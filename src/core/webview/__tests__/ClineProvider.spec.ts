@@ -3057,6 +3057,50 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test("escapes the complete CSP attribute in production and HMR HTML", async () => {
+		vi.mocked(axios.get).mockResolvedValue({ data: "" })
+		const webview = { ...mockWebviewView.webview, cspSource: 'https://test/?x=&quot;"><tag>' }
+		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
+			const html = await provider[build](webview)
+			const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)?.[1]
+			expect(csp).toContain("https://test/?x=&amp;quot;&quot;&gt;&lt;tag&gt;")
+			expect(csp).not.toMatch(/[<>]/)
+		}
+	})
+
+	test.each([
+		[undefined, "https://openrouter.ai"],
+		["https://user:password@EXAMPLE.com:8443/api/v1?key=secret#fragment", "https://example.com:8443"],
+		["http://localhost:3000/api/v1", "http://localhost:3000"],
+		["http://[::1]:3000/api", "http://[::1]:3000"],
+		['https://example.com/path;script-src?x="><script>attack()</script>', "https://example.com"],
+		["https://example.com;script-src", "https://openrouter.ai"],
+		[`https://example.com; script-src-elem 'unsafe-inline'"><script>attack()</script>`, "https://openrouter.ai"],
+		["https://example.com'", "https://openrouter.ai"],
+		['https://example.com"><script>attack()</script>', "https://openrouter.ai"],
+		["javascript:attack()", "https://openrouter.ai"],
+		["file:///tmp/test", "https://openrouter.ai"],
+		["invalid", "https://openrouter.ai"],
+	])("builds safe production and HMR CSPs for endpoint %s", async (baseUrl, origin) => {
+		const state = await provider.getState()
+		vi.spyOn(provider, "getState").mockResolvedValue({
+			...state,
+			apiConfiguration: { ...state.apiConfiguration, openRouterBaseUrl: baseUrl },
+		})
+		vi.mocked(axios.get).mockResolvedValue({ data: "" })
+
+		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
+			const html = await provider[build](mockWebviewView.webview)
+			const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]*)"/)?.[1]
+			expect(csp).toBeDefined()
+			expect(csp).toContain(`connect-src vscode-webview://test-csp-source ${origin} `)
+			expect(csp?.match(/script-src /g)).toHaveLength(1)
+			expect(csp).toContain("'nonce-")
+			expect(html).not.toContain("attack()")
+			expect(html).not.toContain("password")
+		}
+	})
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
