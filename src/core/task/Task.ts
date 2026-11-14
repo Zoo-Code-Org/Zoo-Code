@@ -3624,6 +3624,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A host teardown never calls abortTask(): disposal has to raise the same
 		// counter, or a write still parked on its path chain publishes after the
 		// task is gone.
+		// Disposal drives the abort latch through the kernel, which sets abort and disposed
+		// together on disposeRequested in src/core/task/run-state/runState.ts, so this
+		// increment is what keeps a disposed task's queued writes out of a later run.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
 	}

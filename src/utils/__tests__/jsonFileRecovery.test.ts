@@ -42,8 +42,12 @@ describe("reader recovery", () => {
 				}
 				vi.mocked(fs.readdir).mockRejectedValueOnce(error)
 			}
-			await expect(readFileWithMissingRetry(target)).rejects.toBe(error)
+			// A recovery that rejects is traced by jsonFileRecovery with its own code and then
+			// counted as nothing recovered, so the reader hands back the ENOENT its callers classify by
+			// error code. The two trace assertions are where that recovery failure is reported.
+			await expect(readFileWithMissingRetry(target)).rejects.toMatchObject({ code: "ENOENT" })
 			expect(sink).toHaveBeenCalledWith(expect.stringContaining('"result":"failed"'))
+			expect(sink).toHaveBeenCalledWith(expect.stringContaining('"detail":"EIO"'))
 			expect(JSON.parse(await fs.readFile(backup, "utf8"))).toEqual({ committed: true })
 			await expect(fs.readFile(target)).rejects.toMatchObject({ code: "ENOENT" })
 			expect(JSON.parse(await readFileWithMissingRetry(target))).toEqual({ committed: true })
