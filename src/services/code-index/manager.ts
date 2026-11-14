@@ -367,7 +367,7 @@ export class CodeIndexManager {
 			reason: failure.reason,
 			state: failure.state,
 		}))
-		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles[0]
+		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles.at(0)
 		const failedFileSummary: FailedFileSummary | undefined = representative && {
 			...representative,
 			count: failedFiles.length,
