@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "您确定要重置扩展中的所有状态和密钥存储吗？此操作无法撤消。",
-		"delete_config_profile": "您确定要删除此配置文件吗？"
+		"delete_config_profile": "您确定要删除此配置文件吗？",
+		"requesty_deep_link": "要从外部链接激活 Requesty 凭据吗？",
+		"requesty_deep_link_detail": "这将替换当前启用的提供商。后续请求可能会将您的对话和工作区内容发送到：\n{{url}}\n\n仅当您主动请求了这些凭据并且信任此目标时才继续。"
 	},
 	"errors": {
 		"invalid_mcp_config": "项目MCP配置格式无效",
@@ -151,7 +153,8 @@
 		}
 	},
 	"answers": {
-		"yes": "是"
+		"yes": "是",
+		"activate_requesty": "激活 Requesty"
 	},
 	"buttons": {
 		"learn_more": "了解更多"

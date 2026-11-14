@@ -92,6 +92,23 @@ describe("toRequestyServiceUrl", () => {
 			expect(console.warn).toHaveBeenCalled()
 		})
 
+		it("should redact embedded credentials from invalid-URL warnings", () => {
+			// Regression: the warning logged the raw URL, so a malformed deep-link
+			// baseUrl such as https://user:secret@host:invalid/v1 leaked the password
+			// to the extension-host log before the consent dialog appeared.
+			toRequestyServiceUrl("https://user:secret@host:invalid/v1")
+			expect(console.warn).toHaveBeenCalledWith(
+				'Invalid base URL "https://host:invalid/v1", falling back to default',
+			)
+		})
+
+		it("should leave plain invalid URLs unchanged in warnings", () => {
+			toRequestyServiceUrl("https://attacker.example:bad-port/v1")
+			expect(console.warn).toHaveBeenCalledWith(
+				'Invalid base URL "https://attacker.example:bad-port/v1", falling back to default',
+			)
+		})
+
 		it("should fall back to default app URL for invalid baseUrl with app service", () => {
 			const result = toRequestyServiceUrl("invalid-url", "app")
 			expect(result).toBe("https://app.requesty.ai/")
