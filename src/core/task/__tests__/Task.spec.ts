@@ -1560,6 +1560,79 @@ describe("Cline", () => {
 			},
 		)
 
+		it("marks the api-config wait settled for a delegated child handed an explicit context", async () => {
+			// The dispose-time metadata repair keys off this flag to decide whether the api config is
+			// still being worked out. A child that arrives with its profile named has nothing pending,
+			// so the synchronous branch has to settle the wait itself; leaving it pending would make
+			// every delegated child read as an unfinished initialization for its whole life.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "delegated child",
+				startTask: false,
+				handoffExecutionContext: {
+					mode: "ask",
+					apiConfigName: "parent-local-profile",
+					apiConfiguration: mockApiConfig,
+				},
+			})
+
+			// Bracket access for the private field: this branch settles it synchronously, and the
+			// profile it hands the task is the one the context carried.
+			expect(task["taskApiConfigReadySettled"]).toBe(true)
+			await expect(task.getTaskApiConfigName()).resolves.toBe("parent-local-profile")
+		})
+
+		it("marks the api-config wait settled for a task reopened from a history entry", async () => {
+			// A reopened task carries whatever api config name was saved with it - including none,
+			// for entries written before the name was recorded - and its initialization is complete
+			// the moment the constructor returns. The dispose-time repair reads this flag, so a
+			// reopened task must not spend its life reading as a pending initialization.
+			const historyItem = {
+				id: "settled-history",
+				number: 2,
+				task: "history",
+				ts: Date.now(),
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem,
+				startTask: false,
+			})
+
+			expect(task["taskApiConfigReadySettled"]).toBe(true)
+		})
+
+		it("settles the api-config wait when the initialization rejects, and keeps the rejection reachable", async () => {
+			// The constructor observes settlement on a side channel rather than replacing the promise,
+			// so a rejection has to settle the flag too: otherwise a task whose lookup failed stays
+			// marked as still initializing forever, and the dispose-time repair keeps waiting on a
+			// promise that already failed. The rejection itself must still reach every other awaiter,
+			// which is why the observation is a then(f, r) beside the promise rather than a catch on it.
+			// The prototype is reached through unknown rather than any: only the private member this
+			// row replaces, and the swap is restored below.
+			const proto = Task.prototype as unknown as {
+				initializeTaskApiConfigName: () => Promise<void>
+			}
+			const initSpy = vi
+				.spyOn(proto, "initializeTaskApiConfigName")
+				.mockRejectedValueOnce(new Error("api config lookup refused"))
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "failed init",
+				startTask: false,
+			})
+
+			await expect(task["taskApiConfigReady"]).rejects.toThrow("api config lookup refused")
+
+			expect(task["taskApiConfigReadySettled"]).toBe(true)
+			initSpy.mockRestore()
+		})
 		it("keeps history-task initialization distinct from delegated-child initialization", async () => {
 			const captureTaskRestarted = vi.spyOn(TelemetryService.instance, "captureTaskRestarted")
 			const historyItem = {

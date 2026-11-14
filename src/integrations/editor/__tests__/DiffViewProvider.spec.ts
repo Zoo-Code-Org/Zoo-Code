@@ -1,3 +1,4 @@
+import * as fs from "fs/promises"
 import { DiffViewProvider, DIFF_VIEW_URI_SCHEME, DIFF_VIEW_LABEL_CHANGES } from "../DiffViewProvider"
 import { DecorationController } from "../DecorationController"
 import type { Task } from "../../../core/task/Task"
@@ -17,6 +18,10 @@ vi.mock("delay", () => ({
 vi.mock("fs/promises", () => ({
 	readFile: vi.fn().mockResolvedValue("file content"),
 	writeFile: vi.fn().mockResolvedValue(undefined),
+	// The abandoned-stream discard removes the placeholder file and the directories it
+	// created, so the discard path needs these two.
+	unlink: vi.fn().mockResolvedValue(undefined),
+	rmdir: vi.fn().mockResolvedValue(undefined),
 	access: vi.fn().mockResolvedValue(undefined),
 }))
 
@@ -1774,6 +1779,1408 @@ describe("DiffViewProvider", () => {
 
 			expect(closeFileTab).not.toHaveBeenCalled()
 			expect(vscode.window.showTextDocument).toHaveBeenCalled()
+		})
+		// An abandoned partial stream was never approved. revertChanges() saves a dirty
+		// new-file buffer before deleting the file, which would put partial model output on
+		// disk (and leave it there if the delete fails), so the discard path blanks the
+		// buffer first and only then saves the empty placeholder before removing it.
+		describe("discardUnapprovedStream method", () => {
+			const makeAbandonedDocument = (callOrder: string[], isDirty = true) => ({
+				isDirty,
+				getText: () => "partial model output",
+				positionAt: (offset: number) => ({ line: 0, character: offset }),
+				uri: { fsPath: mockTargetPath, path: mockTargetPath },
+				save: vi.fn(async () => {
+					callOrder.push("save")
+				}),
+			})
+
+			const openAbandonedView = (document: unknown, createdDirs: string[], callOrder: string[]) =>
+				Object.assign(diffViewProvider, {
+					relPath: "mock-target-file.ts",
+					activeDiffEditor: { document },
+					editType: "create",
+					createdDirs,
+					// open() records the placeholder it wrote; the discard may only delete what it owns.
+					placeholderPath: `${mockCwd}/mock-target-file.ts`,
+					closeAllDiffViews: vi.fn(async () => {
+						callOrder.push("closeDiffViews")
+					}),
+					closeFileTab: vi.fn(async () => {
+						callOrder.push("closeFileTab")
+					}),
+				})
+
+			it("leaves no session behind for a task that was disposed while the discard ran", async () => {
+				// Task.dispose() starts this discard and runs no reset() afterwards, so the discard
+				// itself has to end the session. isEditing and the editor reference are what a late
+				// handlePartial() continuation reads to decide whether it still owns a view, and a
+				// disposed task must not keep either - nor the streamed lines it just discarded.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				diffViewProvider.isEditing = true
+				diffViewProvider["streamedLines"] = ["partial model output"]
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(diffViewProvider.isEditing).toBe(false)
+				expect(diffViewProvider.editType).toBeUndefined()
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				expect(diffViewProvider["streamedLines"]).toEqual([])
+			})
+
+			it("never persists the unapproved buffer: blanks it with an empty replacement, then deletes the placeholder", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(callOrder).toEqual(["closeDiffViews", "applyEdit", "save", "closeFileTab"])
+				// The only content the discard may write is an empty buffer, and it must be
+				// written to THIS document before the save that would otherwise persist the
+				// partial model output.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+				expect(replacedUri).toEqual(document.uri)
+				// The replacement covers the whole buffer: the range is built from
+				// positionAt(0) to positionAt(getText().length), so nothing can survive it.
+				expect(vi.mocked(vscode.Range)).toHaveBeenCalledWith(
+					{ line: 0, character: 0 },
+					{ line: 0, character: "partial model output".length },
+				)
+				expect(replacedText).toBe("")
+				expect(mockWorkspaceEdit.delete).not.toHaveBeenCalled()
+				// The placeholder for THIS relPath is what gets removed.
+				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+			})
+
+			it("blanks, saves and removes a dirty create whose placeholder still holds what open() wrote", async () => {
+				// The accept path of the save gate with a dirty buffer. The row above reaches the gate only
+				// with a clean buffer, which never enters the restore branch at all, and the rows below
+				// cover a placeholder somebody else rewrote or removed, so nothing covered the ordinary
+				// case: a dirty create whose placeholder still holds the empty content open() wrote. The
+				// guard agrees, so the emptied buffer is saved onto the file this edit owns and the file is
+				// then removed.
+				const relPath = "dirty-matching-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial model output"),
+						positionAt: (offset: number) => ({ line: 0, character: offset }),
+						isDirty: true,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Emptied with one replacement, saved once onto the path this edit owns, and then removed:
+				// the guard read agreed twice, so neither the keep branch nor the failure branch ran.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				expect(editor.document.save).toHaveBeenCalledTimes(1)
+				expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
+			it("keeps an editor that arrives after the deferred diff command from publishing into a released session", async () => {
+				// The reviewer named this ordering: a release can reach the provider while open() is still
+				// parked inside openDiffEditor(), before the vscode.diff command settles. This row drives the
+				// real open() against a mocked executeCommand("vscode.diff") that resolves only when the
+				// test releases it, and leaves openDiffEditor() itself alone because it is private. What it
+				// pins is open() reacting to a session that was released before that command settled, on the
+				// create path where open() wrote an empty placeholder - not the extension host that would
+				// really raise these events.
+				const callOrder: string[] = []
+				const lateDocument = makeTextDocument({
+					uri: makeUri(`${mockCwd}/test.txt`),
+					isDirty: true,
+					getText: () => "partial model output",
+				})
+				const lateEditor = makeTextEditor({ document: lateDocument })
+				let resolveDiffCommand: () => void = () => {}
+				const diffCommandSettled = new Promise<void>((resolve) => {
+					resolveDiffCommand = resolve
+				})
+				// openDiffEditor() registers these listeners before it invokes the diff command, so the
+				// doubles hand the callbacks back instead of being stubbed away.
+				let onDidOpenTextDocument: ((document: vscode.TextDocument) => unknown) | undefined
+				// openDiffEditor() hands back a disposable for each of the two listeners it registers
+				// before the deferred diff command, and the question this row has to answer is whether the
+				// document callback releases them. Both are kept as distinct objects here - the
+				// visible-editors fallback is registered against its own double rather than the module
+				// mock's shared one, so neither assertion can satisfy the other.
+				const documentListenerDisposable = { dispose: vi.fn() }
+				const visibleEditorsListenerDisposable = { dispose: vi.fn() }
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					onDidOpenTextDocument = callback
+					return documentListenerDisposable
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockImplementation(
+					() => visibleEditorsListenerDisposable,
+				)
+				// The three listeners open() registers after the editor lands stay on the module mock's
+				// own disposable double, so registering them is still observable from outside.
+				Object.defineProperty(vscode.window.tabGroups, "all", { value: [], configurable: true })
+				vi.mocked(vscode.window).visibleTextEditors = []
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(lateEditor)
+				vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
+					callOrder.push(String(command))
+					// Only this test lets the diff command settle, which is what defers the diff editor.
+					await diffCommandSettled
+					callOrder.push("diffCommandSettled")
+				})
+				// A denied write_to_file empties the buffer; the replace is what would be saved.
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+				Object.assign(diffViewProvider, {
+					editType: "create" as const,
+					// Every step the released-session stand-down reaches for is recorded, so the order below
+					// names the whole of it rather than re-testing what each helper does: the plain tab close,
+					// the listener release, the deferred-scroll cancel and the diff-tab close are four separate
+					// calls, and dropping any one of them changes this array.
+					closeAllDiffViews: vi.fn(async () => {
+						callOrder.push("closeDiffViews")
+					}),
+					closeFileTab: vi.fn(async () => {
+						callOrder.push("closeFileTab")
+					}),
+					disposeActiveEditorListener: vi.fn(() => {
+						callOrder.push("disposeActiveEditorListener")
+					}),
+					cancelDeferredScroll: vi.fn(() => {
+						callOrder.push("cancelDeferredScroll")
+					}),
+				})
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+				vi.mocked(fs.readFile).mockResolvedValue("content the user saved after open()")
+				vi.mocked(fs.unlink).mockResolvedValue(undefined)
+				const openPromise = diffViewProvider.open("test.txt")
+				// The streamed text is what the deny discards; open() owns the placeholder it wrote.
+				diffViewProvider["streamedLines"] = ["partial model output"]
+				// Let open() run up to the point where it invokes the diff command and stop it there:
+				// this macrotask queues behind every already-pending microtask, and the command
+				// double stays unresolved, so open() is parked exactly where the reviewer named.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				// open() publishes its editor only when the await below it resolves, so the field
+				// starts empty for this scenario rather than carrying the double the beforeEach installs.
+				diffViewProvider["activeDiffEditor"] = undefined
+				// open() is parked on the diff command, so it has published no editor yet.
+				expect(callOrder).toEqual(["vscode.diff"])
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+					"vscode.diff",
+					expect.anything(),
+					expect.anything(),
+					expect.anything(),
+					{ preserveFocus: true },
+				)
+				// The release runs while open() is still awaiting that command.
+				const released = diffViewProvider.discardUnapprovedStream()
+				await expect(released).rejects.toThrow(/no longer holds the empty placeholder/)
+				// The release refused before any closing: with no editor published it has nothing to work
+				// from, so it neither empties the buffer nor removes the placeholder it no longer owns.
+				expect(callOrder).toEqual(["vscode.diff"])
+				expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+				expect(lateDocument.save).not.toHaveBeenCalled()
+				// Then the host catches up: the command settles and the editor finally appears.
+				resolveDiffCommand()
+				vi.mocked(vscode.window).visibleTextEditors = [lateEditor]
+				if (typeof onDidOpenTextDocument !== "function") {
+					throw new Error("open() never registered the document listener it uses to await the diff editor")
+				}
+				await onDidOpenTextDocument(lateDocument)
+				await openPromise
+				// The document callback is what resolves openDiffEditor(), and releasing the two temporary
+				// listeners is part of that resolution: a subscription that survived the race would leave
+				// one of these two dispose calls uncalled.
+				expect(documentListenerDisposable.dispose).toHaveBeenCalledTimes(1)
+				expect(visibleEditorsListenerDisposable.dispose).toHaveBeenCalledTimes(1)
+				// The late editor never published into the released session.
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				expect(DecorationController).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
+				expect(fs.unlink).not.toHaveBeenCalled()
+				// Two closings follow the release and both belong to open(), reached through the same
+				// helpers the release paths use: first the plain text tab open() pre-opened, then the diff
+				// tabs. The two helpers are doubles above, so this row names the order of the closings and
+				// the parked-open row below is the one that names the tab types. The diff command settling
+				// is recorded before either, and the release that already ran must not run again.
+				expect(callOrder).toEqual([
+					"vscode.diff",
+					"diffCommandSettled",
+					"closeFileTab",
+					"disposeActiveEditorListener",
+					"cancelDeferredScroll",
+					"closeDiffViews",
+				])
+				// Leave the document-open double as the module mock defined it, for the rows after
+				// this one, since a mockImplementation here outlives the test that set it.
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation(() => ({ dispose: vi.fn() }))
+				errorSpy.mockRestore()
+			})
+			it("does not save the emptied buffer over content that arrived in the placeholder after open()", async () => {
+				// The reviewer's ordering ask, at the layer that would have caught it. The tests above all
+				// run with a dirty buffer and no recorded placeholder content, so open() wrote nothing this
+				// discard can recognise as its own and the identity check is skipped; this unit's own tests
+				// all set isDirty to false. Dirty plus a recorded identity is the combination none of them
+				// covered, and it is the case where an emptied buffer used to be saved onto the path before
+				// anything noticed that the path no longer held what open() wrote. Here the save is the only
+				// write this document can make, so a save that never happens is the whole claim.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				diffViewProvider["placeholderContent"] = ""
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+				// Somebody else's content is what now holds the placeholder's path.
+				vi.mocked(fs.readFile).mockResolvedValue("content the user saved after open()")
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/no longer holds the empty placeholder/,
+				)
+
+				// The buffer is still blanked in memory and the tab is still closed - only the write is
+				// withheld. With the identity check running after the buffer work, this list would read
+				// closeDiffViews, applyEdit, save, closeFileTab.
+				expect(callOrder).toEqual(["closeDiffViews", "applyEdit", "closeFileTab"])
+				expect(document.save).not.toHaveBeenCalled()
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				// The file is kept, so nothing removed it either.
+				expect(fs.unlink).not.toHaveBeenCalled()
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({
+						message: expect.stringContaining("no longer holds the empty placeholder"),
+					}),
+				)
+				expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+				expect(diffViewProvider["placeholderContent"]).toBeUndefined()
+			})
+
+			it("restores a modify buffer in memory and never saves the target file", async () => {
+				// revertChanges() restores a modify by applyEdit + document.save(). For a stream the
+				// user never approved that save is a write they never asked for, and for a
+				// .rooignore-denied path a write the policy forbids outright, so the discard restores
+				// the buffer and leaves the file on disk untouched.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				Object.assign(diffViewProvider, {
+					editType: "modify",
+					originalContent: "original content",
+					// A modify owns no placeholder: only open() of a create writes one.
+					placeholderPath: undefined,
+				})
+				vi.mocked(vscode.workspace.applyEdit).mockImplementation(async () => {
+					callOrder.push("applyEdit")
+					return true
+				})
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(callOrder).toEqual(["closeDiffViews", "applyEdit", "closeFileTab"])
+				const [replacedUri, , replacedText] = mockWorkspaceEdit.replace.mock.calls[0]
+				expect(replacedUri).toEqual(document.uri)
+				expect(replacedText).toBe("original content")
+				// The replacement covers the whole buffer, so no streamed content survives it.
+				expect(vi.mocked(vscode.Range)).toHaveBeenCalledWith(
+					{ line: 0, character: 0 },
+					{ line: 0, character: "partial model output".length },
+				)
+				expect(document.save).not.toHaveBeenCalled()
+				// Nothing is unlinked for a modify: saveChanges() may have written this very file with
+				// the user's approval, and this edit created no directories.
+				expect(fs.unlink).not.toHaveBeenCalled()
+				expect(fs.rmdir).not.toHaveBeenCalled()
+			})
+
+			it("does not save and reports the hazard when the buffer restore fails to apply", async () => {
+				// applyEdit resolving false leaves the unapproved partial content in the buffer. Saving
+				// then would persist exactly what this method exists to discard, so the save is skipped
+				// and the caller is told the rollback did not happen.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(false)
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/could not restore the diff editor buffer/i,
+				)
+
+				expect(document.save).not.toHaveBeenCalled()
+				// The artifacts still have to go: the caller runs reset() next, which drops
+				// placeholderPath/createdDirs and leaves nothing else able to remove them.
+				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+			})
+
+			it("removes the directories this edit created in reverse order, after the placeholder unlink", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				const createdDirs = [`${mockCwd}/mock-dir`, `${mockCwd}/mock-dir/nested`]
+				openAbandonedView(document, createdDirs, callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(fs.unlink).toHaveBeenCalledTimes(1)
+				expect(fs.rmdir).toHaveBeenCalledTimes(createdDirs.length)
+				// Reverse order, so a parent is never removed before the child inside it, and
+				// only the directories this edit created - never a pre-existing one.
+				expect(vi.mocked(fs.rmdir).mock.calls.map((c) => c[0])).toEqual([...createdDirs].reverse())
+				const unlinkOrder = vi.mocked(fs.unlink).mock.invocationCallOrder[0]
+				for (const order of vi.mocked(fs.rmdir).mock.invocationCallOrder) {
+					expect(order).toBeGreaterThan(unlinkOrder)
+				}
+			})
+
+			it("does not save when the abandoned buffer is already clean", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder, false)
+				openAbandonedView(document, [], callOrder)
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+				expect(document.save).not.toHaveBeenCalled()
+				expect(mockWorkspaceEdit.replace).not.toHaveBeenCalled()
+				expect(fs.unlink).toHaveBeenCalledTimes(1)
+			})
+
+			it("still removes the placeholder and the created directories when the editor work rejects, and reports the failure", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				const createdDirs = [`${mockCwd}/mock-dir`]
+				openAbandonedView(document, createdDirs, callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockRejectedValue(new Error("applyEdit rejected"))
+
+				// The caller (releaseAbandonedDiffView) treats a throw as "rollback hazard", so
+				// the failure must still surface - but only after the artifacts are gone, because
+				// the caller then runs reset(), which drops relPath/createdDirs and leaves
+				// nothing else able to remove them.
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("applyEdit rejected")
+
+				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+				expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
+			})
+
+			it("removes the placeholder and created directories even when open() failed before activeDiffEditor was assigned", async () => {
+				// open() creates the directories (line 130) and the empty placeholder (line 134)
+				// BEFORE openDiffEditor() assigns activeDiffEditor (line 173). If that call rejects
+				// - the 10s timeout or a failed vscode.diff - an abandoned create therefore has
+				// artifacts on disk and no editor, and the early return must not skip the cleanup.
+				Object.assign(diffViewProvider, {
+					relPath: "mock-target-file.ts",
+					activeDiffEditor: undefined,
+					editType: "create",
+					createdDirs: [`${mockCwd}/mock-dir`],
+					// open() had already written the placeholder before openDiffEditor() rejected,
+					// so this edit owns the path.
+					placeholderPath: `${mockCwd}/mock-target-file.ts`,
+				})
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+				expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
+				// Nothing editor-side ran, and nothing threw: the artifacts are the whole job here.
+				expect(vscode.workspace.applyEdit).not.toHaveBeenCalled()
+				// Bracket access for the private field: the snapshot must be consumed, so a second
+				// discard cannot try to remove the same directories again.
+				expect(diffViewProvider["createdDirs"]).toEqual([])
+			})
+
+			it("logs and rejects when the placeholder unlink fails for a reason other than ENOENT", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const permissionError = Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+				vi.mocked(fs.unlink).mockRejectedValueOnce(permissionError)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					"EPERM: operation not permitted",
+				)
+
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					permissionError,
+				)
+			})
+
+			it("logs and rejects when removing a created directory fails for a reason other than ENOENT", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				vi.mocked(fs.unlink).mockResolvedValue(undefined)
+				const notEmpty = Object.assign(new Error("ENOTEMPTY: directory not empty"), { code: "ENOTEMPTY" })
+				vi.mocked(fs.rmdir).mockRejectedValueOnce(notEmpty)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					"ENOTEMPTY: directory not empty",
+				)
+
+				expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", notEmpty)
+			})
+
+			it("tolerates an already-deleted placeholder and directories (ENOENT) without throwing", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				// Two created directories: the tolerance has to hold for every one of them, so the
+				// rejection is keyed on the path rather than on which call comes first.
+				const dirA = `${mockCwd}/mock-dir-a`
+				const dirB = `${mockCwd}/nested/mock-dir-b`
+				openAbandonedView(document, [dirA, dirB], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const enoent = Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				// A single unlink call in this flow, so the placeholder stays Once-based.
+				vi.mocked(fs.unlink).mockRejectedValueOnce(enoent)
+				vi.mocked(fs.rmdir).mockImplementation(async (dir) => {
+					if (dir === dirA || dir === dirB) {
+						throw enoent
+					}
+				})
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Both directories were attempted; the assertion is on the paths, not the order.
+				expect(fs.rmdir).toHaveBeenCalledWith(dirA)
+				expect(fs.rmdir).toHaveBeenCalledWith(dirB)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+
+				// beforeEach only clears call data, not implementations, so put the default back.
+				vi.mocked(fs.rmdir).mockResolvedValue(undefined)
+			})
+
+			it("reports the editor failure rather than the cleanup failure when both happen", async () => {
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
+				vi.mocked(vscode.workspace.applyEdit).mockRejectedValue(new Error("applyEdit rejected"))
+				vi.mocked(fs.unlink).mockRejectedValueOnce(Object.assign(new Error("EPERM"), { code: "EPERM" }))
+				vi.spyOn(console, "error").mockImplementation(() => {})
+
+				// The caller reports a rollback hazard from the thrown error, so the ORIGINAL failure
+				// is what must surface; the cleanup failure is still logged for the operator.
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow("applyEdit rejected")
+			})
+
+			it("leaves a file this edit never created a placeholder for on disk", async () => {
+				// reset() does not clear relPath, and saveDirectly() sets it for an approved write.
+				// Without ownership tracking the discard would unlink that approved file: an approved
+				// write_to_file to A, then a new write_to_file whose block exits through a rollback
+				// path before open() ever ran, still sees relPath === A.
+				const callOrder: string[] = []
+				const document = makeAbandonedDocument(callOrder)
+				Object.assign(diffViewProvider, {
+					relPath: "previously-approved-file.ts",
+					activeDiffEditor: { document },
+					editType: undefined,
+					createdDirs: [],
+					placeholderPath: undefined,
+				})
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				expect(fs.unlink).not.toHaveBeenCalled()
+				expect(fs.rmdir).not.toHaveBeenCalled()
+				// The buffer is still blanked and the tab closed: the unapproved content is gone
+				// without touching a file the user approved.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				expect(mockWorkspaceEdit.replace.mock.calls[0][2]).toBe("")
+			})
+
+			it("closes a diff editor that open() publishes after a release already ran, and registers nothing behind it", async () => {
+				// The review's late-open scenario, driven through the real open(): the editor call inside
+				// open() is still pending while the abort path releases the view, and only then resolves.
+				// open() itself is the production method; the innermost openDiffEditor() call is deferred
+				// and only vscode and fs are doubles.
+				const relPath = "late-open.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				let handOverEditor: (editor: vscode.TextEditor) => void = () => {}
+				const pendingEditorCall = new Promise<vscode.TextEditor>((resolve) => {
+					handOverEditor = resolve
+				})
+				const lateEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						lineCount: 0,
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					visibleRanges: [],
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: it carries only the members
+				// the late teardown touches.
+				const lateEditorDouble = lateEditor as unknown as vscode.TextEditor
+				const lateDiffTab = makeTab(makeDiffTabInput("cline-diff", fsPath), "diff tab")
+				// The other tab the awaited call puts on screen: openDiffEditor() pre-opens the file as a
+				// plain text document before it runs the diff command, and a plain text tab is not a
+				// diff tab, so closeAllDiffViews() cannot reach it and only closeFileTab() can.
+				const latePlainTab = makeTab(makeTextTab(fsPath), "plain tab")
+
+				// The shared setup already carries an editor and two decoration controllers, so their
+				// identities are captured: open() would have replaced both controllers and assigned the
+				// editor it awaited, and unchanged identities prove it published neither.
+				const editorBefore = diffViewProvider["activeDiffEditor"]
+				const overlayControllerBefore = diffViewProvider["fadedOverlayController"]
+				const lineControllerBefore = diffViewProvider["activeLineController"]
+
+				// Bracket access rather than a cast: openDiffEditor is private, and deferring it is the
+				// only way to hold open() inside the await the release is racing.
+				diffViewProvider["openDiffEditor"] = async () => pendingEditorCall
+				vi.mocked(fs.readFile).mockResolvedValue("")
+				diffViewProvider.editType = "create"
+
+				const opening = diffViewProvider.open(relPath)
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				// open() is parked on the editor call, so it has published nothing yet: the editor is
+				// still the one the setup installed, and no listener has been registered.
+				expect(diffViewProvider["activeDiffEditor"]).toBe(editorBefore)
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+
+				// The release the abort path performs, while open() is still parked.
+				await diffViewProvider.discardUnapprovedStream()
+				expect(diffViewProvider.isEditing).toBe(false)
+
+				// The diff tab the awaited call put on screen, as the tab group would show it now. This
+				// spec installs tabGroups.all through a getter, so the late tab is installed the same way,
+				// and close() is answered with a promise because closeAllDiffViews() awaits it.
+				Object.defineProperty(vscode.window.tabGroups, "all", {
+					get: (): vscode.TabGroup[] => [
+						{
+							isActive: true,
+							viewColumn: vscode.ViewColumn.One,
+							activeTab: lateDiffTab,
+							tabs: [latePlainTab, lateDiffTab],
+						},
+					],
+					configurable: true,
+				})
+				vi.mocked(vscode.window.tabGroups.close).mockResolvedValue(true)
+				handOverEditor(lateEditorDouble)
+				await opening
+
+				// The late editor is closed through the helper the release paths already use, and nothing
+				// was published behind it: no listeners registered, no deferred scroll pending, and the
+				// editor reference dropped so a later update() cannot act on it.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(lateDiffTab)
+				// Both tab types are closed before ownership of the file is dropped, and only two
+				// helpers can close them: the diff tab is closeAllDiffViews() and the plain text tab is
+				// closeFileTab(), so this assertion is the one that answers a guard without the close.
+				expect(vscode.window.tabGroups.close).toHaveBeenCalledWith(latePlainTab)
+				expect(vscode.window.onDidChangeActiveTextEditor).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorSelection).not.toHaveBeenCalled()
+				expect(vscode.window.onDidChangeTextEditorVisibleRanges).not.toHaveBeenCalled()
+				expect(diffViewProvider["activeEditorListener"]).toBeUndefined()
+				expect(diffViewProvider["diffEditorSelectionListener"]).toBeUndefined()
+				expect(diffViewProvider["diffScrollListener"]).toBeUndefined()
+				expect(diffViewProvider["deferredScrollTimer"]).toBeUndefined()
+				expect(diffViewProvider["activeDiffEditor"]).toBeUndefined()
+				// Same controller objects as before open() ran: the late route returned before creating
+				// the pair open() normally installs, so there was nothing on this path to dispose.
+				expect(diffViewProvider["fadedOverlayController"]).toBe(overlayControllerBefore)
+				expect(diffViewProvider["activeLineController"]).toBe(lineControllerBefore)
+				expect(diffViewProvider.isEditing).toBe(false)
+
+				// Leave the tab-group getter as this spec found it so a later test does not see the tab
+				// this test installed.
+				Object.defineProperty(vscode.window.tabGroups, "all", { value: [], configurable: true })
+			})
+
+			it("keeps a placeholder that no longer holds the content open() wrote, and reports it as a cleanup failure", async () => {
+				// The persistence ask, at the public-method layer: open() writes an empty placeholder and
+				// records what it wrote; if something else puts content in that path before the discard,
+				// the discard leaves the file alone. This spec's fs is a double, so the content is the
+				// answer the double gives the guard's read - what the test pins is that a mismatch keeps
+				// the file, writes nothing over it, and reports through the channel this site already uses.
+				const relPath = "kept-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: it carries only the members
+				// open() touches, the same double shape the placeholder test below uses.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Content lands in the placeholder between open() and the discard.
+				vi.mocked(fs.readFile).mockResolvedValue("content the user typed into the preview\n")
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/no longer holds the empty placeholder/,
+				)
+
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				// Nothing wrote over it: the only write to that path in this test is the one open() did.
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				// The kept file is reported through the console.error call this cleanup site already
+				// makes for a cleanup it could not finish, with the error that names it.
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.any(Error),
+				)
+				// The edit drops its claim on the path even though the file stays: a later discard has
+				// nothing to remove and does not report the same kept file twice.
+				expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+				expect(diffViewProvider["placeholderContent"]).toBeUndefined()
+			})
+
+			it("keeps the placeholder when content arrives between the guard read and the unlink", async () => {
+				// The guard's read is the first read the discard makes and the re-check immediately before the
+				// unlink is the second. The first answer has to let the unlink through and the second has to stop
+				// it, so the two reads are mocked in that order and nothing else in the flow reads this path.
+				const relPath = "rewritten-after-guard-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the row above uses.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Read one: still the empty placeholder open() wrote. Read two: a formatter has rewritten it.
+				vi.mocked(fs.readFile).mockResolvedValueOnce("").mockResolvedValueOnce("content a formatter rewrote\n")
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/no longer holds the empty placeholder/,
+				)
+
+				// Nothing was removed and nothing was written over the file that arrived: the only write to
+				// that path is still the empty placeholder open() made, and the kept file is reported through
+				// the console.error call this cleanup site already makes for a cleanup it could not finish.
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.any(Error),
+				)
+			})
+			it("treats a placeholder that vanished between the guard read and the unlink as already removed", async () => {
+				// The re-check must not turn a file that disappeared into a reported failure: this site already
+				// tolerates an unlink that finds nothing, and a file that is gone before the unlink is the same
+				// case arrived one await earlier.
+				const relPath = "vanished-after-guard-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the row above uses.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Read one: still the placeholder open() wrote. Read two: the file is gone, so the re-check
+				// takes its own ENOENT branch, and the unlink that follows finds nothing either. Neither
+				// tolerance is allowed to turn into a reported failure.
+				const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+				vi.mocked(fs.readFile).mockResolvedValueOnce("").mockRejectedValueOnce(enoent)
+				vi.mocked(fs.unlink).mockRejectedValueOnce(enoent)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
+			it("reports the failure when the re-check's own read fails for a reason other than the file being gone", async () => {
+				// The re-check tolerates the file having vanished and rethrows anything else, because a read that
+				// proved nothing about the file does not license removing it. Every earlier row let this read
+				// succeed, so its failure path was never executed at all.
+
+				const relPath = "denied-recheck-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Read one still agrees; read two is refused for a reason that says nothing about the file.
+				const denied: NodeJS.ErrnoException = new Error("EACCES: permission denied, read")
+				denied.code = "EACCES"
+				vi.mocked(fs.readFile).mockResolvedValueOnce("").mockRejectedValue(denied)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(/permission denied, read/)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({ code: "EACCES" }),
+				)
+			})
+
+			it("treats a re-check that rejected with no error object as a cleanup it could not finish", async () => {
+				// A promise can reject with no value at all. The optional chain on this catch is what keeps that
+				// from becoming a crash: the re-check then proves nothing, the file is left alone, and the discard
+				// resolves with the report this site already makes, the same way it does when the guard read is
+				// the one that says nothing.
+
+				const relPath = "reasonless-recheck-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Read one agrees; read two rejects with nothing in the rejection.
+				vi.mocked(fs.readFile).mockResolvedValueOnce("").mockRejectedValue(undefined)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+				expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", undefined)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			})
+
+			it("keeps the file when the guard read found foreign content even though a later read finds it back", async () => {
+				// The guard's answer is the decisive one: it ran before the awaited buffer work, and a re-read that
+				// finds the placeholder content again after a read that found something else does not undo that
+				// finding. The discard refuses both the save and the removal and reports the kept file, rather
+				// than letting the second answer overwrite the first.
+
+				const relPath = "rewritten-then-restored-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// The guard read is the only read this path makes: its answer is decisive, so the row queues
+				// exactly the one value it uses rather than a second that would outlive the test.
+				vi.mocked(fs.readFile).mockResolvedValueOnce("content a formatter rewrote\n")
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(
+					/no longer holds the empty placeholder/,
+				)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.any(Error),
+				)
+			})
+
+			it("does not touch a file the guard read could not read even when a later read would have agreed", async () => {
+				// A guard read that failed for a reason other than the file being gone is the case where the
+				// discard knows nothing about the file, and it has to stop there: entering the unlink path anyway
+				// because a later read happened to agree would remove a file the method never proved anything
+				// about. The failure is reported the way this site reports every cleanup it could not finish.
+
+				const relPath = "unreadable-then-readable-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				const denied: NodeJS.ErrnoException = new Error("EACCES: permission denied, read")
+				denied.code = "EACCES"
+				// The guard read is refused for a reason that says nothing about the file, and it is the last
+				// read the discard makes here: a stopped cleanup never gets to agree with anything.
+				// The failure is queued rather than made the default, so the row leaves nothing behind in
+				// either direction - and a reading that did go on to read again would read the plain
+				// default above and remove the file this reading proved nothing about.
+				vi.mocked(fs.readFile).mockRejectedValueOnce(denied)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(/permission denied, read/)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({ code: "EACCES" }),
+				)
+			})
+
+			it("reports an unlink that rejected with no error object instead of throwing past the discard", async () => {
+				// The optional chain on this catch is what makes a rejection carrying nothing a cleanup that could
+				// not be finished rather than a crash inside the catch: the discard reports it through the channel
+				// this site already has and returns, the way it returns when the guard read is the one that carried
+				// nothing. The row above this file's other ENOENT rows covers an unlink failure that does carry a
+				// code; this one covers the rejection with no object to carry one, which is what the chain is for.
+
+				const relPath = "reasonless-unlink-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Both reads agree, so the removal is attempted, and it rejects with nothing in the rejection.
+				vi.mocked(fs.unlink).mockRejectedValueOnce(undefined)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Reported, not swallowed: the file was not removed and nobody proved it was gone, so the
+				// discard says so on the channel it already uses and leaves the failure unrecorded rather than
+				// rethrowing a value that carries no message.
+				expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", undefined)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			})
+
+			it("tolerates a placeholder somebody else already deleted instead of reporting a cleanup failure", async () => {
+				// The guard reads the file before removing it, so a placeholder that is already gone is not
+				// a failure: there is nothing left to remove. That is the ENOENT tolerance this site had
+				// before the read was added, kept on the new path rather than lost to it.
+				const relPath = "already-gone-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members open() touches.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Somebody else removed the file before the discard ran.
+				const missing: NodeJS.ErrnoException = new Error("ENOENT: no such file, already removed")
+				missing.code = "ENOENT"
+				vi.mocked(fs.readFile).mockRejectedValue(missing)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
+			it("does not save the emptied buffer when the guard read proved the placeholder is gone", async () => {
+				// The same ENOENT the unlink block already tolerates. A placeholder that is not there has
+				// nothing to save onto, and dropping the emptied create buffer onto that path recreates the
+				// empty file the discard just declined to remove. The buffer is still blanked, because the
+				// unapproved bytes must not survive in the editor either.
+				const relPath = "gone-before-save-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue("partial model output"),
+						positionAt: (offset: number) => ({ line: 0, character: offset }),
+						isDirty: true,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the row above uses.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// Somebody else removed the file before the discard ran: the guard read reports ENOENT and
+				// leaves the recorded match untouched, which is what the save gate now has to notice.
+				const missing: NodeJS.ErrnoException = new Error("ENOENT: no such file, already removed")
+				missing.code = "ENOENT"
+				vi.mocked(fs.readFile).mockRejectedValue(missing)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Blanked, not written: the replace ran, the save did not, and the only write to that path
+				// is still the empty placeholder open() made. Nothing was removed and nothing was reported.
+				expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
+				expect(editor.document.save).not.toHaveBeenCalled()
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(errorSpy).not.toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.anything(),
+				)
+			})
+
+			it("keeps the placeholder when the guard's read fails for a reason that does not say it is gone", async () => {
+				// The read that guards the unlink can fail for reasons that say nothing about the file being
+				// gone - a permission refusal, for example. Only ENOENT means there was nothing left to
+				// remove, so anything else is rethrown: the discard keeps the file and reports it through
+				// the console.error call this cleanup site already makes, and the method rejects with that
+				// error the way it rejects for an unlink it could not finish.
+				const relPath = "unreadable-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members open() touches.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// The guard's read now fails for a reason that is not 'already gone'.
+				const denied: NodeJS.ErrnoException = new Error("EACCES: permission denied, read")
+				denied.code = "EACCES"
+				vi.mocked(fs.readFile).mockRejectedValue(denied)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).rejects.toThrow(/permission denied, read/)
+
+				// A read that said nothing about the file being gone does not license removing it.
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+				expect(errorSpy).toHaveBeenCalledWith(
+					"Error removing abandoned write_to_file artifacts:",
+					expect.objectContaining({ code: "EACCES" }),
+				)
+				// The edit drops its claim on the path with the failure, so a later discard does not
+				// report the same kept file twice.
+				expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+				expect(diffViewProvider["placeholderContent"]).toBeUndefined()
+			})
+
+			it("reports a guard read that rejected with no error object and touches nothing", async () => {
+				// The optional chain on the error binding is the whole difference between "this read proved
+				// nothing about the file" and "this read blew up": a promise can reject with no value at all,
+				// and reaching .code on that would throw inside the catch and escape the discard as some other
+				// failure - no cleanup report from this site, and no answer about the file. The row above
+				// covers a rejection that does carry a code; this one covers a rejection with no object to
+				// carry one, which is the case the optional chain exists for.
+				const relPath = "reasonless-rejection-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double routed through unknown rather than any: only the members the discard
+				// touches, the same double shape the neighbouring rows use.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				// The guard read now rejects with nothing in the rejection: no code to read, so the catch
+				// can only conclude that the read proved nothing.
+				vi.mocked(fs.readFile).mockRejectedValue(undefined)
+				const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				await expect(diffViewProvider.discardUnapprovedStream()).resolves.toBeUndefined()
+
+				// Reported through the channel this cleanup site already has, with the file left exactly as it
+				// was found and no second write to it.
+				expect(errorSpy).toHaveBeenCalledWith("Error removing abandoned write_to_file artifacts:", undefined)
+				expect(fs.unlink).not.toHaveBeenCalledWith(fsPath)
+				expect(fs.writeFile).toHaveBeenCalledTimes(1)
+			})
+
+			it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {
+				// The ownership lifecycle lives at the public-method layer, so exercise it there:
+				// open() writes the empty placeholder and records it, and the discard of an abandoned
+				// create removes exactly that path.
+				const relPath = "owned-placeholder.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				const mockEditor = {
+					document: {
+						uri: { fsPath, scheme: "file" },
+						getText: vi.fn().mockReturnValue(""),
+						isDirty: false,
+						save: vi.fn().mockResolvedValue(undefined),
+						lineCount: 0,
+					},
+					selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+					edit: vi.fn().mockResolvedValue(true),
+					revealRange: vi.fn(),
+				}
+				// Structural double for the mocked editor: the mock only implements the members
+				// open() touches, so it is routed through unknown rather than any.
+				const editor = mockEditor as unknown as vscode.TextEditor
+				vi.mocked(vscode.window).visibleTextEditors = [editor]
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(editor)
+				vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+					setTimeout(() => callback({ uri: { fsPath, scheme: "file" } } as vscode.TextDocument), 0)
+					return { dispose: vi.fn() }
+				})
+				vi.mocked(vscode.window.onDidChangeVisibleTextEditors).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.window.onDidChangeTextEditorVisibleRanges).mockReturnValue({ dispose: vi.fn() })
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				diffViewProvider.editType = "create"
+				// The discard reads the placeholder back before unlinking it, so the double has to answer
+				// with the empty content open() wrote; the test above covers the mismatching answer.
+				vi.mocked(fs.readFile).mockResolvedValue("")
+
+				await diffViewProvider.open(relPath)
+
+				// open() created the placeholder, and this edit now owns it.
+				expect(fs.writeFile).toHaveBeenCalledWith(fsPath, "")
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(fs.unlink).toHaveBeenCalledWith(fsPath)
+			})
+
+			it("does not remove the file once saveChanges() has approved the content", async () => {
+				// saveChanges() turns the placeholder into approved content and drops this edit's
+				// claim on it, so a later abandoned cleanup must leave the approved file on disk.
+				const relPath = "approved-by-save.ts"
+				const fsPath = `${mockCwd}/${relPath}`
+				Object.assign(diffViewProvider, {
+					relPath,
+					newContent: "approved content",
+					editType: "create",
+					createdDirs: [],
+					placeholderPath: fsPath,
+					preDiagnostics: [],
+					activeDiffEditor: {
+						document: {
+							uri: { fsPath, scheme: "file" },
+							getText: vi.fn().mockReturnValue("approved content"),
+							isDirty: false,
+							save: vi.fn().mockResolvedValue(undefined),
+						},
+					},
+					closeAllDiffViews: vi.fn().mockResolvedValue(undefined),
+					closeFileTab: vi.fn().mockResolvedValue(undefined),
+				})
+				vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+				vi.mocked(vscode.window.showTextDocument).mockResolvedValue(undefined as never)
+				vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+
+				await diffViewProvider.saveChanges(false, 0)
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(fs.unlink).not.toHaveBeenCalled()
+			})
+
+			it("does nothing when no abandoned view is open", async () => {
+				Object.assign(diffViewProvider, { relPath: undefined, activeDiffEditor: undefined })
+
+				await diffViewProvider.discardUnapprovedStream()
+
+				expect(fs.unlink).not.toHaveBeenCalled()
+			})
 		})
 	})
 })
