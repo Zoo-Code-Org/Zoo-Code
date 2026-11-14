@@ -630,8 +630,9 @@ export class McpHub {
 	}
 
 	// Get project-level MCP configuration path
-	private async getProjectMcpPath(): Promise<string | null> {
-		const workspacePath = this.providerRef.deref()?.cwd ?? getWorkspacePath()
+	private async getProjectMcpPath(
+		workspacePath: string | undefined = this.providerRef.deref()?.cwd ?? getWorkspacePath(),
+	): Promise<string | null> {
 		const projectMcpDir = path.join(workspacePath, ".roo")
 		const projectMcpPath = path.join(projectMcpDir, "mcp.json")
 
@@ -641,6 +642,41 @@ export class McpHub {
 		} catch {
 			return null
 		}
+	}
+
+	/**
+	 * The root a project-scoped MCP write has to stay inside.
+	 *
+	 * safeWriteJson resolves the publish target with realpath before staging beside it, so a
+	 * repository that ships .roo/mcp.json as a symlink to a file OUTSIDE the workspace would
+	 * have that outside file replaced as soon as the user edits a project MCP setting or
+	 * allowlist. Passing the workspace root as confineTo makes that write fail closed instead.
+	 * Global writes are deliberately unconstrained: they target the user's own settings
+	 * directory, which is not under the workspace.
+	 *
+	 * DECISION AND LIMIT - these three call sites carry credentials (MCP server env and
+	 * headers), so the limit of the control they pass is stated here rather than left to the
+	 * option doc: confineTo decides twice from the resolved publish target and stops at its
+	 * final component. If a workspace replaces an ANCESTOR directory - .roo, or the workspace
+	 * directory itself - with a link after the last check, the credential write follows that
+	 * link and can still land outside the workspace; see the confineTo doc in
+	 * src/utils/safeWriteJson.ts for the two outcomes of that window. The control is kept
+	 * anyway, not dropped, because the case a committed tree can actually plant is a link at
+	 * the settings file itself, and that is the case this option does refuse. Closing the
+	 * ancestor window needs a handle-relative no-follow publish, which this runtime does not
+	 * offer, and the alternative reading - removing the control from the credential path -
+	 * would give up the refusal that works today to close a window no unit can close here.
+	 */
+	private confineForMcpWrite(
+		source: "global" | "project",
+		// The root chosen by the same write: reading it twice lets a workspace refresh between the
+		// path lookup and this check reject a valid project write with a confinement error.
+		workspacePath: string | undefined = this.providerRef.deref()?.cwd ?? getWorkspacePath(),
+	): string | undefined {
+		if (source !== "project") {
+			return undefined
+		}
+		return workspacePath
 	}
 
 	// Initialize project-level MCP servers
@@ -2038,10 +2074,12 @@ export class McpHub {
 		configUpdate: Record<string, any>,
 		source: "global" | "project" = "global",
 	): Promise<void> {
-		// Determine which config file to update
+		// Determine which config file to update. The write root is captured once and reused by
+		// the confinement check below, so a workspace refresh cannot split the two reads.
 		let configPath: string
+		const writeRoot = source === "project" ? (this.providerRef.deref()?.cwd ?? getWorkspacePath()) : undefined
 		if (source === "project") {
-			const projectMcpPath = await this.getProjectMcpPath()
+			const projectMcpPath = await this.getProjectMcpPath(writeRoot)
 			if (!projectMcpPath) {
 				throw new Error("Project MCP configuration file not found")
 			}
@@ -2099,7 +2137,10 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+			await safeWriteJson(configPath, updatedConfig, {
+				prettyPrint: true,
+				confineTo: this.confineForMcpWrite(source, writeRoot),
+			})
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
@@ -2143,10 +2184,12 @@ export class McpHub {
 			// Determine config file based on server source
 			const isProjectServer = serverSource === "project"
 			let configPath: string
+			const writeRoot =
+				serverSource === "project" ? (this.providerRef.deref()?.cwd ?? getWorkspacePath()) : undefined
 
 			if (isProjectServer) {
 				// Get project MCP config path
-				const projectMcpPath = await this.getProjectMcpPath()
+				const projectMcpPath = await this.getProjectMcpPath(writeRoot)
 				if (!projectMcpPath) {
 					throw new Error("Project MCP configuration file not found")
 				}
@@ -2184,7 +2227,10 @@ export class McpHub {
 					mcpServers: config.mcpServers,
 				}
 
-				await safeWriteJson(configPath, updatedConfig, { prettyPrint: true })
+				await safeWriteJson(configPath, updatedConfig, {
+					prettyPrint: true,
+					confineTo: this.confineForMcpWrite(serverSource, writeRoot),
+				})
 
 				// Update server connections with the correct source
 				await this.updateServerConnections(config.mcpServers, serverSource)
@@ -2342,9 +2388,10 @@ export class McpHub {
 
 		// Determine the correct config path based on the source
 		let configPath: string
+		const writeRoot = source === "project" ? (this.providerRef.deref()?.cwd ?? getWorkspacePath()) : undefined
 		if (source === "project") {
 			// Get project MCP config path
-			const projectMcpPath = await this.getProjectMcpPath()
+			const projectMcpPath = await this.getProjectMcpPath(writeRoot)
 			if (!projectMcpPath) {
 				throw new Error("Project MCP configuration file not found")
 			}
@@ -2393,7 +2440,10 @@ export class McpHub {
 		}
 		this.isProgrammaticUpdate = true
 		try {
-			await safeWriteJson(normalizedPath, config, { prettyPrint: true })
+			await safeWriteJson(normalizedPath, config, {
+				prettyPrint: true,
+				confineTo: this.confineForMcpWrite(source, writeRoot),
+			})
 		} finally {
 			// Reset flag after watcher debounce period (non-blocking)
 			this.flagResetTimer = setTimeout(() => {
