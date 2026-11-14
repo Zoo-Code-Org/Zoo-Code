@@ -76,7 +76,6 @@
 			"summaryFailedNoFiles": "匯入在複製任何檔案之前已停止。",
 			"summaryCopied": "已複製 {{total}} 個檔案中的 {{copied}} 個",
 			"detailFailed": "開始新的匯入嘗試以重試。",
-			"detailTasksImported_one": "已匯入 {{total}} 個工作歷史記錄中的 {{count}} 個。",
 			"detailTasksImported_other": "已匯入 {{total}} 個工作歷史記錄中的 {{count}} 個。",
 			"detailPreparing": "正在準備匯入 Roo Code 歷史記錄。",
 			"progressAriaLabel": "Roo Code 歷史記錄匯入進度"
@@ -978,7 +977,7 @@
 		"useAzure": "使用 Azure",
 		"azureApiVersion": "設定 Azure API 版本",
 		"gemini": {
-			"freeRequests": "* 每分鐘可免費使用 {{count}} 次請求，超過後將依提示詞大小計費。",
+			"freeRequests_other": "* 每分鐘可免費使用 {{count}} 次請求，超過後將依提示詞大小計費。",
 			"pricingDetails": "詳細資訊請參閱定價說明。",
 			"billingEstimate": "* 費用為估算值 - 實際費用取決於提示大小。"
 		}

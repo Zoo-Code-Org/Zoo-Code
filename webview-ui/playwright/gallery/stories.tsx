@@ -494,6 +494,10 @@ export const stories: Record<string, Story> = {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
 	},
+	"prompts-settings": async () => {
+		const { PromptsSettingsStory } = await import("@/components/settings/__tests__/PromptsSettings.visual.fixture")
+		return <PromptsSettingsStory />
+	},
 	"experimental-settings": async () => {
 		const { ExperimentalSettingsStory } =
 			await import("@/components/settings/__tests__/ExperimentalSettings.visual.fixture")

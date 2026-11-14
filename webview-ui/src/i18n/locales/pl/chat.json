@@ -20,7 +20,10 @@
 	"unpin": "Odepnij",
 	"pin": "Przypnij",
 	"fileChangesInConversation": {
-		"header": "{{count}} plik(ów) zmienionych w tej rozmowie"
+		"header_one": "{{count}} plik zmieniony w tej rozmowie",
+		"header_few": "{{count}} pliki zmienione w tej rozmowie",
+		"header_many": "{{count}} plików zmienionych w tej rozmowie",
+		"header_other": "{{count}} pliku zmienionego w tej rozmowie"
 	},
 	"tokenProgress": {
 		"availableSpace": "Dostępne miejsce: {{amount}} tokenów",
@@ -286,9 +289,11 @@
 		"description": "Wykonuj te działania bez pytania o zgodę. Włącz tę opcję tylko dla działań, którym w pełni ufasz.",
 		"triggerLabelOff": "Automatyczne zatwierdzanie wyłączone",
 		"triggerLabelOffShort": "Wyłączone",
-		"triggerLabel_zero": "0 automatycznie zatwierdzone",
-		"triggerLabel_one": "1 automatycznie zatwierdzony",
-		"triggerLabel_other": "{{count}} automatycznie zatwierdzonych",
+		"triggerLabel_zero": "0 automatycznie zatwierdzonych",
+		"triggerLabel_one": "{{count}} automatycznie zatwierdzony",
+		"triggerLabel_few": "{{count}} automatycznie zatwierdzone",
+		"triggerLabel_many": "{{count}} automatycznie zatwierdzonych",
+		"triggerLabel_other": "{{count}} automatycznie zatwierdzonego",
 		"triggerLabelAll": "BRRR"
 	},
 	"reasoning": {
@@ -305,8 +310,10 @@
 		"truncation": {
 			"title": "Kontekst obcięty",
 			"inProgress": "Obcinanie kontekstu...",
-			"messagesRemoved": "{{count}} wiadomość usunięta",
-			"messagesRemoved_other": "{{count}} wiadomości usunięte",
+			"messagesRemoved_one": "Usunięto {{count}} wiadomość",
+			"messagesRemoved_few": "Usunięto {{count}} wiadomości",
+			"messagesRemoved_many": "Usunięto {{count}} wiadomości",
+			"messagesRemoved_other": "Usunięto {{count}} wiadomości",
 			"description": "Starsze wiadomości zostały usunięte z konwersacji, aby pozostać w granicach okna kontekstu. To szybsze, ale mniej zachowujące kontekst podejście w porównaniu z kondensacją."
 		}
 	},
@@ -349,7 +356,10 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Osiągnięto limit automatycznie zatwierdzonych żądań",
-			"description": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądania/żądań API. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"description_one": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądania API. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"description_few": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądań API. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"description_many": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądań API. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"description_other": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} żądania API. Czy chcesz zresetować licznik i kontynuować zadanie?",
 			"button": "Zresetuj i kontynuuj"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,8 +371,10 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo chce przeszukać bazę kodu w poszukiwaniu <code>{{query}}</code> w <code>{{path}}</code>",
-		"didSearch_one": "Znaleziono 1 wynik",
-		"didSearch_other": "Znaleziono {{count}} wyników",
+		"didSearch_one": "Znaleziono {{count}} wynik",
+		"didSearch_few": "Znaleziono {{count}} wyniki",
+		"didSearch_many": "Znaleziono {{count}} wyników",
+		"didSearch_other": "Znaleziono {{count}} wyniku",
 		"resultTooltip": "Wynik podobieństwa: {{score}} (kliknij, aby otworzyć plik)"
 	},
 	"read-batch": {
@@ -433,9 +445,13 @@
 	"tooManyTools": {
 		"title": "Włączono zbyt wiele narzędzi",
 		"toolsPart_one": "{{count}} narzędzie",
-		"toolsPart_other": "{{count}} narzędzi",
+		"toolsPart_few": "{{count}} narzędzia",
+		"toolsPart_many": "{{count}} narzędzi",
+		"toolsPart_other": "{{count}} narzędzia",
 		"serversPart_one": "{{count}} serwer MCP",
-		"serversPart_other": "{{count}} serwerów MCP",
+		"serversPart_few": "{{count}} serwery MCP",
+		"serversPart_many": "{{count}} serwerów MCP",
+		"serversPart_other": "{{count}} serwera MCP",
 		"messageTemplate": "Masz {{tools}} włączonych przez {{servers}}. Taka duża liczba może zamieszać model i prowadzić do błędów. Staraj się, aby była poniżej {{threshold}}.",
 		"openMcpSettings": "Otwórz ustawienia MCP"
 	},
