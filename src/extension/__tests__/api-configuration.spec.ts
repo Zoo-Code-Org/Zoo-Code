@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest"
 import type * as vscode from "vscode"
 
-import type { RooCodeSettings } from "@roo-code/types"
+import { providerIdentifiers, type ProviderSettings, type RooCodeSettings } from "@roo-code/types"
 
 import { API } from "../api"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
@@ -45,6 +45,107 @@ describe("API - configuration", () => {
 		expect(setModeConfig).toHaveBeenCalledWith("code", "code-config")
 		expect(setModeConfig).toHaveBeenCalledWith("architect", "architect-config")
 		expect(postStateToWebview).toHaveBeenCalledOnce()
+	})
+
+	it("strips provider secrets nested inside the configuration it hands out", () => {
+		const apiConfiguration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+			openRouterBaseUrl: "https://example.test/v1",
+			openRouterApiKey: "nested-secret-value",
+		}
+		const getValues = vi.fn().mockReturnValue({
+			currentApiConfigName: "my-profile",
+			apiConfiguration,
+			openRouterApiKey: "top-level-secret",
+			openAiApiKey: "second-top-level-secret",
+			alwaysAllowReadOnly: true,
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues,
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		// The public signature says RooCodeSettings; the runtime value also carries the view profile
+		// buffer under apiConfiguration, which is what this test is about.
+		const configuration: RooCodeSettings & { apiConfiguration?: ProviderSettings } = api.getConfiguration()
+
+		// The names filtered here are names a profile carries: SECRET_STATE_KEYS are keys of
+		// ProviderSettings (SecretState in packages/types/src/global-settings.ts), so a profile saved with
+		// one of them used to be readable through the public API even though the top-level key of the same
+		// name was filtered out.
+		expect(configuration["openRouterApiKey"]).toBeUndefined()
+		expect(configuration["openAiApiKey"]).toBeUndefined()
+		expect(configuration.alwaysAllowReadOnly).toBe(true)
+		expect(configuration.currentApiConfigName).toBe("my-profile")
+		expect(configuration.apiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+			openRouterBaseUrl: "https://example.test/v1",
+		})
+		expect(JSON.stringify(configuration.apiConfiguration)).not.toContain("nested-secret-value")
+		expect(getValues).toHaveBeenCalledOnce()
+	})
+
+	it("hands back the same nested configuration object when it holds no secret", () => {
+		const apiConfiguration: ProviderSettings = {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		}
+		const getValues = vi.fn().mockReturnValue({ currentApiConfigName: "my-profile", apiConfiguration })
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues,
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration: RooCodeSettings & { apiConfiguration?: ProviderSettings } = api.getConfiguration()
+
+		// A reader comparing the configuration it received against the object the provider holds is not
+		// disturbed by a call that had nothing to strip.
+		expect(configuration.apiConfiguration).toBe(apiConfiguration)
+	})
+
+	it("keeps the per-view state record out of the configuration it hands out", () => {
+		const getValues = vi.fn().mockReturnValue({
+			currentApiConfigName: "my-profile",
+			viewStates: { "view-a": { mode: "code" }, "view-b": { mode: "architect" } },
+			alwaysAllowReadOnly: true,
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues,
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// The record is this machine's map of every view's buffer, not a setting: an extension holding
+		// the API must not be handed it as configuration, and the rest of the settings bag still comes
+		// through unchanged.
+		expect(configuration).not.toHaveProperty("viewStates")
+		expect(configuration.currentApiConfigName).toBe("my-profile")
+		expect(configuration.alwaysAllowReadOnly).toBe(true)
+		expect(getValues).toHaveBeenCalledOnce()
 	})
 
 	it("does not persist mode mappings when none are supplied", async () => {

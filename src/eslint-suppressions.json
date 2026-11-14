@@ -921,12 +921,12 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 195
+			"count": 151
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 27
+			"count": 26
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-profile.spec.ts": {

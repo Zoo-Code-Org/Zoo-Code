@@ -121,6 +121,187 @@ describe("ContextProxy", () => {
 			expect(result).toBe("deepseek")
 		})
 
+		it("should not let an older rejected write clobber a newer cached value", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			const firstWriteResult = new Promise<void>((_, reject) => {
+				rejectFirst = reject
+			})
+
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(firstWriteResult)
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.updateGlobalState("apiProvider", "openai")
+
+			// The older write rejects after a newer value already reached the cache: rolling
+			// the cache back to the pre-first-write value would diverge from storage.
+			rejectFirst(new Error("disk full"))
+			await expect(firstWrite).rejects.toThrow("disk full")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
+		it("should not restore a pre-reset value when a pending write rejects after reset", async () => {
+			let rejectPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(
+				new Promise<void>((_, reject) => {
+					rejectPending = reject
+				}),
+			)
+
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.resetAllState()
+			rejectPending(new Error("disk full"))
+
+			await expect(pending).rejects.toThrow("disk full")
+			// The reset cleared the cache: restoring the pre-reset value would resurrect state
+			// that storage no longer holds.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+		// This branch carried no write guard at all before these two cases: resetAllState cleared the
+		// caches and deleted storage with nothing telling storeSecret that a reset was running, so a
+		// save issued mid-reset could land after the deletes and resurrect a value the user had just
+		// erased. The refusal is the new observable here rather than an existing one, so it gets its
+		// own case instead of being a phase of the leak case.
+		it("refuses a secret write issued while a reset is still inside its delete pass", async () => {
+			const erases: { reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						erases.push({ reject })
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const resetting = proxy.resetAllState()
+			// The reset yields before it reaches its delete pass, so let it get there before asking the
+			// store to write.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+
+			const refused = await proxy.storeSecret("apiKey", "saved-mid-reset").then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			expect(refused).toBeInstanceOf(SettingsWriteError)
+			expect(String((refused as Error).message)).toContain("secret writes are refused while state is being reset")
+			// Refused rather than deferred: a deferred write would re-store the value this reset is
+			// in the middle of erasing.
+			// Refused rather than deferred, and not silently written either: the cache the reset already
+			// cleared stays empty and no store call was made for the key.
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.store.mock.calls.filter((call: readonly unknown[]) => call[0] === "apiKey").length).toBe(
+				0,
+			)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(resetting).rejects.toThrow("keychain locked")
+		})
+		it("accepts a secret write again after a reset whose delete pass rejected", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					throw new Error("keychain locked")
+				}
+				durable.delete(key)
+			})
+
+			await expect(proxy.resetAllState()).rejects.toThrow("keychain locked")
+
+			// The half that bites: the delete pass is a single Promise.all, so one keychain rejection
+			// rejects resetAllState itself. Unless the guard is lowered on that path too, every later
+			// save is refused for the life of the instance while resetState() has already aborted on the
+			// same error, so the user cannot get a key back without restarting the extension host.
+			// Measured as a save that resolves and reads back through storage and cache, not as an
+			// absence of errors.
+			await expect(proxy.storeSecret("apiKey", "written-after-failed-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
+		})
+
+		it("should restore the last persisted value when two overlapping writes both reject", async () => {
+			// The fake now models storage: an update commits its value and a read sees what storage holds,
+			// which is what the cache correction on a rejected write reads back. A write that rejects
+			// commits nothing, so storage still holds the last value it accepted.
+			const storage = new Map<string, unknown>()
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
+			mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+				storage.set(key, value)
+			})
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockReset()
+			let rejectFirst: (error: Error) => void = () => {}
+			let rejectSecond: (error: Error) => void = () => {}
+			mockGlobalState.update
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectFirst = reject
+					}),
+				)
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectSecond = reject
+					}),
+				)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "openrouter")
+			const secondWrite = proxy.updateGlobalState("apiProvider", "deepseek")
+			rejectSecond(new Error("second failed"))
+			await expect(secondWrite).rejects.toThrow("second failed")
+			rejectFirst(new Error("first failed"))
+			await expect(firstWrite).rejects.toThrow("first failed")
+
+			// Neither attempt reached storage: the cache must hold the last persisted value,
+			// not the first attempt's unpersisted value.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("should restore the loaded value when overlapping writes reject with no prior write", async () => {
+			// Cold start: storage holds the value but nothing has been written through this
+			// proxy yet, so the persisted-value map has no entry for the key.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "openai" : undefined))
+			const coldProxy = new ContextProxy(mockContext)
+			await coldProxy.initialize()
+			expect(coldProxy.getGlobalState("apiProvider")).toBe("openai")
+
+			mockGlobalState.update.mockReset()
+			let rejectFirst: (error: Error) => void = () => {}
+			let rejectSecond: (error: Error) => void = () => {}
+			mockGlobalState.update
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectFirst = reject
+					}),
+				)
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectSecond = reject
+					}),
+				)
+
+			const firstWrite = coldProxy.updateGlobalState("apiProvider", "openrouter")
+			const secondWrite = coldProxy.updateGlobalState("apiProvider", "deepseek")
+			rejectSecond(new Error("second failed"))
+			await expect(secondWrite).rejects.toThrow("second failed")
+			rejectFirst(new Error("first failed"))
+			await expect(firstWrite).rejects.toThrow("first failed")
+
+			// The second write's `previousCachedValue` is the first write's pending value, so the
+			// fallback branch would leave a value that storage never accepted.
+			expect(coldProxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
@@ -218,6 +399,22 @@ describe("ContextProxy", () => {
 			// Should have stored the value in cache
 			const storedValue = await proxy.getSecret("apiKey")
 			expect(storedValue).toBe("new-secret")
+		})
+
+		it("counts a secret write in the per-key generation a rollback reads", async () => {
+			const before = proxy.getStateWriteGeneration("apiKey")
+
+			await proxy.storeSecret("apiKey", "first-secret")
+
+			// The guard that rolls back a failed per-view write reads this counter, so a secret it cannot
+			// count is a secret whose newer write of the same value it cannot tell from its own.
+			expect(proxy.getStateWriteGeneration("apiKey")).toBe(before + 1)
+
+			await proxy.storeSecret("apiKey", "first-secret")
+
+			// A second write of the very same value moves the counter too: the value alone cannot tell the
+			// two apart.
+			expect(proxy.getStateWriteGeneration("apiKey")).toBe(before + 2)
 		})
 
 		it("should handle undefined value for secret deletion", async () => {
@@ -1168,6 +1365,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })
