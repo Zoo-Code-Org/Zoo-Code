@@ -1,3 +1,5 @@
+import { useState } from "react"
+
 import { providerIdentifiers } from "@roo-code/types"
 import { defaultModeSlug } from "@roo/modes"
 
@@ -698,6 +700,348 @@ describe("ChatTextArea", () => {
 
 				// Should reset history navigation
 				expect(setInputValue).toHaveBeenCalledWith("New input")
+			})
+
+			it("should open the prompt history picker when typing a leading !", () => {
+				const setInputValue = vi.fn()
+				const onSend = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+
+				// Newest prompt first.
+				expect(container.textContent).toContain("Third prompt")
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				// Selecting only fills the input; it must not send the message.
+				expect(setInputValue).toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should close the prompt history picker on Escape without sending", () => {
+				const onSend = vi.fn()
+				const { container } = render(<ChatTextArea {...defaultProps} onSend={onSend} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				fireEvent.keyDown(textarea, { key: "Escape" })
+
+				expect(container.textContent).not.toContain("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should not open the prompt history picker for a mid-message exclamation mark", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "Great!" } })
+
+				expect(container.textContent).not.toContain("Third prompt")
+			})
+
+			it("should close the picker before cancelling an edit on Escape", () => {
+				const onCancel = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} isEditMode onCancel={onCancel} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// First press closes the picker and keeps the edit (and its draft).
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(onCancel).not.toHaveBeenCalled()
+				expect(container.textContent).not.toContain("Third prompt")
+
+				// Second press, with no picker open, cancels the edit.
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(onCancel).toHaveBeenCalledTimes(1)
+			})
+
+			it("should still send on Enter when the history query matches nothing", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!zzz", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				// "No results" is not selectable, so Enter must not be swallowed.
+				expect(onSend).toHaveBeenCalledTimes(1)
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+			})
+
+			it("should send on Ctrl+Enter instead of selecting a picker row", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true })
+
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).toHaveBeenCalledTimes(1)
+			})
+
+			it("should not select a picker row on Shift+Enter", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter", shiftKey: true })
+
+				// Shift+Enter is a newline, so it neither selects nor sends.
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should not select a picker row on a composing Enter", () => {
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter", isComposing: true })
+
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should reopen the picker after the controlled value is reset", () => {
+				const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// Dismiss the picker with the value still in the box.
+				rerender(<ChatTextArea {...defaultProps} inputValue="!" />)
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(container.textContent).not.toContain("Third prompt")
+
+				// The parent clears the value without an input event (e.g. after send).
+				rerender(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				// Typing "!" again must reopen the picker, not stay suppressed.
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Third prompt")
+			})
+
+			it("should keep the picker open on a composing Escape", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				expect(container.textContent).toContain("Third prompt")
+
+				// Escape belongs to the IME candidate window while composing.
+				fireEvent.keyDown(textarea, { key: "Escape", isComposing: true })
+				expect(container.textContent).toContain("Third prompt")
+
+				// A plain Escape still dismisses the picker.
+				fireEvent.keyDown(textarea, { key: "Escape" })
+				expect(container.textContent).not.toContain("Third prompt")
+			})
+
+			it("should select the active row on Tab", () => {
+				const setInputValue = vi.fn()
+				const onSend = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Tab" })
+
+				expect(setInputValue).toHaveBeenCalledWith("Third prompt")
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should move the active row with ArrowDown before selecting", () => {
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+
+				// The picker starts on the newest prompt; one ArrowDown moves to
+				// the next entry, so Enter commits "Second prompt".
+				fireEvent.keyDown(textarea, { key: "ArrowDown" })
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				expect(setInputValue).toHaveBeenCalledWith("Second prompt")
+			})
+
+			it("should keep the picker closed and let Enter send when history is empty", () => {
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+					filePaths: [],
+					openedTabs: [],
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+					taskHistory: [],
+					clineMessages: [],
+					cwd: "/test/workspace",
+				})
+
+				const onSend = vi.fn()
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} onSend={onSend} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+
+				// The fixture has no prompts, so asserting on prompt text would pass
+				// even if the picker opened on a "No results" row. Assert the picker
+				// itself is absent.
+				expect(container.querySelector('[data-testid="context-menu"]')).toBeNull()
+
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				expect(onSend).toHaveBeenCalledTimes(1)
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+			})
+
+			it("should open the picker with a full-width exclamation mark", () => {
+				const { container } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "！", selectionStart: 1 } })
+
+				expect(container.textContent).toContain("Third prompt")
+			})
+
+			it("should place the cursor at the end of the recalled prompt", () => {
+				const onSend = vi.fn()
+
+				const ControlledArea = () => {
+					const [value, setValue] = useState("")
+
+					return (
+						<ChatTextArea {...defaultProps} inputValue={value} setInputValue={setValue} onSend={onSend} />
+					)
+				}
+
+				const { container } = render(<ControlledArea />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				fireEvent.keyDown(textarea, { key: "Enter" })
+
+				expect(textarea.value).toBe("Third prompt")
+				expect(textarea.selectionStart).toBe("Third prompt".length)
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should fill and dismiss the picker when a history row is clicked", () => {
+				const onSend = vi.fn()
+
+				const ControlledArea = () => {
+					const [value, setValue] = useState("")
+
+					return (
+						<ChatTextArea {...defaultProps} inputValue={value} setInputValue={setValue} onSend={onSend} />
+					)
+				}
+
+				const { container } = render(<ControlledArea />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
+				// Click a row other than the default one to prove the click picks
+				// the row under the pointer, not the first entry.
+				const row = container.querySelector('[title="Second prompt"]')
+				expect(row).not.toBeNull()
+
+				// Real pointer order: mousedown on the row, then the textarea
+				// blurs. The menu must survive the blur.
+				fireEvent.mouseDown(row!)
+				fireEvent.blur(textarea)
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
+				fireEvent.click(row!)
+
+				expect(textarea.value).toBe("Second prompt")
+				expect(container.querySelector('[data-testid="context-menu"]')).toBeNull()
+				expect(onSend).not.toHaveBeenCalled()
+			})
+
+			it("should not reopen the picker when typing after a recalled trigger-shaped prompt", () => {
+				// A prompt that is itself shaped like the "!" trigger: typing more
+				// after recalling it would reopen the picker without the dismissal
+				// guard, because the new value still matches the trigger pattern.
+				;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+					filePaths: [],
+					openedTabs: [],
+					apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+					taskHistory: [],
+					clineMessages: [{ type: "say", say: "user_feedback", text: "!dpl", ts: 1 }],
+					cwd: "/test/workspace",
+				})
+
+				const ControlledArea = () => {
+					const [value, setValue] = useState("")
+
+					return <ChatTextArea {...defaultProps} inputValue={value} setInputValue={setValue} />
+				}
+
+				const { container } = render(<ControlledArea />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.querySelector('[title="!dpl"]')).not.toBeNull()
+
+				fireEvent.keyDown(textarea, { key: "Enter" })
+				expect(textarea.value).toBe("!dpl")
+				expect(container.querySelector('[title="!dpl"]')).toBeNull()
+
+				fireEvent.change(textarea, { target: { value: "!dplo", selectionStart: 5 } })
+				expect(container.querySelector('[title="!dpl"]')).toBeNull()
 			})
 
 			it("should reset history navigation when sending message", () => {

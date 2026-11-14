@@ -30,6 +30,7 @@ interface ContextMenuProps {
 	loading?: boolean
 	dynamicSearchResults?: SearchResult[]
 	commands?: Command[]
+	history?: string[]
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -43,14 +44,23 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 	modes,
 	dynamicSearchResults = [],
 	commands = [],
+	history = [],
 }) => {
 	const [materialIconsBaseUri, setMaterialIconsBaseUri] = useState("")
 	const { t } = useAppTranslation()
 	const menuRef = useRef<HTMLDivElement>(null)
 
 	const filteredOptions = useMemo(() => {
-		return getContextMenuOptions(searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands)
-	}, [searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands])
+		return getContextMenuOptions(
+			searchQuery,
+			selectedType,
+			queryItems,
+			dynamicSearchResults,
+			modes,
+			commands,
+			history,
+		)
+	}, [searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands, history])
 
 	useEffect(() => {
 		if (menuRef.current) {
@@ -138,6 +148,17 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 							</span>
 						)}
 					</div>
+				)
+			case ContextMenuOptionType.History:
+				// Prompts can be long and multi-line; keep every row to one line so
+				// the picker stays scannable. The full text lands in the input on
+				// selection, and line breaks become visible there.
+				return (
+					<span
+						title={option.value}
+						className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-[1.4]">
+						{option.value?.replace(/\s+/g, " ").trim()}
+					</span>
 				)
 			case ContextMenuOptionType.Problems:
 				return <span>{t("chat:contextMenu.problems")}</span>
@@ -231,6 +252,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 				return "link"
 			case ContextMenuOptionType.Git:
 				return "git-commit"
+			case ContextMenuOptionType.History:
+				return "history"
 			case ContextMenuOptionType.NoResults:
 				return "info"
 			default:
@@ -268,6 +291,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 
 	return (
 		<div
+			data-testid="context-menu"
 			style={{
 				position: "absolute",
 				bottom: "calc(100% - 10px)",
