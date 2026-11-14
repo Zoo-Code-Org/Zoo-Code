@@ -3094,6 +3094,32 @@ describe("ClineProvider", () => {
 		}
 	})
 
+	// Rejection must also hold through the builders, not only in the pure helper.
+	test.each([
+		[undefined, null],
+		["https://example.com;script-src", "https://example.com;script-src"],
+		["ftp://example.com", "ftp://example.com"],
+	])("falls back to the default origin for endpoint %s in both HTML builders", async (baseUrl, rejectedValue) => {
+		const state = await provider.getState()
+		vi.spyOn(provider, "getState").mockResolvedValue({
+			...state,
+			apiConfiguration: { ...state.apiConfiguration, openRouterBaseUrl: baseUrl },
+		})
+		vi.mocked(axios.get).mockResolvedValue({ data: "" })
+
+		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
+			const html = await provider[build](mockWebviewView.webview)
+			const csp = html.match(
+				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
+			)?.[1]
+			expect(csp).toBeDefined()
+			expect(csp).toContain("connect-src vscode-webview://test-csp-source https://openrouter.ai ")
+			if (rejectedValue) {
+				expect(csp).not.toContain(rejectedValue)
+			}
+		}
+	})
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
