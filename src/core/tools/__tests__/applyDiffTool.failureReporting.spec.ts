@@ -99,6 +99,7 @@ describe("ApplyDiffTool failure reporting", () => {
 			observationRegistry: {
 				get: vi.fn().mockReturnValue(undefined),
 				observe: vi.fn(),
+				forget: vi.fn(),
 			},
 			diffViewProvider: {
 				editType: undefined,
@@ -530,6 +531,40 @@ describe("ApplyDiffTool failure reporting", () => {
 			expect(output).toContain("Applied 2 of 3")
 			expect(output).toContain("FAILURE-MARKER-1")
 			expect(output).not.toContain("--- Diff block")
+		})
+	})
+	describe("partial-observation cleanup on a failure exit", () => {
+		// The tool's own read is not a model read: it records a partial observation of the version
+		// the hunks were computed against, and a failure exit revokes exactly that observation.
+		// A matching token is not the same entry - a concurrent complete read can carry the same
+		// token and deserve to stay.
+		function _handEntryToAnotherRead(complete: boolean) {
+			let lookups = 0
+			vi.mocked(mockTask.observationRegistry.get).mockImplementation(() => {
+				const created = vi.mocked(mockTask.observationRegistry.observe).mock.calls.at(0)
+				if (lookups++ === 0 || created === undefined) {
+					// Nothing observed yet, so this call is the one that creates the partial entry.
+					return undefined
+				}
+				// The second lookup is the failure exit deciding whether it may forget.
+				return { version: created[1], observedAt: 0, complete }
+			})
+		}
+
+		it("keeps the entry a concurrent complete read recorded on the same version", async () => {
+			_handEntryToAnotherRead(true)
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
+
+			expect(output).toContain("FAILURE-MARKER-1")
+			expect(mockTask.observationRegistry.forget).not.toHaveBeenCalled()
+		})
+
+		it("forgets the entry this call created while it is still the recorded one", async () => {
+			_handEntryToAnotherRead(false)
+			const output = await runApplyDiff({ success: false, failParts: makeFailureSet(1) }, 1)
+
+			expect(output).toContain("FAILURE-MARKER-1")
+			expect(mockTask.observationRegistry.forget).toHaveBeenCalledWith(expect.stringContaining("file.txt"))
 		})
 	})
 })

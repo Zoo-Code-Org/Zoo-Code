@@ -49,9 +49,17 @@ describe("file lock protocol", () => {
 		const base = await fsp.mkdtemp(path.join(os.tmpdir(), "filelock-chain-"))
 		const target = path.join(base, "missing", "nested", "history.json")
 		const release = vi.fn(async () => {})
-		vi.mocked(lockfile.lock).mockResolvedValue(release)
+		// The question is what existed while the lock was being taken, not what is left after it
+		// returned: an assertion only after acquireFileLock also passes when the creation moves
+		// after the lock, which is the ordering this row exists to rule out.
+		let directoryInsideTheLock: boolean | undefined
+		vi.mocked(lockfile.lock).mockImplementation(async () => {
+			directoryInsideTheLock = (await fsp.stat(path.join(base, "missing", "nested"))).isDirectory()
+			return release
+		})
 		try {
 			await acquireFileLock(target)
+			expect(directoryInsideTheLock).toBe(true)
 			expect((await fsp.stat(path.join(base, "missing", "nested"))).isDirectory()).toBe(true)
 			// The artefact did not move to the ancestor that happened to exist: every writer to
 			// this path, arriving before or after the directory, is locking the same location.

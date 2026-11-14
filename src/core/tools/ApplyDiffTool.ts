@@ -43,12 +43,16 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 		// already observed the file): only this exact observation may be removed on a failure
 		// exit, so a replaced or published observation is never discarded here. Declared outside
 		// the try so the catch exit can use it too.
-		let partialObservation: { path: string; version: string } | undefined
+		let partialObservation: { path: string; version: string; complete: boolean } | undefined
 		const forgetPartialObservationIfCurrent = () => {
-			if (
-				partialObservation &&
-				task.observationRegistry.get(partialObservation.path)?.version === partialObservation.version
-			) {
+			if (!partialObservation) {
+				return
+			}
+			const current = task.observationRegistry.get(partialObservation.path)
+			// A matching version token is not the same observation: a concurrent complete read
+			// can record this very version with `complete` true, and forgetting that entry would
+			// discard authority this call never held. Compare both fields the entry carries.
+			if (current?.version === partialObservation.version && current?.complete === partialObservation.complete) {
 				task.observationRegistry.forget(partialObservation.path)
 			}
 		}
@@ -103,14 +107,13 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					// partial observation of the version the diff was computed against - the only
 					// authorization the save can have, since apply_diff computes its hunks from
 					// this read. When the model already observed the file, keep the completeness it
-					// earned, but only on the version it was earned on: refreshing an OLDER
 					// observation to the current version would let content the model built from a
 					// stale read pass the compare-and-swap, so an out-of-date observation is left
 					// alone and the save fails with the re-read remediation.
 					const prior = task.observationRegistry.get(absolutePath)
 					if (prior === undefined) {
 						task.observationRegistry.observe(absolutePath, preReadToken, false)
-						partialObservation = { path: absolutePath, version: preReadToken }
+						partialObservation = { path: absolutePath, version: preReadToken, complete: false }
 					} else if (prior.version === preReadToken) {
 						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
 					}

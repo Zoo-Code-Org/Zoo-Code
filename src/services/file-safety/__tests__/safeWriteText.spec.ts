@@ -1433,6 +1433,13 @@ describe("safeWriteText", () => {
 			expect(fsSync.fsyncSync).toHaveBeenNthCalledWith(1, 1)
 			expect(fsSync.fsyncSync).toHaveBeenNthCalledWith(2, 2)
 			expect(fsSync.closeSync).toHaveBeenCalledWith(2)
+			// The distinct fds only show which fsync is which. The title promises the second one runs
+			// after the commit rename, so compare the invocations too: a publisher that fsynced the
+			// directory before the rename keeps two distinct descriptors and would pass every
+			// assertion above while committing the directory entry before the file it names.
+			const renameCall = vi.mocked(fs.rename).mock.invocationCallOrder[0]
+			const directoryFsyncCall = vi.mocked(fsSync.fsyncSync).mock.invocationCallOrder[1]
+			expect(directoryFsyncCall).toBeGreaterThan(renameCall)
 		})
 
 		it("reports a failed parent-directory fsync instead of claiming a durable write", async () => {

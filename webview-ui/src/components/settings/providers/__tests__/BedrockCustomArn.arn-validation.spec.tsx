@@ -53,12 +53,14 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	),
 }))
 
-vi.mock("@src/i18n/TranslationContext", () => ({
-	useAppTranslation: () => ({
-		t: (key: string, options?: Record<string, unknown>) =>
-			options ? Object.entries(options).reduce((acc: string, [k, v]) => `${acc} ${k}=${String(v)}`, key) : key,
-	}),
-}))
+vi.mock("@src/i18n/TranslationContext", () => {
+	// One `t` for every render, built inside the factory. A hook that constructs a new
+	// function on each call makes the validation memo recompute whatever its dependencies
+	// are, so a memo that omitted `t` could not be told apart from one that declares it.
+	const t = (key: string, options?: Record<string, unknown>) =>
+		options ? Object.entries(options).reduce((acc: string, [k, v]) => `${acc} ${k}=${String(v)}`, key) : key
+	return { useAppTranslation: () => ({ t }) }
+})
 
 describe("BedrockCustomArn - the memoised ARN validation", () => {
 	it("reports no problem for a session with no ARN typed yet", () => {
