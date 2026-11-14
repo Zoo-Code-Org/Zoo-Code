@@ -8536,11 +8536,15 @@ describe("view state claims driven at the method boundary (PR 2414 asks)", () =>
 					storage[key] = value
 				},
 			},
-			getPersistedViewStates: () =>
-				Object.assign(Object.create(null) as Record<string, unknown>, storage["viewStates"] ?? {}),
-			prunePersistedViewStates: (states: Record<string, unknown>) => ({ ...states }),
+			// The read, the pruning and the generation predicate are the real prototype helpers driven
+			// over the double, exactly as the post and enqueue members below are: a hand-written copy
+			// of production logic here cannot fail when production changes.
+			getPersistedViewStates: (options?: { fresh?: boolean }) =>
+				proto["getPersistedViewStates"].call(host, options),
+			prunePersistedViewStates: (states: Record<string, unknown>) =>
+				proto["prunePersistedViewStates"].call(host, states),
 			isViewStateGenerationLive: (generation: number) =>
-				host["_disposed"] !== true && host["viewStateGeneration"] === generation,
+				proto["isViewStateGenerationLive"].call(host, generation),
 			postViewStateClaimToWebview: (viewStateId: string, claimToken: string) =>
 				proto["postViewStateClaimToWebview"].call(host, viewStateId, claimToken),
 			enqueueViewStateWrite: (run: (provider: ClineProvider) => Promise<void>) =>
@@ -8616,32 +8620,38 @@ describe("view state claims driven at the method boundary (PR 2414 asks)", () =>
 		expect(persisted()["sidebar-host-0"]?.claimToken).not.toBe("chosen-by-the-webview")
 	})
 
-	it.each([
-		{ label: "still carries its own binding", later: false },
-		{ label: "was re-bound by a later write", later: true },
-	])("rolls back a persisted claim whose view died while $label", async ({ later }) => {
+	it("drops an entry that is not an object when the real read rebuilds the map", async () => {
+		const { provider, storage, persisted } = makeViewHost()
+		storage["viewStates"] = {
+			"sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 },
+			toString: "a hand-edited record that is not an entry",
+		}
+
+		await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, { mode: "code" })
+
+		// The read is production's, so the corrupt member is gone before the write is composed:
+		// a double that copied the read here would carry it through to storage unchanged.
+		expect(Object.keys(persisted()).sort()).toEqual(["sidebar-host-0"])
+		expect(persisted()["sidebar-host-0"]?.claimToken).not.toBe("token-a")
+	})
+	it("rolls back a persisted claim whose view died while it still carries its own binding", async () => {
 		const prior = { mode: "architect", claimToken: "prior-token", updatedAt: 1 }
+		const writes: { key: string; value: unknown }[] = []
 		let minted: string | undefined
 		const { provider, storage, persisted } = makeViewHost(
 			{ viewStateGeneration: 5 },
-			(storage2, calls, _key, value) => {
-				const written = value as Record<string, { claimToken?: string }>
+			(storage2, calls, key, value) => {
+				writes.push({ key, value })
+				const written = value as Record<string, { claimToken?: string } | undefined>
 				if (calls.n === 1) {
 					minted = written["sidebar-host-0"]?.claimToken
-					storage2["viewStates"] = value
+					storage2[key] = value
 					provider["viewStateGeneration"] = 6
 					return
 				}
-				if (later) {
-					storage2["viewStates"] = {
-						"sidebar-host-0": { mode: "code", claimToken: "later-token", updatedAt: 2 },
-					}
-					return
-				}
-				storage2["viewStates"] = value
+				storage2[key] = value
 			},
 		)
-		void storage
 		storage["viewStates"] = { "sidebar-host-0": { ...prior } }
 
 		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
@@ -8649,12 +8659,45 @@ describe("view state claims driven at the method boundary (PR 2414 asks)", () =>
 		})
 		expect(minted).toBeDefined()
 		expect(result).toEqual({ persisted: false, claim: "none" })
-		if (later) {
-			expect(persisted()["sidebar-host-0"]?.claimToken).toBe("later-token")
-			expect(persisted()["sidebar-host-0"]?.mode).toBe("code")
-		} else {
-			expect(persisted()["sidebar-host-0"]).toEqual(prior)
-		}
+		// The durable entry still carried the token this write minted, so undoing it is the second
+		// write, and what it restores is exactly what the key held before.
+		expect(writes.map((write: { key: string; value: unknown }) => write.key)).toEqual(["viewStates", "viewStates"])
+		expect(persisted()["sidebar-host-0"]).toEqual(prior)
+	})
+
+	it("leaves a later re-binding alone and writes nothing when the dead claim was already replaced", async () => {
+		const prior = { mode: "architect", claimToken: "prior-token", updatedAt: 1 }
+		const laterEntry = { mode: "code", claimToken: "later-token", updatedAt: 2 }
+		const writes: { key: string; value: unknown }[] = []
+		let minted: string | undefined
+		const { provider, storage, persisted } = makeViewHost(
+			{ viewStateGeneration: 5 },
+			(storage2, calls, key, value) => {
+				writes.push({ key, value })
+				const written = value as Record<string, { claimToken?: string } | undefined>
+				if (calls.n === 1) {
+					minted = written["sidebar-host-0"]?.claimToken
+					// A different provider re-bound this key before the rollback read below could see it,
+					// so the durable entry no longer carries the token this write minted.
+					storage2[key] = { ...written, "sidebar-host-0": { ...laterEntry } }
+					provider["viewStateGeneration"] = 6
+					return
+				}
+				storage2[key] = value
+			},
+		)
+		storage["viewStates"] = { "sidebar-host-0": { ...prior } }
+
+		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+		expect(minted).toBeDefined()
+		// The ownership check refused to undo someone else's binding, so there is no rollback
+		// write at all: the later entry survives unchanged and the claim this view minted is
+		// reported as dropped rather than delivered or undone.
+		expect(writes).toHaveLength(1)
+		expect(persisted()["sidebar-host-0"]).toEqual(laterEntry)
+		expect(result).toEqual({ persisted: true, claim: "dropped" })
 	})
 
 	it("flushes a queued claim on the next launch and re-queues it when that post fails", async () => {
@@ -8728,12 +8771,14 @@ describe("view state claims driven at the method boundary (PR 2414 asks)", () =>
 	it("leaves the entry under the stable id with authorship set when the restore write fails", async () => {
 		const { provider, storage, persisted } = makeViewHost(
 			{ wroteUnderTemporaryViewStateId: true },
-			(storage2, calls) => {
+			(storage2, calls, key, value) => {
 				if (calls.n === 2) {
 					provider["viewStateGeneration"] = 1
 					throw new Error("restore write failed")
 				}
-				storage2["viewStates"] = { "stable-view": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+				// What production actually wrote, rather than a hand-written copy of the re-keyed
+				// record: a wrong re-key payload has to fail the assertions below.
+				storage2[key] = value
 				provider["viewStateGeneration"] = 1
 			},
 		)
