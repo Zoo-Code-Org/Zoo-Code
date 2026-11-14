@@ -469,7 +469,14 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 					const belowLink = missing.slice().reverse()
 					const spelled = displayPath.split(/[\\/]/)
 					const keep = Math.max(1, spelled.length - belowLink.length)
-					const linkName = spelled.slice(0, keep).join("/") || path.basename(ancestor)
+					const spelledLink = spelled.slice(0, keep).join("/")
+					// An absolute spelling is a host path as much as the guard's resolved
+					// ancestor is, and this rejection is model-facing text either way. When
+					// the caller spelled the path absolutely, keep only the component the
+					// walk stopped at - the caller's own name for the link - and drop the
+					// prefix the way the branch above drops the ancestor it resolved.
+					const callerName = path.isAbsolute(spelledLink) ? spelled[keep - 1] : spelledLink
+					const linkName = callerName || path.basename(ancestor)
 					throw new GuardRejectedError(
 						`Path runs through a link (${linkName}) that does not resolve -- retry with a path inside the workspace.`,
 						displayPath,

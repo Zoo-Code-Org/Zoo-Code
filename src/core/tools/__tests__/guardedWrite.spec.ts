@@ -352,31 +352,40 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			// reports; rejoining the lexical names would authorize a write whose publish
 			// lands outside the container that was checked.
 			const planted = path.join(path.resolve(WORKSPACE), "linkdir")
-			mockedFsRealpath.mockImplementation(async (p) => {
-				const s = String(p)
-				if (s === path.resolve(WORKSPACE)) return path.resolve(WORKSPACE)
-				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
-			})
-			mockedFsLstat.mockImplementation(async (p) => {
-				if (String(p) === planted) {
-					return { isSymbolicLink: () => true } as never
+			// Both spellings of the same target must land the same way: the rejection
+			// names the link in the caller's own words and carries no host path, so an
+			// absolute spelling must not smuggle the prefix back into the message.
+			const rejectFor = async (spelling: string): Promise<string> => {
+				mockedFsRealpath.mockImplementation(async (p) => {
+					const s = String(p)
+					if (s === path.resolve(WORKSPACE)) return path.resolve(WORKSPACE)
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				})
+				mockedFsLstat.mockImplementation(async (p) => {
+					if (String(p) === planted) {
+						return { isSymbolicLink: () => true } as never
+					}
+					throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
+				})
+				const task = createMockTask()
+				let rejection: Error | undefined
+				try {
+					await guardedWrite(task, spelling, "data", "create")
+				} catch (error: unknown) {
+					rejection = error instanceof Error ? error : new Error(String(error))
 				}
-				throw Object.assign(new Error("ENOENT"), { code: "ENOENT" })
-			})
-			const task = createMockTask()
-
-			let rejection: Error | undefined
-			try {
-				await guardedWrite(task, "linkdir/nested/new.txt", "data", "create")
-			} catch (error: unknown) {
-				rejection = error instanceof Error ? error : new Error(String(error))
+				expect(mockedSafeWriteText).not.toHaveBeenCalled()
+				return rejection?.message ?? ""
 			}
-			// The rejection names the link in the caller's own spelling and carries none
-			// of the guard's absolute ancestor, which is a host path on the user's machine.
-			expect(rejection?.message).toContain("runs through a link (linkdir)")
-			expect(rejection?.message).not.toContain(path.resolve(WORKSPACE))
-
-			expect(mockedSafeWriteText).not.toHaveBeenCalled()
+			const relative = await rejectFor("linkdir/nested/new.txt")
+			// Named the way the caller named it, and none of the guard's ancestor.
+			expect(relative).toContain("runs through a link (linkdir)")
+			expect(relative).not.toContain(path.resolve(WORKSPACE))
+			const absolute = await rejectFor(path.join(path.resolve(WORKSPACE), "linkdir", "nested", "new.txt"))
+			// The same two directions for the host spelling: the link is still named,
+			// the host prefix that spelling carried is still absent.
+			expect(absolute).toContain("runs through a link (linkdir)")
+			expect(absolute).not.toContain(path.resolve(WORKSPACE))
 		})
 
 		it("refuses a target whose leaf is a dangling symlink", async () => {
