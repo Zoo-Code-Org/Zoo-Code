@@ -792,6 +792,65 @@ describe("safeWriteJson", () => {
 		expect(await readFileContent(currentTestFilePath)).toEqual({ ordered: true })
 	}, 20_000)
 
+	// The mode half of the same finding, run for real on a platform that honours mode bits. A target
+	// whose mode is 0o444 withholds write access, so a mode copy that ran first would hand the staged
+	// file that read-only mode and the flush open of this very file would then fail: the flush only
+	// logs what it could not do, so the sync would be skipped while the publish still succeeded. This
+	// row therefore asserts the two facts the ordering comment above was standing in for, on the
+	// handle the publish opened and on the target after the rename, and it drives them with a real
+	// 0o444 mode instead of a recorded call order. Skipped on windows, where 0o444 lands as the
+	// read-only attribute and the commit rename reaches the EPERM fallback for reasons that belong
+	// to the platform and not to this order.
+	test.skipIf(process.platform === "win32")(
+		"publishes onto a 0o444 target, syncing the staged file and leaving the published mode 0o444",
+		async () => {
+			const actual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+			await actual.chmod(currentTestFilePath, 0o444)
+			// The precondition, asserted so that a runner whose filesystem ignores mode bits turns this
+			// row red instead of passing it for the wrong reason.
+			const targetModeBefore = ((await actual.stat(currentTestFilePath)).mode & 0o777) >>> 0
+			expect(targetModeBefore).toBe(0o444)
+			const steps: string[] = []
+			const syncPaths: string[] = []
+			let flushPath: string | undefined
+			vi.mocked(fs.open).mockImplementation(async (filePath, flags) => {
+				flushPath = String(filePath)
+				steps.push("flush-open")
+				const handle = await actual.open(filePath, flags)
+				const realSync = handle.sync.bind(handle)
+				vi.spyOn(handle, "sync").mockImplementation(async () => {
+					syncPaths.push(String(filePath))
+					steps.push("sync")
+					await realSync()
+				})
+				return handle
+			})
+			vi.mocked(fs.chmod).mockImplementation(async (filePath, mode) => {
+				steps.push("mode-copy")
+				return actual.chmod(filePath, mode)
+			})
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			await safeWriteJson(currentTestFilePath, { after: true })
+			// The handle belongs to the staged file and not to the target, and its sync ran against it.
+			expect(flushPath).toBeDefined()
+			expect(path.basename(String(flushPath))).toContain(".new_")
+			expect(syncPaths).toEqual([String(flushPath)])
+			// It ran before the target mode was copied onto the staged file, the only order in which a
+			// 0o444 target cannot deny the open above.
+			expect(steps).toEqual(["flush-open", "sync", "mode-copy"])
+			expect(consoleErrorSpy).not.toHaveBeenCalled()
+			consoleErrorSpy.mockRestore()
+			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+			// The published target still reads the mode its owner set and not the staged file mode.
+			expect(((await actual.stat(currentTestFilePath)).mode & 0o777) >>> 0).toBe(0o444)
+			const leftovers = (await fs.readdir(path.dirname(currentTestFilePath))).filter(
+				(entry) => entry.includes(".new_") || entry.endsWith(".lock"),
+			)
+			expect(leftovers).toEqual([])
+		},
+	)
+
 	test("should garbage collect orphaned replacement files when the canonical path exists", async () => {
 		const initialData = { message: "Initial content" }
 
