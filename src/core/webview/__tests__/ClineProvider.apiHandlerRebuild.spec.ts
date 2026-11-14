@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, providerDefinitionList, RooCodeEventName } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -534,6 +534,33 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "anthropic/claude",
 				openRouterApiKey: "stolen",
+			})
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test.each(
+			providerDefinitionList.flatMap((definition) =>
+				definition.modelIdKey ? [[definition.apiProvider, definition.modelIdKey] as const] : [],
+			),
+		)("accepts the model ID field declared by the %s provider definition", async (apiProvider, modelIdKey) => {
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockResolvedValue({ name: "test-config", id: "test-id", apiProvider })
+
+			await provider.updateProfileModel("test-config", apiProvider, { [modelIdKey]: "patched-model" })
+
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			expect(saveConfig.mock.calls[0][1]).toMatchObject({ [modelIdKey]: "patched-model" })
+		})
+
+		test("rejects a model ID field that no provider definition declares", async () => {
+			// `lmStudioDraftModelId` is a speculative-decoding setting, not the provider's selected model.
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				lmStudioDraftModelId: "draft-model",
 			})
 
 			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()

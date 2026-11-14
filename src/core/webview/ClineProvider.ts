@@ -73,7 +73,7 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
-	modelIdKeys,
+	providerDefinitionList,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -213,7 +213,12 @@ function scheduleTask(
 }
 
 // Keys a model-selector patch may touch: model IDs plus settings reset on model change.
-const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
+// Derived from the provider definitions so a new provider's model field is patchable
+// without editing this list. Providers without a `modelIdKey` (VS Code LM and GitHub
+// Copilot, which use the nested `vsCodeLmModelSelector`) contribute nothing.
+const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(
+	providerDefinitionList.flatMap((definition) => (definition.modelIdKey ? [definition.modelIdKey] : [])),
+)
 
 const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
 
