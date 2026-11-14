@@ -121,6 +121,241 @@ describe("ContextProxy", () => {
 			expect(result).toBe("deepseek")
 		})
 
+		it("should not let an older rejected write clobber a newer cached value", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			const firstWriteResult = new Promise<void>((_, reject) => {
+				rejectFirst = reject
+			})
+
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(firstWriteResult)
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.updateGlobalState("apiProvider", "openai")
+			rejectFirst(new Error("disk full"))
+			await expect(firstWrite).rejects.toThrow("disk full")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
+		it("should not restore a pre-reset value when a pending write rejects after reset", async () => {
+			let rejectPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(
+				new Promise<void>((_, reject) => {
+					rejectPending = reject
+				}),
+			)
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.resetAllState()
+			// The Memento answers the read-back with the pre-reset value: only ending write ownership
+			// during the reset keeps the cache cleared. With the mocked store this is the difference
+			// between the guarantee holding and the rejected write repopulating the cache.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "anthropic" : undefined))
+			rejectPending(new Error("disk full"))
+			await expect(pending).rejects.toThrow("disk full")
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+		it("does not restore a pre-reset secret when a pending storeSecret settles after the reset", async () => {
+			const durable = new Map<string, string | undefined>()
+			let settle: () => void = () => {}
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				durable.delete(key)
+			})
+			mockSecrets.store.mockImplementationOnce(
+				(key: string, value: string) =>
+					new Promise<undefined>((resolve) => {
+						settle = () => {
+							durable.set(key, value)
+							resolve(undefined)
+						}
+					}),
+			)
+
+			const pending = proxy.storeSecret("apiKey", "pre-reset-secret")
+			setTimeout(settle, 0)
+			await proxy.resetAllState()
+			await pending
+
+			// The pending store is held open on a double that only puts the value into storage
+			// when it settles, so the ordering is observable: the reset must wait for the write to
+			// settle and then delete the keys, so neither the cache nor the durable copy keeps the
+			// value that was in flight when the reset started.
+			expect(await mockSecrets.get("apiKey")).toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+		})
+		// Two phases, because the guarantee has two halves. A secret write issued while the reset is
+		// running must be refused rather than deferred - a deferred write would re-store exactly the
+		// value the user asked to erase - and after a reset that failed the store has to accept writes
+		// again. The second half is the one that bites: the delete pass is a single Promise.all, so one
+		// keychain delete rejecting rejects resetAllState itself, and unless the flag that guards
+		// storeSecret is cleared in a finally the store stays shut for the life of the instance while
+		// resetState() aborts on the same error.
+		it("refuses a secret write during a reset and accepts it again after a failed reset", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			let rejectDelete: (error: Error) => void = () => {}
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						rejectDelete = reject
+					})
+				}
+				durable.delete(key)
+				return Promise.resolve()
+			})
+
+			// Holding apiKey's delete open keeps the guard raised across the mid-reset assertion below.
+			const resetting = proxy.resetAllState()
+
+			await expect(proxy.storeSecret("apiKey", "written-mid-reset")).rejects.toThrow(
+				"secret writes are refused while state is being reset",
+			)
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+
+			rejectDelete(new Error("keychain locked"))
+			await expect(resetting).rejects.toThrow("keychain locked")
+
+			// The store is usable again, measured as a save that resolves and reads back through both the
+			// cache and storage, not as an absence of errors.
+			await expect(proxy.storeSecret("apiKey", "written-after-failed-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
+		})
+		// Overlapping resets are the second half of the same defect: on its own the finally only
+		// guarantees the flag falls when the pass it belongs to ends. Single-flight is the shape here
+		// because it makes the invariant structural - a second caller joins the reset already running
+		// rather than starting a second delete pass whose end could clear the flag while the first was
+		// still writing.
+		it("joins an in-flight reset instead of starting a second pass and keeps the guard raised until it ends", async () => {
+			// Every apiKey erase handed back by the double, with its rejecter kept so the test can settle
+			// them all at once: a held-open erase is what keeps the guard raised across the join check,
+			// and the reset issues more than one erase per pass, so they must all be settled or the delete
+			// pass never finishes.
+			const erases: { reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						erases.push({ reject })
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const first = proxy.resetAllState()
+			const second = proxy.resetAllState()
+
+			// One pass, not two racing delete passes: the second caller joins the reset already running.
+			expect(second).toBe(first)
+			// The reset yields once before it reaches its delete pass, so give it a macrotask to get there
+			// rather than counting erases that have not been issued yet. Two passes would by now have issued
+			// two apiKey erases, which is the defect this half of the row describes.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(first).rejects.toThrow("keychain locked")
+			await expect(second).rejects.toThrow("keychain locked")
+
+			// The guard is down for both joiners, so the store accepts writes again.
+			await expect(proxy.storeSecret("apiKey", "after-joined-reset")).resolves.toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBe("after-joined-reset")
+		})
+
+		it("adopts a secret write issued after a reset that waited for a pending write", async () => {
+			const durable = new Map<string, string | undefined>()
+			let settle: () => void = () => {}
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				durable.delete(key)
+			})
+			mockSecrets.store.mockImplementationOnce(
+				(key: string, value: string) =>
+					new Promise<undefined>((resolve) => {
+						settle = () => {
+							durable.set(key, value)
+							resolve(undefined)
+						}
+					}),
+			)
+
+			const pending = proxy.storeSecret("apiKey", "pre-reset-secret")
+			const reset = proxy.resetAllState()
+			setTimeout(settle, 0)
+			await pending
+			await reset
+
+			// The reset released only its own claims, so the machinery stays usable afterwards:
+			// a write issued once the reset has settled is adopted into the cache and reaches storage.
+			// Back the post-reset write with the durable double as well, so the assertion below reads
+			// storage rather than only the cache.
+			mockSecrets.store.mockImplementationOnce(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			await proxy.storeSecret("apiKey", "newer-secret")
+			expect(proxy.getSecret("apiKey")).toBe("newer-secret")
+			expect(await mockSecrets.get("apiKey")).toBe("newer-secret")
+		})
+
+		it("erases a secret whose write begins after the reset has snapshotted the pending writes", async () => {
+			const durable = new Map<string, string | undefined>()
+			let deleteCalls = 0
+			let settleFirstDelete: () => void = () => {}
+			let markDeletePassStarted: () => void = () => {}
+			const deletePassStarted = new Promise<void>((resolve) => {
+				markDeletePassStarted = resolve
+			})
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			// Park the reset inside its own delete pass so a write can begin in the window the in-flight
+			// snapshot cannot cover. Only the first delete is held open; the rest settle normally, so
+			// releasing the park lets the reset finish.
+			mockSecrets.delete.mockImplementation((key: string) => {
+				deleteCalls++
+				durable.delete(key)
+				if (deleteCalls === 1) {
+					return new Promise<undefined>((resolve) => {
+						markDeletePassStarted()
+						settleFirstDelete = () => resolve(undefined)
+					})
+				}
+				return Promise.resolve(undefined)
+			})
+
+			const reset = proxy.resetAllState()
+			await deletePassStarted
+
+			// The reset has taken its in-flight snapshot, cleared both caches and dropped both write
+			// claims, and is standing inside the delete pass. This write is invisible to all of it.
+			const late = proxy.storeSecret("apiKey", "late-secret")
+			settleFirstDelete()
+			await reset
+			await late.catch(() => undefined)
+
+			// All three reads matter. Durable storage is what a reset is supposed to empty, the cache is
+			// what this provider instance shows the user, and re-initializing is what a restarted
+			// provider does - which is how a secret that survived the reset reaches the user after the
+			// fact, so the middle read alone would understate the finding.
+			expect(await mockSecrets.get("apiKey")).toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			await proxy.initialize()
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			// The caller is told: a write the reset cannot honour is refused rather than dropped, so
+			// the save surfaces as a failure instead of vanishing.
+			await expect(late).rejects.toThrow()
+		})
+
 		it("should bypass cache for pass-through state keys", async () => {
 			// Setup mock return value
 			mockGlobalState.get.mockReturnValue("pass-through-value")
@@ -1168,6 +1403,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })
