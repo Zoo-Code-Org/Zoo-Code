@@ -3,7 +3,7 @@ import { FileFailureRegistry } from "../file-failure-registry"
 import { ProviderPacerRegistry } from "../provider-pacer"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
-import type { IDirectoryScanner } from "../interfaces"
+import type { BatchProcessingSummary, IDirectoryScanner } from "../interfaces"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -88,7 +88,11 @@ type Progress = { processedInBatch: number; totalInBatch: number; currentFile?: 
 
 /** Wires the watcher double's three events to callable emitters. */
 function emitters(fileWatcher: ReturnType<typeof setup>["fileWatcher"]) {
-	const listeners: { start?: () => void; progress?: (event: Progress) => void; finish?: () => void } = {}
+	const listeners: {
+		start?: () => void
+		progress?: (event: Progress) => void
+		finish?: (summary: BatchProcessingSummary) => void
+	} = {}
 	fileWatcher.onDidStartBatchProcessing.mockImplementation((listener: () => void) => {
 		listeners.start = listener
 		return { dispose: vi.fn() }
@@ -97,7 +101,7 @@ function emitters(fileWatcher: ReturnType<typeof setup>["fileWatcher"]) {
 		listeners.progress = listener
 		return { dispose: vi.fn() }
 	})
-	fileWatcher.onDidFinishBatchProcessing.mockImplementation((listener: () => void) => {
+	fileWatcher.onDidFinishBatchProcessing.mockImplementation((listener: (summary: BatchProcessingSummary) => void) => {
 		listeners.finish = listener
 		return { dispose: vi.fn() }
 	})
@@ -107,7 +111,7 @@ function emitters(fileWatcher: ReturnType<typeof setup>["fileWatcher"]) {
 		listeners.progress?.({ processedInBatch: 0, totalInBatch: total })
 		duringBatch?.()
 		listeners.progress?.({ processedInBatch: total, totalInBatch: total, currentFile: "/w/a.ts" })
-		listeners.finish?.()
+		listeners.finish?.({ processedFiles: [] })
 		listeners.progress?.({ processedInBatch: total, totalInBatch: total })
 		listeners.progress?.({ processedInBatch: 0, totalInBatch: 0 })
 	}

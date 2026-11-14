@@ -115,9 +115,11 @@ describe("FileIndexWriter", () => {
 			controller.abort()
 			throw serverError()
 		})
-		await expect(writer.replace("/ws/a.ts", "h1", [block(1)], controller.signal)).rejects.toBe(
-			controller.signal.reason,
-		)
+		// Read the reason after the call: it is undefined until the embed aborts the controller.
+		const outcome = await writer
+			.replace("/ws/a.ts", "h1", [block(1)], controller.signal)
+			.catch((error: unknown) => error)
+		expect(outcome).toBe(controller.signal.reason)
 		expect(cache.updateHash).not.toHaveBeenCalled()
 		expect(failures.list()).toEqual([])
 	})

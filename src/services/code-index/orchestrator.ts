@@ -98,8 +98,8 @@ export class CodeIndexOrchestrator {
 						this.updateRecoveryStatus(signal)
 					}
 				}),
-				this.fileWatcher.onDidFinishBatchProcessing((summary: BatchProcessingSummary) => {
-					if (summary.batchError) {
+				this.fileWatcher.onDidFinishBatchProcessing((summary?: BatchProcessingSummary) => {
+					if (summary?.batchError) {
 						console.error(`[CodeIndexOrchestrator] Batch processing failed:`, summary.batchError)
 					}
 					this.watcherBatchPending = false

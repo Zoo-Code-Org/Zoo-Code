@@ -43,7 +43,8 @@ const mockQdrantClientInstance = {
 	delete: vitest.fn(),
 }
 
-const pacers = new ProviderPacerRegistry()
+// Recreated per test: a 429 pause left in a shared registry would delay every later request.
+let pacers: ProviderPacerRegistry
 
 const mockCreateHashInstance = {
 	update: vitest.fn().mockReturnThis(),
@@ -61,6 +62,7 @@ describe("QdrantVectorStore", () => {
 
 	beforeEach(() => {
 		clearAllMocks()
+		pacers = new ProviderPacerRegistry()
 
 		// Mock QdrantClient constructor
 		;(QdrantClient as any).mockImplementation(function () {
@@ -844,7 +846,7 @@ describe("QdrantVectorStore", () => {
 				["without Retry-After", undefined, 1000],
 			])("waits and recovers when collection creation gets a 429 %s", async (_label, retryAfter, waitMs) => {
 				// The module is automocked, so set the fields the patched client would assign.
-				const limited = Object.assign(new QdrantClientResourceExhaustedError("Too many requests", 0), {
+				const limited = Object.assign(new QdrantClientResourceExhaustedError("Too many requests", "0"), {
 					message: "Too many requests",
 					retry_after: retryAfter,
 				})

@@ -322,6 +322,21 @@ describe("CodeParser", () => {
 
 	describe("singleton instance", () => {
 		it("should maintain parser state across calls", async () => {
+			// Capture each parsed root, so the result reflects the input rather than an earlier fixed capture.
+			const echoRoot = (node: { text: string }) => [
+				{
+					node: {
+						text: node.text,
+						startPosition: { row: 0 },
+						endPosition: { row: 0 },
+						type: "function_declaration",
+						childForFieldName: vi.fn().mockReturnValue(null),
+						children: [],
+					},
+					name: "definition.function",
+				},
+			]
+			mockLanguageParser.js.query.captures.mockImplementationOnce(echoRoot).mockImplementationOnce(echoRoot)
 			const first = "const firstValue = 'singleton parser first input with enough text'"
 			const second = "const secondValue = 'singleton parser second input with enough text'"
 			const result1 = await codeParser.parseFile("test.js", { content: first })

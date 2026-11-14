@@ -242,6 +242,9 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 				value: { startIndexing, stopIndexing: vi.fn() },
 				configurable: true,
 			})
+			// The background start re-checks enablement, which a bare manager reports as off.
+			Object.defineProperty(manager, "isFeatureEnabled", { get: () => true, configurable: true })
+			Object.defineProperty(manager, "isWorkspaceEnabled", { get: () => true, configurable: true })
 
 			manager["startIndexingInBackground"]()
 
