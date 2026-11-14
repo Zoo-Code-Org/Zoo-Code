@@ -182,6 +182,34 @@ describe("AwsBedrockHandler", () => {
 		},
 	)
 
+	it.each([
+		["anthropic.claude-sonnet-4-5-20250929-v1:0", false],
+		["minimax.minimax-m2", true],
+	] as const)("replays stored thinking to %s only when the model preserves reasoning", async (apiModelId, kept) => {
+		const provider = new AwsBedrockHandler({ apiModelId, awsRegion: "us-east-1" })
+		provider["client"].send = vi.fn().mockResolvedValue({ stream: asyncStreamFrom([]) })
+		// A MiniMax-signed thinking block survives a mid-task switch to Bedrock.
+		const history = [
+			{ role: "user", content: "hello" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "thinking", thinking: "Signed by MiniMax.", signature: "minimax-signature" },
+					{ type: "text", text: "Done." },
+					{ type: "tool_use", id: "t1", name: "read_file", input: {} },
+				],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "ok" }] },
+		] as Anthropic.Messages.MessageParam[]
+		await collectStream(provider.createMessage("system", history))
+		const [{ messages }] = mockConverseStreamCommand.mock.lastCall!
+		expect(messages?.[1].content).toStrictEqual([
+			...(kept ? [{ reasoningContent: { reasoningText: { text: "Signed by MiniMax." } } }] : []),
+			{ text: "Done." },
+			{ toolUse: { toolUseId: "t1", name: "read_file", input: {} } },
+		])
+	})
+
 	describe("getModel", () => {
 		it("should return the correct model info for a standard model", () => {
 			const modelInfo = handler.getModel()
