@@ -1022,7 +1022,12 @@ describe("ClineProvider", () => {
 				const target = provider.webviewFocusTracker.getLastActiveProvider()!
 				await target.handleCodeAction(command, promptType, { selectedText: "selected code" })
 				expect(sidebarTask).toHaveBeenCalledOnce()
-				expect(sidebarTask).toHaveBeenCalledWith(expect.stringContaining("selected code"))
+				expect(sidebarTask).toHaveBeenCalledWith(
+					expect.stringContaining("selected code"),
+					undefined,
+					undefined,
+					{ authorizedMentionText: "" },
+				)
 				expect(tabTask).not.toHaveBeenCalled()
 			} finally {
 				sidebarTask.mockRestore()

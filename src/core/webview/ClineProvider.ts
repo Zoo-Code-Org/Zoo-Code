@@ -1140,7 +1140,9 @@ export class ClineProvider
 			return
 		}
 
-		await this.createTask(prompt)
+		await this.createTask(prompt, undefined, undefined, {
+			authorizedMentionText: typeof params.userInput === "string" ? params.userInput : "",
+		})
 	}
 
 	public static async handleTerminalAction(
@@ -1170,7 +1172,9 @@ export class ClineProvider
 		}
 
 		try {
-			await visibleProvider.createTask(prompt)
+			await visibleProvider.createTask(prompt, undefined, undefined, {
+				authorizedMentionText: typeof params.userInput === "string" ? params.userInput : "",
+			})
 		} catch (error) {
 			if (error instanceof OrganizationAllowListViolationError) {
 				// Errors from terminal commands seem to get swallowed / ignored.
@@ -4378,7 +4382,10 @@ export class ClineProvider
 		text?: string,
 		images?: string[],
 		parentTask?: Task,
-		options: CreateTaskOptions & { handoffExecutionContext?: DelegatedChildContext } = {},
+		options: CreateTaskOptions & {
+			handoffExecutionContext?: DelegatedChildContext
+			authorizedMentionText?: string
+		} = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {

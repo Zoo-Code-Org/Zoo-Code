@@ -1,3 +1,4 @@
+import { userMentionContent } from "../mentions/processUserContentMentions"
 import * as vscode from "vscode"
 
 import { RooCodeEventName, type HistoryItem, type PendingTaskAction } from "@roo-code/types"
@@ -245,6 +246,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			}
 
 			const feedbackText = `<user_message>\n${text}\n</user_message>`
+			task.userMessageContent.push(userMentionContent(feedbackText, text ?? ""))
 			pushToolResult(formatResponse.toolResult(feedbackText, images))
 		} catch (error) {
 			await handleError("inspecting site", error as Error)

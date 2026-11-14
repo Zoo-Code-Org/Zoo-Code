@@ -60,6 +60,7 @@ describe("attemptCompletionTool", () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
 
 		mockTask = {
+			userMessageContent: [],
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			todoList: undefined,
