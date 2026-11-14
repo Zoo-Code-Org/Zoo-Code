@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "fs/promises"
+import fs, { mkdir, mkdtemp, rm, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import * as path from "path"
 import * as vscode from "vscode"
@@ -260,6 +260,10 @@ describe("commitMessageGenerator", () => {
 				section("diff --git old/.env new/.env", "--- old/.env", "+++ new/.env", "@@ -1 +1 @@", "+A=1"),
 			],
 			[
+				"custom prefixes without a slash",
+				section("diff --git old-.env new-.env", "--- old-.env", "+++ new-.env", "@@ -1 +1 @@", "+A=1"),
+			],
+			[
 				"custom prefixes with more than one folder",
 				section("diff --git x/old/.env y/new/.env", "--- x/old/.env", "+++ y/new/.env", "@@ -1 +1 @@", "+A=1"),
 			],
@@ -305,10 +309,9 @@ describe("commitMessageGenerator", () => {
 		})
 
 		it.each([
-			["a changed file", ["--- a/x", "+++ b/y"], ["a/x", "x", "b/y", "y"]],
-			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"]],
-			["a file in a folder", ["--- a/src/x", "+++ b/src/x"], ["a/src/x", "src/x", "x", "b/src/x", "src/x", "x"]],
-		])("checks each path of %s without each number of leading folders", (_label, pathLines, expected) => {
+			["a changed file", ["--- a/src/x", "+++ b/src/y"], ["a/src/x", "src/x", "/x", "x", "b/src/y", "y"], []],
+			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"], ["/dev/null", "null"]],
+		])("checks every suffix of each path of %s", (_label, pathLines, checkedPaths, uncheckedPaths) => {
 			const checked: string[] = []
 			omitIgnoredFiles(
 				section("diff --git a/x b/y", ...pathLines, "@@ -0,0 +1 @@", "--- a/z"),
@@ -317,7 +320,10 @@ describe("commitMessageGenerator", () => {
 					return true
 				},
 			)
-			expect(checked).toEqual(expected)
+			expect(checked).toEqual(expect.arrayContaining(checkedPaths))
+			for (const unchecked of [...uncheckedPaths, "a/z", "z"]) {
+				expect(checked).not.toContain(unchecked)
+			}
 		})
 	})
 
@@ -1191,6 +1197,12 @@ describe("commitMessageGenerator", () => {
 					"+++ b/src/app.ts",
 					"@@ -1 +1 @@",
 					"+export const port = 8080",
+					// With diff.srcPrefix=old- and diff.dstPrefix=new-
+					"diff --git old-.env new-.env",
+					"--- old-.env",
+					"+++ new-.env",
+					"@@ -1 +1 @@",
+					"+SESSION=hunter4",
 				].join("\n")
 				mockRepo.diff = vi.fn((cached?: boolean) => Promise.resolve(cached === staged ? diff : ""))
 				;(singleCompletionHandler as Mock).mockResolvedValue("chore: update config")
@@ -1200,6 +1212,7 @@ describe("commitMessageGenerator", () => {
 				const prompt = (singleCompletionHandler as Mock).mock.calls[0][1] as string
 				expect(prompt).not.toContain("hunter2")
 				expect(prompt).not.toContain("hunter3")
+				expect(prompt).not.toContain("hunter4")
 				expect(prompt).toContain(`diff --git a/.env b/.env\n${IGNORED_FILE_NOTE}`)
 				expect(prompt).toContain(
 					`diff --git a/config/private/keys.json b/config/private/keys.json\n${IGNORED_FILE_NOTE}`,
@@ -1245,6 +1258,28 @@ describe("commitMessageGenerator", () => {
 				expect(mockRepo.inputBox.value).toBe("")
 			} finally {
 				vi.restoreAllMocks()
+				await rm(root, { recursive: true, force: true })
+			}
+		})
+
+		it("stops without a provider request when checking for .rooignore fails with EACCES", async () => {
+			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+			const accessDenied = Object.assign(new Error("permission denied"), { code: "EACCES" })
+			const stat = vi.spyOn(fs, "stat").mockRejectedValue(accessDenied)
+			try {
+				mockRepo = makeRepo(root)
+				useOnlyRepository(mockRepo)
+				mockRepo.diff = vi.fn().mockResolvedValue("diff --git a/.env b/.env\n@@ -1 +1 @@\n+DB=hunter2")
+
+				await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+				expect(stat).toHaveBeenCalledWith(path.join(root, ".rooignore"))
+				expect(singleCompletionHandler).not.toHaveBeenCalled()
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+					`Failed to generate commit message: ${ROOIGNORE_UNREADABLE_MESSAGE}`,
+				)
+			} finally {
+				stat.mockRestore()
 				await rm(root, { recursive: true, force: true })
 			}
 		})

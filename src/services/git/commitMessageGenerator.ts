@@ -1,3 +1,4 @@
+import fs from "fs/promises"
 import * as path from "path"
 import * as vscode from "vscode"
 import type { ProviderSettings } from "@roo-code/types"
@@ -5,7 +6,6 @@ import type { ProviderSettings } from "@roo-code/types"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { truncateOutput } from "../../integrations/misc/extract-text"
-import { fileExistsAtPath } from "../../utils/fs"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
 export interface GitRepositoryChange {
@@ -261,18 +261,23 @@ function unquoteGitPath(value: string): string {
 /** True when `.rooignore` blocks a path of the diff section (paths are read before its first hunk). */
 function isSectionBlocked(section: string[], isAllowed: (relativePath: string) => boolean): boolean {
 	const firstHunk = section.findIndex((line) => line.startsWith("@@"))
-	return section.slice(0, firstHunk === -1 ? section.length : firstHunk).some((line) => {
+	const candidates = new Set<string>()
+	for (const line of section.slice(0, firstHunk === -1 ? section.length : firstHunk)) {
 		const [, written] = DIFF_PATH_LINE.exec(line) ?? []
 		if (written === undefined || written === "/dev/null") {
-			return false
+			continue
 		}
 		// The path can start with a prefix that is not part of it: `a/` and `b/` by default, `i/` or `w/` with
-		// diff.mnemonicPrefix, any text with diff.srcPrefix and diff.dstPrefix, or none with diff.noPrefix.
-		// The path is checked as written and without each number of leading folders. A file in a folder
-		// can then be left out by a rule for the root (`/.env`), but a blocked file is never kept.
-		const segments = unquoteGitPath(written).split("/")
-		return segments.some((_, start) => !isAllowed(segments.slice(start).join("/")))
-	})
+		// diff.mnemonicPrefix, any text with diff.srcPrefix and diff.dstPrefix (`old-.env`), or none with
+		// diff.noPrefix. Every suffix of the path is checked, so the real path is checked for any prefix.
+		// Some files that are not blocked can then be left out too (`my.env` for a `.env` rule), but a
+		// blocked file is never kept.
+		const gitPath = unquoteGitPath(written)
+		for (let start = 0; start < gitPath.length; start++) {
+			candidates.add(gitPath.slice(start))
+		}
+	}
+	return [...candidates].some((candidate) => !isAllowed(candidate))
 }
 
 /**
@@ -302,6 +307,20 @@ export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string)
 }
 
 /**
+ * True only when nothing is at `filePath`. Any other error (for example EACCES) counts as present, so
+ * the caller stops instead of sending files that the unread `.rooignore` could block.
+ */
+async function isMissing(filePath: string): Promise<boolean> {
+	try {
+		await fs.stat(filePath)
+		return false
+	} catch (error) {
+		const code = error instanceof Error && "code" in error ? error.code : undefined
+		return code === "ENOENT" || code === "ENOTDIR"
+	}
+}
+
+/**
  * The diff without the content of files that `.rooignore` in the repository root blocks. Rejects when
  * `.rooignore` exists but cannot be read, because the controller then allows every file.
  */
@@ -310,7 +329,7 @@ async function withoutIgnoredFiles(repository: GitRepository, diff: string): Pro
 	const rooIgnore = new RooIgnoreController(root)
 	try {
 		await rooIgnore.initialize()
-		if (rooIgnore.rooIgnoreContent === undefined && (await fileExistsAtPath(path.join(root, ".rooignore")))) {
+		if (rooIgnore.rooIgnoreContent === undefined && !(await isMissing(path.join(root, ".rooignore")))) {
 			throw new Error(ROOIGNORE_UNREADABLE_MESSAGE)
 		}
 		return omitIgnoredFiles(diff, (relativePath) => rooIgnore.validateAccess(relativePath))
