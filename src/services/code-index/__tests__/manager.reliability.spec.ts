@@ -1,4 +1,5 @@
 import * as path from "path"
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import type * as vscode from "vscode"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexStateManager } from "../state-manager"
@@ -37,7 +38,7 @@ vi.mock("../config-manager", () => ({
 		return {
 			isFeatureEnabled: true,
 			isFeatureConfigured: true,
-			currentEmbedderProvider: "openai",
+			currentEmbedderProvider: providerIdentifiers.openai,
 			loadConfiguration: async () => ({ requiresRestart: false }),
 			getContextProxy: () => contextProxy,
 		}
