@@ -560,6 +560,123 @@ describe("networkProxy", () => {
 					globalThis.fetch = fetchBefore
 				}
 			})
+
+			// A seed-failure teardown also disposes the extension's output channel, and VS
+			// Code throws "Channel has been closed" from appendLine() afterwards. The
+			// post-dispose continuation must therefore survive a throwing log sink: a
+			// propagating throw would skip the late agent's close, and the retry inside the
+			// outer catch would reject the configureUndiciProxy promise no caller awaits.
+			it("closes the late agent and resolves when the output channel was disposed during teardown", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				let channelClosed = false
+				const closedChannel: vscode.OutputChannel = {
+					name: "Closed in test",
+					append: vi.fn(),
+					appendLine: vi.fn(() => {
+						if (channelClosed) {
+							throw new Error("Channel has been closed")
+						}
+					}),
+					replace: vi.fn(),
+					clear: vi.fn(),
+					show: vi.fn(),
+					hide: vi.fn(),
+					dispose: vi.fn(() => {
+						channelClosed = true
+					}),
+				}
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+					// The late close rejects too, so the deferred close-error log inside the
+					// best-effort close runs against the same closed channel.
+					mocks.proxyAgentClose.mockRejectedValueOnce(new Error("close failed"))
+
+					const init = freshModule.initializeNetworkProxy(context, closedChannel)
+					disposeMidFlight(context)
+					closedChannel.dispose()
+					// An init promise that the activation-failure path ignores must resolve,
+					// not reject, when every teardown log it emits throws.
+					await expect(init).resolves.toBeDefined()
+					// Flush the close rejection's catch chain so a handler that rethrows
+					// surfaces here as an unhandled rejection rather than escaping the test.
+					await new Promise((resolve) => setTimeout(resolve, 0))
+
+					expect(mocks.proxyAgent).toHaveBeenCalledOnce()
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(mocks.setGlobalDispatcher).not.toHaveBeenCalled()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			// Swallowing is limited to appendLine failures: with a live channel the same
+			// post-dispose continuation still writes both disposal logs to it.
+			it("keeps writing the post-dispose teardown logs when the channel is still open", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					const init = freshModule.initializeNetworkProxy(context, mockOutputChannel)
+					disposeMidFlight(context)
+					await init
+
+					const logged = vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")
+					expect(logged).toContain("global-agent import completed after disposal; skipping bootstrap")
+					expect(logged).toContain(
+						"undici import completed after disposal; closing the late proxy agent without installing it",
+					)
+					expect(mocks.proxyAgentClose).toHaveBeenCalledOnce()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					globalThis.fetch = fetchBefore
+				}
+			})
+
+			// The outer catch of configureUndiciProxy logs through the same teardown-safe
+			// logger, so the import-failure path must surface the failure on the channel and
+			// still resolve: the configured proxy is best-effort, and activation continues
+			// without it.
+			it("logs and swallows an undici import failure without installing anything", async () => {
+				vi.resetModules()
+				const fetchBefore = globalThis.fetch
+				const fetchSentinel: typeof fetch = () => Promise.reject(new Error("sentinel fetch"))
+				globalThis.fetch = fetchSentinel
+				vi.doMock("undici", () => {
+					throw new Error("undici unavailable")
+				})
+				try {
+					const { freshModule, context } = await freshDebugRunContext()
+
+					// The ignored configureUndiciProxy path must resolve despite the rejection.
+					// (The expected error text is only the log prefix: vitest wraps factory
+					// errors, so the suffix is its own message, not the thrown one.)
+					await expect(freshModule.initializeNetworkProxy(context, mockOutputChannel)).resolves.toBeDefined()
+					expect(vi.mocked(mockOutputChannel.appendLine).mock.calls.flat().join("\n")).toContain(
+						"Failed to configure undici proxy dispatcher",
+					)
+					expect(mocks.proxyAgent).not.toHaveBeenCalled()
+					expect(mocks.setGlobalDispatcher).not.toHaveBeenCalled()
+					expect(globalThis.fetch).toBe(fetchSentinel)
+				} finally {
+					// Re-register the resolved factory and drop the cached module so later tests
+					// resolve undici exactly as through the file-level mock.
+					vi.doMock("undici", () => ({
+						ProxyAgent: mocks.proxyAgent,
+						setGlobalDispatcher: mocks.setGlobalDispatcher,
+						getGlobalDispatcher: mocks.getGlobalDispatcher,
+						fetch: mocks.undiciFetch,
+					}))
+					vi.resetModules()
+					globalThis.fetch = fetchBefore
+				}
+			})
 		})
 
 		// When the proxy is disabled at activation, only the configuration-change listener

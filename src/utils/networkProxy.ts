@@ -73,13 +73,27 @@ function restoreGlobalFetchPatch(): void {
 }
 
 /**
+ * Teardown-safe logging. A disposed VS Code output channel throws from appendLine(), and
+ * teardown paths run exactly when that disposal may already have happened; a throw out of one
+ * of these log calls would skip the cleanup it flanks or reject a promise no caller handles.
+ * Losing a late log line is always preferable to losing the close it reports.
+ */
+function logTeardown(message: string): void {
+	try {
+		log(message)
+	} catch {
+		// Deliberately empty: the log sink is gone, and every caller here must keep tearing down.
+	}
+}
+
+/**
  * Fire-and-log variant of ProxyAgent.close(): Disposable.dispose() is synchronous while
  * close() is async, and neither a teardown sequence nor the late-import abort may block on
  * (or reject into) its caller.
  */
 function closeProxyAgentBestEffort(proxyAgent: { close(): Promise<void> }): void {
 	void proxyAgent.close().catch((error) => {
-		log(`Failed to close undici proxy agent: ${error instanceof Error ? error.message : String(error)}`)
+		logTeardown(`Failed to close undici proxy agent: ${error instanceof Error ? error.message : String(error)}`)
 	})
 }
 
@@ -303,7 +317,7 @@ async function configureGlobalProxy(config: ProxyConfig, isDisposed: () => boole
 	// A teardown may have run while the import above was pending; bootstrapping global-agent
 	// then would intercept this process's HTTP traffic for a dead extension.
 	if (isDisposed()) {
-		log("global-agent import completed after disposal; skipping bootstrap")
+		logTeardown("global-agent import completed after disposal; skipping bootstrap")
 		return
 	}
 
@@ -373,7 +387,7 @@ async function configureUndiciProxy(
 		// or patching fetch then would leave process-global routing active for a dead extension,
 		// so the freshly built agent is closed and nothing is installed.
 		if (isDisposed()) {
-			log("undici import completed after disposal; closing the late proxy agent without installing it")
+			logTeardown("undici import completed after disposal; closing the late proxy agent without installing it")
 			closeProxyAgentBestEffort(proxyAgent)
 			return
 		}
@@ -431,7 +445,9 @@ async function configureUndiciProxy(
 		registerResource(undiciResource)
 		context.subscriptions.push(undiciResource)
 	} catch (error) {
-		log(`Failed to configure undici proxy dispatcher: ${error instanceof Error ? error.message : String(error)}`)
+		logTeardown(
+			`Failed to configure undici proxy dispatcher: ${error instanceof Error ? error.message : String(error)}`,
+		)
 	}
 }
 /**

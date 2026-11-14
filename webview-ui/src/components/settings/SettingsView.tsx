@@ -188,7 +188,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	latestCachedState.current = cachedState
 	// The live host state, read when a save settles without re-subscribing the result handler on every post.
 	const latestExtensionState = useRef(extensionState)
-	latestExtensionState.current = extensionState
+	// Refreshed synchronously at commit: a host state post and the save answer that follows it can arrive as
+	// back-to-back messages, and the answer's task must observe the post it answers, not the state before it.
+	useLayoutEffect(() => {
+		latestExtensionState.current = extensionState
+	}, [extensionState])
 	// The save the host must answer records the baseline it stamped and the lists it submitted, so the
 	// save-result effect can reconcile each list's baseline against that list's own write outcome.
 	const submittedListSave = useRef<{ baselined: [string[], string[]]; sent: [string[], string[]] } | undefined>(
@@ -319,64 +323,64 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			return
 		}
 
-		setCachedState((prevState) => {
-			const merged: CommandListSnapshot = {}
-			let changedFields = 0
+		// The merge is computed here, outside the state update, from the committed buffer the
+		// effect's render saw; a state update must stay a pure function of the state it is
+		// applied to.
+		const prevState = latestCachedState.current
+		const merged: CommandListSnapshot = {}
 
-			if (!commandListsTouched.current) {
-				if (!commandListsEquivalent(prevState.allowedCommands, extensionState.allowedCommands)) {
-					merged.allowedCommands = extensionState.allowedCommands
-					changedFields++
-				}
-				if (!commandListsEquivalent(prevState.deniedCommands, extensionState.deniedCommands)) {
-					merged.deniedCommands = extensionState.deniedCommands
-					changedFields++
-				}
+		if (!commandListsTouched.current) {
+			if (!commandListsEquivalent(prevState.allowedCommands, extensionState.allowedCommands)) {
+				merged.allowedCommands = extensionState.allowedCommands
 			}
-			if (prevState.workspaceCommandListsEnabled !== extensionState.workspaceCommandListsEnabled) {
-				merged.workspaceCommandListsEnabled = extensionState.workspaceCommandListsEnabled
-				changedFields++
+			if (!commandListsEquivalent(prevState.deniedCommands, extensionState.deniedCommands)) {
+				merged.deniedCommands = extensionState.deniedCommands
 			}
+		}
+		if (prevState.workspaceCommandListsEnabled !== extensionState.workspaceCommandListsEnabled) {
+			merged.workspaceCommandListsEnabled = extensionState.workspaceCommandListsEnabled
+		}
 
-			// The stamp records the lists this merge leaves on screen, never the posted
-			// state outright: an entry held back by an in-flight edit was never displayed,
-			// and a baseline claiming it had been lets the save erase it as a user
-			// deletion without warning. While the lists are held back the buffered lists
-			// are themselves unposted, so the stamp keeps its prior lists instead - a
-			// deletion inside the buffered edit must stay in the baseline for the save to
-			// apply it rather than resurrect the deleted entry as an external addition.
-			// The gate slot holds back with those lists because the stamp has to describe
-			// one displayed state: pairing held-back lists with an externally-flipped gate
-			// would claim the held-back entries were displayed under a gate they never
-			// appeared alongside.
-			const [stampAllowed, stampDenied, stampGate] = commandListsTouched.current
-				? (JSON.parse(lastDisplayedCommandSnapshot.current) as [string[], string[], boolean])
-				: [
-						merged.allowedCommands ?? prevState.allowedCommands,
-						merged.deniedCommands ?? prevState.deniedCommands,
-						merged.workspaceCommandListsEnabled ?? prevState.workspaceCommandListsEnabled,
-					]
-			lastDisplayedCommandSnapshot.current = commandListSnapshot({
-				allowedCommands: stampAllowed,
-				deniedCommands: stampDenied,
-				workspaceCommandListsEnabled: stampGate,
-			})
-
-			if (changedFields === 0) {
-				return prevState
-			}
-			return { ...prevState, ...merged }
+		// The stamp records the lists this merge leaves on screen, never the posted
+		// state outright: an entry held back by an in-flight edit was never displayed,
+		// and a baseline claiming it had been lets the save erase it as a user
+		// deletion without warning. While the lists are held back the buffered lists
+		// are themselves unposted, so the stamp keeps its prior lists instead - a
+		// deletion inside the buffered edit must stay in the baseline for the save to
+		// apply it rather than resurrect the deleted entry as an external addition.
+		// The gate slot holds back with those lists because the stamp has to describe
+		// one displayed state: pairing held-back lists with an externally-flipped gate
+		// would claim the held-back entries were displayed under a gate they never
+		// appeared alongside.
+		const [stampAllowed, stampDenied, stampGate] = commandListsTouched.current
+			? (JSON.parse(lastDisplayedCommandSnapshot.current) as [string[], string[], boolean])
+			: [
+					merged.allowedCommands ?? prevState.allowedCommands,
+					merged.deniedCommands ?? prevState.deniedCommands,
+					merged.workspaceCommandListsEnabled ?? prevState.workspaceCommandListsEnabled,
+				]
+		lastDisplayedCommandSnapshot.current = commandListSnapshot({
+			allowedCommands: stampAllowed,
+			deniedCommands: stampDenied,
+			workspaceCommandListsEnabled: stampGate,
 		})
+
+		if (Object.keys(merged).length > 0) {
+			setCachedState((prevCachedState) => ({ ...prevCachedState, ...merged }))
+		}
 	}, [extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
+		// A list edit claims ownership of the lists only when the value actually changes; the
+		// equality guard is duplicated here so the marking can sit outside the state update,
+		// keeping that update pure without giving a no-op set ownership it never had.
+		if ((field === "allowedCommands" || field === "deniedCommands") && latestCachedState.current[field] !== value) {
+			commandListsTouched.current = true
+		}
+
 		setCachedState((prevState) => {
 			if (prevState[field] === value) {
 				return prevState
-			}
-
-			if (field === "allowedCommands" || field === "deniedCommands") {
-				commandListsTouched.current = true
 			}
 
 			setChangeDetected(true)

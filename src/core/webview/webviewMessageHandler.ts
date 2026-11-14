@@ -925,6 +925,25 @@ export const webviewMessageHandler = async (
 										!hiddenWorkspaceEntries.includes(entry),
 								)
 							: []
+						// An entry the settings file lost while the dialog was open is
+						// still in the submitted list, and with no layer holding it
+						// anymore the split below would classify it as brand-new
+						// knowledge and promote a project entry into the global layer.
+						// The baseline separates that from a user addition: a baseline
+						// entry was displayed, so submitting it signals retention, not
+						// newness — a retained entry that no layer still holds was
+						// removed in the file, and external removal wins over the stale
+						// dialog buffer, mirroring how the external-addition re-admit
+						// above lets the file win over a stale deletion. Entries absent
+						// from the baseline keep their promotion path untouched.
+						const splitSourceEntries = Array.isArray(baseline)
+							? [...incoming, ...externallyAdded].filter(
+									(entry) =>
+										!baseline.includes(entry) ||
+										currentScopes.workspace.includes(entry) ||
+										currentScopes.global.includes(entry),
+								)
+							: [...incoming, ...externallyAdded]
 						// The baseline also carries the gate as the dialog last displayed
 						// it. When the gate flipped since, the hidden set can hold
 						// entries the user did see, and an entry the dialog displayed is
@@ -942,7 +961,7 @@ export const webviewMessageHandler = async (
 										(entry) => !Array.isArray(baseline) || !baseline.includes(entry),
 									)
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
-							[...incoming, ...externallyAdded],
+							splitSourceEntries,
 							// Hidden entries are not existing knowledge for promotion
 							// purposes: the dialog never displayed them, so an entry the
 							// user just added is new even when the workspace layer
@@ -953,7 +972,21 @@ export const webviewMessageHandler = async (
 							currentScopes.global,
 						)
 
-						const workspaceWrite = [...new Set([...keptWorkspaceWrite, ...hiddenWorkspaceEntries])]
+						// The hidden set holds entries the dialog could not display,
+						// which is why re-adding them cannot undo a user deletion. A
+						// gate flip since the dialog displayed its lists breaks that
+						// premise: an entry the baseline shows displayed became hidden
+						// afterwards, and its absence from the submitted list is a
+						// deletion the re-add must honor. Entries hidden all along are
+						// absent from the baseline, so their preservation is unchanged.
+						const workspaceWrite = [
+							...new Set([
+								...keptWorkspaceWrite,
+								...hiddenWorkspaceEntries.filter(
+									(entry) => !Array.isArray(baseline) || !baseline.includes(entry),
+								),
+							]),
+						]
 						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 
 						// The two configuration writes below are not atomic, so their
@@ -1003,7 +1036,11 @@ export const webviewMessageHandler = async (
 								// distinguishes `[]` from absent, and the activation seed
 								// treats `[]` as an override, so writing `[]` where no
 								// value existed would suppress the default lists after a
-								// rolled-back save.
+								// rolled-back save. What the rollback must respect is
+								// whether a layer exists now — one that came into
+								// existence mid-save is as much another writer's
+								// decision as one that predates the save, and its
+								// explicit `[]` override must survive this undo.
 								let freshGlobalValue: string[] | undefined
 								try {
 									freshGlobalValue = config.inspect<string[]>(key)?.globalValue
@@ -1020,13 +1057,12 @@ export const webviewMessageHandler = async (
 										...removedByThisSave,
 									]),
 								]
-								const hadGlobalLayer =
-									globalLayerAtSaveStart !== undefined && freshGlobalValue !== undefined
+								const globalLayerExistsNow = freshGlobalValue !== undefined
 								try {
-									if (globalUndo.length === 0 && !hadGlobalLayer) {
-										// Absent pre-save (or externally cleared mid-save)
-										// and nothing to restore: clear the key rather than
-										// materialize an empty layer.
+									if (globalUndo.length === 0 && !globalLayerExistsNow) {
+										// The re-read found no layer at all (absent from the
+										// start, or cleared mid-save) and nothing to restore:
+										// clear the key rather than materialize an empty layer.
 										await config.update(key, undefined, vscode.ConfigurationTarget.Global)
 									} else {
 										await config.update(key, globalUndo, vscode.ConfigurationTarget.Global)
