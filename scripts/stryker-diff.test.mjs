@@ -17,7 +17,13 @@ import {
 	PR_COMMENT_FILENAME,
 	PR_COMMENT_MARKER,
 	REJECTION_FILENAME,
+	JOB_TIMEOUT_MINUTES,
+	MANIFEST_BUDGET_MINUTES,
 	SPAWN_GRACE_MINUTES,
+	TERMINUS_RESERVE_MINUTES,
+	manifestBudgetError,
+	manifestBudgetMs,
+	manifestRunBudgetMinutes,
 	spawnTimeoutMs,
 	appendSummary,
 	buildManifest,
@@ -50,6 +56,18 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
+// The gate publishes whatever it appends to GITHUB_STEP_SUMMARY, and this suite runs the gate against
+// synthetic deltas from inside the very job that publishes a summary: the mutation-diff job runs this
+// file as its own step, so the step already owns a job summary by the time the suite starts. Without a
+// summary of its own, a synthetic table or a synthetic rejection from test data is published as if it
+// were that runs own outcome. The suite points the variable at a file of its own, and the last describe
+// proves the file the suite inherited stayed empty.
+const suiteSummaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-suite-summary-"))
+const suiteSummary = path.join(suiteSummaryRoot, "suite-summary.md")
+fs.writeFileSync(suiteSummary, "")
+const inheritedJobSummary = process.env.GITHUB_STEP_SUMMARY
+process.env.GITHUB_STEP_SUMMARY = suiteSummary
+process.once("exit", () => fs.rmSync(suiteSummaryRoot, { recursive: true, force: true }))
 describe("mutation testing workflow", () => {
 	const readWorkflow = () =>
 		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
@@ -1790,6 +1808,18 @@ describe("gate rejection record", () => {
 			fs.writeFileSync(path.join(scratch, filePath), contents)
 		}
 
+		// The gate appends its rejection to GITHUB_STEP_SUMMARY, and this test runs the gate in a child
+		// process that would otherwise inherit the summary of the step running this suite. A rejection
+		// produced from synthetic test data would then be published as if it were the runs own outcome
+		// while the job passed. The child is pointed at a summary of its own and the file it would have
+		// inherited is kept as a probe that has to stay empty. The declarations sit outside the try
+		// because the finally block has to reach them.
+		const isolatedSummary = path.join(scratch, "isolated-step-summary.md")
+		const inheritedSummary = path.join(scratch, "inherited-step-summary.md")
+		fs.writeFileSync(isolatedSummary, "")
+		fs.writeFileSync(inheritedSummary, "")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		process.env.GITHUB_STEP_SUMMARY = inheritedSummary
 		try {
 			run("init", "--quiet", "--initial-branch", "main")
 			run("config", "user.email", "gate@example.com")
@@ -1818,7 +1848,12 @@ describe("gate rejection record", () => {
 			const result = spawnSync(
 				process.execPath,
 				["scripts/stryker-diff.mjs", "ci", "--base", beforeSha, "--head", afterSha, "--reports", "rejection"],
-				{ cwd: scratch, encoding: "utf8", timeout: 120000 },
+				{
+					cwd: scratch,
+					encoding: "utf8",
+					timeout: 120000,
+					env: { ...process.env, GITHUB_STEP_SUMMARY: isolatedSummary },
+				},
 			)
 
 			assert.equal(result.status, 1, String(result.stderr).slice(0, 300))
@@ -1830,7 +1865,16 @@ describe("gate rejection record", () => {
 			const recorded = fs.readFileSync(path.join(reportDirectory, REJECTION_FILENAME), "utf8")
 			assert.ok(recorded.includes("Mutation gate rejected: core has "), recorded.slice(0, 240))
 			assert.deepEqual(fs.readdirSync(reportDirectory), [REJECTION_FILENAME])
+			assert.equal(
+				fs.readFileSync(inheritedSummary, "utf8"),
+				"",
+				"the gate child appended to the job summary it inherited instead of the one it was given",
+			)
+			const published = fs.readFileSync(isolatedSummary, "utf8")
+			assert.ok(published.includes("Mutation gate rejected: core has "), published.slice(0, 240))
 		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
 			fs.rmSync(scratch, { recursive: true, force: true })
 		}
 	})
@@ -2100,5 +2144,236 @@ describe("initial-test-run budget", () => {
 			console.warn = previousWarn
 			fs.rmSync(repo, { recursive: true, force: true })
 		}
+	})
+})
+
+describe("manifest wall-clock budget", () => {
+	const packageEntry = (id, root) => ({
+		id,
+		root,
+		vitestConfig: "vitest.unit.config.ts",
+		selectors: ["src/value.ts:1-1"],
+		changedExecutableLines: 1,
+	})
+	const preflightLine = "Instrumented 1 source file(s) with 1 mutant(s)"
+
+	it("holds the manifest budget to the job timeout the workflow prints", () => {
+		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+		const printed = Number((/timeout-minutes: *(\d+)/.exec(workflow) || [])[1])
+		assert.ok(Number.isFinite(printed), "the mutation-diff job must print a timeout-minutes value")
+		assert.equal(JOB_TIMEOUT_MINUTES, printed, "the constant has to name the job limit it is measured against")
+		assert.equal(TERMINUS_RESERVE_MINUTES, 3)
+		assert.equal(MANIFEST_BUDGET_MINUTES, JOB_TIMEOUT_MINUTES - TERMINUS_RESERVE_MINUTES)
+		assert.equal(manifestBudgetMs, MANIFEST_BUDGET_MINUTES * 60 * 1_000)
+		// Two sequential initial test runs, each holding the full budget plus its grace, are already past
+		// the job limit, which is what the manifest budget exists for.
+		assert.ok(
+			2 * (DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES) > JOB_TIMEOUT_MINUTES,
+			"two full runs have to be too much for the job or the manifest budget would be pointless",
+		)
+		assert.ok(
+			MANIFEST_BUDGET_MINUTES + TERMINUS_RESERVE_MINUTES <= JOB_TIMEOUT_MINUTES,
+			"the manifest budget plus the reserve has to stay inside the job",
+		)
+	})
+
+	it("hands a run only the budget the manifest has left and reports none left as a stop", () => {
+		assert.equal(manifestRunBudgetMinutes(0), DRY_RUN_TIMEOUT_MINUTES)
+		assert.equal(manifestRunBudgetMinutes(13.5), 8)
+		assert.equal(manifestRunBudgetMinutes(18), 4)
+		assert.equal(manifestRunBudgetMinutes(21.9), 0)
+		assert.equal(manifestRunBudgetMinutes(27), 0)
+		// The outer kill must stay above the budget handed over, or this tool and not the engine would be
+		// the one that stops an initial test run.
+		for (const spent of [0, 13.5, 18]) {
+			const minutes = manifestRunBudgetMinutes(spent)
+			const roomMinutes = MANIFEST_BUDGET_MINUTES - spent
+			assert.ok(
+				(minutes + SPAWN_GRACE_MINUTES) * 60_000 <= roomMinutes * 60_000,
+				"a run launched with " + spent + " min spent has to be able to finish inside the job",
+			)
+		}
+		const stop = manifestBudgetError(
+			packageEntry("core", "packages/core"),
+			"mutation run",
+			27,
+			MANIFEST_BUDGET_MINUTES,
+		)
+		assert.equal(stop.manifestBudgetStop, true)
+		assert.ok(stop.message.includes("was not launched"), stop.message)
+		assert.ok(stop.message.includes("27 min budget"), stop.message)
+		assert.ok(stop.message.includes("mutation-diff job carries 30 min"), stop.message)
+		assert.ok(
+			stop.message.includes("3 min is held back for the rejection record and the job summary"),
+			stop.message,
+		)
+	})
+
+	it("stops launching rather than walk past the job, and records the stop as a rejection", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-manifest-budget-"))
+		const reportRoot = path.join(repo, "reports")
+		const launches = []
+		const clockValues = [0, 0, 9 * 60_000, 18 * 60_000, 27 * 60_000]
+		let tick = 0
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		console.warn = (warning) => warnings.push(String(warning))
+		delete process.env.GITHUB_STEP_SUMMARY
+		let failure
+		try {
+			runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")] },
+				reportRoot,
+				{
+					runMutation: (_repoRoot, entry, _reportRoot, dryRunOnly, runMinutes) => {
+						launches.push([entry.id, dryRunOnly, runMinutes])
+						return dryRunOnly ? preflightLine : ""
+					},
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.ok(failure, "the manifest should have refused to launch a fourth run")
+			assert.equal(failure.manifestBudgetStop, true)
+			assert.deepEqual(
+				launches,
+				[
+					["core", true, DRY_RUN_TIMEOUT_MINUTES],
+					["core", false, 13],
+					["webview", true, 4],
+				],
+				JSON.stringify(launches),
+			)
+			assert.equal(
+				launches.some((launch) => launch[0] === "webview" && launch[1] === false),
+				false,
+				"the second package started its mutation run with no manifest budget left",
+			)
+			const rejectionRoot = path.join(repo, "rejection")
+			recordRejection(rejectionRoot, "b".repeat(40), "c".repeat(40), failure)
+			const recorded = fs.readFileSync(path.join(rejectionRoot, REJECTION_FILENAME), "utf8")
+			assert.ok(recorded.includes("was not launched"), recorded.slice(0, 240))
+			assert.equal(warnings.length, 0, warnings.join(" | "))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("shrinks the budget and the outer kill in the invocation it actually makes", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-manifest-wiring-"))
+		const reportRoot = path.join(repo, "reports")
+		const recordPath = path.join(repo, "invocations.jsonl")
+		fs.mkdirSync(path.join(repo, "packages", "core", "src"), { recursive: true })
+		fs.mkdirSync(path.join(repo, "packages", "webview"), { recursive: true })
+		const packageDir = path.join(repo, "node_modules", "@stryker-mutator", "core")
+		fs.mkdirSync(path.join(packageDir, "bin"), { recursive: true })
+		fs.writeFileSync(
+			path.join(packageDir, "package.json"),
+			JSON.stringify({ name: "@stryker-mutator/core", bin: { stryker: "./bin/stryker.js" } }),
+		)
+		fs.writeFileSync(
+			path.join(packageDir, "bin", "stryker.js"),
+			[
+				'const fs = require("node:fs")',
+				"const args = process.argv.slice(2)",
+				'const kind = args.includes("--dryRunOnly") ? "preflight" : "run"',
+				'fs.appendFileSync(process.env.U917_STRYKER_RECORD, JSON.stringify({ kind, args }) + "\\n")',
+				'if (kind === "preflight") console.log("Instrumented 1 source file(s) with 1 mutant(s)")',
+				"process.exit(0)",
+			].join("\n"),
+		)
+		const previousRecord = process.env.U917_STRYKER_RECORD
+		const previousLog = console.log
+		const previousWarn = console.warn
+		const logs = []
+		process.env.U917_STRYKER_RECORD = recordPath
+		console.log = (line) => logs.push(String(line))
+		console.warn = () => {}
+		const clockValues = [0, 0, 9 * 60_000, 18 * 60_000, 27 * 60_000]
+		let tick = 0
+		let failure
+		try {
+			runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")] },
+				reportRoot,
+				{
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.equal(failure?.manifestBudgetStop, true)
+			const invocations = fs
+				.readFileSync(recordPath, "utf8")
+				.split("\n")
+				.filter((line) => line.trim())
+				.map((line) => JSON.parse(line))
+			assert.deepEqual(
+				invocations.map((call) => call.kind),
+				["preflight", "run", "preflight"],
+				logs.join(" | ").slice(0, 400),
+			)
+			const budgets = invocations.map((call) => call.args[call.args.indexOf("--dryRunTimeoutMinutes") + 1])
+			assert.deepEqual(budgets, ["20", "13", "4"], JSON.stringify(budgets))
+			const logged = logs.join("\n")
+			for (const kill of ["outer kill 25 min", "outer kill 18 min", "outer kill 9 min"]) {
+				assert.ok(logged.includes(kill), logged.slice(0, 400))
+			}
+			for (const budget of [
+				"initial-test-run budget 20 min (engine schema default 5 min)",
+				"initial-test-run budget 13 min (engine schema default 5 min)",
+				"initial-test-run budget 4 min (engine schema default 5 min)",
+			]) {
+				assert.ok(logged.includes(budget), logged.slice(0, 400))
+			}
+			assert.ok(failure.message.includes("was not launched"), failure.message)
+		} finally {
+			if (previousRecord === undefined) delete process.env.U917_STRYKER_RECORD
+			else process.env.U917_STRYKER_RECORD = previousRecord
+			console.log = previousLog
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("suite summary isolation", () => {
+	it("keeps the job summary the suite inherited free of what the suite published", () => {
+		if (inheritedJobSummary === undefined) {
+			// A local run has no step summary to protect. The isolation still ran, and there is nothing
+			// inherited to read, so the assertion covers the file the suite gave itself instead.
+			assert.equal(process.env.GITHUB_STEP_SUMMARY, suiteSummary)
+			assert.ok(fs.existsSync(suiteSummary))
+			return
+		}
+		const inherited = fs.readFileSync(inheritedJobSummary, "utf8")
+		assert.equal(
+			inherited,
+			"",
+			"the suite published into the job summary of the step that is running it: " + inherited.slice(0, 200),
+		)
 	})
 })
