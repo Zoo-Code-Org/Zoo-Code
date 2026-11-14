@@ -132,7 +132,16 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					return
 				}
 
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Guarded publish: this write carries the complete file content, so it uses
+				// create-guard semantics (unobserved targets may only be created when absent).
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"create",
+				)
 			} else {
 				if (!task.diffViewProvider.isEditing) {
 					const partialMessage = JSON.stringify(sharedMessageProps)

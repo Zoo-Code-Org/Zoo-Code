@@ -297,16 +297,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
 
-	// The observed on-disk version of each file this task has read. Declared here so the
-	// read tools can record it; a write guard later compares a token against this registry.
-	readonly observationRegistry = new ObservationRegistry()
-
 	todoList?: TodoItem[]
 
 	readonly rootTask: Task | undefined = undefined
 	readonly parentTask: Task | undefined = undefined
 	readonly taskNumber: number
 	readonly workspacePath: string
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
 
 	/**
 	 * The mode associated with this task. Persisted across sessions
