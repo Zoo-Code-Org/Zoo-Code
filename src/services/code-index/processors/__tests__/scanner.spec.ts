@@ -549,6 +549,36 @@ describe("DirectoryScanner", () => {
 			expect(failures.list()).toEqual([])
 		})
 
+		it.each([
+			{ truncated: true, removed: false },
+			{ truncated: false, removed: true },
+		])(
+			"failure-only file with truncated listing=$truncated is removed=$removed",
+			async ({ truncated, removed }) => {
+				const failures = new FileFailureRegistry()
+				const truncationScanner = new DirectoryScanner(
+					mockEmbedder,
+					mockVectorStore,
+					mockCodeParser,
+					mockCacheManager,
+					mockIgnoreInstance,
+					undefined,
+					failures,
+					new ProviderPacerRegistry(),
+				)
+				const { listFiles } = await import("../../../glob/list-files")
+				vi.mocked(listFiles).mockResolvedValue([[], truncated])
+				const relativePath = nodePath.normalize("src/unlisted.js")
+				failures.renew(relativePath, "h")
+				failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+				await truncationScanner.scanDirectory("/test")
+
+				expect(vi.mocked(mockVectorStore.deletePointsByFilePath).mock.calls.length).toBe(removed ? 1 : 0)
+				expect(failures.list()).toHaveLength(removed ? 0 : 1)
+			},
+		)
+
 		it("records a non-missing read error as a read failure", async () => {
 			const failures = new FileFailureRegistry()
 			const readScanner = new DirectoryScanner(

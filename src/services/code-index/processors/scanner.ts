@@ -83,7 +83,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		)
 
 		// Get all files recursively (handles .gitignore automatically)
-		const [allPaths, _] = await listFiles(directoryPath, true, MAX_LIST_FILES_LIMIT_CODE_INDEX)
+		const [allPaths, listingTruncated] = await listFiles(directoryPath, true, MAX_LIST_FILES_LIMIT_CODE_INDEX)
 
 		// Filter out directories (marked with trailing '/')
 		const filePaths = allPaths.filter((p) => !p.endsWith("/"))
@@ -202,7 +202,8 @@ export class DirectoryScanner implements IDirectoryScanner {
 			removalCandidates.set(generateRelativeFilePath(cachedFilePath, scanWorkspace), cachedFilePath)
 		}
 		// A file whose first write failed has no hash, but its failure entry means partial points may exist.
-		for (const failure of this.failures.list()) {
+		// A truncated listing cannot prove a failure-only file is gone, so those are kept.
+		for (const failure of listingTruncated ? [] : this.failures.list()) {
 			if (!removalCandidates.has(failure.path)) {
 				removalCandidates.set(failure.path, generateNormalizedAbsolutePath(failure.path, scanWorkspace))
 			}
