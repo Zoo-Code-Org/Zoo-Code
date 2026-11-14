@@ -89,7 +89,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "La clé API contient des caractères invalides.",
-			"apiRequestFailed": "La requête API a échoué ({{status}})"
+			"apiRequestFailed": "La requête API a échoué ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI n'a pas trouvé le déploiement \"{{deployment}}\". Définissez \"Nom du déploiement Azure\" sur le nom exact du déploiement dans Azure AI Foundry, et non sur le nom du modèle (par exemple gpt-4o). Si le nom du déploiement est correct, vérifiez que l'URL de base est le point de terminaison de votre ressource Azure (par exemple https://<resource>.openai.azure.com) sans segments de chemin supplémentaires comme /openai/v1. Détails : {{message}}"
 		},
 		"manual_url_empty": "Veuillez entrer une URL de callback valide",
 		"manual_url_no_query": "URL de callback invalide : paramètres de requête manquants",

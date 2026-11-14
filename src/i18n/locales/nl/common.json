@@ -89,7 +89,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API-sleutel bevat ongeldige karakters.",
-			"apiRequestFailed": "API-verzoek mislukt ({{status}})"
+			"apiRequestFailed": "API-verzoek mislukt ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI kon de implementatie \"{{deployment}}\" niet vinden. Stel \"Naam van Azure-implementatie\" in op de exacte implementatienaam uit Azure AI Foundry, niet op de modelnaam (bijvoorbeeld gpt-4o). Als de implementatienaam klopt, controleer dan of de basis-URL het eindpunt van je Azure-resource is (bijvoorbeeld https://<resource>.openai.azure.com) zonder extra padsegmenten zoals /openai/v1. Details: {{message}}"
 		},
 		"manual_url_empty": "Voer een geldige callback-URL in",
 		"manual_url_no_query": "Ongeldige callback-URL: query-parameters ontbreken",

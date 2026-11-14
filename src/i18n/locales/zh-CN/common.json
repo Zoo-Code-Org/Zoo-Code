@@ -94,7 +94,8 @@
 		},
 		"api": {
 			"invalidKeyInvalidChars": "API 密钥包含无效字符.",
-			"apiRequestFailed": "API 请求失败 ({{status}})"
+			"apiRequestFailed": "API 请求失败 ({{status}})",
+			"azureDeploymentNotFound": "Azure OpenAI 找不到部署 \"{{deployment}}\"。请将\"Azure 部署名称\"设置为 Azure AI Foundry 中的准确部署名称，而不是模型名称（例如 gpt-4o）。如果部署名称正确，请检查基础 URL 是否为 Azure 资源终结点（例如 https://<resource>.openai.azure.com），且不包含 /openai/v1 等多余路径段。详细信息：{{message}}"
 		},
 		"manual_url_empty": "请输入有效的回调 URL",
 		"manual_url_no_query": "无效的回调 URL：缺少查询参数",
