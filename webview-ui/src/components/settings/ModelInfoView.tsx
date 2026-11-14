@@ -61,13 +61,13 @@ export const ModelInfoView = ({
 		typeof modelInfo?.contextWindow === "number" && modelInfo.contextWindow > 0 && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.contextWindow")}</span>{" "}
-				{modelInfo.contextWindow?.toLocaleString()} tokens
+				{t("settings:modelInfo.tokensValue", { count: modelInfo.contextWindow })}
 			</>
 		),
 		typeof modelInfo?.maxTokens === "number" && modelInfo.maxTokens > 0 && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.maxOutput")}:</span>{" "}
-				{modelInfo.maxTokens?.toLocaleString()} tokens
+				{t("settings:modelInfo.tokensValue", { count: modelInfo.maxTokens })}
 			</>
 		),
 		apiProvider === providerIdentifiers.githubCopilot && modelInfo?.supportsImages === undefined ? (
@@ -131,25 +131,25 @@ export const ModelInfoView = ({
 		modelInfo?.inputPrice !== undefined && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.inputPrice")}:</span>{" "}
-				{formatPrice(modelInfo.inputPrice)} / 1M tokens
+				{t("settings:modelInfo.pricePerMillionTokens", { price: formatPrice(modelInfo.inputPrice) })}
 			</>
 		),
 		modelInfo?.outputPrice !== undefined && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.outputPrice")}:</span>{" "}
-				{formatPrice(modelInfo.outputPrice)} / 1M tokens
+				{t("settings:modelInfo.pricePerMillionTokens", { price: formatPrice(modelInfo.outputPrice) })}
 			</>
 		),
 		modelInfo?.supportsPromptCache && modelInfo.cacheReadsPrice && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.cacheReadsPrice")}:</span>{" "}
-				{formatPrice(modelInfo.cacheReadsPrice || 0)} / 1M tokens
+				{t("settings:modelInfo.pricePerMillionTokens", { price: formatPrice(modelInfo.cacheReadsPrice || 0) })}
 			</>
 		),
 		modelInfo?.supportsPromptCache && modelInfo.cacheWritesPrice && (
 			<>
 				<span className="font-medium">{t("settings:modelInfo.cacheWritesPrice")}:</span>{" "}
-				{formatPrice(modelInfo.cacheWritesPrice || 0)} / 1M tokens
+				{t("settings:modelInfo.pricePerMillionTokens", { price: formatPrice(modelInfo.cacheWritesPrice || 0) })}
 			</>
 		),
 	].filter(Boolean)

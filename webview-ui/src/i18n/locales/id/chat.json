@@ -23,7 +23,8 @@
 	"unpin": "Lepas Pin",
 	"pin": "Pin",
 	"fileChangesInConversation": {
-		"header_other": "{{count}} file diubah dalam percakapan ini"
+		"header_other": "{{count}} file diubah dalam percakapan ini",
+		"lineStatsAriaLabel": "Baris ditambahkan: {{added}}, baris dihapus: {{removed}}"
 	},
 	"retry": {
 		"title": "Coba Lagi",
@@ -268,7 +269,8 @@
 		"wantsToSearch": "Zoo ingin mencari codebase untuk <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo ingin mencari codebase untuk <code>{{query}}</code> di <code>{{path}}</code>",
 		"didSearch_other": "Ditemukan {{count}} hasil",
-		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)"
+		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)",
+		"displayError": "Gagal menampilkan hasil pencarian."
 	},
 	"commandExecution": {
 		"abort": "Batalkan",
@@ -280,7 +282,9 @@
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
-		"removeFromDenied": "Hapus dari daftar yang ditolak"
+		"removeFromDenied": "Hapus dari daftar yang ditolak",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Klik untuk menyunting pola"
 	},
 	"text": {
 		"rooSaid": "Zoo berkata"
@@ -342,7 +346,9 @@
 		"triggerLabelOffShort": "Mati",
 		"triggerLabel_zero": "0 disetujui otomatis",
 		"triggerLabel_other": "{{count}} disetujui otomatis",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Aktif",
+		"toggleAriaLabel": "Alihkan persetujuan otomatis"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} Dirilis",
@@ -420,7 +426,17 @@
 		"noResults": "Tidak ada hasil",
 		"problems": "Masalah",
 		"terminal": "Terminal",
-		"url": "Tempel URL untuk mengambil konten"
+		"url": "Tempel URL untuk mengambil konten",
+		"gitCommits": "Commit Git",
+		"gitCommitsDescription": "Cari riwayat repositori",
+		"workingChanges": "Perubahan kerja",
+		"workingChangesDescription": "Perubahan saat ini yang belum di-commit",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash commit Git",
+		"addFile": "Tambah file",
+		"addFolder": "Tambah folder",
+		"commands": "Perintah",
+		"modes": "Mode"
 	},
 	"queuedMessages": {
 		"title": "Pesan Antrian",
@@ -433,7 +449,28 @@
 	"todo": {
 		"partial": "{{completed}} dari {{total}} to-do selesai",
 		"complete": "{{total}} to-do selesai",
-		"updated": "Memperbarui daftar to-do"
+		"updated": "Memperbarui daftar to-do",
+		"listUpdated": "Daftar tugas diperbarui",
+		"userEdit": "Suntingan pengguna",
+		"userEdits": "Suntingan pengguna",
+		"edit": "Sunting",
+		"done": "Selesai",
+		"itemPlaceholder": "Masukkan item tugas",
+		"newItemPlaceholder": "Masukkan item tugas, tekan Enter untuk menambahkan",
+		"remove": "Hapus",
+		"add": "Tambah",
+		"cancel": "Batal",
+		"addTodo": "+ Tambah tugas",
+		"status": {
+			"notStarted": "Belum dimulai",
+			"inProgress": "Sedang dikerjakan",
+			"completed": "Selesai"
+		},
+		"deleteDialog": {
+			"title": "Hapus item tugas",
+			"description": "Yakin ingin menghapus item tugas ini?",
+			"confirm": "Hapus"
+		}
 	},
 	"tooManyTools": {
 		"title": "Terlalu banyak alat diaktifkan",
@@ -453,5 +490,24 @@
 		"title": "Penyedia tidak lagi didukung",
 		"message": "Penyedia ini sudah tidak tersedia. Pilih penyedia yang didukung untuk melanjutkan.",
 		"openSettings": "Buka Pengaturan"
+	},
+	"zooCodeAuth": {
+		"signIn": "Masuk ke Zoo Code",
+		"goToDashboard": "Buka Dasbor",
+		"signOut": "Keluar",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Terhubung"
+	},
+	"arguments": "Argumen:",
+	"copyAsMarkdown": "Salin sebagai Markdown",
+	"openInPreview": "Buka di pratinjau",
+	"codeAccordion": {
+		"userEdits": "Suntingan pengguna",
+		"consoleLogs": "Log konsol",
+		"openFileAriaLabel": "Buka file: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "{{count}} baris tersembunyi"
 	}
 }

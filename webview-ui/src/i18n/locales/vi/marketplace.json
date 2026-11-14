@@ -70,7 +70,8 @@
 		"goToModes": "Đi đến Cài đặt Chế độ",
 		"moreInfoMcp": "Xem tài liệu MCP {{name}}",
 		"validationRequired": "Vui lòng cung cấp giá trị cho {{paramName}}",
-		"prerequisites": "Điều kiện tiên quyết"
+		"prerequisites": "Điều kiện tiên quyết",
+		"optional": "(tùy chọn)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Bạn tìm thấy vấn đề với mục marketplace hoặc có đề xuất cho mục mới? <0>Mở issue GitHub</0> để cho chúng tôi biết!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Chế độ"
 	}
 }

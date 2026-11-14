@@ -379,7 +379,9 @@ export const TerminalSettings = ({
 												)
 											}
 										/>
-										<span className="w-10">{terminalCommandDelay ?? 0}ms</span>
+										<span className="w-10">
+											{t("settings:common.milliseconds", { value: terminalCommandDelay ?? 0 })}
+										</span>
 									</div>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
 										<Trans t={t} i18nKey="settings:terminal.commandDelay.description">

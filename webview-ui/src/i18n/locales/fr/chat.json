@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} fichier modifié dans cette conversation",
 		"header_many": "{{count}} fichiers modifiés dans cette conversation",
-		"header_other": "{{count}} fichiers modifiés dans cette conversation"
+		"header_other": "{{count}} fichiers modifiés dans cette conversation",
+		"lineStatsAriaLabel": "Lignes ajoutées : {{added}}, lignes supprimées : {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espace disponible : {{amount}} tokens",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Ajouter à la liste autorisée",
 		"removeFromAllowed": "Retirer de la liste autorisée",
 		"addToDenied": "Ajouter à la liste refusée",
-		"removeFromDenied": "Retirer de la liste refusée"
+		"removeFromDenied": "Retirer de la liste refusée",
+		"pid": "(PID : {{pid}})",
+		"clickToEditPattern": "Clique pour modifier le motif"
 	},
 	"text": {
 		"rooSaid": "Zoo a dit"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} approuvé automatiquement",
 		"triggerLabel_many": "{{count}} approuvés automatiquement",
 		"triggerLabel_other": "{{count}} approuvés automatiquement",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activé",
+		"toggleAriaLabel": "Activer/désactiver l'approbation automatique"
 	},
 	"reasoning": {
 		"thinking": "Réflexion",
@@ -372,7 +377,8 @@
 		"didSearch_one": "{{count}} résultat trouvé",
 		"didSearch_many": "{{count}} résultats trouvés",
 		"didSearch_other": "{{count}} résultats trouvés",
-		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)"
+		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)",
+		"displayError": "Erreur lors de l'affichage des résultats de recherche."
 	},
 	"read-batch": {
 		"approve": {
@@ -424,7 +430,17 @@
 		"noResults": "Aucun résultat",
 		"problems": "Problèmes",
 		"terminal": "Terminal",
-		"url": "Coller l'URL pour récupérer le contenu"
+		"url": "Coller l'URL pour récupérer le contenu",
+		"gitCommits": "Commits Git",
+		"gitCommitsDescription": "Rechercher dans l'historique du dépôt",
+		"workingChanges": "Modifications en cours",
+		"workingChangesDescription": "Modifications actuelles non commitées",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash du commit Git",
+		"addFile": "Ajouter un fichier",
+		"addFolder": "Ajouter un dossier",
+		"commands": "Commandes",
+		"modes": "Modes"
 	},
 	"queuedMessages": {
 		"title": "Messages en file d'attente",
@@ -437,7 +453,28 @@
 	"todo": {
 		"partial": "{{completed}} sur {{total}} tâches terminées",
 		"complete": "{{total}} tâches terminées",
-		"updated": "La liste des tâches a été mise à jour"
+		"updated": "La liste des tâches a été mise à jour",
+		"listUpdated": "Liste de tâches mise à jour",
+		"userEdit": "Modification de l'utilisateur",
+		"userEdits": "Modifications de l'utilisateur",
+		"edit": "Modifier",
+		"done": "Terminé",
+		"itemPlaceholder": "Saisis une tâche",
+		"newItemPlaceholder": "Saisis une tâche, appuie sur Entrée pour l'ajouter",
+		"remove": "Retirer",
+		"add": "Ajouter",
+		"cancel": "Annuler",
+		"addTodo": "+ Ajouter une tâche",
+		"status": {
+			"notStarted": "Non commencée",
+			"inProgress": "En cours",
+			"completed": "Terminée"
+		},
+		"deleteDialog": {
+			"title": "Supprimer la tâche",
+			"description": "Es-tu sûr de vouloir supprimer cette tâche ?",
+			"confirm": "Supprimer"
+		}
 	},
 	"tooManyTools": {
 		"title": "Trop d'outils activés",
@@ -461,5 +498,26 @@
 		"title": "Fournisseur plus pris en charge",
 		"message": "Ce fournisseur n'est plus disponible. Choisis un fournisseur pris en charge pour continuer.",
 		"openSettings": "Ouvrir les paramètres"
+	},
+	"zooCodeAuth": {
+		"signIn": "Se connecter à Zoo Code",
+		"goToDashboard": "Aller au tableau de bord",
+		"signOut": "Se déconnecter",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code : {{account}}",
+		"connected": "Connecté"
+	},
+	"arguments": "Arguments :",
+	"copyAsMarkdown": "Copier en Markdown",
+	"openInPreview": "Ouvrir dans l'aperçu",
+	"codeAccordion": {
+		"userEdits": "Modifications de l'utilisateur",
+		"consoleLogs": "Journaux de la console",
+		"openFileAriaLabel": "Ouvrir le fichier : {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} ligne masquée",
+		"hiddenLines_many": "{{count}} de lignes masquées",
+		"hiddenLines_other": "{{count}} lignes masquées"
 	}
 }

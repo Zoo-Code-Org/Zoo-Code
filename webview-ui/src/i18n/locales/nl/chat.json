@@ -21,7 +21,8 @@
 	"pin": "Vastmaken",
 	"fileChangesInConversation": {
 		"header_one": "{{count}} bestand gewijzigd in dit gesprek",
-		"header_other": "{{count}} bestanden gewijzigd in dit gesprek"
+		"header_other": "{{count}} bestanden gewijzigd in dit gesprek",
+		"lineStatsAriaLabel": "Regels toegevoegd: {{added}}, regels verwijderd: {{removed}}"
 	},
 	"retry": {
 		"title": "Opnieuw proberen",
@@ -227,7 +228,9 @@
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
-		"removeFromDenied": "Verwijderen van geweigerde lijst"
+		"removeFromDenied": "Verwijderen van geweigerde lijst",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Klik om het patroon te bewerken"
 	},
 	"text": {
 		"rooSaid": "Zoo zei"
@@ -290,7 +293,9 @@
 		"triggerLabel_zero": "0 automatisch goedgekeurd",
 		"triggerLabel_one": "{{count}} automatisch goedgekeurd",
 		"triggerLabel_other": "{{count}} automatisch goedgekeurd",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Ingeschakeld",
+		"toggleAriaLabel": "Automatisch goedkeuren in- of uitschakelen"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} uitgebracht",
@@ -367,7 +372,8 @@
 		"wantsToSearchWithPath": "Zoo wil de codebase doorzoeken op <code>{{query}}</code> in <code>{{path}}</code>",
 		"didSearch_one": "{{count}} resultaat gevonden",
 		"didSearch_other": "{{count}} resultaten gevonden",
-		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)"
+		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)",
+		"displayError": "Fout bij het weergeven van zoekresultaten."
 	},
 	"read-batch": {
 		"approve": {
@@ -419,7 +425,17 @@
 		"noResults": "Geen resultaten",
 		"problems": "Problemen",
 		"terminal": "Terminal",
-		"url": "Plak URL om inhoud op te halen"
+		"url": "Plak URL om inhoud op te halen",
+		"gitCommits": "Git-commits",
+		"gitCommitsDescription": "Doorzoek de repositorygeschiedenis",
+		"workingChanges": "Werkwijzigingen",
+		"workingChangesDescription": "Huidige niet-gecommitte wijzigingen",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git-commithash",
+		"addFile": "Bestand toevoegen",
+		"addFolder": "Map toevoegen",
+		"commands": "Opdrachten",
+		"modes": "Modi"
 	},
 	"queuedMessages": {
 		"title": "Berichten in wachtrij",
@@ -432,7 +448,28 @@
 	"todo": {
 		"partial": "{{completed}} van {{total}} to-do's voltooid",
 		"complete": "{{total}} to-do's voltooid",
-		"updated": "De to-do-lijst is bijgewerkt"
+		"updated": "De to-do-lijst is bijgewerkt",
+		"listUpdated": "Takenlijst bijgewerkt",
+		"userEdit": "Gebruikersbewerking",
+		"userEdits": "Gebruikersbewerkingen",
+		"edit": "Bewerken",
+		"done": "Klaar",
+		"itemPlaceholder": "Voer een taak in",
+		"newItemPlaceholder": "Voer een taak in, druk op Enter om toe te voegen",
+		"remove": "Verwijderen",
+		"add": "Toevoegen",
+		"cancel": "Annuleren",
+		"addTodo": "+ Taak toevoegen",
+		"status": {
+			"notStarted": "Niet gestart",
+			"inProgress": "Bezig",
+			"completed": "Voltooid"
+		},
+		"deleteDialog": {
+			"title": "Taak verwijderen",
+			"description": "Weet je zeker dat je deze taak wilt verwijderen?",
+			"confirm": "Verwijderen"
+		}
 	},
 	"tooManyTools": {
 		"title": "Te veel tools ingeschakeld",
@@ -454,5 +491,25 @@
 		"title": "Provider wordt niet meer ondersteund",
 		"message": "Deze provider is niet meer beschikbaar. Selecteer een ondersteunde provider om door te gaan.",
 		"openSettings": "Instellingen openen"
+	},
+	"zooCodeAuth": {
+		"signIn": "Inloggen bij Zoo Code",
+		"goToDashboard": "Naar dashboard",
+		"signOut": "Uitloggen",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Verbonden"
+	},
+	"arguments": "Argumenten:",
+	"copyAsMarkdown": "Kopiëren als Markdown",
+	"openInPreview": "Openen in voorbeeld",
+	"codeAccordion": {
+		"userEdits": "Gebruikersbewerkingen",
+		"consoleLogs": "Consolelogs",
+		"openFileAriaLabel": "Bestand openen: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} verborgen regel",
+		"hiddenLines_other": "{{count}} verborgen regels"
 	}
 }

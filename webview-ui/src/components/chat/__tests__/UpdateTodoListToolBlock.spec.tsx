@@ -21,12 +21,12 @@ describe("UpdateTodoListToolBlock", () => {
 
 	it("cancels deletion without changing the todo list", async () => {
 		renderEditableList()
-		fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-		fireEvent.click(screen.getByTitle("Remove"))
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.edit" }))
+		fireEvent.click(screen.getByTitle("chat:todo.remove"))
 
 		expect(screen.getByRole("alertdialog")).toBeInTheDocument()
-		expect(screen.getByText("Are you sure you want to delete this todo item?")).toBeInTheDocument()
-		fireEvent.click(screen.getByRole("button", { name: "Cancel" }))
+		expect(screen.getByText("chat:todo.deleteDialog.description")).toBeInTheDocument()
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.cancel" }))
 
 		await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
 		expect(onChange).not.toHaveBeenCalled()
@@ -34,9 +34,9 @@ describe("UpdateTodoListToolBlock", () => {
 
 	it("deletes the selected todo after confirmation", async () => {
 		renderEditableList()
-		fireEvent.click(screen.getByRole("button", { name: "Edit" }))
-		fireEvent.click(screen.getByTitle("Remove"))
-		fireEvent.click(screen.getByRole("button", { name: "Delete" }))
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.edit" }))
+		fireEvent.click(screen.getByTitle("chat:todo.remove"))
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.deleteDialog.confirm" }))
 
 		await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument())
 		expect(onChange).toHaveBeenCalledWith([])
@@ -44,11 +44,11 @@ describe("UpdateTodoListToolBlock", () => {
 
 	test("renders theme-aware edit controls", () => {
 		renderEditableList()
-		fireEvent.click(screen.getByRole("button", { name: "Edit" }))
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.edit" }))
 
-		expect(screen.getByTitle("Remove")).toBeInTheDocument()
+		expect(screen.getByTitle("chat:todo.remove")).toBeInTheDocument()
 		expect(screen.getByDisplayValue("Ship the follow-up")).toBeInTheDocument()
-		fireEvent.click(screen.getByRole("button", { name: "+ Add Todo" }))
-		expect(screen.getByPlaceholderText("Enter todo item, press Enter to add")).toBeInTheDocument()
+		fireEvent.click(screen.getByRole("button", { name: "chat:todo.addTodo" }))
+		expect(screen.getByPlaceholderText("chat:todo.newItemPlaceholder")).toBeInTheDocument()
 	})
 })

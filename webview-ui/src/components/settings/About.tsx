@@ -100,8 +100,11 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 			<Section>
 				<p>
 					{Package.sha
-						? `Version: ${Package.version} (${Package.sha.slice(0, 8)})`
-						: `Version: ${Package.version}`}
+						? t("settings:about.versionWithCommit", {
+								version: Package.version,
+								commit: Package.sha.slice(0, 8),
+							})
+						: t("settings:about.version", { version: Package.version })}
 				</p>
 				<SearchableSetting
 					settingId="about-telemetry"

@@ -221,7 +221,7 @@ export const OpenAICompatible = ({
 					<VSCodeTextField
 						value={apiConfiguration.azureApiVersion || ""}
 						onInput={handleInputChange("azureApiVersion")}
-						placeholder={`Default: ${azureOpenAiDefaultApiVersion}`}
+						placeholder={t("settings:placeholders.defaultValue", { value: azureOpenAiDefaultApiVersion })}
 						className="w-full mt-1"
 					/>
 				)}

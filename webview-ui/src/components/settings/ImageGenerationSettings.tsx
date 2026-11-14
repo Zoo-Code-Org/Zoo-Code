@@ -116,7 +116,8 @@ export const ImageGenerationSettings = ({
 							onChange={(e: any) => handleProviderChange(e.target.value)}
 							className="w-full">
 							<VSCodeOption value={providerIdentifiers.openrouter} className="py-2 px-3">
-								OpenRouter
+								{/* eslint-disable-next-line no-restricted-syntax -- brand name, same in every language */}
+								{"OpenRouter"}
 							</VSCodeOption>
 						</VSCodeDropdown>
 						<p className="text-vscode-descriptionForeground text-xs mt-1">

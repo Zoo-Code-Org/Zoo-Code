@@ -77,6 +77,13 @@ This guidance file is loaded at runtime and should be consulted for the latest b
 - All user interface strings should be internationalized
 - Always use the `Trans` component with named components for text with embedded components
 
+### User-Facing Text (ESLint Enforcement)
+
+- Avoid literal user-facing text in `src/**/*.tsx`: JSX text, attributes such as `aria-label`, `alt`, `title`, `placeholder` and `label`, `StandardTooltip` `content`, and fallbacks such as `{t("x") || "Text"}`. ESLint enforces this via `@roo-code/config-eslint/i18n-literal-strings`.
+- Add a key to every locale under `src/i18n/locales/` and render it with `t` from `useAppTranslation`.
+- URLs, ARNs, host names, paths and JSON examples are exempt by shape. For another string that must stay as is, such as a brand name or a CSS unit, add `eslint-disable-next-line` with the rule name and a one-line reason.
+- Name a key that only screen readers use with an `AriaLabel` suffix, and give a decorative image `alt=""`.
+
 ### Trans Component Example
 
 Translation string:

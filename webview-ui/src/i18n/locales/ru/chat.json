@@ -23,7 +23,8 @@
 		"header_one": "{{count}} файл изменен в этом разговоре",
 		"header_few": "{{count}} файла изменено в этом разговоре",
 		"header_many": "{{count}} файлов изменено в этом разговоре",
-		"header_other": "{{count}} файла изменено в этом разговоре"
+		"header_other": "{{count}} файла изменено в этом разговоре",
+		"lineStatsAriaLabel": "Добавлено строк: {{added}}, удалено строк: {{removed}}"
 	},
 	"retry": {
 		"title": "Повторить",
@@ -230,7 +231,9 @@
 		"addToAllowed": "Добавить в список разрешенных",
 		"removeFromAllowed": "Удалить из списка разрешенных",
 		"addToDenied": "Добавить в список запрещенных",
-		"removeFromDenied": "Удалить из списка запрещенных"
+		"removeFromDenied": "Удалить из списка запрещенных",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Нажмите, чтобы изменить шаблон"
 	},
 	"text": {
 		"rooSaid": "Zoo сказал"
@@ -295,7 +298,9 @@
 		"triggerLabel_few": "{{count}} авто-утвержденных",
 		"triggerLabel_many": "{{count}} авто-утвержденных",
 		"triggerLabel_other": "{{count}} авто-утвержденных",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Включено",
+		"toggleAriaLabel": "Переключить авто-одобрение"
 	},
 	"announcement": {
 		"title": "Выпущен Zoo Code {{version}}",
@@ -378,7 +383,8 @@
 		"didSearch_few": "Найдено {{count}} результата",
 		"didSearch_many": "Найдено {{count}} результатов",
 		"didSearch_other": "Найдено {{count}} результата",
-		"resultTooltip": "Оценка схожести: {{score}} (нажмите, чтобы открыть файл)"
+		"resultTooltip": "Оценка схожести: {{score}} (нажмите, чтобы открыть файл)",
+		"displayError": "Ошибка отображения результатов поиска."
 	},
 	"read-batch": {
 		"approve": {
@@ -430,7 +436,17 @@
 		"noResults": "Нет результатов",
 		"problems": "Проблемы",
 		"terminal": "Терминал",
-		"url": "Вставьте URL для получения содержимого"
+		"url": "Вставьте URL для получения содержимого",
+		"gitCommits": "Коммиты Git",
+		"gitCommitsDescription": "Поиск по истории репозитория",
+		"workingChanges": "Рабочие изменения",
+		"workingChangesDescription": "Текущие незакоммиченные изменения",
+		"commit": "Коммит {{hash}}",
+		"commitHashDescription": "Хеш коммита Git",
+		"addFile": "Добавить файл",
+		"addFolder": "Добавить папку",
+		"commands": "Команды",
+		"modes": "Режимы"
 	},
 	"queuedMessages": {
 		"title": "Сообщения в очереди",
@@ -443,7 +459,28 @@
 	"todo": {
 		"partial": "{{completed}} из {{total}} задач выполнено",
 		"complete": "{{total}} задач выполнено",
-		"updated": "Список задач обновлен"
+		"updated": "Список задач обновлен",
+		"listUpdated": "Список задач обновлён",
+		"userEdit": "Правка пользователя",
+		"userEdits": "Правки пользователя",
+		"edit": "Изменить",
+		"done": "Готово",
+		"itemPlaceholder": "Введите задачу",
+		"newItemPlaceholder": "Введите задачу и нажмите Enter, чтобы добавить",
+		"remove": "Удалить",
+		"add": "Добавить",
+		"cancel": "Отмена",
+		"addTodo": "+ Добавить задачу",
+		"status": {
+			"notStarted": "Не начата",
+			"inProgress": "В работе",
+			"completed": "Выполнена"
+		},
+		"deleteDialog": {
+			"title": "Удалить задачу",
+			"description": "Точно удалить эту задачу?",
+			"confirm": "Удалить"
+		}
 	},
 	"tooManyTools": {
 		"title": "Включено слишком много инструментов",
@@ -469,5 +506,27 @@
 		"title": "Провайдер больше не поддерживается",
 		"message": "Этот провайдер больше недоступен. Выберите поддерживаемого провайдера, чтобы продолжить.",
 		"openSettings": "Открыть настройки"
+	},
+	"zooCodeAuth": {
+		"signIn": "Войти в Zoo Code",
+		"goToDashboard": "Открыть панель управления",
+		"signOut": "Выйти",
+		"avatarAlt": "Аватар",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Подключено"
+	},
+	"arguments": "Аргументы:",
+	"copyAsMarkdown": "Копировать как Markdown",
+	"openInPreview": "Открыть в предпросмотре",
+	"codeAccordion": {
+		"userEdits": "Правки пользователя",
+		"consoleLogs": "Журналы консоли",
+		"openFileAriaLabel": "Открыть файл: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} скрытая строка",
+		"hiddenLines_few": "{{count}} скрытые строки",
+		"hiddenLines_many": "{{count}} скрытых строк",
+		"hiddenLines_other": "{{count}} скрытой строки"
 	}
 }

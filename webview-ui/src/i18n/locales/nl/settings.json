@@ -6,7 +6,8 @@
 		"cancel": "Annuleren",
 		"select": "Selecteren",
 		"add": "Header toevoegen",
-		"remove": "Verwijderen"
+		"remove": "Verwijderen",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Instellingen zoeken...",
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "{{count}} van {{total}} taakgeschiedenissen geïmporteerd.",
 			"detailPreparing": "Importeren van Roo Code-geschiedenis voorbereiden.",
 			"progressAriaLabel": "Voortgang van import van Roo Code-geschiedenis"
-		}
+		},
+		"version": "Versie: {{version}}",
+		"versionWithCommit": "Versie: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Beheer je slash-commando's om snel aangepaste workflows en acties uit te voeren. <DocsLink>Meer informatie</DocsLink>",
@@ -685,6 +688,17 @@
 			"signInDescription": "Log in om Zoo Gateway met je account te gebruiken",
 			"authenticated": "Geauthenticeerd",
 			"authenticatedAs": "Geauthenticeerd als {{name}}"
+		},
+		"awsAuthMethod": "Authenticatiemethode",
+		"qwenCode": {
+			"oauthPathLabel": "Pad naar OAuth-referenties",
+			"oauthPathDescription": "Pad naar je Qwen OAuth-referentiebestand. Als je dit leeg laat, wordt {{defaultPath}} gebruikt.",
+			"description": "Qwen Code is een op OAuth gebaseerde API waarvoor authenticatie via de officiële Qwen-client nodig is. Je moet eerst OAuth-referenties instellen.",
+			"gettingStarted": "Om te beginnen:",
+			"step1": "1. Installeer de officiële Qwen-client",
+			"step2": "2. Authenticeer met je account",
+			"step3": "3. OAuth-referenties worden automatisch opgeslagen",
+			"setupInstructions": "Installatie-instructies"
 		}
 	},
 	"checkpoints": {
@@ -916,7 +930,8 @@
 			"refreshing": "Vernieuwen...",
 			"refreshSuccess": "Tools succesvol vernieuwd",
 			"refreshError": "Fout bij vernieuwen van tools",
-			"toolParameters": "Parameters"
+			"toolParameters": "Parameters",
+			"required": "verplicht"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamisch denkwerk",
@@ -955,7 +970,12 @@
 			"freeRequests_other": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
 			"pricingDetails": "Zie prijsdetails voor meer info.",
 			"billingEstimate": "* Facturering is een schatting - de exacte kosten hangen af van de promptgrootte."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_other": "{{count, number}} tokens",
+		"pricePerMillionTokens": "{{price}} / 1M tokens",
+		"showMore": "Meer",
+		"showLess": "Minder"
 	},
 	"modelPicker": {
 		"automaticFetch": "De extensie haalt automatisch de nieuwste lijst met modellen op van <serviceLink>{{serviceName}}</serviceLink>. Weet je niet welk model je moet kiezen? Zoo Code werkt het beste met <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Je kunt ook zoeken op 'free' voor gratis opties die nu beschikbaar zijn.",
@@ -1020,7 +1040,8 @@
 			"inputPrice": "bijv. 0.0001",
 			"outputPrice": "bijv. 0.0002",
 			"cacheWritePrice": "bijv. 0.00005"
-		}
+		},
+		"defaultValue": "Standaard: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Standaard: http://localhost:11434",
@@ -1049,7 +1070,9 @@
 			"input": "Invoer",
 			"output": "Uitvoer",
 			"cacheReads": "Cache leest"
-		}
+		},
+		"label": "Serviceniveau",
+		"tooltip": "Voor snellere verwerking van API-verzoeken kun je het serviceniveau met prioriteitsverwerking proberen. Voor lagere prijzen met hogere latentie kun je het flex-verwerkingsniveau proberen."
 	},
 	"ui": {
 		"collapseThinking": {

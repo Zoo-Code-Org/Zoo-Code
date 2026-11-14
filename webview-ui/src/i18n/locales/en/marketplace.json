@@ -70,7 +70,8 @@
 		"goToMcp": "Go to MCP Tab",
 		"goToModes": "Go to Modes Settings",
 		"moreInfoMcp": "View {{name}} MCP documentation",
-		"validationRequired": "Please provide a value for {{paramName}}"
+		"validationRequired": "Please provide a value for {{paramName}}",
+		"optional": "(optional)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Found a problem with a marketplace item or have suggestions for new ones? <0>Open a GitHub issue</0> to let us know!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modes"
 	}
 }

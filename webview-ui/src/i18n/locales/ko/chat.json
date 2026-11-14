@@ -20,7 +20,8 @@
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",
 	"fileChangesInConversation": {
-		"header_other": "이 대화에서 {{count}}개 파일이 변경됨"
+		"header_other": "이 대화에서 {{count}}개 파일이 변경됨",
+		"lineStatsAriaLabel": "추가된 줄: {{added}}, 삭제된 줄: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "사용 가능한 공간: {{amount}} 토큰",
@@ -231,7 +232,9 @@
 		"addToAllowed": "허용 목록에 추가",
 		"removeFromAllowed": "허용 목록에서 제거",
 		"addToDenied": "거부 목록에 추가",
-		"removeFromDenied": "거부 목록에서 제거"
+		"removeFromDenied": "거부 목록에서 제거",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "클릭하여 패턴 편집"
 	},
 	"text": {
 		"rooSaid": "루가 말했다"
@@ -288,7 +291,9 @@
 		"triggerLabelOffShort": "꺼짐",
 		"triggerLabel_zero": "0개 자동 승인됨",
 		"triggerLabel_other": "{{count}}개 자동 승인됨",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "활성화됨",
+		"toggleAriaLabel": "자동 승인 전환"
 	},
 	"reasoning": {
 		"thinking": "생각 중",
@@ -362,7 +367,8 @@
 		"wantsToSearch": "Zoo가 코드베이스에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"wantsToSearchWithPath": "Zoo가 <code>{{path}}</code>에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"didSearch_other": "{{count}}개의 결과를 찾았습니다",
-		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)"
+		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)",
+		"displayError": "검색 결과를 표시하는 중 오류가 발생했습니다."
 	},
 	"read-batch": {
 		"approve": {
@@ -414,7 +420,17 @@
 		"noResults": "결과 없음",
 		"problems": "문제",
 		"terminal": "터미널",
-		"url": "콘텐츠를 가져올 URL 붙여넣기"
+		"url": "콘텐츠를 가져올 URL 붙여넣기",
+		"gitCommits": "Git 커밋",
+		"gitCommitsDescription": "저장소 기록 검색",
+		"workingChanges": "작업 중인 변경 사항",
+		"workingChangesDescription": "커밋되지 않은 현재 변경 사항",
+		"commit": "커밋 {{hash}}",
+		"commitHashDescription": "Git 커밋 해시",
+		"addFile": "파일 추가",
+		"addFolder": "폴더 추가",
+		"commands": "명령",
+		"modes": "모드"
 	},
 	"queuedMessages": {
 		"title": "대기열 메시지",
@@ -427,7 +443,28 @@
 	"todo": {
 		"partial": "{{total}}개의 할 일 중 {{completed}}개 완료",
 		"complete": "{{total}}개의 할 일 완료",
-		"updated": "할 일 목록을 업데이트했습니다"
+		"updated": "할 일 목록을 업데이트했습니다",
+		"listUpdated": "할 일 목록 업데이트됨",
+		"userEdit": "사용자 편집",
+		"userEdits": "사용자 편집 내용",
+		"edit": "편집",
+		"done": "완료",
+		"itemPlaceholder": "할 일 입력",
+		"newItemPlaceholder": "할 일을 입력하고 Enter를 눌러 추가",
+		"remove": "제거",
+		"add": "추가",
+		"cancel": "취소",
+		"addTodo": "+ 할 일 추가",
+		"status": {
+			"notStarted": "시작 안 함",
+			"inProgress": "진행 중",
+			"completed": "완료됨"
+		},
+		"deleteDialog": {
+			"title": "할 일 삭제",
+			"description": "이 할 일을 삭제하시겠습니까?",
+			"confirm": "삭제"
+		}
 	},
 	"tooManyTools": {
 		"title": "활성화된 도구가 너무 많습니다",
@@ -447,5 +484,24 @@
 		"title": "공급자 지원 종료",
 		"message": "이 공급자는 더 이상 사용할 수 없습니다. 계속하려면 지원되는 공급자를 선택하세요.",
 		"openSettings": "설정 열기"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code에 로그인",
+		"goToDashboard": "대시보드로 이동",
+		"signOut": "로그아웃",
+		"avatarAlt": "아바타",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "연결됨"
+	},
+	"arguments": "인수:",
+	"copyAsMarkdown": "Markdown으로 복사",
+	"openInPreview": "미리보기에서 열기",
+	"codeAccordion": {
+		"userEdits": "사용자 편집 내용",
+		"consoleLogs": "콘솔 로그",
+		"openFileAriaLabel": "파일 열기: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "숨겨진 줄 {{count}}개"
 	}
 }

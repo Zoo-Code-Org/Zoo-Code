@@ -9,7 +9,8 @@
 		"./provider-identifiers": "./provider-identifiers.js",
 		"./api-provider-hygiene": "./api-provider-hygiene.js",
 		"./i18n-keys": "./i18n-keys.js",
-		"./i18n-language-switch": "./i18n-language-switch.js"
+		"./i18n-language-switch": "./i18n-language-switch.js",
+		"./i18n-literal-strings": "./i18n-literal-strings.js"
 	},
 	"scripts": {
 		"lint": "eslint . --max-warnings=0",
@@ -20,6 +21,7 @@
 		"@next/eslint-plugin-next": "15.5.28",
 		"eslint": "9.39.5",
 		"eslint-config-prettier": "10.1.8",
+		"eslint-plugin-i18next": "6.1.5",
 		"eslint-plugin-react": "7.37.5",
 		"eslint-plugin-react-hooks": "5.2.0",
 		"eslint-plugin-turbo": "catalog:",

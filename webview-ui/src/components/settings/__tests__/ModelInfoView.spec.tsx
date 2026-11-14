@@ -4,9 +4,10 @@ import { render, screen, within } from "@/utils/test-utils"
 
 import { ModelInfoView } from "../ModelInfoView"
 
+// The token-count key echoes its options so assertions can check what reaches the translator
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
-		t: (key: string) =>
+		t: (key: string, options?: Record<string, unknown>) =>
 			({
 				"settings:modelInfo.imageSupportUnknown": "Image support not reported",
 				"settings:modelInfo.supportsImages": "Supports images",
@@ -24,7 +25,7 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 				"settings:serviceTier.standard": "Standard",
 				"settings:serviceTier.flex": "Flex",
 				"settings:serviceTier.priority": "Priority",
-			})[key] ?? key,
+			})[key] ?? (key === "settings:modelInfo.tokensValue" ? `${key} ${JSON.stringify(options)}` : key),
 	}),
 }))
 
@@ -51,6 +52,23 @@ const getPricingRowValues = (tier: string) => {
 }
 
 describe("ModelInfoView service tier pricing", () => {
+	it("passes token counts so the translation picks the plural form and formats the number", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				modelInfo={{ ...baseModelInfo, maxTokens: 4_096 }}
+				hidePricing
+			/>,
+		)
+		expect(
+			screen.getByText(`settings:modelInfo.tokensValue ${JSON.stringify({ count: 128_000 })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.tokensValue ${JSON.stringify({ count: 4_096 })}`),
+		).toBeInTheDocument()
+	})
+
 	it("reports prompt caching as unsupported for other providers when the model says nothing about it", () => {
 		render(
 			<ModelInfoView

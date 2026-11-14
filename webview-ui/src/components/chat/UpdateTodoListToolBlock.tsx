@@ -10,6 +10,7 @@ import {
 	AlertDialogFooter,
 	AlertDialogTitle,
 } from "@/components/ui"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface TodoItem {
 	id?: string
@@ -36,9 +37,9 @@ interface UpdateTodoListToolBlockProps {
 }
 
 const STATUS_OPTIONS = [
-	{ value: "", label: "Not Started" },
-	{ value: "in_progress", label: "In Progress" },
-	{ value: "completed", label: "Completed" },
+	{ value: "", labelKey: "chat:todo.status.notStarted" },
+	{ value: "in_progress", labelKey: "chat:todo.status.inProgress" },
+	{ value: "completed", labelKey: "chat:todo.status.completed" },
 ]
 
 const genId = () => Math.random().toString(36).slice(2, 10)
@@ -50,6 +51,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 	editable = true,
 	userEdited = false,
 }) => {
+	const { t } = useAppTranslation()
 	const [editTodos, setEditTodos] = useState<TodoItem[]>(
 		todos.length > 0 ? todos.map((todo) => ({ ...todo, id: todo.id || genId() })) : [],
 	)
@@ -151,13 +153,13 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 							style={{ color: "var(--vscode-charts-yellow)" }}
 						/>
 						<span className="font-bold mr-2" style={{ fontWeight: "bold" }}>
-							User Edit
+							{t("chat:todo.userEdit")}
 						</span>
 						<div className="flex-grow" />
 					</div>
 				</ToolUseBlockHeader>
 				<div className="overflow-x-auto max-w-full" style={{ padding: "12px 0 8px 0" }}>
-					<span className="text-vscode-descriptionForeground">User Edits</span>
+					<span className="text-vscode-descriptionForeground">{t("chat:todo.userEdits")}</span>
 				</div>
 			</ToolUseBlock>
 		)
@@ -173,7 +175,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 							style={{ color: "var(--vscode-foreground)" }}
 						/>
 						<span className="font-bold mr-2" style={{ fontWeight: "bold" }}>
-							Todo List Updated
+							{t("chat:todo.listUpdated")}
 						</span>
 						<div className="flex-grow" />
 						{editable && (
@@ -195,7 +197,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 									fontSize: 13,
 									marginLeft: 8,
 								}}>
-								{isEditing ? "Done" : "Edit"}
+								{isEditing ? t("chat:todo.done") : t("chat:todo.edit")}
 							</button>
 						)}
 					</div>
@@ -266,7 +268,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 											<input
 												type="text"
 												value={todo.content}
-												placeholder="Enter todo item"
+												placeholder={t("chat:todo.itemPlaceholder")}
 												onChange={(e) => handleContentChange(todo.id!, e.target.value)}
 												style={{
 													flex: 1,
@@ -322,7 +324,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 												}}>
 												{STATUS_OPTIONS.map((opt) => (
 													<option key={opt.value} value={opt.value}>
-														{opt.label}
+														{t(opt.labelKey)}
 													</option>
 												))}
 											</select>
@@ -340,7 +342,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 													padding: 0,
 													lineHeight: 1,
 												}}
-												title="Remove">
+												title={t("chat:todo.remove")}>
 												×
 											</button>
 										)}
@@ -354,7 +356,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 										ref={newInputRef}
 										type="text"
 										value={newContent}
-										placeholder="Enter todo item, press Enter to add"
+										placeholder={t("chat:todo.newItemPlaceholder")}
 										onChange={(e) => setNewContent(e.target.value)}
 										onKeyDown={handleNewInputKeyDown}
 										style={{
@@ -384,7 +386,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 											fontSize: 12,
 											marginRight: 4,
 										}}>
-										Add
+										{t("chat:todo.add")}
 									</button>
 									<button
 										onClick={() => {
@@ -400,7 +402,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 											cursor: "pointer",
 											fontSize: 12,
 										}}>
-										Cancel
+										{t("chat:todo.cancel")}
 									</button>
 								</li>
 							) : (
@@ -417,7 +419,7 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 												cursor: "pointer",
 												fontSize: 12,
 											}}>
-											+ Add Todo
+											{t("chat:todo.addTodo")}
 										</button>
 									)}
 								</li>
@@ -430,18 +432,18 @@ const UpdateTodoListToolBlock: React.FC<UpdateTodoListToolBlockProps> = ({
 			</ToolUseBlock>
 			<AlertDialog open={deleteId !== null} onOpenChange={cancelDelete}>
 				<AlertDialogContent className="max-w-xs">
-					<AlertDialogTitle className="sr-only">Delete todo item</AlertDialogTitle>
-					<AlertDialogDescription>Are you sure you want to delete this todo item?</AlertDialogDescription>
+					<AlertDialogTitle className="sr-only">{t("chat:todo.deleteDialog.title")}</AlertDialogTitle>
+					<AlertDialogDescription>{t("chat:todo.deleteDialog.description")}</AlertDialogDescription>
 					<AlertDialogFooter>
 						<AlertDialogCancel
 							onClick={cancelDelete}
 							className="bg-transparent text-vscode-foreground border-vscode-dropdown-border hover:bg-vscode-toolbar-hoverBackground">
-							Cancel
+							{t("chat:todo.cancel")}
 						</AlertDialogCancel>
 						<AlertDialogAction
 							onClick={confirmDelete}
 							className="bg-transparent text-vscode-errorForeground border-vscode-errorForeground hover:bg-vscode-toolbar-hoverBackground">
-							Delete
+							{t("chat:todo.deleteDialog.confirm")}
 						</AlertDialogAction>
 					</AlertDialogFooter>
 				</AlertDialogContent>

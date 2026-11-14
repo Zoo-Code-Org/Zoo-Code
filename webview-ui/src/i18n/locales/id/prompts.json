@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Konfigurasi API",
-		"select": "Pilih konfigurasi API mana yang akan digunakan untuk mode ini"
+		"select": "Pilih konfigurasi API mana yang akan digunakan untuk mode ini",
+		"pinnedGroupAriaLabel": "Konfigurasi yang disematkan",
+		"allGroupAriaLabel": "Semua konfigurasi"
 	},
 	"tools": {
 		"title": "Tools yang Tersedia",
@@ -47,7 +49,8 @@
 		"title": "Instruksi Kustom Khusus Mode (opsional)",
 		"resetToDefault": "Reset ke default",
 		"description": "Tambahkan panduan perilaku khusus untuk mode {{modeName}}.",
-		"loadFromFile": "Instruksi khusus untuk mode {{mode}} juga dapat dimuat dari folder <span>.roo/rules-{{slug}}/</span> di ruang kerja Anda atau dari global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} dan .clinerules-{{slug}} sudah usang dan akan segera berhenti berfungsi)."
+		"loadFromFile": "Instruksi khusus untuk mode {{mode}} juga dapat dimuat dari folder <span>.roo/rules-{{slug}}/</span> di ruang kerja Anda atau dari global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} dan .clinerules-{{slug}} sudah usang dan akan segera berhenti berfungsi).",
+		"loadFromFileAriaLabel": "Pelajari tentang instruksi kustom global untuk mode"
 	},
 	"exportMode": {
 		"title": "Ekspor Mode",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instruksi Kustom untuk Semua Mode",
 		"description": "Instruksi ini berlaku untuk semua mode. Mereka menyediakan set dasar perilaku yang dapat ditingkatkan oleh instruksi khusus mode di bawah. <0>Pelajari lebih lanjut</0>",
-		"loadFromFile": "Instruksi juga dapat dimuat dari folder <span>.roo/rules/</span> di ruang kerja Anda atau dari global <0>.roo/rules/</0> (.roorules dan .clinerules sudah usang dan akan segera berhenti berfungsi)."
+		"loadFromFile": "Instruksi juga dapat dimuat dari folder <span>.roo/rules/</span> di ruang kerja Anda atau dari global <0>.roo/rules/</0> (.roorules dan .clinerules sudah usang dan akan segera berhenti berfungsi).",
+		"learnMoreAriaLabel": "Pelajari lebih lanjut tentang instruksi kustom global",
+		"loadFromFileAriaLabel": "Pelajari cara menyiapkan instruksi kustom global"
 	},
 	"systemPrompt": {
 		"preview": "Pratinjau System Prompt",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Mode ini memiliki folder aturan di {{folderPath}} yang juga akan dihapus.",
 		"confirm": "Hapus",
 		"cancel": "Batal"
+	},
+	"mcpServers": {
+		"restrict": "Batasi ke server MCP tertentu",
+		"noneConnected": "Tidak ada server MCP yang terhubung",
+		"notConnected": "{{serverName}} (tidak terhubung)"
 	}
 }

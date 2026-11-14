@@ -2,6 +2,8 @@ import React from "react"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import type { McpServer } from "@roo-code/types"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
+
 export interface McpServerChecklistProps {
 	/** The currently-allowed server names. */
 	allowedMcpServers: string[]
@@ -29,6 +31,8 @@ const McpServerChecklist: React.FC<McpServerChecklistProps> = ({
 	onServerToggle,
 	testIdPrefix,
 }) => {
+	const { t } = useAppTranslation()
+
 	return (
 		<div className="ml-6 mt-2 flex flex-col gap-1" data-testid={`${testIdPrefix}-list`}>
 			{mcpServers && mcpServers.length > 0 ? (
@@ -42,7 +46,7 @@ const McpServerChecklist: React.FC<McpServerChecklistProps> = ({
 					</VSCodeCheckbox>
 				))
 			) : (
-				<div className="text-xs text-vscode-descriptionForeground">No MCP servers connected</div>
+				<div className="text-xs text-vscode-descriptionForeground">{t("prompts:mcpServers.noneConnected")}</div>
 			)}
 			{/* Warning for servers in the allowlist that aren't currently connected */}
 			{allowedMcpServers
@@ -50,7 +54,7 @@ const McpServerChecklist: React.FC<McpServerChecklistProps> = ({
 				.map((missingServer) => (
 					<div key={missingServer} className="text-xs text-vscode-errorForeground flex items-center gap-1">
 						<span className="codicon codicon-warning" />
-						{missingServer} (not connected)
+						{t("prompts:mcpServers.notConnected", { serverName: missingServer })}
 					</div>
 				))}
 		</div>

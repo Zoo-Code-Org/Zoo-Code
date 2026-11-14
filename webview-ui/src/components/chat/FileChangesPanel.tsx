@@ -165,7 +165,10 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 				{totalStats.added > 0 || totalStats.removed > 0 ? (
 					<div
 						className="flex items-center gap-2 ml-auto shrink-0"
-						aria-label={`${totalStats.added} lines added, ${totalStats.removed} lines removed`}>
+						aria-label={t("chat:fileChangesInConversation.lineStatsAriaLabel", {
+							added: totalStats.added,
+							removed: totalStats.removed,
+						})}>
 						<span className="text-xs font-medium text-vscode-charts-green" data-testid="total-added">
 							+{totalStats.added}
 						</span>

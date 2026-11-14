@@ -1,7 +1,8 @@
 {
 	"landing": {
 		"greeting": "Benvenuto in Zoo Code!",
-		"introduction": "Con una gamma di Modalità integrate ed estensibili, Zoo Code ti permette di pianificare, architettare, codificare, debuggare e aumentare la tua produttività come mai prima d'ora."
+		"introduction": "Con una gamma di Modalità integrate ed estensibili, Zoo Code ti permette di pianificare, architettare, codificare, debuggare e aumentare la tua produttività come mai prima d'ora.",
+		"logoAlt": "Logo di Roo"
 	},
 	"providerSignup": {
 		"heading": "Scegli il tuo provider",

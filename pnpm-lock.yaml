@@ -289,6 +289,9 @@ importers:
       eslint-config-prettier:
         specifier: 10.1.8
         version: 10.1.8(eslint@9.39.5(jiti@2.7.0))
+      eslint-plugin-i18next:
+        specifier: 6.1.5
+        version: 6.1.5
       eslint-plugin-react:
         specifier: 7.37.5
         version: 7.37.5(eslint@9.39.5(jiti@2.7.0))
@@ -5018,6 +5021,10 @@ packages:
     peerDependencies:
       eslint: '>=7.0.0'
 
+  eslint-plugin-i18next@6.1.5:
+    resolution: {integrity: sha512-xCTfstbK9ZpQ6UFT5S1s6zbZMhKn2o2jRSQYiU2UkV7wt8y1m3WjkUYGkGlipgRdFInYI9+LAqE+JQU/L73HmA==}
+    engines: {node: '>=18.10.0'}
+
   eslint-plugin-react-hooks@5.2.0:
     resolution: {integrity: sha512-+f15FfK64YQwZdJNELETdn5ibXEUQmW1DZL6KXhNnc2heoy/sg9VJJeT7n8TlMWouzWqSWavFkIhHyIbIAEapg==}
     engines: {node: '>=10'}
@@ -7696,6 +7703,10 @@ packages:
   require-from-string@2.0.2:
     resolution: {integrity: sha512-Xf0nWe6RseziFMu+Ap9biiUbmplq6S9/p+7w7YXP/JBHhrUDDUhwa+vANyubuqfZWTveU//DYVGsDG7RKL/vEw==}
     engines: {node: '>=0.10.0'}
+
+  requireindex@1.1.0:
+    resolution: {integrity: sha512-LBnkqsDE7BZKvqylbmn7lTIVdpx4K/QCduRATpO5R+wtPmky/a8pN1bO2D6wXppn1497AJF9mNjqAXr6bdl9jg==}
+    engines: {node: '>=0.10.5'}
 
   resize-observer-polyfill@1.5.1:
     resolution: {integrity: sha512-LwZrotdHOo12nQuZlHEmtuXdqGoOD0OhaxopaNFxWzInpEgaLWoVuAMbTzixuosCx2nEG58ngzW3vxdWoxIgdg==}
@@ -13554,6 +13565,10 @@ snapshots:
     dependencies:
       eslint: 9.39.5(jiti@2.7.0)
 
+  eslint-plugin-i18next@6.1.5:
+    dependencies:
+      requireindex: 1.1.0
+
   eslint-plugin-react-hooks@5.2.0(eslint@9.39.5(jiti@2.7.0)):
     dependencies:
       eslint: 9.39.5(jiti@2.7.0)
@@ -16793,6 +16808,8 @@ snapshots:
   require-directory@2.1.1: {}
 
   require-from-string@2.0.2: {}
+
+  requireindex@1.1.0: {}
 
   resize-observer-polyfill@1.5.1: {}
 

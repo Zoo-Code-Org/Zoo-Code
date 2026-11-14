@@ -49,8 +49,8 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 	const menuRef = useRef<HTMLDivElement>(null)
 
 	const filteredOptions = useMemo(() => {
-		return getContextMenuOptions(searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands)
-	}, [searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands])
+		return getContextMenuOptions(t, searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands)
+	}, [t, searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands])
 
 	useEffect(() => {
 		if (menuRef.current) {
@@ -166,7 +166,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						</div>
 					)
 				} else {
-					return <span>Git Commits</span>
+					return <span>{t("chat:contextMenu.gitCommits")}</span>
 				}
 			case ContextMenuOptionType.File:
 			case ContextMenuOptionType.OpenedFile:
@@ -206,7 +206,13 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 						</div>
 					)
 				} else {
-					return <span>Add {option.type === ContextMenuOptionType.File ? "File" : "Folder"}</span>
+					return (
+						<span>
+							{option.type === ContextMenuOptionType.File
+								? t("chat:contextMenu.addFile")
+								: t("chat:contextMenu.addFolder")}
+						</span>
+					)
 				}
 		}
 	}
@@ -295,7 +301,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 					<div className="p-2 flex items-start gap-4 justify-between">
 						{searchQuery.length === 1 && (
 							<div className="text-sm">
-								<p className="font-bold text-base text-vscode-foreground mt-1 mb-0.5">Slash Commands</p>
+								<p className="font-bold text-base text-vscode-foreground mt-1 mb-0.5">
+									{t("settings:sections.slashCommands")}
+								</p>
 								<p className="text-xs mt-0.5 -mb-1">
 									<Trans
 										t={t}
@@ -383,7 +391,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 									option.type === ContextMenuOptionType.OpenedFile) && (
 									<img
 										src={getMaterialIconForOption(option)}
-										alt="Mode"
+										alt=""
 										style={{
 											marginRight: "6px",
 											flexShrink: 0,

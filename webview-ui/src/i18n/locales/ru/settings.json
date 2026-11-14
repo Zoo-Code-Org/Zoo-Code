@@ -6,7 +6,8 @@
 		"cancel": "Отмена",
 		"select": "Выбрать",
 		"add": "Добавить заголовок",
-		"remove": "Удалить"
+		"remove": "Удалить",
+		"milliseconds": "{{value}} мс"
 	},
 	"search": {
 		"placeholder": "Поиск параметров...",
@@ -82,7 +83,9 @@
 			"detailTasksImported_other": "Импортировано историй задач: {{count}} из {{total}}.",
 			"detailPreparing": "Подготовка импорта истории Roo Code.",
 			"progressAriaLabel": "Ход импорта истории Roo Code"
-		}
+		},
+		"version": "Версия: {{version}}",
+		"versionWithCommit": "Версия: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Управляйте своими слэш-командами для быстрого выполнения пользовательских рабочих процессов и действий. <DocsLink>Узнать больше</DocsLink>",
@@ -687,6 +690,17 @@
 			"signInDescription": "Войдите, чтобы использовать Zoo Gateway с вашей учетной записью",
 			"authenticated": "Аутентифицирован",
 			"authenticatedAs": "Аутентифицирован как {{name}}"
+		},
+		"awsAuthMethod": "Способ аутентификации",
+		"qwenCode": {
+			"oauthPathLabel": "Путь к учётным данным OAuth",
+			"oauthPathDescription": "Путь к файлу учётных данных Qwen OAuth. Если оставить поле пустым, используется {{defaultPath}}.",
+			"description": "Qwen Code — это API на основе OAuth, которому нужна аутентификация через официальный клиент Qwen. Сначала настройте учётные данные OAuth.",
+			"gettingStarted": "Чтобы начать:",
+			"step1": "1. Установите официальный клиент Qwen",
+			"step2": "2. Войдите в свою учётную запись",
+			"step3": "3. Учётные данные OAuth сохранятся автоматически",
+			"setupInstructions": "Инструкция по настройке"
 		}
 	},
 	"checkpoints": {
@@ -918,7 +932,8 @@
 			"refreshing": "Обновление...",
 			"refreshSuccess": "Инструменты успешно обновлены",
 			"refreshError": "Не удалось обновить инструменты",
-			"toolParameters": "Параметры"
+			"toolParameters": "Параметры",
+			"required": "обязательный"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Динамическое усилие размышления",
@@ -959,7 +974,14 @@
 			"freeRequests_other": "* Бесплатно до {{count}} запроса в минуту. Далее тарификация зависит от размера подсказки.",
 			"pricingDetails": "Подробнее о ценах.",
 			"billingEstimate": "* Счёт — приблизительный, точная стоимость зависит от размера подсказки."
-		}
+		},
+		"tokensValue_one": "{{count, number}} токен",
+		"tokensValue_few": "{{count, number}} токена",
+		"tokensValue_many": "{{count, number}} токенов",
+		"tokensValue_other": "{{count, number}} токена",
+		"pricePerMillionTokens": "{{price}} / 1 млн токенов",
+		"showMore": "Ещё",
+		"showLess": "Свернуть"
 	},
 	"modelPicker": {
 		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",
@@ -1024,7 +1046,8 @@
 			"inputPrice": "например, 0.0001",
 			"outputPrice": "например, 0.0002",
 			"cacheWritePrice": "например, 0.00005"
-		}
+		},
+		"defaultValue": "По умолчанию: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "По умолчанию: http://localhost:11434",
@@ -1053,7 +1076,9 @@
 			"input": "Вход",
 			"output": "Выход",
 			"cacheReads": "Чтения из кэша"
-		}
+		},
+		"label": "Уровень обслуживания",
+		"tooltip": "Для более быстрой обработки API-запросов попробуйте уровень обслуживания с приоритетной обработкой. Чтобы платить меньше ценой большей задержки, попробуйте уровень гибкой обработки (Flex)."
 	},
 	"ui": {
 		"collapseThinking": {

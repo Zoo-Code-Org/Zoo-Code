@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "Поиск...",
-		"no_results": "Результатов не найдено"
+		"no_results": "Результатов не найдено",
+		"close": "Закрыть",
+		"clear_search_aria_label": "Очистить поиск"
 	},
 	"mermaid": {
 		"loading": "Создание диаграммы mermaid...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "Изображение"
 		},
-		"noData": "Нет данных изображения"
+		"noData": "Нет данных изображения",
+		"generatedAlt": "Изображение, созданное ИИ",
+		"thumbnailAlt": "Миниатюра {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "Удалить Сообщение",

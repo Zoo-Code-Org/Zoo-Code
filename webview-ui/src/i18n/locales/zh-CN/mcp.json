@@ -55,5 +55,10 @@
 		"running": "运行中",
 		"completed": "已完成",
 		"error": "错误"
-	}
+	},
+	"resource": {
+		"returns": "返回",
+		"unknownMimeType": "未知"
+	},
+	"toggleServerAriaLabel": "启用/禁用 {{serverName}} 服务"
 }

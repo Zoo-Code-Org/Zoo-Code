@@ -97,7 +97,9 @@ export const OpenRouter = ({
 							value={apiConfiguration.openRouterBaseUrl || ""}
 							type="url"
 							onInput={handleInputChange("openRouterBaseUrl")}
-							placeholder="Default: https://openrouter.ai/api/v1"
+							placeholder={t("settings:placeholders.defaultValue", {
+								value: "https://openrouter.ai/api/v1",
+							})}
 							className="w-full mt-1"
 						/>
 					)}

@@ -70,7 +70,8 @@
 		"goToModes": "Ga naar Modi-instellingen",
 		"moreInfoMcp": "{{name}} MCP-documentatie bekijken",
 		"validationRequired": "Geef een waarde op voor {{paramName}}",
-		"prerequisites": "Vereisten"
+		"prerequisites": "Vereisten",
+		"optional": "(optioneel)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Heb je een probleem gevonden met een marketplace-item of heb je suggesties voor nieuwe items? <0>Open een GitHub issue</0> om het ons te laten weten!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modi"
 	}
 }

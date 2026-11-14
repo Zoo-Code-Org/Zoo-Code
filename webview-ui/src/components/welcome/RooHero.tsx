@@ -1,6 +1,9 @@
 import { useState } from "react"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
+
 const RooHero = () => {
+	const { t } = useAppTranslation()
 	const [imagesBaseUri] = useState(() => {
 		const w = window as any
 		return w.IMAGES_BASE_URI || ""
@@ -24,7 +27,11 @@ const RooHero = () => {
 					animation: isHovered ? "smooth-bounce 1s ease-in-out infinite" : "none",
 				}}
 				className="z-5 mr-auto translate-y-0 transition-transform duration-500">
-				<img src={imagesBaseUri + "/roo-logo.svg"} alt="Roo logo" className="h-8 opacity-0" />
+				<img
+					src={imagesBaseUri + "/roo-logo.svg"}
+					alt={t("welcome:landing.logoAlt")}
+					className="h-8 opacity-0"
+				/>
 			</div>
 			<div
 				className="w-[200%] -mt-0.25 h-0.5 overflow-hidden opacity-0 group-hover:opacity-70 transition-opacity duration-300"

@@ -20,7 +20,8 @@
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
 	"fileChangesInConversation": {
-		"header_other": "この会話で {{count}} 個のファイルが変更されました"
+		"header_other": "この会話で {{count}} 個のファイルが変更されました",
+		"lineStatsAriaLabel": "追加行: {{added}}、削除行: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "利用可能な空き容量: {{amount}} トークン",
@@ -231,7 +232,9 @@
 		"addToAllowed": "許可リストに追加",
 		"removeFromAllowed": "許可リストから削除",
 		"addToDenied": "拒否リストに追加",
-		"removeFromDenied": "拒否リストから削除"
+		"removeFromDenied": "拒否リストから削除",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "クリックしてパターンを編集"
 	},
 	"text": {
 		"rooSaid": "Zooの発言"
@@ -288,7 +291,9 @@
 		"triggerLabelOffShort": "オフ",
 		"triggerLabel_zero": "0個の自動承認",
 		"triggerLabel_other": "{{count}}個の自動承認済み",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "有効",
+		"toggleAriaLabel": "自動承認を切り替える"
 	},
 	"reasoning": {
 		"thinking": "考え中",
@@ -362,7 +367,8 @@
 		"wantsToSearch": "Zooはコードベースで <code>{{query}}</code> を検索したい",
 		"wantsToSearchWithPath": "Zooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
 		"didSearch_other": "{{count}}件の結果が見つかりました",
-		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
+		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)",
+		"displayError": "検索結果の表示中にエラーが発生しました。"
 	},
 	"read-batch": {
 		"approve": {
@@ -414,7 +420,17 @@
 		"noResults": "結果なし",
 		"problems": "問題",
 		"terminal": "ターミナル",
-		"url": "URLを貼り付けてコンテンツを取得"
+		"url": "URLを貼り付けてコンテンツを取得",
+		"gitCommits": "Git コミット",
+		"gitCommitsDescription": "リポジトリの履歴を検索",
+		"workingChanges": "作業中の変更",
+		"workingChangesDescription": "未コミットの現在の変更",
+		"commit": "コミット {{hash}}",
+		"commitHashDescription": "Git コミットハッシュ",
+		"addFile": "ファイルを追加",
+		"addFolder": "フォルダーを追加",
+		"commands": "コマンド",
+		"modes": "モード"
 	},
 	"queuedMessages": {
 		"title": "キューメッセージ",
@@ -427,7 +443,28 @@
 	"todo": {
 		"partial": "{{total}}件中{{completed}}件のTo-Doが完了",
 		"complete": "{{total}}件のTo-Doが完了",
-		"updated": "To-Doリストを更新しました"
+		"updated": "To-Doリストを更新しました",
+		"listUpdated": "ToDo リストを更新しました",
+		"userEdit": "ユーザーによる編集",
+		"userEdits": "ユーザーによる編集",
+		"edit": "編集",
+		"done": "完了",
+		"itemPlaceholder": "ToDo 項目を入力",
+		"newItemPlaceholder": "ToDo 項目を入力し、Enter で追加",
+		"remove": "削除",
+		"add": "追加",
+		"cancel": "キャンセル",
+		"addTodo": "+ ToDo を追加",
+		"status": {
+			"notStarted": "未着手",
+			"inProgress": "進行中",
+			"completed": "完了"
+		},
+		"deleteDialog": {
+			"title": "ToDo 項目を削除",
+			"description": "この ToDo 項目を削除してもよろしいですか？",
+			"confirm": "削除"
+		}
 	},
 	"tooManyTools": {
 		"title": "有効になっているツールが多すぎます",
@@ -447,5 +484,24 @@
 		"title": "プロバイダーのサポート終了",
 		"message": "このプロバイダーは現在利用できません。続行するには、サポートされているプロバイダーを選択してください。",
 		"openSettings": "設定を開く"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code にサインイン",
+		"goToDashboard": "ダッシュボードへ",
+		"signOut": "サインアウト",
+		"avatarAlt": "アバター",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "接続済み"
+	},
+	"arguments": "引数:",
+	"copyAsMarkdown": "Markdown としてコピー",
+	"openInPreview": "プレビューで開く",
+	"codeAccordion": {
+		"userEdits": "ユーザーによる編集",
+		"consoleLogs": "コンソールログ",
+		"openFileAriaLabel": "ファイルを開く: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "{{count}} 行が非表示"
 	}
 }

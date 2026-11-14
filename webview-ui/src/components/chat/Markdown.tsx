@@ -2,11 +2,13 @@ import { memo, useState } from "react"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 
 import { useCopyToClipboard } from "@src/utils/clipboard"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { StandardTooltip } from "@src/components/ui"
 
 import MarkdownBlock from "../common/MarkdownBlock"
 
 export const Markdown = memo(({ markdown, partial }: { markdown?: string; partial?: boolean }) => {
+	const { t } = useAppTranslation()
 	const [isHovering, setIsHovering] = useState(false)
 
 	// Shorter feedback duration for copy button flash.
@@ -35,7 +37,7 @@ export const Markdown = memo(({ markdown, partial }: { markdown?: string; partia
 						borderRadius: "4px",
 					}}>
 					<style>{`@keyframes fadeIn { from { opacity: 0; } to { opacity: 1.0; } }`}</style>
-					<StandardTooltip content="Copy as markdown">
+					<StandardTooltip content={t("chat:copyAsMarkdown")}>
 						<VSCodeButton
 							className="copy-button"
 							appearance="icon"

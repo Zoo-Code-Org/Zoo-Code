@@ -55,5 +55,10 @@
 		"running": "Wird ausgeführt",
 		"completed": "Abgeschlossen",
 		"error": "Fehler"
-	}
+	},
+	"resource": {
+		"returns": "Gibt zurück",
+		"unknownMimeType": "Unbekannt"
+	},
+	"toggleServerAriaLabel": "Server {{serverName}} ein-/ausschalten"
 }

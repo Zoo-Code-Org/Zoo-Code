@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Konfiguracja API",
-		"select": "Wybierz, której konfiguracji API użyć dla tego trybu"
+		"select": "Wybierz, której konfiguracji API użyć dla tego trybu",
+		"pinnedGroupAriaLabel": "Przypięte konfiguracje",
+		"allGroupAriaLabel": "Wszystkie konfiguracje"
 	},
 	"tools": {
 		"title": "Dostępne narzędzia",
@@ -47,7 +49,8 @@
 		"title": "Niestandardowe instrukcje dla trybu (opcjonalne)",
 		"resetToDefault": "Przywróć domyślne",
 		"description": "Dodaj wytyczne dotyczące zachowania specyficzne dla trybu {{modeName}}.",
-		"loadFromFile": "Niestandardowe instrukcje specyficzne dla trybu {{mode}} można również załadować z folderu <span>.roo/rules-{{slug}}/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} są przestarzałe i wkrótce przestaną działać)."
+		"loadFromFile": "Niestandardowe instrukcje specyficzne dla trybu {{mode}} można również załadować z folderu <span>.roo/rules-{{slug}}/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} są przestarzałe i wkrótce przestaną działać).",
+		"loadFromFileAriaLabel": "Dowiedz się o globalnych instrukcjach niestandardowych dla trybów"
 	},
 	"exportMode": {
 		"title": "Eksportuj tryb",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Niestandardowe instrukcje dla wszystkich trybów",
 		"description": "Te instrukcje dotyczą wszystkich trybów. Zapewniają podstawowy zestaw zachowań, które mogą być rozszerzone przez instrukcje specyficzne dla trybów poniżej. <0>Dowiedz się więcej</0>",
-		"loadFromFile": "Instrukcje można również załadować z folderu <span>.roo/rules/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules/</0> (.roorules i .clinerules są przestarzałe i wkrótce przestaną działać)."
+		"loadFromFile": "Instrukcje można również załadować z folderu <span>.roo/rules/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules/</0> (.roorules i .clinerules są przestarzałe i wkrótce przestaną działać).",
+		"learnMoreAriaLabel": "Dowiedz się więcej o globalnych instrukcjach niestandardowych",
+		"loadFromFileAriaLabel": "Dowiedz się, jak skonfigurować globalne instrukcje niestandardowe"
 	},
 	"systemPrompt": {
 		"preview": "Podgląd podpowiedzi systemowej",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Ten tryb ma folder z regułami w {{folderPath}}, który również zostanie usunięty.",
 		"confirm": "Usuń",
 		"cancel": "Anuluj"
+	},
+	"mcpServers": {
+		"restrict": "Ogranicz do wybranych serwerów MCP",
+		"noneConnected": "Brak połączonych serwerów MCP",
+		"notConnected": "{{serverName}} (niepołączony)"
 	}
 }

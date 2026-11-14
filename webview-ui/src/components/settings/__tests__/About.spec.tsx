@@ -42,6 +42,8 @@ vi.mock("@/i18n/TranslationContext", () => {
 		useAppTranslation: () => ({
 			t: (key: string, options?: Record<string, unknown>) => {
 				if (!options) return key
+				// The version keys echo their options so the test can check what reaches the translator
+				if (key.startsWith("settings:about.version")) return `${key} ${JSON.stringify(options)}`
 				let result = key
 				for (const [k, v] of Object.entries(options)) {
 					result = result.replace(`{{${k}}}`, String(v))
@@ -109,7 +111,9 @@ describe("About", () => {
 				<About {...defaultProps} />
 			</TranslationProvider>,
 		)
-		expect(screen.getByText(/Version: 1\.0\.0/)).toBeInTheDocument()
+		expect(
+			screen.getByText('settings:about.versionWithCommit {"version":"1.0.0","commit":"abc12345"}'),
+		).toBeInTheDocument()
 	})
 
 	it("renders the bug report section with label and link text", () => {

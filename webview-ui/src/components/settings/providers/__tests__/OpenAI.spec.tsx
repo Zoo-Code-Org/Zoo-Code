@@ -57,12 +57,13 @@ describe("OpenAI service tier selector", () => {
 			/>,
 		)
 
+		expect(screen.getByText("settings:serviceTier.label")).toBeInTheDocument()
 		const selector = screen.getByRole("combobox", { name: "Service tier" })
 		expect(selector).toHaveValue(OpenAiServiceTier.Default)
 		expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
-			"Standard",
-			"Flex",
-			"Priority",
+			"settings:serviceTier.standard",
+			"settings:serviceTier.flex",
+			"settings:serviceTier.priority",
 		])
 
 		fireEvent.change(selector, { target: { value: OpenAiServiceTier.Flex } })

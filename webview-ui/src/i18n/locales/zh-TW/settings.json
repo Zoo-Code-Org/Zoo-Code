@@ -6,7 +6,8 @@
 		"cancel": "取消",
 		"select": "選擇",
 		"add": "新增標頭",
-		"remove": "移除"
+		"remove": "移除",
+		"milliseconds": "{{value}} 毫秒"
 	},
 	"header": {
 		"title": "設定",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "已匯入 {{total}} 個工作歷史記錄中的 {{count}} 個。",
 			"detailPreparing": "正在準備匯入 Roo Code 歷史記錄。",
 			"progressAriaLabel": "Roo Code 歷史記錄匯入進度"
-		}
+		},
+		"version": "版本：{{version}}",
+		"versionWithCommit": "版本：{{version}}（{{commit}}）"
 	},
 	"slashCommands": {
 		"description": "管理您的斜線命令，以便快速執行自訂工作流程和動作。 <DocsLink>了解更多</DocsLink>",
@@ -711,6 +714,17 @@
 			"signInDescription": "登入以使用您的帳戶存取 Zoo Gateway",
 			"authenticated": "已認證",
 			"authenticatedAs": "已認證為 {{name}}"
+		},
+		"awsAuthMethod": "驗證方式",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 憑證路徑",
+			"oauthPathDescription": "Qwen OAuth 憑證檔案的路徑。留空時預設使用 {{defaultPath}}。",
+			"description": "Qwen Code 是以 OAuth 為基礎的 API，需要透過官方 Qwen 用戶端進行驗證。請先設定 OAuth 憑證。",
+			"gettingStarted": "開始使用：",
+			"step1": "1. 安裝官方 Qwen 用戶端",
+			"step2": "2. 使用你的帳號進行驗證",
+			"step3": "3. OAuth 憑證將自動儲存",
+			"setupInstructions": "設定說明"
 		}
 	},
 	"checkpoints": {
@@ -942,7 +956,8 @@
 			"refreshing": "正在重新整理...",
 			"refreshSuccess": "工具重新整理成功",
 			"refreshError": "工具重新整理失敗",
-			"toolParameters": "參數"
+			"toolParameters": "參數",
+			"required": "必填"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "動態思考強度",
@@ -980,7 +995,11 @@
 			"freeRequests_other": "* 每分鐘可免費使用 {{count}} 次請求，超過後將依提示詞大小計費。",
 			"pricingDetails": "詳細資訊請參閱定價說明。",
 			"billingEstimate": "* 費用為估算值 - 實際費用取決於提示大小。"
-		}
+		},
+		"tokensValue_other": "{{count, number}} Token",
+		"pricePerMillionTokens": "{{price}} / 百萬 Token",
+		"showMore": "展開",
+		"showLess": "收合"
 	},
 	"modelPicker": {
 		"automaticFetch": "此擴充功能會自動從 <serviceLink>{{serviceName}}</serviceLink> 取得最新的可用模型清單。如果不確定要選哪個模型，建議使用 <defaultModelLink>{{defaultModelId}}</defaultModelLink>，這是與 Zoo Code 最佳搭配的模型。您也可以搜尋「free」來檢視目前可用的免費選項。",
@@ -1045,7 +1064,8 @@
 			"inputPrice": "例：0.0001",
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
-		}
+		},
+		"defaultValue": "預設：{{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "預設：http://localhost:11434",
@@ -1074,7 +1094,9 @@
 			"input": "輸入",
 			"output": "輸出",
 			"cacheReads": "快取讀取"
-		}
+		},
+		"label": "服務層級",
+		"tooltip": "如需更快處理 API 請求，請試試優先處理服務層級。如需以較高延遲換取較低價格，請試試彈性處理層級。"
 	},
 	"skills": {
 		"description": "管理為代理提供上下文指令的技能。技能會在與您的任務相關時自動套用。<DocsLink>深入了解</DocsLink>",

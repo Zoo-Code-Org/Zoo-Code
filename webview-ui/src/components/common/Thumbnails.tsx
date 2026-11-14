@@ -1,6 +1,7 @@
 import React, { useState, useRef, useLayoutEffect, memo } from "react"
 import { useWindowSize } from "react-use"
 import { vscode } from "@src/utils/vscode"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface ThumbnailsProps {
 	images: string[]
@@ -10,6 +11,7 @@ interface ThumbnailsProps {
 }
 
 const Thumbnails = ({ images, style, setImages, onHeightChange }: ThumbnailsProps) => {
+	const { t } = useAppTranslation()
 	const [hoveredIndex, setHoveredIndex] = useState<number | null>(null)
 	const containerRef = useRef<HTMLDivElement>(null)
 	const { width } = useWindowSize()
@@ -55,7 +57,7 @@ const Thumbnails = ({ images, style, setImages, onHeightChange }: ThumbnailsProp
 					onMouseLeave={() => setHoveredIndex(null)}>
 					<img
 						src={image}
-						alt={`Thumbnail ${index + 1}`}
+						alt={t("common:image.thumbnailAlt", { index: index + 1 })}
 						style={{
 							width: 34,
 							height: 34,

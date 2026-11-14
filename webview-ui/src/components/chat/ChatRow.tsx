@@ -332,22 +332,14 @@ export const ChatRowContent = ({
 			case "command":
 				if (message.autoApprovalDecision === "deny") {
 					return [
-						<OctagonX
-							key="denied-icon"
-							className="size-4 text-vscode-errorForeground"
-							aria-label="Denied command icon"
-						/>,
+						<OctagonX key="denied-icon" className="size-4 text-vscode-errorForeground" />,
 						<span key="denied-title" className="font-bold text-vscode-errorForeground">
 							{t("chat:commandExecution.denied")}
 						</span>,
 					]
 				}
 				return [
-					isCommandExecuting ? (
-						<ProgressIndicator />
-					) : (
-						<SquareTerminal className="size-4" aria-label="Terminal icon" />
-					),
+					isCommandExecuting ? <ProgressIndicator /> : <SquareTerminal className="size-4" />,
 					<span style={{ color: normalColor, fontWeight: "bold" }}>
 						{t("chat:commandExecution.running")}
 					</span>,
@@ -434,7 +426,7 @@ export const ChatRowContent = ({
 				]
 			case "followup":
 				return [
-					<MessageCircleQuestionMark className="w-4 shrink-0" aria-label="Question icon" />,
+					<MessageCircleQuestionMark className="w-4 shrink-0" />,
 					<span style={{ color: normalColor, fontWeight: "bold" }}>{t("chat:questions.hasQuestion")}</span>,
 				]
 			default:
@@ -510,7 +502,7 @@ export const ChatRowContent = ({
 					return (
 						<>
 							<div style={headerStyle}>
-								<FileDiff className="w-4 shrink-0" aria-label="Batch diff icon" />
+								<FileDiff className="w-4 shrink-0" />
 								<span style={{ fontWeight: "bold" }}>
 									{t("chat:fileOperations.wantsToApplyBatchChanges")}
 								</span>
@@ -632,7 +624,7 @@ export const ChatRowContent = ({
 					return (
 						<>
 							<div style={headerStyle}>
-								<Eye className="w-4 shrink-0" aria-label="View files icon" />
+								<Eye className="w-4 shrink-0" />
 								<span style={{ fontWeight: "bold" }}>
 									{t("chat:fileOperations.wantsToReadMultiple")}
 								</span>
@@ -652,7 +644,7 @@ export const ChatRowContent = ({
 				return (
 					<>
 						<div style={headerStyle}>
-							<FileCode2 className="w-4 shrink-0" aria-label="Read file icon" />
+							<FileCode2 className="w-4 shrink-0" />
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask"
 									? tool.isOutsideWorkspace
@@ -749,7 +741,7 @@ export const ChatRowContent = ({
 									)}
 									{skillInfo.args && (
 										<div>
-											<span style={{ fontWeight: "500" }}>Arguments: </span>
+											<span style={{ fontWeight: "500" }}>{t("chat:arguments")} </span>
 											<span style={{ color: "var(--vscode-descriptionForeground)" }}>
 												{skillInfo.args}
 											</span>
@@ -765,7 +757,7 @@ export const ChatRowContent = ({
 				return (
 					<>
 						<div style={headerStyle}>
-							<ListTree className="w-4 shrink-0" aria-label="List files icon" />
+							<ListTree className="w-4 shrink-0" />
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask"
 									? tool.isOutsideWorkspace
@@ -791,7 +783,7 @@ export const ChatRowContent = ({
 				return (
 					<>
 						<div style={headerStyle}>
-							<FolderTree className="w-4 shrink-0" aria-label="Folder tree icon" />
+							<FolderTree className="w-4 shrink-0" />
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask"
 									? tool.isOutsideWorkspace
@@ -859,7 +851,7 @@ export const ChatRowContent = ({
 				return (
 					<>
 						<div style={headerStyle}>
-							<PocketKnife className="w-4 shrink-0" aria-label="Switch mode icon" />
+							<PocketKnife className="w-4 shrink-0" />
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask" ? (
 									<>
@@ -1007,7 +999,7 @@ export const ChatRowContent = ({
 									}}>
 									{slashCommandInfo.args && (
 										<div>
-											<span style={{ fontWeight: "500" }}>Arguments: </span>
+											<span style={{ fontWeight: "500" }}>{t("chat:arguments")} </span>
 											<span style={{ color: "var(--vscode-descriptionForeground)" }}>
 												{slashCommandInfo.args}
 											</span>
@@ -1247,7 +1239,7 @@ export const ChatRowContent = ({
 					return (
 						<div className="group">
 							<div style={headerStyle}>
-								<MessageCircle className="w-4 shrink-0" aria-label="Speech bubble icon" />
+								<MessageCircle className="w-4 shrink-0" />
 								<span style={{ fontWeight: "bold" }}>{t("chat:text.rooSaid")}</span>
 								<div style={{ flexGrow: 1 }} />
 								<OpenMarkdownPreviewButton markdown={message.text} />
@@ -1275,7 +1267,7 @@ export const ChatRowContent = ({
 					return (
 						<div className="group">
 							<div style={headerStyle}>
-								<User className="w-4 shrink-0" aria-label="User icon" />
+								<User className="w-4 shrink-0" />
 								<span style={{ fontWeight: "bold" }}>{t("chat:feedback.youSaid")}</span>
 							</div>
 							<div
@@ -1326,7 +1318,10 @@ export const ChatRowContent = ({
 													e.stopPropagation()
 													handleEditClick()
 												}}>
-												<Edit className="w-4 shrink-0" aria-label="Edit message icon" />
+												<Edit
+													className="w-4 shrink-0"
+													aria-label={t("common:confirmation.editMessage")}
+												/>
 											</div>
 											<div
 												className="cursor-pointer shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -1335,7 +1330,10 @@ export const ChatRowContent = ({
 													e.stopPropagation()
 													vscode.postMessage({ type: "deleteMessage", value: message.ts })
 												}}>
-												<Trash2 className="w-4 shrink-0" aria-label="Delete message icon" />
+												<Trash2
+													className="w-4 shrink-0"
+													aria-label={t("common:confirmation.deleteMessage")}
+												/>
 											</div>
 										</div>
 									</div>
@@ -1477,7 +1475,7 @@ export const ChatRowContent = ({
 
 					if (parsed && !parsed?.content) {
 						console.error("Invalid codebaseSearch content structure:", parsed.content)
-						return <div>Error displaying search results.</div>
+						return <div>{t("chat:codebaseSearch.displayError")}</div>
 					}
 
 					const { results = [] } = parsed?.content || {}
@@ -1594,7 +1592,7 @@ export const ChatRowContent = ({
 
 							return (
 								<div style={headerStyle}>
-									<FileCode2 className="w-4 shrink-0" aria-label="Read command output icon" />
+									<FileCode2 className="w-4 shrink-0" />
 									<span style={{ fontWeight: "bold" }}>{t("chat:readCommandOutput.title")}</span>
 									{infoText && (
 										<span

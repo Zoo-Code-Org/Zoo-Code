@@ -451,6 +451,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						setSelectedMenuIndex((prevIndex) => {
 							const direction = event.key === "ArrowUp" ? -1 : 1
 							const options = getContextMenuOptions(
+								t,
 								searchQuery,
 								selectedType,
 								queryItems,
@@ -489,6 +490,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
 						event.preventDefault()
 						const selectedOption = getContextMenuOptions(
+							t,
 							searchQuery,
 							selectedType,
 							queryItems,
@@ -597,6 +599,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				resetHistoryNavigation,
 				commands,
 				enterBehavior,
+				t,
 			],
 		)
 

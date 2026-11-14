@@ -55,5 +55,10 @@
 		"running": "In esecuzione",
 		"completed": "Completato",
 		"error": "Errore"
-	}
+	},
+	"resource": {
+		"returns": "Restituisce",
+		"unknownMimeType": "Sconosciuto"
+	},
+	"toggleServerAriaLabel": "Attiva/disattiva il server {{serverName}}"
 }

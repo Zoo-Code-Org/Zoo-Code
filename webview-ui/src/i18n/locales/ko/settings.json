@@ -6,7 +6,8 @@
 		"cancel": "취소",
 		"select": "선택",
 		"add": "헤더 추가",
-		"remove": "삭제"
+		"remove": "삭제",
+		"milliseconds": "{{value}}ms"
 	},
 	"search": {
 		"placeholder": "설정 검색...",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
 			"detailPreparing": "Roo Code 기록 가져오기를 준비 중입니다.",
 			"progressAriaLabel": "Roo Code 기록 가져오기 진행률"
-		}
+		},
+		"version": "버전: {{version}}",
+		"versionWithCommit": "버전: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "사용자 지정 워크플로와 작업을 신속하게 실행하기 위해 슬래시 명령을 관리합니다. <DocsLink>더 알아보기</DocsLink>",
@@ -684,6 +687,17 @@
 			"signInDescription": "계정으로 Zoo Gateway를 사용하려면 로그인하세요",
 			"authenticated": "인증됨",
 			"authenticatedAs": "{{name}}(으)로 인증됨"
+		},
+		"awsAuthMethod": "인증 방법",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 자격 증명 경로",
+			"oauthPathDescription": "Qwen OAuth 자격 증명 파일 경로입니다. 비워 두면 {{defaultPath}}이(가) 사용됩니다.",
+			"description": "Qwen Code는 공식 Qwen 클라이언트를 통한 인증이 필요한 OAuth 기반 API입니다. 먼저 OAuth 자격 증명을 설정해야 합니다.",
+			"gettingStarted": "시작하려면:",
+			"step1": "1. 공식 Qwen 클라이언트 설치",
+			"step2": "2. 계정으로 인증",
+			"step3": "3. OAuth 자격 증명이 자동으로 저장됩니다",
+			"setupInstructions": "설정 안내"
 		}
 	},
 	"checkpoints": {
@@ -915,7 +929,8 @@
 			"refreshing": "새로고침 중...",
 			"refreshSuccess": "도구가 성공적으로 새로고침되었습니다",
 			"refreshError": "도구 새로고침에 실패했습니다",
-			"toolParameters": "매개변수"
+			"toolParameters": "매개변수",
+			"required": "필수"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "동적 사고 노력",
@@ -953,7 +968,11 @@
 			"freeRequests_other": "* 분당 {{count}}개의 요청까지 무료. 이후에는 프롬프트 크기에 따라 요금이 부과됩니다.",
 			"pricingDetails": "자세한 내용은 가격 정보를 참조하세요.",
 			"billingEstimate": "* 요금은 추정치입니다 - 정확한 비용은 프롬프트 크기에 따라 달라집니다."
-		}
+		},
+		"tokensValue_other": "{{count, number}} 토큰",
+		"pricePerMillionTokens": "{{price}} / 100만 토큰",
+		"showMore": "더 보기",
+		"showLess": "간략히"
 	},
 	"modelPicker": {
 		"automaticFetch": "확장 프로그램은 <serviceLink>{{serviceName}}</serviceLink>에서 사용 가능한 최신 모델 목록을 자동으로 가져옵니다. 어떤 모델을 선택해야 할지 확실하지 않다면, Zoo Code는 <defaultModelLink>{{defaultModelId}}</defaultModelLink>로 가장 잘 작동합니다. 현재 사용 가능한 무료 옵션을 찾으려면 \"free\"를 검색해 볼 수도 있습니다.",
@@ -1018,7 +1037,8 @@
 			"inputPrice": "예: 0.0001",
 			"outputPrice": "예: 0.0002",
 			"cacheWritePrice": "예: 0.00005"
-		}
+		},
+		"defaultValue": "기본값: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "기본값: http://localhost:11434",
@@ -1047,7 +1067,9 @@
 			"input": "입력",
 			"output": "출력",
 			"cacheReads": "캐시 읽기"
-		}
+		},
+		"label": "서비스 등급",
+		"tooltip": "API 요청을 더 빠르게 처리하려면 우선 처리(Priority) 서비스 등급을 사용해 보세요. 지연 시간이 길어도 더 저렴한 가격을 원하면 Flex 처리 등급을 사용해 보세요."
 	},
 	"ui": {
 		"collapseThinking": {

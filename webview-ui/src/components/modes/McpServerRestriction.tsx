@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from "react"
 import { VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 import type { ModeConfig, McpServer } from "@roo-code/types"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import McpServerChecklist from "./McpServerChecklist"
 
 export interface McpServerRestrictionProps {
@@ -48,6 +49,7 @@ function arraysEqualOrBothUndefined(a: string[] | undefined, b: string[] | undef
  *    case without clobbering an in-flight user edit.
  */
 const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode, mcpServers, onCommit }) => {
+	const { t } = useAppTranslation()
 	const [cachedAllowedMcpServers, setCachedAllowedMcpServers] = useState<string[] | undefined>(
 		customMode.allowedMcpServers,
 	)
@@ -153,7 +155,7 @@ const McpServerRestriction: React.FC<McpServerRestrictionProps> = ({ customMode,
 	return (
 		<div className="mt-3 ml-1" data-testid="mcp-server-restriction">
 			<VSCodeCheckbox checked={isRestricted} data-testid="restrict-mcp-servers-toggle" onChange={handleToggle}>
-				Restrict to specific MCP servers
+				{t("prompts:mcpServers.restrict")}
 			</VSCodeCheckbox>
 			{isRestricted && (
 				<McpServerChecklist

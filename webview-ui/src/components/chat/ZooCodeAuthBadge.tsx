@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { getZooCodeAuthUrl } from "@src/oauth/urls"
 import { vscode } from "@src/utils/vscode"
 import { cn } from "@src/lib/utils"
@@ -34,6 +35,7 @@ function getInitials(name?: string, email?: string): string {
 }
 
 export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className }) => {
+	const { t } = useAppTranslation()
 	const {
 		zooCodeIsAuthenticated,
 		zooCodeUserName,
@@ -92,12 +94,18 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 						"text-[9px] font-semibold text-[var(--vscode-button-foreground,#ffffff)]",
 				)}
 				style={avatarButtonStyle}
-				title={zooCodeIsAuthenticated ? `Zoo Code: ${zooCodeUserEmail || "Connected"}` : "Sign in to Zoo Code"}>
+				title={
+					zooCodeIsAuthenticated
+						? t("chat:zooCodeAuth.accountTitle", {
+								account: zooCodeUserEmail || t("chat:zooCodeAuth.connected"),
+							})
+						: t("chat:zooCodeAuth.signIn")
+				}>
 				{zooCodeIsAuthenticated ? (
 					showImage ? (
 						<img
 							src={zooCodeUserImage}
-							alt="avatar"
+							alt={t("chat:zooCodeAuth.avatarAlt")}
 							className="size-full rounded-full object-cover"
 							onError={() => setImageError(true)}
 						/>
@@ -131,7 +139,7 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 					)}>
 					{!zooCodeIsAuthenticated ? (
 						<a href={authUrl} onClick={() => setIsOpen(false)} className={menuItemClasses}>
-							Sign in to Zoo Code
+							{t("chat:zooCodeAuth.signIn")}
 						</a>
 					) : (
 						<>
@@ -148,7 +156,7 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 								href={`${zooCodeBaseUrl || "https://www.zoocode.dev"}/dashboard`}
 								onClick={() => setIsOpen(false)}
 								className={menuItemClasses}>
-								Go to Dashboard
+								{t("chat:zooCodeAuth.goToDashboard")}
 							</a>
 							<button
 								onClick={handleSignOut}
@@ -156,7 +164,7 @@ export const ZooCodeAuthBadge: React.FC<ZooCodeAuthBadgeProps> = ({ className })
 									menuItemClasses,
 									"w-full border-none bg-transparent text-left text-vscode-errorForeground",
 								)}>
-								Sign out
+								{t("chat:zooCodeAuth.signOut")}
 							</button>
 						</>
 					)}

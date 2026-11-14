@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "Cerca...",
-		"no_results": "No s'han trobat resultats"
+		"no_results": "No s'han trobat resultats",
+		"close": "Tanca",
+		"clear_search_aria_label": "Esborra la cerca"
 	},
 	"mermaid": {
 		"loading": "Generant diagrama mermaid...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "Imatge"
 		},
-		"noData": "Sense dades d'imatge"
+		"noData": "Sense dades d'imatge",
+		"generatedAlt": "Imatge generada per IA",
+		"thumbnailAlt": "Miniatura {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "Eliminar missatge",

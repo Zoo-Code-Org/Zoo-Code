@@ -6,7 +6,8 @@
 		"cancel": "取消",
 		"select": "选择",
 		"add": "添加标头",
-		"remove": "移除"
+		"remove": "移除",
+		"milliseconds": "{{value}} 毫秒"
 	},
 	"search": {
 		"placeholder": "搜索设置...",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "已导入 {{total}} 个任务历史记录中的 {{count}} 个。",
 			"detailPreparing": "正在准备导入 Roo Code 历史记录。",
 			"progressAriaLabel": "Roo Code 历史记录导入进度"
-		}
+		},
+		"version": "版本：{{version}}",
+		"versionWithCommit": "版本：{{version}}（{{commit}}）"
 	},
 	"slashCommands": {
 		"description": "管理您的斜杠命令，以快速执行自定义工作流和操作。 <DocsLink>了解更多</DocsLink>",
@@ -684,6 +687,17 @@
 			"signInDescription": "登录以使用您的账户访问 Zoo Gateway",
 			"authenticated": "已认证",
 			"authenticatedAs": "已认证为 {{name}}"
+		},
+		"awsAuthMethod": "身份验证方式",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 凭据路径",
+			"oauthPathDescription": "Qwen OAuth 凭据文件的路径。留空时默认使用 {{defaultPath}}。",
+			"description": "Qwen Code 是基于 OAuth 的 API，需要通过官方 Qwen 客户端进行身份验证。请先设置 OAuth 凭据。",
+			"gettingStarted": "开始使用：",
+			"step1": "1. 安装官方 Qwen 客户端",
+			"step2": "2. 使用你的账号进行身份验证",
+			"step3": "3. OAuth 凭据将自动保存",
+			"setupInstructions": "设置说明"
 		}
 	},
 	"checkpoints": {
@@ -915,7 +929,8 @@
 			"refreshing": "正在刷新...",
 			"refreshSuccess": "工具刷新成功",
 			"refreshError": "工具刷新失败",
-			"toolParameters": "参数"
+			"toolParameters": "参数",
+			"required": "必填"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "动态思考强度",
@@ -953,7 +968,11 @@
 			"freeRequests_other": "* 每分钟免费 {{count}} 个请求。之后，计费取决于提示大小。",
 			"pricingDetails": "有关更多信息，请参阅定价详情。",
 			"billingEstimate": "* 计费为估计值 - 具体费用取决于提示大小。"
-		}
+		},
+		"tokensValue_other": "{{count, number}} Token",
+		"pricePerMillionTokens": "{{price}} / 百万 Token",
+		"showMore": "展开",
+		"showLess": "收起"
 	},
 	"modelPicker": {
 		"automaticFetch": "自动获取 <serviceLink>{{serviceName}}</serviceLink> 上可用的最新模型列表。如果您不确定选择哪个模型，Zoo Code 与 <defaultModelLink>{{defaultModelId}}</defaultModelLink> 配合最佳。您还可以搜索\"free\"以查找当前可用的免费选项。",
@@ -1018,7 +1037,8 @@
 			"inputPrice": "例：0.0001",
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
-		}
+		},
+		"defaultValue": "默认：{{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "默认值：http://localhost:11434",
@@ -1047,7 +1067,9 @@
 			"input": "输入",
 			"output": "输出",
 			"cacheReads": "缓存读取"
-		}
+		},
+		"label": "服务等级",
+		"tooltip": "如需更快地处理 API 请求，请尝试优先处理服务等级。如需以更高延迟换取更低价格，请尝试灵活处理等级。"
 	},
 	"ui": {
 		"collapseThinking": {

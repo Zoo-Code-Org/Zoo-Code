@@ -71,11 +71,13 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							/>
 							<SocialLink
 								icon={<SiDiscord className="w-4 h-4" aria-hidden />}
+								// eslint-disable-next-line no-restricted-syntax -- brand name, same in every language
 								label="Discord"
 								href="https://discord.gg/VxfP4Vx3gX"
 							/>
 							<SocialLink
 								icon={<SiReddit className="w-4 h-4" aria-hidden />}
+								// eslint-disable-next-line no-restricted-syntax -- brand name, same in every language
 								label="Reddit"
 								href="https://www.reddit.com/r/ZooCode/"
 							/>

@@ -23,7 +23,8 @@
 		"header_one": "{{count}} plik zmieniony w tej rozmowie",
 		"header_few": "{{count}} pliki zmienione w tej rozmowie",
 		"header_many": "{{count}} plików zmienionych w tej rozmowie",
-		"header_other": "{{count}} pliku zmienionego w tej rozmowie"
+		"header_other": "{{count}} pliku zmienionego w tej rozmowie",
+		"lineStatsAriaLabel": "Dodane wiersze: {{added}}, usunięte wiersze: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Dostępne miejsce: {{amount}} tokenów",
@@ -234,7 +235,9 @@
 		"addToAllowed": "Dodaj do listy dozwolonych",
 		"removeFromAllowed": "Usuń z listy dozwolonych",
 		"addToDenied": "Dodaj do listy odrzuconych",
-		"removeFromDenied": "Usuń z listy odrzuconych"
+		"removeFromDenied": "Usuń z listy odrzuconych",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Kliknij, aby edytować wzorzec"
 	},
 	"text": {
 		"rooSaid": "Zoo powiedział"
@@ -294,7 +297,9 @@
 		"triggerLabel_few": "{{count}} automatycznie zatwierdzone",
 		"triggerLabel_many": "{{count}} automatycznie zatwierdzonych",
 		"triggerLabel_other": "{{count}} automatycznie zatwierdzonego",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Włączone",
+		"toggleAriaLabel": "Przełącz automatyczne zatwierdzanie"
 	},
 	"reasoning": {
 		"thinking": "Myślenie",
@@ -377,7 +382,8 @@
 		"didSearch_few": "Znaleziono {{count}} wyniki",
 		"didSearch_many": "Znaleziono {{count}} wyników",
 		"didSearch_other": "Znaleziono {{count}} wyniku",
-		"resultTooltip": "Wynik podobieństwa: {{score}} (kliknij, aby otworzyć plik)"
+		"resultTooltip": "Wynik podobieństwa: {{score}} (kliknij, aby otworzyć plik)",
+		"displayError": "Błąd wyświetlania wyników wyszukiwania."
 	},
 	"read-batch": {
 		"approve": {
@@ -429,7 +435,17 @@
 		"noResults": "Brak wyników",
 		"problems": "Problemy",
 		"terminal": "Terminal",
-		"url": "Wklej adres URL, aby pobrać zawartość"
+		"url": "Wklej adres URL, aby pobrać zawartość",
+		"gitCommits": "Commity Git",
+		"gitCommitsDescription": "Przeszukaj historię repozytorium",
+		"workingChanges": "Bieżące zmiany",
+		"workingChangesDescription": "Bieżące niezatwierdzone zmiany",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash commita Git",
+		"addFile": "Dodaj plik",
+		"addFolder": "Dodaj folder",
+		"commands": "Polecenia",
+		"modes": "Tryby"
 	},
 	"queuedMessages": {
 		"title": "Wiadomości w kolejce",
@@ -442,7 +458,28 @@
 	"todo": {
 		"partial": "Ukończono {{completed}} z {{total}} zadań do wykonania",
 		"complete": "Ukończono {{total}} zadań do wykonania",
-		"updated": "Zaktualizowano listę zadań do wykonania"
+		"updated": "Zaktualizowano listę zadań do wykonania",
+		"listUpdated": "Lista zadań zaktualizowana",
+		"userEdit": "Edycja użytkownika",
+		"userEdits": "Edycje użytkownika",
+		"edit": "Edytuj",
+		"done": "Gotowe",
+		"itemPlaceholder": "Wpisz zadanie",
+		"newItemPlaceholder": "Wpisz zadanie i naciśnij Enter, aby dodać",
+		"remove": "Usuń",
+		"add": "Dodaj",
+		"cancel": "Anuluj",
+		"addTodo": "+ Dodaj zadanie",
+		"status": {
+			"notStarted": "Nierozpoczęte",
+			"inProgress": "W toku",
+			"completed": "Ukończone"
+		},
+		"deleteDialog": {
+			"title": "Usuń zadanie",
+			"description": "Czy na pewno chcesz usunąć to zadanie?",
+			"confirm": "Usuń"
+		}
 	},
 	"tooManyTools": {
 		"title": "Włączono zbyt wiele narzędzi",
@@ -468,5 +505,27 @@
 		"title": "Dostawca nie jest już obsługiwany",
 		"message": "Ten dostawca nie jest już dostępny. Wybierz obsługiwanego dostawcę, aby kontynuować.",
 		"openSettings": "Otwórz ustawienia"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zaloguj się do Zoo Code",
+		"goToDashboard": "Przejdź do panelu",
+		"signOut": "Wyloguj się",
+		"avatarAlt": "Awatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Połączono"
+	},
+	"arguments": "Argumenty:",
+	"copyAsMarkdown": "Kopiuj jako Markdown",
+	"openInPreview": "Otwórz w podglądzie",
+	"codeAccordion": {
+		"userEdits": "Edycje użytkownika",
+		"consoleLogs": "Logi konsoli",
+		"openFileAriaLabel": "Otwórz plik: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} ukryty wiersz",
+		"hiddenLines_few": "{{count}} ukryte wiersze",
+		"hiddenLines_many": "{{count}} ukrytych wierszy",
+		"hiddenLines_other": "{{count}} ukrytego wiersza"
 	}
 }

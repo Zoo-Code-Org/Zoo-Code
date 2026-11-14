@@ -1,7 +1,8 @@
 {
 	"landing": {
 		"greeting": "Chào mừng đến với Zoo Code!",
-		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây."
+		"introduction": "Với nhiều Chế độ tích hợp và có thể mở rộng, Zoo Code cho phép bạn lập kế hoạch, thiết kế kiến trúc, viết mã, gỡ lỗi và tăng năng suất như chưa từng có trước đây.",
+		"logoAlt": "Logo Roo"
 	},
 	"providerSignup": {
 		"heading": "Chọn nhà cung cấp của bạn",

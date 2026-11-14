@@ -3,6 +3,7 @@ import { VSCodeProgressRing } from "@vscode/webview-ui-toolkit/react"
 import { type ToolProgressStatus } from "@roo-code/types"
 import { getLanguageFromPath } from "@src/utils/getLanguageFromPath"
 import { formatPathTooltip } from "@src/utils/formatPathTooltip"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { ToolUseBlock, ToolUseBlockHeader } from "./ToolUseBlock"
 import CodeBlock from "./CodeBlock"
@@ -37,6 +38,7 @@ const CodeAccordion = ({
 	onJumpToFile,
 	diffStats,
 }: CodeAccordionProps) => {
+	const { t } = useAppTranslation()
 	const inferredLanguage = useMemo(() => language ?? (path ? getLanguageFromPath(path) : "txt"), [path, language])
 	const source = useMemo(() => code.trim(), [code])
 	const hasHeader = Boolean(path || isFeedback || header)
@@ -65,7 +67,7 @@ const CodeAccordion = ({
 						<div className="flex items-center">
 							<span className={`codicon codicon-${isFeedback ? "feedback" : "codicon-output"} mr-1.5`} />
 							<span className="whitespace-nowrap overflow-hidden text-ellipsis mr-2 rtl">
-								{isFeedback ? "User Edits" : "Console Logs"}
+								{isFeedback ? t("chat:codeAccordion.userEdits") : t("chat:codeAccordion.consoleLogs")}
 							</span>
 						</div>
 					) : (
@@ -106,7 +108,7 @@ const CodeAccordion = ({
 								e.stopPropagation()
 								onJumpToFile()
 							}}
-							aria-label={`Open file: ${path}`}
+							aria-label={t("chat:codeAccordion.openFileAriaLabel", { path })}
 						/>
 					)}
 					{!onJumpToFile && (

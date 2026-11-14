@@ -220,7 +220,11 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 					<div className="flex flex-row items-center gap-1">
 						{status?.status === "started" && (
 							<div className="flex flex-row items-center gap-2 font-mono text-xs">
-								{status.pid && <div className="whitespace-nowrap">(PID: {status.pid})</div>}
+								{status.pid && (
+									<div className="whitespace-nowrap">
+										{t("chat:commandExecution.pid", { pid: status.pid })}
+									</div>
+								)}
 								<StandardTooltip content={t("chat:commandExecution.abort")}>
 									<Button
 										variant="ghost"

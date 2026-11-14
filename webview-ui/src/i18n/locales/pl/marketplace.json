@@ -70,7 +70,8 @@
 		"goToModes": "Przejdź do ustawień Trybów",
 		"moreInfoMcp": "Zobacz dokumentację MCP {{name}}",
 		"validationRequired": "Podaj wartość dla {{paramName}}",
-		"prerequisites": "Wymagania wstępne"
+		"prerequisites": "Wymagania wstępne",
+		"optional": "(opcjonalnie)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Znalazłeś problem z elementem marketplace lub masz sugestie dotyczące nowych elementów? <0>Otwórz issue na GitHub</0>, aby nam o tym powiedzieć!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Tryby"
 	}
 }

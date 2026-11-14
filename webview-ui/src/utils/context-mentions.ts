@@ -1,4 +1,5 @@
 import { Fzf } from "fzf"
+import type { TFunction } from "i18next"
 
 import type { ModeConfig, Command } from "@roo-code/types"
 
@@ -122,6 +123,7 @@ export interface ContextMenuQueryItem {
 }
 
 export function getContextMenuOptions(
+	t: TFunction,
 	query: string,
 	selectedType: ContextMenuOptionType | null = null,
 	queryItems: ContextMenuQueryItem[],
@@ -168,7 +170,7 @@ export function getContextMenuOptions(
 			if (matchingCommands.length > 0) {
 				results.push({
 					type: ContextMenuOptionType.SectionHeader,
-					label: "Commands",
+					label: t("chat:contextMenu.commands"),
 				})
 				results.push(...matchingCommands)
 			}
@@ -205,7 +207,7 @@ export function getContextMenuOptions(
 			if (matchingModes.length > 0) {
 				results.push({
 					type: ContextMenuOptionType.SectionHeader,
-					label: "Modes",
+					label: t("chat:contextMenu.modes"),
 				})
 				results.push(...matchingModes)
 			}
@@ -217,8 +219,8 @@ export function getContextMenuOptions(
 	const workingChanges: ContextMenuQueryItem = {
 		type: ContextMenuOptionType.Git,
 		value: "git-changes",
-		label: "Working changes",
-		description: "Current uncommitted changes",
+		label: t("chat:contextMenu.workingChanges"),
+		description: t("chat:contextMenu.workingChangesDescription"),
 		icon: "$(git-commit)",
 	}
 
@@ -265,8 +267,8 @@ export function getContextMenuOptions(
 	if ("git".startsWith(lowerQuery)) {
 		suggestions.push({
 			type: ContextMenuOptionType.Git,
-			label: "Git Commits",
-			description: "Search repository history",
+			label: t("chat:contextMenu.gitCommits"),
+			description: t("chat:contextMenu.gitCommitsDescription"),
 			icon: "$(git-commit)",
 		})
 	} else if ("git-changes".startsWith(lowerQuery)) {
@@ -294,8 +296,8 @@ export function getContextMenuOptions(
 			suggestions.push({
 				type: ContextMenuOptionType.Git,
 				value: lowerQuery,
-				label: `Commit ${lowerQuery}`,
-				description: "Git commit hash",
+				label: t("chat:contextMenu.commit", { hash: lowerQuery }),
+				description: t("chat:contextMenu.commitHashDescription"),
 				icon: "$(git-commit)",
 			})
 		}

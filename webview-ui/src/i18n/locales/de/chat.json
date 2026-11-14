@@ -21,7 +21,8 @@
 	"pin": "Anheften",
 	"fileChangesInConversation": {
 		"header_one": "{{count}} Datei in dieser Unterhaltung geändert",
-		"header_other": "{{count}} Dateien in dieser Unterhaltung geändert"
+		"header_other": "{{count}} Dateien in dieser Unterhaltung geändert",
+		"lineStatsAriaLabel": "Hinzugefügte Zeilen: {{added}}, entfernte Zeilen: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Verfügbarer Speicher: {{amount}} Tokens",
@@ -232,7 +233,9 @@
 		"addToAllowed": "Zur erlaubten Liste hinzufügen",
 		"removeFromAllowed": "Von der erlaubten Liste entfernen",
 		"addToDenied": "Zur verweigerten Liste hinzufügen",
-		"removeFromDenied": "Von der verweigerten Liste entfernen"
+		"removeFromDenied": "Von der verweigerten Liste entfernen",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Klicken, um das Muster zu bearbeiten"
 	},
 	"text": {
 		"rooSaid": "Zoo hat gesagt"
@@ -290,7 +293,9 @@
 		"triggerLabel_zero": "0 automatisch genehmigt",
 		"triggerLabel_one": "{{count}} automatisch genehmigt",
 		"triggerLabel_other": "{{count}} automatisch genehmigt",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Aktiviert",
+		"toggleAriaLabel": "Automatische Genehmigung umschalten"
 	},
 	"reasoning": {
 		"thinking": "Denke nach",
@@ -367,7 +372,8 @@
 		"wantsToSearchWithPath": "Zoo möchte den Codebase nach <code>{{query}}</code> in <code>{{path}}</code> durchsuchen",
 		"didSearch_one": "{{count}} Ergebnis gefunden",
 		"didSearch_other": "{{count}} Ergebnisse gefunden",
-		"resultTooltip": "Ähnlichkeitswert: {{score}} (klicken zum Öffnen der Datei)"
+		"resultTooltip": "Ähnlichkeitswert: {{score}} (klicken zum Öffnen der Datei)",
+		"displayError": "Fehler beim Anzeigen der Suchergebnisse."
 	},
 	"read-batch": {
 		"approve": {
@@ -419,7 +425,17 @@
 		"noResults": "Keine Ergebnisse",
 		"problems": "Probleme",
 		"terminal": "Terminal",
-		"url": "URL einfügen, um Inhalte abzurufen"
+		"url": "URL einfügen, um Inhalte abzurufen",
+		"gitCommits": "Git-Commits",
+		"gitCommitsDescription": "Repository-Verlauf durchsuchen",
+		"workingChanges": "Arbeitsänderungen",
+		"workingChangesDescription": "Aktuelle nicht committete Änderungen",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git-Commit-Hash",
+		"addFile": "Datei hinzufügen",
+		"addFolder": "Ordner hinzufügen",
+		"commands": "Befehle",
+		"modes": "Modi"
 	},
 	"queuedMessages": {
 		"title": "Warteschlange Nachrichten",
@@ -432,7 +448,28 @@
 	"todo": {
 		"partial": "{{completed}} von {{total}} To-Dos erledigt",
 		"complete": "{{total}} To-Dos erledigt",
-		"updated": "Die To-Do-Liste wurde aktualisiert"
+		"updated": "Die To-Do-Liste wurde aktualisiert",
+		"listUpdated": "To-do-Liste aktualisiert",
+		"userEdit": "Benutzeränderung",
+		"userEdits": "Benutzeränderungen",
+		"edit": "Bearbeiten",
+		"done": "Fertig",
+		"itemPlaceholder": "To-do eingeben",
+		"newItemPlaceholder": "To-do eingeben, mit Enter hinzufügen",
+		"remove": "Entfernen",
+		"add": "Hinzufügen",
+		"cancel": "Abbrechen",
+		"addTodo": "+ To-do hinzufügen",
+		"status": {
+			"notStarted": "Nicht begonnen",
+			"inProgress": "In Bearbeitung",
+			"completed": "Abgeschlossen"
+		},
+		"deleteDialog": {
+			"title": "To-do löschen",
+			"description": "Möchtest du dieses To-do wirklich löschen?",
+			"confirm": "Löschen"
+		}
 	},
 	"tooManyTools": {
 		"title": "Zu viele Tools aktiviert",
@@ -454,5 +491,25 @@
 		"title": "Anbieter wird nicht mehr unterstützt",
 		"message": "Dieser Anbieter ist nicht mehr verfügbar. Wähle einen unterstützten Anbieter aus, um fortzufahren.",
 		"openSettings": "Einstellungen öffnen"
+	},
+	"zooCodeAuth": {
+		"signIn": "Bei Zoo Code anmelden",
+		"goToDashboard": "Zum Dashboard",
+		"signOut": "Abmelden",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Verbunden"
+	},
+	"arguments": "Argumente:",
+	"copyAsMarkdown": "Als Markdown kopieren",
+	"openInPreview": "In der Vorschau öffnen",
+	"codeAccordion": {
+		"userEdits": "Benutzeränderungen",
+		"consoleLogs": "Konsolenprotokolle",
+		"openFileAriaLabel": "Datei öffnen: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} ausgeblendete Zeile",
+		"hiddenLines_other": "{{count}} ausgeblendete Zeilen"
 	}
 }

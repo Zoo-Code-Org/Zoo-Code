@@ -401,7 +401,7 @@ export const ContextManagementSettings = ({
 							onValueChange={([value]) => setCachedStateField("writeDelayMs", value)}
 							data-testid="write-delay-slider"
 						/>
-						<span className="w-20">{writeDelayMs}ms</span>
+						<span className="w-20">{t("settings:common.milliseconds", { value: writeDelayMs })}</span>
 					</div>
 					<div className="text-vscode-descriptionForeground text-sm mt-1">
 						{t("settings:contextManagement.diagnostics.delayAfterWrite.description")}
@@ -526,16 +526,12 @@ export const ContextManagementSettings = ({
 								data-testid="threshold-profile-select">
 								<SelectTrigger className="w-full">
 									<SelectValue
-										placeholder={
-											t("settings:contextManagement.condensingThreshold.selectProfile") ||
-											"Select profile for threshold"
-										}
+										placeholder={t("settings:contextManagement.condensingThreshold.selectProfile")}
 									/>
 								</SelectTrigger>
 								<SelectContent>
 									<SelectItem value="default">
-										{t("settings:contextManagement.condensingThreshold.defaultProfile") ||
-											"Default (applies to all unconfigured profiles)"}
+										{t("settings:contextManagement.condensingThreshold.defaultProfile")}
 									</SelectItem>
 									{(listApiConfigMeta || []).map((config) => {
 										const profileThreshold = profileThresholds[config.id]

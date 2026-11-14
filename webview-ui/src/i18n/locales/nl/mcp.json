@@ -55,5 +55,10 @@
 		"running": "Wordt uitgevoerd",
 		"completed": "Voltooid",
 		"error": "Fout"
-	}
+	},
+	"resource": {
+		"returns": "Retourneert",
+		"unknownMimeType": "Onbekend"
+	},
+	"toggleServerAriaLabel": "Server {{serverName}} in- of uitschakelen"
 }

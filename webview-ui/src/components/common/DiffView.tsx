@@ -3,6 +3,7 @@ import { parseUnifiedDiff, type DiffLine } from "@src/utils/parseUnifiedDiff"
 import { normalizeLanguage } from "@src/utils/highlighter"
 import { getLanguageFromPath } from "@src/utils/getLanguageFromPath"
 import { highlightHunks } from "@src/utils/highlightDiff"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface DiffViewProps {
 	source: string
@@ -23,6 +24,7 @@ interface Hunk {
  * matching VSCode's diff editor style
  */
 const DiffView = memo(({ source, filePath }: DiffViewProps) => {
+	const { t } = useAppTranslation()
 	// Determine language from file path
 	const normalizedLang = useMemo(() => normalizeLanguage(getLanguageFromPath(filePath || "") || "txt"), [filePath])
 
@@ -186,7 +188,7 @@ const DiffView = memo(({ source, filePath }: DiffViewProps) => {
 											{/* +/- column (empty for gap) */}
 											<td className="w-[16px] text-center select-none bg-[var(--vscode-editor-background)]" />
 											<td className="pr-3 whitespace-pre-wrap break-words w-full italic bg-[var(--vscode-editor-background)]">
-												{`${line.hiddenCount ?? 0} hidden lines`}
+												{t("chat:diffView.hiddenLines", { count: line.hiddenCount ?? 0 })}
 											</td>
 										</tr>
 									)

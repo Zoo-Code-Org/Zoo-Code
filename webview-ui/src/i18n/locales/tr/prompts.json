@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API Yapılandırması",
-		"select": "Bu mod için hangi API yapılandırmasının kullanılacağını seçin"
+		"select": "Bu mod için hangi API yapılandırmasının kullanılacağını seçin",
+		"pinnedGroupAriaLabel": "Sabitlenmiş yapılandırmalar",
+		"allGroupAriaLabel": "Tüm yapılandırmalar"
 	},
 	"tools": {
 		"title": "Kullanılabilir Araçlar",
@@ -47,7 +49,8 @@
 		"title": "Moda özgü özel talimatlar (isteğe bağlı)",
 		"resetToDefault": "Varsayılana sıfırla",
 		"description": "{{modeName}} modu için özel davranış yönergeleri ekleyin.",
-		"loadFromFile": "{{mode}} moduna özgü özel talimatlar, çalışma alanınızdaki <span>.roo/rules-{{slug}}/</span> klasöründen veya global <0>.roo/rules-{{slug}}/</0> klasöründen de yüklenebilir (.roorules-{{slug}} ve .clinerules-{{slug}} kullanımdan kaldırılmıştır ve yakında çalışmayı durduracaktır)."
+		"loadFromFile": "{{mode}} moduna özgü özel talimatlar, çalışma alanınızdaki <span>.roo/rules-{{slug}}/</span> klasöründen veya global <0>.roo/rules-{{slug}}/</0> klasöründen de yüklenebilir (.roorules-{{slug}} ve .clinerules-{{slug}} kullanımdan kaldırılmıştır ve yakında çalışmayı durduracaktır).",
+		"loadFromFileAriaLabel": "Modlar için genel özel talimatlar hakkında bilgi"
 	},
 	"exportMode": {
 		"title": "Modu Dışa Aktar",
@@ -56,7 +59,9 @@
 	"globalCustomInstructions": {
 		"title": "Tüm Modlar için Özel Talimatlar",
 		"description": "Bu talimatlar tüm modlara uygulanır. Aşağıdaki moda özgü talimatlarla geliştirilebilen temel davranış seti sağlarlar. <0>Daha fazla bilgi edinin</0>",
-		"loadFromFile": "Talimatlar, çalışma alanınızdaki <span>.roo/rules/</span> klasöründen veya global <0>.roo/rules/</0> klasöründen de yüklenebilir (.roorules ve .clinerules kullanımdan kaldırılmıştır ve yakında çalışmayı durduracaktır)."
+		"loadFromFile": "Talimatlar, çalışma alanınızdaki <span>.roo/rules/</span> klasöründen veya global <0>.roo/rules/</0> klasöründen de yüklenebilir (.roorules ve .clinerules kullanımdan kaldırılmıştır ve yakında çalışmayı durduracaktır).",
+		"learnMoreAriaLabel": "Genel özel talimatlar hakkında daha fazla bilgi",
+		"loadFromFileAriaLabel": "Genel özel talimatları ayarlamayı öğren"
 	},
 	"importMode": {
 		"selectLevel": "Bu modu nereye içe aktaracağınızı seçin:",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Bu modun {{folderPath}} konumunda bir kurallar klasörü var ve bu da silinecek.",
 		"confirm": "Sil",
 		"cancel": "İptal"
+	},
+	"mcpServers": {
+		"restrict": "Belirli MCP sunucularıyla sınırla",
+		"noneConnected": "Bağlı MCP sunucusu yok",
+		"notConnected": "{{serverName}} (bağlı değil)"
 	}
 }

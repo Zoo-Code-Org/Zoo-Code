@@ -6,7 +6,8 @@
 		"cancel": "Hủy",
 		"select": "Chọn",
 		"add": "Thêm tiêu đề",
-		"remove": "Xóa"
+		"remove": "Xóa",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Tìm kiếm cài đặt...",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "Đã nhập {{count}} trong {{total}} lịch sử nhiệm vụ.",
 			"detailPreparing": "Đang chuẩn bị nhập lịch sử Roo Code.",
 			"progressAriaLabel": "Tiến trình nhập lịch sử Roo Code"
-		}
+		},
+		"version": "Phiên bản: {{version}}",
+		"versionWithCommit": "Phiên bản: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Quản lý các lệnh slash của bạn để thực thi nhanh các quy trình công việc và hành động tùy chỉnh. <DocsLink>Tìm hiểu thêm</DocsLink>",
@@ -684,6 +687,17 @@
 			"signInDescription": "Đăng nhập để sử dụng Zoo Gateway với tài khoản của bạn",
 			"authenticated": "Đã xác thực",
 			"authenticatedAs": "Đã xác thực với tên {{name}}"
+		},
+		"awsAuthMethod": "Phương thức xác thực",
+		"qwenCode": {
+			"oauthPathLabel": "Đường dẫn thông tin xác thực OAuth",
+			"oauthPathDescription": "Đường dẫn tới tệp thông tin xác thực OAuth Qwen của bạn. Nếu để trống, sẽ dùng {{defaultPath}}.",
+			"description": "Qwen Code là API dựa trên OAuth, yêu cầu xác thực qua ứng dụng Qwen chính thức. Bạn cần thiết lập thông tin xác thực OAuth trước.",
+			"gettingStarted": "Để bắt đầu:",
+			"step1": "1. Cài đặt ứng dụng Qwen chính thức",
+			"step2": "2. Xác thực bằng tài khoản của bạn",
+			"step3": "3. Thông tin xác thực OAuth sẽ được lưu tự động",
+			"setupInstructions": "Hướng dẫn thiết lập"
 		}
 	},
 	"checkpoints": {
@@ -915,7 +929,8 @@
 			"refreshing": "Đang làm mới...",
 			"refreshSuccess": "Làm mới công cụ thành công",
 			"refreshError": "Không thể làm mới công cụ",
-			"toolParameters": "Thông số"
+			"toolParameters": "Thông số",
+			"required": "bắt buộc"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Nỗ lực suy nghĩ động",
@@ -953,7 +968,11 @@
 			"freeRequests_other": "* Miễn phí đến {{count}} yêu cầu mỗi phút. Sau đó, thanh toán phụ thuộc vào kích thước lời nhắc.",
 			"pricingDetails": "Để biết thêm thông tin, xem chi tiết giá.",
 			"billingEstimate": "* Thanh toán là ước tính - chi phí chính xác phụ thuộc vào kích thước lời nhắc."
-		}
+		},
+		"tokensValue_other": "{{count, number}} token",
+		"pricePerMillionTokens": "{{price}} / 1 triệu token",
+		"showMore": "Xem thêm",
+		"showLess": "Thu gọn"
 	},
 	"modelPicker": {
 		"automaticFetch": "Tiện ích mở rộng tự động lấy danh sách mới nhất các mô hình có sẵn trên <serviceLink>{{serviceName}}</serviceLink>. Nếu bạn không chắc chắn nên chọn mô hình nào, Zoo Code hoạt động tốt nhất với <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Bạn cũng có thể thử tìm kiếm \"free\" cho các tùy chọn miễn phí hiện có.",
@@ -1018,7 +1037,8 @@
 			"inputPrice": "vd: 0.0001",
 			"outputPrice": "vd: 0.0002",
 			"cacheWritePrice": "vd: 0.00005"
-		}
+		},
+		"defaultValue": "Mặc định: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Mặc định: http://localhost:11434",
@@ -1047,7 +1067,9 @@
 			"input": "Đầu vào",
 			"output": "Đầu ra",
 			"cacheReads": "Lượt đọc bộ nhớ đệm"
-		}
+		},
+		"label": "Cấp độ dịch vụ",
+		"tooltip": "Để xử lý yêu cầu API nhanh hơn, hãy thử cấp độ dịch vụ xử lý ưu tiên. Để có giá thấp hơn với độ trễ cao hơn, hãy thử cấp độ xử lý linh hoạt."
 	},
 	"ui": {
 		"collapseThinking": {

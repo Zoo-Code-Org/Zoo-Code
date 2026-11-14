@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API配置",
-		"select": "选择要用于此模式的API配置"
+		"select": "选择要用于此模式的API配置",
+		"pinnedGroupAriaLabel": "已固定的配置",
+		"allGroupAriaLabel": "所有配置"
 	},
 	"tools": {
 		"title": "可用功能",
@@ -47,7 +49,8 @@
 		"title": "模式专属规则（可选）",
 		"resetToDefault": "重置为默认值",
 		"description": "{{modeName}}模式的专属规则",
-		"loadFromFile": "{{mode}}模式的特定自定义指令也可以从工作区中的<span>.roo/rules-{{slug}}/</span>文件夹或全局<0>.roo/rules-{{slug}}/</0>加载（.roorules-{{slug}}和.clinerules-{{slug}}已弃用，即将停止工作）。"
+		"loadFromFile": "{{mode}}模式的特定自定义指令也可以从工作区中的<span>.roo/rules-{{slug}}/</span>文件夹或全局<0>.roo/rules-{{slug}}/</0>加载（.roorules-{{slug}}和.clinerules-{{slug}}已弃用，即将停止工作）。",
+		"loadFromFileAriaLabel": "了解模式的全局自定义指令"
 	},
 	"exportMode": {
 		"title": "导出模式",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "所有模式的自定义指令",
 		"description": "这些指令适用于所有模式。它们提供了一套基础行为，可以通过下面的模式特定指令进行增强。<0>了解更多</0>",
-		"loadFromFile": "指令也可以从工作区中的<span>.roo/rules/</span>文件夹或全局<0>.roo/rules/</0>加载（.roorules和.clinerules已弃用，即将停止工作）。"
+		"loadFromFile": "指令也可以从工作区中的<span>.roo/rules/</span>文件夹或全局<0>.roo/rules/</0>加载（.roorules和.clinerules已弃用，即将停止工作）。",
+		"learnMoreAriaLabel": "了解有关全局自定义指令的更多信息",
+		"loadFromFileAriaLabel": "了解如何设置全局自定义指令"
 	},
 	"systemPrompt": {
 		"preview": "预览系统提示词",
@@ -199,5 +204,10 @@
 		"rulesFolder": "此模式在 {{folderPath}} 有一个规则文件夹，该文件夹也将被删除。",
 		"confirm": "删除",
 		"cancel": "取消"
+	},
+	"mcpServers": {
+		"restrict": "仅限特定 MCP 服务",
+		"noneConnected": "没有已连接的 MCP 服务",
+		"notConnected": "{{serverName}}（未连接）"
 	}
 }

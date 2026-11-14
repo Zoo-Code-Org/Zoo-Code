@@ -6,7 +6,8 @@
 		"cancel": "Cancel·lar",
 		"select": "Seleccionar",
 		"add": "Afegir capçalera",
-		"remove": "Eliminar"
+		"remove": "Eliminar",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Cercar configuració...",
@@ -81,7 +82,9 @@
 			"detailTasksImported_other": "S'han importat {{count}} de {{total}} historials de tasques.",
 			"detailPreparing": "Preparant la importació de l'historial de Roo Code.",
 			"progressAriaLabel": "Progrés de la importació de l'historial de Roo Code"
-		}
+		},
+		"version": "Versió: {{version}}",
+		"versionWithCommit": "Versió: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Gestiona les teves comandes de barra per executar ràpidament fluxos de treball i accions personalitzades. <DocsLink>Aprèn-ne més</DocsLink>",
@@ -686,6 +689,17 @@
 			"signInDescription": "Inicia sessió per utilitzar Zoo Gateway amb el teu compte",
 			"authenticated": "Autenticat",
 			"authenticatedAs": "Autenticat com a {{name}}"
+		},
+		"awsAuthMethod": "Mètode d'autenticació",
+		"qwenCode": {
+			"oauthPathLabel": "Ruta de les credencials OAuth",
+			"oauthPathDescription": "Ruta al teu fitxer de credencials OAuth de Qwen. Si el deixes buit, s'utilitza {{defaultPath}}.",
+			"description": "Qwen Code és una API basada en OAuth que requereix autenticació mitjançant el client oficial de Qwen. Primer has de configurar les credencials OAuth.",
+			"gettingStarted": "Per començar:",
+			"step1": "1. Instal·la el client oficial de Qwen",
+			"step2": "2. Autentica't amb el teu compte",
+			"step3": "3. Les credencials OAuth es desaran automàticament",
+			"setupInstructions": "Instruccions de configuració"
 		}
 	},
 	"checkpoints": {
@@ -917,7 +931,8 @@
 			"refreshing": "Actualitzant...",
 			"refreshSuccess": "Eines actualitzades correctament",
 			"refreshError": "Error en actualitzar les eines",
-			"toolParameters": "Paràmetres"
+			"toolParameters": "Paràmetres",
+			"required": "obligatori"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esforç de pensament dinàmic",
@@ -957,7 +972,13 @@
 			"freeRequests_other": "* Gratuït fins a {{count}} sol·licituds per minut. Després d'això, la facturació depèn de la mida del prompt.",
 			"pricingDetails": "Per a més informació, consulteu els detalls de preus.",
 			"billingEstimate": "* La facturació és una estimació - el cost exacte depèn de la mida del prompt."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_many": "{{count, number}} de tokens",
+		"tokensValue_other": "{{count, number}} tokens",
+		"pricePerMillionTokens": "{{price}} / 1M de tokens",
+		"showMore": "Més",
+		"showLess": "Menys"
 	},
 	"modelPicker": {
 		"automaticFetch": "L'extensió obté automàticament la llista més recent de models disponibles a <serviceLink>{{serviceName}}</serviceLink>. Si no esteu segur de quin model triar, Zoo Code funciona millor amb <defaultModelLink>{{defaultModelId}}</defaultModelLink>. També podeu cercar \"free\" per a opcions gratuïtes actualment disponibles.",
@@ -1022,7 +1043,8 @@
 			"inputPrice": "p. ex. 0.0001",
 			"outputPrice": "p. ex. 0.0002",
 			"cacheWritePrice": "p. ex. 0.00005"
-		}
+		},
+		"defaultValue": "Per defecte: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Per defecte: http://localhost:11434",
@@ -1051,7 +1073,9 @@
 			"input": "Entrada",
 			"output": "Sortida",
 			"cacheReads": "Lectures de memòria cau"
-		}
+		},
+		"label": "Nivell de servei",
+		"tooltip": "Per a un processament més ràpid de les sol·licituds a l'API, prova el nivell de servei de processament prioritari. Per a preus més baixos amb més latència, prova el nivell de processament flexible."
 	},
 	"ui": {
 		"collapseThinking": {

@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} file modificato in questa conversazione",
 		"header_many": "{{count}} file modificati in questa conversazione",
-		"header_other": "{{count}} file modificati in questa conversazione"
+		"header_other": "{{count}} file modificati in questa conversazione",
+		"lineStatsAriaLabel": "Righe aggiunte: {{added}}, righe rimosse: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Spazio disponibile: {{amount}} tokens",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Aggiungi alla lista dei permessi",
 		"removeFromAllowed": "Rimuovi dalla lista dei permessi",
 		"addToDenied": "Aggiungi alla lista dei negati",
-		"removeFromDenied": "Rimuovi dalla lista dei negati"
+		"removeFromDenied": "Rimuovi dalla lista dei negati",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Clicca per modificare il pattern"
 	},
 	"text": {
 		"rooSaid": "Zoo ha detto"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} approvato automaticamente",
 		"triggerLabel_many": "{{count}} approvati automaticamente",
 		"triggerLabel_other": "{{count}} approvati automaticamente",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Attivato",
+		"toggleAriaLabel": "Attiva/disattiva approvazione automatica"
 	},
 	"reasoning": {
 		"thinking": "Sto pensando",
@@ -372,7 +377,8 @@
 		"didSearch_one": "Trovato {{count}} risultato",
 		"didSearch_many": "Trovati {{count}} risultati",
 		"didSearch_other": "Trovati {{count}} risultati",
-		"resultTooltip": "Punteggio di somiglianza: {{score}} (clicca per aprire il file)"
+		"resultTooltip": "Punteggio di somiglianza: {{score}} (clicca per aprire il file)",
+		"displayError": "Errore nella visualizzazione dei risultati di ricerca."
 	},
 	"read-batch": {
 		"approve": {
@@ -424,7 +430,17 @@
 		"noResults": "Nessun risultato",
 		"problems": "Problemi",
 		"terminal": "Terminale",
-		"url": "Incolla l'URL per recuperare i contenuti"
+		"url": "Incolla l'URL per recuperare i contenuti",
+		"gitCommits": "Commit Git",
+		"gitCommitsDescription": "Cerca nella cronologia del repository",
+		"workingChanges": "Modifiche in corso",
+		"workingChangesDescription": "Modifiche attuali non ancora committate",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash del commit Git",
+		"addFile": "Aggiungi file",
+		"addFolder": "Aggiungi cartella",
+		"commands": "Comandi",
+		"modes": "Modalità"
 	},
 	"queuedMessages": {
 		"title": "Messaggi in coda",
@@ -437,7 +453,28 @@
 	"todo": {
 		"partial": "{{completed}} di {{total}} cose da fare completate",
 		"complete": "{{total}} cose da fare completate",
-		"updated": "Aggiornata la lista delle cose da fare"
+		"updated": "Aggiornata la lista delle cose da fare",
+		"listUpdated": "Lista delle attività aggiornata",
+		"userEdit": "Modifica dell'utente",
+		"userEdits": "Modifiche dell'utente",
+		"edit": "Modifica",
+		"done": "Fatto",
+		"itemPlaceholder": "Inserisci un'attività",
+		"newItemPlaceholder": "Inserisci un'attività, premi Invio per aggiungerla",
+		"remove": "Rimuovi",
+		"add": "Aggiungi",
+		"cancel": "Annulla",
+		"addTodo": "+ Aggiungi attività",
+		"status": {
+			"notStarted": "Non iniziata",
+			"inProgress": "In corso",
+			"completed": "Completata"
+		},
+		"deleteDialog": {
+			"title": "Elimina attività",
+			"description": "Vuoi davvero eliminare questa attività?",
+			"confirm": "Elimina"
+		}
 	},
 	"tooManyTools": {
 		"title": "Troppi strumenti abilitati",
@@ -461,5 +498,26 @@
 		"title": "Provider non più supportato",
 		"message": "Questo provider non è più disponibile. Seleziona un provider supportato per continuare.",
 		"openSettings": "Apri impostazioni"
+	},
+	"zooCodeAuth": {
+		"signIn": "Accedi a Zoo Code",
+		"goToDashboard": "Vai alla dashboard",
+		"signOut": "Esci",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Connesso"
+	},
+	"arguments": "Argomenti:",
+	"copyAsMarkdown": "Copia come Markdown",
+	"openInPreview": "Apri nell'anteprima",
+	"codeAccordion": {
+		"userEdits": "Modifiche dell'utente",
+		"consoleLogs": "Log della console",
+		"openFileAriaLabel": "Apri file: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} riga nascosta",
+		"hiddenLines_many": "{{count}} di righe nascoste",
+		"hiddenLines_other": "{{count}} righe nascoste"
 	}
 }

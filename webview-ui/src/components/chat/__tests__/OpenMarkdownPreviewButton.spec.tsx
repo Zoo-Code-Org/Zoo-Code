@@ -29,7 +29,7 @@ describe("OpenMarkdownPreviewButton", () => {
 				<OpenMarkdownPreviewButton markdown={simple} />
 			</TooltipProvider>,
 		)
-		expect(screen.queryByLabelText("Open markdown in preview")).toBeNull()
+		expect(screen.queryByLabelText("chat:openInPreview")).toBeNull()
 	})
 
 	it("renders when markdown has 2+ headings", () => {
@@ -38,7 +38,7 @@ describe("OpenMarkdownPreviewButton", () => {
 				<OpenMarkdownPreviewButton markdown={complex} />
 			</TooltipProvider>,
 		)
-		expect(screen.getByLabelText("Open markdown in preview")).toBeInTheDocument()
+		expect(screen.getByLabelText("chat:openInPreview")).toBeInTheDocument()
 	})
 
 	it("posts message on click", () => {
@@ -47,7 +47,7 @@ describe("OpenMarkdownPreviewButton", () => {
 				<OpenMarkdownPreviewButton markdown={complex} />
 			</TooltipProvider>,
 		)
-		fireEvent.click(screen.getByLabelText("Open markdown in preview"))
+		fireEvent.click(screen.getByLabelText("chat:openInPreview"))
 		expect(postMessageMock).toHaveBeenCalledWith({ type: "openMarkdownPreview", text: complex })
 	})
 })

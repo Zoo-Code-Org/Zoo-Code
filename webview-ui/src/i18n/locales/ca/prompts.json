@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configuració d'API",
-		"select": "Seleccioneu quina configuració d'API utilitzar per a aquest mode"
+		"select": "Seleccioneu quina configuració d'API utilitzar per a aquest mode",
+		"pinnedGroupAriaLabel": "Configuracions fixades",
+		"allGroupAriaLabel": "Totes les configuracions"
 	},
 	"tools": {
 		"title": "Eines disponibles",
@@ -47,7 +49,8 @@
 		"title": "Instruccions personalitzades específiques del mode (opcional)",
 		"resetToDefault": "Restablir a valors predeterminats",
 		"description": "Afegiu directrius de comportament específiques per al mode {{modeName}}.",
-		"loadFromFile": "Les instruccions personalitzades específiques per al mode {{mode}} també es poden carregar des de la carpeta <span>.roo/rules-{{slug}}/</span> al vostre espai de treball o des del global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} estan obsolets i deixaran de funcionar aviat)."
+		"loadFromFile": "Les instruccions personalitzades específiques per al mode {{mode}} també es poden carregar des de la carpeta <span>.roo/rules-{{slug}}/</span> al vostre espai de treball o des del global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} estan obsolets i deixaran de funcionar aviat).",
+		"loadFromFileAriaLabel": "Més informació sobre les instruccions personalitzades globals per a modes"
 	},
 	"exportMode": {
 		"title": "Exportar mode",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instruccions personalitzades per a tots els modes",
 		"description": "Aquestes instruccions s'apliquen a tots els modes. Proporcionen un conjunt bàsic de comportaments que es poden millorar amb instruccions específiques de cada mode a continuació. <0>Més informació</0>",
-		"loadFromFile": "Les instruccions també es poden carregar des de la carpeta <span>.roo/rules/</span> al vostre espai de treball o des del global <0>.roo/rules/</0> (.roorules i .clinerules estan obsolets i deixaran de funcionar aviat)."
+		"loadFromFile": "Les instruccions també es poden carregar des de la carpeta <span>.roo/rules/</span> al vostre espai de treball o des del global <0>.roo/rules/</0> (.roorules i .clinerules estan obsolets i deixaran de funcionar aviat).",
+		"learnMoreAriaLabel": "Més informació sobre les instruccions personalitzades globals",
+		"loadFromFileAriaLabel": "Aprèn a configurar instruccions personalitzades globals"
 	},
 	"systemPrompt": {
 		"preview": "Previsualització del prompt del sistema",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Aquest mode té una carpeta de regles a {{folderPath}} que també se suprimirà.",
 		"confirm": "Suprimeix",
 		"cancel": "Cancel·la"
+	},
+	"mcpServers": {
+		"restrict": "Restringeix a servidors MCP concrets",
+		"noneConnected": "No hi ha cap servidor MCP connectat",
+		"notConnected": "{{serverName}} (no connectat)"
 	}
 }

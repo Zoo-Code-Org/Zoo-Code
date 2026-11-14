@@ -143,6 +143,7 @@ export const UISettings = ({
 									onValueChange={([value]) => handleChatFontSizeChange(value)}
 									data-testid="chat-font-size-slider"
 								/>
+								{/* eslint-disable-next-line i18next/no-literal-string -- CSS pixel unit, same in every language */}
 								<span className="w-12 text-right">{chatFontSize ?? CHAT_FONT_SIZE_DEFAULT}px</span>
 								<Button
 									className="h-auto max-w-full whitespace-normal text-center"

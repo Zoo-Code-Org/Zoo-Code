@@ -55,5 +55,10 @@
 		"running": "Đang chạy",
 		"completed": "Hoàn thành",
 		"error": "Lỗi"
-	}
+	},
+	"resource": {
+		"returns": "Trả về",
+		"unknownMimeType": "Không xác định"
+	},
+	"toggleServerAriaLabel": "Bật/tắt máy chủ {{serverName}}"
 }
