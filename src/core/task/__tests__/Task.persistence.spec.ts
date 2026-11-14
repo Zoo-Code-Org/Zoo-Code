@@ -2468,5 +2468,69 @@ describe("Task persistence", () => {
 			// userMessageContent should be cleared on success
 			expect(task.userMessageContent).toEqual([])
 		})
+
+		const toolResultMessages = (task: Task) =>
+			task.apiConversationHistory.filter(
+				(message) =>
+					message.role === "user" &&
+					Array.isArray(message.content) &&
+					message.content.some((block) => block.type === "tool_result"),
+			)
+
+		it("keeps an unsaved flush out of history so retries and the next request append the results once", async () => {
+			mockSaveApiMessages
+				.mockRejectedValueOnce(new Error("disk full"))
+				.mockRejectedValueOnce(new Error("disk full"))
+				.mockResolvedValueOnce([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.assistantMessageSavedToHistory = true
+			const pending = [{ type: "tool_result" as const, tool_use_id: "tool-1", content: "done" }]
+			task.userMessageContent = [...pending]
+
+			// Repeated failures leave history untouched and keep the results pending in memory, so the
+			// request loop (which appends userMessageContent) cannot add a second copy.
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(toolResultMessages(task)).toHaveLength(0)
+			expect(task.userMessageContent).toEqual(pending)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+			expect(toolResultMessages(task)).toHaveLength(1)
+			expect(task.userMessageContent).toEqual([])
+
+			// New results after the successful retry append as their own message.
+			mockSaveApiMessages.mockResolvedValueOnce([])
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-2", content: "done" }]
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+			expect(toolResultMessages(task)).toHaveLength(2)
+		})
+
+		it("keeps results that never reached history so a later flush can still add them", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			task.userMessageContent = [{ type: "tool_result", tool_use_id: "tool-1", content: "done" }]
+			vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
+				.mockResolvedValueOnce(false)
+				.mockResolvedValue(true)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(false)
+			expect(toolResultMessages(task)).toHaveLength(0)
+			expect(task.userMessageContent).toHaveLength(1)
+
+			await expect(task.flushPendingToolResultsToHistory()).resolves.toBe(true)
+
+			expect(toolResultMessages(task)).toHaveLength(1)
+			expect(task.userMessageContent).toEqual([])
+		})
 	})
 })

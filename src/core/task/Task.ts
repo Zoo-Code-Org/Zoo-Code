@@ -1609,6 +1609,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Clear the pending content since it's now saved
 			this.userMessageContent = []
 		} else {
+			// Undo the in-memory append: `userMessageContent` stays the only pending copy, so a retry
+			// flush or the next request appends these results exactly once.
+			const appendedIndex = this.apiConversationHistory.indexOf(userMessageWithTs as ApiMessage)
+			if (appendedIndex !== -1) {
+				this.apiConversationHistory.splice(appendedIndex, 1)
+			}
 			console.warn(
 				`[Task#${this.taskId}] flushPendingToolResultsToHistory: save failed, retaining pending tool results in memory`,
 			)
