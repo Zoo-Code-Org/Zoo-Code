@@ -130,6 +130,7 @@
 		"rooHistoryImport": {
 			"nothingFound": "No s'ha trobat historial de tasques de Roo Code per importar de {{domain}}.",
 			"alreadyImported_one": "Tot l'historial de tasca de Roo Code ({{count}}) ja s'ha importat a Zoo Code.",
+			"alreadyImported_many": "Tots els {{count}} historials de tasques de Roo Code ja s'han importat a Zoo Code.",
 			"alreadyImported_other": "Tots els {{count}} historials de tasques de Roo Code ja s'han importat a Zoo Code."
 		}
 	},
@@ -148,6 +149,7 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "S'ha importat {{count}} historial de tasca de Roo Code a Zoo Code.",
+			"success_many": "S'han importat {{count}} historials de tasques de Roo Code a Zoo Code.",
 			"success_other": "S'han importat {{count}} historials de tasques de Roo Code a Zoo Code."
 		}
 	},

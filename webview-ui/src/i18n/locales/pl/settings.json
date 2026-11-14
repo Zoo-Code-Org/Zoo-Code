@@ -76,8 +76,10 @@
 			"summaryFailedNoFiles": "Import zatrzymał się przed skopiowaniem jakichkolwiek plików.",
 			"summaryCopied": "Skopiowano {{copied}} z {{total}} plików",
 			"detailFailed": "Rozpocznij nową próbę importu, aby spróbować ponownie.",
-			"detailTasksImported_one": "Zaimportowano {{count}} z {{total}} historię zadań.",
-			"detailTasksImported_other": "Zaimportowano {{count}} z {{total}} historii zadań.",
+			"detailTasksImported_one": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_few": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_many": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_other": "Zaimportowano historii zadań: {{count}} z {{total}}.",
 			"detailPreparing": "Przygotowywanie importu historii Roo Code.",
 			"progressAriaLabel": "Postęp importu historii Roo Code"
 		}
@@ -951,7 +953,10 @@
 		"useAzure": "Użyj Azure",
 		"azureApiVersion": "Ustaw wersję API Azure",
 		"gemini": {
-			"freeRequests": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_one": "* Darmowe do {{count}} zapytania na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_few": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_many": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_other": "* Darmowe do {{count}} zapytania na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
 			"pricingDetails": "Więcej informacji znajdziesz w szczegółach cennika.",
 			"billingEstimate": "* Rozliczenie jest szacunkowe - dokładny koszt zależy od rozmiaru podpowiedzi."
 		}
