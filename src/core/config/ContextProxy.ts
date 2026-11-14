@@ -76,6 +76,8 @@ export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+	// Counted for either store, so a rollback can tell its own write from a newer one of the same value.
+	private stateWriteGenerations = new Map<GlobalStateKey | SecretStateKey, number>()
 
 	private secretCache: SecretState
 	private _isInitialized = false
@@ -420,6 +422,8 @@ export class ContextProxy {
 		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
 		const release = () => {
 			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
@@ -436,8 +440,8 @@ export class ContextProxy {
 		})
 	}
 
-	/** Current per-key write generation, used by callers whose rollback must not clobber a newer write. */
-	public getStateWriteGeneration<K extends GlobalStateKey>(key: K): number {
+	/** Current per-key write generation of either store: a rollback must not clobber a newer write. */
+	public getStateWriteGeneration<K extends GlobalStateKey | SecretStateKey>(key: K): number {
 		return this.stateWriteGenerations.get(key) ?? 0
 	}
 
@@ -466,6 +470,9 @@ export class ContextProxy {
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
 		this.secretWriteCount.set(key, (this.secretWriteCount.get(key) ?? 0) + 1)
+		// Counted here as well as in updateGlobalState: the guard that rolls back a failed per-view write reads
+		// this map, and a secret it cannot count is a secret whose newer same-valued write it cannot see.
+		this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
 		this.secretCache[key] = value
 
 		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this

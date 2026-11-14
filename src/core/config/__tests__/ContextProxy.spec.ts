@@ -231,6 +231,14 @@ describe("ContextProxy", () => {
 		})
 
 		it("should restore the last persisted value when two overlapping writes both reject", async () => {
+			// The fake now models storage: an update commits its value and a read sees what storage holds,
+			// which is what the cache correction on a rejected write reads back. A write that rejects
+			// commits nothing, so storage still holds the last value it accepted.
+			const storage = new Map<string, unknown>()
+			mockGlobalState.get.mockImplementation((key: string) => storage.get(key))
+			mockGlobalState.update.mockImplementation(async (key: string, value: unknown) => {
+				storage.set(key, value)
+			})
 			await proxy.updateGlobalState("apiProvider", "anthropic")
 			mockGlobalState.update.mockReset()
 			let rejectFirst: (error: Error) => void = () => {}
@@ -391,6 +399,22 @@ describe("ContextProxy", () => {
 			// Should have stored the value in cache
 			const storedValue = await proxy.getSecret("apiKey")
 			expect(storedValue).toBe("new-secret")
+		})
+
+		it("counts a secret write in the per-key generation a rollback reads", async () => {
+			const before = proxy.getStateWriteGeneration("apiKey")
+
+			await proxy.storeSecret("apiKey", "first-secret")
+
+			// The guard that rolls back a failed per-view write reads this counter, so a secret it cannot
+			// count is a secret whose newer write of the same value it cannot tell from its own.
+			expect(proxy.getStateWriteGeneration("apiKey")).toBe(before + 1)
+
+			await proxy.storeSecret("apiKey", "first-secret")
+
+			// A second write of the very same value moves the counter too: the value alone cannot tell the
+			// two apart.
+			expect(proxy.getStateWriteGeneration("apiKey")).toBe(before + 2)
 		})
 
 		it("should handle undefined value for secret deletion", async () => {

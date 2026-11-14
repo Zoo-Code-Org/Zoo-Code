@@ -119,6 +119,35 @@ describe("API - configuration", () => {
 		expect(configuration.apiConfiguration).toBe(apiConfiguration)
 	})
 
+	it("keeps the per-view state record out of the configuration it hands out", () => {
+		const getValues = vi.fn().mockReturnValue({
+			currentApiConfigName: "my-profile",
+			viewStates: { "view-a": { mode: "code" }, "view-b": { mode: "architect" } },
+			alwaysAllowReadOnly: true,
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log: vi.fn(),
+			getValues,
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			providerSettingsManager: { saveConfig: vi.fn(), setModeConfig: vi.fn() },
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		const configuration = api.getConfiguration()
+
+		// The record is this machine's map of every view's buffer, not a setting: an extension holding
+		// the API must not be handed it as configuration, and the rest of the settings bag still comes
+		// through unchanged.
+		expect(configuration).not.toHaveProperty("viewStates")
+		expect(configuration.currentApiConfigName).toBe("my-profile")
+		expect(configuration.alwaysAllowReadOnly).toBe(true)
+		expect(getValues).toHaveBeenCalledOnce()
+	})
+
 	it("does not persist mode mappings when none are supplied", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("default-id")

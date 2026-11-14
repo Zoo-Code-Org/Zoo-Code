@@ -76,7 +76,6 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
-	isSecretStateKey,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -1763,31 +1762,6 @@ export class ClineProvider
 			this.webviewDisposables,
 		)
 
-		// Register disposal before awaiting HTML or state so closing the view during
-		// either load invalidates this resolve and prevents later listener installation.
-		webviewView.onDidDispose(
-			async () => {
-				// A view that is no longer current must not clear the current
-				// view's resources or dispose the provider.
-				if (webviewView !== this.view) {
-					return
-				}
-
-				if (inTabMode) {
-					this.log("Disposing ClineProvider instance for tab view")
-					await this.dispose()
-				} else {
-					this.log("Clearing webview resources for sidebar view")
-					this.view = undefined
-					this.clearWebviewResources()
-				}
-			},
-			null,
-			// View-scoped, like the other view subscriptions: disposed both when
-			// the view is disposed and when a different view replaces it.
-			this.webviewDisposables,
-		)
-
 		if (inTabMode) {
 			setPanel(webviewView, "tab")
 		} else if ("onDidChangeVisibility" in webviewView) {
@@ -1812,14 +1786,6 @@ export class ClineProvider
 		// The HTML load above can finish after the view was disposed or replaced.
 		// A stale resolve must not assign HTML to a view the provider no longer owns.
 		if (this.isStaleViewResolve(webviewView, epoch)) {
-			return
-		}
-
-		webviewView.webview.html = html
-
-		// The HTML load above can finish after the view was disposed or replaced.
-		// A stale resolve must not assign HTML to a view the provider no longer owns.
-		if (this.isStaleViewResolve(webviewView)) {
 			return
 		}
 
@@ -2358,7 +2324,6 @@ export class ClineProvider
 			)
 		}
 		try {
-		try {
 			void Promise.resolve(webview.postMessage(omitOriginalContentFromExtensionMessage(message)))
 				.then((delivered) => {
 					this.diagnosticsRecorder.record({
@@ -2382,7 +2347,6 @@ export class ClineProvider
 				taskId,
 			})
 			logDropped(error)
-		}
 		}
 	}
 
@@ -3203,12 +3167,7 @@ export class ClineProvider
 			}
 		}
 
-		if (viewWasPinnedToDeleted) {
-			// This view's pin now dangles: re-point it. setValue also persists the
-			// survivor to the shared store, which covers the deleted-was-global case
-			// for every other view as well as this one.
-			await this.setValue("currentApiConfigName", profileToActivate)
-		} else if (deletedWasGlobal) {
+		if (deletedWasGlobal && !viewWasPinnedToDeleted) {
 			// The shared selection changed, but this view's own pin still names a
 			// surviving profile: update the shared store only, leaving the
 			// view-local pin untouched.
@@ -3223,6 +3182,14 @@ export class ClineProvider
 				await this.contextProxy.setProviderSettings(survivingSettings)
 
 				if (viewWasPinnedToDeleted) {
+					// This view's pin now dangles: re-point it only after the survivor's settings
+					// landed. A settings write that rejects propagates from the line above, so the
+					// shared store cannot be left naming the survivor while it still carries the
+					// deleted profile's settings - the half-repair this flow cannot undo. setValue
+					// also persists the survivor to the shared store, which covers the
+					// deleted-was-global case for every other view as well as this one.
+					await this.setValue("currentApiConfigName", profileToActivate)
+
 					// This view's nested overlay (viewLocalState.apiConfiguration, seeded
 					// by loadViewState) still serves the deleted profile's configuration:
 					// replace it with the survivor's so the re-pointed pin serves matching
@@ -3238,6 +3205,9 @@ export class ClineProvider
 					await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
 				}
 			} else if (viewWasPinnedToDeleted) {
+				// Nothing resolved to install, so the pin still has to move off the deleted profile,
+				// and it moves before the overlay is cleared, in the order the re-pointed pin can serve.
+				await this.setValue("currentApiConfigName", profileToActivate)
 				// The survivor's settings never resolved: this view's pin now names the survivor, so
 				// its overlay must stop serving the deleted profile's configuration and fall back to
 				// the shared settings instead.
@@ -4670,7 +4640,7 @@ export class ClineProvider
 				typeof sanitizedValues.mode !== "string" ||
 				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
 			) {
-				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`) 
+				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
 				delete sanitizedValues.mode
 			}
 		}
@@ -6590,15 +6560,16 @@ export class ClineProvider
 
 		for (const key of Object.keys(attempted) as (keyof RooCodeSettings)[]) {
 			const generation = generations[key]
-			// ContextProxy does not count every key: secrets go through storeSecret and pass-through
-			// keys straight to the Memento, and neither advances the per-key write generation, so the
-			// expectation this setter recorded for them (generation 1 against a stored 0) can never
-			// match and would exempt those keys from the rollback of their own failed attempt.
-			const uncountedHere = isSecretStateKey(key) || isPassThroughStateKey(key)
+			// Pass-through keys go straight to the Memento and advance no per-key write generation, so the
+			// expectation this setter recorded for them (generation 1 against a stored 0) can never match;
+			// they are exempt from the generation test alone, not from the rollback of their own failed
+			// attempt. Secrets are counted, in storeSecret as in updateGlobalState, so a newer write of the
+			// same secret value is visible here and no longer rolls back over it.
+			const passThroughHere = isPassThroughStateKey(key)
 			if (
 				this.contextProxy.getValue(key) === attempted[key] &&
 				(generation === undefined ||
-					uncountedHere ||
+					passThroughHere ||
 					this.contextProxy.getStateWriteGeneration(key as never) === generation)
 			) {
 				;(rollback as Record<string, unknown>)[key] = previous[key]

@@ -639,6 +639,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		const values = Object.fromEntries(
 			Object.entries(this.sidebarProvider.getValues()).filter(([key]) => !isSecretStateKey(key)),
 		)
+		// The per-view record is this machine's map of every view's buffer, not a setting: an extension
+		// holding the API must not be handed it as configuration, and dropping it here covers both the
+		// shared copy and the copy this view's buffer merged in.
+		delete values.viewStates
 		const apiConfiguration = values.apiConfiguration
 		// The secret storage keys are keys of ProviderSettings (SecretState in
 		// packages/types/src/global-settings.ts), so a profile-shaped value can carry a secret that the

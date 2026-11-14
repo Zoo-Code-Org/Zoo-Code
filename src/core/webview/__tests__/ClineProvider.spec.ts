@@ -32,7 +32,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
-import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
@@ -5747,6 +5747,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("preserves mode when it exists in custom modes", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes that include the saved mode
@@ -5903,6 +5904,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("continues with task restoration even if mode config loading fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes
@@ -5991,6 +5993,56 @@ describe("ClineProvider", () => {
 			expect(activateProfile).toHaveBeenCalledWith({ name: "survivor" })
 
 			await provider.dispose()
+		})
+
+		it("keeps the shared selection on the deleted profile when the survivor's settings cannot be installed", async () => {
+			const contextProxy = new ContextProxy(mockContext)
+			const deleter = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				contextProxy,
+				new WebviewFocusTracker(),
+			)
+			const profileToDelete: ProviderSettingsEntry = { name: "deleted", id: "deleted-id" }
+			const deletedSettings = { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "deleted-model" }
+
+			await contextProxy.setValue("listApiConfigMeta", [
+				{ name: "deleted", id: "deleted-id" },
+				{ name: "survivor", id: "survivor-id" },
+			])
+			await contextProxy.setValue("currentApiConfigName", "deleted")
+			await contextProxy.setProviderSettings(deletedSettings)
+			// This view's own pin names the profile being deleted.
+			await deleter.saveViewState("currentApiConfigName", "deleted")
+
+			vi.spyOn(deleter["providerSettingsManager"], "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(deleter["providerSettingsManager"], "activateProfile").mockResolvedValue({
+				name: "survivor",
+				id: "survivor-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// The survivor's settings do resolve here, so the flow reaches the shared settings write - and
+			// that write is what fails.
+			vi.spyOn(deleter["providerSettingsManager"], "getProfile").mockResolvedValue({
+				name: "survivor",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			const settingsWrite = vi
+				.spyOn(deleter["contextProxy"], "setProviderSettings")
+				.mockRejectedValue(new Error("global store unavailable"))
+
+			await expect(deleter.deleteProviderProfile(profileToDelete)).rejects.toThrow("global store unavailable")
+
+			// The pinned name write must follow the survivor's settings write rather than precede it: with
+			// the settings write failed, the shared store may not already name the survivor while it still
+			// carries the deleted profile's settings - the half-repair nothing in this flow undoes.
+			expect(settingsWrite).toHaveBeenCalledOnce()
+			expect(deleter.getValue("currentApiConfigName")).toBe("deleted")
+			expect(deleter["viewLocalState"].currentApiConfigName).toBe("deleted")
+			expect(deleter.contextProxy.getProviderSettings()).toMatchObject(deletedSettings)
+
+			await deleter.dispose()
 		})
 
 		it("clears the settings overlay of a view re-pinned when the survivor's settings cannot be resolved", async () => {
@@ -6122,276 +6174,6 @@ describe("ClineProvider", () => {
 
 			await deleter.dispose()
 			await sibling.dispose()
-		})
-	})
-
-	describe("createTaskWithHistoryItem mode validation", () => {
-		test("validates and falls back to default mode when restored mode no longer exists", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes that don't include the saved mode
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([
-					{
-						slug: "existing-mode",
-						name: "Existing Mode",
-						roleDefinition: "Test role",
-						groups: ["read"] as const,
-					},
-				]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return undefined for non-existent mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug)
-				.mockReturnValueOnce(undefined) // First call returns undefined (mode doesn't exist)
-				.mockReturnValue({
-					slug: "code",
-					name: "Code Mode",
-					roleDefinition: "You are a code assistant",
-					groups: ["read", "edit"],
-				}) // Subsequent calls return default mode
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Spy on log method to verify warning was logged
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item with non-existent mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "non-existent-mode", // This mode doesn't exist
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode validation occurred
-			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
-			expect(getModeBySlug).toHaveBeenCalledWith("non-existent-mode", expect.any(Array))
-
-			// Verify fallback to default mode
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "code")
-			expect(logSpy).toHaveBeenCalledWith(
-				"Mode 'non-existent-mode' from history no longer exists. Falling back to default mode 'code'.",
-			)
-
-			// Verify history item was updated with default mode
-			expect(historyItem.mode).toBe("code")
-		})
-
-		test("preserves mode when it exists in custom modes", async () => {
-			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes that include the saved mode
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([
-					{
-						slug: "custom-mode",
-						name: "Custom Mode",
-						roleDefinition: "Custom role",
-						groups: ["read", "edit"] as const,
-					},
-				]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return the custom mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "custom-mode",
-				name: "Custom Mode",
-				roleDefinition: "Custom role",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				activateProfile: vi.fn().mockResolvedValue({
-					name: "test-config",
-					id: "config-id",
-					apiProvider: providerIdentifiers.anthropic,
-				}),
-			}
-
-			// Spy on log method to verify no warning was logged
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item with existing custom mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "custom-mode",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode validation occurred
-			expect(mockCustomModesManager.getCustomModes).toHaveBeenCalled()
-			expect(getModeBySlug).toHaveBeenCalledWith("custom-mode", expect.any(Array))
-
-			// Verify mode was preserved
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "custom-mode")
-			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("no longer exists"))
-
-			// Verify history item mode was not changed
-			expect(historyItem.mode).toBe("custom-mode")
-		})
-
-		test("preserves mode when it exists in built-in modes", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock no custom modes
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return built-in architect mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "architect",
-				name: "Architect Mode",
-				roleDefinition: "You are an architect",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Create history item with built-in mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "architect",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify mode was preserved
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
-
-			// Verify history item mode was not changed
-			expect(historyItem.mode).toBe("architect")
-		})
-
-		test("handles history items without mode property", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock provider settings manager
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue(undefined),
-				listConfig: vi.fn().mockResolvedValue([]),
-			}
-
-			// Create history item without mode
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				// No mode property
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item
-			await provider.createTaskWithHistoryItem(historyItem)
-
-			// Verify no mode validation occurred (mode update not called)
-			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", expect.any(String))
-		})
-
-		test("continues with task restoration even if mode config loading fails", async () => {
-			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Mock custom modes
-			const mockCustomModesManager = {
-				getCustomModes: vi.fn().mockResolvedValue([]),
-				dispose: vi.fn(),
-			}
-			;(provider as any).customModesManager = mockCustomModesManager
-
-			// Mock getModeBySlug to return built-in mode
-			const { getModeBySlug } = await import("../../../shared/modes")
-			vi.mocked(getModeBySlug).mockReturnValue({
-				slug: "code",
-				name: "Code Mode",
-				roleDefinition: "You are a code assistant",
-				groups: ["read", "edit"],
-			})
-
-			// Mock provider settings manager to throw error
-			;(provider as any).providerSettingsManager = {
-				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
-				listConfig: vi
-					.fn()
-					.mockResolvedValue([
-						{ name: "test-config", id: "config-id", apiProvider: providerIdentifiers.anthropic },
-					]),
-				activateProfile: vi.fn().mockRejectedValue(new Error("Failed to load config")),
-			}
-
-			// Spy on log method
-			const logSpy = vi.spyOn(provider, "log")
-
-			// Create history item
-			const historyItem = {
-				id: "test-id",
-				ts: Date.now(),
-				task: "Test task",
-				mode: "code",
-				number: 1,
-				tokensIn: 0,
-				tokensOut: 0,
-				totalCost: 0,
-			}
-
-			// Initialize with history item - should not throw
-			await expect(provider.createTaskWithHistoryItem(historyItem)).resolves.not.toThrow()
-
-			// Verify error was logged but task restoration continued
-			expect(logSpy).toHaveBeenCalledWith(
-				expect.stringContaining("Failed to restore API configuration for mode 'code'"),
-			)
 		})
 	})
 
@@ -7913,7 +7695,7 @@ describe("ClineProvider", () => {
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
 	})
-	it("should roll back a secret key that ContextProxy does not track with a write generation", async () => {
+	it("restores a secret whose own write is still the newest write of that key", async () => {
 		const provider = new ClineProvider(
 			mockContext,
 			mockOutputChannel,
@@ -7936,18 +7718,63 @@ describe("ClineProvider", () => {
 			"storage unavailable",
 		)
 
-		// ContextProxy routes secret keys through storeSecret, which never advances the per-key
-		// write generation the rollback guard compares against. A key it does not count is captured
-		// with generation 1 and still reads 0 afterwards, so the guard excludes it and the secret
-		// alone stays at the value the failed attempt wrote while every other key is restored.
-		// The attempt did move the secret: ContextProxy.storeSecret is fire-and-forget, so
-		// only the presence of the attempted value and the restored end state are deterministic.
+		// storeSecret advances the per-key write generation the way updateGlobalState does, so the
+		// expectation this setter captured for the secret matches this attempt's own write and the
+		// secret comes back with every other key the attempt committed. What the guard will not do is
+		// restore over a newer write of the same value: that is the case below, which keeps the shape
+		// of the counted-key case beside it. The attempt did move the secret: storeSecret is
+		// fire-and-forget, so only the presence of the attempted value and the restored end state are
+		// deterministic.
 		expect(secretStore.mock.calls.map(([key, value]) => [key, value])).toContainEqual([
 			"nanoGptApiKey",
 			"new-secret",
 		])
 		expect(provider.getValue("mode")).toBe("architect")
 		expect(provider.contextProxy.getSecret("nanoGptApiKey")).toBe("old-secret")
+
+		mockContext.globalState.update = originalUpdate
+		await provider.dispose()
+	})
+
+	it("keeps the guard for a secret whose concurrent write carried the same value", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("nanoGptApiKey", "old-secret")
+		await provider.contextProxy.setValue("mode", "architect")
+		const originalUpdate = mockContext.globalState.update
+		let rejectViews: (error: Error) => void = () => {}
+		let viewWrites = 0
+		mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			if (key === "viewStates") {
+				// The attempt's own per-view write is parked below; the concurrent write's must land.
+				viewWrites++
+				if (viewWrites === 1) {
+					return new Promise<void>((_, reject) => (rejectViews = reject))
+				}
+				return Promise.resolve()
+			}
+			return Promise.resolve()
+		})
+
+		const attempt = provider.setValues({ nanoGptApiKey: "new-secret", mode: "code" })
+		await vi.waitFor(() => expect(provider.contextProxy.getSecret("nanoGptApiKey")).toBe("new-secret"))
+		// A concurrent provider stores the very secret this attempt stored: the stored value cannot
+		// tell the two writes apart, only the per-key count can, and a secret the count did not carry
+		// is a secret the guard could not tell apart either.
+		await provider.contextProxy.setValue("nanoGptApiKey", "new-secret")
+		rejectViews(new Error("storage unavailable"))
+		await expect(attempt).rejects.toThrow("storage unavailable")
+
+		// The rollback captured "old-secret". Restoring it here would undo a newer write this rollback
+		// did not make, for every view that reads shared state. The counted key this attempt really did
+		// leave newest is still restored, which is what the next assertion checks.
+		expect(provider.contextProxy.getSecret("nanoGptApiKey")).toBe("new-secret")
+		expect(provider.getValue("mode")).toBe("architect")
 
 		mockContext.globalState.update = originalUpdate
 		await provider.dispose()
