@@ -7,6 +7,20 @@ import { vscode } from "@/utils/vscode"
 
 import { About } from "../About"
 
+const { mockPackage, mockTranslate } = vi.hoisted(() => ({
+	mockPackage: { version: "1.0.0", sha: "abc12345" as string | undefined },
+	mockTranslate: vi.fn((key: string, options?: Record<string, unknown>) => {
+		if (!options) return key
+		// The version keys echo their options so the test can check what reaches the translator
+		if (key.startsWith("settings:about.version")) return `${key} ${JSON.stringify(options)}`
+		let result = key
+		for (const [k, v] of Object.entries(options)) {
+			result = result.replace(`{{${k}}}`, String(v))
+		}
+		return result
+	}),
+}))
+
 vi.mock("@/utils/vscode", () => ({
 	vscode: { postMessage: vi.fn() },
 }))
@@ -39,27 +53,11 @@ vi.mock("@/i18n/TranslationContext", () => {
 	const actual = vi.importActual("@/i18n/TranslationContext")
 	return {
 		...actual,
-		useAppTranslation: () => ({
-			t: (key: string, options?: Record<string, unknown>) => {
-				if (!options) return key
-				// The version keys echo their options so the test can check what reaches the translator
-				if (key.startsWith("settings:about.version")) return `${key} ${JSON.stringify(options)}`
-				let result = key
-				for (const [k, v] of Object.entries(options)) {
-					result = result.replace(`{{${k}}}`, String(v))
-				}
-				return result
-			},
-		}),
+		useAppTranslation: () => ({ t: mockTranslate }),
 	}
 })
 
-vi.mock("@roo/package", () => ({
-	Package: {
-		version: "1.0.0",
-		sha: "abc12345",
-	},
-}))
+vi.mock("@roo/package", () => ({ Package: mockPackage }))
 
 describe("About", () => {
 	const defaultProps = {
@@ -94,6 +92,7 @@ describe("About", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		mockPackage.sha = "abc12345"
 	})
 
 	it("renders the About section header", () => {
@@ -114,6 +113,16 @@ describe("About", () => {
 		expect(
 			screen.getByText('settings:about.versionWithCommit {"version":"1.0.0","commit":"abc12345"}'),
 		).toBeInTheDocument()
+	})
+
+	it("displays the version without a commit when the package sha is unset", () => {
+		mockPackage.sha = undefined
+
+		renderAbout()
+
+		expect(mockTranslate).toHaveBeenCalledWith("settings:about.version", { version: "1.0.0" })
+		expect(mockTranslate).not.toHaveBeenCalledWith("settings:about.versionWithCommit", expect.anything())
+		expect(screen.getByText('settings:about.version {"version":"1.0.0"}')).toBeInTheDocument()
 	})
 
 	it("renders the bug report section with label and link text", () => {

@@ -4,16 +4,9 @@ import CodeAccordion from "../CodeAccordion"
 
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
-		t: (key: string, options?: Record<string, unknown>) => {
-			const translations: Record<string, string> = {
-				"chat:codeAccordion.userEdits": "User Edits",
-				"chat:codeAccordion.consoleLogs": "Console Logs",
-			}
-			return (
-				translations[key] ??
-				(key === "chat:codeAccordion.openFileAriaLabel" ? `${key} ${JSON.stringify(options)}` : key)
-			)
-		},
+		// Echo keys so assertions fail if the component renders hardcoded English instead of calling t()
+		t: (key: string, options?: Record<string, unknown>) =>
+			key === "chat:codeAccordion.openFileAriaLabel" ? `${key} ${JSON.stringify(options)}` : key,
 	}),
 }))
 
@@ -50,6 +43,6 @@ describe("CodeAccordion", () => {
 			/>,
 		)
 
-		expect(screen.getByText("User Edits")).toBeInTheDocument()
+		expect(screen.getByText("chat:codeAccordion.userEdits")).toBeInTheDocument()
 	})
 })
