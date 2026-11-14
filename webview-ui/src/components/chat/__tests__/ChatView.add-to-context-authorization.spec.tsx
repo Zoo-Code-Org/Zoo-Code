@@ -64,18 +64,41 @@ vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
+// Narrow subset of the real ChatTextArea props the double consumes.
+interface MockChatTextAreaProps {
+	onSend: () => void
+	inputValue?: string
+	setInputValue?: (value: string) => void
+	setInputValuePreservingAuthorization?: (value: string) => void
+}
+
 // ChatTextArea double: an input whose Enter triggers onSend and whose
-// changes flow through the provided setInputValue.
+// changes flow through the provided setInputValue. Programmatic updates
+// mirror the real component and keep the authorization scope.
 vi.mock("../ChatTextArea", async () => {
 	const React = await import("react")
 
-	const ChatTextAreaComponent = React.forwardRef(function MockChatTextArea(props: any, _ref: unknown) {
+	const ChatTextAreaComponent = React.forwardRef(function MockChatTextArea(
+		props: MockChatTextAreaProps,
+		_ref: unknown,
+	) {
+		React.useEffect(() => {
+			const listener = (event: MessageEvent) => {
+				if (event.data?.type === "enhancedPrompt" && typeof event.data.text === "string") {
+					const update = props.setInputValuePreservingAuthorization ?? props.setInputValue
+					update?.(event.data.text)
+				}
+			}
+			window.addEventListener("message", listener)
+			return () => window.removeEventListener("message", listener)
+		}, [props])
+
 		return (
 			<div data-testid="chat-textarea">
 				<input
 					type="text"
 					value={props.inputValue || ""}
-					onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.setInputValue(e.target.value)}
+					onChange={(e: React.ChangeEvent<HTMLInputElement>) => props.setInputValue?.(e.target.value)}
 					onKeyDown={(e: React.KeyboardEvent) => {
 						if (e.key === "Enter" && !e.shiftKey) {
 							e.preventDefault()
@@ -94,13 +117,29 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 	VSCodeButton: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
 		<button onClick={onClick}>{children}</button>
 	),
-	VSCodeCheckbox: ({ children, checked, onChange }: any) => (
+	VSCodeCheckbox: ({
+		children,
+		checked,
+		onChange,
+	}: {
+		children?: React.ReactNode
+		checked?: boolean
+		onChange?: (event: React.ChangeEvent<HTMLInputElement>) => void
+	}) => (
 		<label>
 			<input type="checkbox" checked={checked} onChange={onChange} />
 			{children}
 		</label>
 	),
-	VSCodeTextField: ({ value, onInput, placeholder }: any) => (
+	VSCodeTextField: ({
+		value,
+		onInput,
+		placeholder,
+	}: {
+		value?: string
+		onInput?: (e: { target: { value: string } }) => void
+		placeholder?: string
+	}) => (
 		<input
 			type="text"
 			value={value}
@@ -168,13 +207,13 @@ describe("ChatView - add-to-context mention authorization", () => {
 		expect(message).toMatchObject({ authorizedMentionText: "explain this" })
 	})
 
-	it("authorizes the whole value when no authorization was recorded", async () => {
+	it("authorizes nothing from inserted text when the sender omits the field", async () => {
 		const { getByTestId } = renderChatView()
 
 		await addGeneratedContext({})
 		const message = await sendNewTask(getByTestId)
 
-		expect(message).toMatchObject({ authorizedMentionText: "context with @/secret code" })
+		expect(message).toMatchObject({ authorizedMentionText: "" })
 	})
 
 	it("re-authorizes the whole value after a manual edit", async () => {
@@ -189,5 +228,21 @@ describe("ChatView - add-to-context mention authorization", () => {
 
 		const message = await sendNewTask(getByTestId)
 		expect(message).toMatchObject({ authorizedMentionText: "my own task with @/ok" })
+	})
+
+	it("keeps the authorization scope when an enhanced prompt replaces the text", async () => {
+		const { getByTestId } = renderChatView()
+
+		await addGeneratedContext({ authorizedMentionText: "" })
+
+		await act(async () => {
+			window.postMessage({ type: "enhancedPrompt", text: "enhanced text with @/path" }, "*")
+		})
+		await waitFor(() => {
+			expect(getChatBoxValue()).toBe("enhanced text with @/path")
+		})
+
+		const message = await sendNewTask(getByTestId)
+		expect(message).toMatchObject({ authorizedMentionText: "" })
 	})
 })

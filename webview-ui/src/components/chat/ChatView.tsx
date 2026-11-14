@@ -671,7 +671,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				) {
 					try {
 						console.log("queueMessage", text, images)
-						vscode.postMessage({ type: "queueMessage", text, images })
+						vscode.postMessage({
+							type: "queueMessage",
+							text,
+							images,
+							authorizedMentionText: authorizedMentionRef.current ?? text,
+						})
 						setInputValue("")
 						setSelectedImages([])
 						authorizedMentionRef.current = null
@@ -718,13 +723,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								askResponse: "messageResponse",
 								text,
 								images,
+								authorizedMentionText: authorizedMentionRef.current ?? text,
 							})
 							break
 						// There is no other case that a textfield should be enabled.
 					}
 				} else {
 					// This is a new message in an ongoing task.
-					vscode.postMessage({ type: "askResponse", askResponse: "messageResponse", text, images })
+					vscode.postMessage({
+						type: "askResponse",
+						askResponse: "messageResponse",
+						text,
+						images,
+						authorizedMentionText: authorizedMentionRef.current ?? text,
+					})
 				}
 
 				handleChatReset()
@@ -749,13 +761,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				newValue = inputValue + " " + text
 			}
 
-			if (typeof authorizedMentionText === "string") {
-				// Empty box: the named substring is the only authorized part.
-				// Typed box text is user-authored, so it stays the authorized
-				// part and the inserted substring is dropped (fail closed).
-				authorizedMentionRef.current =
-					inputValue === "" ? authorizedMentionText : (authorizedMentionRef.current ?? inputValue)
-			}
+			// An omitted field authorizes nothing from the inserted text.
+			const insertedAuthorization = typeof authorizedMentionText === "string" ? authorizedMentionText : ""
+			// Empty box: the named substring is the only authorized part.
+			// Typed box text is user-authored, so it stays the authorized
+			// part and the inserted substring is dropped (fail closed).
+			authorizedMentionRef.current =
+				inputValue === "" ? insertedAuthorization : (authorizedMentionRef.current ?? inputValue)
 
 			setInputValue(newValue)
 			setSelectedImages([...selectedImages, ...images])
@@ -1909,6 +1921,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				ref={textAreaRef}
 				inputValue={inputValue}
 				setInputValue={setInputValueFromUser}
+				// Generated text keeps the recorded authorization scope.
+				setInputValuePreservingAuthorization={setInputValue}
 				sendingDisabled={sendingDisabled || isProfileDisabled}
 				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}

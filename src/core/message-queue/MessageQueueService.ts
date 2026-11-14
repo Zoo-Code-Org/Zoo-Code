@@ -28,7 +28,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return { index, message: this._messages[index] }
 	}
 
-	public addMessage(text: string, images?: string[]): QueuedMessage | undefined {
+	public addMessage(text: string, images?: string[], authorizedMentionText?: string): QueuedMessage | undefined {
 		if (!text && !images?.length) {
 			return undefined
 		}
@@ -38,6 +38,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 			id: uuidv4(),
 			text,
 			images,
+			authorizedMentionText,
 		}
 
 		this._messages.push(message)
@@ -69,6 +70,8 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		message.timestamp = Date.now()
 		message.text = text
 		message.images = images
+		// The edited text is user-authored, so it replaces any recorded scope.
+		message.authorizedMentionText = text
 		this.emit("stateChanged", this._messages)
 		return true
 	}

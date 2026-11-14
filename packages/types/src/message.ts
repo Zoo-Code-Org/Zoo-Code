@@ -376,6 +376,8 @@ export const queuedMessageSchema = z.object({
 	id: z.string(),
 	text: z.string(),
 	images: z.array(z.string()).optional(),
+	/** User-authored substring of `text` that may have mentions expanded. */
+	authorizedMentionText: z.string().optional(),
 })
 
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>

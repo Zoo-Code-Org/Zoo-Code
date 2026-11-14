@@ -1242,6 +1242,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "follow-up question during spinner",
 				images: [],
+				authorizedMentionText: "follow-up question during spinner",
 			})
 		})
 
@@ -1313,6 +1314,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				askResponse: "messageResponse",
 				text: "follow-up after completion",
 				images: [],
+				authorizedMentionText: "follow-up after completion",
 			})
 		})
 
@@ -1372,6 +1374,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during queue drain",
 				images: [],
+				authorizedMentionText: "message during queue drain",
 			})
 		})
 
@@ -1435,6 +1438,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during command execution",
 				images: [],
+				authorizedMentionText: "message during command execution",
 			})
 		})
 
@@ -1555,6 +1559,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 			askResponse: "messageResponse",
 			text: "Use code mode",
 			images: [],
+			authorizedMentionText: "Use code mode",
 		})
 	})
 
@@ -1595,6 +1600,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Use invalid mode",
 				images: [],
+				authorizedMentionText: "Use invalid mode",
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
@@ -1655,6 +1661,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Valid answer",
 				images: [],
+				authorizedMentionText: "Valid answer",
 			})
 		})
 	})

@@ -3591,12 +3591,15 @@ describe("Cline", () => {
 					await task.catch(() => {})
 				})
 
-				it("does not expand task text when the start passes no authorization", async () => {
+				it.each([
+					{ label: "empty string", authorizedMentionText: "" },
+					{ label: "omitted option", authorizedMentionText: undefined },
+				])("does not expand task text when authorization is $label", async ({ authorizedMentionText }) => {
 					const [cline, task] = Task.create({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
 						task: "read '@/secret' please",
-						authorizedMentionText: "",
+						authorizedMentionText,
 					})
 
 					// Wait until the loop reached mention processing, then stop it.
@@ -3621,6 +3624,22 @@ describe("Cline", () => {
 					await task.catch(() => {})
 
 					expect(vi.mocked(parseMentions).mock.calls[0]?.[0]).toBe(taskText)
+				})
+
+				it("expands only the authorized substring of generated task text", async () => {
+					const [cline, task] = Task.create({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "context @/context.txt\nchosen @/chosen.txt",
+						authorizedMentionText: "chosen @/chosen.txt",
+					})
+
+					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
+					await cline.abortTask(true)
+					await task.catch(() => {})
+
+					const texts = vi.mocked(parseMentions).mock.calls.map(([text]) => text)
+					expect(texts).toEqual(["chosen @/chosen.txt"])
 				})
 			})
 		})

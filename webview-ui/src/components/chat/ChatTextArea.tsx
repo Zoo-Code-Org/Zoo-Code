@@ -59,6 +59,8 @@ const isFileDrag = (dataTransfer: DataTransfer): boolean =>
 interface ChatTextAreaProps {
 	inputValue: string
 	setInputValue: (value: string) => void
+	/** Programmatic updates preserve the chat box authorization scope. */
+	setInputValuePreservingAuthorization?: (value: string) => void
 	sendingDisabled: boolean
 	selectApiConfigDisabled: boolean
 	placeholderText: string
@@ -85,6 +87,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		{
 			inputValue,
 			setInputValue,
+			setInputValuePreservingAuthorization,
 			selectApiConfigDisabled,
 			placeholderText,
 			selectedImages,
@@ -155,6 +158,12 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			return () => document.removeEventListener("mousedown", handleClickOutside)
 		}, [showDropdown])
 
+		// Generated text routes through this setter so it never clears the
+		// chat box authorization scope.
+		const setInputValueProgrammatic = setInputValuePreservingAuthorization ?? setInputValue
+
+		const programmaticInsertRef = useRef(false)
+
 		// Handle enhanced prompt response and search results.
 		useEffect(() => {
 			const messageHandler = (event: MessageEvent) => {
@@ -173,12 +182,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 								// Select all text first
 								textarea.select()
+								programmaticInsertRef.current = true
 								document.execCommand("insertText", false, message.text)
 							} else {
-								setInputValue(message.text)
+								setInputValueProgrammatic(message.text)
 							}
 						} catch {
-							setInputValue(message.text)
+							programmaticInsertRef.current = false
+							setInputValueProgrammatic(message.text)
 						}
 					}
 
@@ -202,7 +213,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							message.text +
 							" " +
 							currentValue.slice(cursorPos)
-						setInputValue(newValue)
+						setInputValueProgrammatic(newValue)
 
 						// Set cursor position after the inserted text
 						const newCursorPos = cursorPos + prefix.length + message.text.length + 1
@@ -233,7 +244,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			window.addEventListener("message", messageHandler)
 			return () => window.removeEventListener("message", messageHandler)
-		}, [setInputValue, searchRequestId, normalizedInputValue])
+		}, [setInputValueProgrammatic, searchRequestId, normalizedInputValue])
 
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
@@ -278,9 +289,9 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				setIsEnhancingPrompt(true)
 				vscode.postMessage({ type: "enhancePrompt" as const, text: trimmedInput })
 			} else {
-				setInputValue(t("chat:enhancePromptDescription"))
+				setInputValueProgrammatic(t("chat:enhancePromptDescription"))
 			}
-		}, [normalizedInputValue, setInputValue, t])
+		}, [normalizedInputValue, setInputValueProgrammatic, t])
 
 		const allModes = useMemo(() => getAllModes(customModes), [customModes])
 
@@ -613,7 +624,12 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleInputChange = useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const newValue = e.target.value
-				setInputValue(newValue)
+				if (programmaticInsertRef.current) {
+					programmaticInsertRef.current = false
+					setInputValueProgrammatic(newValue)
+				} else {
+					setInputValue(newValue)
+				}
 
 				// Reset history navigation when user types
 				resetOnInputChange()
@@ -675,7 +691,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([]) // Clear file search results.
 				}
 			},
-			[setInputValue, setSearchRequestId, setFileSearchResults, setSearchLoading, resetOnInputChange],
+			[
+				setInputValue,
+				setInputValueProgrammatic,
+				setSearchRequestId,
+				setFileSearchResults,
+				setSearchLoading,
+				resetOnInputChange,
+			],
 		)
 
 		useEffect(() => {

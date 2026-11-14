@@ -219,7 +219,11 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				task.flushTelemetryInstallment("attempt_completion")
 			}
 
-			const { response, text, images, queuedMessageId } = await task.ask("completion_result", "", false)
+			const { response, text, images, queuedMessageId, authorizedMentionText } = await task.ask(
+				"completion_result",
+				"",
+				false,
+			)
 
 			if (response === "yesButtonClicked") {
 				// A stale history replay reruns this handler on a fresh Task instance for a
@@ -246,8 +250,9 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			}
 
 			const feedbackText = `<user_message>\n${text}\n</user_message>`
-			// Authorizes expansion. The tool result repeats the text by design.
-			task.userMessageContent.push(userMentionContent(feedbackText, text ?? ""))
+			// Authorizes only the chat-box substring the webview named. The
+			// tool result repeats the text by design.
+			task.userMessageContent.push(userMentionContent(feedbackText, authorizedMentionText ?? ""))
 			pushToolResult(formatResponse.toolResult(feedbackText, images))
 		} catch (error) {
 			await handleError("inspecting site", error as Error)

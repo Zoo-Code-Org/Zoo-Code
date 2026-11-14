@@ -462,6 +462,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	private askResponseAuthorizedMentionText?: string
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -1268,7 +1269,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
-		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
+		this.handleWebviewAskResponse(
+			resolution.response,
+			message.text,
+			message.images,
+			message.authorizedMentionText ?? "",
+		)
 		if (resolution.requiresDurableAck) {
 			return message.id
 		}
@@ -1938,6 +1944,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		response: ClineAskResponse
 		text?: string
 		images?: string[]
+		/** User-authored substring of `text` that may have mentions expanded. */
+		authorizedMentionText?: string
 		queuedMessageId?: string
 		/**
 		 * Present when the ask was resolved by an automatic (policy) denial
@@ -2153,7 +2161,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Store the auto-approval timeout so it can be cancelled if user interacts
 			this.autoApprovalTimeoutRef = setTimeout(() => {
 				const { askResponse, text, images } = approval.fn()
-				this.handleWebviewAskResponse(askResponse, text, images)
+				this.handleWebviewAskResponse(askResponse, text, images, "")
 				this.autoApprovalTimeoutRef = undefined
 			}, approval.timeout)
 			timeouts.push(this.autoApprovalTimeoutRef)
@@ -2456,12 +2464,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				response: this.askResponse!,
 				text: this.askResponseText,
 				images: this.askResponseImages,
+				authorizedMentionText: this.askResponseAuthorizedMentionText ?? "",
 				queuedMessageId,
 				autoDenyDetail: this.pendingAutoDenyDetail,
 			}
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseAuthorizedMentionText = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2484,13 +2494,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		authorizedMentionText = "",
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseAuthorizedMentionText = authorizedMentionText
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -3318,7 +3334,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.markInitialized()
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, authorizedMentionText } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -3440,8 +3456,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
 
 			if (responseText) {
+				// Only the chat-box substring the webview authorized expands.
 				newUserContent.push(
-					userMentionContent(`<user_message>\n${responseText}\n</user_message>`, responseText),
+					userMentionContent(`<user_message>\n${responseText}\n</user_message>`, authorizedMentionText ?? ""),
 				)
 			}
 

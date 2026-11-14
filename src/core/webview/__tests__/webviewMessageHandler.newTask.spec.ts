@@ -1,5 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import type { ClineProvider } from "../ClineProvider"
+import type { WebviewMessage } from "../../../shared/WebviewMessage"
 
 vi.mock("../../../i18n", () => ({
 	t: vi.fn((key: string) => key),
@@ -28,28 +30,43 @@ vi.mock("vscode", () => ({
 	commands: { executeCommand: vi.fn() },
 }))
 
-describe("webviewMessageHandler newTask authorization", () => {
-	let provider: Record<string, ReturnType<typeof vi.fn>>
+describe("webviewMessageHandler mention authorization forwarding", () => {
+	// Narrow double: the handler under test only touches these members.
+	// The single cast at construction keeps every use site type-checked.
+	let provider: {
+		createTask: ReturnType<typeof vi.fn>
+		postMessageToWebview: ReturnType<typeof vi.fn>
+		getCurrentTask: ReturnType<typeof vi.fn>
+		getState: ReturnType<typeof vi.fn>
+	}
+	let providerAsClineProvider: ClineProvider
+	let currentTask: {
+		handleWebviewAskResponse: ReturnType<typeof vi.fn>
+		messageQueueService: { addMessage: ReturnType<typeof vi.fn> }
+	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		currentTask = {
+			handleWebviewAskResponse: vi.fn(),
+			messageQueueService: { addMessage: vi.fn() },
+		}
 		provider = {
 			createTask: vi.fn().mockResolvedValue({ taskId: "task-1" }),
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
-			getCurrentTask: vi.fn(() => undefined),
+			getCurrentTask: vi.fn(() => currentTask),
 			getState: vi.fn().mockResolvedValue({ maxImageFileSize: 5, maxTotalImageSize: 20 }),
-		} as unknown as Record<string, ReturnType<typeof vi.fn>>
+		}
+		providerAsClineProvider = provider as unknown as ClineProvider
 	})
 
 	it("forwards the authorized mention substring from the webview message", async () => {
-		await webviewMessageHandler(
-			provider as never,
-			{
-				type: "newTask",
-				text: "context @/secret\nuser line",
-				authorizedMentionText: "user line",
-			} as never,
-		)
+		const message: WebviewMessage = {
+			type: "newTask",
+			text: "context @/secret\nuser line",
+			authorizedMentionText: "user line",
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
 
 		expect(provider.createTask).toHaveBeenCalledWith(
 			"context @/secret\nuser line",
@@ -61,13 +78,11 @@ describe("webviewMessageHandler newTask authorization", () => {
 	})
 
 	it("passes an empty authorized substring when the webview omits it", async () => {
-		await webviewMessageHandler(
-			provider as never,
-			{
-				type: "newTask",
-				text: "generated @/path from selected code",
-			} as never,
-		)
+		const message: WebviewMessage = {
+			type: "newTask",
+			text: "generated @/path from selected code",
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
 
 		expect(provider.createTask).toHaveBeenCalledWith(
 			"generated @/path from selected code",
@@ -75,6 +90,56 @@ describe("webviewMessageHandler newTask authorization", () => {
 			undefined,
 			expect.objectContaining({ authorizedMentionText: "" }),
 			undefined,
+		)
+	})
+
+	it("forwards the authorized substring with the ask response", async () => {
+		const message: WebviewMessage = {
+			type: "askResponse",
+			askResponse: "messageResponse",
+			text: "context @/secret\nuser line",
+			authorizedMentionText: "user line",
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
+
+		expect(currentTask.handleWebviewAskResponse).toHaveBeenCalledWith(
+			"messageResponse",
+			"context @/secret\nuser line",
+			[],
+			"user line",
+		)
+	})
+
+	it("treats an omitted authorized substring on an ask response as empty", async () => {
+		const message: WebviewMessage = {
+			type: "askResponse",
+			askResponse: "messageResponse",
+			text: "generated @/path",
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
+
+		expect(currentTask.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "generated @/path", [], "")
+	})
+
+	it("passes an empty authorized substring when a queued message omits it", async () => {
+		const message: WebviewMessage = { type: "queueMessage", text: "generated @/path" }
+		await webviewMessageHandler(providerAsClineProvider, message)
+
+		expect(currentTask.messageQueueService.addMessage).toHaveBeenCalledWith("generated @/path", [], "")
+	})
+
+	it("forwards the authorized substring with a queued message", async () => {
+		const message: WebviewMessage = {
+			type: "queueMessage",
+			text: "context @/secret\nuser line",
+			authorizedMentionText: "user line",
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
+
+		expect(currentTask.messageQueueService.addMessage).toHaveBeenCalledWith(
+			"context @/secret\nuser line",
+			[],
+			"user line",
 		)
 	})
 })

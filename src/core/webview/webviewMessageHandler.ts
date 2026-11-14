@@ -744,9 +744,14 @@ export const webviewMessageHandler = async (
 		case "askResponse":
 			{
 				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-				provider
-					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+				provider.getCurrentTask()?.handleWebviewAskResponse(
+					message.askResponse!,
+					resolved.text,
+					resolved.images,
+					// Fail closed when the webview omits the authorized
+					// substring.
+					typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+				)
 			}
 			break
 
@@ -4037,7 +4042,12 @@ export const webviewMessageHandler = async (
 
 		case "queueMessage": {
 			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			provider.getCurrentTask()?.messageQueueService.addMessage(
+				resolved.text,
+				resolved.images,
+				// Fail closed when the webview omits the authorized substring.
+				typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+			)
 			break
 		}
 		case "removeQueuedMessage": {
