@@ -33,6 +33,57 @@ export type AnthropicProviderReasoningParams =
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
+/**
+ * Effort levels accepted by the Claude 4.7+ adaptive-thinking
+ * `output_config.effort` envelope. Efforts outside this set (e.g. "none",
+ * "minimal", "disable") omit the envelope so the API applies its own default.
+ * @internal Exported for focused implementation tests.
+ */
+export const ADAPTIVE_OUTPUT_CONFIG_EFFORTS: readonly ReasoningEffortExtended[] = [
+	"low",
+	"medium",
+	"high",
+	"xhigh",
+	"max",
+]
+
+/**
+ * Resolves the effective thinking effort for a single request, strongest override first.
+ *
+ * Resolution order (strongest first):
+ * 1. `override` — the per-request task-local effort
+ *    (`ApiHandlerCreateMessageMetadata.reasoningEffort`),
+ * 2. `settingsReasoningEffort` — the settings-derived value,
+ * 3. `modelDefaultEffort` — the model's default effort.
+ *
+ * This is the shared resolution point for the per-request override: a provider
+ * that resolves its effective effort through this function applies the override
+ * there instead of duplicating precedence logic. Nothing calls it in this unit
+ * yet - the caller-side wiring arrives later in the series (the task supplies
+ * `reasoningEffort` in request metadata, the Anthropic provider resolves here),
+ * so this states what a caller gets rather than claiming providers already
+ * apply an override. The override is transient (next request only) and is never
+ * persisted to settings.
+ * @internal Exported for focused implementation tests.
+ */
+export const resolveEffectiveReasoningEffort = ({
+	override,
+	settingsReasoningEffort,
+	modelDefaultEffort,
+}: {
+	override?: ReasoningEffortExtended
+	settingsReasoningEffort?: ReasoningEffortExtended | "disable"
+	modelDefaultEffort?: ReasoningEffortExtended
+}): ReasoningEffortExtended | "disable" | undefined => {
+	if (override !== undefined) {
+		return override
+	}
+	if (settingsReasoningEffort !== undefined) {
+		return settingsReasoningEffort
+	}
+	return modelDefaultEffort
+}
+
 // Valid Gemini thinking levels for effort-based reasoning
 const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
 
