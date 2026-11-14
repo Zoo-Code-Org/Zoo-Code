@@ -240,7 +240,7 @@ describe("Task dispose method", () => {
 
 	test("should await diff reversion during abort without waiting for output cleanup", async () => {
 		let resolveCleanup!: () => void
-		let resolveReversion!: () => void
+		let resolveReversion!: (restored: boolean) => void
 		vi.mocked(OutputInterceptor.cleanup).mockReturnValueOnce(
 			new Promise((resolve) => {
 				resolveCleanup = resolve
@@ -249,7 +249,7 @@ describe("Task dispose method", () => {
 		task.isStreaming = true
 		task.diffViewProvider.isEditing = true
 		const revertChangesSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(
-			new Promise((resolve) => {
+			new Promise<boolean>((resolve) => {
 				resolveReversion = resolve
 			}),
 		)
@@ -260,7 +260,7 @@ describe("Task dispose method", () => {
 		await vi.waitFor(() => expect(revertChangesSpy).toHaveBeenCalledOnce())
 		expect(saveMessages).not.toHaveBeenCalled()
 
-		resolveReversion()
+		resolveReversion(true)
 		await abort
 		expect(saveMessages).toHaveBeenCalledOnce()
 
@@ -277,8 +277,8 @@ describe("Task dispose method", () => {
 	})
 
 	test("should expose completion of deferred diff reversion", async () => {
-		let resolveReversion: () => void
-		const reversion = new Promise<void>((resolve) => {
+		let resolveReversion: (restored: boolean) => void
+		const reversion = new Promise<boolean>((resolve) => {
 			resolveReversion = resolve
 		})
 		task.isStreaming = true
@@ -295,7 +295,8 @@ describe("Task dispose method", () => {
 		expect(disposalComplete).toBe(false)
 		expect(revertChangesSpy).toHaveBeenCalledOnce()
 
-		resolveReversion!()
+		// A completed rollback: this is the reversion the deferred disposal is waiting for.
+		resolveReversion!(true)
 		await disposal
 		expect(disposalComplete).toBe(true)
 	})
