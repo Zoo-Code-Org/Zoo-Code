@@ -137,6 +137,30 @@ describe("prepareApiConversationMessage", () => {
 		])
 	})
 
+	it("stores the origin of a thought signature when the handler reports one", () => {
+		const api = {
+			getThoughtSignature: () => "signature-1",
+			getThoughtSignatureOrigin: () => "litellm|http://localhost:4000|gemini-3-pro",
+		}
+
+		const result = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			// prepareApiConversationMessage reads only the thought signature hooks of the handler.
+			api: api as unknown as ApiHandler,
+			apiConfiguration: { apiProvider: providerIdentifiers.litellm, litellmModelId: "gemini-3-pro" },
+			apiConversationHistory: [],
+		})
+
+		expect(result.content).toEqual([
+			{ type: "text", text: "answer" },
+			{
+				type: "thoughtSignature",
+				thoughtSignature: "signature-1",
+				origin: "litellm|http://localhost:4000|gemini-3-pro",
+			},
+		])
+	})
+
 	it("validates user tool_result blocks against the last effective assistant message", () => {
 		const result = prepareApiConversationMessage({
 			message: {

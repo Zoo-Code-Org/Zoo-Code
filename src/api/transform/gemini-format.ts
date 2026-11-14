@@ -6,9 +6,14 @@ import { Content, Part } from "@google/genai"
 // This bypass token tells Gemini to skip signature validation for cross-model history entries.
 export const GEMINI_THOUGHT_SIGNATURE_BYPASS = Buffer.from("skip_thought_signature_validator").toString("base64")
 
-type ThoughtSignatureContentBlock = {
+export type ThoughtSignatureContentBlock = {
 	type: "thoughtSignature"
 	thoughtSignature?: string
+	/**
+	 * Backend that minted the signature, set by handlers that are not native Gemini.
+	 * A signature validates only on the backend that minted it.
+	 */
+	origin?: string
 }
 
 type ReasoningContentBlock = {
@@ -16,7 +21,8 @@ type ReasoningContentBlock = {
 	text: string
 }
 
-type ExtendedContentBlockParam = Anthropic.ContentBlockParam | ThoughtSignatureContentBlock | ReasoningContentBlock
+export type ExtendedContentBlockParam =
+	Anthropic.ContentBlockParam | ThoughtSignatureContentBlock | ReasoningContentBlock
 type ExtendedAnthropicContent = string | ExtendedContentBlockParam[]
 
 // Extension type to safely add thoughtSignature to Part
@@ -24,7 +30,9 @@ type PartWithThoughtSignature = Part & {
 	thoughtSignature?: string
 }
 
-function isThoughtSignatureContentBlock(block: ExtendedContentBlockParam): block is ThoughtSignatureContentBlock {
+export function isThoughtSignatureContentBlock(
+	block: ExtendedContentBlockParam,
+): block is ThoughtSignatureContentBlock {
 	return block.type === "thoughtSignature"
 }
 
@@ -38,7 +46,9 @@ export function convertAnthropicContentToGemini(
 	// First pass: find thoughtSignature if it exists in the content blocks
 	let activeThoughtSignature: string | undefined
 	if (Array.isArray(content)) {
-		const sigBlock = content.find((block) => isThoughtSignatureContentBlock(block)) as ThoughtSignatureContentBlock
+		const sigBlock = content.find(
+			(block) => isThoughtSignatureContentBlock(block) && block.origin === undefined,
+		) as ThoughtSignatureContentBlock
 		if (sigBlock?.thoughtSignature) {
 			activeThoughtSignature = sigBlock.thoughtSignature
 		}
