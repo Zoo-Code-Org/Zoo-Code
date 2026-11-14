@@ -178,6 +178,40 @@ describe("SkillsManager", () => {
 	})
 
 	describe("discoverSkills", () => {
+		it.each(["", "yaml", "json", "js", "javascript"])("restricts skill parsing for %s", async (language) => {
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === projectSkillsDir)
+			mockRealpath.mockImplementation(async (dir: string) => dir)
+			mockReaddir.mockResolvedValue(["example"])
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockResolvedValue(true)
+			const probe = vi.fn()
+			vi.stubGlobal("frontmatterProbe", probe)
+			const unsafe = ["js", "javascript"].includes(language)
+			const metadata = unsafe
+				? '(globalThis.frontmatterProbe(), {name: "example", description: "Example"})'
+				: language === "json"
+					? '{"name":"example","description":"Example"}'
+					: "name: example\ndescription: Example"
+			mockReadFile.mockResolvedValue(`---${language}\n${metadata}\n---\nBody`)
+			try {
+				await skillsManager.discoverSkills()
+				expect(skillsManager.getAllSkills()).toHaveLength(unsafe ? 0 : 1)
+				if (!unsafe) {
+					expect((await skillsManager.getSkillContent("example"))?.instructions).toBe("Body")
+					mockReadFile.mockResolvedValue("---js\n(globalThis.frontmatterProbe(), {})\n---")
+					await expect(skillsManager.getSkillContent("example")).rejects.toThrow(
+						"Unsupported frontmatter language",
+					)
+					await expect(skillsManager.updateSkillModes("example", "project", ["code"])).rejects.toThrow(
+						"Unsupported frontmatter language",
+					)
+				}
+				expect(probe).not.toHaveBeenCalled()
+			} finally {
+				vi.unstubAllGlobals()
+			}
+		})
+
 		it("should discover skills from global directory", async () => {
 			const pdfSkillDir = p(globalSkillsDir, "pdf-processing")
 			const pdfSkillMd = p(pdfSkillDir, "SKILL.md")

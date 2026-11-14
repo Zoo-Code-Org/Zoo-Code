@@ -22,6 +22,33 @@ describe("Command loading with frontmatter", () => {
 		vi.clearAllMocks()
 	})
 
+	it.each(["", "yaml", "json", "js", "javascript"])("restricts both command loaders for %s", async (language) => {
+		const probe = vi.fn()
+		vi.stubGlobal("frontmatterProbe", probe)
+		const unsafe = ["js", "javascript"].includes(language)
+		const metadata = unsafe
+			? '(globalThis.frontmatterProbe(), {description: "Example"})'
+			: language === "json"
+				? '{"description":"Example"}'
+				: "description: Example"
+		const content = `---${language}\n${metadata}\n---\nBody`
+		mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+		mockFs.readdir = vi.fn().mockResolvedValue([{ name: "example.md", isFile: () => true }])
+		mockFs.readFile = vi.fn().mockResolvedValue(content)
+		try {
+			const command = await getCommand("/test/cwd", "example")
+			const commands = await getCommands("/test/cwd")
+			for (const result of [command, ...commands]) {
+				expect(result?.description).toBe(unsafe ? undefined : "Example")
+				expect(result?.content).toBe(unsafe ? content : "Body")
+			}
+			expect(commands).toHaveLength(1)
+			expect(probe).not.toHaveBeenCalled()
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	describe("getCommand with frontmatter", () => {
 		it("should load command with description from frontmatter", async () => {
 			const commandContent = `---
