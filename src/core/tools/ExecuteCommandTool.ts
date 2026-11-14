@@ -156,13 +156,45 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				return
 			}
 			const provider = await task.providerRef.deref()
+			// One canonical working directory, resolved before any approval
+			// decision: the command-list policy, the DCG run, and the terminal
+			// spawn must all see the same directory, so a custom `cwd` can never
+			// be approved against one folder and executed in another.
+			const lexicalWorkingDirectory = customCwd
+				? path.isAbsolute(customCwd)
+					? customCwd
+					: path.resolve(task.cwd, customCwd)
+				: task.cwd
+			// A folder's command lists apply to a command by containment: the
+			// working directory is matched against the open roots, and against
+			// each root's real path when the registered paths match nothing, so
+			// a root that is itself a link still claims its own directory.
+			// Canonicalizing here keeps both sides of that match physical, so
+			// the judged folder is the one containing the directory the process
+			// actually starts in — a symlinked directory would otherwise be
+			// judged by the folder its path sits in while the process starts in
+			// the link's target, the same drift in filesystem form (precedent:
+			// `RooIgnoreController.validateAccess` also resolves symlinks with
+			// realpath before a policy check). Unlike that file-access posture,
+			// an unresolvable link here names no directory any policy could
+			// judge, so the command fails closed through the working-directory
+			// error channel rather than falling back to the lexical path. A link
+			// re-pointed between this call and the spawn cannot be closed from
+			// here; it rides the same accepted race class as a settings flip
+			// during a pending prompt.
+			let workingDirectory: string
+			try {
+				workingDirectory = await fs.realpath(lexicalWorkingDirectory)
+			} catch (error) {
+				const resolutionError =
+					(await commandWorkingDirectoryError(lexicalWorkingDirectory)) ??
+					`Unable to resolve working directory '${lexicalWorkingDirectory}': ${error instanceof Error ? error.message : String(error)}`
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formatResponse.toolError(resolutionError))
+				return
+			}
 			let dcgDecision: DcgDecision | undefined
 			if (provider?.contextProxy.getValue("destructiveCommandGuardEnabled") === true) {
-				const workingDirectory = customCwd
-					? path.isAbsolute(customCwd)
-						? customCwd
-						: path.resolve(task.cwd, customCwd)
-					: task.cwd
 				const workingDirectoryError = await commandWorkingDirectoryError(workingDirectory)
 				if (workingDirectoryError) {
 					task.didToolFailInCurrentTurn = true
@@ -214,13 +246,23 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 			// choose whether to execute it.
 			let didApprove: boolean
 			if (dcgDecision === undefined) {
-				didApprove = await askApproval("command", canonicalCommand)
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, {
+					commandCwd: workingDirectory,
+				})
 			} else if (dcgDecision.decision === "allow") {
-				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, {
+					dcgDecision,
+					commandCwd: workingDirectory,
+				})
 			} else if (blanketAutoDeny) {
-				didApprove = await askApproval("command", canonicalCommand, undefined, false, { dcgDecision })
+				didApprove = await askApproval("command", canonicalCommand, undefined, false, {
+					dcgDecision,
+					commandCwd: workingDirectory,
+				})
 			} else {
-				didApprove = await askApproval("command", canonicalCommand, undefined, isProtectedAsk)
+				didApprove = await askApproval("command", canonicalCommand, undefined, isProtectedAsk, {
+					commandCwd: workingDirectory,
+				})
 			}
 
 			if (!didApprove) {
@@ -257,7 +299,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				// whose own approval was legal, inverting approval semantics.
 				const recheck = await checkAutoApproval({
 					state: freshState,
-					cwd: task.cwd,
+					cwd: workingDirectory,
 					ask: "command",
 					text: canonicalCommand,
 					isProtected: false,
@@ -330,6 +372,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				executionId,
 				command: canonicalCommand,
 				customCwd,
+				workingDirectory,
 				terminalShellIntegrationDisabled,
 				commandExecutionTimeout,
 				agentTimeout,
@@ -394,6 +437,14 @@ export type ExecuteCommandOptions = {
 	executionId: string
 	command: string
 	customCwd?: string
+	/**
+	 * The directory the approval was judged against, resolved once by the
+	 * tool. When present the command spawns there directly, so the executed
+	 * directory cannot drift from the one the command policy approved;
+	 * callers that build options without it fall back to resolving
+	 * `customCwd` against the task's own `cwd` here.
+	 */
+	workingDirectory?: string
 	terminalShellIntegrationDisabled?: boolean
 	commandExecutionTimeout?: number
 	agentTimeout?: number
@@ -406,6 +457,7 @@ export async function executeCommandInTerminal(
 		executionId,
 		command,
 		customCwd,
+		workingDirectory,
 		terminalShellIntegrationDisabled = true,
 		commandExecutionTimeout = 0,
 		agentTimeout = 0,
@@ -415,7 +467,9 @@ export async function executeCommandInTerminal(
 	// Convert milliseconds back to seconds for display purposes.
 	const commandExecutionTimeoutSeconds = commandExecutionTimeout / 1000
 	let workingDir: string
-	if (!customCwd) {
+	if (workingDirectory !== undefined) {
+		workingDir = workingDirectory
+	} else if (!customCwd) {
 		workingDir = task.cwd
 	} else if (path.isAbsolute(customCwd)) {
 		workingDir = customCwd

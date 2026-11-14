@@ -50,5 +50,6 @@
 	"settings.debugProxy.tlsInsecure.description": "프록시의 self-signed 인증서를 허용합니다. **MITM 검사에 필요합니다.** ⚠️ 안전하지 않으므로 로컬 디버깅에만 사용하세요.",
 	"settings.workspace.rootResolution.description": "멀티 루트 워크스페이스에서 Zoo가 워크스페이스 루트를 어떻게 결정하는지 설정합니다. 루트는 `.roomodes`, `.roo/mcp.json`, `.roo/rules/` 및 기타 프로젝트 범위 구성을 찾는 데 사용됩니다. 이 설정을 변경해도 이후의 조회에만 영향을 주며, 실행 중인 작업은 원래 루트를 유지합니다.",
 	"settings.workspace.rootResolution.activeEditor.description": "활성 편집기가 있는 워크스페이스 폴더를 사용하고, 첫 번째 워크스페이스 폴더로 폴백합니다. (기본값 — 기존 동작을 유지합니다.)",
-	"settings.workspace.rootResolution.firstFolder.description": "항상 첫 번째 워크스페이스 폴더(workspaceFolders[0])를 사용합니다. 결정적이며, 현재 포커스된 파일과 무관합니다."
+	"settings.workspace.rootResolution.firstFolder.description": "항상 첫 번째 워크스페이스 폴더(workspaceFolders[0])를 사용합니다. 결정적이며, 현재 포커스된 파일과 무관합니다.",
+	"settings.workspaceCommandListsEnabled.description": "워크스페이스 설정이 제공하는 명령 목록을 활성화합니다(워크스페이스 설정 파일의 `zoo-code.allowedCommands` 및 `zoo-code.deniedCommands` 값). 비활성화된 동안에는 워크스페이스 명령 목록이 효과가 없습니다. 활성화하면 사용자 수준 항목이 우선합니다: 사용자 수준 항목은 자신이 일치시키는 모든 명령을 결정하며, 워크스페이스 항목은 사용자 수준 항목이 일치시키지 않는 명령에만 적용됩니다. 이 설정은 [사용자 설정](https://code.visualstudio.com/docs/getstarted/settings)에서만 변경할 수 있습니다."
 }

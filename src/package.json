@@ -327,6 +327,13 @@
 					"default": [],
 					"description": "%commands.deniedCommands.description%"
 				},
+				"zoo-code.workspaceCommandListsEnabled": {
+					"type": "boolean",
+					"default": false,
+					"scope": "application",
+					"description": "%settings.workspaceCommandListsEnabled.description%",
+					"markdownDescription": "%settings.workspaceCommandListsEnabled.description%"
+				},
 				"zoo-code.commandExecutionTimeout": {
 					"type": "number",
 					"default": 0,

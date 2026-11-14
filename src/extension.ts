@@ -42,6 +42,7 @@ import { CodeIndexManagerRegistry } from "./services/code-index/code-index-manag
 import { CodeIndexScope } from "./services/code-index/code-index-scope"
 import { MdmService } from "./services/mdm/MdmService"
 import { migrateSettings } from "./utils/migrateSettings"
+import { seedCommandList } from "./utils/seedAllowedCommands"
 import { autoImportSettings } from "./utils/autoImportSettings"
 import { API } from "./extension/api"
 
@@ -134,8 +135,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize network proxy configuration early, before any network requests.
 	// When proxyUrl is configured, all HTTP/HTTPS traffic will be routed through it.
-	// Only applied in debug mode (F5).
-	await initializeNetworkProxy(context, outputChannel)
+	// Only applied in debug mode (F5). The returned disposable covers the debug-proxy
+	// resources; keep it for both the normal deactivate path and the failed-activation
+	// path below.
+	const proxyResources = await initializeNetworkProxy(context, outputChannel)
 
 	// Set extension path for custom tool registry to find bundled esbuild
 	customToolRegistry.setExtensionPath(context.extensionPath)
@@ -161,24 +164,75 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize i18n for internationalization support.
 	initializeI18n(context.globalState.get("language") ?? formatLanguage(vscode.env.language))
 
-	// Initialize terminal shell execution handlers.
-	TerminalRegistry.initialize()
-
 	// Initialize OpenAI Codex OAuth manager for ChatGPT subscription-based access.
 	openAiCodexOAuthManager.initialize(context, (message) => outputChannel.appendLine(message))
 	// Kimi Code OAuth tokens live only in VS Code SecretStorage, outside provider profile JSON/cloud sync.
 	kimiCodeOAuthManager.initialize(context)
 
 	// Initialize Zoo Code auth service for extension session token management.
-	await initZooCodeAuth(context)
+	// The returned disposable unregisters the secret-storage listener the
+	// initializer acquires; keep it for both the normal deactivate path and the
+	// failed-activation path below.
+	const authSecretsListener = await initZooCodeAuth(context)
+	context.subscriptions.push(authSecretsListener)
 
-	// Get default commands from configuration.
-	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
-
-	// Initialize global state if not already set.
-	if (!context.globalState.get("allowedCommands")) {
-		context.globalState.update("allowedCommands", defaultCommands)
+	// Seed before the terminal registry is initialized: a rejected seed must
+	// abort activation while the registry holds no resources, because its
+	// listeners are released only by `deactivate()`, which the host does not
+	// guarantee after a failed activation.
+	// Each list key carries its own first-run guard, so a profile whose
+	// allowlist was seeded by an earlier version still gets the deny-list
+	// migration on the next activation.
+	try {
+		await seedCommandList(context.globalState, "allowedCommands")
+		await seedCommandList(context.globalState, "deniedCommands")
+	} catch (error) {
+		// Activation aborts here, and `deactivate()` is not guaranteed to run
+		// afterward, so this catch is the only teardown for everything
+		// initialized before the seed point: release the secret-storage
+		// listener, shut down the telemetry client registered above, release
+		// the debug-proxy resources, clear the persistence trace sink, and
+		// dispose the output channel — in strict reverse acquisition order
+		// (auth was acquired last, the output channel first), each step
+		// disposed only after the previous one settles.
+		// Teardown failures are logged rather than rethrown so they cannot mask
+		// the seed rejection; the telemetry service bounds its own drain and
+		// client-flush phases, so a stuck client cannot hang the host here.
+		authSecretsListener.dispose()
+		try {
+			await telemetryService.shutdown()
+		} catch (shutdownError) {
+			outputChannel.appendLine(
+				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
+			)
+		}
+		try {
+			proxyResources.dispose()
+		} catch (disposeError) {
+			outputChannel.appendLine(
+				`Failed to dispose network proxy resources: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`,
+			)
+		}
+		// The persistence trace sink installed above writes its lines through
+		// the output channel, so it is cleared — passing undefined restores the
+		// default console sink — before the channel is disposed, keeping any
+		// later trace event (such as a deactivate() shutdown trace) from
+		// writing into a disposed channel.
+		setPersistenceTraceSink(undefined)
+		// The channel is disposed after every step that logs through it, so no
+		// teardown log is written to an already-dead channel. Once it is gone,
+		// no extension output sink is left to report a failed dispose to; the
+		// error is deliberately dropped rather than routed to the console.
+		try {
+			outputChannel.dispose()
+		} catch {
+			// The extension output sink is itself being torn down.
+		}
+		throw error
 	}
+
+	// Initialize terminal shell execution handlers.
+	TerminalRegistry.initialize()
 
 	const contextProxy = await ContextProxy.getInstance(context)
 	const updateTelemetryState = () => {

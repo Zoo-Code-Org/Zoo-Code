@@ -304,6 +304,7 @@ export type ExtensionState = Pick<
 	| "followupAutoApproveTimeoutMs"
 	| "allowedCommands"
 	| "deniedCommands"
+	| "workspaceCommandListsEnabled"
 	| "allowedMaxRequests"
 	| "allowedMaxCost"
 	| "ttsEnabled"
@@ -389,6 +390,18 @@ export type ExtensionState = Pick<
 	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory
+
+	/**
+	 * The user-scope command lists as persisted in extension global state,
+	 * before any workspace-scoped composition. Auto-approval composes the
+	 * pair it enforces from these raw layers plus the folder the task runs
+	 * in, because the merged `allowedCommands`/`deniedCommands` pair follows
+	 * the window's first folder and would judge a task by another root's
+	 * lists. Not user settings: runtime state, written by the provider's
+	 * state bake, never by the settings dialog.
+	 */
+	globalAllowedCommands?: string[]
+	globalDeniedCommands?: string[]
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
 	machineId?: string
@@ -668,9 +681,7 @@ export interface WebviewMessage {
 		| "getDismissedUpsells"
 		| "openMarkdownPreview"
 		| "updateSettings"
-		| "allowedCommands"
 		| "getTaskWithAggregatedCosts"
-		| "deniedCommands"
 		| "openDebugApiHistory"
 		| "openDebugUiHistory"
 		| "downloadErrorDiagnostics"
@@ -728,7 +739,6 @@ export interface WebviewMessage {
 	stepIndex?: number
 	isLaunchAction?: boolean
 	forceShow?: boolean
-	commands?: string[]
 	audioType?: AudioType
 	serverName?: string
 	toolName?: string
@@ -817,6 +827,24 @@ export interface WebviewMessage {
 		codebaseIndexOpenRouterApiKey?: string
 	}
 	updatedSettings?: RooCodeSettings
+	/**
+	 * The command lists as the settings dialog last displayed them, sent alongside the
+	 * save that rewrites them. The settings file can gain entries while the dialog is
+	 * open, and without this baseline the save path cannot tell those additions apart
+	 * from list entries the user deleted: both look like "in the file, absent from the
+	 * submitted list". Senders that do not display the lists omit it.
+	 */
+	commandListBaseline?: {
+		allowedCommands?: string[]
+		deniedCommands?: string[]
+		/**
+		 * The workspace-command-lists gate as the dialog last displayed it. Flipping the
+		 * gate between display and save hides workspace entries, so this travels with the
+		 * baseline to let the save path classify an entry the baseline already showed as
+		 * existing workspace knowledge rather than a brand-new promotion into the global layer.
+		 */
+		workspaceCommandListsEnabled?: boolean
+	}
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
 	// Worktree properties

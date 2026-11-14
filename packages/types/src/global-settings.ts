@@ -58,6 +58,17 @@ export const DEFAULT_DESTRUCTIVE_COMMAND_GUARD_ENABLED = false
 export const DEFAULT_TASK_TITLE_GENERATION_ENABLED = true
 
 /**
+ * Whether workspace-scoped command-list layers (`zoo-code.allowedCommands` /
+ * `zoo-code.deniedCommands` values set in workspace settings) participate in
+ * command auto-approval at all. Opt-in: while off, workspace-layer entries
+ * contribute nothing to enforcement or display. The manifest declares the key
+ * with `scope: "application"`, so only user settings can change it; this
+ * constant is the single default shared by every consumer reading the
+ * setting.
+ */
+export const DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED = false
+
+/**
  * Whether commands that are not explicitly auto-approved are automatically
  * denied (with a structured reason sent to the model) instead of prompting the
  * user. Opt-in: by default, unapproved commands still ask for confirmation.
@@ -183,6 +194,14 @@ export const globalSettingsSchema = z.object({
 	followupAutoApproveTimeoutMs: z.number().optional(),
 	allowedCommands: z.array(z.string()).optional(),
 	deniedCommands: z.array(z.string()).optional(),
+	/**
+	 * Gate for the workspace-scoped command-list layers. While false (the
+	 * default), workspace-set `allowedCommands`/`deniedCommands` entries
+	 * contribute nothing; when true they are composed under the global layer,
+	 * which outranks them wherever it matches a command.
+	 * @default false
+	 */
+	workspaceCommandListsEnabled: z.boolean().optional(),
 	commandExecutionTimeout: z.number().optional(),
 	commandTimeoutAllowlist: z.array(z.string()).optional(),
 	preventCompletionWithOpenTodos: z.boolean().optional(),

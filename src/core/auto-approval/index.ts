@@ -12,9 +12,24 @@ import type { DcgDecision } from "../../services/destructive-command-guard/runne
 
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
+import { parseCommand } from "../../shared/parse-command"
+
 import { isWriteToolAction, isReadOnlyToolAction } from "./tools"
 import { isMcpToolAlwaysAllowed } from "./mcp"
-import { containsDangerousSubstitution, getCommandDecisionDetailed } from "./commands"
+import {
+	type CommandDecisionDetail,
+	containsDangerousSubstitution,
+	findLongestPrefixMatch,
+	getCommandDecisionDetailed,
+} from "./commands"
+import {
+	type EffectiveCommandLists,
+	commandListFolderForResource,
+	getEffectiveCommandDecision,
+	readCommandListScopes,
+	resolveEffectiveCommandLists,
+	workspaceCommandListsEnabled,
+} from "./commandScope"
 import { isFileMatchedByPatterns } from "./filePatterns"
 import { type AutoDenyDetail } from "./autoDenyReason"
 
@@ -40,6 +55,8 @@ export type AutoApprovalStateOptions =
 	| "mcpServers" // For `alwaysAllowMcp`.
 	| "allowedCommands" // For `alwaysAllowExecute`.
 	| "deniedCommands"
+	| "globalAllowedCommands" // Raw global layer feeding the per-folder command-list composition.
+	| "globalDeniedCommands"
 	| "destructiveCommandGuardEnabled"
 	| "alwaysDenyUnapprovedCommands" // For `alwaysAllowExecute` (blanket auto-deny).
 
@@ -138,6 +155,66 @@ function isWriteAllowedByPatterns(
 	)
 }
 
+/**
+ * Same chain aggregation as `getCommandDecisionDetailed` — split into
+ * sub-commands, any denial denies the whole command, a dangerous substitution
+ * forces the user prompt, and approval needs every sub-command approved — but
+ * each sub-command is decided by `getEffectiveCommandDecision`, so the global
+ * layer decides every command it matches and workspace entries apply only
+ * where no global entry matches. A flat merged pair cannot express that
+ * precedence: a workspace wildcard deny ties a global prefix allow in the
+ * matcher's longest-prefix comparison, so composition would have to drop one
+ * layer's entries to break the tie and lose its verdicts elsewhere.
+ *
+ * The aggregation mirrors `getCommandDecisionDetailed` on purpose: malformed
+ * parsing, redirection sanitization, the substitution veto, and the
+ * offending-command/matched-pattern reporting must not drift between the two
+ * paths — only the per-sub-command leaf decision differs. Where a sub-command
+ * has no global match at all, both paths reach the same outcome, because the
+ * flat pair is the union of exactly the layers the split evaluates.
+ */
+function getLayerScopedCommandDecisionDetailed(
+	command: string,
+	effective: EffectiveCommandLists,
+): CommandDecisionDetail {
+	if (!command?.trim()) {
+		return { decision: "auto_approve" }
+	}
+
+	const { commands: subCommands, parseError } = parseCommand(command)
+	if (parseError !== null) {
+		return { decision: "malformed_command", offendingCommand: command, parseError: parseError.message }
+	}
+
+	const sanitizedCommands = subCommands.map((cmd) => cmd.replace(/\d*>&\d*/, "").trim())
+
+	const decisions = sanitizedCommands.map((cmd) => getEffectiveCommandDecision(cmd, effective))
+
+	const denyIndex = decisions.indexOf("auto_deny")
+	if (denyIndex !== -1) {
+		const offendingCommand = sanitizedCommands[denyIndex]
+		const lowerMatch = findLongestPrefixMatch(offendingCommand, effective.denied)
+		// Prefer the original-cased pattern the user typed, falling back to the
+		// case-insensitive match itself.
+		const matchedPattern =
+			effective.denied.find((pattern) => pattern.toLowerCase() === lowerMatch) ?? lowerMatch ?? undefined
+
+		return { decision: "auto_deny", offendingCommand, matchedPattern }
+	}
+
+	if (containsDangerousSubstitution(command)) {
+		return { decision: "ask_user" }
+	}
+
+	if (decisions.every((decision) => decision === "auto_approve")) {
+		return { decision: "auto_approve" }
+	}
+
+	const askIndex = decisions.indexOf("ask_user")
+
+	return { decision: "ask_user", offendingCommand: askIndex !== -1 ? sanitizedCommands[askIndex] : undefined }
+}
+
 export type CheckAutoApprovalResult =
 	| { decision: "approve" }
 	/**
@@ -170,8 +247,11 @@ export async function checkAutoApproval({
 	 * Workspace root the allowlist patterns and the checked path are resolved
 	 * against.
 	 *
-	 * Must be the `cwd` of the task this ask belongs to, which is the root the
-	 * path in `text` was made relative to. It is not read from `state`, because
+	 * For every ask but a command, this is the `cwd` of the task the ask belongs
+	 * to — the root the path in `text` was made relative to. A command ask is
+	 * judged against the command's own resolved working directory when the
+	 * caller forwards `commandCwd`, which a custom working directory moves off
+	 * the task folder. It is not read from `state`, because
 	 * the provider's `cwd` follows the window (the focused editor in a multi-root
 	 * workspace, or a `refreshWorkspace()` while the task runs) and a resumed or
 	 * child task can run against another root entirely. Resolving against the
@@ -304,11 +384,48 @@ export async function checkAutoApproval({
 				return { decision: "approve" }
 			}
 
-			const { decision, offendingCommand, matchedPattern, parseError } = getCommandDecisionDetailed(
-				text,
-				state.allowedCommands || [],
-				state.deniedCommands || [],
-			)
+			// The pair on `state` was composed against the window's first
+			// folder; a command executing in another folder must be judged by
+			// that folder's lists, so enforcement re-composes from the raw
+			// global layers at the folder the command's `cwd` resolves to. A
+			// non-blank `cwd` that resolves to no workspace root names a
+			// directory outside every folder, and no folder's layer may decide
+			// it: the workspace layer is dropped (`enabled=false`) and only the
+			// global layers apply — fail-closed, so nothing on a folder's
+			// allow list can approve a command in a directory no folder
+			// claims. A blank or absent `cwd` keeps the first-folder
+			// configuration. Without the raw layers the pre-composed pair is
+			// all the state carries, and that pair is what enforcement
+			// consumes.
+			const commandFolder = commandListFolderForResource(cwd)
+			const cwdNamesNoFolder = Boolean(cwd) && commandFolder === undefined
+			const effectiveLists =
+				state.globalAllowedCommands !== undefined && state.globalDeniedCommands !== undefined
+					? resolveEffectiveCommandLists(
+							readCommandListScopes(
+								"allowedCommands",
+								state.globalAllowedCommands,
+								undefined,
+								commandFolder,
+							),
+							readCommandListScopes(
+								"deniedCommands",
+								state.globalDeniedCommands,
+								undefined,
+								commandFolder,
+							),
+							workspaceCommandListsEnabled() && !cwdNamesNoFolder,
+						)
+					: { allowed: state.allowedCommands || [], denied: state.deniedCommands || [] }
+
+			// The layered composition carries the per-layer split, so each
+			// sub-command goes through getEffectiveCommandDecision; the
+			// pre-composed fallback pair carries no layers and keeps the flat
+			// matcher.
+			const { decision, offendingCommand, matchedPattern, parseError } =
+				"globalAllow" in effectiveLists
+					? getLayerScopedCommandDecisionDetailed(text, effectiveLists)
+					: getCommandDecisionDetailed(text, effectiveLists.allowed, effectiveLists.denied)
 
 			if (decision === "auto_approve") {
 				return { decision: "approve" }

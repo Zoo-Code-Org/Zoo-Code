@@ -71,6 +71,7 @@ import {
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
 	getModelId,
 	isRetiredProvider,
 	modelIdKeys,
@@ -135,6 +136,11 @@ import { ContextProxy } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
+import {
+	readCommandListScopes,
+	resolveEffectiveCommandLists,
+	workspaceCommandListsEnabled,
+} from "../auto-approval/commandScope"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
@@ -3140,62 +3146,6 @@ export class ClineProvider
 		}
 	}
 
-	/**
-	 * Merges allowed commands from global state and workspace configuration
-	 * with proper validation and deduplication
-	 */
-	private mergeAllowedCommands(globalStateCommands?: string[]): string[] {
-		return this.mergeCommandLists("allowedCommands", "allowed", globalStateCommands)
-	}
-
-	/**
-	 * Merges denied commands from global state and workspace configuration
-	 * with proper validation and deduplication
-	 */
-	private mergeDeniedCommands(globalStateCommands?: string[]): string[] {
-		return this.mergeCommandLists("deniedCommands", "denied", globalStateCommands)
-	}
-
-	/**
-	 * Common utility for merging command lists from global state and workspace configuration.
-	 * Implements the Command Denylist feature's merging strategy with proper validation.
-	 *
-	 * @param configKey - VSCode workspace configuration key
-	 * @param commandType - Type of commands for error logging
-	 * @param globalStateCommands - Commands from global state
-	 * @returns Merged and deduplicated command list
-	 */
-	private mergeCommandLists(
-		configKey: "allowedCommands" | "deniedCommands",
-		commandType: "allowed" | "denied",
-		globalStateCommands?: string[],
-	): string[] {
-		try {
-			// Validate and sanitize global state commands
-			const validGlobalCommands = Array.isArray(globalStateCommands)
-				? globalStateCommands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-				: []
-
-			// Get workspace configuration commands
-			const workspaceCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>(configKey) || []
-
-			// Validate and sanitize workspace commands
-			const validWorkspaceCommands = Array.isArray(workspaceCommands)
-				? workspaceCommands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-				: []
-
-			// Combine and deduplicate commands
-			// Global state takes precedence over workspace configuration
-			const mergedCommands = [...new Set([...validGlobalCommands, ...validWorkspaceCommands])]
-
-			return mergedCommands
-		} catch (error) {
-			console.error(`Error merging ${commandType} commands:`, error)
-			// Return empty array as fallback to prevent crashes
-			return []
-		}
-	}
-
 	async getStateToPostToWebview({ includeTaskHistory = true }: GetStateOptions = {}): Promise<ExtensionState> {
 		// Ensure the store is initialized before reading task history
 		await this.taskHistoryStore.initialized
@@ -3216,6 +3166,7 @@ export class ClineProvider
 			alwaysDenyUnapprovedCommands,
 			allowedCommands,
 			deniedCommands,
+			workspaceCommandListsEnabled: gateEnabled,
 			alwaysAllowMcp,
 			alwaysAllowModeSwitch,
 			alwaysAllowSubtasks,
@@ -3323,8 +3274,6 @@ export class ClineProvider
 		const telemetryKey = process.env.POSTHOG_API_KEY
 		const machineId = vscode.env.machineId
 		const vscodeTelemetryEnabled = vscode.env.isTelemetryEnabled
-		const mergedAllowedCommands = this.mergeAllowedCommands(allowedCommands)
-		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)
 		const cwd = this.cwd
 		const currentTask = this.getCurrentTask()
 		let currentTaskMode: string | undefined
@@ -3404,8 +3353,11 @@ export class ClineProvider
 			checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			shouldShowAnnouncement:
 				telemetrySetting !== "unset" && lastShownAnnouncementId !== this.latestAnnouncementId,
-			allowedCommands: mergedAllowedCommands,
-			deniedCommands: mergedDeniedCommands,
+			// getState() always resolves these to the effective command lists
+			// (never undefined), so no fallback is needed here.
+			allowedCommands,
+			deniedCommands,
+			workspaceCommandListsEnabled: gateEnabled ?? DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
 			soundVolume: soundVolume ?? 0.5,
 			writeDelayMs: writeDelayMs ?? DEFAULT_WRITE_DELAY_MS,
 			diffFuzzyThreshold: diffFuzzyThreshold ?? DEFAULT_DIFF_FUZZY_THRESHOLD,
@@ -3612,6 +3564,14 @@ export class ClineProvider
 
 		const taskSyncEnabled: boolean = false
 
+		// One gate read and one resolver pass per getState() call, so the
+		// effective lists and the gate value posted together describe a single
+		// configuration state.
+		const gateEnabled = workspaceCommandListsEnabled()
+		const allowScopes = readCommandListScopes("allowedCommands", stateValues.allowedCommands)
+		const denyScopes = readCommandListScopes("deniedCommands", stateValues.deniedCommands)
+		const effectiveCommandLists = resolveEffectiveCommandLists(allowScopes, denyScopes, gateEnabled)
+
 		// Return the same structure as before.
 		return {
 			apiConfiguration: providerSettings,
@@ -3641,8 +3601,22 @@ export class ClineProvider
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			allowedCommands: stateValues.allowedCommands,
-			deniedCommands: stateValues.deniedCommands,
+			// The effective lists composed from the global-state and
+			// workspace-scope configuration layers, scoped to the window's
+			// first folder; getStateToPostToWebview shows exactly these values,
+			// so the dialog cannot drift from what this state posts. In a
+			// multi-root window a task in another folder is judged by that
+			// folder's lists instead — enforcement re-composes the pair from
+			// the raw global layers below, so the displayed pair describes the
+			// window, not the task.
+			allowedCommands: effectiveCommandLists.allowed,
+			deniedCommands: effectiveCommandLists.denied,
+			workspaceCommandListsEnabled: gateEnabled,
+			// The global layers before workspace composition, so command
+			// enforcement can re-compose the pair against each task's own
+			// folder; the window-scoped pair above stays what display shows.
+			globalAllowedCommands: allowScopes.global,
+			globalDeniedCommands: denyScopes.global,
 			soundEnabled: stateValues.soundEnabled ?? false,
 			ttsEnabled: stateValues.ttsEnabled ?? false,
 			ttsSpeed: stateValues.ttsSpeed ?? 1.0,
@@ -4384,6 +4358,9 @@ export class ClineProvider
 		if (configuration) {
 			await this.setValues(configuration)
 
+			// Deliberately Global-targeted: these writes carry "start this task with
+			// exactly this auto-approval policy" semantics (e.g. from handoff/delegation
+			// payloads), unlike the scope-split persistence in the settings dialog.
 			if (configuration.allowedCommands) {
 				await vscode.workspace
 					.getConfiguration(Package.name)

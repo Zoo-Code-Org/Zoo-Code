@@ -1295,10 +1295,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			text,
 			isProtected,
 			dcgDecision,
+			commandCwd,
 		}: {
 			text?: string
 			isProtected?: boolean
 			dcgDecision?: AutoApprovalContext["dcgDecision"]
+			commandCwd?: AutoApprovalContext["commandCwd"]
 		},
 		abortSignal?: AbortSignal,
 	): Promise<QueuedCommandPolicyAction> {
@@ -1327,11 +1329,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Disengaged: the queued answer is a legitimate approval, as before.
 			return { action: "consume" }
 		}
-		// Engaged: the full policy decides, with the fresh state. `cwd` and the
-		// forwarded DCG verdict match the ask-time `checkAutoApproval` call.
+		// Engaged: the full policy decides, with the fresh state. `cwd`, the
+		// forwarded DCG verdict, and the command's working directory match the
+		// ask-time `checkAutoApproval` call.
 		const approval = await checkAutoApproval({
 			state: freshState,
-			cwd: this.cwd,
+			cwd: commandCwd ?? this.cwd,
 			ask: "command",
 			text,
 			isProtected,
@@ -1992,12 +1995,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
-		// currently reports.
+		// currently reports. A tool that forwards a `commandCwd` overrides that
+		// for policy purposes: the command lists must judge the directory the
+		// command will actually run in, which a custom tool `cwd` moves off the
+		// task folder.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
 			: await checkAutoApproval({
 					state,
-					cwd: this.cwd,
+					cwd: autoApprovalContext?.commandCwd ?? this.cwd,
 					ask: type,
 					text,
 					isProtected,
@@ -2270,6 +2276,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							text,
 							isProtected,
 							dcgDecision: autoApprovalContext?.dcgDecision,
+							commandCwd: autoApprovalContext?.commandCwd,
 						},
 						recheckAbort.signal,
 					)
@@ -2343,6 +2350,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						text,
 						isProtected,
 						dcgDecision: autoApprovalContext?.dcgDecision,
+						commandCwd: autoApprovalContext?.commandCwd,
 					},
 					recheckAbort.signal,
 				)
