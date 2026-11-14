@@ -837,6 +837,25 @@ describe("ContextProxy", () => {
 		})
 	})
 
+	describe("export()", () => {
+		it("omits host-owned viewStates from a settings export", async () => {
+			await proxy.setValue("viewStates", {
+				"export-view": { claimToken: "export-claim-token", mode: "architect" },
+			})
+			// A portable global setting the export schema keeps: without it the test would pass on an
+			// empty export, because every remaining check only asserts absence.
+			await proxy.setValue("customInstructions", "retain these instructions")
+			// The cache carries the key; only the export must not.
+			expect(Object.keys(proxy.getValues())).toContain("viewStates")
+			const exported = await proxy.export()
+			expect(exported?.customInstructions).toBe("retain these instructions")
+			expect(exported && Object.keys(exported)).not.toContain("viewStates")
+			expect(exported && "viewStates" in exported).toBe(false)
+			// The value must not escape under another name either: the claim token is host state.
+			expect(JSON.stringify(exported)).not.toContain("export-claim-token")
+		})
+	})
+
 	describe("resetAllState", () => {
 		it("should clear all in-memory caches", async () => {
 			// Setup initial state in caches
