@@ -113,7 +113,14 @@ export interface ExtensionMessage {
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
 		| "diagnosticsRequest"
+		| "viewStateClaim"
 	text?: string
+	/**
+	 * For `viewStateClaim`: the durable `viewStates` key the delivered claim governs.
+	 */
+	viewStateId?: string
+	/** For `viewStateClaim`: the host-minted token the webview stores and echoes on launch. */
+	viewStateClaim?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
 	/** For originalContent: the pre-edit file content of the requested tool message (null when unavailable) */
@@ -714,6 +721,9 @@ export interface WebviewMessage {
 		| "themeFixtureProbeResponse"
 		| "diagnosticsResponse"
 	text?: string
+	viewStateId?: string
+	/** For `webviewDidLaunch`: the claim delivered for `viewStateId`, enforced by setViewStateId. */
+	viewStateClaim?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
