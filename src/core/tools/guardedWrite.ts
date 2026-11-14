@@ -461,8 +461,17 @@ async function realpathNearest(target: string, displayPath: string): Promise<str
 				// directory this check authorized.
 				const asLink = await fs.lstat(ancestor, { bigint: true }).catch(() => undefined)
 				if (asLink?.isSymbolicLink()) {
+					// This rejection is model-facing text. The guard's own absolute ancestor is a
+					// host path on the user's machine, and every other rejection here keeps
+					// host paths out of the model's context. The walk already collected the
+					// components below the link, so cutting them off the caller's own
+					// spelling names the link the way the caller named it.
+					const belowLink = missing.slice().reverse()
+					const spelled = displayPath.split(/[\\/]/)
+					const keep = Math.max(1, spelled.length - belowLink.length)
+					const linkName = spelled.slice(0, keep).join("/") || path.basename(ancestor)
 					throw new GuardRejectedError(
-						`Path runs through a link (${ancestor}) that does not resolve -- retry with a path inside the workspace.`,
+						`Path runs through a link (${linkName}) that does not resolve -- retry with a path inside the workspace.`,
 						displayPath,
 					)
 				}

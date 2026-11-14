@@ -20,5 +20,8 @@ describe("QueuedMessages - the heading it puts over the queue", () => {
 
 		expect(tSpy).toHaveBeenCalledWith("chat:queuedMessages.title")
 		expect(screen.getByTestId("queued-messages")).toHaveTextContent("chat:queuedMessages.title")
+		// The heading alone does not prove the queue hands each message's own text to
+		// the render, so assert the queued text itself, not only the title above it.
+		expect(screen.getByTestId("queued-messages")).toHaveTextContent("keep the diff open")
 	})
 })

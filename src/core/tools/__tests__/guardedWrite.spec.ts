@@ -365,9 +365,16 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			})
 			const task = createMockTask()
 
-			await expect(guardedWrite(task, "linkdir/nested/new.txt", "data", "create")).rejects.toThrow(
-				"runs through a link",
-			)
+			let rejection: Error | undefined
+			try {
+				await guardedWrite(task, "linkdir/nested/new.txt", "data", "create")
+			} catch (error: unknown) {
+				rejection = error instanceof Error ? error : new Error(String(error))
+			}
+			// The rejection names the link in the caller's own spelling and carries none
+			// of the guard's absolute ancestor, which is a host path on the user's machine.
+			expect(rejection?.message).toContain("runs through a link (linkdir)")
+			expect(rejection?.message).not.toContain(path.resolve(WORKSPACE))
 
 			expect(mockedSafeWriteText).not.toHaveBeenCalled()
 		})
