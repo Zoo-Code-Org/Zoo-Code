@@ -30,6 +30,86 @@ describe("matching on Windows", () => {
 	const matches = (filePath: string, patterns: string[], cwd: string | undefined = WINDOWS_CWD) =>
 		matcher().isFileMatchedByPatterns({ filePath, cwd, patterns, homeDir: WINDOWS_HOME })
 
+	it.each([
+		"///server/share/docs/**",
+		"////server/share/docs/**",
+		"\\\\\\server\\share\\docs\\**",
+		"\\\\\\\\server\\share\\docs\\**",
+	])("treats extra leading separators in a grant as drive-rooted, not UNC: %s", (pattern) => {
+		expect(matches("//server/share/docs/private.md", [pattern], "C:/repo")).toBe(false)
+		expect(matches("C:/server/share/docs/private.md", [pattern], "C:/repo")).toBe(true)
+		expect(matches("//server/share/docs/private.md", ["//server/share/docs/**"], "C:/repo")).toBe(true)
+	})
+
+	it.each([
+		"///server/share/docs/private.md",
+		"////server/share/docs/private.md",
+		"\\\\\\server\\share\\docs\\private.md",
+		"\\\\\\\\server\\share\\docs\\private.md",
+	])("treats extra leading separators in a candidate as drive-rooted, not UNC: %s", (filePath) => {
+		expect(matches(filePath, ["//server/share/docs/**"], "C:/repo")).toBe(false)
+		expect(matches(filePath, ["C:/server/share/docs/**"], "C:/repo")).toBe(true)
+		expect(matches(filePath, ["///server/share/docs/**"], "C:/repo")).toBe(true)
+	})
+
+	it.each(["//server//share", "//server///share", "\\\\server\\\\share", "\\\\server\\\\\\share"])(
+		"normalizes repeated separators between a UNC server and share: %s",
+		(root) => {
+			expect(matches("//server/share/docs/private.md", [`${root}/docs/**`], "C:/repo")).toBe(true)
+			expect(matches(`${root}/docs/private.md`, ["//server/share/docs/**"], "C:/repo")).toBe(true)
+			expect(matches("//server/share/docs/private.md", ["docs/**"], root)).toBe(true)
+			expect(matches("docs/private.md", ["//server/share/docs/**"], root)).toBe(true)
+			expect(matches("docs/private.md", ["C:/server/share/docs/**"], root)).toBe(false)
+			expect(matches("C:/server/share/docs/private.md", [`${root}/docs/**`], "C:/repo")).toBe(false)
+		},
+	)
+
+	it.each(["//server", "\\\\server"])("treats an incomplete UNC name as drive-rooted: %s", (filePath) => {
+		expect(matches(filePath, ["C:/server"], "C:/repo")).toBe(true)
+		expect(matches(filePath, ["D:/server"], "C:/repo")).toBe(false)
+		expect(matches("C:/server", [filePath], "C:/repo")).toBe(true)
+		expect(matches("//server/share/docs/private.md", [filePath], "C:/repo")).toBe(false)
+	})
+
+	it.each([
+		{
+			cwd: "//server/share/../project",
+			canonicalCwd: "//server/share/project",
+			otherVolume: "//server/project",
+		},
+		{
+			cwd: "\\\\server\\share\\..\\project",
+			canonicalCwd: "//server/share/project",
+			otherVolume: "//server/project",
+		},
+		{ cwd: "C:/../D/project", canonicalCwd: "C:/D/project", otherVolume: "D:/project" },
+		{ cwd: "C:\\..\\D\\project", canonicalCwd: "C:/D/project", otherVolume: "D:/project" },
+	])(
+		"clamps parent traversal at the volume when normalizing equivalent workspace roots: $cwd",
+		({ cwd, canonicalCwd, otherVolume }) => {
+			const input = {
+				cwd,
+				canonicalCwd,
+				filePath: `${canonicalCwd}/docs/private.md`,
+			}
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: [`${otherVolume}/docs/**`] })).toBe(false)
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["docs/**"] })).toBe(true)
+			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: [`${canonicalCwd}/docs/**`] })).toBe(true)
+			expect(
+				matcher().isFileMatchedByPatterns({
+					...input,
+					patterns: ["docs/**", `!${canonicalCwd}/docs/private.md`],
+				}),
+			).toBe(false)
+			expect(
+				matcher().isFileMatchedByPatterns({
+					...input,
+					patterns: [`!${canonicalCwd}/docs/private.md`, "docs/**"],
+				}),
+			).toBe(true)
+		},
+	)
+
 	it.each([undefined, "/ws", "\\ws", "//server/share/ws", "\\\\server\\share\\ws"])(
 		"preserves cross-volume wildcard exclusions and their order with workspace %s",
 		(cwd) => {

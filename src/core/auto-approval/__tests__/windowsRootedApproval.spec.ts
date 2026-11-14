@@ -43,6 +43,24 @@ describe("Windows rooted approval rules", () => {
 	afterEach(() => vi.restoreAllMocks())
 
 	describe.each(approvalRoutes)("$name", ({ tool, setting }) => {
+		it.each(["///server/share/docs/**", "\\\\\\server\\share\\docs\\**"])(
+			"keeps the rooted pattern %s separate from an explicit UNC grant",
+			async (pattern) => {
+				const cwd = "C:/repo"
+				const uncFile = "//server/share/docs/private.md"
+				expect(await approval(tool, uncFile, cwd, { [setting]: [pattern] })).toEqual({ decision: "ask" })
+				expect(await approval(tool, "C:/server/share/docs/private.md", cwd, { [setting]: [pattern] })).toEqual({
+					decision: "approve",
+				})
+				expect(await approval(tool, uncFile, cwd, { [setting]: ["//server/share/docs/**"] })).toEqual({
+					decision: "approve",
+				})
+				expect(
+					await approval(tool, uncFile, cwd, { [setting]: ["//server/share/docs/**", `!${pattern}`] }),
+				).toEqual({ decision: "approve" })
+			},
+		)
+
 		it.each([undefined, "/ws", "//server/share/ws"])(
 			"applies ordered global exclusions when cwd is %s",
 			async (cwd) => {
@@ -81,6 +99,26 @@ describe("Windows rooted approval rules", () => {
 			},
 		)
 	})
+
+	it.each(["allowedReadFiles", "allowedWriteFiles"] as const)(
+		"keeps UNC parent traversal within the share when %s grants reads",
+		async (setting) => {
+			const cwd = "//server/share/../project"
+			const file = "//server/share/project/docs/private.md"
+			vi.mocked(fs.realpath).mockResolvedValue("//server/share/project")
+			expect(await approval("readFile", file, cwd, { [setting]: ["//server/project/docs/**"] })).toEqual({
+				decision: "ask",
+			})
+			expect(await approval("readFile", file, cwd, { [setting]: ["//server/share/project/docs/**"] })).toEqual({
+				decision: "approve",
+			})
+			expect(
+				await approval("readFile", file, cwd, {
+					[setting]: ["//server/share/project/docs/**", "!//server/share/project/docs/private.md"],
+				}),
+			).toEqual({ decision: "ask" })
+		},
+	)
 
 	it("applies rooted UNC rules to reads through the verified drive alias", async () => {
 		const cwd = "//server/sh[a]re/project"

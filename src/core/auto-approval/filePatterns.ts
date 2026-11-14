@@ -5,6 +5,7 @@ import ignore from "ignore"
 
 import { WorkspaceRootCanonicalizer } from "./WorkspaceRootCanonicalizer"
 import { WorkspaceRootStrategy } from "./strategies/WorkspaceRootStrategy"
+import { WINDOWS_UNC_PREFIX } from "./strategies/WindowsWorkspaceRootStrategy"
 
 /**
  * Matching of file paths against user-configured file patterns.
@@ -171,7 +172,7 @@ const DRIVE_PREFIX = /^([a-zA-Z]):(?=\/)/
  */
 function volumeSegmentOf(absolutePath: string, isWindows: boolean): string {
 	if (isWindows) {
-		const unc = /^\/\/([^/]+)\/([^/]+)/.exec(absolutePath)
+		const unc = WINDOWS_UNC_PREFIX.exec(absolutePath)
 		if (unc) return `/UNC/${unc[1]}/${unc[2]}`
 	}
 	const drive = isWindows ? DRIVE_PREFIX.exec(absolutePath) : null
