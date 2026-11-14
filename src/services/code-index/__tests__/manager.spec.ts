@@ -826,15 +826,15 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 	})
 
 	describe("stopIndexing", () => {
-		it("should delegate to orchestrator.stopIndexing()", () => {
+		it("should delegate to orchestrator.stopIndexing()", async () => {
 			const mockOrchestrator = {
-				stopIndexing: vi.fn(),
+				stopIndexing: vi.fn().mockResolvedValue(undefined),
 				stopWatcher: vi.fn(),
 				state: "Indexing",
 			}
 			;(manager as any)._orchestrator = mockOrchestrator
 
-			manager.stopIndexing()
+			await manager.stopIndexing()
 
 			expect(mockOrchestrator.stopIndexing).toHaveBeenCalled()
 		})

@@ -36,6 +36,7 @@ vi.mock("../parser", () => ({
 				content: "test content",
 				start_line: 1,
 				end_line: 1,
+				segmentHash: `segment-${filePath}`,
 			},
 		]),
 	},
