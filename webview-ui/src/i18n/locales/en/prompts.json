@@ -88,6 +88,13 @@
 			"includeTaskHistory": "Include task history as context",
 			"includeTaskHistoryDescription": "When enabled, the last 10 messages from the current conversation will be included as context when enhancing prompts, helping to generate more relevant and context-aware suggestions."
 		},
+		"taskTitle": {
+			"enabled": "Generate task titles automatically",
+			"enabledDescription": "Summarizes the first prompt of each new task into a short title in the background. Title requests are not included in the task cost. GitHub Copilot and VS Code LM profiles consume your quota.",
+			"apiConfiguration": "API Configuration",
+			"useTaskConfig": "Same as the task",
+			"apiConfigDescription": "A lightweight, non-reasoning profile is recommended. If you select a different profile, the beginning of your prompt is sent to that provider."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Enhance Prompt",
@@ -128,6 +135,10 @@
 			"NEW_TASK": {
 				"label": "Start New Task",
 				"description": "Start a new task with user input. Available in the Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Task Title",
+				"description": "Generate a short title for new tasks in the background. Shown in history and the task header. Configure it below."
 			}
 		}
 	},

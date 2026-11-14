@@ -20,7 +20,8 @@
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
 	"fileChangesInConversation": {
-		"header": "Bu sohbette {{count}} dosya değiştirildi"
+		"header_one": "Bu sohbette {{count}} dosya değiştirildi",
+		"header_other": "Bu sohbette {{count}} dosya değiştirildi"
 	},
 	"tokenProgress": {
 		"availableSpace": "Kullanılabilir alan: {{amount}} token",
@@ -288,7 +289,7 @@
 		"triggerLabelOff": "Otomatik onay kapalı",
 		"triggerLabelOffShort": "Kapalı",
 		"triggerLabel_zero": "0 otomatik onaylandı",
-		"triggerLabel_one": "1 otomatik onaylandı",
+		"triggerLabel_one": "{{count}} otomatik onaylandı",
 		"triggerLabel_other": "{{count}} otomatik onaylandı",
 		"triggerLabelAll": "BRRR"
 	},
@@ -306,7 +307,7 @@
 		"truncation": {
 			"title": "Bağlam Kısaltıldı",
 			"inProgress": "Bağlam kısaltılıyor...",
-			"messagesRemoved": "{{count}} mesaj kaldırıldı",
+			"messagesRemoved_one": "{{count}} mesaj kaldırıldı",
 			"messagesRemoved_other": "{{count}} mesaj kaldırıldı",
 			"description": "Bağlam penceresi sınırında kalmak için eski mesajlar konuşmadan kaldırıldı. Bu, yoğunlaştırmaya kıyasla hızlı ancak daha az bağlam koruyucu bir yaklaşımdır."
 		}
@@ -350,7 +351,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Otomatik Onaylanan İstek Limiti Aşıldı",
-			"description": "Zoo, {{count}} API isteği/istekleri için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_one": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_other": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
 			"button": "Sıfırla ve Devam Et"
 		},
 		"autoApprovedCostLimitReached": {
@@ -362,7 +364,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo kod tabanında <code>{{query}}</code> aramak istiyor",
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
-		"didSearch_one": "1 sonuç bulundu",
+		"didSearch_one": "{{count}} sonuç bulundu",
 		"didSearch_other": "{{count}} sonuç bulundu",
 		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)"
 	},

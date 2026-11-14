@@ -20,7 +20,8 @@
 	"unpin": "Lösen von oben",
 	"pin": "Anheften",
 	"fileChangesInConversation": {
-		"header": "{{count}} Datei(en) in dieser Unterhaltung geändert"
+		"header_one": "{{count}} Datei in dieser Unterhaltung geändert",
+		"header_other": "{{count}} Dateien in dieser Unterhaltung geändert"
 	},
 	"tokenProgress": {
 		"availableSpace": "Verfügbarer Speicher: {{amount}} Tokens",
@@ -287,7 +288,7 @@
 		"triggerLabelOff": "Automatische Genehmigung aus",
 		"triggerLabelOffShort": "Aus",
 		"triggerLabel_zero": "0 automatisch genehmigt",
-		"triggerLabel_one": "1 automatisch genehmigt",
+		"triggerLabel_one": "{{count}} automatisch genehmigt",
 		"triggerLabel_other": "{{count}} automatisch genehmigt",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +306,7 @@
 		"truncation": {
 			"title": "Kontext gekürzt",
 			"inProgress": "Kontext wird gekürzt...",
-			"messagesRemoved": "{{count}} Nachricht entfernt",
+			"messagesRemoved_one": "{{count}} Nachricht entfernt",
 			"messagesRemoved_other": "{{count}} Nachrichten entfernt",
 			"description": "Ältere Nachrichten wurden aus der Konversation entfernt, um innerhalb des Kontextfenster-Limits zu bleiben. Dies ist ein schnellerer, aber weniger kontexterhaltender Ansatz im Vergleich zur Komprimierung."
 		}
@@ -349,7 +350,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Limit für automatisch genehmigte Anfragen erreicht",
-			"description": "Zoo hat das automatisch genehmigte Limit von {{count}} API-Anfrage(n) erreicht. Möchtest du den Zähler zurücksetzen und mit der Aufgabe fortfahren?",
+			"description_one": "Zoo hat das automatisch genehmigte Limit von {{count}} API-Anfrage erreicht. Möchtest du den Zähler zurücksetzen und mit der Aufgabe fortfahren?",
+			"description_other": "Zoo hat das automatisch genehmigte Limit von {{count}} API-Anfragen erreicht. Möchtest du den Zähler zurücksetzen und mit der Aufgabe fortfahren?",
 			"button": "Zurücksetzen und fortfahren"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +363,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo möchte den Codebase nach <code>{{query}}</code> durchsuchen",
 		"wantsToSearchWithPath": "Zoo möchte den Codebase nach <code>{{query}}</code> in <code>{{path}}</code> durchsuchen",
-		"didSearch_one": "1 Ergebnis gefunden",
+		"didSearch_one": "{{count}} Ergebnis gefunden",
 		"didSearch_other": "{{count}} Ergebnisse gefunden",
 		"resultTooltip": "Ähnlichkeitswert: {{score}} (klicken zum Öffnen der Datei)"
 	},

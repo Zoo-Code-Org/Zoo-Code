@@ -130,6 +130,7 @@
 		"rooHistoryImport": {
 			"nothingFound": "Nenhum histórico de tarefas do Roo Code encontrado para importar de {{domain}}.",
 			"alreadyImported_one": "O histórico de {{count}} tarefa do Roo Code já foi importado para o Zoo Code.",
+			"alreadyImported_many": "Todos os {{count}} históricos de tarefas do Roo Code já foram importados para o Zoo Code.",
 			"alreadyImported_other": "Todos os {{count}} históricos de tarefas do Roo Code já foram importados para o Zoo Code."
 		}
 	},
@@ -148,6 +149,7 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "{{count}} histórico de tarefa do Roo Code importado para o Zoo Code.",
+			"success_many": "{{count}} históricos de tarefas do Roo Code importados para o Zoo Code.",
 			"success_other": "{{count}} históricos de tarefas do Roo Code importados para o Zoo Code."
 		}
 	},
