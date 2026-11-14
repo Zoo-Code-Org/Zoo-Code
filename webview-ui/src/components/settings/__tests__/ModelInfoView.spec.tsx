@@ -25,7 +25,10 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 				"settings:serviceTier.standard": "Standard",
 				"settings:serviceTier.flex": "Flex",
 				"settings:serviceTier.priority": "Priority",
-			})[key] ?? (key === "settings:modelInfo.tokensValue" ? `${key} ${JSON.stringify(options)}` : key),
+			})[key] ??
+			(key === "settings:modelInfo.tokensValue" || key === "settings:modelInfo.pricePerMillionTokens"
+				? `${key} ${JSON.stringify(options)}`
+				: key),
 	}),
 }))
 
@@ -305,5 +308,31 @@ describe("ModelInfoView service tier pricing", () => {
 
 		expect(getPricingRowValues("Flex")).toEqual(["Flex", "—", "—", "—"])
 		expect(getPricingRowValues("Priority")).toEqual(["Priority", "—", "—", "—"])
+	})
+
+	it("renders per-million-token prices for input, output, cache reads, and cache writes", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				modelInfo={{
+					...baseModelInfo,
+					cacheWritesPrice: 5,
+				}}
+			/>,
+		)
+
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$10.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$20.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$3.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$5.00" })}`),
+		).toBeInTheDocument()
 	})
 })
