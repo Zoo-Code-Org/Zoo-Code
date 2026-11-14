@@ -2,6 +2,7 @@ import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import * as path from "path"
 import { execFile } from "child_process"
+import { userInfo } from "os"
 
 export interface SafeWriteTextOptions {
 	/**
@@ -164,11 +165,32 @@ async function _restoreDaclWindows(
  * inside inherit only that account. Measured on a Windows host: the directory went
  * from three inherited ACEs (SYSTEM, Administrators and the user) to the single
  * explicit one, and a file written into it inherited only the user.
- * Returns false instead of throwing: a machine without icacls, or without a resolvable
- * account name in the environment, still saves the file, and the caller reports the
- * leftover exposure through onWarning. */
+ * Returns false instead of throwing: a machine without icacls, or with no account name
+ * readable either from the environment or from the host itself, still saves the file, and
+ * the caller reports the leftover exposure through onWarning. */
+/**
+ * The account name the staging grant names. The environment comes first because that is
+ * the source a caller can control and the source the tests pin. It is empty on a process
+ * that inherits neither USERNAME nor USER, which is how the hosted windows jobs run, so
+ * the account the host itself reports is asked next: userInfo is synchronous, and it throws
+ * when no account entry can be read, which is the same no-account state the caller already
+ * reports through onWarning. A name icacls will not resolve makes the grant fail, and a
+ * failed grant already takes this same warning path rather than rejecting the write. */
+function _resolveStagingAccountName(): string | null {
+	const fromEnvironment = process.env.USERNAME ?? process.env.USER
+	if (typeof fromEnvironment === "string" && fromEnvironment.length > 0) {
+		return fromEnvironment
+	}
+	try {
+		const reported = userInfo().username
+		return typeof reported === "string" && reported.length > 0 ? reported : null
+	} catch {
+		return null
+	}
+}
+
 async function _grantPrivateDaclWindows(stagingDirPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
-	const account = process.env.USERNAME ?? process.env.USER
+	const account = _resolveStagingAccountName()
 	if (!account) {
 		return false
 	}

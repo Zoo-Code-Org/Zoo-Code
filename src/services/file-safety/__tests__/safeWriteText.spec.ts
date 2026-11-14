@@ -3,6 +3,7 @@ import * as fsSync from "fs"
 import { execFile } from "child_process"
 import type { ChildProcess, ExecFileException } from "child_process"
 import * as path from "path"
+import { userInfo } from "os"
 
 import { PostCommitDurabilityError, resolveLockKey, safeWriteText, StagingPathError } from "../safeWriteText"
 
@@ -35,6 +36,13 @@ vi.mock("fs", () => ({
 	// finishes the copy loop instead of spinning on an undefined read.
 	readSync: vi.fn(() => 0),
 	Stats: class Stats {},
+}))
+
+// Mock os.userInfo so the staging grant asks the host for an account name on a fixed
+// schedule rather than on whatever the host happens to report (same shape as the shell
+// spec, which already mocks os this way).
+vi.mock("os", () => ({
+	userInfo: vi.fn(() => ({ username: "unit-test-user", uid: 0, gid: 0, homedir: "", shell: null })),
 }))
 
 // Mock child_process.execFile (callback-based — must invoke callback to resolve)
@@ -88,6 +96,10 @@ function mockDefaults(): void {
 	// Staged-file default: a regular file, not a link, so a caller-supplied
 	// tempPath passes the location and file-type check by default.
 	vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+	// resetAllMocks above dropped the factory implementation above, so restore the host
+	// account name this code may fall back to: every row that does not pin USERNAME gets the
+	// same answer on every host.
+	vi.mocked(userInfo).mockReturnValue({ username: "unit-test-user", uid: 0, gid: 0, homedir: "", shell: null })
 }
 function _stats(mode: number): fsSync.Stats {
 	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
@@ -208,17 +220,20 @@ describe("safeWriteText", () => {
 			vi.unstubAllEnvs()
 		})
 		it.skipIf(process.platform !== "win32")(
-			"skips the staging-directory grant and reports the leftover exposure when no account name resolves",
+			"skips the staging-directory grant and reports the leftover exposure when neither the environment nor the host resolves an account",
 			async () => {
 				const targetPath = "/tmp/test-dir/target.txt"
 				const warnings: string[] = []
 				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 				vi.mocked(fsSync.openSync).mockReturnValue(1)
-				// Both account sources cleared: the state a host reaches when its environment
-				// carries neither USERNAME nor USER. The grant never runs, so the two calls left
-				// are the target DACL save and the post-commit restore, named by argument.
+				// Both sources cleared: the environment carries neither USERNAME nor USER and the host
+				// cannot report an account either, which is what userInfo throwing means. The grant never
+				// runs, so the two calls left are the target DACL save and the post-commit restore.
 				vi.stubEnv("USERNAME", "")
 				vi.stubEnv("USER", "")
+				vi.mocked(userInfo).mockImplementation(() => {
+					throw new Error("EACCES: account entry unread")
+				})
 
 				await expect(
 					safeWriteText(targetPath, "hello", {
@@ -251,6 +266,38 @@ describe("safeWriteText", () => {
 						return message.includes("may be readable by other accounts")
 					}),
 				).toBe(true)
+				vi.unstubAllEnvs()
+			},
+		)
+
+		it.skipIf(process.platform !== "win32")(
+			"names the account the host reports when the environment carries neither USERNAME nor USER",
+			async () => {
+				const targetPath = "/tmp/test-dir/target.txt"
+				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+				vi.mocked(fsSync.openSync).mockReturnValue(1)
+				vi.stubEnv("USERNAME", "")
+				vi.stubEnv("USER", "")
+				vi.mocked(userInfo).mockReturnValue({
+					username: "host-reported-account",
+					uid: 0,
+					gid: 0,
+					homedir: "",
+					shell: null,
+				})
+
+				await expect(safeWriteText(targetPath, "hello", { platform: "win32" })).resolves.toBeUndefined()
+
+				const grants = vi
+					.mocked(execFile)
+					.mock.calls.map(function (call) {
+						return (call[1] ?? []).map(String)
+					})
+					.filter(function (args) {
+						return args.includes("/inheritance:r")
+					})
+				expect(grants).toHaveLength(1)
+				expect(grants[0]?.[3]).toBe("host-reported-account:(OI)(CI)F")
 				vi.unstubAllEnvs()
 			},
 		)
