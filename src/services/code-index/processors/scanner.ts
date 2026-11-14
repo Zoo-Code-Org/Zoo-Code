@@ -111,6 +111,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		})
 
 		const processedFiles = new Set<string>()
+		const missingFiles = new Set<string>()
 		let processedCount = 0
 		let skippedCount = 0
 		let totalBlockCount = 0
@@ -118,6 +119,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 		const parseLimiter = pLimit(PARSING_CONCURRENCY)
 		const writeLimiter = pLimit(BATCH_PROCESSING_CONCURRENCY)
 		const writes: Promise<void>[] = []
+		let writeFailure: { error: unknown } | undefined
 
 		const recordLocalFailure = (
 			filePath: string,
@@ -141,13 +143,19 @@ export class DirectoryScanner implements IDirectoryScanner {
 				try {
 					const stats = await readSource(stat(filePath))
 					// A file deleted after listing is a removal: leaving it out lets the removal phase delete it.
-					if (stats === SOURCE_MISSING) return
+					if (stats === SOURCE_MISSING) {
+						missingFiles.add(generateRelativeFilePath(filePath, scanWorkspace))
+						return
+					}
 					if (stats.size > MAX_FILE_SIZE_BYTES) {
 						skippedCount++
 						return
 					}
 					const buffer = await readSource(vscode.workspace.fs.readFile(vscode.Uri.file(filePath)))
-					if (buffer === SOURCE_MISSING) return
+					if (buffer === SOURCE_MISSING) {
+						missingFiles.add(generateRelativeFilePath(filePath, scanWorkspace))
+						return
+					}
 					content = Buffer.from(buffer).toString("utf-8")
 				} catch (error) {
 					processedFiles.add(filePath)
@@ -180,11 +188,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 				}
 				totalBlockCount += blocks.length
 
+				// The handler is attached at queue time; parses still pending must not leave a rejection unhandled.
 				writes.push(
 					writeLimiter(async () => {
 						if (signal?.aborted) return
 						const indexed = await writer.replace(filePath, currentFileHash, blocks, signal)
 						if (indexed) onBlocksIndexed?.(blocks.filter((block) => block.content.trim()).length)
+					}).catch((error: unknown) => {
+						writeFailure ??= { error }
 					}),
 				)
 			}),
@@ -192,6 +203,7 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 		await Promise.all(parsePromises)
 		await Promise.all(writes)
+		if (writeFailure) throw writeFailure.error
 
 		if (signal?.aborted) {
 			return { stats: { processed: processedCount, skipped: skippedCount }, totalBlockCount }
@@ -202,8 +214,9 @@ export class DirectoryScanner implements IDirectoryScanner {
 			removalCandidates.set(generateRelativeFilePath(cachedFilePath, scanWorkspace), cachedFilePath)
 		}
 		// A file whose first write failed has no hash, but its failure entry means partial points may exist.
-		// A truncated listing cannot prove a failure-only file is gone, so those are kept.
-		for (const failure of listingTruncated ? [] : this.failures.list()) {
+		// A truncated listing cannot prove an unlisted failure-only file is gone; a confirmed-missing one is.
+		for (const failure of this.failures.list()) {
+			if (listingTruncated && !missingFiles.has(failure.path)) continue
 			if (!removalCandidates.has(failure.path)) {
 				removalCandidates.set(failure.path, generateNormalizedAbsolutePath(failure.path, scanWorkspace))
 			}

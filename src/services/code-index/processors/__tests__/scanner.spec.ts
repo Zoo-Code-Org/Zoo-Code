@@ -579,6 +579,67 @@ describe("DirectoryScanner", () => {
 			},
 		)
 
+		it("removes a listed failure-only file confirmed missing even when the listing is truncated", async () => {
+			const failures = new FileFailureRegistry()
+			const truncationScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/vanished.js"], true])
+			vi.mocked(stat).mockRejectedValueOnce(Object.assign(new Error("gone"), { code: "ENOENT" }))
+			const relativePath = nodePath.normalize("test/vanished.js")
+			failures.renew(relativePath, "h")
+			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+			await truncationScanner.scanDirectory("/test")
+
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+			expect(failures.list()).toEqual([])
+		})
+
+		it("drains queued writes and propagates an aborted write's error while a parse is pending", async () => {
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([["test/file1.js", "test/file2.js"], false])
+			const controller = new AbortController()
+			const abortError = new Error("aborted write")
+			let releaseSecondParse: () => void = () => {}
+			const secondParse = new Promise<void>((resolve) => {
+				releaseSecondParse = resolve
+			})
+			const block = {
+				file_path: "test/file1.js",
+				content: "function hello() {}",
+				start_line: 1,
+				end_line: 1,
+				identifier: "hello",
+				type: "function",
+				fileHash: "hash1",
+				segmentHash: "seg-hash-1",
+			}
+			vi.mocked(mockCodeParser.parseFile)
+				.mockResolvedValueOnce([block])
+				.mockImplementationOnce(async () => {
+					await secondParse
+					return []
+				})
+			vi.mocked(mockEmbedder.createEmbeddings).mockImplementationOnce(async () => {
+				controller.abort()
+				setTimeout(releaseSecondParse, 0)
+				throw abortError
+			})
+
+			await expect(
+				scanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal),
+			).rejects.toBe(abortError)
+		})
+
 		it("records a non-missing read error as a read failure", async () => {
 			const failures = new FileFailureRegistry()
 			const readScanner = new DirectoryScanner(
