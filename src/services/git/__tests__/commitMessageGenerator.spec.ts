@@ -1,4 +1,4 @@
-import fs, { mkdir, mkdtemp, rm, writeFile } from "fs/promises"
+import fs, { mkdir, mkdtemp, rm, symlink, writeFile } from "fs/promises"
 import { tmpdir } from "os"
 import * as path from "path"
 import * as vscode from "vscode"
@@ -260,10 +260,6 @@ describe("commitMessageGenerator", () => {
 				section("diff --git old/.env new/.env", "--- old/.env", "+++ new/.env", "@@ -1 +1 @@", "+A=1"),
 			],
 			[
-				"custom prefixes without a slash",
-				section("diff --git old-.env new-.env", "--- old-.env", "+++ new-.env", "@@ -1 +1 @@", "+A=1"),
-			],
-			[
 				"custom prefixes with more than one folder",
 				section("diff --git x/old/.env y/new/.env", "--- x/old/.env", "+++ y/new/.env", "@@ -1 +1 @@", "+A=1"),
 			],
@@ -308,22 +304,59 @@ describe("commitMessageGenerator", () => {
 			expect(omitIgnoredFiles(diff, isAllowed)).toBe(diff)
 		})
 
+		it("leaves out a file with custom prefixes without a slash when the Git extension lists it", () => {
+			const ignored = section(
+				"diff --git old-.env new-.env",
+				"--- old-.env",
+				"+++ new-.env",
+				"@@ -1 +1 @@",
+				"+A=1",
+			)
+			expect(omitIgnoredFiles(ignored, isAllowed, new Set([".env"]))).toBe(
+				`diff --git old-.env new-.env\n${IGNORED_FILE_NOTE}`,
+			)
+		})
+
 		it.each([
-			["a changed file", ["--- a/src/x", "+++ b/src/y"], ["a/src/x", "src/x", "/x", "x", "b/src/y", "y"], []],
-			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"], ["/dev/null", "null"]],
-		])("checks every suffix of each path of %s", (_label, pathLines, checkedPaths, uncheckedPaths) => {
+			["a changed file", ["--- a/src/x", "+++ b/src/y"], ["a/src/x", "src/x", "x", "b/src/y", "src/y", "y"]],
+			["an added file", ["--- /dev/null", "+++ b/y"], ["b/y", "y"]],
+			[
+				"a file with custom prefixes",
+				["--- old-src/x", "+++ new-src/x"],
+				["old-src/x", "x", "src/x", "new-src/x"],
+			],
+		])("checks each path of %s once, by folder and by listed path", (_label, pathLines, expected) => {
 			const checked: string[] = []
+			const diff = section("diff --git a/x b/y", ...pathLines, "@@ -0,0 +1 @@", "--- a/z")
 			omitIgnoredFiles(
-				section("diff --git a/x b/y", ...pathLines, "@@ -0,0 +1 @@", "--- a/z"),
+				diff,
 				(relativePath) => {
 					checked.push(relativePath)
 					return true
 				},
+				new Set(["src/x"]),
 			)
-			expect(checked).toEqual(expect.arrayContaining(checkedPaths))
-			for (const unchecked of [...uncheckedPaths, "a/z", "z"]) {
-				expect(checked).not.toContain(unchecked)
-			}
+			expect(checked).toEqual(expected)
+		})
+
+		it("checks a bounded number of paths for a diff of many files", () => {
+			const files = Array.from({ length: 500 }, (_, i) => `src/feature/file${i}.ts`)
+			const diff = files
+				.map((file) =>
+					section(`diff --git a/${file} b/${file}`, `--- a/${file}`, `+++ b/${file}`, "@@ -1 +1 @@", "+x"),
+				)
+				.join("\n")
+			let checks = 0
+			omitIgnoredFiles(
+				diff,
+				() => {
+					checks++
+					return true
+				},
+				new Set(files),
+			)
+			// Each file: a/src/feature/fileN.ts and b/..., then src/feature/fileN.ts, feature/fileN.ts, fileN.ts.
+			expect(checks).toBe(files.length * 5)
 		})
 	})
 
@@ -1177,7 +1210,12 @@ describe("commitMessageGenerator", () => {
 			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
 			try {
 				await writeFile(path.join(root, ".rooignore"), ".env\nconfig/private/\n")
-				mockRepo = makeRepo(root)
+				// The Git extension lists the changed files. It finds `.env` also behind custom prefixes.
+				const changes = [".env", "config/private/keys.json", "src/app.ts"].map((file) => ({
+					uri: vscode.Uri.file(path.join(root, file)),
+					status: 5,
+				}))
+				mockRepo = makeRepo(root, { state: { indexChanges: changes, workingTreeChanges: changes } })
 				useOnlyRepository(mockRepo)
 				const diff = [
 					"diff --git a/.env b/.env",
@@ -1265,7 +1303,7 @@ describe("commitMessageGenerator", () => {
 		it("stops without a provider request when checking for .rooignore fails with EACCES", async () => {
 			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
 			const accessDenied = Object.assign(new Error("permission denied"), { code: "EACCES" })
-			const stat = vi.spyOn(fs, "stat").mockRejectedValue(accessDenied)
+			const stat = vi.spyOn(fs, "lstat").mockRejectedValue(accessDenied)
 			try {
 				mockRepo = makeRepo(root)
 				useOnlyRepository(mockRepo)
@@ -1283,6 +1321,52 @@ describe("commitMessageGenerator", () => {
 				await rm(root, { recursive: true, force: true })
 			}
 		})
+
+		it("finds a renamed file by its original path behind custom prefixes", async () => {
+			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+			try {
+				await writeFile(path.join(root, ".rooignore"), ".env\n")
+				const renamed = {
+					uri: vscode.Uri.file(path.join(root, "moved.txt")),
+					originalUri: vscode.Uri.file(path.join(root, ".env")),
+					status: 3,
+				}
+				mockRepo = makeRepo(root, { state: { indexChanges: [renamed] } })
+				useOnlyRepository(mockRepo)
+				// Without rename detection, the diff shows the old file as deleted.
+				const diff = "diff --git old-.env new-.env\n--- old-.env\n+++ /dev/null\n@@ -1 +0,0 @@\n-DB=hunter5"
+				mockRepo.diff = vi.fn().mockResolvedValue(diff)
+				;(singleCompletionHandler as Mock).mockResolvedValue("chore: move config")
+
+				await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+				expect((singleCompletionHandler as Mock).mock.calls[0][1]).not.toContain("hunter5")
+			} finally {
+				await rm(root, { recursive: true, force: true })
+			}
+		})
+
+		it.skipIf(process.platform === "win32")(
+			"stops without a provider request when .rooignore is a link to a missing file",
+			async () => {
+				const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))
+				try {
+					await symlink(path.join(root, "missing-rules"), path.join(root, ".rooignore"))
+					mockRepo = makeRepo(root)
+					useOnlyRepository(mockRepo)
+					mockRepo.diff = vi.fn().mockResolvedValue("diff --git a/.env b/.env\n@@ -1 +1 @@\n+DB=hunter2")
+
+					await generateCommitMessage({ provider: mockProvider, outputChannel: mockOutputChannel })
+
+					expect(singleCompletionHandler).not.toHaveBeenCalled()
+					expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+						`Failed to generate commit message: ${ROOIGNORE_UNREADABLE_MESSAGE}`,
+					)
+				} finally {
+					await rm(root, { recursive: true, force: true })
+				}
+			},
+		)
 
 		it("sends the diff unchanged when the repository has no .rooignore", async () => {
 			const root = await mkdtemp(path.join(tmpdir(), "zoo-commit-"))

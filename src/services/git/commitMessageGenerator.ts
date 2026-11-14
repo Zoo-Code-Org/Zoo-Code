@@ -10,10 +10,13 @@ import { singleCompletionHandler } from "../../utils/single-completion-handler"
 
 export interface GitRepositoryChange {
 	readonly uri: vscode.Uri
+	readonly originalUri?: vscode.Uri
 	readonly status: number
 }
 
 export interface GitRepositoryState {
+	readonly indexChanges?: ReadonlyArray<GitRepositoryChange>
+	readonly mergeChanges?: ReadonlyArray<GitRepositoryChange>
 	readonly workingTreeChanges?: ReadonlyArray<GitRepositoryChange>
 	readonly untrackedChanges?: ReadonlyArray<GitRepositoryChange>
 }
@@ -258,8 +261,15 @@ function unquoteGitPath(value: string): string {
 	return Buffer.concat(bytes).toString("utf8")
 }
 
-/** True when `.rooignore` blocks a path of the diff section (paths are read before its first hunk). */
-function isSectionBlocked(section: string[], isAllowed: (relativePath: string) => boolean): boolean {
+/**
+ * True when `.rooignore` blocks a path of the diff section (paths are read before its first hunk).
+ * `changedPaths` are the repository-relative paths of the changed files that the Git extension lists.
+ */
+function isSectionBlocked(
+	section: string[],
+	isAllowed: (relativePath: string) => boolean,
+	changedPaths: ReadonlySet<string>,
+): boolean {
 	const firstHunk = section.findIndex((line) => line.startsWith("@@"))
 	const candidates = new Set<string>()
 	for (const line of section.slice(0, firstHunk === -1 ? section.length : firstHunk)) {
@@ -269,12 +279,17 @@ function isSectionBlocked(section: string[], isAllowed: (relativePath: string) =
 		}
 		// The path can start with a prefix that is not part of it: `a/` and `b/` by default, `i/` or `w/` with
 		// diff.mnemonicPrefix, any text with diff.srcPrefix and diff.dstPrefix (`old-.env`), or none with
-		// diff.noPrefix. Every suffix of the path is checked, so the real path is checked for any prefix.
-		// Some files that are not blocked can then be left out too (`my.env` for a `.env` rule), but a
-		// blocked file is never kept.
+		// diff.noPrefix. The path is checked as written, without each number of leading folders, and as
+		// each listed changed path that it ends with. A file can then be left out by a rule for another
+		// path (`/.env` for `src/.env`), but a blocked file is never kept.
 		const gitPath = unquoteGitPath(written)
+		const segments = gitPath.split("/")
+		segments.forEach((_, start) => candidates.add(segments.slice(start).join("/")))
 		for (let start = 0; start < gitPath.length; start++) {
-			candidates.add(gitPath.slice(start))
+			const suffix = gitPath.slice(start)
+			if (changedPaths.has(suffix)) {
+				candidates.add(suffix)
+			}
 		}
 	}
 	return [...candidates].some((candidate) => !isAllowed(candidate))
@@ -285,13 +300,17 @@ function isSectionBlocked(section: string[], isAllowed: (relativePath: string) =
  * these files out of the chat. The first line of the file stays, so the commit message can name it.
  * The list of untracked files has no path lines, so it is kept as it is.
  */
-export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string) => boolean): string {
+export function omitIgnoredFiles(
+	diff: string,
+	isAllowed: (relativePath: string) => boolean,
+	changedPaths: ReadonlySet<string> = new Set(),
+): string {
 	const kept: string[] = []
 	let section: string[] = []
 	const closeSection = () => {
 		const [header = ""] = section
 		// One push per line: spreading a large file into push() would exceed the argument limit.
-		for (const line of isSectionBlocked(section, isAllowed) ? [header, IGNORED_FILE_NOTE] : section) {
+		for (const line of isSectionBlocked(section, isAllowed, changedPaths) ? [header, IGNORED_FILE_NOTE] : section) {
 			kept.push(line)
 		}
 		section = []
@@ -312,7 +331,8 @@ export function omitIgnoredFiles(diff: string, isAllowed: (relativePath: string)
  */
 async function isMissing(filePath: string): Promise<boolean> {
 	try {
-		await fs.stat(filePath)
+		// lstat: a symbolic link to a missing file is present, and the controller cannot read it.
+		await fs.lstat(filePath)
 		return false
 	} catch (error) {
 		const code = error instanceof Error && "code" in error ? error.code : undefined
@@ -332,7 +352,15 @@ async function withoutIgnoredFiles(repository: GitRepository, diff: string): Pro
 		if (rooIgnore.rooIgnoreContent === undefined && !(await isMissing(path.join(root, ".rooignore")))) {
 			throw new Error(ROOIGNORE_UNREADABLE_MESSAGE)
 		}
-		return omitIgnoredFiles(diff, (relativePath) => rooIgnore.validateAccess(relativePath))
+		const state = repository.state
+		const changes = [state?.indexChanges, state?.mergeChanges, state?.workingTreeChanges, state?.untrackedChanges]
+		const changedPaths = new Set(
+			changes
+				.flatMap((group) => group ?? [])
+				.flatMap((change) => [change.uri, change.originalUri ?? change.uri])
+				.map((uri) => path.relative(root, uri.fsPath).split(path.sep).join("/")),
+		)
+		return omitIgnoredFiles(diff, (relativePath) => rooIgnore.validateAccess(relativePath), changedPaths)
 	} finally {
 		rooIgnore.dispose()
 	}
