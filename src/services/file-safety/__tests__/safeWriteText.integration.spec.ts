@@ -174,3 +174,36 @@ describe("safeWriteText against a real filesystem", () => {
 		expect(await fs.readdir(moved)).toEqual([])
 	})
 })
+
+// Blocks carried across the merge from the side that landed this module on the writers unit (pull
+// 2452). The merged module keeps that side's guarantees, so its evidence travels with them.
+// They are appended in their own describe so this file's own setup stays readable.
+describe("guarantees carried from the writers unit (2452)", () => {
+	let carriedDir: string
+
+	beforeEach(async () => {
+		carriedDir = await fs.mkdtemp(path.join(os.tmpdir(), "safe-write-text-carried-"))
+	})
+
+	afterEach(async () => {
+		await fs.rm(carriedDir, { recursive: true, force: true })
+	})
+
+	it("leaves the target bytes untouched when the commit cannot replace it", async () => {
+		// A regular file cannot be renamed over a directory, so the commit rename itself fails on a
+		// real filesystem with no mocking at all. No backup is asked for: with backup:true the run
+		// stopped one step earlier, at the backup copy hitting the same EISDIR, and the commit rename
+		// this test is named for never ran.
+		const targetPath = path.join(carriedDir, "target-dir")
+		await fs.mkdir(targetPath)
+		const inside = path.join(targetPath, "payload.txt")
+		await fs.writeFile(inside, "original bytes")
+
+		await expect(safeWriteText(targetPath, "new data")).rejects.toThrow()
+
+		// The directory and its content are exactly as they were, and no backup copy
+		// or staging directory was left behind next to them.
+		expect(await fs.readFile(inside, "utf8")).toBe("original bytes")
+		expect(await fs.readdir(carriedDir)).toEqual(["target-dir"])
+	})
+})

@@ -2,6 +2,7 @@
 
 import * as os from "os"
 import path from "path"
+import { existsSync } from "fs"
 import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
@@ -102,12 +103,16 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// The one resolve after the lock is the publish target, and staging plus every
-		// rename site then name that same resolved string, so there is no second resolution
-		// left to diverge on. (The chain's delegation resolved again inside safeWriteText and
-		// ran two staging-path lstat checks; this protocol resolves once under the lock, which
-		// is why two lstat entries and one resolve are gone rather than reordered.)
-		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve"])
+		// The lock key is the key every other writer to this file uses, so the caller
+		// queued behind the peer instead of failing before the lock.
+		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
+		// Choreography under the merged protocol: the pre-lock resolution is tolerant (a link the
+		// peer has not committed yet must not reject the caller), and the strict resolution runs
+		// after the recovery pass so an interrupted publish that recovery restores still resolves.
+		// That is one resolution more than a single strict resolve under the lock would cost, and
+		// staging plus every rename site then name the string that strict step returned, so
+		// nothing is left to diverge on afterwards.
+		expect(order).toEqual(["resolve-failed", "lstat", "resolve", "resolve", "lock", "resolve", "resolve"])
 		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
 	})
 
@@ -145,9 +150,10 @@ describe("safeWriteJson lock key under a peer commit", () => {
 
 		await expect(safeWriteJson(currentLink, { id: "task-1" })).rejects.toThrow(enoent)
 		expect(released).toBe(true)
-		// The strict rejection is reached through the ENOENT + symlink branch, not
-		// through a synchronous throw that skips it.
-		expect(order).toEqual(["lstat", "lock", "lstat", "release"])
+		// The strict rejection is reached through the ENOENT + symlink branch of the resolution
+		// that runs after the recovery pass, not through a synchronous throw that skips it, and the
+		// second lstat entry is that branch consulting lstat before refusing.
+		expect(order).toEqual(["lstat", "lock", "lstat", "lstat", "release"])
 	})
 
 	it("canonicalizes the parent directory when the file itself is not there yet", async () => {
@@ -261,4 +267,100 @@ it("does not log a cleanup error when the safety net finds the temp file already
 		unlinkSpy.mockRestore()
 		consoleError.mockRestore()
 	}
+})
+
+// Blocks carried across the merge from the side that landed this module on the writers unit (pull
+// 2452). The merged module keeps that side's guarantees, so its evidence travels with them.
+// They are appended in their own describe so this file's own setup stays readable.
+describe("guarantees carried from the writers unit (2452)", () => {
+	it("follows a chain of nine links to the file it ends at", async () => {
+		// Nine links, dangling at the far end. A walk that stops at eight leaves the key naming
+		// an intermediate link, so a writer that named the file through this chain queued on a
+		// different lock from a writer standing at the file itself - two locks for one file,
+		// reached by chain length instead of by spelling.
+		const chain = [
+			"a0.json",
+			"a1.json",
+			"a2.json",
+			"a3.json",
+			"a4.json",
+			"a5.json",
+			"a6.json",
+			"a7.json",
+			"a8.json",
+		]
+		const referent = path.resolve("/tmp/chain-dir", "history_item.json")
+		const targets = new Map<string, string>()
+		chain.forEach((name, index) => {
+			targets.set(
+				path.resolve("/tmp/chain-dir", name),
+				index + 1 < chain.length ? path.resolve("/tmp/chain-dir", chain[index + 1]) : referent,
+			)
+		})
+		mockedRealpath.mockRejectedValue(enoent)
+		mockedLstat.mockImplementation(
+			async (target) =>
+				({
+					isSymbolicLink: () => targets.has(String(target)),
+					isFile: () => !targets.has(String(target)),
+				}) as unknown as BigIntStats,
+		)
+		mockedReadlink.mockImplementation(async (target) => {
+			const next = targets.get(String(target))
+			return next === undefined
+				? Promise.reject(Object.assign(new Error("not a link"), { code: "EINVAL" }))
+				: next
+		})
+
+		const viaChain = await resolveLockKey(path.resolve("/tmp/chain-dir", chain[0]))
+
+		// One readlink per link, all nine, plus the probe that finds a non-link at the far end:
+		// the key names the file, not a link part-way down the chain.
+		expect(mockedReadlink).toHaveBeenCalledTimes(chain.length + 1)
+		expect(viaChain).toBe(referent)
+	})
+
+	it("heals the interrupted publish beside the referent while the alias dangles", async () => {
+		const linkDir = await makeDir("lockkey-link-")
+		const referentDir = await makeDir("lockkey-referent-")
+		const referent = path.join(referentDir, "history_item.json")
+		currentLink = path.join(linkDir, "link.json")
+		// An interrupted two-step replacement: the previous write renamed the committed file to
+		// its backup and never landed the replacement, so the committed content sits in a
+		// backup beside the referent while the referent itself is absent. The link was renamed
+		// away too, so the alias resolves nowhere.
+		const backupPath = path.join(referentDir, ".history_item.json.bak_previous.tmp")
+		await fs.writeFile(backupPath, JSON.stringify({ version: "committed" }))
+		// Neither spelling resolves while the referent is missing, which is what a dangling
+		// link looks like to realpath. Recovery restores the referent, and from then on both
+		// spellings resolve again.
+		// Only the two spellings of the missing file fail to resolve; directory components answer with
+		// their own path, which is what a real filesystem does while the referent is away, and the
+		// canonical key walk has to resolve them to find the nearest real ancestor.
+		mockedRealpath.mockImplementation(async (target) => {
+			const p = String(target)
+			if (!existsSync(referent) && (p === referent || p === currentLink)) {
+				throw enoent
+			}
+			return p === currentLink ? referent : p
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink
+				? referent
+				: Promise.reject(Object.assign(new Error("not a link"), { code: "EINVAL" })),
+		)
+		mockedAcquireFileLock.mockResolvedValue(async () => {})
+
+		await safeWriteJson(currentLink, { id: "task-1" })
+
+		// The lock key is the referent's key, and recovery looked beside the referent as well,
+		// so the interrupted publish's committed state was restored before this write decided
+		// what the file holds. Named at the dangling alias, this write queued on the referent's
+		// lock and healed the referent's leftovers instead of failing every retry.
+		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
+		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+		expect(await fs.readdir(referentDir)).toEqual(["history_item.json"])
+		expect(await fs.readdir(linkDir)).toEqual([])
+	})
 })

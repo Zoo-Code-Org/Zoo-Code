@@ -103,14 +103,21 @@ export class StagingPathError extends Error {
  */
 export class PostCommitDurabilityError extends Error {
 	readonly targetPath: string
+	/**
+	 * The old-content copy this path retains for recovery, or null when backup mode was off
+	 * or no copy was taken. The name is a hidden random path, so without this field no caller
+	 * could find the copy the failure cleanup deliberately keeps.
+	 */
+	readonly backupPath: string | null
 
-	constructor(targetPath: string, cause: unknown) {
+	constructor(targetPath: string, cause: unknown, backupPath: string | null = null) {
 		super(
 			"The rename committed but the parent directory could not be fsynced -- the content is at the target path reported on this error, and the directory entry may not be durable.",
 			{ cause },
 		)
 		this.name = "PostCommitDurabilityError"
 		this.targetPath = targetPath
+		this.backupPath = backupPath
 	}
 }
 
@@ -174,6 +181,15 @@ export class AncestorReplacedError extends Error {
 		this.directory = directory
 	}
 }
+
+/**
+ * How far resolveLockKey follows a chain of links. 40 is where Node's own resolver gives up
+ * with ELOOP, so every chain the operating system is willing to resolve is a chain this walk
+ * resolves too; a smaller bound stops at an intermediate link of a long chain, and the writer
+ * that stopped there queues on a different lock from the writer standing at the referent - the
+ * two-locks-for-one-file case canonicalDirKey exists to prevent.
+ */
+const MAX_SYMLINK_HOPS = 40
 
 // -- helpers ---------------------------------------------------------------
 
@@ -303,6 +319,33 @@ async function _restoreDaclWindows(
 	}
 }
 
+/** Apply a restrictive Windows DACL to a freshly created staging directory.
+ * `icacls <dir> /inheritance:r /grant:r "<account>:(OI)(CI)F"` drops every inherited ACE and
+ * leaves one explicit ACE for the account running the write, so files created inside inherit
+ * only that account. Returns false instead of throwing: a machine without icacls, or without a
+ * resolvable account name in the environment, still saves the file, and the caller reports the
+ * leftover exposure through the warning sink. */
+async function _grantPrivateDaclWindows(stagingDirPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+	const account = process.env.USERNAME ?? process.env.USER
+	if (!account) {
+		return false
+	}
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner(
+				"icacls",
+				[stagingDirPath, "/inheritance:r", "/grant:r", `${account}:(OI)(CI)F`],
+				{ windowsHide: true },
+				(err) => (err ? reject(err) : resolve()),
+			)
+		})
+		return true
+	} catch {
+		return false
+	}
+}
+
 // -- public API ------------------------------------------------------------
 
 /**
@@ -410,7 +453,7 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		// path is a link, so it propagates: keying this writer to the alias while a
 		// writer that reached the referent keys the referent is the two-locks-for-one-file
 		// loss this function exists to prevent, and guessing it is how that loss arrives.
-		const linkWalkLimit = 8
+		const linkWalkLimit = MAX_SYMLINK_HOPS
 		let key = absoluteFilePath
 		for (let depth = 0; depth < linkWalkLimit; depth++) {
 			const target = await fs.readlink(key).catch((linkError: unknown) => {
@@ -464,7 +507,12 @@ export async function safeWriteText(
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
-	await fs.mkdir(dirPath, { recursive: true })
+	// fs.mkdir reports the shallowest directory it had to create and returns undefined when
+	// every component was already there. The return value is kept because step 4b uses it to
+	// synchronize the directory ENTRIES this write created: fsyncing a created directory syncs
+	// that directory's own inode, not the entry in its parent that names it, so a crash could
+	// lose the saved file together with the new directory holding it.
+	const createdFrom = await fs.mkdir(dirPath, { recursive: true })
 	await fs.access(dirPath)
 
 	// Create the staging directory only when we generate the temp file there;
@@ -621,8 +669,26 @@ export async function safeWriteText(
 			report("failed", error)
 		}
 	}
+	// The win32 staging-directory grant (step 1a) and the step-2 DACL dump both key off this
+	// value and both report through the sink above, so it is resolved before the first byte.
+	const platform = options?.platform ?? process.platform
 
 	try {
+		// -- Step 1a (win32): make the staging directory private before staging any content.
+		// The staging directory is created with mode 0o700, but that mode is narrowed by the
+		// process umask and on Windows the directory also inherits its parent's access rights, so
+		// an inherited ACE leaves the staged bytes readable to others until the grant lands. The
+		// grant runs after the directory exists and before the first staged byte; a machine that
+		// cannot apply it still saves the file, with the exposure reported rather than thrown.
+		if (stagingDir !== null && platform === "win32") {
+			const granted = await _grantPrivateDaclWindows(stagingDir, options?.execFileRunner)
+			if (!granted) {
+				warn(
+					`safeWriteText: could not make the staging directory ${stagingDir} private; the staged copy of ${targetPath} may be readable by other accounts until it is published.`,
+				)
+			}
+		}
+
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
 			// Preserve the existing target's permissions: the staging file must
@@ -724,7 +790,6 @@ export async function safeWriteText(
 		}
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
-		const platform = options?.platform ?? process.platform
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -942,7 +1007,45 @@ export async function safeWriteText(
 					// so the failure is surfaced as its own error: the caller can
 					// still find the content at the target, it just cannot rely on
 					// the directory entry having reached the disk.
-					throw new PostCommitDurabilityError(targetPath, error)
+					// The failure cleanup keeps the backup on this path, so hand the caller the
+					// path of the copy it is keeping - it is a hidden random name and is
+					// otherwise unrecoverable.
+					throw new PostCommitDurabilityError(targetPath, error, releaseBackupOnSuccess ? backupPath : null)
+				}
+				// The rename above changed one entry inside dirPath. When this write also created
+				// dirPath or any of its ancestors, each of those directories is itself an entry in
+				// its own parent, and the fsync above synchronized dirPath's inode, not the entries
+				// naming it. Walk up from the first directory this write created and synchronize
+				// each containing directory, deepest first: the same failure is reported the same
+				// way, because the content is at the target either way and only its durability is
+				// in question. When mkdir had nothing to create there is no ancestor to walk.
+				if (createdFrom !== undefined) {
+					const stopAt = path.dirname(createdFrom)
+					let ancestorCursor = path.dirname(dirPath)
+					try {
+						for (;;) {
+							const ancestorFd = fsSync.openSync(ancestorCursor, "r")
+							try {
+								_fsyncFile(ancestorFd)
+							} finally {
+								fsSync.closeSync(ancestorFd)
+							}
+							if (ancestorCursor === stopAt) {
+								break
+							}
+							const ancestorParent = path.dirname(ancestorCursor)
+							if (ancestorParent === ancestorCursor) {
+								break
+							}
+							ancestorCursor = ancestorParent
+						}
+					} catch (ancestorError: unknown) {
+						throw new PostCommitDurabilityError(
+							targetPath,
+							ancestorError,
+							releaseBackupOnSuccess ? backupPath : null,
+						)
+					}
 				}
 			}
 
@@ -1019,9 +1122,12 @@ export async function safeWriteText(
 		// The backup is a COPY taken before the commit, never a rename of the target,
 		// so there is nothing to restore here: the target still holds whatever the
 		// commit left - the pre-write content when the commit never ran, the published
-		// content when it did. The copy has served its purpose and must not be left
-		// beside the target where no caller can find it.
-		if (backupPath && releaseBackupOnSuccess) {
+		// content when it did. Only a failure before the commit may discard the copy: after the
+		// commit the target holds the new content, and when the failure is a post-commit durability
+		// error the backup is the only copy known to hold the previous content. Deleting it there
+		// would destroy the recovery copy the contract promises, so it stays and its path travels
+		// on PostCommitDurabilityError.
+		if (backupPath && releaseBackupOnSuccess && !committed) {
 			// Retry once (Windows reports EPERM while a handle is still being released), and
 			// if it still fails keep the path: clearing it would drop the only reference to
 			// the orphan. The original write error is what propagates; the leftover is

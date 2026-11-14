@@ -1736,3 +1736,82 @@ describe("safeWriteJson", () => {
 		consoleWarnSpy.mockRestore()
 	})
 })
+
+// Blocks carried across the merge from the side that landed this module on the writers unit (pull
+// 2452). The merged module keeps that side's guarantees, so its evidence travels with them.
+// They are appended in their own describe so this file's own setup stays readable.
+describe("guarantees carried from the writers unit (2452)", () => {
+	let carriedTempDir: string
+	let carriedFilePath: string
+
+	beforeEach(async () => {
+		carriedTempDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "safeWriteJson-carried-")))
+		carriedFilePath = path.join(carriedTempDir, "test-file.json")
+	})
+
+	afterEach(async () => {
+		await fs.rm(carriedTempDir, { recursive: true, force: true })
+	})
+
+	test("rejects an out-of-scope target before creating any directory", async () => {
+		const projectDir = path.join(carriedTempDir, "scope")
+		await fs.mkdir(projectDir)
+		// The target lives in a directory that does not exist. A confinement check that runs
+		// after the mkdir -p would create that directory OUTSIDE the declared scope first -
+		// the same side effect the pre-lock check exists to prevent, reached through a
+		// symlinked ancestor in the reported case - and an unwritable referent would surface
+		// the mkdir error instead of the confinement verdict.
+		const missingParent = path.join(carriedTempDir, "no-such-dir")
+		const outside = path.join(missingParent, "elsewhere.json")
+
+		await expect(safeWriteJson(outside, { mcpServers: {} }, { confineTo: projectDir })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Nothing was created outside the scope, and no lock was attempted there.
+		expect(fsSyncActual.existsSync(missingParent)).toBe(false)
+		expect(
+			(await fs.readdir(carriedTempDir)).filter(function (entry: string) {
+				return entry.endsWith(".lock")
+			}),
+		).toEqual([])
+	})
+
+	test("a failed commit keeps the previous content at the target and leaves no backup behind", async () => {
+		const initialData = { message: "Initial, must survive a failed commit" }
+		const newData = { message: "New content" }
+
+		await fsPromisesActuals.writeFile!(carriedFilePath, JSON.stringify(initialData))
+
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {}) // Suppress console.error
+
+		// fs.rename is already vi.fn() — use vi.mocked to avoid double-wrapping via vi.spyOn
+		let renameCallCount = 0
+		vi.mocked(fs.rename).mockImplementation(async (oldPath, newPath) => {
+			renameCallCount++
+			if (renameCallCount === 1) {
+				// The commit rename fails with a non-EPERM error, so no fallback runs.
+				throw new Error("Primary rename failed")
+			}
+			return fsPromisesActuals.rename!(oldPath, newPath)
+		})
+
+		await expect(safeWriteJson(carriedFilePath, newData)).rejects.toThrow("Primary rename failed")
+
+		// Exactly one rename was attempted, and it was the commit.
+		expect(renameCallCount).toBe(1)
+
+		// The target never left its path, so the previous content is still what a
+		// reader sees, and no orphaned backup copy is left behind either.
+		// readFileContent lives inside the other describe's scope, so read through the real
+		// fs/promises the same way that helper did.
+		const content = JSON.parse(String(fsSyncActual.readFileSync(carriedFilePath, "utf8")))
+		expect(content).toEqual(initialData)
+		const leftovers = (await fs.readdir(carriedTempDir)).filter(
+			(entry) => entry.includes(".bak_") || entry.includes(".new_") || entry.includes("safeWriteText.bak_"),
+		)
+		expect(leftovers).toEqual([])
+
+		consoleErrorSpy.mockRestore()
+	})
+})

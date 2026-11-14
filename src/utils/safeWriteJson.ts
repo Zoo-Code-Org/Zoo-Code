@@ -328,11 +328,21 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	let actualTempBackupFilePath: string | null = null
 
 	try {
-		// Resolve the publish target under the lock: the peer has committed by now, so
-		// the strict dangling-link rejection still applies to a real dangling link. It
-		// must stay inside the protected block, otherwise a rejection here leaves the
-		// advisory lock held until the stale timeout for every other writer.
-		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		// First resolution, tolerant on purpose: resolvePublishTarget rejects a link with no
+		// referent, and while the link dangles the lock key still names the file an interrupted
+		// publish was renaming onto - the place the recovery below has to look, because the
+		// leftover names are derived from the publish target the interrupted write resolved.
+		// The strict resolution runs after that recovery, inside the protected block (a rejection
+		// here must not leave the advisory lock held until the stale timeout), so a link recovery
+		// healed resolves there and a link that is still dangling is refused rather than
+		// written through.
+		const initialTarget = await resolvePublishTarget(absoluteFilePath).catch((error: unknown) => {
+			if (getErrorCode(error) !== "ENOENT") {
+				throw error
+			}
+			return lockKey
+		})
+		resolvedTargetPath = initialTarget
 
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
@@ -382,6 +392,20 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		})
 		if (recovery.foundLeftovers) {
 			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+		}
+
+		// Strict resolution after the heal: the target this write publishes to, decided once the
+		// leftovers beside the referent are gone. Where it differs from the path the
+		// confinement pins were computed against, the pins move with it and the declared scope
+		// is re-asserted before any byte moves.
+		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
+		if (
+			expectedResolvedPath !== undefined &&
+			expectedAncestorIdentities !== undefined &&
+			resolvedTargetPath !== expectedResolvedPath
+		) {
+			expectedResolvedPath = resolvedTargetPath
+			await _assertConfinementStillHolds(absoluteFilePath, expectedResolvedPath, expectedAncestorIdentities)
 		}
 
 		// If a merge callback was provided, read the current file under the lock
