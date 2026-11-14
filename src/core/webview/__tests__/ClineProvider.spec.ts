@@ -1071,6 +1071,26 @@ describe("ClineProvider", () => {
 		expect(forceFullModelDetailsLoad).not.toHaveBeenCalled()
 	})
 
+	test("resolveWebviewView re-arms the claim gate for the renderer it is about to mount", async () => {
+		// A previous mount arms the claim gate through webviewDidLaunch, and claim delivery is gated on that
+		// flag. Resolving the view mounts a fresh renderer that has not sent webviewDidLaunch yet, so a claim
+		// minted in between must queue rather than post into a renderer with no listener attached.
+		provider.isViewLaunched = true
+
+		await provider.resolveWebviewView(mockWebviewView)
+
+		expect(provider.isViewLaunched).toBe(false)
+	})
+
+	test("mints a temporary view id that is scoped to this extension host", () => {
+		// viewStates is one machine-wide globalState key while the instance counter restarts at 0 in every
+		// host, so the temporary id has to carry something host-specific or two windows collide on sidebar-0.
+		const scope = ClineProvider["hostScope"]()
+		expect(scope).toMatch(/^[A-Za-z0-9_-]{1,8}$/)
+		expect(ClineProvider["hostScopeToken"]).toBe(scope)
+		expect(provider.viewId.startsWith("sidebar-" + scope + "-")).toBe(true)
+		expect(provider.viewId.length).toBeLessThanOrEqual(ClineProvider["MAX_VIEW_STATE_ID_LENGTH"])
+	})
 	test("resolveWebviewView hydrates the saved terminalProfile into the process-wide Terminal state", async () => {
 		const setTerminalProfileSpy = vi.spyOn(Terminal, "setTerminalProfile").mockImplementation(() => {})
 		// Seed the persisted setting so the real getState() returns it during hydration.
@@ -8476,5 +8496,252 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				expect(handleSpy).toHaveBeenCalledWith("current-token")
 			})
 		})
+	})
+})
+describe("view state claims driven at the method boundary (PR 2414 asks)", () => {
+	// The view-state methods are private, so the doubles above cannot inherit them: each one is run with the
+	// double as its receiver through the prototype. The cast is to a record of functions because the
+	// private names are not reachable by property access on the prototype either.
+	const proto = ClineProvider.prototype as unknown as Record<string, (this: unknown, ...args: unknown[]) => unknown>
+	const drive = <T>(name: string, self: ClineProvider, ...args: unknown[]): Promise<T> =>
+		Promise.resolve(proto[name].call(self, ...args) as T)
+
+	// The view-state machinery is private and has no caller at this head: registration and the callers
+	// that would use it arrive with the next unit. So the real methods are driven through bracket notation
+	// over a structural double carrying only the members they read, asserted once here rather than cast at
+	// every call.
+	const makeViewHost = (
+		initial: Record<string, unknown> = {},
+		write?: (storage: Record<string, unknown>, calls: { n: number }, key: string, value: unknown) => void,
+	) => {
+		const storage: Record<string, unknown> = {}
+		const calls = { n: 0 }
+		const host: Record<string, unknown> = {
+			context: {
+				globalState: {
+					get: (key: string) => storage[key],
+					update: async (key: string, value: unknown) => {
+						storage[key] = value
+					},
+				},
+			},
+			contextProxy: {
+				getValue: (key: string) => storage[key],
+				setValue: async (key: string, value: unknown) => {
+					calls.n += 1
+					if (write) {
+						write(storage, calls, key, value)
+						return
+					}
+					storage[key] = value
+				},
+			},
+			getPersistedViewStates: () =>
+				Object.assign(Object.create(null) as Record<string, unknown>, storage["viewStates"] ?? {}),
+			prunePersistedViewStates: (states: Record<string, unknown>) => ({ ...states }),
+			isViewStateGenerationLive: (generation: number) =>
+				host["_disposed"] !== true && host["viewStateGeneration"] === generation,
+			postViewStateClaimToWebview: (viewStateId: string, claimToken: string) =>
+				proto["postViewStateClaimToWebview"].call(host, viewStateId, claimToken),
+			enqueueViewStateWrite: (run: (provider: ClineProvider) => Promise<void>) =>
+				run(host as unknown as ClineProvider),
+			postMessageToWebview: vi.fn().mockResolvedValue(true),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			diagnosticsRecorder: { record: vi.fn() },
+			log: vi.fn(),
+			view: { visible: true },
+			viewId: "sidebar-host-0",
+			viewStateId: "sidebar-host-0",
+			viewStateGeneration: 0,
+			wroteUnderTemporaryViewStateId: false,
+			pendingViewStateClaims: new Map<string, string>(),
+			scheduledViewStateWrites: [],
+			isViewLaunched: false,
+			_disposed: false,
+		}
+		Object.assign(host, initial)
+		const provider = host as unknown as ClineProvider
+		const persisted = () =>
+			(storage["viewStates"] ?? {}) as Record<
+				string,
+				{ mode?: string; claimToken?: string; updatedAt?: number } | undefined
+			>
+		return { provider, storage, persisted }
+	}
+
+	it.each([
+		{ label: "a launched webview that accepts the post", launched: true, post: true, expected: "delivered" },
+		{ label: "a webview that has not launched yet", launched: false, post: true, expected: "queued" },
+		{
+			label: "a launched webview whose post resolves as not delivered",
+			launched: true,
+			post: false,
+			expected: "queued",
+		},
+	])("mints the claim host-side and reports $label as $expected", async ({ launched, post, expected }) => {
+		const { provider, persisted } = makeViewHost({ isViewLaunched: launched }, undefined)
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(post)
+		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+
+		expect(result.persisted).toBe(true)
+		expect(result.claim).toBe(expected)
+		const entry = persisted()["sidebar-host-0"]
+		expect(entry?.mode).toBe("code")
+		expect(entry?.claimToken).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+		if (expected === "delivered") {
+			expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "viewStateClaim",
+				viewStateId: "sidebar-host-0",
+				viewStateClaim: entry?.claimToken,
+			})
+			expect(provider["pendingViewStateClaims"].size).toBe(0)
+		} else if (launched) {
+			expect(provider.postMessageToWebview).toHaveBeenCalledTimes(1)
+			expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(entry?.claimToken)
+		} else {
+			expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+			expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(entry?.claimToken)
+		}
+	})
+
+	it("refuses a claim token the webview tried to supply", async () => {
+		const { provider, persisted } = makeViewHost({ isViewLaunched: true })
+		await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+			claimToken: "chosen-by-the-webview",
+		})
+
+		expect(persisted()["sidebar-host-0"]?.claimToken).not.toBe("chosen-by-the-webview")
+	})
+
+	it.each([
+		{ label: "still carries its own binding", later: false },
+		{ label: "was re-bound by a later write", later: true },
+	])("rolls back a persisted claim whose view died while $label", async ({ later }) => {
+		const prior = { mode: "architect", claimToken: "prior-token", updatedAt: 1 }
+		let minted: string | undefined
+		const { provider, storage, persisted } = makeViewHost(
+			{ viewStateGeneration: 5 },
+			(storage2, calls, _key, value) => {
+				const written = value as Record<string, { claimToken?: string }>
+				if (calls.n === 1) {
+					minted = written["sidebar-host-0"]?.claimToken
+					storage2["viewStates"] = value
+					provider["viewStateGeneration"] = 6
+					return
+				}
+				if (later) {
+					storage2["viewStates"] = {
+						"sidebar-host-0": { mode: "code", claimToken: "later-token", updatedAt: 2 },
+					}
+					return
+				}
+				storage2["viewStates"] = value
+			},
+		)
+		void storage
+		storage["viewStates"] = { "sidebar-host-0": { ...prior } }
+
+		const result = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+		expect(minted).toBeDefined()
+		expect(result).toEqual({ persisted: false, claim: "none" })
+		if (later) {
+			expect(persisted()["sidebar-host-0"]?.claimToken).toBe("later-token")
+			expect(persisted()["sidebar-host-0"]?.mode).toBe("code")
+		} else {
+			expect(persisted()["sidebar-host-0"]).toEqual(prior)
+		}
+	})
+
+	it("flushes a queued claim on the next launch and re-queues it when that post fails", async () => {
+		const { provider, persisted } = makeViewHost()
+		const queued = await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, {
+			mode: "code",
+		})
+		expect(queued.claim).toBe("queued")
+		const token = persisted()["sidebar-host-0"]?.claimToken
+		expect(token).toBeDefined()
+
+		provider.isViewLaunched = true
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(false)
+		await drive<void>("deliverPendingViewStateClaims", provider)
+		expect(provider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "viewStateClaim",
+			viewStateId: "sidebar-host-0",
+			viewStateClaim: token,
+		})
+		expect(provider["pendingViewStateClaims"].get("sidebar-host-0")).toBe(token)
+
+		provider.postMessageToWebview = vi.fn().mockResolvedValue(true)
+		await drive<void>("deliverPendingViewStateClaims", provider)
+		expect(provider["pendingViewStateClaims"].size).toBe(0)
+		expect(persisted()["sidebar-host-0"]?.claimToken).toBe(token)
+	})
+
+	it("deletes a persisted entry only when the expected claim token still matches", async () => {
+		const { provider, storage, persisted } = makeViewHost()
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0", "token-b")).resolves.toBe(
+			false,
+		)
+		expect(persisted()["sidebar-host-0"]?.claimToken).toBe("token-a")
+
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0", "token-a")).resolves.toBe(
+			true,
+		)
+		expect(persisted()["sidebar-host-0"]).toBeUndefined()
+
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-c", updatedAt: 2 } }
+		await expect(drive<boolean>("clearPersistedViewState", provider, "sidebar-host-0")).resolves.toBe(true)
+		expect(persisted()["sidebar-host-0"]).toBeUndefined()
+	})
+
+	it("re-binds a durable entry only for the claim no webview can present any more", async () => {
+		const { provider, storage, persisted } = makeViewHost()
+		storage["viewStates"] = { "stable-view": { mode: "code", claimToken: "dead-token", updatedAt: 1 } }
+
+		await expect(
+			drive<string | undefined>("rebindUnboundViewStateEntry", provider, "stable-view"),
+		).resolves.toBeUndefined()
+		expect(persisted()["stable-view"]?.claimToken).toBe("dead-token")
+		await expect(
+			drive<string | undefined>("rebindUnboundViewStateEntry", provider, "stable-view", "some-other-token"),
+		).resolves.toBeUndefined()
+		expect(persisted()["stable-view"]?.claimToken).toBe("dead-token")
+
+		const rebound = await drive<string | undefined>(
+			"rebindUnboundViewStateEntry",
+			provider,
+			"stable-view",
+			"dead-token",
+		)
+		expect(rebound).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/)
+		expect(persisted()["stable-view"]?.claimToken).toBe(rebound)
+		expect(persisted()["stable-view"]?.mode).toBe("code")
+	})
+
+	it("leaves the entry under the stable id with authorship set when the restore write fails", async () => {
+		const { provider, storage, persisted } = makeViewHost(
+			{ wroteUnderTemporaryViewStateId: true },
+			(storage2, calls) => {
+				if (calls.n === 2) {
+					provider["viewStateGeneration"] = 1
+					throw new Error("restore write failed")
+				}
+				storage2["viewStates"] = { "stable-view": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+				provider["viewStateGeneration"] = 1
+			},
+		)
+		storage["viewStates"] = { "sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 } }
+
+		await drive<void>("rekeyPersistedViewStateEntry", provider, "stable-view")
+
+		expect(persisted()["stable-view"]?.claimToken).toBe("token-a")
+		expect(provider["wroteUnderTemporaryViewStateId"]).toBe(true)
 	})
 })

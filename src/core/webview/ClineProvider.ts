@@ -296,6 +296,25 @@ export class ClineProvider
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
 	private static nextViewId = 0
+	/**
+	 * Scope that identifies this extension host, folded into every temporary view id. Temporary ids
+	 * restart from 0 in every host, while `viewStates` is one machine-wide globalState key, so two
+	 * windows would otherwise mint the same pre-launch key and overwrite or adopt each other's entry.
+	 */
+	private static hostScopeToken: string | undefined
+
+	private static hostScope(): string {
+		if (ClineProvider.hostScopeToken) {
+			return ClineProvider.hostScopeToken
+		}
+
+		const sessionId: string | undefined = vscode.env && vscode.env.sessionId
+		const raw = sessionId && sessionId.trim() !== "" ? sessionId : crypto.randomUUID()
+		const scope = raw.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 8)
+		ClineProvider.hostScopeToken = scope || crypto.randomUUID().replace(/-/g, "").slice(0, 8)
+
+		return ClineProvider.hostScopeToken
+	}
 	private static readonly MAX_PERSISTED_VIEW_STATES = 50
 	private static readonly MAX_VIEW_STATE_ID_LENGTH = 64
 	/** Queued view-state writes, held as entries rather than as closures over a provider. */
@@ -551,9 +570,11 @@ export class ClineProvider
 		mdmService?: MdmService,
 	) {
 		super()
-		// Initialize viewId based on renderContext and monotonically increasing instance identifier for uniqueness.
-		// activeInstances is used for visibility/iteration checks, so we keep tracking instances separately.
-		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		// Initialize viewId from the render context, this host's scope, and a per-host instance counter. The
+		// host scope is what keeps two windows from minting the same pre-launch key: the counter alone restarts
+		// at 0 in every host while `viewStates` is one machine-wide key. activeInstances is used for
+		// visibility/iteration checks, so we keep tracking instances separately.
+		this.viewId = `${renderContext}-${ClineProvider.hostScope()}-${ClineProvider.nextViewId++}`
 		this.viewStateId = this.viewId
 		ClineProvider.activeInstances.add(this)
 		this.currentWorkspacePath = getWorkspacePath()
@@ -922,28 +943,61 @@ export class ClineProvider
 		})
 	}
 
-	private async clearPersistedViewState(viewStateId = this.viewStateId): Promise<void> {
+	private async clearPersistedViewState(
+		viewStateId = this.viewStateId,
+		expectedClaimToken?: string,
+	): Promise<boolean> {
+		let deleted = false
+
 		const run = async (provider: ClineProvider): Promise<void> => {
 			const states = provider.getPersistedViewStates({ fresh: true })
+			// Same expected-token discipline the rollback and the re-key already use: a caller holding the token
+			// this entry was written with deletes only the entry that still carries it, so a late clear cannot
+			// drop a selection another view re-bound under the same key in the meantime. With no token the caller
+			// wants the entry gone unconditionally, which is what view disposal asks for today.
+			if (expectedClaimToken !== undefined && states[viewStateId]?.claimToken !== expectedClaimToken) {
+				return
+			}
 			delete states[viewStateId]
 			await provider.contextProxy.setValue("viewStates", states)
+			deleted = true
 		}
 
 		await this.enqueueViewStateWrite(run)
+
+		return deleted
 	}
 
-	/** Re-bind a claim-less entry with a fresh claim; unowned selections are dropped. */
-	private async rebindUnboundViewStateEntry(viewStateId: string): Promise<string | undefined> {
+	/**
+	 * Re-bind a persisted entry with a fresh claim.
+	 *
+	 * With no expected token this takes only claim-less entries, which is what a launch that found an entry
+	 * predating claims needs: a key that already carries a token belongs to some renderer and must not be
+	 * stolen. With an expected token it does the other job - recovering a durable entry whose token no
+	 * webview can present any more, because its view was disposed or the host restarted and no renderer was
+	 * ever handed the post. The caller has just read that token out of storage and proved nobody holds it.
+	 * Either way a write that lands first changes the stored token, and this refuses it.
+	 */
+	private async rebindUnboundViewStateEntry(
+		viewStateId: string,
+		expectedClaimToken?: string,
+	): Promise<string | undefined> {
 		const claimToken = crypto.randomUUID()
 		let rebound = false
 
 		const run = async (provider: ClineProvider): Promise<void> => {
 			const states = provider.getPersistedViewStates({ fresh: true })
 			const current = states[viewStateId]
-			// A concurrent registration may have bound this key while this write was queued:
-			// never overwrite an existing claim, and let the caller refuse the stale adoption.
-			if (current && typeof current.claimToken === "string" && current.claimToken) return
-			states[viewStateId] = { claimToken, updatedAt: Date.now() }
+			// A concurrent registration or save may have bound this key while this write was queued, so the
+			// stored token is compared before writing either way: with no expected token any stored token
+			// blocks the rebind, with one only the token the caller proved dead is replaced.
+			const storedClaimToken = current && typeof current.claimToken === "string" ? current.claimToken : undefined
+			if (expectedClaimToken === undefined ? Boolean(storedClaimToken) : storedClaimToken !== expectedClaimToken)
+				return
+			// A recovery that threw away the entry's selections would be barely better than the strand it replaces: the
+			// mode or profile the view had chosen is still what the next launch should restore, and only the
+			// binding is dead. Keep the entry and swap the token.
+			states[viewStateId] = { ...current, claimToken, updatedAt: Date.now() }
 			await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(states))
 			rebound = true
 		}
@@ -1108,13 +1162,12 @@ export class ClineProvider
 					try {
 						await provider.contextProxy.setValue("viewStates", provider.prunePersistedViewStates(after))
 					} catch {
-						// The comment above promises best effort for the storage write only. If that write fails
-						// the entry is still under the stable id in storage, so the in-memory re-key above has to be
-						// undone as well: otherwise memory claims the temporary name is gone while storage still
-						// holds it, and authorship is cleared below even though a later launch still has to re-key
-						// the entry. Undo the re-key and keep the claim so the next launch can try again.
-						delete after[previousViewStateId]
-						after[nextViewStateId] = moved
+						// The write is the only thing that moves the entry: `getPersistedViewStates({ fresh: true })` hands back a
+						// copy, so the in-memory re-key above is not a view of anything that is read again, and undoing
+						// it there changes no state. A failed restore therefore leaves the entry under the stable id in
+						// storage and leaves this view's authorship set - the early return below skips the clear - which
+						// is what lets a later launch re-key the entry that storage still holds. Keeping the flag set is
+						// the intent, not an oversight.
 					}
 				}
 				return
@@ -1708,6 +1761,11 @@ export class ClineProvider
 		const epoch = this.webviewRecoveryEpoch
 		this.pendingSidebarRecovery = false
 		this.view = webviewView
+		// A view that has just been mounted or remounted has not launched yet: `webviewDidLaunch` is what arms
+		// the claim gate, and it fires on every renderer mount. Without re-arming here, a claim minted between
+		// an earlier mount and this one passes the gate, resolves true, and leaves the pending map before the
+		// new renderer ever attaches the listener that would have received it.
+		this.isViewLaunched = false
 		const inTabMode = "onDidChangeViewState" in webviewView
 		this.diagnosticsRecorder.record({
 			boundary: "provider",
@@ -1724,6 +1782,10 @@ export class ClineProvider
 				if (webviewView !== this.view) {
 					return
 				}
+
+				// The launched renderer is gone, so the gate cannot stay open on its strength: the next mount
+				// reports itself through `webviewDidLaunch` again.
+				this.isViewLaunched = false
 
 				if (inTabMode) {
 					if (getPanel() === webviewView) setPanel(undefined, "tab")

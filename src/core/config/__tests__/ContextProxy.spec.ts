@@ -1189,4 +1189,27 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
 	})
+
+	it("keeps host-owned viewStates out of a configuration write and stores every other key", async () => {
+		// Every caller of setValues takes input that did not originate inside the extension host - a posted
+		// updateSettings, a newTask taskConfiguration, the external API, an imported settings file - so the
+		// guard has to live on this path rather than at whichever caller a reviewer happened to point at.
+		const viewStates = { "sidebar-1": { claimToken: "token-a", updatedAt: 1 } }
+		await proxy.setValues({ mode: "code", viewStates })
+
+		expect(mockGlobalState.update).toHaveBeenCalledWith("mode", "code")
+		const viewStatesWrites = mockGlobalState.update.mock.calls.filter((call: unknown[]) => call[0] === "viewStates")
+		expect(viewStatesWrites).toHaveLength(0)
+		expect(proxy.getValue("viewStates")).toBeUndefined()
+	})
+
+	it("still persists viewStates written through the host-only setValue path", async () => {
+		// The filter above exists so the host can keep writing its own map: closing both paths would strand
+		// every per-view selection.
+		const viewStates = { "sidebar-1": { claimToken: "token-a", updatedAt: 1 } }
+		await proxy.setValue("viewStates", viewStates)
+
+		expect(mockGlobalState.update).toHaveBeenCalledWith("viewStates", viewStates)
+		expect(proxy.getValue("viewStates")).toEqual(viewStates)
+	})
 })
