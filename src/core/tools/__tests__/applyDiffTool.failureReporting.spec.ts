@@ -7,6 +7,7 @@ import { fileExistsAtPath } from "../../../utils/fs"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ToolCallbacks } from "../BaseTool"
 import { applyDiffTool } from "../ApplyDiffTool"
+import { ObservationRegistry } from "../../task/observationRegistry"
 
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: { instance: { captureDiffApplicationError: vi.fn() } },
@@ -15,6 +16,11 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn().mockResolvedValue(""),
+		// ApplyDiffTool stats around its read so the guarded save is authorized against
+		// the version the diff was computed from; one shared stats object means the file did
+		// not change underneath the read. This spec is about failure reporting, but the read
+		// still runs before the diff strategy is asked.
+		stat: vi.fn().mockResolvedValue({ dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n }),
 	},
 }))
 
@@ -26,9 +32,13 @@ vi.mock("../../../utils/path", () => ({
 	getReadablePath: vi.fn().mockReturnValue("test/file.txt"),
 }))
 
-vi.mock("../../../utils/pathUtils", () => ({
-	isPathOutsideWorkspace: vi.fn().mockReturnValue(false),
-}))
+// Whether the target sits outside every workspace root is host state, and the guarded-save
+// wiring asks for it on the success path. Doubled here (same as applyDiffTool.guardedWrite.spec.ts)
+// so this spec stays about failure reporting; the target is inside the task cwd.
+vi.mock("../../../utils/pathUtils", async () => {
+	const actual = await vi.importActual("../../../utils/pathUtils")
+	return { ...actual, isPathOutsideWorkspace: vi.fn(() => false) }
+})
 
 vi.mock("../../prompts/responses", () => ({
 	formatResponse: {
@@ -106,6 +116,9 @@ describe("ApplyDiffTool failure reporting", () => {
 			processQueuedMessages: vi.fn(),
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing param error"),
 			diffStrategy: undefined,
+			// Real registry: the tool's read records the version it read into it, and the
+			// failure path below must survive that bookkeeping.
+			observationRegistry: new ObservationRegistry(),
 		} as unknown as Task
 	})
 
