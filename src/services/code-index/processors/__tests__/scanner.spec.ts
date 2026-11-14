@@ -635,9 +635,17 @@ describe("DirectoryScanner", () => {
 				throw abortError
 			})
 
-			await expect(
-				scanner.scanDirectory("/test", undefined, undefined, undefined, controller.signal),
-			).rejects.toBe(controller.signal.reason)
+			const rejection = await scanner
+				.scanDirectory("/test", undefined, undefined, undefined, controller.signal)
+				.then(
+					() => undefined,
+					(error: unknown) => error,
+				)
+
+			// Read the reason only after the scan settles; it is undefined until abort() runs.
+			expect(controller.signal.aborted).toBe(true)
+			expect(rejection).toBeInstanceOf(DOMException)
+			expect(rejection).toBe(controller.signal.reason)
 		})
 
 		it("records a non-missing read error as a read failure", async () => {
