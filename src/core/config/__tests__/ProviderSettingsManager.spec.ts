@@ -12,7 +12,7 @@ import {
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
-import { ProviderSettingsManager, ProviderProfiles } from "../ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError, ProviderProfiles } from "../ProviderSettingsManager"
 
 // `export()` builds an API handler per profile to read model capabilities. Mock
 // buildApiHandler with the real @roo-code/types model definitions so the token-field
@@ -973,6 +973,11 @@ describe("ProviderSettingsManager", () => {
 				}),
 			)
 
+			// The typed not-found signal is the contract callers branch on: a profile
+			// name containing "not found" must not be matchable via message text.
+			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toBeInstanceOf(
+				ProviderSettingsNotFoundError,
+			)
 			await expect(providerSettingsManager.deleteConfig("nonexistent")).rejects.toThrow(
 				"Config 'nonexistent' not found",
 			)

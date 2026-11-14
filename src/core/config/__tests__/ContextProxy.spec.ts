@@ -2,6 +2,8 @@
 
 import * as vscode from "vscode"
 
+import type { RooCodeSettings } from "@roo-code/types"
+
 import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -119,6 +121,115 @@ describe("ContextProxy", () => {
 			// No value in cache
 			const result = proxy.getGlobalState("apiProvider", "deepseek")
 			expect(result).toBe("deepseek")
+		})
+
+		it("should not let an older rejected write clobber a newer cached value", async () => {
+			let rejectFirst: (error: Error) => void = () => {}
+			const firstWriteResult = new Promise<void>((_, reject) => {
+				rejectFirst = reject
+			})
+
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(firstWriteResult)
+			mockGlobalState.update.mockResolvedValueOnce(undefined)
+
+			const firstWrite = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.updateGlobalState("apiProvider", "openai")
+
+			// The older write rejects after a newer value already reached the cache: rolling
+			// the cache back to the pre-first-write value would diverge from storage.
+			rejectFirst(new Error("disk full"))
+			await expect(firstWrite).rejects.toThrow("disk full")
+
+			expect(proxy.getGlobalState("apiProvider")).toBe("openai")
+		})
+
+		it("should not restore a pre-reset value when a pending write rejects after reset", async () => {
+			let rejectPending: (error: Error) => void = () => {}
+			mockGlobalState.update.mockReset()
+			mockGlobalState.update.mockReturnValueOnce(
+				new Promise<void>((_, reject) => {
+					rejectPending = reject
+				}),
+			)
+
+			const pending = proxy.updateGlobalState("apiProvider", "anthropic")
+			await proxy.resetAllState()
+			rejectPending(new Error("disk full"))
+
+			await expect(pending).rejects.toThrow("disk full")
+			// The reset cleared the cache: restoring the pre-reset value would resurrect state
+			// that storage no longer holds.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+		})
+		// This branch carried no write guard at all before these two cases: resetAllState cleared the
+		// caches and deleted storage with nothing telling storeSecret that a reset was running, so a
+		// save issued mid-reset could land after the deletes and resurrect a value the user had just
+		// erased. The refusal is the new observable here rather than an existing one, so it gets its
+		// own case instead of being a phase of the leak case.
+		it("refuses a secret write issued while a reset is still inside its delete pass", async () => {
+			const erases: { reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((_, reject) => {
+						erases.push({ reject })
+					})
+				}
+				return Promise.resolve()
+			})
+
+			const resetting = proxy.resetAllState()
+			// The reset yields before it reaches its delete pass, so let it get there before asking the
+			// store to write.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+
+			const refused = await proxy.storeSecret("apiKey", "saved-mid-reset").then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			expect(refused).toBeInstanceOf(SettingsWriteError)
+			expect(String((refused as Error).message)).toContain("secret writes are refused while state is being reset")
+			// Refused rather than deferred: a deferred write would re-store the value this reset is
+			// in the middle of erasing.
+			// Refused rather than deferred, and not silently written either: the cache the reset already
+			// cleared stays empty and no store call was made for the key.
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.store.mock.calls.filter((call: readonly unknown[]) => call[0] === "apiKey").length).toBe(
+				0,
+			)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(resetting).rejects.toThrow("keychain locked")
+		})
+		it("accepts a secret write again after a reset whose delete pass rejected", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					throw new Error("keychain locked")
+				}
+				durable.delete(key)
+			})
+
+			await expect(proxy.resetAllState()).rejects.toThrow("keychain locked")
+
+			// The half that bites: the delete pass is a single Promise.all, so one keychain rejection
+			// rejects resetAllState itself. Unless the guard is lowered on that path too, every later
+			// save is refused for the life of the instance while resetState() has already aborted on the
+			// same error, so the user cannot get a key back without restarting the extension host.
+			// Measured as a save that resolves and reads back through storage and cache, not as an
+			// absence of errors.
+			await expect(proxy.storeSecret("apiKey", "written-after-failed-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("written-after-failed-reset")
+			expect(proxy.getSecret("apiKey")).toBe("written-after-failed-reset")
 		})
 
 		it("should bypass cache for pass-through state keys", async () => {
@@ -1149,7 +1260,7 @@ Output only the summary of the conversation so far, without any additional comme
 			// Should NOT have called update for customSupportPrompts (custom prompt should be preserved)
 			const updateCalls = mockGlobalState.update.mock.calls
 			const customSupportPromptsUpdateCalls = updateCalls.filter(
-				(call: any[]) => call[0] === "customSupportPrompts",
+				(call: unknown[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
 		})
@@ -1165,9 +1276,122 @@ Output only the summary of the conversation so far, without any additional comme
 			// Should not have called update for customSupportPrompts
 			const updateCalls = mockGlobalState.update.mock.calls
 			const customSupportPromptsUpdateCalls = updateCalls.filter(
-				(call: any[]) => call[0] === "customSupportPrompts",
+				(call: unknown[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("payload-shaped state keys", () => {
+		it("should refuse a prototype key carried by a parsed payload", async () => {
+			// JSON.parse gives an object an own "__proto__" key, and `setValues` iterates own keys.
+			// Accepting it would re-point the state cache's prototype instead of storing a setting,
+			// and every later read of a real key could then resolve through that prototype.
+			const payload = JSON.parse('{"__proto__":{"polluted":true},"mode":"code"}') as RooCodeSettings
+
+			await proxy.setValues(payload)
+
+			expect(proxy.getValue("mode")).toBe("code")
+			const stateCache = proxy["stateCache"] as Record<string, unknown>
+			expect(Object.getPrototypeOf(stateCache)).toBe(Object.prototype)
+			expect(stateCache["polluted"]).toBeUndefined()
+			expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+			expect(mockGlobalState.update.mock.calls.some((call: unknown[]) => call[0] === "__proto__")).toBe(false)
+		})
+
+		it("should refuse the same key on the global-state write path", async () => {
+			// `updateGlobalState` is the function that performs the computed assignment, so it
+			// rejects the key itself rather than relying on its callers.
+			await proxy.updateGlobalState("__proto__" as never, { polluted: true } as never)
+			await proxy.updateGlobalState("constructor" as never, { polluted: true } as never)
+
+			const stateCache = proxy["stateCache"] as Record<string, unknown>
+			expect(Object.getPrototypeOf(stateCache)).toBe(Object.prototype)
+			expect(stateCache["polluted"]).toBeUndefined()
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("__proto__", expect.anything())
+		})
+		it("settles every delete before the reset rejects, so no save can land between the guard coming down and a straggler erasing it", async () => {
+			const durable = new Map<string, string | undefined>()
+			mockSecrets.get.mockImplementation(async (key: string) => durable.get(key))
+			mockSecrets.store.mockImplementation(async (key: string, value: string) => {
+				durable.set(key, value)
+			})
+			// openRouterApiKey rejects first; apiKey lands 20 ms later on its own, the way a slow
+			// keychain call does. stragglerLanded is what the two shapes disagree about.
+			let stragglerLanded = false
+			let landStraggler: (() => void) | undefined
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "openRouterApiKey") {
+					return Promise.reject(new Error("keychain locked"))
+				}
+				if (key === "apiKey") {
+					return new Promise<void>((resolve) => {
+						landStraggler = () => {
+							durable.delete(key)
+							stragglerLanded = true
+							resolve()
+						}
+					})
+				}
+				durable.delete(key)
+				return Promise.resolve()
+			})
+			const reset = proxy.resetAllState()
+			setTimeout(() => landStraggler?.(), 20)
+			// Probe the guard after the first delete's rejection handler has had its turn, not before it: a
+			// guard that comes down on the failure while a delete is still outstanding has to be caught here,
+			// not only by the straggler assertion further down. The 0 ms tick lands before the 20 ms one, so
+			// the pending delete is still pending when the probe runs.
+			await new Promise((resolveTick) => setTimeout(resolveTick, 0))
+			// While the pass is still settling the guard is up, so a save here is refused rather than
+			// accepted and erased later. That refusal is the observable the fix bought.
+			await expect(proxy.storeSecret("apiKey", "mid-settling-save")).rejects.toThrow(
+				"secret writes are refused while state is being reset",
+			)
+			await expect(reset).rejects.toThrow("keychain locked")
+			// A reset that rejects before every delete has landed leaves an outstanding delete that can
+			// still reach storage after the guard is down. This is the line the two shapes split on.
+			expect(stragglerLanded).toBe(true)
+			await expect(proxy.storeSecret("apiKey", "saved-after-settled-reset")).resolves.toBeUndefined()
+			expect(await mockSecrets.get("apiKey")).toBe("saved-after-settled-reset")
+			expect(proxy.getSecret("apiKey")).toBe("saved-after-settled-reset")
+		})
+	})
+
+	describe("state write generations", () => {
+		it("should report the generation the next global-state write produces", async () => {
+			expect(proxy.beginStateWriteGeneration("writeDelayMs")).toBe(1)
+
+			await proxy.setValue("writeDelayMs", 10)
+
+			expect(proxy.getStateWriteGeneration("writeDelayMs")).toBe(1)
+			expect(proxy.beginStateWriteGeneration("writeDelayMs")).toBe(2)
+		})
+
+		it("should record no generation for keys that bypass the state cache", () => {
+			// Secrets live in ExtensionContext.secrets and `taskHistory` is written straight
+			// through to global state. Neither path advances a generation, so a rollback of such a
+			// write keeps the value-only check instead of claiming a token it cannot honour.
+			expect(proxy.beginStateWriteGeneration("apiKey")).toBeUndefined()
+			expect(proxy.getStateWriteGeneration("apiKey")).toBeUndefined()
+			expect(proxy.beginStateWriteGeneration("taskHistory")).toBeUndefined()
+			expect(proxy.getStateWriteGeneration("taskHistory")).toBeUndefined()
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })
