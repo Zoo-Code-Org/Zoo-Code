@@ -12,6 +12,7 @@ import { t } from "../../i18n"
 
 import { defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import type { AutoApprovalContext, ToolResponse, ToolUse, McpToolUse } from "../../shared/tools"
+import type { ToolCallbacks } from "../tools/BaseTool"
 
 import { buildAutoDenyReason } from "../auto-approval"
 
@@ -69,6 +70,51 @@ export function toTelemetryToolName(
 	}
 
 	return "invalid_tool_call"
+}
+
+/**
+ * The one tool instance the parse-failure teardown can act on for a dropped call.
+ *
+ * write_to_file is the only tool that overrides onParameterParseFailure(); every other tool
+ * inherits the base no-op that reports nothing and tears nothing down, so resolving those
+ * names here would only add a call with no effect. Unknown, MCP, and custom-tool names
+ * resolve to no tool.
+ */
+function parseFailureTeardownTool(toolName: string) {
+	return toolName === "write_to_file" ? writeToFileTool : undefined
+}
+
+/**
+ * Run the parse-failure teardown for a known tool whose call never reached handle().
+ *
+ * The dispatch-scope callbacks do not exist at the point where the call is dropped, so this
+ * builds the ToolCallbacks shape the teardown expects and points both report paths at the
+ * caller instead of pushing a second payload: the caller keeps owning the single tool_result
+ * the dropped call must carry, and the returned text tells it which error to put in it. The
+ * write_to_file override reports through handleError; pushToolResult records a string result
+ * the same way so a later override cannot have its report dropped on the floor.
+ *
+ * @returns the error text the teardown reported, or undefined when it reported nothing
+ */
+async function reportedErrorFromParseFailureTeardown(
+	cline: Task,
+	toolCallId: string,
+	toolName: string,
+	errorMessage: string,
+): Promise<string | undefined> {
+	const tool = parseFailureTeardownTool(toolName)
+	if (!tool) {
+		return undefined
+	}
+	let reported: string | undefined
+	const callbacks: ToolCallbacks = {
+		askApproval: async () => false,
+		handleError: async (_action: string, error: Error) => void (reported = error.message),
+		pushToolResult: (content: ToolResponse) => (reported ??= typeof content === "string" ? content : undefined),
+		toolCallId,
+	}
+	await tool.onParameterParseFailure(cline, callbacks, new Error(errorMessage))
+	return reported
 }
 
 /**
@@ -577,12 +623,26 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						// Best-effort only
 					}
 
+					// The call is dropped before dispatch, so the tool never sees it: the parse-failure
+					// boundary in BaseTool - write_to_file's only teardown for the partial ask, the abort
+					// listener, the streaming failure mark, and any diff preview a delta already opened -
+					// would not run either. Route the failure through that same boundary rather than
+					// writing a parallel cleanup here. When the teardown already surfaced the streaming
+					// error a delta captured, that is the error the user can act on, so it replaces the
+					// generic missing-nativeArgs text in the one tool_result below instead of being pushed
+					// as a second error for the same tool_use_id.
+					const teardownReport = await reportedErrorFromParseFailureTeardown(
+						cline,
+						toolCallId,
+						block.name,
+						errorMessage,
+					)
 					// Push tool_result directly without setting didAlreadyUseTool so streaming can
 					// continue gracefully.
 					cline.pushToolResultToUserContent({
 						type: "tool_result",
 						tool_use_id: sanitizeToolUseId(toolCallId),
-						content: formatResponse.toolError(errorMessage),
+						content: formatResponse.toolError(teardownReport ?? errorMessage),
 						is_error: true,
 					})
 
