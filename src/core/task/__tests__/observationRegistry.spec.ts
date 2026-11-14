@@ -4,29 +4,41 @@ import { ObservationRegistry } from "../observationRegistry"
 
 describe("ObservationRegistry", () => {
 	it("observe → get returns the recorded version and observedAt", () => {
-		const reg = new ObservationRegistry()
-		reg.observe("/a/b/c.ts", "1:2:300:4000000000:5000000000")
+		vi.useFakeTimers()
+		try {
+			vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"))
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "1:2:300:4000000000:5000000000")
 
-		const obs = reg.get("/a/b/c.ts")
-		expect(obs).toBeDefined()
-		expect(obs!.version).toBe("1:2:300:4000000000:5000000000")
-		expect(typeof obs!.observedAt).toBe("number")
+			const obs = reg.get("/a/b/c.ts")
+			expect(obs).toBeDefined()
+			expect(obs!.version).toBe("1:2:300:4000000000:5000000000")
+			// The clock is pinned, so this checks the recorded instant rather than
+			// merely that some number is present.
+			expect(obs!.observedAt).toBe(Date.parse("2026-01-01T00:00:00.000Z"))
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("re-observe replaces the entry with a fresh observedAt", () => {
 		vi.useFakeTimers()
-		const reg = new ObservationRegistry()
-		reg.observe("/a/b/c.ts", "v1")
-		const first = reg.get("/a/b/c.ts")!
-		expect(first.version).toBe("v1")
+		try {
+			vi.setSystemTime(new Date("2026-01-01T00:00:00.000Z"))
+			const reg = new ObservationRegistry()
+			reg.observe("/a/b/c.ts", "v1")
+			const first = reg.get("/a/b/c.ts")!
+			expect(first.version).toBe("v1")
 
-		vi.advanceTimersByTime(50)
-		reg.observe("/a/b/c.ts", "v2")
-		const second = reg.get("/a/b/c.ts")!
-		expect(second.version).toBe("v2")
-		expect(second.observedAt).toBeGreaterThan(first.observedAt)
-
-		vi.useRealTimers()
+			vi.advanceTimersByTime(50)
+			reg.observe("/a/b/c.ts", "v2")
+			const second = reg.get("/a/b/c.ts")!
+			expect(second.version).toBe("v2")
+			expect(second.observedAt).toBeGreaterThan(first.observedAt)
+		} finally {
+			// A failed assertion must not leave fake timers for the next test.
+			vi.useRealTimers()
+		}
 	})
 
 	it("has returns true for observed paths, false otherwise", () => {

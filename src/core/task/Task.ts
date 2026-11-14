@@ -3721,6 +3721,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.cancelAssistantMessagePersistence()
 		this.cancelPendingPartialMessageUpdate()
 
+		// The observation registry is task-owned: clear it during disposal so its
+		// per-path Map cannot outlive the task that owns it.
+		try {
+			this.observationRegistry.clear()
+		} catch (error) {
+			console.error("Error clearing observation registry:", error)
+		}
+
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
 		// find nothing retired and so cannot dispose twice.
