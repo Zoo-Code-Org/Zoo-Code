@@ -1,6 +1,7 @@
 import { parse } from "shell-quote"
 
-export type ShellToken = string | { op: string } | { command: string }
+export type ShellToken =
+	string | { op: "glob"; pattern: string } | { op: string } | { command: string } | { comment: string }
 
 /**
  * The style of quoting that opened a region.
@@ -516,14 +517,18 @@ export function parseCommand(command: string): ParseResult {
 		// Restore top-level quote placeholders before per-line parsing so that
 		// parseCommandLine sees the original quoted content and can apply its own
 		// masking for operator splitting.
-		const restoredLine = line.replace(/__TOPLEVEL_QUOTE_(\d+)__/g, (_, i) => topLevelQuotes[parseInt(i)])
+		const restoreQuotes = (text: string) =>
+			text.replace(/__TOPLEVEL_QUOTE_(\d+)__/g, (_, i) => topLevelQuotes[parseInt(i)])
+		const restoredLine = restoreQuotes(line)
 
 		// If the restored line contains embedded newlines it means a top-level
-		// quote (e.g. a heredoc) spanned multiple lines. The entire restored
-		// string is a single atomic command -- passing it through parseCommandLine
-		// would let shell-quote split on the embedded newlines and << operators.
+		// quote (e.g. a heredoc) spanned multiple lines. Passing the restored text
+		// to parseCommandLine would let shell-quote split on the embedded newlines
+		// and << operators, so split the masked line instead and restore each
+		// quote inside its own sub-command. Each chained command must reach the
+		// allowlist check on its own.
 		if (restoredLine.includes("\n")) {
-			allCommands.push(restoredLine)
+			allCommands.push(...parseCommandLine(line).map(restoreQuotes))
 			continue
 		}
 
@@ -650,6 +655,12 @@ function parseCommandLine(command: string): string[] {
 		return `__QUOTE_${quotes.length - 1}__`
 	})
 
+	// The shell starts a comment only at a `#` that begins a word. shell-quote
+	// starts one at any `#`, so a word such as `safe#x` would hide the rest of
+	// the line, including chained commands, from the allowlist check. Mask a `#`
+	// that follows a word character so shell-quote keeps it as text.
+	processedCommand = processedCommand.replace(/(?<=[^\s;&|()<>])#/g, "__HASH__")
+
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(processedCommand) as ShellToken[]
@@ -681,6 +692,26 @@ function parseCommandLine(command: string): string[] {
 	const commands: string[] = []
 	let currentCommand: string[] = []
 
+	const addWord = (word: string) => {
+		const subshellMatches = [...word.matchAll(/__SUBSH_(\d+)__/g)]
+		if (subshellMatches.length === 0) {
+			currentCommand.push(word)
+			return
+		}
+		if (word.replace(/__SUBSH_\d+__/g, "")) {
+			// The substitution output is part of this word, for example
+			// `$(printf re)boot` runs `reboot`. Keep the substitution text in the
+			// word: the allowlist check must not see only the literal part.
+			currentCommand.push(word.replace(/__SUBSH_(\d+)__/g, (_, i) => `$(${subshells[parseInt(i)]})`))
+		} else if (currentCommand.length > 0) {
+			commands.push(currentCommand.join(" "))
+			currentCommand = []
+		}
+		for (const match of subshellMatches) {
+			commands.push(subshells[parseInt(match[1])])
+		}
+	}
+
 	for (const token of tokens) {
 		if (typeof token === "object" && "op" in token) {
 			// Chain operator - split command
@@ -689,22 +720,16 @@ function parseCommandLine(command: string): string[] {
 					commands.push(currentCommand.join(" "))
 					currentCommand = []
 				}
+			} else if ("pattern" in token) {
+				// shell-quote returns a glob as { op: "glob", pattern }. Keep the glob
+				// text (for example `*`) so that deny rules can match it.
+				addWord(token.pattern)
 			} else {
 				// Other operators (>) are part of the command
 				currentCommand.push(token.op)
 			}
 		} else if (typeof token === "string") {
-			// Check if it's a subshell placeholder
-			const subshellMatch = token.match(/__SUBSH_(\d+)__/)
-			if (subshellMatch) {
-				if (currentCommand.length > 0) {
-					commands.push(currentCommand.join(" "))
-					currentCommand = []
-				}
-				commands.push(subshells[parseInt(subshellMatch[1])])
-			} else {
-				currentCommand.push(token)
-			}
+			addWord(token)
 		}
 	}
 
@@ -755,5 +780,6 @@ function restorePlaceholders(
 	// Restore variable references
 	result = result.replace(/__VAR_(\d+)__/g, (_, i) => variables[parseInt(i)])
 	result = result.replace(/__SUBSH_(\d+)__/g, (_, i) => subshells[parseInt(i)])
+	result = result.replace(/__HASH__/g, "#")
 	return result
 }

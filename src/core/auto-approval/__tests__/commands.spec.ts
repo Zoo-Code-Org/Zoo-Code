@@ -160,6 +160,71 @@ describe("getCommandDecision — multi-line script wrapped in a quoted argument"
 	})
 })
 
+describe("getCommandDecision — chained command next to a multi-line quoted argument", () => {
+	// Every command in the chain must match the allowlist on its own, also when
+	// one of them has a quoted argument that spans lines.
+	const chained = `cd cmd-test && node -e "\nconsole.log('hello world');\n"`
+	const reversed = `node -e "\nconsole.log('hello world');\n" && cd cmd-test`
+
+	it.each([chained, reversed])("asks user when only cd is allowed: %j", (command) => {
+		expect(getCommandDecision(command, ["cd"])).toBe("ask_user")
+	})
+
+	it.each([chained, reversed])("auto-approves when every command is allowed: %j", (command) => {
+		expect(getCommandDecision(command, ["cd", "node"])).toBe("auto_approve")
+	})
+
+	it.each([chained, reversed])("auto-denies when the chained command is denied: %j", (command) => {
+		expect(getCommandDecision(command, ["cd"], ["node"])).toBe("auto_deny")
+	})
+})
+
+describe("getCommandDecision — # inside a word and glob patterns", () => {
+	it.each(["echo safe#blocked && node -v", "echo safe#blocked 'a\nb' && node -v"])(
+		"applies a deny rule that contains # and checks the chained command: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["echo"], ["echo safe#blocked"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["echo"])).toBe("ask_user")
+		},
+	)
+
+	it.each(["rm *", "rm * 'a\nb'"])("applies a deny rule for a glob: %j", (command) => {
+		expect(getCommandDecision(command, ["rm"], ["rm *"])).toBe("auto_deny")
+	})
+
+	it("auto-approves a glob argument when the command is allowed", () => {
+		expect(getCommandDecision("ls *.ts && echo x", ["ls", "echo"])).toBe("auto_approve")
+	})
+})
+
+describe("getCommandDecision — outer word attached to a command substitution", () => {
+	it.each(["reboot$(printf 'x')", "reboot$(printf '\n')"])(
+		"checks the outer command when only the inner command is allowed: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["printf"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["printf"], ["reboot"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["printf", "reboot"])).toBe("auto_approve")
+		},
+	)
+
+	it.each(["$(printf re)boot", "$(printf re)boot 'a\nb'", "`printf re`boot 'a\nb'"])(
+		"asks the user when a substitution is part of the command name: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["printf", "boot"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["printf", "boot"], ["reboot"])).toBe("ask_user")
+		},
+	)
+
+	it.each(["echo*$(reboot)", "echo*$(reboot) 'a\nb'", "ls *$(reboot).ts"])(
+		"checks a substitution inside a glob: %j",
+		(command) => {
+			expect(getCommandDecision(command, ["echo", "ls"])).toBe("ask_user")
+			expect(getCommandDecision(command, ["echo", "ls"], ["reboot"])).toBe("auto_deny")
+			expect(getCommandDecision(command, ["echo", "ls", "reboot"])).toBe("auto_approve")
+		},
+	)
+})
+
 describe("getCommandDecisionDetailed", () => {
 	it("names the offending sub-command and matched denied prefix on chained commands", () => {
 		const result = getCommandDecisionDetailed("git status && rm x && npm test", ["git", "npm"], ["rm"])
