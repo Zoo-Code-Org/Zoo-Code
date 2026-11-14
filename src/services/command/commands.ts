@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import * as path from "path"
 import { Dirent } from "fs"
-import matter from "gray-matter"
+import { parseFrontmatter } from "../../utils/safeFrontmatter"
 import { getGlobalRooDirectory, getProjectRooDirectoryForCwd } from "../roo-config"
 import { getBuiltInCommands, getBuiltInCommand } from "./built-in-commands"
 
@@ -221,7 +221,7 @@ async function tryLoadCommand(
 
 		try {
 			// Try to parse frontmatter with gray-matter
-			parsed = matter(content)
+			parsed = parseFrontmatter(content)
 			description =
 				typeof parsed.data.description === "string" && parsed.data.description.trim()
 					? parsed.data.description.trim()
@@ -306,7 +306,7 @@ async function scanCommandDirectory(
 
 				try {
 					// Try to parse frontmatter with gray-matter
-					parsed = matter(content)
+					parsed = parseFrontmatter(content)
 					description =
 						typeof parsed.data.description === "string" && parsed.data.description.trim()
 							? parsed.data.description.trim()
