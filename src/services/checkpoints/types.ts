@@ -29,6 +29,8 @@ export interface CheckpointEventMap {
 		toHash: string
 		duration: number
 		suppressMessage?: boolean
+		// set only by the task-start baseline save: the checkpoint is recorded, but it must not become the webview current checkpoint
+		suppressBroadcast?: boolean
 	}
 	restore: { type: "restore"; commitHash: string; duration: number }
 	error: { type: "error"; error: Error }

@@ -29,6 +29,12 @@ export interface ApplyPatchFileChange {
 	originalContent?: string
 	/** New content (for add/update) */
 	newContent?: string
+	/**
+	 * Set by the tool handler when a move's source unlink succeeded: the
+	 * change journal then records the source deletion alongside the
+	 * destination write so a step rollback can restore the removed file.
+	 */
+	moveSourceDeleted?: boolean
 }
 
 /**

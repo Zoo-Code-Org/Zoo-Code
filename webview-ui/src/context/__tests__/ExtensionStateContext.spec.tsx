@@ -927,6 +927,7 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
 			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
 			// must not disagree with the extension's own fallback).
 			writeDelayMs: 0,
@@ -999,6 +1000,7 @@ describe("mergeExtensionState", () => {
 			taskHistory: [],
 			shouldShowAnnouncement: false,
 			enableCheckpoints: true,
+			perWriteCheckpoints: true,
 			// Matches the shared DEFAULT_WRITE_DELAY_MS (pre-hydration placeholder
 			// must not disagree with the extension's own fallback).
 			writeDelayMs: 0,
