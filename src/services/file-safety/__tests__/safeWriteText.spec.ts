@@ -2238,6 +2238,46 @@ describe("asks landed at the refreshed 2357 footing", () => {
 			await expect(promise).resolves.toBeUndefined()
 			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 		})
+		it("refuses to publish when a deeper pin covers the created name better than a longer alias spelling does", async () => {
+			// Two pins cover the name mkdir reported creating. The identity pin reached it
+			// through an alias, so its dir is the alias spelling /ws/long-root-alias - longer
+			// than anything on the deeper side - while only the location that alias resolved to,
+			// /ws, covers the created name at all. The path-form pin names the created directory
+			// itself. Ranking candidates by the length of their dir field put the longer alias
+			// first, so the containment check ran against /ws and a created /ws/a/new that had
+			// become a link into /ws/other passed it, publishing through ground the caller never
+			// authorized under that name.
+			const shallow = path.resolve("/ws")
+			const aliasDir = path.resolve("/ws/long-root-alias")
+			const created = path.resolve("/ws/a/new")
+			const redirected = path.join(shallow, "other", "new")
+			const target = path.join(created, "target.txt")
+			let linkPlanted = false
+			const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+			vi.mocked(fs.realpath).mockImplementation(async (p) => {
+				const s = String(p)
+				if (s === target || (s === created && !linkPlanted)) throw enoent()
+				// The alias spelling stands for the location it was recorded resolving to, and the
+				// created name became a link into shallower grounds between the canonicalization
+				// and the mkdir answer.
+				if (path.resolve(s) === aliasDir) return shallow
+				return s === created ? redirected : s
+			})
+			vi.mocked(fs.mkdir).mockImplementation(async () => {
+				linkPlanted = true
+				return created
+			})
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			const promise = safeWriteText(target, "data", {
+				platform: "linux",
+				expectedAncestorIdentities: [{ dir: aliasDir, dev: 1n, ino: 100n, resolvedPath: shallow }],
+				expectedResolvedPath: target,
+			})
+			await expect(promise).rejects.toBeInstanceOf(AncestorReplacedError)
+			await expect(promise).rejects.toThrow(/outside the authorized location/)
+			expect(fs.rename).not.toHaveBeenCalled()
+			expect(fs.link).not.toHaveBeenCalled()
+		})
 	})
 	describe("target group carried onto the staging descriptor before publication", () => {
 		// The commit publishes the staging inode, so the group the published file ends up in is whatever
@@ -2449,5 +2489,17 @@ describe("effective parent validated when mkdir created nothing", () => {
 		await expect(promise).rejects.toThrow(/nothing the caller authorized/)
 		expect(fs.rename).not.toHaveBeenCalled()
 		expect(fs.link).not.toHaveBeenCalled()
+	})
+	it("publishes when only the path form of the name pin is given and its parent resolves in place", async () => {
+		// The accept path of the guard this block established. The narrowing that sends every
+		// path-only pin through the effective-parent check left the reject case tested and the
+		// accept case untested, so a regression that refused every path-only pin - publishing
+		// nothing for a parent that resolved exactly where the caller pinned it - would have
+		// passed this suite.
+		_scenario(false, false)
+		await expect(
+			safeWriteText(target, "data", { platform: "linux", expectedResolvedPath: target }),
+		).resolves.toBeUndefined()
+		expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), target)
 	})
 })

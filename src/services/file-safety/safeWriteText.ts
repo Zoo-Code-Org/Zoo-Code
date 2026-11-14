@@ -423,6 +423,7 @@ function _deepestAuthorizedLocation(locations: AuthorizedLocation[], target: str
  */
 function _deepestPinnedDirectory(locations: AuthorizedLocation[], target: string): AuthorizedLocation | undefined {
 	let deepest: AuthorizedLocation | undefined
+	let deepestMatchLength = -1
 	for (const candidate of locations) {
 		// Either spelling is the caller's own decision: the name it walked, or the location
 		// it recorded that name resolving to when it walked through a symlink alias. A
@@ -432,8 +433,16 @@ function _deepestPinnedDirectory(locations: AuthorizedLocation[], target: string
 		if (!underTheNamedSpelling && !underTheAuthorizedLocation) {
 			continue
 		}
-		if (!deepest || candidate.dir.length > deepest.dir.length) {
+		// Depth is measured on the spelling that matched. A pin that reaches the name only
+		// through the location its alias resolved to authorized shallower ground than a pin
+		// whose own name contains it, and ranking the candidates by the length of their dir
+		// field let a long alias spelling outrank a deeper name: the containment check that
+		// follows then ran against the shallower location, and a directory created under the
+		// deeper pin that had become a link into the shallower one passed it.
+		const matchedSpelling = underTheNamedSpelling ? candidate.dir : candidate.location
+		if (matchedSpelling.length > deepestMatchLength) {
 			deepest = candidate
+			deepestMatchLength = matchedSpelling.length
 		}
 	}
 	return deepest
