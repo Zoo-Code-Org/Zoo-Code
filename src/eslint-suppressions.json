@@ -224,11 +224,6 @@
 			"count": 1
 		}
 	},
-	"api/providers/fetchers/__tests__/lmstudio.test.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 3
-		}
-	},
 	"api/providers/fetchers/__tests__/modelEndpointCache.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 9

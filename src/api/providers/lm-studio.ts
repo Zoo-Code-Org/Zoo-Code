@@ -25,7 +25,8 @@ import type {
 	ModelCacheScope,
 } from "../index"
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
-import { getLMStudioModels } from "./fetchers/lmstudio"
+import { getLMStudioModels, getLMStudioModelAlias } from "./fetchers/lmstudio"
+import { normalizeLMStudioBaseUrl } from "./utils/lmstudio"
 import {
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
@@ -38,6 +39,8 @@ import {
 } from "./utils/abort-signal"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+
+class LmStudioModelSelectionError extends Error {}
 
 export class LmStudioHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
@@ -52,7 +55,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		const apiKey = "noop"
 
 		this.client = new OpenAI({
-			baseURL: (this.options.lmStudioBaseUrl || "http://localhost:1234") + "/v1",
+			baseURL: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl) + "/v1",
 			apiKey: apiKey,
 			timeout: this.timeoutMs,
 		})
@@ -72,7 +75,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			const models = await getModels(
 				{
 					provider: providerIdentifiers.lmstudio,
-					baseUrl: this.options.lmStudioBaseUrl,
+					baseUrl: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl),
 				},
 				this,
 			)
@@ -191,6 +194,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				if (isRequestAborted(error, externalSignal)) {
 					throw createAbortError("LM Studio")
 				}
+				this.rethrowModelSelectionError(error)
 				throw handleOpenAIError(error, this.providerName)
 			}
 
@@ -289,6 +293,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			if (isRequestAborted(error, externalSignal)) {
 				throw createAbortError("LM Studio")
 			}
+			this.rethrowModelSelectionError(error)
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)
@@ -303,24 +308,44 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		}
 	}
 
+	private rethrowModelSelectionError(error: unknown): void {
+		if (error instanceof LmStudioModelSelectionError) throw error
+		if (!error || typeof error !== "object" || !("status" in error)) return
+		if (error.status !== 400 && error.status !== 404) return
+		const detail = "error" in error ? error.error : undefined
+		const code = detail && typeof detail === "object" && "code" in detail ? detail.code : undefined
+		const type = detail && typeof detail === "object" && "type" in detail ? detail.type : undefined
+		const message = "message" in error && typeof error.message === "string" ? error.message : ""
+		// An empty server needs a model loaded, not a new selection.
+		if (/no models? loaded/i.test(message)) {
+			throw new LmStudioModelSelectionError(
+				"LM Studio has no model loaded. Load a model in LM Studio, or turn on just-in-time loading.",
+			)
+		}
+		if (
+			code === "model_not_found" ||
+			type === "model_not_found" ||
+			/model.*(?:not found|does not exist|not available)|no models? found/i.test(message)
+		) {
+			throw new LmStudioModelSelectionError(
+				"LM Studio could not find the selected model. Reselect a model in the LM Studio provider settings. Your saved model ID has not been changed.",
+			)
+		}
+	}
+
 	override getModel(): { id: string; info: ModelInfo } {
 		const models = getModelsFromCache(
 			{
 				provider: providerIdentifiers.lmstudio,
-				baseUrl: this.options.lmStudioBaseUrl,
+				baseUrl: normalizeLMStudioBaseUrl(this.options.lmStudioBaseUrl),
 			},
 			this,
 		)
-		if (models && this.options.lmStudioModelId && models[this.options.lmStudioModelId]) {
-			return {
-				id: this.options.lmStudioModelId,
-				info: models[this.options.lmStudioModelId],
-			}
-		} else {
-			return {
-				id: this.options.lmStudioModelId || "",
-				info: openAiModelInfoSaneDefaults,
-			}
+		const id = this.options.lmStudioModelId || ""
+		return {
+			id,
+			info:
+				models?.[id] ?? getLMStudioModelAlias(id, this.options.lmStudioBaseUrl) ?? openAiModelInfoSaneDefaults,
 		}
 	}
 
@@ -370,6 +395,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 				if (isRequestAborted(error, requestSignal)) {
 					throw this.toCompletionAbortError(requestSignal)
 				}
+				this.rethrowModelSelectionError(error)
 				throw handleOpenAIError(error, this.providerName)
 			}
 			return response.choices[0]?.message.content || ""
@@ -377,6 +403,7 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			if (isRequestAborted(error, requestSignal)) {
 				throw this.toCompletionAbortError(requestSignal)
 			}
+			this.rethrowModelSelectionError(error)
 			throw new Error(
 				"Please check the LM Studio developer logs to debug what went wrong. You may need to load the model with a larger context length to work with Zoo Code's prompts.",
 			)

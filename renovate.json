@@ -36,7 +36,6 @@
 				"/^@ai-sdk\\//",
 				"/^@anthropic-ai\\//",
 				"/^@aws-sdk\\//",
-				"/^@lmstudio\\//",
 				"/^@mistralai\\//",
 				"/^@openrouter\\//",
 				"/^@qdrant\\//"

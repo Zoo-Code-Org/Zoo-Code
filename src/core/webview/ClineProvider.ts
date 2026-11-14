@@ -719,12 +719,27 @@ export class ClineProvider
 		// size; we do it now since we're starting a task with that model selected.
 		if (cline.apiConfiguration && cline.apiConfiguration.apiProvider === providerIdentifiers.lmstudio) {
 			try {
-				if (!hasLoadedFullDetails(cline.apiConfiguration.lmStudioModelId!)) {
-					await forceFullModelDetailsLoad(
-						cline.apiConfiguration.lmStudioBaseUrl ?? "http://localhost:1234",
+				if (
+					!hasLoadedFullDetails(
 						cline.apiConfiguration.lmStudioModelId!,
-						buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
+						cline.apiConfiguration.lmStudioBaseUrl,
 					)
+				) {
+					const controller = new AbortController()
+					cline.metadataFetchAbortController = controller
+					try {
+						await forceFullModelDetailsLoad(
+							cline.apiConfiguration.lmStudioBaseUrl,
+							cline.apiConfiguration.lmStudioModelId!,
+							buildApiHandler({ ...cline.apiConfiguration, apiProvider: providerIdentifiers.lmstudio }),
+							controller.signal,
+						)
+					} finally {
+						if (cline.metadataFetchAbortController === controller) {
+							cline.metadataFetchAbortController = undefined
+						}
+						controller.abort()
+					}
 				}
 			} catch (error) {
 				this.log(`Failed to load full model details for LM Studio: ${error}`)

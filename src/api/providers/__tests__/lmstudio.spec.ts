@@ -95,6 +95,16 @@ describe("LmStudioHandler", () => {
 		mockGetModelsFromCache.mockReturnValue(undefined)
 	})
 
+	it.each([undefined, "", "http://localhost:1234/"])("normalizes handler URL %s", async (lmStudioBaseUrl) => {
+		const normalized = new LmStudioHandler({ ...mockOptions, lmStudioBaseUrl })
+		mockGetModels.mockResolvedValue({})
+		await normalized.ensureModelFetched()
+		normalized.getModel()
+		const scope = { provider: providerIdentifiers.lmstudio, baseUrl: "http://localhost:1234" }
+		expect(mockGetModels).toHaveBeenCalledWith(scope, expect.anything())
+		expect(mockGetModelsFromCache).toHaveBeenCalledWith(scope, normalized)
+	})
+
 	describe("constructor", () => {
 		it("should initialize with provided options", () => {
 			expect(handler).toBeInstanceOf(LmStudioHandler)

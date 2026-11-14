@@ -914,6 +914,19 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 		})
 	})
 
+	it.each([undefined, "", "http://localhost:1234/"])(
+		"uses the default server cache key for persisted URL %s",
+		async (lmStudioBaseUrl) => {
+			mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: { lmStudioBaseUrl } })
+			mockGetModels.mockResolvedValue({})
+			await webviewMessageHandler(mockClineProvider, { type: "requestLmStudioModels" })
+			expect(mockGetModels).toHaveBeenCalledWith(
+				{ provider: providerIdentifiers.lmstudio, baseUrl: "http://localhost:1234" },
+				expect.anything(),
+			)
+		},
+	)
+
 	it("prefers the request payload base URL over persisted settings", async () => {
 		mockGetLMStudioModels.mockResolvedValue({})
 
@@ -922,7 +935,7 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			values: { baseUrl: "http://127.0.0.1:4321" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("http://127.0.0.1:4321", { commit: false })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 
@@ -934,7 +947,7 @@ describe("webviewMessageHandler - requestLmStudioModels", () => {
 			values: { baseUrl: "" },
 		})
 
-		expect(mockGetLMStudioModels).toHaveBeenCalledWith("")
+		expect(mockGetLMStudioModels).toHaveBeenCalledWith("", { commit: false })
 		expect(mockGetModels).not.toHaveBeenCalled()
 	})
 })

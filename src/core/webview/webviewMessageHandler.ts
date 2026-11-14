@@ -101,6 +101,7 @@ import { GetModelsOptions } from "../../shared/api"
 import { generateSystemPrompt } from "./generateSystemPrompt"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
 import { getCommand } from "../../utils/commands"
+import { normalizeLMStudioBaseUrl } from "../../api/providers/utils/lmstudio"
 import { getLMStudioModels } from "../../api/providers/fetchers/lmstudio"
 
 const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
@@ -1540,11 +1541,11 @@ export const webviewMessageHandler = async (
 				const hasPreviewBaseUrl = typeof requestedBaseUrl === "string"
 				let lmStudioModels: ModelRecord
 				if (hasPreviewBaseUrl) {
-					lmStudioModels = await getLMStudioModels(requestedBaseUrl)
+					lmStudioModels = await getLMStudioModels(requestedBaseUrl, { commit: false })
 				} else {
 					const lmStudioOptions = {
 						provider: providerIdentifiers.lmstudio,
-						baseUrl: lmStudioApiConfig.lmStudioBaseUrl,
+						baseUrl: normalizeLMStudioBaseUrl(lmStudioApiConfig.lmStudioBaseUrl),
 					}
 					const handler = handlerFor(lmStudioApiConfig, providerIdentifiers.lmstudio)
 					// Flush cache and refresh to ensure fresh models.
