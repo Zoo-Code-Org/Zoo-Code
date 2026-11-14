@@ -74,7 +74,54 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
-			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			// Bytes, not a decoded string: fs.readFile with a "utf-8" encoding replaces every byte sequence
+			// that is not valid UTF-8 with U+FFFD, and every path below republishes the decoded string -
+			// saveDirectly, saveChanges, and the baseline the diff view and the approval payload are built
+			// from - so a file with undecodable bytes used to be saved back with the replacements in it,
+			// silently rewriting bytes the model never asked to touch. Decoding fatally refuses instead,
+			// which is the fail-closed decision the guarded publish already makes about a target it cannot
+			// vouch for. The file is reported by name and the first undecodable byte is reported by offset,
+			// because the refusal is only actionable if the model can find the byte.
+			// The union is readFile's, not a cast: this call resolves to the byte overload because no encoding
+			// is passed, but the encoding overload is what the repo's existing fs doubles answer with -
+			// applyDiffTool.outsideWorkspace.spec.ts:143 returns "old\n" from it - and a string that came back
+			// from that overload has already been decoded by whoever asked for it, with the original bytes
+			// unrecoverable. Those callers keep the pre-change behaviour; the refusal below applies where the
+			// tool actually holds bytes, which is every real read.
+			const raw: string | Buffer = await fs.readFile(absolutePath)
+			const originalBytes = Buffer.isBuffer(raw) ? raw : Buffer.from(raw, "utf-8")
+			let originalContent: string
+			try {
+				originalContent = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(originalBytes)
+			} catch {
+				const lossy = new TextDecoder("utf-8", { ignoreBOM: true }).decode(originalBytes)
+				// The offset is counted back through the bytes, not read off the decoded string. Two things
+				// make the string lie: a byte-order mark is three bytes that decode to one character, so a
+				// count through the string is three short on every BOM file, and a U+FFFD that the file itself
+				// contains is indistinguishable in the output from a replacement the decoder produced, so the
+				// first one of those is read as the failure position too. Each replacement is therefore located
+				// in the original bytes and only stepped over when those bytes really are the encoded form of
+				// U+FFFD, which is the one case where moving past it is correct.
+				let undecodableByte = 0
+				for (const prefix of lossy.split("\uFFFD")) {
+					undecodableByte += Buffer.byteLength(prefix, "utf-8")
+					if (
+						originalBytes[undecodableByte] !== 0xef ||
+						originalBytes[undecodableByte + 1] !== 0xbf ||
+						originalBytes[undecodableByte + 2] !== 0xbd
+					) {
+						break
+					}
+					undecodableByte += 3
+				}
+				task.consecutiveMistakeCount++
+				task.recordToolError("apply_diff")
+				const formattedError = `File ${absolutePath} is not valid UTF-8 (first undecodable byte at offset ${undecodableByte}).\n\n<error_details>\napply_diff decodes the file, applies the diff to the decoded text, and saves the result back. Bytes that cannot be decoded would have been saved back as U+FFFD alongside every byte the diff did not touch, so the edit was refused and nothing was written. Re-read the file and convert it to UTF-8 before applying the diff again.\n</error_details>`
+				await task.say("error", formattedError)
+				task.didToolFailInCurrentTurn = true
+				pushToolResult(formattedError)
+				return
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
