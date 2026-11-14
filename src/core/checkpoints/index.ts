@@ -330,19 +330,14 @@ function enqueueCheckpointWork<T>(
 	// releases a wait, so it must stop being able to once the caller's own turn has arrived:
 	// from that point the caller is either running or already dropped by the gate above.
 	let predecessorSettled = false
-	void previous.then(
-		() => {
-			predecessorSettled = true
-		},
-		() => {
-			predecessorSettled = true
-		},
-	)
+	// Both settlement arms answer the same way, so one named handler stands where the two identical ones stood.
+	const markPredecessorSettled = (): void => {
+		predecessorSettled = true
+	}
+	void previous.then(markPredecessorSettled, markPredecessorSettled)
 	const next = previous.then(attempt, attempt)
-	const tail = next.then(
-		() => undefined,
-		() => undefined,
-	)
+	const swallowResult = (): undefined => undefined
+	const tail = next.then(swallowResult, swallowResult)
 	checkpointWorkQueues.set(taskId, tail)
 	void tail.finally(() => {
 		if (checkpointWorkQueues.get(taskId) === tail) {

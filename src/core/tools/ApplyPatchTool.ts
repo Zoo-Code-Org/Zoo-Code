@@ -584,13 +584,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 						// entry that no longer exists as a link. The move is refused with nothing
 						// written and no path moved.
 						await reportMoveRefusal(
-							"Cannot move file to '" +
-								change.movePath +
-								"': the destination is a link " +
-								"chain longer than " +
-								String(linkFollowLimit) +
-								" links, and its last link " +
-								"would have been replaced by a regular file.",
+							`Cannot move file to '${change.movePath}': the destination is a link chain longer than ${linkFollowLimit} links, and its last link would have been replaced by a regular file.`,
 						)
 						return { ok: false, mutated }
 					}
@@ -645,11 +639,7 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 				}
 				if (isPathOutsideWorkspace(resolvedWritePath)) {
 					await reportMoveRefusal(
-						"Cannot move file to a path outside the workspace: " +
-							change.movePath +
-							" resolves to " +
-							getReadablePath(task.cwd, resolvedWritePath) +
-							".",
+						`Cannot move file to a path outside the workspace: ${change.movePath} resolves to ${getReadablePath(task.cwd, resolvedWritePath)}.`,
 					)
 					return { ok: false, mutated }
 				}
@@ -678,12 +668,9 @@ export class ApplyPatchTool extends BaseTool<"apply_patch"> {
 			} catch (error) {
 				const code = (error as NodeJS.ErrnoException).code
 				if (code !== "ENOENT") {
-					task.consecutiveMistakeCount++
-					task.recordToolError("apply_patch")
+					// This is the refusal the hoisted helper above exists for, and it reports the same five effects in the same order.
 					const inspectErrorMessage = `Cannot inspect move destination '${change.movePath}': ${error instanceof Error ? error.message : String(error)}`
-					await task.say("error", inspectErrorMessage)
-					pushToolResult(formatResponse.toolError(inspectErrorMessage))
-					await task.diffViewProvider.reset()
+					await reportMoveRefusal(inspectErrorMessage)
 					return { ok: false, mutated }
 				}
 			}
