@@ -1352,6 +1352,41 @@ describe("ProviderSettingsManager", () => {
 		})
 	})
 
+	describe("GetModeConfigIds", () => {
+		const profilesWithModes = (modeApiConfigs?: Record<string, string>) =>
+			JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { id: "default" } },
+				modeApiConfigs,
+				migrations: { rateLimitSecondsMigrated: true },
+			})
+
+		it("returns a copy of the stored mode map", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes({ code: "code-id", architect: "architect-id" }))
+
+			const ids = await providerSettingsManager.getModeConfigIds()
+			ids.code = "changed"
+
+			expect(ids).toEqual({ code: "changed", architect: "architect-id" })
+			await expect(providerSettingsManager.getModeConfigIds()).resolves.toEqual({
+				code: "code-id",
+				architect: "architect-id",
+			})
+		})
+
+		it("returns an empty map when none is stored", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes(undefined))
+
+			await expect(providerSettingsManager.getModeConfigIds()).resolves.toEqual({})
+		})
+
+		it("should throw error if secrets storage fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			await expect(providerSettingsManager.getModeConfigIds()).rejects.toThrow("Failed to get mode configs")
+		})
+	})
+
 	describe("HasConfig", () => {
 		it("should return true for existing config", async () => {
 			const existingConfig: ProviderProfiles = {
