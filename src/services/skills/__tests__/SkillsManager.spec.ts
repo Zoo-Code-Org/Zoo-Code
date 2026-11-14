@@ -3259,3 +3259,46 @@ Instructions`)
 		})
 	})
 })
+
+describe("skillsTestHarness platform branches", () => {
+	// The harness computes its constants once, at import time, from process.platform, so the branch
+	// the importing runner never takes is only exercisable by re-importing the module with that
+	// platform value installed. Both sides are asserted so the patch coverage lands whichever runner
+	// computes the report, and the module registry is reset back afterwards for the tests above.
+	const harnessUnderPlatform = async (platform: NodeJS.Platform) => {
+		const original = Object.getOwnPropertyDescriptor(process, "platform")
+		Object.defineProperty(process, "platform", { value: platform, configurable: true, writable: true })
+		vi.resetModules()
+		try {
+			return await import("./skillsTestHarness")
+		} finally {
+			if (original) {
+				Object.defineProperty(process, "platform", original)
+			}
+			vi.resetModules()
+		}
+	}
+
+	it("takes the win32 branch of each path constant", async () => {
+		const harness = await harnessUnderPlatform("win32")
+		expect(harness.HOME_DIR).toBe("C:\\Users\\testuser")
+		expect(harness.PROJECT_DIR).toBe("C:\\test\\project")
+		expect(harness.SHARED_DIR).toBe("C:\\shared\\skills")
+		expect(harness.GLOBAL_ROO_DIR).toBe(path.join("C:\\Users\\testuser", ".roo"))
+		expect(harness.GLOBAL_AGENTS_DIR).toBe(path.join("C:\\Users\\testuser", ".agents"))
+		expect(harness.p("skills", "code")).toBe(path.join("skills", "code"))
+		expect(harness.enoent().code).toBe("ENOENT")
+	})
+
+	it("takes the posix branch of each path constant", async () => {
+		const harness = await harnessUnderPlatform("linux")
+		expect(harness.HOME_DIR).toBe("/home/user")
+		expect(harness.PROJECT_DIR).toBe("/test/project")
+		expect(harness.SHARED_DIR).toBe("/shared/skills")
+		expect(harness.GLOBAL_ROO_DIR).toBe(path.join("/home/user", ".roo"))
+		expect(harness.GLOBAL_AGENTS_DIR).toBe(path.join("/home/user", ".agents"))
+		expect(harness.p("skills", "code")).toBe(path.join("skills", "code"))
+		expect(harness.enoent().code).toBe("ENOENT")
+		expect(harness.enoent().message).toBe("ENOENT: no such file or directory")
+	})
+})
