@@ -54,6 +54,40 @@ function historyFilePath(storagePath: string, taskId: string): string {
 	return path.join(storagePath, "tasks", taskId, GlobalFileNames.historyItem)
 }
 
+// The delete locks the file it unlinks, and the spelling of that path is whatever the
+// store was given: `delete` hands `deleteJsonFile` a joined path, `deleteJsonFile` hands it
+// to `withFileLock`, and `withFileLock` only `path.resolve`s it -- the canonicalisation
+// through fs/promises realpath happens deeper, when the lock file itself is placed, so it
+// never reaches this spy. On the Windows runner the two spellings of one temp file differ
+// (C:/Users/runneradmin/... and its NTFS 8.3 alias C:/Users/RUNNER~1/...), so comparing the
+// key by text holds on a developer box and misses there. File identity is the comparison
+// that holds on both spellings, which is how the landed
+// src/utils/__tests__/safeWriteJson.interruption.test.ts handles the same hazard.
+async function fileIdentity(candidate: string): Promise<string | null> {
+	try {
+		const stats = await actualFs.stat(candidate)
+		return `${stats.dev}:${stats.ino}`
+	} catch {
+		return null
+	}
+}
+
+async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): Promise<boolean> {
+	if (typeof lockKey !== "string") {
+		return false
+	}
+	// The unlink removes the file and leaves the per-task directory in place, so both sides
+	// still carry an identity here. Case is folded because it is not significant on Windows,
+	// where the alias spelling appears.
+	const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
+	const keyDirectory = await fileIdentity(path.dirname(lockKey))
+	return (
+		expectedDirectory !== null &&
+		keyDirectory === expectedDirectory &&
+		path.basename(lockKey).toLowerCase() === path.basename(expectedPath).toLowerCase()
+	)
+}
+
 function storeInternals(store: TaskHistoryStore): {
 	cache: Map<string, HistoryItem>
 	taskFileMtimes: Map<string, number>
@@ -152,14 +186,23 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const store = createStore()
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
+			// The lock spy is created once for the whole file, so clear it to make the
+			// assertion below about this delete and not about every case before it.
+			vi.mocked(withFileLock).mockClear()
 			onWrite.mockClear()
 
 			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
-				historyFilePath(storagePath, "locked-delete"),
-				expect.any(Function),
+			const lockCalls = vi.mocked(withFileLock).mock.calls
+			expect(lockCalls).toHaveLength(1)
+			// The lock is taken for the file the delete unlinked, under a function body: the key
+			// is pinned by identity rather than by text, and the arity and the body are pinned
+			// alongside it so an argument dropped or swapped cannot slip through.
+			expect(lockCalls[0]).toHaveLength(2)
+			expect(await lockKeyNamesTheSameFile(lockCalls[0][0], historyFilePath(storagePath, "locked-delete"))).toBe(
+				true,
 			)
+			expect(lockCalls[0][1]).toBeTypeOf("function")
 			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
