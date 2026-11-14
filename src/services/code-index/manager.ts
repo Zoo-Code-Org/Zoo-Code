@@ -16,7 +16,7 @@ import fs from "fs/promises"
 import ignore from "ignore"
 import path from "path"
 import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
+import { TelemetryEventName, type FailedFileSummary } from "@roo-code/types"
 import { t } from "../../i18n"
 
 export class CodeIndexManager {
@@ -368,7 +368,10 @@ export class CodeIndexManager {
 			state: failure.state,
 		}))
 		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles[0]
-		const failedFileSummary = representative && { ...representative, count: failedFiles.length }
+		const failedFileSummary: FailedFileSummary | undefined = representative && {
+			...representative,
+			count: failedFiles.length,
+		}
 		const providerWaits = this.pacers.providerWaits()
 		let systemStatus: IndexingState = status.systemStatus
 		let message = status.message
