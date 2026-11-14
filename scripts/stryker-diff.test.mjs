@@ -2360,6 +2360,147 @@ describe("manifest wall-clock budget", () => {
 	})
 })
 
+describe("budget stop publishing and discovery cap", () => {
+	const packageEntry = (id, root, discoverRelatedTests) => ({
+		id,
+		root,
+		vitestConfig: "vitest.unit.config.ts",
+		selectors: ["src/value.ts:1-1"],
+		changedExecutableLines: 1,
+		...(discoverRelatedTests === undefined ? {} : { discoverRelatedTests }),
+	})
+	const preflightLine = "Instrumented 1 source file(s) with 1 mutant(s)"
+
+	it("publishes the finished package before a later budget stop is rethrown", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-stop-publish-"))
+		const reportRoot = path.join(repo, "reports")
+		fs.mkdirSync(reportRoot, { recursive: true })
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const suiteSummaryPath = path.join(repo, "step-summary.md")
+		fs.writeFileSync(suiteSummaryPath, "")
+		process.env.GITHUB_STEP_SUMMARY = suiteSummaryPath
+		const clockValues = [0, 0, 10 * 60_000, 26 * 60_000]
+		let tick = 0
+		let failure
+		try {
+			runManifest(
+				repo,
+				{
+					packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")],
+					headSha: "c".repeat(40),
+				},
+				reportRoot,
+				{
+					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => (dryRunOnly ? preflightLine : ""),
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.ok(failure, "the manifest should have refused the second preflight")
+			assert.equal(failure.manifestBudgetStop, true)
+			const commentPath = path.join(reportRoot, PR_COMMENT_FILENAME)
+			assert.ok(
+				fs.existsSync(commentPath),
+				"a budget stop threw away the row for the package that had already finished",
+			)
+			const comment = fs.readFileSync(commentPath, "utf8")
+			assert.ok(comment.includes("| core |"), comment.slice(0, 400))
+			assert.ok(!comment.includes("| webview |"), comment.slice(0, 400))
+			const published = fs.readFileSync(suiteSummaryPath, "utf8")
+			assert.ok(published.includes("| core |"), published.slice(0, 400))
+			const rejectionRoot = path.join(repo, "rejection")
+			recordRejection(rejectionRoot, "b".repeat(40), "c".repeat(40), failure)
+			const recorded = fs.readFileSync(path.join(rejectionRoot, REJECTION_FILENAME), "utf8")
+			assert.ok(recorded.includes("was not launched"), recorded.slice(0, 240))
+			assert.ok(!recorded.includes("| core |"), recorded.slice(0, 240))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("caps related-test discovery at the budget that is left and refuses it when none is", () => {
+		const caps = []
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-discovery-cap-"))
+		const reportRoot = path.join(repo, "reports")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const summaryFile = path.join(repo, "step-summary.md")
+		fs.writeFileSync(summaryFile, "")
+		process.env.GITHUB_STEP_SUMMARY = summaryFile
+		try {
+			fs.mkdirSync(reportRoot, { recursive: true })
+			const clockValues = [0, 20.5 * 60_000, 21 * 60_000]
+			let tick = 0
+			runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+				reportRoot,
+				{
+					discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+						caps.push(timeoutMs)
+						return ["src/value.test.ts"]
+					},
+					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => (dryRunOnly ? preflightLine : ""),
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+			assert.deepEqual(caps, [(MANIFEST_BUDGET_MINUTES - 20.5 - 3) * 60_000], JSON.stringify(caps))
+			assert.ok(caps[0] < 5 * 60_000, "discovery kept its full five minutes with 6.5 min of budget left")
+			const refusedRoot = path.join(repo, "refused")
+			fs.mkdirSync(path.join(refusedRoot, "reports"), { recursive: true })
+			const refusals = []
+			const refusalClock = [0, 24.5 * 60_000]
+			let refusalTick = 0
+			let failure
+			try {
+				runManifest(
+					repo,
+					{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+					path.join(refusedRoot, "reports"),
+					{
+						discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+							refusals.push(timeoutMs)
+							return ["src/value.test.ts"]
+						},
+						now: () => {
+							const value = refusalClock[refusalTick]
+							assert.ok(refusalTick < refusalClock.length, "the refusal clock ran out of readings")
+							refusalTick += 1
+							return value
+						},
+					},
+				)
+			} catch (error) {
+				failure = error
+			}
+			assert.ok(failure, "discovery started although only 2.5 min of the budget was left")
+			assert.equal(failure.manifestBudgetStop, true)
+			assert.ok(failure.message.includes("related-test discovery was not launched"), failure.message)
+			assert.deepEqual(refusals, [], "discovery ran after the manifest said it had no room left")
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
 describe("suite summary isolation", () => {
 	it("keeps the job summary the suite inherited free of what the suite published", () => {
 		if (inheritedJobSummary === undefined) {
