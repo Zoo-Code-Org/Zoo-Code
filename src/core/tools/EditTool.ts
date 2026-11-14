@@ -14,6 +14,7 @@ import { sanitizeUnifiedDiff, computeDiffStats } from "../diff/stats"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
+import { canonicalizeForApproval } from "./guardedWrite"
 
 interface EditParams {
 	file_path: string
@@ -175,6 +176,12 @@ export class EditTool extends BaseTool<"edit"> {
 			const sanitizedDiff = sanitizeUnifiedDiff(diff)
 			const diffStats = computeDiffStats(sanitizedDiff) || undefined
 			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			// Captured before the approval is asked: guardedWrite binds the publish to this
+			// identity, so a name repointed between the approval and the publish is refused
+			// instead of publishing to whatever the name points at by then.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
 
 			const sharedMessageProps: ClineSayTool = {
 				tool: "appliedDiff",
@@ -211,11 +218,30 @@ export class EditTool extends BaseTool<"edit"> {
 
 			// Save the changes
 			if (isPreventFocusDisruptionEnabled) {
-				// Direct file write without diff view or opening the file
-				await task.diffViewProvider.saveDirectly(relPath, newContent, false, diagnosticsEnabled, writeDelayMs)
+				// Direct file write without diff view or opening the file. This tool only
+				// edits existing files, so edit-guard semantics require a prior read.
+				await task.diffViewProvider.saveDirectly(
+					relPath,
+					newContent,
+					false,
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			} else {
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			// Track file edit operation

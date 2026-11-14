@@ -18,6 +18,13 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 
 vi.mock("fs/promises", () => ({
+	// The merged tool canonicalizes an outside-workspace approval target through guardedWrite,
+	// and guardedWrite reaches realpath through a namespace import of fs/promises, so the double
+	// has to expose realpath as a named export as well as on the default object (the same shape
+	// writeToFileTool.spec.ts and editTool.spec.ts use). Without it canonicalizeForApproval fails,
+	// the tool catch routes it to handleError, and askApproval is never reached. No row and no
+	// assertion below is changed by this.
+	realpath: vi.fn(async (p: string) => String(p)),
 	default: {
 		readFile: vi.fn(),
 		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
@@ -100,6 +107,12 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 						experiments: { preventFocusDisruption },
 					}),
 				}),
+			},
+			// The merged tool consults the observation registry during its pre-save authorization,
+			// so the double has to carry it. No row below asserts on it.
+			observationRegistry: {
+				get: vi.fn().mockReturnValue(undefined),
+				observe: vi.fn(),
 			},
 			diffStrategy: {
 				getName: () => "test",
