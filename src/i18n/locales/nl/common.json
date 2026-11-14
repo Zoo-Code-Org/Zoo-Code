@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Weet je zeker dat je alle status en geheime opslag in de extensie wilt resetten? Dit kan niet ongedaan worden gemaakt.",
-		"delete_config_profile": "Weet je zeker dat je dit configuratieprofiel wilt verwijderen?"
+		"delete_config_profile": "Weet je zeker dat je dit configuratieprofiel wilt verwijderen?",
+		"requesty_deep_link": "Requesty-referenties vanuit een externe link activeren?",
+		"requesty_deep_link_detail": "Dit vervangt de actieve provider. Toekomstige verzoeken kunnen je gespreks- en werkruimte-inhoud verzenden naar:\n{{url}}\n\nGa alleen verder als je deze referenties hebt aangevraagd en deze bestemming vertrouwt."
 	},
 	"errors": {
 		"invalid_data_uri": "Ongeldig data-URI-formaat",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Ja"
+		"yes": "Ja",
+		"activate_requesty": "Requesty activeren"
 	},
 	"buttons": {
 		"learn_more": "Meer informatie"

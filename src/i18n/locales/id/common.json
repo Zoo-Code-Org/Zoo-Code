@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Apakah kamu yakin ingin mereset semua state dan secret storage di ekstensi? Ini tidak dapat dibatalkan.",
-		"delete_config_profile": "Apakah kamu yakin ingin menghapus profil konfigurasi ini?"
+		"delete_config_profile": "Apakah kamu yakin ingin menghapus profil konfigurasi ini?",
+		"requesty_deep_link": "Aktifkan kredensial Requesty dari tautan eksternal?",
+		"requesty_deep_link_detail": "Ini akan mengganti penyedia aktif. Permintaan berikutnya dapat mengirim konten percakapan dan ruang kerja Anda ke:\n{{url}}\n\nLanjutkan hanya jika Anda meminta kredensial ini dan mempercayai tujuan ini."
 	},
 	"errors": {
 		"invalid_data_uri": "Format data URI tidak valid",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Ya"
+		"yes": "Ya",
+		"activate_requesty": "Aktifkan Requesty"
 	},
 	"buttons": {
 		"learn_more": "Pelajari Lebih Lanjut"

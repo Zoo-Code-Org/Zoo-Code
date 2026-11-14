@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Êtes-vous sûr de vouloir réinitialiser le global state et le stockage de secrets de l'extension ? Cette action est irréversible.",
-		"delete_config_profile": "Êtes-vous sûr de vouloir supprimer ce profil de configuration ?"
+		"delete_config_profile": "Êtes-vous sûr de vouloir supprimer ce profil de configuration ?",
+		"requesty_deep_link": "Activer les identifiants Requesty depuis un lien externe ?",
+		"requesty_deep_link_detail": "Cela remplacera le fournisseur actif. Les requêtes suivantes peuvent envoyer le contenu de votre conversation et de votre espace de travail vers :\n{{url}}\n\nContinuez uniquement si vous avez demandé ces identifiants et si vous faites confiance à cette destination."
 	},
 	"errors": {
 		"invalid_data_uri": "Format d'URI de données invalide",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Oui"
+		"yes": "Oui",
+		"activate_requesty": "Activer Requesty"
 	},
 	"buttons": {
 		"learn_more": "En savoir plus"

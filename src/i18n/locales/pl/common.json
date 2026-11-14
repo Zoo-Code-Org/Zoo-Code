@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Czy na pewno chcesz zresetować wszystkie stany i tajne magazyny w rozszerzeniu? Tej operacji nie można cofnąć.",
-		"delete_config_profile": "Czy na pewno chcesz usunąć ten profil konfiguracyjny?"
+		"delete_config_profile": "Czy na pewno chcesz usunąć ten profil konfiguracyjny?",
+		"requesty_deep_link": "Aktywować poświadczenia Requesty z zewnętrznego linku?",
+		"requesty_deep_link_detail": "Spowoduje to zastąpienie aktywnego dostawcy. Kolejne żądania mogą wysyłać zawartość rozmowy i obszaru roboczego do:\n{{url}}\n\nKontynuuj tylko wtedy, gdy o te poświadczenia poprosiłeś i ufasz temu celowi."
 	},
 	"errors": {
 		"invalid_data_uri": "Nieprawidłowy format URI danych",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Tak"
+		"yes": "Tak",
+		"activate_requesty": "Aktywuj Requesty"
 	},
 	"buttons": {
 		"learn_more": "Dowiedz się więcej"

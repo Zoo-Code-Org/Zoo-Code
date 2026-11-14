@@ -10,7 +10,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Estàs segur que vols restablir tots els estats i emmagatzematge secret a l'extensió? Això no es pot desfer.",
-		"delete_config_profile": "Estàs segur que vols eliminar aquest perfil de configuració?"
+		"delete_config_profile": "Estàs segur que vols eliminar aquest perfil de configuració?",
+		"requesty_deep_link": "Vols activar credencials de Requesty des d'un enllaç extern?",
+		"requesty_deep_link_detail": "Això substituirà el proveïdor actiu. Les sol·licituds següents poden enviar el contingut de la teva conversa i espai de treball a:\n{{url}}\n\nContinua només si has sol·licitat aquestes credencials i confies en aquest destí."
 	},
 	"errors": {
 		"invalid_data_uri": "Format d'URI de dades no vàlid",
@@ -152,7 +154,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Sí"
+		"yes": "Sí",
+		"activate_requesty": "Activa Requesty"
 	},
 	"buttons": {
 		"learn_more": "Més informació"

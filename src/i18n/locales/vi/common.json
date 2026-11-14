@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Bạn có chắc chắn muốn đặt lại tất cả trạng thái và lưu trữ bí mật trong tiện ích mở rộng không? Hành động này không thể hoàn tác.",
-		"delete_config_profile": "Bạn có chắc chắn muốn xóa hồ sơ cấu hình này không?"
+		"delete_config_profile": "Bạn có chắc chắn muốn xóa hồ sơ cấu hình này không?",
+		"requesty_deep_link": "Kích hoạt thông tin xác thực Requesty từ liên kết bên ngoài?",
+		"requesty_deep_link_detail": "Thao tác này sẽ thay thế nhà cung cấp hiện tại. Các yêu cầu tiếp theo có thể gửi nội dung cuộc trò chuyện và không gian làm việc của bạn đến:\n{{url}}\n\nChỉ tiếp tục nếu bạn đã yêu cầu các thông tin xác thực này và tin tưởng đích đến này."
 	},
 	"errors": {
 		"invalid_data_uri": "Định dạng URI dữ liệu không hợp lệ",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Có"
+		"yes": "Có",
+		"activate_requesty": "Kích hoạt Requesty"
 	},
 	"buttons": {
 		"learn_more": "Tìm hiểu thêm"

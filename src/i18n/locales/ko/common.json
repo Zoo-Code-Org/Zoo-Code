@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "확장 프로그램의 모든 상태와 보안 저장소를 재설정하시겠습니까? 이 작업은 취소할 수 없습니다.",
-		"delete_config_profile": "이 구성 프로필을 삭제하시겠습니까?"
+		"delete_config_profile": "이 구성 프로필을 삭제하시겠습니까?",
+		"requesty_deep_link": "외부 링크에서 Requesty 자격 증명을 활성화하시겠습니까?",
+		"requesty_deep_link_detail": "활성 공급자가 대체됩니다. 이후 요청에서 대화 및 작업 영역 콘텐츠가 다음으로 전송될 수 있습니다:\n{{url}}\n\n이 자격 증명을 직접 요청했고 이 대상을 신뢰하는 경우에만 계속하십시오."
 	},
 	"errors": {
 		"invalid_data_uri": "잘못된 데이터 URI 형식",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "예"
+		"yes": "예",
+		"activate_requesty": "Requesty 활성화"
 	},
 	"buttons": {
 		"learn_more": "더 알아보기"

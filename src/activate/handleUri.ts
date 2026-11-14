@@ -5,6 +5,7 @@ import { toRequestyServiceUrl } from "../shared/utils/requesty"
 import { getRouterUnavailableSignInMessage } from "../core/config/routerRemoval"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { handleAuthCallback as handleZooCodeAuthCallback, setZooCodeUserInfo } from "../services/zoo-code-auth"
+import { t } from "../i18n"
 
 /**
  * Persist the Zoo Code session token to every active provider instance.
@@ -56,12 +57,16 @@ export const handleUri = async (uri: vscode.Uri) => {
 				// Deep links are untrusted. Require consent before installing credentials
 				// or redirecting an existing task's conversation to this destination.
 				const destination = toRequestyServiceUrl(baseUrl)
-				const approve = "Activate Requesty"
+				const approve = t("common:answers.activate_requesty")
+				// JSON.stringify quotes and escapes the URL. This stops control characters
+				// in the untrusted baseUrl from faking dialog text.
 				const choice = await vscode.window.showWarningMessage(
-					"Activate Requesty credentials from an external link?",
+					t("common:confirmation.requesty_deep_link"),
 					{
 						modal: true,
-						detail: `This will replace the active provider. Subsequent requests can send your conversation and workspace content to:\n${JSON.stringify(destination)}\n\nContinue only if you requested these credentials and trust this destination.`,
+						detail: t("common:confirmation.requesty_deep_link_detail", {
+							url: JSON.stringify(destination),
+						}),
 					},
 					approve,
 				)

@@ -16,6 +16,24 @@ vi.mock("vscode", () => ({
 	},
 }))
 
+// i18next loads no locale resources in the test environment, so t() would return
+// the key. Resolve keys from the en bundle so dialog text and interpolation match
+// production behavior.
+vi.mock("../../i18n", async () => {
+	const { default: enCommon } = await import("../../i18n/locales/en/common.json")
+	return {
+		t: (key: string, options?: Record<string, unknown>) => {
+			const template = key
+				.replace(/^common:/, "")
+				.split(".")
+				.reduce<unknown>((node, part) => (node as Record<string, unknown> | undefined)?.[part], enCommon)
+			return typeof template === "string"
+				? template.replace(/\{\{(\w+)\}\}/g, (match: string, name: string) => String(options?.[name] ?? match))
+				: key
+		},
+	}
+})
+
 import * as vscode from "vscode"
 
 const {
@@ -54,6 +72,7 @@ vi.mock("../../services/zoo-code-auth", () => ({
 }))
 
 import { handleUri } from "../handleUri"
+import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 
 const makeUri = (uri: Pick<vscode.Uri, "path" | "query">): vscode.Uri => uri as vscode.Uri
@@ -93,6 +112,32 @@ describe("handleUri", () => {
 		)
 		expect(mockVisibleProvider.handleRequestyCallback).toHaveBeenCalledWith("test-code", null)
 	})
+
+	it.each(["not-a-url", "ftp://x.example", ""])(
+		"shows the resolved destination for invalid baseUrl %s and passes the raw value",
+		async (baseUrl) => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+			mockShowWarningMessage.mockImplementation(async () => "Activate Requesty")
+			try {
+				await handleUri(
+					makeUri({ path: "/requesty", query: `code=test-code&baseUrl=${encodeURIComponent(baseUrl)}` }),
+				)
+			} finally {
+				warn.mockRestore()
+			}
+			// The dialog shows what toRequestyServiceUrl resolves (the default on fallback),
+			// while the callback receives the raw value for consumers to resolve again.
+			expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+				"Activate Requesty credentials from an external link?",
+				expect.objectContaining({
+					modal: true,
+					detail: expect.stringContaining(JSON.stringify(toRequestyServiceUrl(baseUrl))),
+				}),
+				"Activate Requesty",
+			)
+			expect(mockVisibleProvider.handleRequestyCallback).toHaveBeenCalledWith("test-code", baseUrl)
+		},
+	)
 
 	it.each([undefined, "Cancel"])(
 		"does not apply an unsolicited Requesty callback when dismissed with %s",
