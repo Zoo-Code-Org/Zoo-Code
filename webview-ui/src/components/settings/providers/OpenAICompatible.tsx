@@ -12,6 +12,7 @@ import {
 	azureOpenAiDefaultApiVersion,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
+	DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS,
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OpenAiModelsMessageType,
 	parseOpenAiExtraBody,
@@ -182,7 +183,7 @@ export const OpenAICompatible = ({
 			</Checkbox>
 			<div>
 				<Checkbox
-					checked={apiConfiguration.includeMaxTokens ?? true}
+					checked={apiConfiguration.includeMaxTokens ?? DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS}
 					onChange={handleInputChange("includeMaxTokens", noTransform)}>
 					{t("settings:includeMaxOutputTokens")}
 				</Checkbox>

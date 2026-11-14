@@ -687,25 +687,34 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.max_completion_tokens).toBeUndefined()
 		})
 
-		it("should not include max_tokens when includeMaxTokens is undefined", async () => {
-			const optionsWithUndefinedMaxTokens: ApiHandlerOptions = {
-				...mockOptions,
-				// includeMaxTokens is not set, should not include max_tokens
-				openAiCustomModelInfo: {
-					contextWindow: 128_000,
-					maxTokens: 4096,
-					supportsPromptCache: false,
-				},
-			}
-			const handlerWithDefaultMaxTokens = new OpenAiHandler(optionsWithUndefinedMaxTokens)
-			const stream = handlerWithDefaultMaxTokens.createMessage(systemPrompt, messages)
-			// Consume the stream to trigger the API call
-			await collectStream(stream)
-			// Assert the mockCreate was called without max_tokens
-			expect(mockCreate).toHaveBeenCalled()
-			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.max_completion_tokens).toBeUndefined()
-		})
+		it.each([
+			{ label: "unset (UI shows it checked)", includeMaxTokens: undefined, expected: 4096 },
+			{ label: "true", includeMaxTokens: true, expected: 4096 },
+			{ label: "false", includeMaxTokens: false, expected: undefined },
+		])(
+			"sends max_completion_tokens matching the checkbox when includeMaxTokens is $label",
+			async ({ includeMaxTokens, expected }) => {
+				const customModelInfo = { contextWindow: 128_000, maxTokens: 4096, supportsPromptCache: false }
+				const streamingHandler = new OpenAiHandler({
+					...mockOptions,
+					includeMaxTokens,
+					openAiCustomModelInfo: customModelInfo,
+				})
+				await collectStream(streamingHandler.createMessage(systemPrompt, messages))
+				const nonStreamingHandler = new OpenAiHandler({
+					...mockOptions,
+					includeMaxTokens,
+					openAiStreamingEnabled: false,
+					openAiCustomModelInfo: customModelInfo,
+				})
+				await collectStream(nonStreamingHandler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalledTimes(2)
+				for (const [callArgs] of mockCreate.mock.calls) {
+					expect(callArgs.max_completion_tokens).toBe(expected)
+				}
+			},
+		)
 
 		it("should use user-configured modelMaxTokens instead of model default maxTokens", async () => {
 			const optionsWithUserMaxTokens: ApiHandlerOptions = {
