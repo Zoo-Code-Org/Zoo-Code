@@ -86,7 +86,11 @@ describe("API - startNewTask routing", () => {
 			"new task",
 			images,
 			undefined,
-			{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+			{
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 0,
+				authorizedMentionText: "new task",
+			},
 			configuration,
 		)
 		expect(taskId).toBe(newTab ? "editor-task" : "sidebar-task")

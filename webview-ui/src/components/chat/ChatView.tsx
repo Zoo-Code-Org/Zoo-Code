@@ -789,6 +789,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		[setInputValue],
 	)
 
+	// Generated text never widens the scope: a null scope keeps only the prior text.
+	const setInputValueGenerated = useCallback((value: string) => {
+		authorizedMentionRef.current ??= inputValueRef.current
+		setInputValue(value)
+	}, [])
+
 	// Handle stop button click from textarea
 	const handleStopTask = useCallback(() => {
 		vscode.postMessage({ type: "cancelTask" })
@@ -803,7 +809,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				type: "queueMessage",
 				text,
 				images: selectedImages,
+				authorizedMentionText: authorizedMentionRef.current ?? text,
 			})
+			authorizedMentionRef.current = null
 			setInputValue("")
 			setSelectedImages([])
 		}
@@ -1517,9 +1525,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed
 				const preservedInput = inputValueRef.current
+				const preservedAuthorization = authorizedMentionRef.current
+				// A suggestion is model text, so it authorizes no mention.
+				authorizedMentionRef.current = ""
 				handleSendMessage(answer, [])
-				// Restore the input value after sending
+				// Restore the input value and its scope after sending
 				setInputValue(preservedInput)
+				authorizedMentionRef.current = preservedAuthorization
 			}
 		},
 		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered],
@@ -1922,7 +1934,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				inputValue={inputValue}
 				setInputValue={setInputValueFromUser}
 				// Generated text keeps the recorded authorization scope.
-				setInputValuePreservingAuthorization={setInputValue}
+				setInputValuePreservingAuthorization={setInputValueGenerated}
 				sendingDisabled={sendingDisabled || isProfileDisabled}
 				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}

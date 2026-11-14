@@ -1559,7 +1559,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 			askResponse: "messageResponse",
 			text: "Use code mode",
 			images: [],
-			authorizedMentionText: "Use code mode",
+			authorizedMentionText: "",
 		})
 	})
 
@@ -1600,7 +1600,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Use invalid mode",
 				images: [],
-				authorizedMentionText: "Use invalid mode",
+				authorizedMentionText: "",
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
@@ -1661,7 +1661,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Valid answer",
 				images: [],
-				authorizedMentionText: "Valid answer",
+				authorizedMentionText: "",
 			})
 		})
 	})

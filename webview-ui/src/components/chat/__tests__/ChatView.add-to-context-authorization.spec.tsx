@@ -245,4 +245,22 @@ describe("ChatView - add-to-context mention authorization", () => {
 		const message = await sendNewTask(getByTestId)
 		expect(message).toMatchObject({ authorizedMentionText: "" })
 	})
+
+	it("authorizes only the typed text when an enhanced prompt replaces a manual draft", async () => {
+		const { getByTestId } = renderChatView()
+
+		const input = getByTestId("chat-textarea").querySelector("input")!
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "my draft" } })
+		})
+		await act(async () => {
+			window.postMessage({ type: "enhancedPrompt", text: "enhanced with @/secret" }, "*")
+		})
+		await waitFor(() => {
+			expect(getChatBoxValue()).toBe("enhanced with @/secret")
+		})
+
+		const message = await sendNewTask(getByTestId)
+		expect(message).toMatchObject({ text: "enhanced with @/secret", authorizedMentionText: "my draft" })
+	})
 })

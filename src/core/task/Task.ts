@@ -2647,6 +2647,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
+		authorizedMentionText = "",
 	): Promise<void> {
 		try {
 			text = (text ?? "").trim()
@@ -2681,7 +2682,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images)
+				this.handleWebviewAskResponse("messageResponse", text, images, authorizedMentionText)
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
 			}
@@ -6583,9 +6584,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const queued = this.messageQueueService.dequeueMessage()
 				if (queued) {
 					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images).catch((err) =>
-							console.error(`[Task] Failed to submit queued message:`, err),
-						)
+						this.submitUserMessage(
+							queued.text,
+							queued.images,
+							undefined,
+							undefined,
+							queued.authorizedMentionText ?? "",
+						).catch((err) => console.error(`[Task] Failed to submit queued message:`, err))
 					}, 0)
 				}
 			}

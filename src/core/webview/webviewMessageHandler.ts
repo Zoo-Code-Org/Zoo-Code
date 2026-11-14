@@ -227,21 +227,28 @@ export const webviewMessageHandler = async (
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
 	 */
-	const resolveIncomingImages = async (payload: { text?: string; images?: string[] }) => {
+	const resolveIncomingImages = async (payload: {
+		text?: string
+		images?: string[]
+		authorizedMentionText?: string
+	}) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
 		const state = await provider.getState()
+		// Scan only the authorized substring, so generated mentions attach no images.
 		const resolved = await resolveImageMentions({
-			text,
+			text: payload.authorizedMentionText ?? "",
 			images,
 			cwd: getCurrentCwd(),
 			rooIgnoreController: currentTask?.rooIgnoreController,
 			maxImageFileSize: state.maxImageFileSize,
 			maxTotalImageSize: state.maxTotalImageSize,
 		})
-		return resolved
+		return { text, images: resolved.images }
 	}
+	const authorizedTextOf = (message: { authorizedMentionText?: unknown }) =>
+		typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : ""
 	/**
 	 * Shared utility to find message indices based on timestamp.
 	 * When multiple messages share the same timestamp (e.g., after condense),
@@ -712,7 +719,11 @@ export const webviewMessageHandler = async (
 			// agentically running promises in old instance don't affect our new
 			// task. This essentially creates a fresh slate for the new task.
 			try {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					authorizedMentionText: authorizedTextOf(message),
+				})
 				await provider.createTask(
 					resolved.text,
 					resolved.images,
@@ -721,8 +732,7 @@ export const webviewMessageHandler = async (
 						taskId: message.taskId,
 						// Fail closed when the webview omits the authorized
 						// substring, so generated context cannot expand.
-						authorizedMentionText:
-							typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+						authorizedMentionText: authorizedTextOf(message),
 					},
 					message.taskConfiguration,
 				)
@@ -743,14 +753,18 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					authorizedMentionText: authorizedTextOf(message),
+				})
 				provider.getCurrentTask()?.handleWebviewAskResponse(
 					message.askResponse!,
 					resolved.text,
 					resolved.images,
 					// Fail closed when the webview omits the authorized
 					// substring.
-					typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+					authorizedTextOf(message),
 				)
 			}
 			break
@@ -4041,12 +4055,16 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
-			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+			const resolved = await resolveIncomingImages({
+				text: message.text,
+				images: message.images,
+				authorizedMentionText: authorizedTextOf(message),
+			})
 			provider.getCurrentTask()?.messageQueueService.addMessage(
 				resolved.text,
 				resolved.images,
 				// Fail closed when the webview omits the authorized substring.
-				typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+				authorizedTextOf(message),
 			)
 			break
 		}

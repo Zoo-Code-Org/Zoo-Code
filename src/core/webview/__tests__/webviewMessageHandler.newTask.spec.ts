@@ -30,6 +30,11 @@ vi.mock("vscode", () => ({
 	commands: { executeCommand: vi.fn() },
 }))
 
+const { resolveImageMentions } = vi.hoisted(() => ({
+	resolveImageMentions: vi.fn(async ({ images }: { images?: string[] }) => ({ text: "", images: images ?? [] })),
+}))
+vi.mock("../../mentions/resolveImageMentions", () => ({ resolveImageMentions }))
+
 describe("webviewMessageHandler mention authorization forwarding", () => {
 	// Narrow double: the handler under test only touches these members.
 	// The single cast at construction keeps every use site type-checked.
@@ -140,6 +145,27 @@ describe("webviewMessageHandler mention authorization forwarding", () => {
 			"context @/secret\nuser line",
 			[],
 			"user line",
+		)
+	})
+
+	it.each([
+		{ label: "an authorized substring", authorizedMentionText: "user @/a.png", expected: "user @/a.png" },
+		{ label: "an omitted field", authorizedMentionText: undefined, expected: "" },
+	])("scans only the authorized text for image mentions with $label", async ({ authorizedMentionText, expected }) => {
+		const message: WebviewMessage = {
+			type: "newTask",
+			text: "generated @/b.png user @/a.png",
+			authorizedMentionText,
+		}
+		await webviewMessageHandler(providerAsClineProvider, message)
+
+		expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: expected }))
+		expect(provider.createTask).toHaveBeenCalledWith(
+			"generated @/b.png user @/a.png",
+			[],
+			undefined,
+			expect.anything(),
+			undefined,
 		)
 	})
 })

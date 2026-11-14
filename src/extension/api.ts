@@ -411,7 +411,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				return
 			}
 
-			await currentTask.submitUserMessage(text ?? "", images)
+			await currentTask.submitUserMessage(text ?? "", images, undefined, undefined, text ?? "")
 			return
 		}
 

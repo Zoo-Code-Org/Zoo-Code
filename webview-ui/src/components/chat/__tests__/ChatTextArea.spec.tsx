@@ -282,6 +282,28 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).toHaveBeenCalledWith("Enhanced test prompt")
 		})
 
+		it("routes the enhanced prompt through the authorization-preserving setter when provided", () => {
+			const setInputValue = vi.fn()
+			const setInputValuePreservingAuthorization = vi.fn()
+			Object.defineProperty(document, "execCommand", { value: undefined, writable: true })
+
+			render(
+				<ChatTextArea
+					{...defaultProps}
+					setInputValue={setInputValue}
+					setInputValuePreservingAuthorization={setInputValuePreservingAuthorization}
+					inputValue="Original prompt"
+				/>,
+			)
+
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "enhancedPrompt", text: "Enhanced test prompt" } }),
+			)
+
+			expect(setInputValuePreservingAuthorization).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValue).not.toHaveBeenCalled()
+		})
+
 		it("should not crash when textarea ref is not available", () => {
 			const setInputValue = vi.fn()
 

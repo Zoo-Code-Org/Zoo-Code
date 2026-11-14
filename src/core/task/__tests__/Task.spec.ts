@@ -4261,9 +4261,23 @@ describe("Cline", () => {
 				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"], "")
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			})
+
+			it("forwards the authorized substring to the ask response", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				await task.submitUserMessage("a @/x b", [], undefined, undefined, "b")
+
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "a @/x b", [], "b")
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
@@ -4356,7 +4370,7 @@ describe("Cline", () => {
 				task.clineMessages = []
 				await task.submitUserMessage("new task", ["image1.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"], "")
 
 				// Clear mock
 				handleResponseSpy.mockClear()
@@ -4372,7 +4386,12 @@ describe("Cline", () => {
 				]
 				await task.submitUserMessage("follow-up message", ["image2.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "follow-up message", ["image2.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"follow-up message",
+					["image2.png"],
+					"",
+				)
 			})
 
 			it("should handle undefined provider gracefully", async () => {
@@ -8218,7 +8237,7 @@ describe("Queued message processing after condense", () => {
 		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
 
 		// Queue a message during condensing
-		task.messageQueueService.addMessage("queued text", ["img1.png"])
+		task.messageQueueService.addMessage("queued text", ["img1.png"], "queued")
 
 		// Use fake timers to capture setTimeout(0) in processQueuedMessages
 		vi.useFakeTimers()
@@ -8228,7 +8247,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"], undefined, undefined, "queued")
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -8264,7 +8283,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined)
+		expect(spyA).toHaveBeenCalledWith("A message", undefined, undefined, undefined, "")
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
@@ -8274,7 +8293,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyB).toHaveBeenCalledWith("B message", undefined)
+		expect(spyB).toHaveBeenCalledWith("B message", undefined, undefined, undefined, "")
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
 	})
 })
