@@ -3072,7 +3072,7 @@ describe("ClineProvider", () => {
 			...state,
 			apiConfiguration: {
 				...state.apiConfiguration,
-				// The origin helper must strip credentials and paths; the escape helper must escape quotes.
+				// The origin helper must strip credentials and paths. The cspSource test covers escaping.
 				openRouterBaseUrl:
 					'https://user:password@example.com:8443/api;script-src?x="><script>attack()</script>',
 			},

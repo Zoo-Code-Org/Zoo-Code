@@ -13,12 +13,15 @@ describe("getOpenRouterCspOrigin", () => {
 		["http://127.0.0.1:3000/api", "http://127.0.0.1:3000"],
 		["http://[::1]:3000/api", "http://[::1]:3000"],
 		["http://my_proxy:8080", "http://my_proxy:8080"],
+		["https://my-proxy.example.com:8443/api", "https://my-proxy.example.com:8443"],
 		// CSP delimiters and markup in the path or host fall back to the default.
 		['https://example.com/path;script-src?x="><script>attack()</script>', "https://example.com"],
 		["https://example.com;script-src", "https://openrouter.ai"],
 		[`https://example.com; script-src-elem 'unsafe-inline'"><script>attack()</script>`, "https://openrouter.ai"],
 		["https://example.com'", "https://openrouter.ai"],
 		['https://example.com"><script>attack()</script>', "https://openrouter.ai"],
+		// Only the hostname regex rejects this quote; the URL parses without it.
+		['https://example.com"', "https://openrouter.ai"],
 		// The hostname regex rejects wildcard and list syntax that CSP would misread.
 		["https://*.example.com", "https://openrouter.ai"],
 		["https://a,b.com", "https://openrouter.ai"],
