@@ -76,7 +76,6 @@
 			"summaryFailedNoFiles": "파일이 복사되기 전에 가져오기가 중단되었습니다.",
 			"summaryCopied": "{{total}}개 중 {{copied}}개 파일 복사됨",
 			"detailFailed": "다시 시도하려면 새 가져오기를 시작하세요.",
-			"detailTasksImported_one": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
 			"detailTasksImported_other": "{{total}}개 중 {{count}}개의 작업 기록을 가져왔습니다.",
 			"detailPreparing": "Roo Code 기록 가져오기를 준비 중입니다.",
 			"progressAriaLabel": "Roo Code 기록 가져오기 진행률"
@@ -951,7 +950,7 @@
 		"useAzure": "Azure 사용",
 		"azureApiVersion": "Azure API 버전 설정",
 		"gemini": {
-			"freeRequests": "* 분당 {{count}}개의 요청까지 무료. 이후에는 프롬프트 크기에 따라 요금이 부과됩니다.",
+			"freeRequests_other": "* 분당 {{count}}개의 요청까지 무료. 이후에는 프롬프트 크기에 따라 요금이 부과됩니다.",
 			"pricingDetails": "자세한 내용은 가격 정보를 참조하세요.",
 			"billingEstimate": "* 요금은 추정치입니다 - 정확한 비용은 프롬프트 크기에 따라 달라집니다."
 		}

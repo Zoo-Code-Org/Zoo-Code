@@ -26,9 +26,9 @@
 	"clearSelection": "Xóa chọn",
 	"deleteSelected": "Xóa các mục đã chọn",
 	"deleteTasks": "Xóa nhiệm vụ",
-	"confirmDeleteTasks": "Bạn có chắc chắn muốn xóa {{count}} nhiệm vụ không?",
+	"confirmDeleteTasks_other": "Bạn có chắc chắn muốn xóa {{count}} nhiệm vụ không?",
 	"deleteTasksWarning": "Các nhiệm vụ đã xóa không thể khôi phục. Vui lòng chắc chắn bạn muốn tiếp tục.",
-	"deleteItems": "Xóa {{count}} mục",
+	"deleteItems_other": "Xóa {{count}} mục",
 	"workspace": {
 		"prefix": "Không gian làm việc:",
 		"current": "Hiện tại",
@@ -43,10 +43,9 @@
 		"mostRelevant": "Liên quan nhất"
 	},
 	"viewAllHistory": "Xem tất cả",
-	"subtasks_one": "{{count}} tác vụ con",
 	"subtasks_other": "{{count}} tác vụ con",
 	"subtaskTag": "Tác vụ con",
-	"deleteWithSubtasks": "Điều này cũng sẽ xóa {{count}} tác vụ con. Bạn có chắc không?",
+	"deleteWithSubtasks_other": "Điều này cũng sẽ xóa {{count}} tác vụ con. Bạn có chắc không?",
 	"expandSubtasks": "Mở rộng tác vụ con",
 	"collapseSubtasks": "Thu gọn tác vụ con",
 	"delegatedTag": "Đang chờ nhiệm vụ con",

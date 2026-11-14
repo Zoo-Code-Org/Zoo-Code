@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Etiketlere göre filtrele:",
 			"clear": "Etiketleri temizle",
+			"removeFromFilter": "'{{tag}}' etiketini filtrelerden kaldırmak için tıkla",
 			"placeholder": "Etiket aramak ve seçmek için yazın...",
 			"noResults": "Eşleşen etiket bulunamadı",
 			"selected": "Seçilen etiketlerden herhangi birine sahip öğeler gösteriliyor",

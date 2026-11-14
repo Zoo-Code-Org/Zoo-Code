@@ -20,7 +20,10 @@
 	"unpin": "Открепить",
 	"pin": "Закрепить",
 	"fileChangesInConversation": {
-		"header": "{{count}} файл(ов) изменено в этом разговоре"
+		"header_one": "{{count}} файл изменен в этом разговоре",
+		"header_few": "{{count}} файла изменено в этом разговоре",
+		"header_many": "{{count}} файлов изменено в этом разговоре",
+		"header_other": "{{count}} файла изменено в этом разговоре"
 	},
 	"retry": {
 		"title": "Повторить",
@@ -288,7 +291,9 @@
 		"triggerLabelOff": "Авто-утверждение выкл",
 		"triggerLabelOffShort": "Выкл",
 		"triggerLabel_zero": "0 авто-утвержденных",
-		"triggerLabel_one": "1 авто-утвержден",
+		"triggerLabel_one": "{{count}} авто-утвержденное",
+		"triggerLabel_few": "{{count}} авто-утвержденных",
+		"triggerLabel_many": "{{count}} авто-утвержденных",
 		"triggerLabel_other": "{{count}} авто-утвержденных",
 		"triggerLabelAll": "BRRR"
 	},
@@ -316,8 +321,10 @@
 		"truncation": {
 			"title": "Контекст усечён",
 			"inProgress": "Усечение контекста...",
-			"messagesRemoved": "{{count}} сообщение удалено",
-			"messagesRemoved_other": "{{count}} сообщений удалено",
+			"messagesRemoved_one": "{{count}} сообщение удалено",
+			"messagesRemoved_few": "{{count}} сообщения удалено",
+			"messagesRemoved_many": "{{count}} сообщений удалено",
+			"messagesRemoved_other": "{{count}} сообщения удалено",
 			"description": "Более старые сообщения были удалены из разговора, чтобы остаться в пределах контекстного окна. Это быстрый, но менее сохраняющий контекст подход по сравнению со сжатием."
 		}
 	},
@@ -350,7 +357,10 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Достигнут лимит автоматически одобренных запросов",
-			"description": "Zoo достиг автоматически одобренного лимита в {{count}} API-запрос(ов). Хотите сбросить счетчик и продолжить задачу?",
+			"description_one": "Zoo достиг автоматически одобренного лимита в {{count}} API-запрос. Хотите сбросить счетчик и продолжить задачу?",
+			"description_few": "Zoo достиг автоматически одобренного лимита в {{count}} API-запроса. Хотите сбросить счетчик и продолжить задачу?",
+			"description_many": "Zoo достиг автоматически одобренного лимита в {{count}} API-запросов. Хотите сбросить счетчик и продолжить задачу?",
+			"description_other": "Zoo достиг автоматически одобренного лимита в {{count}} API-запроса. Хотите сбросить счетчик и продолжить задачу?",
 			"button": "Сбросить и продолжить"
 		},
 		"autoApprovedCostLimitReached": {
@@ -362,8 +372,10 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo хочет выполнить поиск в кодовой базе по <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo хочет выполнить поиск в кодовой базе по <code>{{query}}</code> в <code>{{path}}</code>",
-		"didSearch_one": "Найден 1 результат",
-		"didSearch_other": "Найдено {{count}} результатов",
+		"didSearch_one": "Найден {{count}} результат",
+		"didSearch_few": "Найдено {{count}} результата",
+		"didSearch_many": "Найдено {{count}} результатов",
+		"didSearch_other": "Найдено {{count}} результата",
 		"resultTooltip": "Оценка схожести: {{score}} (нажмите, чтобы открыть файл)"
 	},
 	"read-batch": {
@@ -434,9 +446,13 @@
 	"tooManyTools": {
 		"title": "Включено слишком много инструментов",
 		"toolsPart_one": "{{count}} инструмент",
-		"toolsPart_other": "{{count}} инструментов",
+		"toolsPart_few": "{{count}} инструмента",
+		"toolsPart_many": "{{count}} инструментов",
+		"toolsPart_other": "{{count}} инструмента",
 		"serversPart_one": "{{count}} сервер MCP",
-		"serversPart_other": "{{count}} серверов MCP",
+		"serversPart_few": "{{count}} сервера MCP",
+		"serversPart_many": "{{count}} серверов MCP",
+		"serversPart_other": "{{count}} сервера MCP",
 		"messageTemplate": "У тебя включено {{tools}} через {{servers}}. Такое большое количество может сбить модель с толку и привести к ошибкам. Постарайся держать это ниже {{threshold}}.",
 		"openMcpSettings": "Открыть настройки MCP"
 	},

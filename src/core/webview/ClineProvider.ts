@@ -67,6 +67,7 @@ import {
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_FILES_AFTER_USER_EDITED,
 	DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES,
+	DEFAULT_TASK_TITLE_GENERATION_ENABLED,
 	ORGANIZATION_ALLOW_ALL,
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
@@ -153,6 +154,7 @@ import {
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
 import { readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
+import { TaskTitleService } from "../task-title/TaskTitleService"
 import { getNonce } from "./getNonce"
 import { getUri } from "./getUri"
 import { omitOriginalContentFromExtensionMessage } from "./stripOriginalContent"
@@ -327,6 +329,7 @@ export class ClineProvider
 
 	private recentTasksCache?: string[]
 	public readonly taskHistoryStore: TaskHistoryStore
+	private readonly taskTitleService: TaskTitleService
 	private taskHistoryStoreInitialized = false
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
@@ -421,6 +424,20 @@ export class ClineProvider
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
+	/**
+	 * Mode -> profile id choices made by this window. The persisted mode map in
+	 * `providerSettingsManager` is shared by every VS Code window, so reading it
+	 * alone lets another window's profile selection leak into this window's tasks.
+	 */
+	private readonly localModeConfigIds = new Map<string, string>()
+
+	/**
+	 * The shared mode map as it was when this window opened. Modes this window has not changed
+	 * resolve against it, so another window's later selection cannot reach this window's tasks
+	 * (including delegated subtasks).
+	 */
+	private initialModeConfigIds: Promise<Record<string, string>> = Promise.resolve({})
+
 	constructor(
 		readonly context: vscode.ExtensionContext,
 		private readonly outputChannel: vscode.OutputChannel,
@@ -448,6 +465,34 @@ export class ClineProvider
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
 
+		this.taskTitleService = new TaskTitleService({
+			getHistoryItem: (taskId) => this.taskHistoryStore.get(taskId),
+			setAutoTitle: (taskId, autoTitle) => this.setAutoTitle(taskId, autoTitle),
+			getSettings: async () => {
+				const { taskTitleGenerationEnabled, taskTitleApiConfigId, customSupportPrompts } = await this.getState({
+					includeTaskHistory: false,
+				})
+				return {
+					enabled: taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+					apiConfigId: taskTitleApiConfigId,
+					customSupportPrompts,
+				}
+			},
+			resolveProfile: async (apiConfigId) => {
+				const { listApiConfigMeta = [] } = await this.getState({ includeTaskHistory: false })
+				if (!listApiConfigMeta.some(({ id }) => id === apiConfigId)) {
+					return undefined
+				}
+				const { name: _name, ...profile } = await this.providerSettingsManager.getProfile({ id: apiConfigId })
+				return profile.apiProvider ? profile : undefined
+			},
+			isProfileAllowed: async (profile) => {
+				const { organizationAllowList } = await this.getState({ includeTaskHistory: false })
+				return ProfileValidator.isProfileAllowed(profile, organizationAllowList)
+			},
+			log: (message) => this.log(message),
+		})
+
 		// Start configuration loading (which might trigger indexing) in the background.
 		// Don't await, allowing activation to continue immediately.
 
@@ -457,7 +502,12 @@ export class ClineProvider
 
 		this._workspaceTracker = new WorkspaceTracker(this)
 
-		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+		this.providerSettingsManager = new ProviderSettingsManager(this.context, (modeConfigIds) => {
+			// Manual and automatic imports replace this provider's previous mode choices.
+			this.localModeConfigIds.clear()
+			this.initialModeConfigIds = Promise.resolve(modeConfigIds)
+		})
+		this.captureInitialModeConfigIds()
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
@@ -485,6 +535,7 @@ export class ClineProvider
 		// We do something fairly similar for the IPC-based API.
 		this.taskCreationCallback = (instance: Task) => {
 			this.emit(RooCodeEventName.TaskCreated, instance)
+			this.taskTitleService.onTaskCreated(instance)
 
 			// Create named listener functions so we can remove them later.
 			const onTaskStarted = () => this.emit(RooCodeEventName.TaskStarted, instance.taskId)
@@ -506,7 +557,12 @@ export class ClineProvider
 				}
 				this.emit(RooCodeEventName.TaskCompleted, taskId, tokenUsage, toolUsage)
 			}
-			const onTaskAborted = () => this.emit(RooCodeEventName.TaskAborted, instance.taskId)
+			const onTaskAborted = () => {
+				if (instance.abortReason === "user_cancelled") {
+					this.taskTitleService.cancel(instance.taskId, "user")
+				}
+				this.emit(RooCodeEventName.TaskAborted, instance.taskId)
+			}
 			const onTaskFocused = () => this.emit(RooCodeEventName.TaskFocused, instance.taskId)
 			const onTaskUnfocused = () => this.emit(RooCodeEventName.TaskUnfocused, instance.taskId)
 			const onTaskActive = (taskId: string) => this.emit(RooCodeEventName.TaskActive, taskId)
@@ -517,8 +573,10 @@ export class ClineProvider
 			const onTaskUnpaused = (taskId: string) => this.emit(RooCodeEventName.TaskUnpaused, taskId)
 			const onTaskSpawned = (taskId: string) => this.emit(RooCodeEventName.TaskSpawned, taskId)
 			const onTaskUserMessage = (taskId: string) => this.emit(RooCodeEventName.TaskUserMessage, taskId)
-			const onTaskTokenUsageUpdated = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) =>
+			const onTaskTokenUsageUpdated = (taskId: string, tokenUsage: TokenUsage, toolUsage: ToolUsage) => {
+				this.taskTitleService.onTokenUsageUpdated(taskId, tokenUsage)
 				this.emit(RooCodeEventName.TaskTokenUsageUpdated, taskId, tokenUsage, toolUsage)
+			}
 
 			// Attach the listeners.
 			instance.on(RooCodeEventName.TaskStarted, onTaskStarted)
@@ -552,6 +610,7 @@ export class ClineProvider
 				() => instance.off(RooCodeEventName.TaskUnpaused, onTaskUnpaused),
 				() => instance.off(RooCodeEventName.TaskSpawned, onTaskSpawned),
 				() => instance.off(RooCodeEventName.TaskTokenUsageUpdated, onTaskTokenUsageUpdated),
+				() => this.taskTitleService.forget(instance.taskId),
 			])
 		}
 	}
@@ -1000,6 +1059,7 @@ export class ClineProvider
 		this.skillsManager = undefined
 		await this.marketplaceManager?.cleanup()
 		this.customModesManager?.dispose()
+		this.taskTitleService.dispose()
 		this.taskHistoryStore.dispose()
 		this.log("Disposed all disposables")
 		ClineProvider.activeInstances.delete(this)
@@ -1493,7 +1553,7 @@ export class ClineProvider
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 
 			if (!historyItem.apiConfigName && !lockApiConfigAcrossModes && !skipProfileRestoreFromHistory) {
-				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
+				const savedConfigId = await this.getModeConfigId(historyItem.mode)
 				const listApiConfig = await this.providerSettingsManager.listConfig()
 
 				// Update listApiConfigMeta first to ensure UI has latest data.
@@ -2098,7 +2158,7 @@ export class ClineProvider
 		if (signal?.aborted) return
 
 		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+		const savedConfigId = await this.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		if (signal?.aborted) return
@@ -2123,7 +2183,7 @@ export class ClineProvider
 				if (hasActualSettings) {
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						{ persistModeConfig: false, skipCurrentTaskRebuild: targetTask === null },
 						signal,
 					)
 				} else {
@@ -2133,14 +2193,14 @@ export class ClineProvider
 				// The task will continue with the current/default configuration.
 			}
 		} else {
-			// If no saved config for this mode, save current config as default.
+			// Keep an unmapped mode's default local; another window may already have saved a shared choice.
 			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
 			if (currentApiConfigNameAfter) {
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
 				if (config?.id) {
-					await this.providerSettingsManager.setModeConfig(newMode, config.id)
+					this.localModeConfigIds.set(newMode, config.id)
 				}
 			}
 		}
@@ -2151,6 +2211,28 @@ export class ClineProvider
 	}
 
 	// Provider Profile Management
+
+	private captureInitialModeConfigIds(): void {
+		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
+			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
+			return {}
+		})
+	}
+
+	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
+		const cachedId = this.localModeConfigIds.get(mode) ?? (await this.initialModeConfigIds)[mode]
+		// An unmapped mode keeps this provider's current profile, even if another window maps it later.
+		if (!cachedId) return undefined
+		if ((await this.providerSettingsManager.listConfig()).some(({ id }) => id === cachedId)) {
+			return cachedId
+		}
+		return this.providerSettingsManager.getModeConfigId(mode)
+	}
+
+	public async setModeConfig(mode: Mode, id: string): Promise<void> {
+		await this.providerSettingsManager.setModeConfig(mode, id)
+		this.localModeConfigIds.set(mode, id)
+	}
 
 	/**
 	 * Updates the current task's API handler.
@@ -2357,7 +2439,7 @@ export class ClineProvider
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
-				this.providerSettingsManager.setModeConfig(mode, id),
+				this.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 			const failedActivation = activationResults.find(
@@ -2482,7 +2564,7 @@ export class ClineProvider
 		const { mode } = await this.getState()
 
 		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			await this.setModeConfig(mode, id)
 		}
 
 		// Change the provider for the current task.
@@ -2831,6 +2913,19 @@ export class ClineProvider
 		}
 	}
 
+	/*
+	 * Records a generated title unless the task already has one. The store decides under its lock
+	 * against the persisted record, so a deleted or already-titled task is left untouched.
+	 */
+	async setAutoTitle(id: string, autoTitle: string) {
+		const { item } = await this.taskHistoryStore.setAutoTitleIfAbsent(id, autoTitle)
+		this.recentTasksCache = undefined
+
+		if (item && this.isViewLaunched) {
+			await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: item })
+		}
+	}
+
 	/* Condenses a task's message history to use fewer tokens. */
 	async condenseTaskContext(taskId: string) {
 		const task = this.taskRegistry.getById(taskId)
@@ -2879,6 +2974,10 @@ export class ClineProvider
 				}
 			}
 
+			for (const taskId of allIdsToDelete) {
+				this.taskTitleService.cancel(taskId, "deleted")
+			}
+
 			// Delete all tasks from state in one batch
 			await this.taskHistoryStore.deleteMany(allIdsToDelete)
 			this.recentTasksCache = undefined
@@ -2922,6 +3021,7 @@ export class ClineProvider
 	}
 
 	async deleteTaskFromState(id: string) {
+		this.taskTitleService.cancel(id, "deleted")
 		await this.taskHistoryStore.delete(id)
 		this.recentTasksCache = undefined
 
@@ -3183,6 +3283,8 @@ export class ClineProvider
 			includeDiagnosticMessages,
 			maxDiagnosticMessages,
 			includeTaskHistoryInEnhance,
+			taskTitleGenerationEnabled,
+			taskTitleApiConfigId,
 			includeCurrentTime,
 			includeCurrentCost,
 			maxGitStatusFiles,
@@ -3388,6 +3490,8 @@ export class ClineProvider
 			includeDiagnosticMessages: includeDiagnosticMessages ?? true,
 			maxDiagnosticMessages: maxDiagnosticMessages ?? 50,
 			includeTaskHistoryInEnhance: includeTaskHistoryInEnhance ?? true,
+			taskTitleGenerationEnabled: taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+			taskTitleApiConfigId,
 			includeCurrentTime: includeCurrentTime ?? true,
 			includeCurrentCost: includeCurrentCost ?? true,
 			maxGitStatusFiles: maxGitStatusFiles ?? 0,
@@ -3620,6 +3724,8 @@ export class ClineProvider
 			includeDiagnosticMessages: stateValues.includeDiagnosticMessages ?? true,
 			maxDiagnosticMessages: stateValues.maxDiagnosticMessages ?? 50,
 			includeTaskHistoryInEnhance: stateValues.includeTaskHistoryInEnhance ?? true,
+			taskTitleGenerationEnabled: stateValues.taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+			taskTitleApiConfigId: stateValues.taskTitleApiConfigId,
 			includeCurrentTime: stateValues.includeCurrentTime ?? true,
 			includeCurrentCost: stateValues.includeCurrentCost ?? true,
 			maxGitStatusFiles: stateValues.maxGitStatusFiles ?? 0,
@@ -3637,9 +3743,10 @@ export class ClineProvider
 	 * Updates a task in the task history and optionally broadcasts the updated history to the webview.
 	 * Now delegates to TaskHistoryStore for per-task file persistence.
 	 *
-	 * This writer never owns the `title` field: `title` is written only by the rename path
-	 * (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`). Callers here build items
-	 * from snapshots read before taking the store lock, so any title they carry can be stale.
+	 * This writer never owns the `title` or `autoTitle` fields: `title` is written only by the rename
+	 * path (`renameTaskWithId` via `taskHistoryStore.atomicReadAndUpdate`) and `autoTitle` only by
+	 * `setAutoTitle`. Callers here build items from snapshots read before taking the store lock,
+	 * so any title they carry can be stale.
 	 *
 	 * @param item The history item to update or add
 	 * @param options.broadcast Whether to broadcast the updated history to the webview (default: true)
@@ -3648,9 +3755,9 @@ export class ClineProvider
 	async updateTaskHistory(item: HistoryItem, options: { broadcast?: boolean } = {}): Promise<HistoryItem[]> {
 		const { broadcast = true } = options
 
-		// Drop the snapshot's title so upsertCore preserves the value held under the store lock
-		// instead of treating a stale title as a changed field and reverting a concurrent rename.
-		const { title: _title, ...itemWithoutTitle } = item
+		// Drop the snapshot's titles so upsertCore preserves the values held under the store lock
+		// instead of treating a stale title as a changed field and reverting a concurrent write.
+		const { title: _title, autoTitle: _autoTitle, ...itemWithoutTitle } = item
 
 		const history = await this.taskHistoryStore.upsert(itemWithoutTitle)
 		this.recentTasksCache = undefined
@@ -3745,6 +3852,9 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 		await this.providerSettingsManager.resetAllConfigs()
+		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
+		this.localModeConfigIds.clear()
+		this.captureInitialModeConfigIds()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
 		await this.postStateToWebview()
@@ -4760,7 +4870,7 @@ export class ClineProvider
 			mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		let savedModeProfile: { name?: string; apiConfiguration: ProviderSettings } | undefined
 		if (mode !== parentMode && !lockApiConfigAcrossModes) {
-			const savedConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
+			const savedConfigId = await this.getModeConfigId(mode as Mode)
 			if (savedConfigId) {
 				try {
 					const {

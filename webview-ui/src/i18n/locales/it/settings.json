@@ -77,6 +77,7 @@
 			"summaryCopied": "{{copied}} di {{total}} file copiati",
 			"detailFailed": "Avvia un nuovo tentativo di importazione per riprovare.",
 			"detailTasksImported_one": "Importato {{count}} di {{total}} cronologia attività.",
+			"detailTasksImported_many": "Importati {{count}} di {{total}} cronologie attività.",
 			"detailTasksImported_other": "Importati {{count}} di {{total}} cronologie attività.",
 			"detailPreparing": "Preparazione dell'importazione della cronologia Roo Code.",
 			"progressAriaLabel": "Avanzamento importazione cronologia Roo Code"
@@ -951,7 +952,9 @@
 		"useAzure": "Usa Azure",
 		"azureApiVersion": "Imposta versione API Azure",
 		"gemini": {
-			"freeRequests": "* Gratuito fino a {{count}} richieste al minuto. Dopo, la fatturazione dipende dalla dimensione del prompt.",
+			"freeRequests_one": "* Gratuito fino a {{count}} richiesta al minuto. Dopo, la fatturazione dipende dalla dimensione del prompt.",
+			"freeRequests_many": "* Gratuito fino a {{count}} richieste al minuto. Dopo, la fatturazione dipende dalla dimensione del prompt.",
+			"freeRequests_other": "* Gratuito fino a {{count}} richieste al minuto. Dopo, la fatturazione dipende dalla dimensione del prompt.",
 			"pricingDetails": "Per maggiori informazioni, vedi i dettagli sui prezzi.",
 			"billingEstimate": "* La fatturazione è una stima - il costo esatto dipende dalle dimensioni del prompt."
 		}

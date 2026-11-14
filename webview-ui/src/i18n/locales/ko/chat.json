@@ -20,7 +20,7 @@
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",
 	"fileChangesInConversation": {
-		"header": "이 대화에서 {{count}}개 파일이 변경됨"
+		"header_other": "이 대화에서 {{count}}개 파일이 변경됨"
 	},
 	"tokenProgress": {
 		"availableSpace": "사용 가능한 공간: {{amount}} 토큰",
@@ -287,7 +287,6 @@
 		"triggerLabelOff": "자동 승인 꺼짐",
 		"triggerLabelOffShort": "꺼짐",
 		"triggerLabel_zero": "0개 자동 승인됨",
-		"triggerLabel_one": "1개 자동 승인됨",
 		"triggerLabel_other": "{{count}}개 자동 승인됨",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +304,6 @@
 		"truncation": {
 			"title": "컨텍스트 잘림",
 			"inProgress": "컨텍스트 자르는 중...",
-			"messagesRemoved": "{{count}}개 메시지 제거됨",
 			"messagesRemoved_other": "{{count}}개 메시지 제거됨",
 			"description": "컨텍스트 윈도우 제한 내에 유지하기 위해 대화에서 오래된 메시지가 제거되었습니다. 이것은 압축에 비해 빠르지만 컨텍스트 보존 능력이 낮은 접근 방식입니다."
 		}
@@ -349,7 +347,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "자동 승인 요청 한도 도달",
-			"description": "Zoo가 {{count}}개의 API 요청(들)에 대한 자동 승인 한도에 도달했습니다. 카운트를 재설정하고 작업을 계속하시겠습니까?",
+			"description_other": "Zoo가 {{count}}개의 API 요청에 대한 자동 승인 한도에 도달했습니다. 카운트를 재설정하고 작업을 계속하시겠습니까?",
 			"button": "재설정 후 계속"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +359,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo가 코드베이스에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"wantsToSearchWithPath": "Zoo가 <code>{{path}}</code>에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
-		"didSearch_one": "1개의 결과를 찾았습니다",
 		"didSearch_other": "{{count}}개의 결과를 찾았습니다",
 		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)"
 	},
@@ -432,9 +429,7 @@
 	},
 	"tooManyTools": {
 		"title": "활성화된 도구가 너무 많습니다",
-		"toolsPart_one": "{{count}}개 도구",
 		"toolsPart_other": "{{count}}개 도구",
-		"serversPart_one": "{{count}}개 MCP 서버",
 		"serversPart_other": "{{count}}개 MCP 서버",
 		"messageTemplate": "{{servers}}를 통해 {{tools}}가 활성화되어 있습니다. 이렇게 많은 수의 도구는 모델을 혼동시키고 오류를 유발할 수 있습니다. {{threshold}} 이하로 유지하도록 노력하세요.",
 		"openMcpSettings": "MCP 설정 열기"

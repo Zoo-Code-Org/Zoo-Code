@@ -20,7 +20,9 @@
 	"unpin": "Desfixar",
 	"pin": "Fixar",
 	"fileChangesInConversation": {
-		"header": "{{count}} fitxer(s) canviat(s) en aquesta conversa"
+		"header_one": "{{count}} fitxer canviat en aquesta conversa",
+		"header_many": "{{count}} fitxers canviats en aquesta conversa",
+		"header_other": "{{count}} fitxers canviats en aquesta conversa"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espai disponible: {{amount}} tokens",
@@ -287,7 +289,8 @@
 		"triggerLabelOff": "Aprovació automàtica desactivada",
 		"triggerLabelOffShort": "Off",
 		"triggerLabel_zero": "0 aprovacions automàtiques",
-		"triggerLabel_one": "1 aprovació automàtica",
+		"triggerLabel_one": "{{count}} aprovació automàtica",
+		"triggerLabel_many": "{{count}} aprovacions automàtiques",
 		"triggerLabel_other": "{{count}} aprovacions automàtiques",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +308,8 @@
 		"truncation": {
 			"title": "Context truncat",
 			"inProgress": "Truncant context...",
-			"messagesRemoved": "{{count}} missatge eliminat",
+			"messagesRemoved_one": "{{count}} missatge eliminat",
+			"messagesRemoved_many": "{{count}} missatges eliminats",
 			"messagesRemoved_other": "{{count}} missatges eliminats",
 			"description": "S'han eliminat missatges més antics de la conversa per mantenir-se dins del límit de la finestra de context. Aquest és un enfocament ràpid però menys conservador del context en comparació amb la condensació."
 		}
@@ -349,7 +353,9 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "S'ha arribat al límit de sol·licituds aprovades automàticament",
-			"description": "Zoo ha arribat al límit aprovat automàticament de {{count}} sol·licitud(s) d'API. Vols reiniciar el comptador i continuar amb la tasca?",
+			"description_one": "Zoo ha arribat al límit aprovat automàticament de {{count}} sol·licitud d'API. Vols reiniciar el comptador i continuar amb la tasca?",
+			"description_many": "Zoo ha arribat al límit aprovat automàticament de {{count}} sol·licituds d'API. Vols reiniciar el comptador i continuar amb la tasca?",
+			"description_other": "Zoo ha arribat al límit aprovat automàticament de {{count}} sol·licituds d'API. Vols reiniciar el comptador i continuar amb la tasca?",
 			"button": "Reiniciar i continuar"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +367,8 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo vol cercar a la base de codi <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo vol cercar a la base de codi <code>{{query}}</code> a <code>{{path}}</code>",
-		"didSearch_one": "S'ha trobat 1 resultat",
+		"didSearch_one": "S'ha trobat {{count}} resultat",
+		"didSearch_many": "S'han trobat {{count}} resultats",
 		"didSearch_other": "S'han trobat {{count}} resultats",
 		"resultTooltip": "Puntuació de similitud: {{score}} (fes clic per obrir el fitxer)"
 	},
@@ -433,8 +440,10 @@
 	"tooManyTools": {
 		"title": "Massa eines habilitades",
 		"toolsPart_one": "{{count}} eina",
+		"toolsPart_many": "{{count}} eines",
 		"toolsPart_other": "{{count}} eines",
 		"serversPart_one": "{{count}} servidor MCP",
+		"serversPart_many": "{{count}} servidors MCP",
 		"serversPart_other": "{{count}} servidors MCP",
 		"messageTemplate": "Tens {{tools}} habilitades via {{servers}}. Un nombre tant alt pot confondre el model i portar a errors. Intenta mantenir-lo per sota de {{threshold}}.",
 		"openMcpSettings": "Obrir configuració de MCP"

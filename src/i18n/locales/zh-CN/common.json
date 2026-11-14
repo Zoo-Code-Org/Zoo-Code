@@ -130,7 +130,6 @@
 		"auto_import_failed": "自动导入 ZooCode 设置失败：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可从 {{domain}} 导入的 Roo Code 任务历史记录。",
-			"alreadyImported_one": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。",
 			"alreadyImported_other": "全部 {{count}} 条 Roo Code 任务历史记录已导入 Zoo Code。"
 		}
 	},
@@ -148,7 +147,6 @@
 			"signInUnavailable": "Roo Code Cloud 登录当前不可用。请配置其他提供商以继续。"
 		},
 		"rooHistoryImport": {
-			"success_one": "已将 {{count}} 条 Roo Code 任务历史记录导入 Zoo Code。",
 			"success_other": "已将 {{count}} 条 Roo Code 任务历史记录导入 Zoo Code。"
 		}
 	},

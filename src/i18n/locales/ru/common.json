@@ -126,6 +126,8 @@
 		"rooHistoryImport": {
 			"nothingFound": "История задач Roo Code для импорта из {{domain}} не найдена.",
 			"alreadyImported_one": "{{count}} история задач Roo Code уже импортирована в Zoo Code.",
+			"alreadyImported_few": "Все {{count}} истории задач Roo Code уже импортированы в Zoo Code.",
+			"alreadyImported_many": "Все {{count}} историй задач Roo Code уже импортированы в Zoo Code.",
 			"alreadyImported_other": "Все {{count}} истории задач Roo Code уже импортированы в Zoo Code."
 		}
 	},
@@ -144,7 +146,9 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "{{count}} история задач Roo Code импортирована в Zoo Code.",
-			"success_other": "{{count}} историй задач Roo Code импортировано в Zoo Code."
+			"success_few": "{{count}} истории задач Roo Code импортированы в Zoo Code.",
+			"success_many": "{{count}} историй задач Roo Code импортировано в Zoo Code.",
+			"success_other": "{{count}} истории задач Roo Code импортировано в Zoo Code."
 		}
 	},
 	"answers": {

@@ -41,7 +41,8 @@
 		"knip": "knip --treat-config-hints-as-errors",
 		"npm:publish:types": "pnpm --filter @roo-code/types npm:publish",
 		"knip:production": "knip --production --treat-config-hints-as-errors",
-		"test:knip-policy": "node --test scripts/knip-policy.test.mjs"
+		"test:knip-policy": "node --test scripts/knip-policy.test.mjs",
+		"test:translations-check": "node --test scripts/find-missing-translations.test.mjs scripts/validate-plural-forms.test.mjs"
 	},
 	"devDependencies": {
 		"@changesets/cli": "2.31.1",

@@ -125,7 +125,6 @@
 		"auto_import_failed": "ZooCode 설정 자동 가져오기 실패: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}에서 가져올 Roo Code 작업 기록을 찾을 수 없습니다.",
-			"alreadyImported_one": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다.",
 			"alreadyImported_other": "{{count}}개의 Roo Code 작업 기록이 이미 Zoo Code로 가져와졌습니다."
 		}
 	},
@@ -143,7 +142,6 @@
 			"signInUnavailable": "Roo Code Cloud 로그인은 현재 사용할 수 없습니다. 계속하려면 다른 제공업체를 구성하세요."
 		},
 		"rooHistoryImport": {
-			"success_one": "Roo Code 작업 기록 {{count}}개를 Zoo Code로 가져왔습니다.",
 			"success_other": "Roo Code 작업 기록 {{count}}개를 Zoo Code로 가져왔습니다."
 		}
 	},

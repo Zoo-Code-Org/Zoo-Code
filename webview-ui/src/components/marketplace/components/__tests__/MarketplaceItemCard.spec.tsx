@@ -1,4 +1,4 @@
-import { render, screen } from "@/utils/test-utils"
+import { render, screen, waitFor } from "@/utils/test-utils"
 import userEvent from "@testing-library/user-event"
 
 import { MarketplaceItem } from "@roo-code/types"
@@ -27,10 +27,12 @@ vi.mock("@/i18n/TranslationContext", () => ({
 			if (key === "marketplace:items.card.by") {
 				return `by ${params.author}`
 			}
+			if (key === "marketplace:filters.tags.removeFromFilter") {
+				return `Remove ${params.tag} from filters`
+			}
 			const translations: Record<string, any> = {
 				"marketplace:filters.type.mode": "Mode",
 				"marketplace:filters.type.mcpServer": "MCP Server",
-				"marketplace:filters.tags.clear": "Remove filter",
 				"marketplace:filters.tags.clickToFilter": "Add filter",
 				"marketplace:items.components": "Components", // This should be a string for the title prop
 				"marketplace:items.card.install": "Install",
@@ -116,6 +118,22 @@ describe("MarketplaceItemCard", () => {
 		await user.click(tagButton)
 
 		expect(setFilters).toHaveBeenCalledWith({ tags: ["test"] })
+	})
+
+	it.each([
+		{ selectedTags: [], tooltip: "Add filter" },
+		{ selectedTags: ["test"], tooltip: "Remove test from filters" },
+	])("shows '$tooltip' on hover when selected tags are $selectedTags", async ({ selectedTags, tooltip }) => {
+		const user = userEvent.setup()
+		renderWithProviders(
+			<MarketplaceItemCard {...defaultProps} filters={{ ...defaultProps.filters, tags: selectedTags }} />,
+		)
+
+		await user.hover(screen.getByText("test"))
+
+		await waitFor(() => expect(screen.getByRole("tooltip", { name: tooltip })).toBeInTheDocument(), {
+			timeout: 1000,
+		})
 	})
 
 	it("handles author link click", async () => {

@@ -106,6 +106,7 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
@@ -296,6 +297,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
 
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
+
 	todoList?: TodoItem[]
 
 	readonly rootTask: Task | undefined = undefined
@@ -392,6 +397,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
+	// Monotonic cancellation counter. `requestAbort()` and `requestDispose()` advance
+	// this fence, and the guarded-write path compares the value it captured when the
+	// write was queued with the value at publish time, so a queued write cannot publish
+	// after the task was cancelled or disposed.
+	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
@@ -3595,6 +3605,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
+		// The S4a write guard compares this counter with the value a queued write
+		// captured when it started, so every cancellation must advance it and it
+		// must never go backwards. Main moved the abort flag into the run-state
+		// reducer (see the abort(this.runState) getter above), so this counter is
+		// the only thing left that separates a cancelled run's queued writes from
+		// the resumed run's, and only if it advances monotonically.
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
 
@@ -3604,6 +3621,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	requestDispose(): void {
+		// A host teardown never calls abortTask(): disposal has to raise the same
+		// counter, or a write still parked on its path chain publishes after the
+		// task is gone.
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
 	}
 
@@ -3632,6 +3653,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public abortTask(isAbandoned = false): Promise<void> {
 		this.requestAbort(isAbandoned)
+
 		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
@@ -3753,6 +3775,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
 		}
+
+		// A disposed task is no longer authoritative for what it read. The registry holds
+		// version tokens captured while the task was alive, and a disposed task can still be
+		// reachable through a parent/subtask reference; a guarded write must not accept one of
+		// those tokens for a file this task has not re-read since. Clearing also stops a long
+		// task from pinning every file it ever read.
+		this.observationRegistry.close()
 
 		// Release any terminals associated with this task.
 		try {

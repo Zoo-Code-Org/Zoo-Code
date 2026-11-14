@@ -13,6 +13,7 @@
 
 const path = require("path")
 const { promises: fs } = require("fs")
+const { PLURAL_FORMS, PLURAL_KEY, findPluralBases } = require("./lib/plural-forms")
 
 const readFile = fs.readFile
 const readdir = fs.readdir
@@ -47,6 +48,8 @@ Find Missing Translations
 
 A utility script to identify missing translations across locale files.
 Compares non-English locale files to the English ones to find any missing keys.
+A plural key is reported only when a locale has no key with its base name (e.g. no "files_*").
+Run validate-plural-forms.js to check that each locale has exactly its CLDR plural forms.
 
 Usage:
   node scripts/find-missing-translations.js [options]
@@ -93,6 +96,22 @@ function findKeys(obj, parentKey = "") {
 	}
 
 	return keys
+}
+
+// A plural key is translated when the locale has any key with its base name ("files" or "files_<form>").
+// Locales use different plural suffixes (ru: _few, _many; ja: only _other), so the suffixes are not
+// compared here. validate-plural-forms.js checks that each locale has exactly its CLDR forms.
+function findMissingPluralKeys(localeContent, pluralBases) {
+	const missing = []
+
+	for (const [base, { englishValue }] of pluralBases) {
+		const related = [base, ...PLURAL_FORMS.map((form) => `${base}_${form}`)]
+		if (related.every((key) => getValueAtPath(localeContent, key) === undefined)) {
+			missing.push({ key: `${base}_*`, englishValue })
+		}
+	}
+
+	return missing
 }
 
 // Get value at a dotted path in an object
@@ -190,8 +209,14 @@ async function checkAreaTranslations(area) {
 		`Checking ${englishFileContents.length} translation file(s): ${englishFileContents.map((f) => f.name).join(", ")}`,
 	)
 
-	// Precompute English keys per file
+	// Precompute English keys and plural keys per file
 	const englishFileKeys = new Map(englishFileContents.map((f) => [f.name, findKeys(f.content)]))
+	const englishPluralBases = new Map(
+		englishFileContents.map((f) => [
+			f.name,
+			findPluralBases(englishFileKeys.get(f.name).map((key) => [key, getValueAtPath(f.content, key)])),
+		]),
+	)
 
 	// Results object to store missing translations
 	const missingTranslations = {}
@@ -220,6 +245,9 @@ async function checkAreaTranslations(area) {
 					const missingKeys = []
 
 					for (const key of englishKeys) {
+						// Plural forms differ between locales, so plural keys are matched by base name below
+						if (PLURAL_KEY.test(key)) continue
+
 						const englishValue = getValueAtPath(englishContent, key)
 						const localeValue = getValueAtPath(localeContent, key)
 
@@ -230,6 +258,8 @@ async function checkAreaTranslations(area) {
 							})
 						}
 					}
+
+					missingKeys.push(...findMissingPluralKeys(localeContent, englishPluralBases.get(name)))
 
 					if (missingKeys.length > 0) {
 						missingTranslations[locale][name] = missingKeys

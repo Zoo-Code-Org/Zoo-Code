@@ -4769,6 +4769,88 @@ describe("Cline", () => {
 			).toHaveLength(1)
 		})
 
+		it("advances the cancellation generation on each cancellation and keeps it advanced across a resume", async () => {
+			// The S4a write guard compares the cancellation generation a queued write
+			// captured against the generation at publish time. The abort FLAG cannot do
+			// that on its own: it is set on cancellation and no resume path clears it,
+			// so on a resumed task it says only that some cancellation happened, not
+			// which run a queued write belongs to. Only the generation keeps the two
+			// runs apart, so it must never go backwards.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.resumeAfterDelegation()
+			// The run-state model (RSK-06) no longer clears the legacy `abort` flag
+			// on resume: that is exactly why the generation exists. Only the
+			// generation keeps the cancelled run and the resumed run apart.
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
+		it("advances the cancellation generation on disposal, without any explicit cancel", async () => {
+			// A task torn down by the host never sees abortTask(). Disposal has to raise the
+			// same generation, or a write still parked on its path chain publishes after the
+			// task is gone.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.dispose()
+
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+		})
+		it("advances the cancellation generation for the disposal an unmocked abort performs", async () => {
+			// The two rows above mock dispose(), so each proves one increment in isolation. The
+			// sequence the guarded-write fence actually sees is an abort that tears the task down:
+			// requestAbort raises the fence, and the dispose() that abortTaskOnce drives raises it
+			// again. Nothing is mocked here, so if either increment stopped landing - or if disposal
+			// stopped being part of an abort - this row reads the stale value.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			// Started, not awaited. requestAbort is synchronous and raises the fence before any of the
+			// abort work runs (Task.abortTask calls it before it hands back abortPromise), so the increment
+			// has to be visible while the abort promise is still pending. Asserting the generation only
+			// after the await would still pass if the increment landed at the end of the teardown, which is
+			// exactly the delay that lets a write parked on its path chain publish after the task is gone.
+			const aborting = task.abortTask()
+			expect(task.cancellationGeneration).toBe(1)
+
+			await aborting
+
+			expect(task.abort).toBe(true)
+			// Disposal never marks a task abandoned; only an explicit abandon does.
+			expect(task.abandoned).toBe(false)
+			// One from requestAbort, one from the disposal the abort performed.
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -7762,6 +7844,9 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Earlier tests in this file can leave a ui_messages.json for the fixed task id;
+			// merge=true would read it here and fail the first save stage for an unrelated reason.
+			fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")

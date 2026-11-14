@@ -4,6 +4,7 @@ import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import {
 	type ProviderSettings,
 	type ExtensionMessage,
@@ -12,7 +13,6 @@ import {
 	providerIdentifiers,
 } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { requestLmStudioModels } from "@src/components/ui/hooks/useLmStudioModels"
 import { useRouterModels } from "@src/components/ui/hooks/useRouterModels"
 
@@ -158,6 +158,7 @@ export const LMStudio = ({ apiConfiguration, setApiConfigurationField }: LMStudi
 			)}
 			<div className="text-sm text-vscode-descriptionForeground">
 				<Trans
+					t={t}
 					i18nKey="settings:providers.lmStudio.description"
 					components={{
 						a: <VSCodeLink href="https://lmstudio.ai/docs" />,

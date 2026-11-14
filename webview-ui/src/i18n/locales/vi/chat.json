@@ -20,7 +20,7 @@
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
 	"fileChangesInConversation": {
-		"header": "{{count}} tệp đã thay đổi trong cuộc hội thoại này"
+		"header_other": "{{count}} tệp đã thay đổi trong cuộc hội thoại này"
 	},
 	"tokenProgress": {
 		"availableSpace": "Không gian khả dụng: {{amount}} tokens",
@@ -288,7 +288,6 @@
 		"triggerLabelOff": "Tự động phê duyệt tắt",
 		"triggerLabelOffShort": "Tắt",
 		"triggerLabel_zero": "0 được tự động phê duyệt",
-		"triggerLabel_one": "1 được tự động phê duyệt",
 		"triggerLabel_other": "{{count}} được tự động phê duyệt",
 		"triggerLabelAll": "BRRR"
 	},
@@ -306,7 +305,6 @@
 		"truncation": {
 			"title": "Ngữ cảnh đã cắt bớt",
 			"inProgress": "Đang cắt bớt ngữ cảnh...",
-			"messagesRemoved": "{{count}} tin nhắn đã xóa",
 			"messagesRemoved_other": "{{count}} tin nhắn đã xóa",
 			"description": "Các tin nhắn cũ hơn đã bị xóa khỏi cuộc trò chuyện để giữ trong giới hạn cửa sổ ngữ cảnh. Đây là cách tiếp cận nhanh nhưng ít bảo toàn ngữ cảnh hơn so với cô đọng."
 		}
@@ -350,7 +348,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Đã Đạt Giới Hạn Yêu Cầu Tự Động Phê Duyệt",
-			"description": "Zoo đã đạt đến giới hạn tự động phê duyệt là {{count}} yêu cầu API. Bạn có muốn đặt lại bộ đếm và tiếp tục nhiệm vụ không?",
+			"description_other": "Zoo đã đạt đến giới hạn tự động phê duyệt là {{count}} yêu cầu API. Bạn có muốn đặt lại bộ đếm và tiếp tục nhiệm vụ không?",
 			"button": "Đặt lại và Tiếp tục"
 		},
 		"autoApprovedCostLimitReached": {
@@ -362,7 +360,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code> trong <code>{{path}}</code>",
-		"didSearch_one": "Đã tìm thấy 1 kết quả",
 		"didSearch_other": "Đã tìm thấy {{count}} kết quả",
 		"resultTooltip": "Điểm tương tự: {{score}} (nhấp để mở tệp)"
 	},
@@ -433,9 +430,7 @@
 	},
 	"tooManyTools": {
 		"title": "Đã bật quá nhiều công cụ",
-		"toolsPart_one": "{{count}} công cụ",
 		"toolsPart_other": "{{count}} công cụ",
-		"serversPart_one": "{{count}} máy chủ MCP",
 		"serversPart_other": "{{count}} máy chủ MCP",
 		"messageTemplate": "Bạn đã bật {{tools}} qua {{servers}}. Số lượng lớn như vậy có thể khiến mô hình bối rối và dẫn đến lỗi. Cố gắng giữ nó dưới {{threshold}}.",
 		"openMcpSettings": "Mở cài đặt MCP"
