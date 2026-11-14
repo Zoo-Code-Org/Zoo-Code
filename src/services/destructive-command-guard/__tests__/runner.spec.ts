@@ -4,7 +4,7 @@ import { PassThrough } from "stream"
 import { spawn } from "child_process"
 
 import { DCG_MAX_OUTPUT_BYTES } from "../constants"
-import { runDcg } from "../runner"
+import { getDcgArgs, runDcg } from "../runner"
 
 vi.mock("child_process", () => ({ spawn: vi.fn() }))
 
@@ -165,5 +165,23 @@ describe("runDcg", () => {
 
 		await rejection
 		expect(child.kill).toHaveBeenCalledWith("SIGKILL")
+	})
+})
+
+describe("getDcgArgs", () => {
+	it("enables the Windows packs on win32", () => {
+		expect(getDcgArgs("rd /s /q foo", "win32")).toEqual([
+			"test",
+			"--format",
+			"json",
+			"--no-color",
+			"--with-packs",
+			"windows.filesystem,windows.misc",
+			"rd /s /q foo",
+		])
+	})
+
+	it.each(["linux", "darwin"] as const)("passes no pack options on %s", (platform) => {
+		expect(getDcgArgs("ls", platform)).toEqual(["test", "--format", "json", "--no-color", "ls"])
 	})
 })

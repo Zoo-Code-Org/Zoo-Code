@@ -31,6 +31,8 @@ import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor
 import { Package } from "../../shared/package"
 import { t } from "../../i18n"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import { getShell } from "../../utils/shell"
+import { describeShellDialect, getShellName } from "../../utils/shellDialect"
 import { BaseTool, ToolCallbacks } from "./BaseTool"
 
 export { ShellIntegrationError } from "../../integrations/terminal/types"
@@ -55,20 +57,35 @@ interface ExecuteCommandParams {
 	timeout?: number | null
 }
 
-export function formatDcgBlockedMessage(reason?: string, ruleId?: string): string {
-	if (reason && ruleId) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReasonAndRule", { reason, ruleId })
+/**
+ * @param shellPath The shell the command will run in. DCG parses every command as POSIX,
+ * so for cmd.exe/PowerShell the message says so, letting the user tell "dangerous" from "unreadable".
+ */
+export function formatDcgBlockedMessage(reason?: string, ruleId?: string, shellPath?: string): string {
+	const message = (() => {
+		if (reason && ruleId) {
+			return t("tools:executeCommand.destructiveCommandGuard.blockedWithReasonAndRule", { reason, ruleId })
+		}
+
+		if (reason) {
+			return t("tools:executeCommand.destructiveCommandGuard.blockedWithReason", { reason })
+		}
+
+		if (ruleId) {
+			return t("tools:executeCommand.destructiveCommandGuard.blockedWithRule", { ruleId })
+		}
+
+		return t("tools:executeCommand.destructiveCommandGuard.blocked")
+	})()
+
+	if (shellPath && describeShellDialect(shellPath)) {
+		const note = t("tools:executeCommand.destructiveCommandGuard.assumedPosixNote", {
+			shell: getShellName(shellPath),
+		})
+		return `${message} ${note}`
 	}
 
-	if (reason) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithReason", { reason })
-	}
-
-	if (ruleId) {
-		return t("tools:executeCommand.destructiveCommandGuard.blockedWithRule", { ruleId })
-	}
-
-	return t("tools:executeCommand.destructiveCommandGuard.blocked")
+	return message
 }
 
 export function resolveAgentTimeoutMs(timeoutSeconds: number | null | undefined): number {
@@ -182,7 +199,7 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				// retryable tool_error via the outer catch — never as a policy denial.
 				dcgDecision = await runDcg(binaryPath, canonicalCommand, workingDirectory)
 				if (dcgDecision.decision === "deny") {
-					await task.say("error", formatDcgBlockedMessage(dcgDecision.reason, dcgDecision.ruleId))
+					await task.say("error", formatDcgBlockedMessage(dcgDecision.reason, dcgDecision.ruleId, getShell()))
 				}
 			}
 
