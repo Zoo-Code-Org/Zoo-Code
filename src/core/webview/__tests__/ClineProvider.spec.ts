@@ -1046,6 +1046,52 @@ describe("ClineProvider", () => {
 			sidebarTask.mockRestore()
 			tabTask.mockRestore()
 		})
+
+		test.each([
+			["explainCode", "EXPLAIN"],
+			["fixCode", "FIX"],
+			["improveCode", "IMPROVE"],
+		] as const)(
+			"forwards user-authored code action input as authorizedMentionText for %s",
+			async (command, promptType) => {
+				const task = new Task(defaultTaskOptions)
+				const createTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+				try {
+					await provider.handleCodeAction(command, promptType, {
+						selectedText: "selected code",
+						userInput: "@/allowed",
+					})
+					// A regression that always sends "" would fail this assertion.
+					expect(createTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
+						authorizedMentionText: "@/allowed",
+					})
+				} finally {
+					createTask.mockRestore()
+				}
+			},
+		)
+
+		test("forwards user-authored terminal action input as authorizedMentionText", async () => {
+			const task = new Task(defaultTaskOptions)
+			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
+			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
+			try {
+				// No chat focus fired, so the last registered visible provider
+				// (the tab) receives the task, as in the fallback test above.
+				await ClineProvider.handleTerminalAction("terminalFixCommand", "TERMINAL_FIX", {
+					userInput: "@/allowed",
+				})
+				// A regression that always sends "" would fail this assertion.
+				expect(tabTask).toHaveBeenCalledOnce()
+				expect(tabTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
+					authorizedMentionText: "@/allowed",
+				})
+				expect(sidebarTask).not.toHaveBeenCalled()
+			} finally {
+				sidebarTask.mockRestore()
+				tabTask.mockRestore()
+			}
+		})
 	})
 
 	test("loads full model details when preparing an LM Studio task", async () => {

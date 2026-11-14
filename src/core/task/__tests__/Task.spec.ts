@@ -3511,7 +3511,7 @@ describe("Cline", () => {
 			})
 
 			describe("processUserContentMentions", () => {
-				it("should process mentions in user_message tags", async () => {
+				it("expands only the authorized user input and leaves tool results unexpanded", async () => {
 					const [cline, task] = Task.create({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
@@ -3525,6 +3525,7 @@ describe("Cline", () => {
 						} as const,
 						userMentionContent(
 							"<user_message>Text with 'some/path' (see below for file content) in user_message tags</user_message>",
+							"Text with 'some/path' (see below for file content) in user_message tags",
 						),
 						{
 							type: "tool_result",
@@ -3559,10 +3560,11 @@ describe("Cline", () => {
 						"Regular text with 'some/path' (see below for file content)",
 					)
 
-					// Text within user_message tags should be processed
+					// Only the authorized input is replaced; the surrounding
+					// wrapper text stays intact.
 					expect((processedContent[1] as Anthropic.TextBlockParam).text).toContain("processed:")
 					expect((processedContent[1] as Anthropic.TextBlockParam).text).toContain(
-						"<user_message>Text with 'some/path' (see below for file content) in user_message tags</user_message>",
+						"<user_message>processed: Text with 'some/path' (see below for file content) in user_message tags</user_message>",
 					)
 
 					// Tool result markers cannot authorize mention expansion

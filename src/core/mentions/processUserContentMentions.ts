@@ -12,7 +12,7 @@ type ImagePart = Anthropic.Messages.ImageBlockParam
 const authorizedInputs = new WeakMap<TextPart, { text: string; input: string }>()
 
 /** Call only at a user-input boundary, before adding lower-trust context. */
-export function userMentionContent(text: string, input: string = text): TextPart {
+export function userMentionContent(text: string, input: string): TextPart {
 	const block: TextPart = { type: "text", text }
 	if (input && text.includes(input)) authorizedInputs.set(block, { text, input })
 	return block

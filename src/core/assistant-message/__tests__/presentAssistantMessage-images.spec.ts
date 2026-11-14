@@ -381,13 +381,15 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			await presentAssistantMessage(mockTask, baseSnapshot)
 
-			// Anthropic rejects user messages where image blocks sit between
-			// tool_result blocks, so images from both tools must be grouped
-			// after the last tool_result instead of interleaved.
+			// Images must come after all tool_result blocks (#1307). Feedback
+			// text blocks join the tail in push order. No image may appear
+			// before the second tool_result.
 			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
 				"tool_result",
 				"tool_result",
+				"text",
 				"image",
+				"text",
 				"image",
 			])
 			expect(
@@ -442,10 +444,14 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			await presentAssistantMessage(mockTask, baseSnapshot)
 
+			// The image must come after the last tool_result (#1307), never
+			// between tool_result blocks. Feedback text joins the tail.
 			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
 				"tool_result",
 				"tool_result",
+				"text",
 				"image",
+				"text",
 			])
 			expect(
 				mockTask.userMessageContent

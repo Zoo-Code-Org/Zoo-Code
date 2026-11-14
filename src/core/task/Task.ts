@@ -3175,7 +3175,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Task starting
 			await this.initiateTaskLoop([
-				userMentionContent(`<user_message>\n${task}\n</user_message>`, this.authorizedMentionText ?? task),
+				// Child tasks get model-written text. Only an explicit
+				// authorizedMentionText may expand there.
+				userMentionContent(
+					`<user_message>\n${task}\n</user_message>`,
+					this.authorizedMentionText ?? (this.parentTask ? "" : (task ?? "")),
+				),
 				...imageBlocks,
 			]).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted

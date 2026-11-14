@@ -246,6 +246,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			}
 
 			const feedbackText = `<user_message>\n${text}\n</user_message>`
+			// Authorizes expansion. The tool result repeats the text by design.
 			task.userMessageContent.push(userMentionContent(feedbackText, text ?? ""))
 			pushToolResult(formatResponse.toolResult(feedbackText, images))
 		} catch (error) {

@@ -34,7 +34,7 @@ describe("processUserContentMentions authorization", () => {
 	})
 
 	it("expands explicit user input without requiring a textual marker", async () => {
-		const result = await process([userMentionContent("@/allowed")])
+		const result = await process([userMentionContent("@/allowed", "@/allowed")])
 		expect(parseMentions).toHaveBeenCalledWith(
 			"@/allowed",
 			"/test",
@@ -64,7 +64,7 @@ describe("processUserContentMentions authorization", () => {
 	})
 
 	it("does not trust restored, copied, or modified blocks", async () => {
-		const block = userMentionContent("@/allowed")
+		const block = userMentionContent("@/allowed", "@/allowed")
 		const copy = { ...block }
 		block.text += " @/secret"
 		await process([copy, block, userMentionContent("context @/secret", "")])
