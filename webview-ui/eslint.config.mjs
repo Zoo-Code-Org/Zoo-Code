@@ -103,9 +103,10 @@ export default [
 	{
 		// The block above replaces no-restricted-syntax for the same files, so repeat the i18n dot-key
 		// selectors. Keep the dot-key config's ignores so test files stay out of that check and out of the
-		// literal-string selectors.
+		// literal-string selectors, and add __mocks__, which the literal-string plugin config also skips.
 		...i18nDotKeyConfig,
 		files: ["src/**/*.{ts,tsx}"],
+		ignores: [...i18nDotKeyConfig.ignores, "src/**/__mocks__/**"],
 		rules: {
 			"no-restricted-syntax": [
 				"error",

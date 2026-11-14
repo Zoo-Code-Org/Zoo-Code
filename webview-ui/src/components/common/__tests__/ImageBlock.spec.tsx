@@ -4,7 +4,7 @@ import ImageBlock from "../ImageBlock"
 
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
-		t: (key: string) => (key === "common:image.generatedAlt" ? "AI Generated Image" : key),
+		t: (key: string) => (key === "common:image.generatedAlt" ? "Imagen generada por IA" : key),
 	}),
 }))
 
@@ -16,6 +16,6 @@ describe("ImageBlock", () => {
 	it("passes the translated alt text to the image viewer", () => {
 		render(<ImageBlock imageUri="vscode-webview://example.png" imagePath="/tmp/example.png" />)
 
-		expect(screen.getByTestId("image-viewer")).toHaveAttribute("alt", "AI Generated Image")
+		expect(screen.getByTestId("image-viewer")).toHaveAttribute("alt", "Imagen generada por IA")
 	})
 })

@@ -27,8 +27,10 @@ export const userFacingComponentProps = {
 	StandardTooltip: ["content"],
 }
 
-// Technical values that read the same in every language: URLs, AWS ARNs, host names, paths and JSON.
+// Technical values that read the same in every language: URLs, AWS ARNs, host names, paths, JSON and
+// CSS length units such as the "px" after a font size.
 export const technicalLiteralPatterns = [
+	/^(px|r?em)$/,
 	/^(•\s*)?https?:\/\/\S*$/,
 	/^arn:aws:\S+$/,
 	/^[a-z0-9-]+(\.[a-z0-9-]+)+(\/\S*)?$/,
@@ -44,11 +46,19 @@ const componentAttributes = Object.entries(userFacingComponentProps).map(
 	([component, props]) => `JSXOpeningElement[name.name="${component}"] > JSXAttribute[name.name=${anyOf(props)}]`,
 )
 const attribute = `:matches(JSXAttribute[name.name=${anyOf(userFacingAttributes)}], ${componentAttributes.join(", ")})`
-// Element children, except <style> (CSS) and <Trans> (fallback text the translation replaces).
-const children = `:matches(JSXElement:not([openingElement.name.name=/^(style|Trans)$/]), JSXFragment)`
+// Element children, except <style> (CSS) and anything in a <Trans> subtree (fallback text the translation
+// replaces), so <Trans><div>{t("x") || "Fallback"}</div></Trans> is skipped too.
+const insideTrans = `JSXElement[openingElement.name.name="Trans"] *`
+const children = `:matches(JSXElement:not([openingElement.name.name=/^(style|Trans)$/]), JSXFragment):not(${insideTrans})`
 // A word of two or more letters; punctuation, numbers and symbols such as "•", "✓" or "%" stay allowed.
 const wordy = "/[A-Za-z]{2,}/"
 const notTechnical = technicalLiteralPatterns.map((pattern) => `:not([value=${toSelectorRegex(pattern)}])`).join("")
+// Template literals store their text in `value.raw`, so the technical-value exclusion needs its own
+// attribute path. This lets a template literal holding an API URL in a placeholder pass, matching the
+// quoted-attribute behavior.
+const notTechnicalRaw = technicalLiteralPatterns
+	.map((pattern) => `:not([value.raw=${toSelectorRegex(pattern)}])`)
+	.join("")
 // The attribute's value itself or a branch of a ternary / logical fallback, never a call argument such as a
 // t() key or a comparison operand: those are not what the attribute renders.
 const valueBranch = ":matches(ConditionalExpression, LogicalExpression)"
@@ -73,7 +83,7 @@ export const i18nLiteralSelectors = [
 	},
 	{
 		// aria-label={`Open ${path}`}, <p>{`${count} hidden lines`}</p>: the template's static text is untranslated.
-		selector: templatePositions.map((position) => `${position}[value.raw=${wordy}]`).join(", "),
+		selector: templatePositions.map((position) => `${position}[value.raw=${wordy}]${notTechnicalRaw}`).join(", "),
 		message,
 	},
 ]

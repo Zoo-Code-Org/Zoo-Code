@@ -6,8 +6,8 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
-				"settings:modelInfo.showLess": "Less",
-				"settings:modelInfo.showMore": "More",
+				"settings:modelInfo.showLess": "Mostrar menos",
+				"settings:modelInfo.showMore": "Mostrar más",
 			}
 			return translations[key] ?? key
 		},
@@ -42,7 +42,7 @@ describe("ModelDescriptionMarkdown", () => {
 			/>,
 		)
 
-		expect(screen.getByText("More")).toBeInTheDocument()
+		expect(screen.getByText("Mostrar más")).toBeInTheDocument()
 	})
 
 	it("shows the translated show-less label when expanded", () => {
@@ -55,6 +55,6 @@ describe("ModelDescriptionMarkdown", () => {
 			/>,
 		)
 
-		expect(screen.getByText("Less")).toBeInTheDocument()
+		expect(screen.getByText("Mostrar menos")).toBeInTheDocument()
 	})
 })

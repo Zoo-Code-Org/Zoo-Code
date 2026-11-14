@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
 import { describe, it } from "node:test"
+import { fileURLToPath, URL } from "node:url"
 
-import { Linter } from "eslint"
+import { ESLint, Linter } from "eslint"
 import typescriptEslint from "typescript-eslint"
 
 import { createI18nLiteralStringConfig, i18nLiteralSelectors } from "./i18n-literal-strings.js"
@@ -29,6 +30,7 @@ describe("i18n literal strings: JSX text", () => {
 		"<span>✓</span>",
 		"<span>v{version}</span>",
 		"<span>{seconds}s</span>",
+		"<span>{fontSize}px</span>",
 		"<p>&nbsp;</p>",
 		'<Trans i18nKey="mcp:description"><a href="#">Learn More</a></Trans>',
 		"<li>arn:aws:bedrock:us-west-2:123456789012:provisioned-model/my-model</li>",
@@ -77,9 +79,48 @@ describe("i18n literal strings: user-facing attributes and children expressions"
 		`<textarea placeholder={'{\\n  "metadata": {}\\n}'} />`,
 		"<style>{`@keyframes fadeIn { from { opacity: 0; } }`}</style>",
 		'<p>{" "}</p>',
+		// A template literal holding an API URL in a placeholder is technical text, matching the
+		// quoted-attribute behavior.
+		"<input placeholder={`https://api.openai.com/v1`} />",
+		// Fallback expressions owned by a nested element inside <Trans> are the translation's fallback.
+		'<Trans i18nKey="mcp:description"><div>{t("x") || "Fallback"}</div></Trans>',
+		'<Trans i18nKey="mcp:description"><p><>{t("x") || "Fallback"}</></p></Trans>',
 	]) {
 		it(`allows: ${code}`, () => {
 			assert.deepEqual(lint(code), [])
+		})
+	}
+})
+
+// Resolve the webview's real config so the __mocks__ exclusion is proven for both rules, with a
+// component file as the control that the same code is still flagged there.
+describe("i18n literal strings in the webview ESLint config", () => {
+	const webviewRoot = fileURLToPath(new URL("../../webview-ui/", import.meta.url))
+	const eslint = new ESLint({ cwd: webviewRoot })
+	const lintAs = async (code, filename) => {
+		const { rules } = await eslint.calculateConfigForFile(filename)
+		const resolved = [
+			{
+				...createI18nLiteralStringConfig({ files: ["**/*.tsx"] }),
+				languageOptions,
+				rules: {
+					"i18next/no-literal-string": rules["i18next/no-literal-string"] ?? "off",
+					"no-restricted-syntax": rules["no-restricted-syntax"] ?? "off",
+				},
+			},
+		]
+		return linter
+			.verify(code, resolved, { filename: "example.tsx" })
+			.map((message) => message.ruleId)
+			.sort()
+	}
+
+	for (const [filename, expected] of [
+		["src/components/common/__mocks__/Example.tsx", []],
+		["src/components/common/Example.tsx", ["i18next/no-literal-string", "no-restricted-syntax"]],
+	]) {
+		it(`reports ${expected.length ? "both rules" : "nothing"} for ${filename}`, async () => {
+			assert.deepEqual(await lintAs('<p title="Close">Sign out</p>', filename), expected)
 		})
 	}
 })

@@ -271,6 +271,46 @@ describe("getContextMenuOptions", () => {
 		expect(result[0].description).toBe("chat:contextMenu.gitCommitsDescription")
 	})
 
+	describe("top-level options matched by translated label", () => {
+		const spanishLabels: Record<string, string> = {
+			"chat:contextMenu.gitCommits": "Commits de Git",
+			"chat:contextMenu.workingChanges": "Cambios en curso",
+			"chat:contextMenu.problems": "Problemas",
+			"chat:contextMenu.terminal": "Terminal integrada",
+			"chat:contextMenu.addFolder": "Añadir carpeta",
+			"chat:contextMenu.addFile": "Añadir archivo",
+		}
+		const spanishT = ((key: string) => spanishLabels[key] ?? key) as TFunction
+		const topLevel = (query: string) =>
+			getContextMenuOptions(spanishT, query, null, [])
+				.filter((item) => item.type !== ContextMenuOptionType.NoResults)
+				.map((item) => item.label ?? item.type)
+
+		it.each([
+			["comm", ["Commits de Git"]],
+			["camb", ["Cambios en curso"]],
+			["probl", [ContextMenuOptionType.Problems]],
+			["integ", [ContextMenuOptionType.Terminal]],
+			["carp", [ContextMenuOptionType.Folder]],
+			["arch", [ContextMenuOptionType.File]],
+			// Both valueless picker options share a label word and must both survive deduplication.
+			["añad", [ContextMenuOptionType.Folder, ContextMenuOptionType.File]],
+		])("finds %s by a word of its label", (query, expected) => {
+			expect(topLevel(query)).toEqual(expected)
+		})
+
+		it.each([
+			["git", ["Commits de Git", "Cambios en curso"]],
+			["git-c", ["Cambios en curso"]],
+			["prob", [ContextMenuOptionType.Problems]],
+			["term", [ContextMenuOptionType.Terminal]],
+			["fol", [ContextMenuOptionType.Folder]],
+			["fil", [ContextMenuOptionType.File]],
+		])("keeps matching %s by its mention token", (query, expected) => {
+			expect(topLevel(query)).toEqual(expected)
+		})
+	})
+
 	it("should offer an unknown commit hash with a translated label", () => {
 		const result = getContextMenuOptions(t, "def5678", null, mockQueryItems)
 		expect(result[0].type).toBe(ContextMenuOptionType.Git)

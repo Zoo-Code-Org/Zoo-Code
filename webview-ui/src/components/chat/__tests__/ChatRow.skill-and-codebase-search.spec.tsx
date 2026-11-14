@@ -27,7 +27,9 @@ vi.mock("@src/components/common/CodeBlock", () => ({
 	default: () => null,
 }))
 
-const renderChatRow = (message: any, isExpanded = false) =>
+type ChatRowMessage = React.ComponentProps<typeof ChatRowContent>["message"]
+
+const renderChatRow = (message: ChatRowMessage, isExpanded = false) =>
 	renderWithExtensionState(
 		<ChatRowContent
 			message={message}
@@ -44,7 +46,7 @@ const renderChatRow = (message: any, isExpanded = false) =>
 
 describe("ChatRow - skill and codebase search", () => {
 	it("renders the translated arguments label for a skill with args", () => {
-		const message = {
+		const message: ChatRowMessage = {
 			type: "ask",
 			ask: "tool",
 			ts: Date.now(),
@@ -65,7 +67,7 @@ describe("ChatRow - skill and codebase search", () => {
 	})
 
 	it("renders the translated error label for an invalid codebase search result", () => {
-		const message = {
+		const message: ChatRowMessage = {
 			type: "say",
 			say: "codebase_search_result",
 			ts: Date.now(),

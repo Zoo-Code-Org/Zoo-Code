@@ -122,6 +122,20 @@ export interface ContextMenuQueryItem {
 	argumentHint?: string
 }
 
+/**
+ * Whether a lowercased query matches a top-level option: a prefix of its mention token, or of any
+ * word of its translated label, so "comm" finds "Commits de Git".
+ */
+function matchesTopLevelOption(lowerQuery: string, label: string, token: string): boolean {
+	return (
+		token.startsWith(lowerQuery) ||
+		label
+			.toLowerCase()
+			.split(/\s+/)
+			.some((word) => word.startsWith(lowerQuery))
+	)
+}
+
 export function getContextMenuOptions(
 	t: TFunction,
 	query: string,
@@ -264,21 +278,29 @@ export function getContextMenuOptions(
 	const suggestions: ContextMenuQueryItem[] = []
 
 	// Check for top-level option matches
-	if ("git".startsWith(lowerQuery)) {
+	const gitCommitsLabel = t("chat:contextMenu.gitCommits")
+	if (matchesTopLevelOption(lowerQuery, gitCommitsLabel, "git")) {
 		suggestions.push({
 			type: ContextMenuOptionType.Git,
-			label: t("chat:contextMenu.gitCommits"),
+			label: gitCommitsLabel,
 			description: t("chat:contextMenu.gitCommitsDescription"),
 			icon: "$(git-commit)",
 		})
-	} else if ("git-changes".startsWith(lowerQuery)) {
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.workingChanges"), "git-changes")) {
 		suggestions.push(workingChanges)
 	}
-	if ("problems".startsWith(lowerQuery)) {
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.problems"), "problems")) {
 		suggestions.push({ type: ContextMenuOptionType.Problems })
 	}
-	if ("terminal".startsWith(lowerQuery)) {
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.terminal"), "terminal")) {
 		suggestions.push({ type: ContextMenuOptionType.Terminal })
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.addFolder"), "folder")) {
+		suggestions.push({ type: ContextMenuOptionType.Folder })
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.addFile"), "file")) {
+		suggestions.push({ type: ContextMenuOptionType.File })
 	}
 	if (query.startsWith("http")) {
 		suggestions.push({ type: ContextMenuOptionType.URL, value: query })
@@ -354,7 +376,8 @@ export function getContextMenuOptions(
 			item.type === ContextMenuOptionType.Folder ||
 			item.type === ContextMenuOptionType.OpenedFile
 		) {
-			key = normalizedValue!
+			// The valueless "Add Folder" / "Add File" options are keyed by type so both survive.
+			key = normalizedValue ?? item.type
 		} else {
 			key = `${item.type}-${normalizedValue}`
 		}

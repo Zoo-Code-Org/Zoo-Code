@@ -4,6 +4,11 @@ import { VSCodeCheckbox, VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@
 import { IMAGE_GENERATION_MODELS, type ImageGenerationProvider, getImageGenerationProvider } from "@roo-code/types"
 import { useAppTranslation } from "@/i18n/TranslationContext"
 
+import { PROVIDERS } from "./constants"
+
+// Brand name, same in every language: reuse the provider list's label.
+const openRouterLabel = PROVIDERS.find(({ value }) => value === providerIdentifiers.openrouter)?.label
+
 interface ImageGenerationSettingsProps {
 	enabled: boolean
 	onChange: (enabled: boolean) => void
@@ -116,8 +121,7 @@ export const ImageGenerationSettings = ({
 							onChange={(e: any) => handleProviderChange(e.target.value)}
 							className="w-full">
 							<VSCodeOption value={providerIdentifiers.openrouter} className="py-2 px-3">
-								{/* eslint-disable-next-line no-restricted-syntax -- brand name, same in every language */}
-								{"OpenRouter"}
+								{openRouterLabel}
 							</VSCodeOption>
 						</VSCodeDropdown>
 						<p className="text-vscode-descriptionForeground text-xs mt-1">

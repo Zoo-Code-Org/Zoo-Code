@@ -23,6 +23,13 @@ interface AnnouncementProps {
  * first; other locales are updated separately after the copy is approved.
  */
 
+// Brand names, same in every language.
+const socialLinks = [
+	{ Icon: SiX, label: "X", href: "https://x.com/ZooCodeDev" },
+	{ Icon: SiDiscord, label: "Discord", href: EXTERNAL_LINKS.DISCORD },
+	{ Icon: SiReddit, label: "Reddit", href: EXTERNAL_LINKS.REDDIT },
+]
+
 const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 	const { t } = useAppTranslation()
 	const [open, setOpen] = useState(true)
@@ -64,23 +71,14 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 
 					<div className="mt-4 text-sm text-center text-vscode-descriptionForeground">
 						<div className="flex items-center justify-center gap-4">
-							<SocialLink
-								icon={<SiX className="w-4 h-4" aria-hidden />}
-								label="X"
-								href="https://x.com/ZooCodeDev"
-							/>
-							<SocialLink
-								icon={<SiDiscord className="w-4 h-4" aria-hidden />}
-								// eslint-disable-next-line no-restricted-syntax -- brand name, same in every language
-								label="Discord"
-								href="https://discord.gg/VxfP4Vx3gX"
-							/>
-							<SocialLink
-								icon={<SiReddit className="w-4 h-4" aria-hidden />}
-								// eslint-disable-next-line no-restricted-syntax -- brand name, same in every language
-								label="Reddit"
-								href="https://www.reddit.com/r/ZooCode/"
-							/>
+							{socialLinks.map(({ Icon, label, href }) => (
+								<SocialLink
+									key={href}
+									icon={<Icon className="w-4 h-4" aria-hidden />}
+									label={label}
+									href={href}
+								/>
+							))}
 						</div>
 					</div>
 
