@@ -7,7 +7,8 @@
 		"invalidJsonArgument": "Zoo hat versucht, {{toolName}} mit einem ungültigen JSON-Argument zu verwenden. Wiederhole...",
 		"refresh_after_disable": "Fehler beim Aktualisieren der MCP-Verbindungen nach dem Deaktivieren",
 		"refresh_after_enable": "Fehler beim Aktualisieren der MCP-Verbindungen nach dem Aktivieren",
-		"disconnect_servers_partial": "Fehler beim Trennen von {{count}} MCP-Server(n). Überprüfe die Ausgabe für Details.",
+		"disconnect_servers_partial_one": "Fehler beim Trennen von {{count}} MCP-Server. Überprüfe die Ausgabe für Details.",
+		"disconnect_servers_partial_other": "Fehler beim Trennen von {{count}} MCP-Servern. Überprüfe die Ausgabe für Details.",
 		"toolNotFound": "Tool '{{toolName}}' existiert nicht auf Server '{{serverName}}'. Verfügbare Tools: {{availableTools}}",
 		"serverNotFound": "MCP-Server '{{serverName}}' ist nicht konfiguriert. Verfügbare Server: {{availableServers}}",
 		"toolDisabled": "Tool '{{toolName}}' auf Server '{{serverName}}' ist deaktiviert. Verfügbare aktivierte Tools: {{availableTools}}"

@@ -20,7 +20,7 @@
 	"unpin": "取消置顶",
 	"pin": "置顶",
 	"fileChangesInConversation": {
-		"header": "此对话中已更改 {{count}} 个文件"
+		"header_other": "此对话中已更改 {{count}} 个文件"
 	},
 	"tokenProgress": {
 		"availableSpace": "可用: {{amount}}",
@@ -288,7 +288,6 @@
 		"triggerLabelOff": "自动批准已关闭",
 		"triggerLabelOffShort": "关闭",
 		"triggerLabel_zero": "0 个自动批准",
-		"triggerLabel_one": "1 个自动批准",
 		"triggerLabel_other": "{{count}} 个自动批准",
 		"triggerLabelAll": "BRRR"
 	},
@@ -306,7 +305,6 @@
 		"truncation": {
 			"title": "上下文已截断",
 			"inProgress": "正在截断上下文...",
-			"messagesRemoved": "已移除 {{count}} 条消息",
 			"messagesRemoved_other": "已移除 {{count}} 条消息",
 			"description": "为保持在上下文窗口限制内，已从对话中移除较旧的消息。与压缩相比，这是一种快速但上下文保留较少的方法。"
 		}
@@ -350,7 +348,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已达自动批准请求限制",
-			"description": "Zoo 已达到 {{count}} 次 API 请求的自动批准限制。您想重置计数并继续任务吗？",
+			"description_other": "Zoo 已达到 {{count}} 次 API 请求的自动批准限制。您想重置计数并继续任务吗？",
 			"button": "重置并继续"
 		},
 		"autoApprovedCostLimitReached": {
@@ -362,7 +360,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo 需要搜索代码库: <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 需要在 <code>{{path}}</code> 中搜索: <code>{{query}}</code>",
-		"didSearch_one": "找到 1 个结果",
 		"didSearch_other": "找到 {{count}} 个结果",
 		"resultTooltip": "相似度评分: {{score}} (点击打开文件)"
 	},
@@ -433,9 +430,7 @@
 	},
 	"tooManyTools": {
 		"title": "启用的工具过多",
-		"toolsPart_one": "{{count}} 个工具",
 		"toolsPart_other": "{{count}} 个工具",
-		"serversPart_one": "{{count}} 个 MCP 服务",
 		"serversPart_other": "{{count}} 个 MCP 服务",
 		"messageTemplate": "你通过 {{servers}} 启用了 {{tools}}。这么多数量会混淆模型并导致错误。建议将其保持在 {{threshold}} 以下。",
 		"openMcpSettings": "打开 MCP 设置"

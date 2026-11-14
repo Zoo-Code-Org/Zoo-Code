@@ -125,7 +125,6 @@
 		"auto_import_failed": "ZooCode設定の自動インポートに失敗しました：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "{{domain}}からインポートするRoo Codeのタスク履歴が見つかりませんでした。",
-			"alreadyImported_one": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。",
 			"alreadyImported_other": "{{count}}件のRoo Codeタスク履歴はすでにZoo Codeにインポート済みです。"
 		}
 	},
@@ -143,7 +142,6 @@
 			"signInUnavailable": "Roo Code Cloud へのサインインは現在利用できません。続行するには別のプロバイダーを設定してください。"
 		},
 		"rooHistoryImport": {
-			"success_one": "{{count}}件のRoo CodeタスクをZoo Codeにインポートしました。",
 			"success_other": "{{count}}件のRoo CodeタスクをZoo Codeにインポートしました。"
 		}
 	},

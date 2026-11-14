@@ -57,19 +57,19 @@
 	},
 	"time_ago": {
 		"just_now": "방금",
-		"seconds_ago": "{{count}}초 전",
+		"seconds_ago_other": "{{count}}초 전",
 		"minute_ago": "1분 전",
-		"minutes_ago": "{{count}}분 전",
+		"minutes_ago_other": "{{count}}분 전",
 		"hour_ago": "1시간 전",
-		"hours_ago": "{{count}}시간 전",
+		"hours_ago_other": "{{count}}시간 전",
 		"day_ago": "1일 전",
-		"days_ago": "{{count}}일 전",
+		"days_ago_other": "{{count}}일 전",
 		"week_ago": "1주일 전",
-		"weeks_ago": "{{count}}주일 전",
+		"weeks_ago_other": "{{count}}주일 전",
 		"month_ago": "1개월 전",
-		"months_ago": "{{count}}개월 전",
+		"months_ago_other": "{{count}}개월 전",
 		"year_ago": "1년 전",
-		"years_ago": "{{count}}년 전"
+		"years_ago_other": "{{count}}년 전"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "{{timeout}}초 동안 체크포인트 초기화를 기다렸어. 체크포인트 기능이 필요 없다면 <settingsLink>체크포인트 설정</settingsLink>에서 꺼 줘.",

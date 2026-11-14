@@ -76,8 +76,10 @@
 			"summaryFailedNoFiles": "Импорт остановился до копирования каких-либо файлов.",
 			"summaryCopied": "Скопировано {{copied}} из {{total}} файлов",
 			"detailFailed": "Начни новую попытку импорта, чтобы повторить.",
-			"detailTasksImported_one": "Импортирована {{count}} из {{total}} история задач.",
-			"detailTasksImported_other": "Импортировано {{count}} из {{total}} историй задач.",
+			"detailTasksImported_one": "Импортировано историй задач: {{count}} из {{total}}.",
+			"detailTasksImported_few": "Импортировано историй задач: {{count}} из {{total}}.",
+			"detailTasksImported_many": "Импортировано историй задач: {{count}} из {{total}}.",
+			"detailTasksImported_other": "Импортировано историй задач: {{count}} из {{total}}.",
 			"detailPreparing": "Подготовка импорта истории Roo Code.",
 			"progressAriaLabel": "Ход импорта истории Roo Code"
 		}
@@ -951,7 +953,10 @@
 		"useAzure": "Использовать Azure",
 		"azureApiVersion": "Установить версию API Azure",
 		"gemini": {
-			"freeRequests": "* Бесплатно до {{count}} запросов в минуту. Далее тарификация зависит от размера подсказки.",
+			"freeRequests_one": "* Бесплатно до {{count}} запроса в минуту. Далее тарификация зависит от размера подсказки.",
+			"freeRequests_few": "* Бесплатно до {{count}} запросов в минуту. Далее тарификация зависит от размера подсказки.",
+			"freeRequests_many": "* Бесплатно до {{count}} запросов в минуту. Далее тарификация зависит от размера подсказки.",
+			"freeRequests_other": "* Бесплатно до {{count}} запроса в минуту. Далее тарификация зависит от размера подсказки.",
 			"pricingDetails": "Подробнее о ценах.",
 			"billingEstimate": "* Счёт — приблизительный, точная стоимость зависит от размера подсказки."
 		}

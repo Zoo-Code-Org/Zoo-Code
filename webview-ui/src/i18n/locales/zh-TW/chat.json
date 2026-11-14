@@ -20,7 +20,7 @@
 	"unpin": "取消釘選",
 	"pin": "釘選",
 	"fileChangesInConversation": {
-		"header": "此對話中已變更 {{count}} 個檔案"
+		"header_other": "此對話中已變更 {{count}} 個檔案"
 	},
 	"retry": {
 		"title": "重試",
@@ -217,7 +217,6 @@
 		"truncation": {
 			"title": "上下文已截斷",
 			"inProgress": "正在截斷上下文...",
-			"messagesRemoved": "已移除 {{count}} 則訊息",
 			"messagesRemoved_other": "已移除 {{count}} 則訊息",
 			"description": "為保持在上下文視窗限制內，已從對話中移除較舊的訊息。與壓縮相比，這是一種快速但上下文保留較少的方法。"
 		}
@@ -263,7 +262,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
-		"didSearch_one": "找到 1 個結果",
 		"didSearch_other": "找到 {{count}} 個結果",
 		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
 	},
@@ -336,7 +334,6 @@
 		"triggerLabelOff": "自動核准已關閉",
 		"triggerLabelOffShort": "關閉",
 		"triggerLabel_zero": "0 個自動核准",
-		"triggerLabel_one": "1 個自動核准",
 		"triggerLabel_other": "{{count}} 個自動核准",
 		"triggerLabelAll": "BRRR"
 	},
@@ -379,7 +376,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已達自動核准請求上限",
-			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"description_other": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
 			"button": "重設並繼續"
 		},
 		"autoApprovedCostLimitReached": {
@@ -423,9 +420,7 @@
 	},
 	"tooManyTools": {
 		"title": "啟用的工具過多",
-		"toolsPart_one": "{{count}} 個工具",
 		"toolsPart_other": "{{count}} 個工具",
-		"serversPart_one": "{{count}} 個 MCP 伺服器",
 		"serversPart_other": "{{count}} 個 MCP 伺服器",
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"
