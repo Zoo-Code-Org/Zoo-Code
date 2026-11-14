@@ -807,18 +807,10 @@ describe("CI-WV-01: code index start and status forwarding", () => {
 
 	beforeEach(() => vi.clearAllMocks())
 
-	it.each(["Standby", "Error"])("starts indexing once from %s and awaits the start", async (state) => {
+	it.each(["Standby", "Error"])("starts indexing once from %s without awaiting the start", async (state) => {
 		const { manager, provider } = withManager(state)
-		let finishStart!: () => void
-		manager.startIndexing.mockReturnValue(new Promise<void>((resolve) => (finishStart = resolve)))
-		let handled = false
-		const handling = webviewMessageHandler(provider, { type: "startIndexing" }).then(() => (handled = true))
-		await new Promise((resolve) => setTimeout(resolve, 0))
-		expect(manager.startIndexing).toHaveBeenCalledTimes(1)
-		expect(handled).toBe(false)
-		finishStart()
-		await handling
-		expect(handled).toBe(true)
+		manager.startIndexing.mockReturnValue(new Promise<void>(() => {}))
+		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
 		expect(manager.startIndexing).toHaveBeenCalledTimes(1)
 	})
 
@@ -826,6 +818,7 @@ describe("CI-WV-01: code index start and status forwarding", () => {
 		const { manager, provider } = withManager("Standby")
 		manager.startIndexing.mockRejectedValue(new Error("boom"))
 		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		await new Promise((resolve) => setTimeout(resolve, 0))
 		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: boom")
 	})
 

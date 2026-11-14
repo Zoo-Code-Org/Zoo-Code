@@ -3530,12 +3530,13 @@ export const webviewMessageHandler = async (
 
 					const currentState = manager.state
 					if (currentState === "Standby" || currentState === "Error") {
-						await manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
+						// Detached: a full scan must not block the message handler; the manager joins repeat starts.
+						void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 
 						if (!manager.isInitialized) {
 							await manager.initialize(provider.contextProxy)
 							if (manager.state === "Standby" || manager.state === "Error") {
-								await manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
+								void manager.startIndexing().catch((err) => provider.log(`Indexing error: ${err}`))
 							}
 						}
 					}
