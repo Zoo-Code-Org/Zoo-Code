@@ -89,7 +89,10 @@ interface MockTask {
 	providerRef: {
 		deref: () => {
 			getState: ReturnType<typeof vi.fn>
-			getMcpHub?: () => { findServerNameBySanitizedName: (name: string) => string | undefined }
+			getMcpHub?: () => {
+				findServerNameBySanitizedName: (name: string) => string | undefined
+				getAllServers: () => Array<{ name: string; tools?: Array<{ name: string }> }>
+			}
 		}
 	}
 	say: ReturnType<typeof vi.fn>
@@ -369,7 +372,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		mockTask.providerRef = {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
-				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined }),
+				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined, getAllServers: () => [] }),
 			}),
 		}
 
@@ -429,7 +432,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		mockTask.providerRef = {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
-				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined }),
+				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined, getAllServers: () => [] }),
 			}),
 		}
 
@@ -542,7 +545,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		mockTask.providerRef = {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
-				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined }),
+				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined, getAllServers: () => [] }),
 			}),
 		}
 
@@ -582,7 +585,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		mockTask.providerRef = {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
-				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined }),
+				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined, getAllServers: () => [] }),
 			}),
 		}
 
@@ -643,7 +646,7 @@ describe("presentAssistantMessage - automatic (policy) denials", () => {
 		mockTask.providerRef = {
 			deref: () => ({
 				getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
-				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined }),
+				getMcpHub: () => ({ findServerNameBySanitizedName: () => undefined, getAllServers: () => [] }),
 			}),
 		}
 

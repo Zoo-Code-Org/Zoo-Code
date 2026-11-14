@@ -16,7 +16,14 @@ import type {
 	ApiStreamToolCallDeltaChunk,
 	ApiStreamToolCallEndChunk,
 } from "../../api/transform/stream"
-import { MCP_TOOL_PREFIX, MCP_TOOL_SEPARATOR, parseMcpToolName, normalizeMcpToolName } from "../../utils/mcp-name"
+import {
+	MAX_TOOL_NAME_LENGTH,
+	MCP_TOOL_PREFIX,
+	MCP_TOOL_SEPARATOR,
+	buildMcpToolName,
+	parseMcpToolName,
+	normalizeMcpToolName,
+} from "../../utils/mcp-name"
 
 /**
  * Helper type to extract properly typed native arguments for a given tool.
@@ -1141,8 +1148,13 @@ export class NativeToolCallParser {
 			const result: McpToolUse = {
 				type: "mcp_tool_use" as const,
 				id: toolCall.id,
-				// Keep the original tool name (e.g., "mcp--serverName--toolName") for API history
-				name: toolCall.name,
+				// Keep the original tool name (e.g., "mcp--serverName--toolName") for API history.
+				// A name over the provider limit can only be the uncut name; providers reject it in
+				// history, so record it under the name that was declared to the model instead.
+				name:
+					toolCall.name.length > MAX_TOOL_NAME_LENGTH
+						? buildMcpToolName(serverName, toolName)
+						: toolCall.name,
 				serverName,
 				toolName,
 				arguments: args,
