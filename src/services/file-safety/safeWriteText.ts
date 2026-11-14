@@ -88,6 +88,16 @@ export class PostCommitDurabilityError extends Error {
 }
 // -- helpers ---------------------------------------------------------------
 
+/**
+ * How far resolveLockKey follows a chain of links. 40 is where Node's own resolver
+ * gives up with ELOOP, so every chain the operating system is willing to resolve is a
+ * chain this walk resolves too. A smaller bound stops at an intermediate link of a
+ * long dangling chain, and the writer that stopped there queues on a different lock
+ * from the writer standing at the referent - the two-locks-for-one-file case
+ * canonicalDirKey exists to prevent.
+ */
+const MAX_SYMLINK_HOPS = 40
+
 /** Generate a unique temp file name in the given directory. */
 function _tempName(dir: string, prefix: string): string {
 	return path.join(dir, "." + prefix + "_" + Date.now() + "_" + Math.random().toString(36).substring(2) + ".tmp")
@@ -103,6 +113,10 @@ function _stagingDir(dir: string): string {
 	// mode:0o700 protects a freshly created staging dir; the best-effort chmod
 	// repairs a pre-existing one (mkdirSync with recursive:true never chmods an
 	// existing directory), so staged temp files are never group/world readable.
+	// That is the POSIX story only: Windows directory creation ignores this mode argument
+	// and chmodSync establishes no DACL, so on win32 what makes the staging directory
+	// private is the caller's _grantPrivateDaclWindows step, which runs before the first
+	// staged byte and reports rather than fails when icacls is unavailable.
 	fsSync.mkdirSync(sd, { recursive: true, mode: 0o700 })
 	try {
 		fsSync.chmodSync(sd, 0o700)
@@ -146,6 +160,36 @@ async function _restoreDaclWindows(
 		await new Promise<void>((resolve, reject) => {
 			runner("icacls", [dirPath, "/restore", dumpPath], { windowsHide: true }, (err) =>
 				err ? reject(err) : resolve(),
+			)
+		})
+		return true
+	} catch {
+		return false
+	}
+}
+
+/** Apply a restrictive Windows DACL to a freshly created staging directory.
+ * `icacls <dir> /inheritance:r /grant:r "<account>:(OI)(CI)F"` drops every inherited
+ * ACE and leaves one explicit ACE for the account running the write, so files created
+ * inside inherit only that account. Measured on a Windows host: the directory went
+ * from three inherited ACEs (SYSTEM, Administrators and the user) to the single
+ * explicit one, and a file written into it inherited only the user.
+ * Returns false instead of throwing: a machine without icacls, or without a resolvable
+ * account name in the environment, still saves the file, and the caller reports the
+ * leftover exposure through onWarning. */
+async function _grantPrivateDaclWindows(stagingDirPath: string, execFileRunner?: typeof execFile): Promise<boolean> {
+	const account = process.env.USERNAME ?? process.env.USER
+	if (!account) {
+		return false
+	}
+	const runner = execFileRunner ?? execFile
+	try {
+		await new Promise<void>((resolve, reject) => {
+			runner(
+				"icacls",
+				[stagingDirPath, "/inheritance:r", "/grant:r", `${account}:(OI)(CI)F`],
+				{ windowsHide: true },
+				(err) => (err ? reject(err) : resolve()),
 			)
 		})
 		return true
@@ -243,8 +287,12 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * tolerates a dangling link, because the lock key has to be computable while a
  * peer writer is mid-commit (a publish renames the staged file onto the referent,
  * and backup mode keeps a copy beside it).
- * The walk is bounded so a two-link cycle terminates, and every key it returns is
- * canonicalized through canonicalDirKey.
+ * The walk is bounded so a link cycle terminates, and every key it returns is
+ * canonicalized through canonicalDirKey. The bound is MAX_SYMLINK_HOPS: a dangling
+ * chain longer than the bound ends the walk at an intermediate link, and a writer
+ * named through that chain then queues on a different lock from a writer named at
+ * the referent. 40 links is the longest chain Node resolves at all, so no chain the
+ * operating system itself can follow is cut off here.
  */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
@@ -254,7 +302,7 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 		// ends the walk. Two links that point at each other never would, so the
 		// walk is bounded and callers use the key they actually reached.
 		let key = absoluteFilePath
-		for (let depth = 0; depth < 8; depth++) {
+		for (let depth = 0; depth < MAX_SYMLINK_HOPS; depth++) {
 			const target = await fs.readlink(key).catch(() => undefined)
 			if (target === undefined) return await canonicalDirKey(key)
 			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
@@ -281,7 +329,13 @@ export async function safeWriteText(
 	const dirPath = path.dirname(targetPath)
 
 	// Ensure parent directory exists (mirrors safeWriteJson behaviour).
-	await fs.mkdir(dirPath, { recursive: true })
+	// fs.mkdir reports the shallowest directory it had to create and returns undefined
+	// when every component was already there. The return value is kept because step 4b
+	// uses it to synchronize the directory ENTRIES this write created: fsyncing a
+	// created directory syncs that directory's own inode, not the entry in its parent
+	// that names it, so a crash could lose the saved file together with the new
+	// directory holding it.
+	const createdFrom = await fs.mkdir(dirPath, { recursive: true })
 	await fs.access(dirPath)
 
 	// Create the staging directory only when we generate the temp file there;
@@ -300,7 +354,15 @@ export async function safeWriteText(
 		// link points at, which is the same trust problem as writing through a
 		// dangling symlink in resolvePublishTarget.
 		const supplied = path.resolve(options.tempPath)
-		if (path.dirname(supplied) !== path.resolve(dirPath)) {
+		// Compare canonical directories, not spellings. fs.realpath resolves a symlinked
+		// ancestor directory and a Windows 8.3 short name, so a caller that staged through
+		// an alias of the target's own directory staged beside the target and the commit
+		// rename would not cross a filesystem: rejecting it on spelling alone failed a
+		// write that was always legal. canonicalDirKey propagates any realpath failure that
+		// is not "not there yet", so a directory whose canonical form cannot be established
+		// is rejected rather than guessed at.
+		const suppliedDirKey = path.dirname(await canonicalDirKey(supplied))
+		if (suppliedDirKey !== path.dirname(await canonicalDirKey(targetPath))) {
 			throw new StagingPathError(
 				`Staging file must sit in the target's directory (${dirPath}), got ${supplied}`,
 				supplied,
@@ -355,6 +417,36 @@ export async function safeWriteText(
 	// Non-null only when the win32 step-2 block saved a successful DACL dump:
 	// it gates the step-5 restore and is tracked for the cleanup unlinks.
 	let daclDumpPath: string | null = null
+	// The step-2 DACL handling and the staging-directory hardening in step 1 both key
+	// off this value, and the hardening has to report through the same sink, so both are
+	// resolved before the staging directory is created.
+	const platform = options?.platform ?? process.platform
+	// Warning delivery must never abort the write: the notices below describe a
+	// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
+	// a logger that is mid-restart) must not turn that into a failed save.
+	const warn = (message: string) => {
+		const report = (label: string, error: unknown) => {
+			console.warn(
+				`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
+			)
+		}
+		try {
+			const sink = options?.onWarning ?? ((m: string) => console.warn(m))
+			const result: unknown = sink(message)
+			// A sink may be async - TypeScript accepts a value-returning callback where
+			// a void one is expected. Awaiting it would let warning delivery delay a
+			// write that has already committed (and hang it if the sink never settles),
+			// while leaving the promise unhandled turns a rejection into an unhandled
+			// rejection, which under Node's default mode can end the process after a
+			// successful write. Attach a handler without awaiting.
+			if (result instanceof Promise) {
+				result.catch((error: unknown) => report("rejected", error))
+			}
+		} catch (error: unknown) {
+			report("failed", error)
+		}
+	}
+
 	try {
 		// -- Step 1: write content to staging temp file -------------------
 		if (!options?.tempPath) {
@@ -367,6 +459,18 @@ export async function safeWriteText(
 			// extension host encodes a document with VS Code's own codec, which
 			// covers the legacy code pages Node cannot represent) are published
 			// unchanged.
+			// Windows: the platform's directory creation ignores mkdirSync's mode argument and
+			// chmodSync does not establish a private DACL, so a staging directory created
+			// inside a parent whose DACL admits other accounts holds the staged content readable
+			// by those accounts until the step-5 restore. Make the directory private before the
+			// first byte is written; stagingDir is non-null exactly on this branch.
+			if (platform === "win32" && stagingDir !== null) {
+				if (!(await _grantPrivateDaclWindows(stagingDir, options?.execFileRunner))) {
+					warn(
+						`Staged content in ${stagingDir} may be readable by other accounts: the staging directory's Windows DACL could not be made restrictive before the content was written.`,
+					)
+				}
+			}
 			const buffer = Buffer.from(content)
 			let targetMode = 0o644 // default for a fresh target
 			let targetExists = false
@@ -423,32 +527,6 @@ export async function safeWriteText(
 		}
 
 		// -- Step 2 (win32): save DACL BEFORE the backup copy -----------
-		const platform = options?.platform ?? process.platform
-		// Warning delivery must never abort the write: the notices below describe a
-		// committed-but-imperfect publish, and a caller whose callback throws (a UI sink,
-		// a logger that is mid-restart) must not turn that into a failed save.
-		const warn = (message: string) => {
-			const report = (label: string, error: unknown) => {
-				console.warn(
-					`safeWriteText: onWarning callback ${label}: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-			try {
-				const sink = options?.onWarning ?? ((m: string) => console.warn(m))
-				const result: unknown = sink(message)
-				// A sink may be async - TypeScript accepts a value-returning callback where
-				// a void one is expected. Awaiting it would let warning delivery delay a
-				// write that has already committed (and hang it if the sink never settles),
-				// while leaving the promise unhandled turns a rejection into an unhandled
-				// rejection, which under Node's default mode can end the process after a
-				// successful write. Attach a handler without awaiting.
-				if (result instanceof Promise) {
-					result.catch((error: unknown) => report("rejected", error))
-				}
-			} catch (error: unknown) {
-				report("failed", error)
-			}
-		}
 		if (platform === "win32") {
 			let accessError: unknown = null
 			try {
@@ -498,19 +576,41 @@ export async function safeWriteText(
 					// keeps the target present, so the step 4 rename is the only change to the
 					// canonical path. The copy is flushed so the retained content survives a crash.
 					try {
-						// Create the destination BEFORE any content exists at it, with the mode fixed
-						// at open time. fs.copyFile picks the destination mode itself (the platform
-						// creation mask subject to umask on some platforms, the source's mode - or its
-						// read-only attribute - on others), so letting it create the file would either
-						// leave a restrictive target's bytes briefly readable to others, or leave the
-						// copy unwritable so the fsync open below fails with EACCES. open() ignores its
-						// mode argument for an existing file, so this 0o600 survives the copy on POSIX;
-						// the chmod afterwards is what clears a copied read-only attribute on Windows
-						// and keeps a backup of a permissive file private.
+						// Create the destination BEFORE any content exists at it, with the mode fixed at
+						// open time, and copy the bytes through descriptors this code opened. fs.copyFile
+						// picks the destination's mode itself (the platform creation mask subject to umask
+						// on some platforms) and, on POSIX, re-applies the SOURCE's mode to the file it
+						// writes: a copy through it would widen this private 0o600 seed to the target's
+						// permissions for the whole copy window - the previous content readable to every
+						// account the target never admitted - and on Windows it carries the source's
+						// read-only attribute onto the copy. Writing into the descriptor opened below keeps
+						// the mode this code chose from the first byte to the last, so nothing has to be
+						// chmodded afterwards.
 						const seedFd = fsSync.openSync(backupPath, "wx", 0o600)
-						fsSync.closeSync(seedFd)
-						await fs.copyFile(targetPath, backupPath)
-						await fs.chmod(backupPath, 0o600)
+						try {
+							const sourceFd = fsSync.openSync(targetPath, "r")
+							try {
+								const chunk = Buffer.allocUnsafe(64 * 1024)
+								let readOffset = 0
+								for (;;) {
+									const read = fsSync.readSync(sourceFd, chunk, 0, chunk.length, readOffset)
+									if (read === 0) {
+										break
+									}
+									// writeSync can report a short write: publishing a truncated backup would
+									// hand recovery a copy that is not a complete previous state.
+									let written = 0
+									while (written < read) {
+										written += fsSync.writeSync(seedFd, chunk, written, read - written)
+									}
+									readOffset += read
+								}
+							} finally {
+								fsSync.closeSync(sourceFd)
+							}
+						} finally {
+							fsSync.closeSync(seedFd)
+						}
 						// "r+" not "r": fsync on a read-only handle is EPERM on Windows, and the same
 						// flag the staged temp file uses above.
 						const backupFd = fsSync.openSync(backupPath, "r+")
@@ -557,6 +657,41 @@ export async function safeWriteText(
 					// path of the copy it is keeping - it is a hidden random name and is
 					// otherwise unrecoverable.
 					throw new PostCommitDurabilityError(targetPath, error, releaseBackupOnSuccess ? backupPath : null)
+				}
+				// The rename above changed one entry inside dirPath. When this write also
+				// created dirPath or any of its ancestors, each of those directories is itself
+				// an entry in its own parent, and the fsync above synchronized dirPath's inode,
+				// not the entries naming it. Walk up from the first directory this write created
+				// and synchronize each containing directory, deepest first: the same failure is
+				// reported the same way, because the content is at the target either way and only
+				// its durability is in question.
+				if (createdFrom !== undefined) {
+					const stopAt = path.dirname(createdFrom)
+					let ancestorCursor = path.dirname(dirPath)
+					try {
+						for (;;) {
+							const ancestorFd = fsSync.openSync(ancestorCursor, "r")
+							try {
+								_fsyncFile(ancestorFd)
+							} finally {
+								fsSync.closeSync(ancestorFd)
+							}
+							if (ancestorCursor === stopAt) {
+								break
+							}
+							const ancestorParent = path.dirname(ancestorCursor)
+							if (ancestorParent === ancestorCursor) {
+								break
+							}
+							ancestorCursor = ancestorParent
+						}
+					} catch (ancestorError: unknown) {
+						throw new PostCommitDurabilityError(
+							targetPath,
+							ancestorError,
+							releaseBackupOnSuccess ? backupPath : null,
+						)
+					}
 				}
 			}
 

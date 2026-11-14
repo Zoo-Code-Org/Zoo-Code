@@ -229,15 +229,20 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// referent while this scan - which used the lexical spelling - searched the link's own
 		// directory, found nothing, and let the write below publish straight over the orphaned
 		// newer content. Resolve the publish target first so the scan looks where the bytes are.
-		// Best-effort on purpose: resolvePublishTarget rejects a link with no referent, and in that
-		// state nothing can be attributed to a referent, so recovery falls back to the named path -
-		// exactly what it always scanned - and the strict resolution below still decides whether
-		// this write may proceed at all.
-		let recoveryTarget = absoluteFilePath
+		// Best-effort on purpose: resolvePublishTarget rejects a link with no referent, and in
+		// that state the strict resolution below still decides whether this write may proceed at
+		// all. The fallback is the lock key rather than the spelling the caller named:
+		// resolveLockKey already followed the links as far as they went and canonicalized what it
+		// reached, so while the link dangles it still names the file an interrupted publish was
+		// renaming onto, whereas the named spelling sits in a different directory whenever the
+		// referent lives elsewhere. Falling back to the named path made this scan look into the
+		// link's own directory, find nothing, and let the write publish straight over the orphaned
+		// newer copy this scan exists to heal.
+		let recoveryTarget = lockKey
 		try {
 			recoveryTarget = await resolvePublishTarget(absoluteFilePath)
 		} catch {
-			recoveryTarget = absoluteFilePath
+			recoveryTarget = lockKey
 		}
 		const recovery = await recoverInterruptedReplacement(recoveryTarget).catch((error: unknown) => {
 			const code = getErrorCode(error) ?? "unknown"

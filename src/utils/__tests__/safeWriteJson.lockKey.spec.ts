@@ -1,5 +1,6 @@
 // npx vitest run utils/__tests__/safeWriteJson.lockKey.spec.ts
 
+import { existsSync } from "fs"
 import * as os from "os"
 import path from "path"
 import type { BigIntStats } from "fs"
@@ -169,6 +170,89 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		)
 
 		expect(await resolveLockKey(file)).toBe(path.join(canonicalDir, "history_item.json"))
+	})
+
+	it("follows a chain of nine links to the file it ends at", async () => {
+		// Nine links, dangling at the far end. A walk that stops at eight leaves the key naming
+		// an intermediate link, so a writer that named the file through this chain queued on a
+		// different lock from a writer standing at the file itself - two locks for one file,
+		// reached by chain length instead of by spelling.
+		const chain = [
+			"a0.json",
+			"a1.json",
+			"a2.json",
+			"a3.json",
+			"a4.json",
+			"a5.json",
+			"a6.json",
+			"a7.json",
+			"a8.json",
+		]
+		const referent = path.resolve("/tmp/chain-dir", "history_item.json")
+		const targets = new Map<string, string>()
+		chain.forEach((name, index) => {
+			targets.set(
+				path.resolve("/tmp/chain-dir", name),
+				index + 1 < chain.length ? path.resolve("/tmp/chain-dir", chain[index + 1]) : referent,
+			)
+		})
+		mockedRealpath.mockRejectedValue(enoent)
+		mockedLstat.mockImplementation(
+			async (target) =>
+				({
+					isSymbolicLink: () => targets.has(String(target)),
+					isFile: () => !targets.has(String(target)),
+				}) as unknown as BigIntStats,
+		)
+		mockedReadlink.mockImplementation(async (target) => {
+			const next = targets.get(String(target))
+			return next === undefined ? Promise.reject(new Error("not a link")) : next
+		})
+
+		const viaChain = await resolveLockKey(path.resolve("/tmp/chain-dir", chain[0]))
+
+		// One readlink per link, all nine, plus the probe that finds a non-link at the far end:
+		// the key names the file, not a link part-way down the chain.
+		expect(mockedReadlink).toHaveBeenCalledTimes(chain.length + 1)
+		expect(viaChain).toBe(referent)
+	})
+
+	it("heals the interrupted publish beside the referent while the alias dangles", async () => {
+		const linkDir = await makeDir("lockkey-link-")
+		const referentDir = await makeDir("lockkey-referent-")
+		const referent = path.join(referentDir, "history_item.json")
+		currentLink = path.join(linkDir, "link.json")
+		// An interrupted two-step replacement: the previous write renamed the committed file to
+		// its backup and never landed the replacement, so the committed content sits in a
+		// backup beside the referent while the referent itself is absent. The link was renamed
+		// away too, so the alias resolves nowhere.
+		const backupPath = path.join(referentDir, ".history_item.json.bak_previous.tmp")
+		await fs.writeFile(backupPath, JSON.stringify({ version: "committed" }))
+		// Neither spelling resolves while the referent is missing, which is what a dangling
+		// link looks like to realpath. Recovery restores the referent, and from then on both
+		// spellings resolve again.
+		mockedRealpath.mockImplementation(async (target) => {
+			if (!existsSync(referent)) {
+				throw enoent
+			}
+			return String(target) === currentLink ? referent : String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink ? referent : Promise.reject(new Error("not a link")),
+		)
+		mockedAcquireFileLock.mockResolvedValue(async () => {})
+
+		await safeWriteJson(currentLink, { id: "task-1" })
+
+		// The lock key is the referent's key, and recovery looked beside the referent as well,
+		// so the interrupted publish's committed state was restored before this write decided
+		// what the file holds. Named at the dangling alias, this write queued on the referent's
+		// lock and healed the referent's leftovers instead of failing every retry.
+		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
+		expect(JSON.parse(await fs.readFile(referent, "utf8"))).toEqual({ id: "task-1" })
+		expect(await fs.readdir(referentDir)).toEqual(["history_item.json"])
+		expect(await fs.readdir(linkDir)).toEqual([])
 	})
 })
 
