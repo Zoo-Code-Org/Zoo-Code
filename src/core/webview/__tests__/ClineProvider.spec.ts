@@ -748,6 +748,8 @@ describe("ClineProvider", () => {
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: expect.stringContaining("selected code"),
+				// Generated context is never the authorized substring.
+				authorizedMentionText: "",
 			})
 			expect(sidebar.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 			expect(tab.postMessage).not.toHaveBeenCalled()
@@ -938,6 +940,8 @@ describe("ClineProvider", () => {
 					type: "invoke",
 					invoke: "setChatBoxMessage",
 					text: expect.stringContaining("selected code"),
+					// Generated context is never the authorized substring.
+					authorizedMentionText: "",
 				})
 				expect(visible.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 				expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
@@ -966,6 +970,8 @@ describe("ClineProvider", () => {
 					type: "invoke",
 					invoke: "setChatBoxMessage",
 					text: expect.stringContaining("selected code"),
+					// Generated context is never the authorized substring.
+					authorizedMentionText: "",
 				})
 				expect(tab.postMessage).not.toHaveBeenCalled()
 				expect(panel.reveal).not.toHaveBeenCalled()

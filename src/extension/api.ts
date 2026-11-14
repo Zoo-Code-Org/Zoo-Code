@@ -250,9 +250,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// effectively unlimited. The soft repetition tier is disabled too:
 		// without a reachable hard stop it would reject every identical call
 		// with no escalation.
-		const options: CreateTaskOptions = {
+		const options: CreateTaskOptions & { authorizedMentionText?: string } = {
 			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
 			toolRepetitionSoftLimit: 0,
+			// The API caller authored the task text.
+			authorizedMentionText: text ?? "",
 		}
 
 		const task = await provider.createTask(text, images, undefined, options, configuration)

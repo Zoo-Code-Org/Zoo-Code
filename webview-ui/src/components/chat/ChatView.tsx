@@ -205,6 +205,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 	const autoApproveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const userRespondedRef = useRef<boolean>(false)
+	// Null means the chat box value is fully user-authored. A string names
+	// the only substring that may have mentions expanded.
+	const authorizedMentionRef = useRef<string | null>(null)
 	const [currentFollowUpTs, setCurrentFollowUpTs] = useState<number | null>(null)
 	const [aggregatedCostsMap, setAggregatedCostsMap] = useState<
 		Map<
@@ -632,6 +635,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setSelectedImages([])
 		setClineAsk(undefined)
 		setEnableButtons(false)
+		authorizedMentionRef.current = null
 		// Do not reset mode here as it should persist.
 		// setPrimaryButtonKey(undefined)
 		// setSecondaryButtonKey(undefined)
@@ -670,6 +674,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						vscode.postMessage({ type: "queueMessage", text, images })
 						setInputValue("")
 						setSelectedImages([])
+						authorizedMentionRef.current = null
 					} catch (error) {
 						console.error(
 							`Failed to queue message: ${error instanceof Error ? error.message : String(error)}`,
@@ -683,7 +688,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				userRespondedRef.current = true
 
 				if (messagesRef.current.length === 0) {
-					vscode.postMessage({ type: "newTask", text, images })
+					vscode.postMessage({
+						type: "newTask",
+						text,
+						images,
+						// Null means the user authored the whole value.
+						authorizedMentionText: authorizedMentionRef.current ?? text,
+					})
+					authorizedMentionRef.current = null
 				} else if (clineAskRef.current) {
 					if (clineAskRef.current === "followup") {
 						markFollowUpAsAnswered()
@@ -729,12 +741,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 
 	const handleSetChatBoxMessage = useCallback(
-		(text: string, images: string[]) => {
+		(text: string, images: string[], authorizedMentionText?: string) => {
 			// Avoid nested template literals by breaking down the logic
 			let newValue = text
 
 			if (inputValue !== "") {
 				newValue = inputValue + " " + text
+			}
+
+			if (typeof authorizedMentionText === "string") {
+				// Empty box: the named substring is the only authorized part.
+				// Typed box text is user-authored, so it stays the authorized
+				// part and the inserted substring is dropped (fail closed).
+				authorizedMentionRef.current =
+					inputValue === "" ? authorizedMentionText : (authorizedMentionRef.current ?? inputValue)
 			}
 
 			setInputValue(newValue)
@@ -747,6 +767,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setShowRetiredProviderWarning(false)
 		vscode.postMessage({ type: "clearTask" })
 	}, [])
+
+	// A manual edit re-authors the whole chat box value.
+	const setInputValueFromUser = useCallback(
+		(value: string | ((prev: string) => string)) => {
+			authorizedMentionRef.current = null
+			setInputValue(value)
+		},
+		[setInputValue],
+	)
 
 	// Handle stop button click from textarea
 	const handleStopTask = useCallback(() => {
@@ -943,7 +972,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							handleSendMessage(message.text ?? "", message.images ?? [])
 							break
 						case "setChatBoxMessage":
-							handleSetChatBoxMessage(message.text ?? "", message.images ?? [])
+							handleSetChatBoxMessage(
+								message.text ?? "",
+								message.images ?? [],
+								message.authorizedMentionText,
+							)
 							break
 						case "primaryButtonClick":
 							handlePrimaryButtonClick(message.text ?? "", message.images ?? [])
@@ -1875,7 +1908,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			<ChatTextArea
 				ref={textAreaRef}
 				inputValue={inputValue}
-				setInputValue={setInputValue}
+				setInputValue={setInputValueFromUser}
 				sendingDisabled={sendingDisabled || isProfileDisabled}
 				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}

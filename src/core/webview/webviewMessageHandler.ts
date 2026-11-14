@@ -717,7 +717,13 @@ export const webviewMessageHandler = async (
 					resolved.text,
 					resolved.images,
 					undefined,
-					{ taskId: message.taskId },
+					{
+						taskId: message.taskId,
+						// Fail closed when the webview omits the authorized
+						// substring, so generated context cannot expand.
+						authorizedMentionText:
+							typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : "",
+					},
 					message.taskConfiguration,
 				)
 				// Task created successfully - notify the UI to reset

@@ -33,6 +33,7 @@ import { ApiStreamChunk } from "../../../api/transform/stream"
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { processUserContentMentions, userMentionContent } from "../../mentions/processUserContentMentions"
+import { parseMentions } from "../../mentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
@@ -3511,6 +3512,10 @@ describe("Cline", () => {
 			})
 
 			describe("processUserContentMentions", () => {
+				beforeEach(() => {
+					vi.clearAllMocks()
+				})
+
 				it("expands only the authorized user input and leaves tool results unexpanded", async () => {
 					const [cline, task] = Task.create({
 						provider: mockProvider,
@@ -3584,6 +3589,38 @@ describe("Cline", () => {
 
 					await cline.abortTask(true)
 					await task.catch(() => {})
+				})
+
+				it("does not expand task text when the start passes no authorization", async () => {
+					const [cline, task] = Task.create({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "read '@/secret' please",
+						authorizedMentionText: "",
+					})
+
+					// Wait until the loop reached mention processing, then stop it.
+					await vi.waitFor(() => expect(processUserContentMentions).toHaveBeenCalled())
+					await cline.abortTask(true)
+					await task.catch(() => {})
+
+					expect(parseMentions).not.toHaveBeenCalled()
+				})
+
+				it("expands the task text when the start authorizes it", async () => {
+					const taskText = "read '@/secret' please"
+					const [cline, task] = Task.create({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: taskText,
+						authorizedMentionText: taskText,
+					})
+
+					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
+					await cline.abortTask(true)
+					await task.catch(() => {})
+
+					expect(vi.mocked(parseMentions).mock.calls[0]?.[0]).toBe(taskText)
 				})
 			})
 		})

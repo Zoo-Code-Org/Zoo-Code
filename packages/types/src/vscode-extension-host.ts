@@ -163,6 +163,8 @@ export interface ExtensionMessage {
 		| "switchTab"
 		| "toggleAutoApprove"
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
+	/** With `invoke: "setChatBoxMessage"`: user-authored substring of `text` that may have mentions expanded. */
+	authorizedMentionText?: string
 	/**
 	 * Partial state updates are allowed to reduce message size (e.g. omit large fields like taskHistory).
 	 * The webview is responsible for merging.
@@ -850,6 +852,8 @@ export interface WebviewMessage {
 	updatedSettings?: RooCodeSettings
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
+	/** User-authored substring of `text` that may have mentions expanded. Empty disables expansion. */
+	authorizedMentionText?: string
 	// Worktree properties
 	worktreePath?: string
 	worktreeBranch?: string

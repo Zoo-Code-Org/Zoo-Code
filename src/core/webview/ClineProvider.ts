@@ -1135,6 +1135,9 @@ export class ClineProvider
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				// The generated prompt is context. Only the typed input may
+				// have mentions expanded.
+				authorizedMentionText: typeof params.userInput === "string" ? params.userInput : "",
 			})
 			await this.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
@@ -1166,6 +1169,9 @@ export class ClineProvider
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				// The template interpolates the typed input, so only that
+				// part may have mentions expanded.
+				authorizedMentionText: typeof params.userInput === "string" ? params.userInput : "",
 			})
 			await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
