@@ -3,6 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
+import { PostCommitDurabilityError } from "../../services/file-safety/safeWriteText"
 import { safeWriteJson } from "../safeWriteJson"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -817,5 +818,314 @@ describe("safeWriteJson", () => {
 		expect(traceEvents.find((event) => event.stage === "backup-rename")?.detail).toBe("eperm-fallback")
 		const content = await readFileContent(currentTestFilePath)
 		expect(content).toEqual(newData)
+	})
+
+	// The four cases below come from the branch side of the merge: they pin the
+	// lock-key and publish-target behaviour that motivated this unit, plus the
+	// mode-preservation and post-commit-durability behaviour that safeWriteText
+	// provides to the JSON path.
+	// The commit rename targets the symlink referent. The staged temp file must
+	// therefore be created beside the RESOLVED target — staging beside the link
+	// would make the commit rename fail with EXDEV when the referent is on
+	// another filesystem. (Real symlinks are unavailable in this CI lane, so the
+	// resolution is simulated by mocking fs.realpath the same way.)
+	test("stages the temp file beside the symlink referent and commits onto it", async () => {
+		const referentDir = path.join(tempDir, "referent")
+		const linkDir = path.join(tempDir, "link")
+		await fs.mkdir(referentDir, { recursive: true })
+		await fs.mkdir(linkDir, { recursive: true })
+		// caller-visible path (the link) vs the resolved referent path
+		const callerPath = path.join(linkDir, "test-file.json")
+		const referentPath = path.join(referentDir, "test-file.json")
+		// Seed the RESOLVED referent with real content (via the actual fs) so the
+		// write exercises replacement of an EXISTING referent: the lock, the
+		// backup, and the commit all target the resolved referent.
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: true }))
+
+		// Only the file resolves through the link; the directory is already canonical,
+		// so the lock key is the referent rather than the alias directory + basename.
+		vi.spyOn(fs, "realpath").mockImplementation(async (target) =>
+			target === callerPath ? referentPath : String(target),
+		)
+
+		await safeWriteJson(callerPath, { after: true })
+
+		// the temp file was created next to the resolved referent, NOT beside the link
+		const tempPaths = vi.mocked(fsSyncActual.createWriteStream).mock.calls.map((call) => String(call[0]))
+		expect(tempPaths.some((p) => p.startsWith(referentDir + path.sep) && p.includes(".new_"))).toBe(true)
+		expect(tempPaths.some((p) => p.startsWith(linkDir + path.sep))).toBe(false)
+
+		// the content was committed onto the referent
+		expect(await readFileContent(referentPath)).toEqual({ after: true })
+	})
+
+	// proper-lockfile with realpath:false keys the lock by the given path, so a
+	// symlink alias and its referent must coordinate through ONE lock on the
+	// resolved referent — otherwise a concurrent merge through both aliases
+	// reads the same JSON and overwrites one update. (Real symlinks are
+	// unavailable in this CI lane, so the resolution is simulated by mocking
+	// fs.realpath, the same way as the staging test above.)
+	test("acquires the lock on the resolved referent, not the caller alias", async () => {
+		vi.resetModules() // fresh module instances so the doMock below is picked up
+
+		const referentDir = path.join(tempDir, "lock-referent")
+		const linkDir = path.join(tempDir, "lock-link")
+		await fs.mkdir(referentDir, { recursive: true })
+		await fs.mkdir(linkDir, { recursive: true })
+		// caller-visible path (the link) vs the resolved referent path
+		const callerPath = path.join(linkDir, "locked.json")
+		const referentPath = path.join(referentDir, "locked.json")
+		await fsPromisesActuals.writeFile!(referentPath, JSON.stringify({ seed: 1 }))
+
+		// Only the file resolves through the link; the directory is already canonical,
+		// so the lock key is the referent rather than the alias directory + basename.
+		const realpathSpy = vi
+			.spyOn(fs, "realpath")
+			.mockImplementation(async (target) => (target === callerPath ? referentPath : String(target)))
+
+		// Wrap the real lock in a capturing mock, and drive the two rare error paths
+		// (the onCompromised callback and a failing release) so they stay covered
+		// without real lockfile staleness. The callback rethrows by design, so
+		// the mock swallows that throw and lets the real lock proceed.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const lockMockFn = vi.fn(
+			async (
+				file: Parameters<typeof realLockfile.lock>[0],
+				options?: Parameters<typeof realLockfile.lock>[1],
+			) => {
+				try {
+					options?.onCompromised?.(new Error("lock compromised (test)"))
+				} catch {
+					// onCompromised rethrows by design; swallow so the real lock proceeds.
+				}
+				const release = await realLockfile.lock(file, options)
+				return async () => {
+					await release()
+					throw new Error("release failed (test)")
+				}
+			},
+		)
+		const lockMock = lockMockFn as unknown as typeof realLockfile.lock
+		vi.doMock("proper-lockfile", () => ({
+			...realLockfile,
+			lock: lockMock,
+		}))
+
+		// Re-import safeWriteJson so it picks up the mocked proper-lockfile.
+		const { safeWriteJson: mockedSafeWriteJson } = await import("../safeWriteJson")
+
+		const mergeFn = vi.fn((existing: unknown, incoming: unknown) => ({
+			...(existing as Record<string, unknown>),
+			...(incoming as Record<string, unknown>),
+		}))
+
+		// Capture the compromise + release-failure logs.
+		const consoleErrorSpy = vi.spyOn(console, "error")
+		try {
+			await mockedSafeWriteJson(callerPath, { added: true }, { merge: mergeFn })
+
+			// The lock was keyed by the resolved referent — every alias shares it.
+			expect(lockMock).toHaveBeenCalledTimes(1)
+			expect(String(lockMockFn.mock.calls[0][0])).toBe(referentPath)
+			// The merge read the referent's content through that single lock.
+			expect(mergeFn).toHaveBeenCalledWith({ seed: 1 }, { added: true })
+			expect(await readFileContent(referentPath)).toEqual({ seed: 1, added: true })
+			// The compromise callback and the failed release were logged, not thrown.
+			expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("was compromised"), expect.any(Error))
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to release lock"),
+				expect.any(Error),
+			)
+		} finally {
+			// Cleanup must run even when an assertion fails: a leaked mock
+			// registration or console spy changes later tests, and vi.unmock
+			// alone does not reset a module that already imported the mock.
+			realpathSpy.mockRestore()
+			vi.unmock("proper-lockfile")
+			vi.resetModules()
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
+	test.skipIf(process.platform === "win32")(
+		"preserves a restrictive 0o600 target mode through the atomic publish",
+		async () => {
+			await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+			fsSyncActual.chmodSync(currentTestFilePath, 0o600)
+
+			await safeWriteJson(currentTestFilePath, { after: true })
+
+			expect(fsSyncActual.statSync(currentTestFilePath).mode & 0o777).toBe(0o600)
+			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+		},
+	)
+
+	// ── post-commit durability: the published target must survive (PI regression) ──
+
+	it("stages under a token that a zero random still fills", async () => {
+		// Math.random() === 0 stringifies to "0", so substring(2) answers the empty string and the staging
+		// name would end <timestamp>_.tmp (measured with node 22.23.4) - the one tail jsonFileRecovery
+		// cannot collect on the underscore-anchored prefix, where the token is the only thing that
+		// attributes the name to this target. The other half of the guarantee: a non-zero random still has
+		// to produce its own token rather than a constant.
+		// The suite's own directory rather than a second mkdtemp: this row writes two files and a rejection
+		// anywhere inside it would leave a per-test directory behind, whereas afterEach removes tempDir
+		// whatever happens.
+		const stagedName = async (name: string): Promise<string> => {
+			const file = path.join(tempDir, name)
+			await safeWriteJson(file, { committed: true })
+			const calls = vi.mocked(fs.rename).mock.calls
+			// The commit rename is the last rename of the write: its source is the staging file.
+			return path.basename(String(calls[calls.length - 1][0]))
+		}
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
+		let zeroName: string
+		let halfName: string
+		try {
+			zeroName = await stagedName("zero.json")
+			randomSpy.mockReturnValue(0.5)
+			halfName = await stagedName("half.json")
+		} finally {
+			randomSpy.mockRestore()
+		}
+
+		expect(zeroName).toMatch(/^\.new_zero\.json_\d+_[^_]+\.tmp$/)
+		expect(halfName).toMatch(/^\.new_half\.json_\d+_[0-9a-z]+\.tmp$/)
+		// "i" is what 0.5 answers in this shape: 0.5.toString(36) is "0.i", so substring(2) is "i"
+		// (measured with node 22.23.4). The staging name has to carry it, not a constant.
+		expect(halfName).toContain("_i.tmp")
+	})
+
+	// The other builder that reads the same expression: the EPERM fallback moves the target to a backup
+	// name, and jsonFileRecovery only collects that name when the token part is non-empty. Forcing the
+	// Windows-style commit failure while Math.random() answers 0 reads the backup destination out of the
+	// rename that actually ran, so removing the fallback in createBackupFilePath cannot pass unnoticed.
+	it("backs up under a token that a zero random still fills when the commit rename hits EPERM", async () => {
+		const randomSpy = vi.spyOn(Math, "random").mockReturnValue(0)
+		try {
+			// Cleared first: the mock's call history survives between tests in this file, and without this the
+			// assertion below could be satisfied by another test's backup rename.
+			vi.mocked(fs.rename).mockClear()
+			vi.mocked(fs.rename).mockImplementationOnce(async () => {
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			})
+			await safeWriteJson(currentTestFilePath, { committed: true })
+			const backupRename = vi.mocked(fs.rename).mock.calls.find((call) => String(call[1]).includes(".bak_"))
+			expect(backupRename).toBeDefined()
+			expect(path.basename(String(backupRename![1]))).toMatch(/^\.test-file\.json\.bak_\d+_[0-9a-z]+\.tmp$/)
+		} finally {
+			randomSpy.mockRestore()
+		}
+	})
+
+	it("keeps the published target with its new content when the post-commit directory fsync fails", async () => {
+		const fsSyncMod = await import("fs")
+		const realFsync = fsSyncMod.fsyncSync
+		// The parent-directory fsync is the only fsync that runs after the
+		// commit rename. Watching the rename itself - rather than fabricating a
+		// descriptor - keeps the SUT in charge of opening and closing its own
+		// real directory handle, so the injected fsync failure is the only
+		// error in flight on every platform.
+		const fsyncFailure = new Error("EIO fsync")
+		let committed = false
+		const actualRename = fsPromisesActuals.rename!
+		vi.mocked(fs.rename).mockImplementation((async (from: string, to: string) => {
+			await actualRename(from, to)
+			committed = true
+		}) as typeof fs.rename)
+		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
+		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
+			if (committed) {
+				throw fsyncFailure
+			}
+			return (realFsync as (f: number) => unknown)(fd)
+		}) as never)
+
+		// Earlier tests in this file leave unlink history on the shared mock.
+		vi.mocked(fs.unlink).mockClear()
+
+		const failure: unknown = await safeWriteJson(currentTestFilePath, { fresh: "content" }).then(
+			() => null,
+			(error: unknown) => error,
+		)
+		expect(failure).toBeInstanceOf(PostCommitDurabilityError)
+		// The wrapper must carry the injected fsync failure, not a cleanup error.
+		expect((failure as Error).cause).toBe(fsyncFailure)
+
+		// The rename committed: the target must still hold the new JSON, not be
+		// unlinked away by the catch cleanup of the consumed staging path.
+		const content = await readFileContent(currentTestFilePath)
+		expect(content).toEqual({ fresh: "content" })
+		// The cleanup must not unlink the consumed staging path: after the commit
+		// rename it is no longer this write's file to remove.
+		const stagingUnlinks = vi.mocked(fs.unlink).mock.calls.filter((call) => /\.new_.*\.tmp$/.test(String(call[0])))
+		expect(stagingUnlinks).toHaveLength(0)
+	})
+
+	it("does not restore the fallback backup over a commit that landed", async () => {
+		const fsSyncMod = await import("fs")
+		const realFsync = fsSyncMod.fsyncSync
+		const fsyncFailure = new Error("EIO directory fsync")
+		const newData = { published: "new content" }
+		const targetBaseName = path.basename(currentTestFilePath)
+		let commitAttemptFailed = false
+		let commitLanded = false
+		const actualRename = fsPromisesActuals.rename!
+		// The EPERM fallback is the only path that takes a backup at all: the first commit
+		// rename fails with the Windows-style EPERM, the fallback moves the target to its
+		// backup and renames the replacement in. That second commit succeeds - it is the
+		// rename onto the target below - and only then does the parent-directory fsync fail.
+		// The commit rename is recognised by what it lands on rather than by the path this test
+		// built, because safeWriteText commits onto its re-resolved publish target: when the
+		// temp directory is reached through a link - which is how the windows-latest runner
+		// reports its temp path - that destination is the resolved directory, not the literal
+		// path written here. Path equality then waits for an event that already happened, the
+		// injection never fires, and the real parent-directory fsync runs instead - on a
+		// read-only handle that is EPERM on Windows, which is why safeWriteText opens its
+		// backup "r+". The basename identifies the commit rename here: this write is the only
+		// activity in this directory, and neither the staging name nor the backup name carries
+		// it.
+		vi.mocked(fs.rename).mockImplementation((async (from: string, to: string) => {
+			const ontoTarget = path.basename(to) === targetBaseName
+			if (ontoTarget && !commitAttemptFailed) {
+				commitAttemptFailed = true
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			}
+			if (ontoTarget) {
+				commitLanded = true
+			}
+			await actualRename(from, to)
+		}) as typeof fs.rename)
+		vi.spyOn(process, "platform", "get").mockReturnValue("linux")
+		vi.spyOn(fsSyncMod, "fsyncSync").mockImplementation(((fd: number) => {
+			if (commitLanded) throw fsyncFailure
+			return (realFsync as (f: number) => unknown)(fd)
+		}) as never)
+		vi.mocked(fs.unlink).mockClear()
+
+		const failure: unknown = await safeWriteJson(currentTestFilePath, newData).then(
+			() => null,
+			(error: unknown) => error,
+		)
+		expect(failure).toBeInstanceOf(PostCommitDurabilityError)
+		expect((failure as Error).cause).toBe(fsyncFailure)
+
+		// The replacement is at the target. Renaming the backup back over it - which is what
+		// the pre-commit rollback does - would put the old bytes where the rethrown error says
+		// the new content is.
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+
+		// Nothing moved the backup back, and the stale backup is gone rather than left beside
+		// the published file.
+		const rollbackRenames = vi
+			.mocked(fs.rename)
+			.mock.calls.filter(
+				(call) =>
+					/\.bak_/.test(String(call[0])) &&
+					path.resolve(String(call[1])) === path.resolve(currentTestFilePath),
+			)
+		expect(rollbackRenames).toHaveLength(0)
+		const backupLeftovers = (await fs.readdir(tempDir)).filter((entry) => entry.includes(".bak_"))
+		expect(backupLeftovers).toEqual([])
 	})
 })

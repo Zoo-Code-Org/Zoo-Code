@@ -10,12 +10,53 @@ function getTempFilePrefix(absoluteFilePath: string, kind: "new" | "bak"): strin
 	return `.${path.basename(absoluteFilePath)}.${kind}_`
 }
 
+/**
+ * Staging name used by writers that publish through safeWriteText, which requires a
+ * caller-staged path named `.new_*.tmp` (see services/file-safety/safeWriteText). The
+ * target basename is embedded after the anchor so the name stays scoped to this file.
+ */
+function getStagedReplacementPrefix(absoluteFilePath: string): string {
+	return `.new_${path.basename(absoluteFilePath)}_`
+}
+
+/**
+ * The tail that marks a leftover as this target's own, and the three prefixes do not scope alike.
+ *
+ * The dot-anchored prefixes `.<basename>.new_` and `.<basename>.bak_` already pin this file's
+ * basename through the literal dot before the kind, so a timestamp alone identifies the name. The
+ * token is optional there because writers appended it later: `.history_item.json.bak_1.tmp`, which
+ * core/task-persistence/__tests__/TaskHistoryStore.realConcurrency.spec.ts still plants and
+ * migration must still recover, is a backup of this target. Current writers append
+ * `_<timestamp>_<random>.tmp` (see safeWriteJson's createStagingFilePath and createBackupFilePath);
+ * the base36 token never contains an underscore, and both writers now guarantee it is not empty:
+ * Math.random() === 0 stringifies to "0", so substring(2) answers the empty string and the tail
+ * would be `<timestamp>_.tmp` (measured with node 22.23.4). This pattern still accepts that tail,
+ * because a leftover written before the guarantee is not distinguishable from one written after it.
+ *
+ * The underscore-anchored staged prefix `.new_<basename>_` is not scoped by its prefix alone. A
+ * basename that starts with this basename plus an underscore - `a.json_extra.json` beside `a.json` -
+ * produces `.new_a.json_extra_<ts>_<rand>.tmp`, which starts with this file's `.new_a.json_` prefix.
+ * That writer holds only the sibling's lock, so collecting the name would unlink a staging file a
+ * live writer is about to publish, and that write then fails with ENOENT before it can commit. Only
+ * the full `<ts>_<rand>.tmp` tail attributes a staged-looking name, so without the token it is not
+ * this target's leftover.
+ */
+const ANCHORED_LEFTOVER_TAIL = /^\d+(_[^_]*)?\.tmp$/
+const STAGED_LEFTOVER_TAIL = /^\d+_[^_]+\.tmp$/
+
+/** Whether `entry` is a leftover this target's own writer staged. */
 function isReplacementLeftover(absoluteFilePath: string, entry: string): boolean {
-	return (
-		entry.endsWith(".tmp") &&
-		(entry.startsWith(getTempFilePrefix(absoluteFilePath, "new")) ||
-			entry.startsWith(getTempFilePrefix(absoluteFilePath, "bak")))
-	)
+	const patterns: [string, RegExp][] = [
+		[getTempFilePrefix(absoluteFilePath, "new"), ANCHORED_LEFTOVER_TAIL],
+		[getTempFilePrefix(absoluteFilePath, "bak"), ANCHORED_LEFTOVER_TAIL],
+		[getStagedReplacementPrefix(absoluteFilePath), STAGED_LEFTOVER_TAIL],
+	]
+	for (const [prefix, tail] of patterns) {
+		if (entry.startsWith(prefix) && tail.test(entry.slice(prefix.length))) {
+			return true
+		}
+	}
+	return false
 }
 
 /**
