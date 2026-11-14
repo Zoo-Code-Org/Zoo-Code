@@ -46,7 +46,10 @@ export const DISCOVERY_TIMEOUT_MINUTES = 5
 export const discoveryTimeoutMs = (spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) => {
 	const spareMinutes = budgetMinutes - spentMinutes - TERMINUS_RESERVE_MINUTES
 	if (spareMinutes <= 0) return 0
-	return Math.min(DISCOVERY_TIMEOUT_MINUTES, spareMinutes) * 60 * 1_000
+	// Floor to whole milliseconds: the value goes straight into spawnSync's timeout option, and a
+	// fractional reading of the elapsed clock (a partial minute spent on the packages before
+	// this one) would otherwise hand the timeout a fractional number of milliseconds.
+	return Math.floor(Math.min(DISCOVERY_TIMEOUT_MINUTES, spareMinutes) * 60 * 1_000)
 }
 
 export function manifestRunBudgetMinutes(spentMinutes, budgetMinutes = MANIFEST_BUDGET_MINUTES) {

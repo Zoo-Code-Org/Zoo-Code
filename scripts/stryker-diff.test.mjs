@@ -2431,6 +2431,7 @@ describe("budget stop publishing and discovery cap", () => {
 
 	it("caps related-test discovery at the budget that is left and refuses it when none is", () => {
 		const caps = []
+		const launches = []
 		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-discovery-cap-"))
 		const reportRoot = path.join(repo, "reports")
 		const previousSummary = process.env.GITHUB_STEP_SUMMARY
@@ -2439,9 +2440,14 @@ describe("budget stop publishing and discovery cap", () => {
 		process.env.GITHUB_STEP_SUMMARY = summaryFile
 		try {
 			fs.mkdirSync(reportRoot, { recursive: true })
-			const clockValues = [0, 20.5 * 60_000, 21 * 60_000]
+			// Four readings for one package: the manifest's own start, the time spent before related-test
+			// discovery, the preflight launch, and the mutation-run launch. With three readings the
+			// mutation-run launch runs out of clock, the harness assertion is thrown inside the
+			// package loop, and the loop reports it as an "Advisory incomplete" row instead of
+			// showing that the acceptance case never reached the engine at all.
+			const clockValues = [0, 19.5 * 60_000, 20 * 60_000, 20.5 * 60_000]
 			let tick = 0
-			runManifest(
+			const rows = runManifest(
 				repo,
 				{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
 				reportRoot,
@@ -2450,7 +2456,10 @@ describe("budget stop publishing and discovery cap", () => {
 						caps.push(timeoutMs)
 						return ["src/value.test.ts"]
 					},
-					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => (dryRunOnly ? preflightLine : ""),
+					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => {
+						launches.push(dryRunOnly)
+						return dryRunOnly ? preflightLine : ""
+					},
 					readMutationReport: () => ({ files: {} }),
 					now: () => {
 						const value = clockValues[tick]
@@ -2460,8 +2469,15 @@ describe("budget stop publishing and discovery cap", () => {
 					},
 				},
 			)
-			assert.deepEqual(caps, [(MANIFEST_BUDGET_MINUTES - 20.5 - 3) * 60_000], JSON.stringify(caps))
-			assert.ok(caps[0] < 5 * 60_000, "discovery kept its full five minutes with 6.5 min of budget left")
+			assert.deepEqual(caps, [(MANIFEST_BUDGET_MINUTES - 19.5 - 3) * 60_000], JSON.stringify(caps))
+			assert.ok(caps[0] < 5 * 60_000, "discovery kept its full five minutes with 7.5 min of budget left")
+			assert.ok(
+				Number.isInteger(caps[0]),
+				"discovery was handed a fractional timeout: " + JSON.stringify(caps[0]),
+			)
+			assert.deepEqual(launches, [true, false], "a mutation phase was skipped: " + JSON.stringify(launches))
+			assert.equal(rows.length, 1, JSON.stringify(rows.map((row) => row.id)))
+			assert.equal(rows[0].result, "Passed", "the acceptance row read " + String(rows[0].result))
 			const refusedRoot = path.join(repo, "refused")
 			fs.mkdirSync(path.join(refusedRoot, "reports"), { recursive: true })
 			const refusals = []
@@ -2498,6 +2514,51 @@ describe("budget stop publishing and discovery cap", () => {
 			else process.env.GITHUB_STEP_SUMMARY = previousSummary
 			fs.rmSync(repo, { recursive: true, force: true })
 		}
+	})
+	it("floors the discovery cap to whole milliseconds when the remaining budget is fractional", () => {
+		const caps = []
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-discovery-floor-"))
+		const reportRoot = path.join(repo, "reports")
+		fs.mkdirSync(reportRoot, { recursive: true })
+		// 20.7 min of the 27-minute manifest budget spent leaves 3.3 min for related-test
+		// discovery. The elapsed clock is a fractional number of minutes at this spending, so the
+		// cap is a fractional number of milliseconds unless it is floored before it is handed to
+		// spawnSync's timeout option.
+		const clockValues = [0, 20.7 * 60_000, 20.7 * 60_000, 20.7 * 60_000]
+		let tick = 0
+		const rows = runManifest(
+			repo,
+			{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+			reportRoot,
+			{
+				discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+					caps.push(timeoutMs)
+					return ["src/value.test.ts"]
+				},
+				runMutation: (_repoRoot, _entry, _reportRoot, _budgetMinutes) => preflightLine,
+				readMutationReport: () => ({ files: {} }),
+				now: () => {
+					const value = clockValues[tick]
+					assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+					tick += 1
+					return value
+				},
+			},
+		)
+		assert.equal(caps.length, 1, JSON.stringify(caps))
+		// The product this spending produces is fractional; the value handed to the engine must not be.
+		assert.ok(
+			!Number.isInteger((MANIFEST_BUDGET_MINUTES - 20.7 - 3) * 60_000),
+			"the fractional-minute case stopped being fractional",
+		)
+		assert.ok(Number.isInteger(caps[0]), "discovery was handed a fractional timeout: " + JSON.stringify(caps[0]))
+		assert.equal(caps[0], Math.floor((MANIFEST_BUDGET_MINUTES - 20.7 - 3) * 60_000), JSON.stringify(caps[0]))
+		assert.ok(caps[0] > 0, "discovery was refused although 3.3 min of budget was left")
+		// The two mutation launches that follow ran on their own budgets, which shows the cap above
+		// is a cap and not a refusal.
+		assert.equal(rows.length, 1, JSON.stringify(rows.map((row) => row.id)))
+		assert.equal(rows[0].result, "Passed", "the row read " + String(rows[0].result))
+		fs.rmSync(repo, { recursive: true, force: true })
 	})
 })
 
