@@ -41,6 +41,7 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import { attemptCompletionTool } from "../../tools/AttemptCompletionTool"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -8090,6 +8091,528 @@ describe("Cline", () => {
 				"[Task#handleWebviewAskResponse] updateClineMessage failed:",
 				boom,
 			)
+		})
+	})
+
+	describe("say() stale partial snapshot dedup (issue #1346)", () => {
+		// Streaming reasoning calls say("reasoning", text, undefined, true) on
+		// every delta. If another message is appended while the stream is in
+		// flight, the final write no longer sees the partial snapshot as the
+		// last message and used to append a duplicate entry — the pair rendered
+		// twice in Code mode. These specs pin the backwards-scan merge.
+
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		it("merges a final reasoning write into a stranded partial snapshot instead of appending a duplicate", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Frozen streaming snapshot, then another message lands mid-stream.
+			await task.say("reasoning", "Let me list the .ps1 files", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			// Clear the initial partial save so only the completing write is observed:
+			// addToClineMessages (Task.ts:1691) also calls saveClineMessages, so an
+			// uncleared spy would be satisfied without the completing merge persisting.
+			saveSpy.mockClear()
+			// The final (complete) write replaces the stranded snapshot in place.
+			await task.say("reasoning", "Let me list the .ps1 files.", undefined, false)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].partial).toBe(false)
+			expect(reasoningMessages[0].text).toBe("Let me list the .ps1 files.")
+			// The merge preserves the snapshot's original timestamp instead of
+			// minting a fresh one, and the interactive call stamps lastMessageTs
+			// with that preserved timestamp.
+			expect(reasoningMessages[0].ts).toBe(originalSnapshotTs)
+			expect(task.lastMessageTs).toBe(originalSnapshotTs)
+			// No duplicate entry was appended next to the interleaved message.
+			expect(task.clineMessages).toHaveLength(2)
+			// Exactly one save: the completing merge's own write, not the partial append's.
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+		})
+
+		it("keeps streaming partial reasoning deltas into a stranded snapshot instead of starting a duplicate", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
+			// A tool approval ask interrupts the reasoning stream. ask() stamps
+			// lastMessageTs with the ask timestamp (Task.ts:2022), so mirror that
+			// state: without a distinct askTs, lastMessageTs already equals the
+			// snapshot ts and a regression that re-stamps it would pass unseen.
+			const askTs = originalSnapshotTs + 1
+			task.clineMessages.push({
+				ts: askTs,
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+			task.lastMessageTs = askTs
+			// The next delta extends the stranded snapshot rather than forking a
+			// second partial entry that would render as its own reasoning block.
+			await task.say("reasoning", "Thinking about it", undefined, true)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].partial).toBe(true)
+			expect(reasoningMessages[0].text).toBe("Thinking about it")
+			// Streaming into the stranded snapshot keeps its original timestamp and
+			// leaves lastMessageTs on the pending ask: the partial-merge branch does
+			// not touch lastMessageTs, so the ask stays the newest interactive point.
+			expect(reasoningMessages[0].ts).toBe(originalSnapshotTs)
+			expect(task.lastMessageTs).toBe(askTs)
+			expect(task.clineMessages).toHaveLength(2)
+
+			// The complete-merge branch is different by design and pinned here:
+			// finalizing the stranded snapshot re-stamps lastMessageTs with the
+			// snapshot ts (Task.ts:2899), because the completed row replaces
+			// the ask as the newest message the user can act on.
+			await task.say("reasoning", "Thinking about it.", undefined, false)
+
+			const completedMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(completedMessages).toHaveLength(1)
+			expect(completedMessages[0].partial).toBe(false)
+			expect(completedMessages[0].text).toBe("Thinking about it.")
+			expect(completedMessages[0].ts).toBe(originalSnapshotTs)
+			expect(task.lastMessageTs).toBe(originalSnapshotTs)
+			expect(task.clineMessages).toHaveLength(2)
+		})
+
+		it("persists the merged partial delta before the webview update", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			// A tool approval ask interrupts the reasoning stream.
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+
+			// Arm a deferred save for the merge call so await-order is observable:
+			// the merged state must reach persistence, and the webview update must
+			// not fire before the save settles.
+			const events: string[] = []
+			let resolveSave!: (saved: boolean) => void
+			const pendingSave = new Promise<boolean>((resolve) => {
+				resolveSave = resolve
+			})
+			let persistedAtSaveCall: Array<{ text?: string; partial?: boolean }> | undefined
+			saveSpy.mockClear()
+			saveSpy.mockImplementation(() => {
+				events.push("save")
+				persistedAtSaveCall = task.clineMessages.map((m) => ({ text: m.text, partial: m.partial }))
+				return pendingSave
+			})
+			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockImplementation(() => {
+				events.push("update")
+				return Promise.resolve()
+			})
+
+			let saySettled = false
+			const sayPromise = task.say("reasoning", "Thinking about it", undefined, true).then(() => {
+				saySettled = true
+			})
+
+			// The merge must not return while persistence is still pending.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			expect(saySettled).toBe(false)
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(updateSpy).not.toHaveBeenCalled()
+
+			resolveSave(true)
+			await sayPromise
+
+			expect(events).toEqual(["save", "update"])
+			// The save observed the already-merged snapshot, not the stale text.
+			// The merged row is moved to the tail before the save, so the array
+			// order matches content recency rather than the original position.
+			expect(persistedAtSaveCall).toEqual([
+				{ text: "Execute command?", partial: false },
+				{ text: "Thinking about it", partial: true },
+			])
+		})
+
+		it("moves a merged stranded snapshot to the tail so later deltas take the in-place fast path", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			const snapshotTs = task.clineMessages[0].ts
+			const askTs = snapshotTs + 1
+			task.clineMessages.push({
+				ts: askTs,
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+			task.lastMessageTs = askTs
+			const tsBefore = task.clineMessages.map((m) => m.ts)
+			saveSpy.mockClear()
+
+			// Three more deltas of the same stranded stream.
+			await task.say("reasoning", "Thinking about", undefined, true)
+			await task.say("reasoning", "Thinking about the", undefined, true)
+			await task.say("reasoning", "Thinking about the plan", undefined, true)
+
+			// (b) One awaited full save for the whole stranding, not one per delta:
+			// the first delta merges and persists, the rest update the tail in place.
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+
+			// (a) The splice must not mint or re-stamp a ts: the webview uses ts as
+			// the virtuoso list key (Task.ts:4180), so a changed key remounts the row.
+			expect([...task.clineMessages.map((m) => m.ts)].sort((a, b) => a - b)).toEqual(
+				[...tsBefore].sort((a, b) => a - b),
+			)
+			const reasoning = task.clineMessages.find((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoning?.ts).toBe(snapshotTs)
+
+			// (c) The tail is the row whose content was written most recently.
+			expect(task.clineMessages.at(-1)).toBe(reasoning)
+			expect(task.clineMessages.at(-1)?.text).toBe("Thinking about the plan")
+			expect(task.clineMessages.at(-1)?.partial).toBe(true)
+			// The partial-merge branch leaves lastMessageTs on the pending ask.
+			expect(task.lastMessageTs).toBe(askTs)
+		})
+
+		it("appends a new partial message when no prefix-related stranded snapshot exists", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Two genuinely different reasoning segments must not be merged: the
+			// texts are not prefix-related, so the second stream starts fresh.
+			await task.say("reasoning", "Completely different topic", undefined, true)
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "say",
+				say: "text",
+				text: "interleaved",
+				partial: false,
+			})
+			await task.say("reasoning", "Another unrelated reasoning", undefined, true)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(2)
+			expect(reasoningMessages[1].partial).toBe(true)
+			expect(reasoningMessages[1].text).toBe("Another unrelated reasoning")
+		})
+
+		it("appends a complete message when only a completed same-type message exists, even with prefix-related text", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// A finalized reasoning message is not a partial snapshot — the
+			// partial===true boundary must hold even when the new text extends
+			// the old one, so both remain distinct messages.
+			await task.say("reasoning", "First reasoning block.", undefined, false)
+			await task.say("reasoning", "First reasoning block. Second reasoning block.", undefined, false)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(2)
+			expect(reasoningMessages[0].text).toBe("First reasoning block.")
+			expect(reasoningMessages[1].text).toBe("First reasoning block. Second reasoning block.")
+			expect(reasoningMessages.every((m) => m.partial === undefined)).toBe(true)
+		})
+
+		it("does not replace a stranded partial snapshot when the new text belongs to a different say value", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Stranded reasoning snapshot…
+			await task.say("reasoning", "Shared prefix text", undefined, true)
+			// …followed by a completion_result whose text happens to extend the
+			// same prefix. Different say value ⇒ no merge; the partial snapshot
+			// stays untouched.
+			await task.say("completion_result", "Shared prefix text, continued", undefined, false)
+
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].partial).toBe(true)
+			expect(reasoningMessages[0].text).toBe("Shared prefix text")
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			expect(completionMessages).toHaveLength(1)
+			expect(completionMessages[0].text).toBe("Shared prefix text, continued")
+		})
+
+		it("treats undefined completing text as a no-match append instead of throwing (rate-limit finalize)", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// Mirrors the production rate-limit countdown: partial delay
+			// snapshots stream with partial=true…
+			await task.say("api_req_rate_limit_wait", JSON.stringify({ seconds: 2 }), undefined, true)
+			const strandedSnapshotTs = task.clineMessages[0].ts
+			// …another message lands mid-stream…
+			task.clineMessages.push({
+				ts: Date.now(),
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			// …then the stream finalizes with text === undefined, exactly like
+			// say("api_req_rate_limit_wait", undefined, undefined, false). The
+			// typeof text !== "string" guard must turn the stale-snapshot lookup
+			// into a no-match instead of throwing on startsWith, leaving the
+			// stranded snapshot untouched and appending the completion.
+			await expect(task.say("api_req_rate_limit_wait", undefined, undefined, false)).resolves.toBeUndefined()
+
+			const rateLimitMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "api_req_rate_limit_wait",
+			)
+			expect(rateLimitMessages).toHaveLength(2)
+			expect(rateLimitMessages[0].partial).toBe(true)
+			expect(rateLimitMessages[0].text).toBe(JSON.stringify({ seconds: 2 }))
+			expect(rateLimitMessages[0].ts).toBe(strandedSnapshotTs)
+			expect(rateLimitMessages[1].partial).toBeUndefined()
+			expect(rateLimitMessages[1].text).toBeUndefined()
+			expect(task.clineMessages).toHaveLength(3)
+			expect(saveSpy).toHaveBeenCalled()
+		})
+
+		it("skips the webview post and logs when the partial-merge save fails", async () => {
+			// saveClineMessages' contract (Task.ts:1757-1764) makes the boolean
+			// authoritative for durable state: a false result leaves the on-disk
+			// record stale, so the webview-only post must be skipped the way
+			// finalizePartialToolAsk does it (Task.ts:2998-3007).
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockResolvedValue(undefined)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
+			// A tool approval ask strands the partial snapshot mid-stream.
+			task.clineMessages.push({
+				ts: originalSnapshotTs + 1,
+				type: "ask",
+				ask: "tool",
+				text: "Execute command?",
+				partial: false,
+			})
+
+			// Only the merge's save fails; the earlier append save already succeeded.
+			saveSpy.mockClear()
+			saveSpy.mockResolvedValue(false)
+			updateSpy.mockClear()
+
+			await task.say("reasoning", "Thinking about it", undefined, true)
+
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).not.toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#say] saveClineMessages failed; skipping webview update")
+			// The in-memory merge still happened: only the webview post is gated.
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].text).toBe("Thinking about it")
+
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("skips the webview post and logs when the complete-merge save fails", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockResolvedValue(undefined)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await task.say("reasoning", "Thinking ab", undefined, true)
+			const originalSnapshotTs = task.clineMessages[0].ts
+			task.clineMessages.push({
+				ts: originalSnapshotTs + 1,
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+
+			saveSpy.mockClear()
+			saveSpy.mockResolvedValue(false)
+			updateSpy.mockClear()
+
+			await task.say("reasoning", "Thinking about it.", undefined, false)
+
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(updateSpy).not.toHaveBeenCalled()
+			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#say] saveClineMessages failed; skipping webview update")
+			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
+			expect(reasoningMessages).toHaveLength(1)
+			expect(reasoningMessages[0].partial).toBe(false)
+			expect(reasoningMessages[0].text).toBe("Thinking about it.")
+
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("does not finalize an abandoned partial completion_result row when the completing text is empty", async () => {
+			// AttemptCompletionTool.handlePartial passes `result ?? ""` with
+			// `block.partial` forwarded (AttemptCompletionTool.ts:312), so an
+			// empty completion_result is reachable in production. `"".startsWith`
+			// is false for any non-empty stored text, but `m.text.startsWith("")`
+			// is true for every stored text, so without a non-empty guard the
+			// empty completion matches any earlier partial completion_result row.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			// A completion_result stream that was abandoned mid-flight: its row is
+			// still partial and no longer the tail, so nothing finalizes it.
+			task.clineMessages.push({
+				ts: 1,
+				type: "say",
+				say: "completion_result",
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			task.clineMessages.push({
+				ts: 2,
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			saveSpy.mockClear()
+
+			// The next turn's attempt_completion streams with an empty result.
+			await attemptCompletionTool.handlePartial(task, {
+				type: "tool_use",
+				name: "attempt_completion",
+				params: { result: "" },
+				partial: true,
+			})
+
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			// The dead row must stay dead: no finalize, no hijacked lastMessageTs.
+			expect(completionMessages[0]).toMatchObject({
+				ts: 1,
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			// The empty stream starts its own row instead of resurrecting the old one.
+			expect(completionMessages).toHaveLength(2)
+			expect(completionMessages[1]).toMatchObject({ text: "", partial: true })
+			expect(completionMessages[1].ts).toBeGreaterThan(2)
+		})
+
+		it("does not turn an abandoned partial completion_result row into the completed row of an empty completion", async () => {
+			// The same degenerate match on the completing (partial=false) write, which
+			// is the branch that finalizes the row: the dead row's `partial` flips to
+			// false and `lastMessageTs` is re-stamped with the dead row's ts, so the
+			// abandoned attempt is persisted and rendered as this turn's completion.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+
+			task.clineMessages.push({
+				ts: 1,
+				type: "say",
+				say: "completion_result",
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			task.clineMessages.push({
+				ts: 2,
+				type: "say",
+				say: "api_req_started",
+				text: "{}",
+				partial: false,
+			})
+			task.lastMessageTs = 2
+
+			// The empty completion is rejected by AttemptCompletionTool.handle before
+			// any say() call, so drive the completing write the way the tool's
+			// completion path does: say("completion_result", result, undefined, false).
+			await task.say("completion_result", "", undefined, false)
+
+			const completionMessages = task.clineMessages.filter(
+				(m) => m.type === "say" && m.say === "completion_result",
+			)
+			expect(completionMessages[0]).toMatchObject({
+				ts: 1,
+				text: "Abandoned completion attempt",
+				partial: true,
+			})
+			expect(completionMessages).toHaveLength(2)
+			expect(completionMessages[1].text).toBe("")
+			expect(completionMessages[1].partial).toBeUndefined()
+			// lastMessageTs must not be hijacked by the dead row's ts.
+			expect(task.lastMessageTs).not.toBe(1)
 		})
 	})
 })
