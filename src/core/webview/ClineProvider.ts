@@ -124,7 +124,7 @@ import { getWorkspaceGitInfo } from "../../utils/git"
 import { getWorkspacePath } from "../../utils/path"
 import { OrganizationAllowListViolationError } from "../../utils/errors"
 
-import { getPanel, setPanel } from "../../activate/registerCommands"
+import { clearSidebarPanel, getPanel, setPanel } from "../../activate/registerCommands"
 
 import { t } from "../../i18n"
 
@@ -250,6 +250,10 @@ export class ClineProvider
 	public static readonly sideBarId = `${Package.name}.SidebarProvider`
 	public static readonly tabPanelId = `${Package.name}.TabPanelProvider`
 	private static activeInstances: Set<ClineProvider> = new Set()
+	// Listeners registered for the view this provider currently owns. A replacement view drains
+	// the previous view's subscriptions when it takes the slot (initializeWebviewView), and every
+	// disposal callback is identity-checked, so this one list always releases exactly the listeners
+	// of the surface that went away and never a replacement's.
 	private webviewDisposables: vscode.Disposable[] = []
 	private pendingThemeFixtureProbes = new Map<
 		string,
@@ -961,6 +965,7 @@ export class ClineProvider
 	- https://vscode-docs.readthedocs.io/en/stable/extensions/patterns-and-principles/
 	- https://github.com/microsoft/vscode-extension-samples/blob/main/webview-sample/src/extension.ts
 	*/
+
 	private clearWebviewResources() {
 		this.rejectPendingThemeFixtureProbes(new Error("Webview was disposed before the theme fixture probe completed"))
 		this.stopWebviewWatchdog()
@@ -1081,6 +1086,23 @@ export class ClineProvider
 
 	public static getAllInstances(): ClineProvider[] {
 		return Array.from(this.activeInstances)
+	}
+
+	/**
+	 * Returns the live instance whose current view is the given view or panel,
+	 * if any. Title-bar commands on a specific surface use this to target the
+	 * instance that owns that surface rather than the visible-instance
+	 * heuristic (which picks whichever surface the user last focused).
+	 */
+	public static getInstanceForView(view: vscode.WebviewView | vscode.WebviewPanel): ClineProvider | undefined {
+		// A provider whose disposal has started is still listed in activeInstances until
+		// dispose() finishes its ASYNCHRONOUS task cleanup (the set removal happens after
+		// it), so a command queued during that window would otherwise be handed a dying
+		// provider and re-run task eviction and workspace refresh on top of the disposal
+		// already performing them. A disposing instance never resolves a view lookup, which
+		// also means every *InTab handler bails on undefined instead of mutating a disposed
+		// task.
+		return Array.from(this.activeInstances).find((instance) => instance.view === view && !instance._disposed)
 	}
 
 	public static async getInstance(): Promise<ClineProvider | undefined> {
@@ -1245,6 +1267,9 @@ export class ClineProvider
 					await this.dispose()
 				} else {
 					this.log("Clearing webview resources for sidebar view")
+					// Identity-checked above: a replaced view already lost its subscriptions when the replacement
+					// took the slot, and the drain below releases everything this provider still holds.
+					clearSidebarPanel(webviewView)
 					this.view = undefined
 					this.clearWebviewResources()
 				}
@@ -1323,7 +1348,7 @@ export class ClineProvider
 
 		// Sets up an event listener to listen for messages passed from the webview view context
 		// and executes code based on the message that is received.
-		this.setWebviewMessageListener(webviewView)
+		this.setWebviewMessageListener(webviewView.webview, webviewView)
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
@@ -2059,12 +2084,15 @@ export class ClineProvider
 	 * Sets up an event listener to listen for messages passed from the webview context and
 	 * executes code based on the message that is received.
 	 *
-	 * @param webviewView The view whose webview messages are listened to
+	 * @param webview The webview whose messages are listened to
+	 * @param view The view that owns `webview`. The listener drops every message whose view is no
+	 *   longer the provider's current view, so a late message from a replaced view cannot act on the
+	 *   replacement's state.
 	 */
-	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+	private setWebviewMessageListener(webview: vscode.Webview, view: vscode.WebviewView | vscode.WebviewPanel) {
 		const onReceiveMessage = async (message: WebviewMessage) => {
 			// Ignore messages from a view that is no longer the current view.
-			if (webviewView !== this.view) {
+			if (view !== this.view) {
 				return
 			}
 
@@ -2093,7 +2121,7 @@ export class ClineProvider
 			}
 		}
 
-		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
+		const messageDisposable = webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
 	}
 
