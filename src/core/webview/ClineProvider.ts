@@ -2249,9 +2249,40 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean = true,
 	): Promise<string | undefined> {
+		let partialState = false
+
 		try {
 			return await this.enqueueProviderProfileMutation(
-				(signal) => this.persistProviderProfile(name, providerSettings, activate, signal),
+				async (signal) => {
+					const { organizationAllowList, mode } = await this.getState()
+
+					// Reject before touching disk or in-memory state.
+					if (!ProfileValidator.isProfileAllowed(providerSettings, organizationAllowList)) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
+
+					const snapshot = await this.snapshotProviderProfileState(name, mode)
+
+					try {
+						// Activate with the snapshot's mode so rollback undoes the binding it wrote.
+						return await this.persistProviderProfile(name, providerSettings, activate, signal, mode)
+					} catch (persistError) {
+						// Save, activate and propagate are separate writes; put everything back so
+						// storage, context settings, the mode binding and the task agree again.
+						try {
+							await this.restoreProviderProfileState(name, mode, snapshot, activate)
+						} catch (restoreError) {
+							partialState = true
+							this.log(
+								`Error restoring profile state after failed upsert: ${JSON.stringify(restoreError, Object.getOwnPropertyNames(restoreError), 2)}`,
+							)
+						}
+
+						throw persistError
+					}
+				},
 				{ runToCompletion: true },
 			)
 		} catch (error) {
@@ -2259,8 +2290,97 @@ export class ClineProvider
 				`Error create new api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 			)
 
-			vscode.window.showErrorMessage(t("common:errors.create_api_config"))
+			vscode.window.showErrorMessage(
+				partialState
+					? t("common:errors.update_profile_model_partial")
+					: error instanceof OrganizationAllowListViolationError
+						? error.message
+						: t("common:errors.create_api_config"),
+			)
 			return undefined
+		}
+	}
+
+	/** Captures every value `persistProviderProfile` can change, so a failed upsert can be undone. */
+	private async snapshotProviderProfileState(name: string, mode: Mode) {
+		let previousProfile: Omit<Awaited<ReturnType<ProviderSettingsManager["getProfile"]>>, "name"> | undefined
+
+		if (await this.providerSettingsManager.hasConfig(name)) {
+			const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+			previousProfile = stored
+		}
+
+		// A delegated child can run with a handoff configuration that differs from the global
+		// settings, so rollback rebuilds this task from its own captured configuration.
+		const task = this.getCurrentTask()
+		const historyItem = task ? this.getTaskHistoryItem(task.taskId) : undefined
+
+		return {
+			previousProfile,
+			listApiConfigMeta: this.getGlobalState("listApiConfigMeta"),
+			currentApiConfigName: this.getGlobalState("currentApiConfigName"),
+			modeConfigId: await this.providerSettingsManager.getModeConfigId(mode),
+			providerSettings: this.contextProxy.getProviderSettings(),
+			task,
+			taskApiConfiguration: task?.apiConfiguration ? structuredClone(task.apiConfiguration) : undefined,
+			// Activation re-points the task's sticky profile and its history entry at `name`.
+			taskApiConfigName: task?.taskApiConfigName,
+			taskHistoryEntry: historyItem ? { apiConfigName: historyItem.apiConfigName } : undefined,
+		}
+	}
+
+	private async restoreProviderProfileState(
+		name: string,
+		mode: Mode,
+		snapshot: Awaited<ReturnType<ClineProvider["snapshotProviderProfileState"]>>,
+		activate: boolean,
+	): Promise<void> {
+		const task = activate && snapshot.task && this.getCurrentTask() === snapshot.task ? snapshot.task : undefined
+
+		// Run every step even if one fails, then report the first failure.
+		const results = await Promise.allSettled([
+			snapshot.previousProfile
+				? this.providerSettingsManager.saveConfig(name, snapshot.previousProfile)
+				: this.providerSettingsManager.hasConfig(name).then(async (exists) => {
+						if (exists) await this.providerSettingsManager.deleteConfig(name)
+					}),
+			this.updateGlobalState("listApiConfigMeta", snapshot.listApiConfigMeta),
+			this.updateGlobalState("currentApiConfigName", snapshot.currentApiConfigName),
+			// A mode with no previous binding must not stay bound to a profile that is being removed.
+			snapshot.modeConfigId
+				? this.providerSettingsManager.setModeConfig(mode, snapshot.modeConfigId)
+				: this.providerSettingsManager.clearModeConfig(mode),
+			this.contextProxy.setProviderSettings(snapshot.providerSettings),
+			task
+				? this.restoreTaskApiConfigName(task, snapshot.taskApiConfigName, snapshot.taskHistoryEntry)
+				: undefined,
+		])
+
+		if (task && snapshot.taskApiConfiguration) {
+			this.updateTaskApiHandlerIfNeeded(snapshot.taskApiConfiguration, { forceRebuild: true })
+		}
+
+		const failed = results.find((result): result is PromiseRejectedResult => result.status === "rejected")
+		if (failed) throw failed.reason
+	}
+
+	/** Puts back the task's sticky profile name and its history entry if activation re-pointed them. */
+	private async restoreTaskApiConfigName(
+		task: Task,
+		apiConfigName: string | undefined,
+		historyEntry: { apiConfigName?: string } | undefined,
+	): Promise<void> {
+		if (task.taskApiConfigName !== apiConfigName) {
+			task.setTaskApiConfigName(apiConfigName)
+		}
+
+		if (!historyEntry) return
+
+		// Re-read the entry so only the profile name is reverted, not fields written since the snapshot.
+		const historyItem = this.getTaskHistoryItem(task.taskId)
+
+		if (historyItem && historyItem.apiConfigName !== historyEntry.apiConfigName) {
+			await this.updateTaskHistory({ ...historyItem, apiConfigName: historyEntry.apiConfigName })
 		}
 	}
 
@@ -2369,6 +2489,7 @@ export class ClineProvider
 		providerSettings: ProviderSettings,
 		activate: boolean,
 		signal: AbortSignal,
+		activationMode?: Mode,
 	): Promise<string | undefined> {
 		// TODO: Do we need to be calling `activateProfile`? It's not
 		// clear to me what the source of truth should be; in some cases
@@ -2380,7 +2501,7 @@ export class ClineProvider
 		if (signal.aborted) return id
 
 		if (activate) {
-			const { mode } = await this.getState()
+			const mode = activationMode ?? (await this.getState()).mode
 
 			if (signal.aborted) return id
 

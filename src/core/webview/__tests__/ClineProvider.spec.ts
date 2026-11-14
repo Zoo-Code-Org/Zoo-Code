@@ -4888,6 +4888,8 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
@@ -5662,7 +5664,10 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				setModeConfig: vi.fn(),
+				clearModeConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -5698,6 +5703,9 @@ describe("ClineProvider", () => {
 
 		test("handles buildApiHandler error in updateApiConfiguration", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
+			// Seed the active profile so the rollback has a known name to put back.
+			await provider.setValue("currentApiConfigName", "current-config")
+			vi.mocked(mockContext.globalState.update).mockClear()
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			// Mock buildApiHandler to throw an error
@@ -5707,7 +5715,10 @@ describe("ClineProvider", () => {
 				throw new Error("API handler error")
 			})
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				setModeConfig: vi.fn(),
+				clearModeConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -5718,6 +5729,13 @@ describe("ClineProvider", () => {
 
 			// Setup Task instance with auto-mock from the top of the file
 			const mockCline = new Task(defaultTaskOptions) // Create a new mocked instance
+			// The first rebuild (activation) fails; the rollback's rebuild succeeds.
+			mockCline.updateApiConfiguration = vi
+				.fn()
+				.mockImplementationOnce(() => {
+					throw new Error("API handler error")
+				})
+				.mockImplementation(() => {})
 			await provider.addClineToStack(mockCline)
 
 			const testApiConfig = {
@@ -5738,11 +5756,14 @@ describe("ClineProvider", () => {
 			)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
 
-			// Verify state was still updated
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("listApiConfigMeta", [
-				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.anthropic },
-			])
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
+			// The failed upsert is rolled back: the new profile is removed from storage and the
+			// previously active profile name is put back.
+			expect(provider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("test-config")
+			const nameWrites = vi
+				.mocked(mockContext.globalState.update)
+				.mock.calls.filter(([key]) => key === "currentApiConfigName")
+			expect(nameWrites.at(0)?.[1]).toBe("test-config")
+			expect(nameWrites.at(-1)?.[1]).toBe("current-config")
 		})
 
 		test("handles successful saveApiConfiguration", async () => {
@@ -5750,7 +5771,10 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				setModeConfig: vi.fn(),
+				clearModeConfig: vi.fn().mockResolvedValue(undefined),
 				saveConfig: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -8189,6 +8213,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					hasConfig: vi.fn().mockResolvedValue(false),
+					getModeConfigId: vi.fn().mockResolvedValue(undefined),
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -8220,6 +8246,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const saveConfig = vi.fn().mockResolvedValue(undefined)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					hasConfig: vi.fn().mockResolvedValue(false),
+					getModeConfigId: vi.fn().mockResolvedValue(undefined),
 					listConfig: vi.fn().mockResolvedValue([
 						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
