@@ -117,6 +117,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 					</VSCodeCheckbox>
 					<p className="text-vscode-descriptionForeground text-sm mt-0">
 						<Trans
+							t={t}
 							i18nKey="settings:footer.telemetry.description"
 							components={{
 								privacyLink: <VSCodeLink href="https://www.zoocode.dev/privacy" />,
@@ -160,6 +161,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<MessagesSquare className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							<Trans
+								t={t}
 								i18nKey="settings:about.community"
 								components={{
 									redditLink: <VSCodeLink href={EXTERNAL_LINKS.REDDIT} />,

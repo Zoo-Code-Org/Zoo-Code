@@ -125,7 +125,9 @@
 		"auto_import_failed": "Nie udało się automatycznie zaimportować ustawień ZooCode: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Nie znaleziono historii zadań Roo Code do zaimportowania z {{domain}}.",
-			"alreadyImported_one": "Cała {{count}} historia zadań Roo Code została już zaimportowana do Zoo Code.",
+			"alreadyImported_one": "{{count}} historia zadań Roo Code została już zaimportowana do Zoo Code.",
+			"alreadyImported_few": "Wszystkie {{count}} historie zadań Roo Code zostały już zaimportowane do Zoo Code.",
+			"alreadyImported_many": "Wszystkie {{count}} historii zadań Roo Code zostały już zaimportowane do Zoo Code.",
 			"alreadyImported_other": "Wszystkie {{count}} historii zadań Roo Code zostały już zaimportowane do Zoo Code."
 		}
 	},
@@ -144,6 +146,8 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "Zaimportowano {{count}} historię zadania Roo Code do Zoo Code.",
+			"success_few": "Zaimportowano {{count}} historie zadań Roo Code do Zoo Code.",
+			"success_many": "Zaimportowano {{count}} historii zadań Roo Code do Zoo Code.",
 			"success_other": "Zaimportowano {{count}} historii zadań Roo Code do Zoo Code."
 		}
 	},

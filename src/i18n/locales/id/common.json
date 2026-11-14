@@ -125,7 +125,6 @@
 		"auto_import_failed": "Gagal mengimpor pengaturan ZooCode secara otomatis: {{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "Tidak ada riwayat tugas Roo Code yang ditemukan untuk diimpor dari {{domain}}.",
-			"alreadyImported_one": "Semua {{count}} riwayat tugas Roo Code sudah diimpor ke Zoo Code.",
 			"alreadyImported_other": "Semua {{count}} riwayat tugas Roo Code sudah diimpor ke Zoo Code."
 		}
 	},
@@ -143,7 +142,6 @@
 			"signInUnavailable": "Masuk ke Roo Code Cloud saat ini tidak tersedia. Konfigurasikan penyedia lain untuk melanjutkan."
 		},
 		"rooHistoryImport": {
-			"success_one": "{{count}} riwayat tugas Roo Code berhasil diimpor ke Zoo Code.",
 			"success_other": "{{count}} riwayat tugas Roo Code berhasil diimpor ke Zoo Code."
 		}
 	},

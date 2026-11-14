@@ -77,6 +77,7 @@
 			"summaryCopied": "S'han copiat {{copied}} de {{total}} fitxers",
 			"detailFailed": "Inicia un nou intent d'importació per tornar-ho a provar.",
 			"detailTasksImported_one": "S'ha importat {{count}} de {{total}} historial de tasques.",
+			"detailTasksImported_many": "S'han importat {{count}} de {{total}} historials de tasques.",
 			"detailTasksImported_other": "S'han importat {{count}} de {{total}} historials de tasques.",
 			"detailPreparing": "Preparant la importació de l'historial de Roo Code.",
 			"progressAriaLabel": "Progrés de la importació de l'historial de Roo Code"
@@ -951,7 +952,9 @@
 		"useAzure": "Utilitzar Azure",
 		"azureApiVersion": "Establir versió de l'API d'Azure",
 		"gemini": {
-			"freeRequests": "* Gratuït fins a {{count}} sol·licituds per minut. Després d'això, la facturació depèn de la mida del prompt.",
+			"freeRequests_one": "* Gratuït fins a {{count}} sol·licitud per minut. Després d'això, la facturació depèn de la mida del prompt.",
+			"freeRequests_many": "* Gratuït fins a {{count}} sol·licituds per minut. Després d'això, la facturació depèn de la mida del prompt.",
+			"freeRequests_other": "* Gratuït fins a {{count}} sol·licituds per minut. Després d'això, la facturació depèn de la mida del prompt.",
 			"pricingDetails": "Per a més informació, consulteu els detalls de preus.",
 			"billingEstimate": "* La facturació és una estimació - el cost exacte depèn de la mida del prompt."
 		}
