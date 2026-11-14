@@ -522,6 +522,33 @@ describe("DirectoryScanner", () => {
 			},
 		)
 
+		it("removes points and the entry of a failed file that has no hash and is gone", async () => {
+			const failures = new FileFailureRegistry()
+			const removalScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const { listFiles } = await import("../../../glob/list-files")
+			vi.mocked(listFiles).mockResolvedValue([[], false])
+			const relativePath = nodePath.normalize("src/failed.js")
+			failures.renew(relativePath, "h")
+			failures.record(relativePath, "h", "upsert", "down", 3, "exhausted")
+
+			await removalScanner.scanDirectory("/test")
+
+			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledOnce()
+			const [[removedPath]] = vi.mocked(mockVectorStore.deletePointsByFilePath).mock.calls
+			expect(nodePath.isAbsolute(removedPath)).toBe(true)
+			expect(removedPath.endsWith(relativePath)).toBe(true)
+			expect(failures.list()).toEqual([])
+		})
+
 		it("records a non-missing read error as a read failure", async () => {
 			const failures = new FileFailureRegistry()
 			const readScanner = new DirectoryScanner(

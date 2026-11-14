@@ -169,6 +169,8 @@ export class CodeIndexManager {
 
 		// 5. CacheManager Initialization; an unreadable cache ends here so existing index data is kept.
 		if (!(await this.ensureCacheManager())) return { requiresRestart }
+		// The cache read yields; indexing may have been disabled meanwhile.
+		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) return { requiresRestart }
 
 		// 6. Determine if Core Services Need Recreation
 		const needsServiceRecreation = (!this._serviceFactory && !this._sembleProvider) || requiresRestart
@@ -252,13 +254,13 @@ export class CodeIndexManager {
 		if (this.startInFlight) return this.startInFlight
 		this.failureRegistry.resetAllBudgets()
 
-		// Check if we're in error state and recover if needed
-		const currentStatus = this.getCurrentStatus()
-		if (currentStatus.systemStatus === "Error") {
+		if (this.getCurrentStatus().systemStatus === "Error") {
+			// Recovery drops the config manager, so keep its proxy to re-initialize; initialize() starts indexing.
+			const contextProxy = this._configManager?.getContextProxy()
 			await this.recoverFromError()
-
-			// After recovery, we need to reinitialize since recoverFromError clears all services
-			// This will be handled by the caller (webviewMessageHandler) checking isInitialized
+			if (!contextProxy) return
+			await this.initialize(contextProxy)
+			await this.startInFlight
 			return
 		}
 

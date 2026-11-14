@@ -86,35 +86,43 @@ const tick = () => new Promise((resolve) => setTimeout(resolve, 0))
 
 type Progress = { processedInBatch: number; totalInBatch: number; currentFile?: string }
 
-/** Wires the watcher double's three events to callable emitters. */
-function emitters(fileWatcher: ReturnType<typeof setup>["fileWatcher"]) {
-	const listeners: {
-		start?: () => void
-		progress?: (event: Progress) => void
-		finish?: (summary: BatchProcessingSummary) => void
-	} = {}
-	fileWatcher.onDidStartBatchProcessing.mockImplementation((listener: () => void) => {
-		listeners.start = listener
-		return { dispose: vi.fn() }
-	})
-	fileWatcher.onBatchProgressUpdate.mockImplementation((listener: (event: Progress) => void) => {
-		listeners.progress = listener
-		return { dispose: vi.fn() }
-	})
-	fileWatcher.onDidFinishBatchProcessing.mockImplementation((listener: (summary: BatchProcessingSummary) => void) => {
-		listeners.finish = listener
-		return { dispose: vi.fn() }
-	})
-	/** Same order as `FileWatcher.processBatch()`: start, progress, finish, then two trailing progress events. */
-	return (total: number, duringBatch?: () => void) => {
-		listeners.start?.()
-		listeners.progress?.({ processedInBatch: 0, totalInBatch: total })
-		duringBatch?.()
-		listeners.progress?.({ processedInBatch: total, totalInBatch: total, currentFile: "/w/a.ts" })
-		listeners.finish?.({ processedFiles: [] })
-		listeners.progress?.({ processedInBatch: total, totalInBatch: total })
-		listeners.progress?.({ processedInBatch: 0, totalInBatch: 0 })
+function liveListeners<T>() {
+	const listeners = new Set<(value: T) => void>()
+	return {
+		listeners,
+		subscribe: (listener: (value: T) => void) => {
+			listeners.add(listener)
+			return { dispose: () => void listeners.delete(listener) }
+		},
+		fire: (value: T) => listeners.forEach((listener) => listener(value)),
 	}
+}
+
+/** Wires the watcher double's three events to emitters whose subscriptions really dispose. */
+function emitters(fileWatcher: ReturnType<typeof setup>["fileWatcher"]) {
+	const start = liveListeners<void>()
+	const progress = liveListeners<Progress>()
+	const finish = liveListeners<BatchProcessingSummary>()
+	fileWatcher.onDidStartBatchProcessing.mockImplementation(start.subscribe)
+	fileWatcher.onBatchProgressUpdate.mockImplementation(progress.subscribe)
+	fileWatcher.onDidFinishBatchProcessing.mockImplementation(finish.subscribe)
+	const events = {
+		start: () => start.fire(),
+		progress: progress.fire,
+		finish: () => finish.fire({ processedFiles: [] }),
+		listenerCounts: () => [start.listeners.size, progress.listeners.size, finish.listeners.size],
+	}
+	/** Same order as `FileWatcher.processBatch()`: start, progress, finish, then two trailing progress events. */
+	const runBatch = (total: number, duringBatch?: () => void) => {
+		events.start()
+		events.progress({ processedInBatch: 0, totalInBatch: total })
+		duringBatch?.()
+		events.progress({ processedInBatch: total, totalInBatch: total, currentFile: "/w/a.ts" })
+		events.finish()
+		events.progress({ processedInBatch: total, totalInBatch: total })
+		events.progress({ processedInBatch: 0, totalInBatch: 0 })
+	}
+	return { runBatch, events }
 }
 
 describe("CodeIndexOrchestrator", () => {
@@ -162,7 +170,7 @@ describe("CodeIndexOrchestrator", () => {
 			context.stateManager.reportFileQueueProgress.mockImplementation(() => {
 				context.stateManager.setSystemState("Indexing")
 			})
-			return { context, runBatch: emitters(context.fileWatcher) }
+			return { context, ...emitters(context.fileWatcher) }
 		}
 
 		it("ends in Indexed after batch-finished and the two trailing progress events", async () => {
@@ -187,14 +195,37 @@ describe("CodeIndexOrchestrator", () => {
 			)
 		})
 
-		it("reuses the watcher events after stop and restart", async () => {
-			const { context, runBatch } = progressSetup()
+		it("subscribes new watcher listeners after stop and restart", async () => {
+			const { context, runBatch, events } = progressSetup()
 			await context.orchestrator.startIndexing()
 			await context.orchestrator.stopIndexing()
+			expect(events.listenerCounts()).toEqual([0, 0, 0])
+
 			await context.orchestrator.startIndexing()
-			runBatch(1)
+			expect(events.listenerCounts()).toEqual([1, 1, 1])
+			expect(context.fileWatcher.onDidStartBatchProcessing).toHaveBeenCalledTimes(2)
+			runBatch(1, () => expect(context.orchestrator.state).toBe("Indexing"))
 			expect(context.orchestrator.state).toBe("Indexed")
 			expect(context.fileWatcher.initialize).toHaveBeenCalledTimes(2)
+		})
+
+		it("stays Indexing while a second queued batch is pending after the first finishes", async () => {
+			const { context, events } = progressSetup()
+			await context.orchestrator.startIndexing()
+			events.start()
+			events.start()
+			events.progress({ processedInBatch: 0, totalInBatch: 1 })
+			events.finish()
+			events.progress({ processedInBatch: 1, totalInBatch: 1 })
+
+			context.failures.renew("a.ts", "h")
+			context.failures.record("a.ts", "h", "embed", "down", 1, "retrying")
+			context.failures.clear("a.ts", "h")
+			expect(context.orchestrator.state).toBe("Indexing")
+
+			events.progress({ processedInBatch: 0, totalInBatch: 1 })
+			events.finish()
+			expect(context.orchestrator.state).toBe("Indexed")
 		})
 	})
 

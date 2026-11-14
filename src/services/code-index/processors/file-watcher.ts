@@ -230,8 +230,13 @@ export class FileWatcher implements IFileWatcher {
 				if (!signal?.aborted) this.failures.clear(generateRelativeFilePath(filePath, this.workspacePath))
 				return result
 			}
-			// A file that became ignored or too large must not keep its old points.
-			if (this.cacheManager.getHash(filePath) !== undefined) return this.removeFile(filePath, signal)
+			// A file that became ignored or too large must not keep its old points; a failure entry
+			// without a hash means a failed first write may have left partial points.
+			const relativePath = generateRelativeFilePath(filePath, this.workspacePath)
+			const mayHavePoints =
+				this.cacheManager.getHash(filePath) !== undefined ||
+				this.failures.list().some((failure) => failure.path === relativePath)
+			if (mayHavePoints) return this.removeFile(filePath, signal)
 			return result
 		}
 		if (result.status !== "processed_for_batching" || !result.newHash || !this.writer) return result

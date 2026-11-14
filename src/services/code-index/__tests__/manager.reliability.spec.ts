@@ -32,6 +32,17 @@ vi.mock("../semble", () => ({
 	}),
 }))
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
+vi.mock("../config-manager", () => ({
+	CodeIndexConfigManager: vi.fn().mockImplementation(function (contextProxy: unknown) {
+		return {
+			isFeatureEnabled: true,
+			isFeatureConfigured: true,
+			currentEmbedderProvider: "openai",
+			loadConfiguration: async () => ({ requiresRestart: false }),
+			getContextProxy: () => contextProxy,
+		}
+	}),
+}))
 
 const workspacePath = path.join(path.sep, "test", "workspace")
 
@@ -149,6 +160,46 @@ describe("CodeIndexManager reliability", () => {
 			else expect(manager["_orchestrator"]).toBeUndefined()
 		},
 	)
+
+	it("CI-MG-02: one start from Error recovers, re-initializes and starts indexing", async () => {
+		const { manager, stateManager } = makeManager()
+		const contextProxy = {}
+		manager["_configManager"] = {
+			isFeatureEnabled: true,
+			isFeatureConfigured: true,
+			getContextProxy: () => contextProxy,
+		} as unknown as (typeof manager)["_configManager"]
+		const stale: OrchestratorDouble = {
+			startIndexing: vi.fn(async () => {}),
+			// Settles a tick later, as the real stop does, so a same-tick caller check would miss recovery.
+			stopIndexing: vi.fn(() => new Promise<void>((resolve) => setTimeout(resolve, 0))),
+			isScanning: false,
+			state: "Error",
+		}
+		attach(manager, stale)
+		stateManager.setSystemState("Error", "scan failed")
+		const fresh: OrchestratorDouble = {
+			startIndexing: vi.fn(async () => void stateManager.setSystemState("Indexing", "scanning")),
+			stopIndexing: vi.fn(async () => {}),
+			isScanning: false,
+			state: "Standby",
+		}
+		vi.spyOn(CacheManager.prototype, "initialize").mockResolvedValue(undefined)
+		vi.spyOn(manager as unknown as { _recreateServices(): Promise<void> }, "_recreateServices").mockImplementation(
+			async () => {
+				attach(manager, fresh)
+				manager["_searchService"] = {} as unknown as (typeof manager)["_searchService"]
+			},
+		)
+
+		await manager.startIndexing()
+
+		expect(stale.stopIndexing).toHaveBeenCalledOnce()
+		expect(stale.startIndexing).not.toHaveBeenCalled()
+		expect(fresh.startIndexing).toHaveBeenCalledOnce()
+		expect(manager.isInitialized).toBe(true)
+		expect(stateManager.state).toBe("Indexing")
+	})
 
 	it("CI-MG-02: a replacement failure ends in Error and stays restartable", async () => {
 		const { manager, stateManager } = makeManager()

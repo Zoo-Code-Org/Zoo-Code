@@ -99,7 +99,7 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		await vi.advanceTimersByTimeAsync(59_999)
 		expect(shortRequest).toHaveBeenCalledTimes(1)
 		await vi.advanceTimersByTimeAsync(1)
-		await Promise.all([slow, short])
+		await expect(Promise.all([slow, short])).resolves.toEqual([{ value: undefined }, { value: "ok" }])
 		expect(shortRequest).toHaveBeenCalledTimes(2)
 	})
 
@@ -119,7 +119,7 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		await vi.advanceTimersByTimeAsync(0)
 		expect(pacer.resumeAt! - Date.now()).toBe(1000)
 		await vi.advanceTimersByTimeAsync(1000)
-		await Promise.all(runs)
+		await expect(Promise.all(runs)).resolves.toEqual([1, 2, 3, 4].map(() => ({ value: "ok" })))
 	})
 
 	it("rejects a waiter at once with the abort reason and drops its path", async () => {
@@ -136,7 +136,7 @@ describe("ProviderPacer (CI-PP-02)", () => {
 		expect(pacer.waitingPaths).not.toContain("b.ts")
 		expect(request).not.toHaveBeenCalled()
 		await vi.advanceTimersByTimeAsync(60_000)
-		await first
+		await expect(first).resolves.toEqual({ value: undefined })
 	})
 
 	it("rethrows non-rate-limit errors unchanged", async () => {
@@ -180,7 +180,7 @@ describe("ProviderPacerRegistry", () => {
 		expect(changed).toHaveBeenCalled()
 
 		await vi.advanceTimersByTimeAsync(5000)
-		await Promise.all([paused, same])
+		await expect(Promise.all([paused, same])).resolves.toEqual([{ value: undefined }, { value: "ok" }])
 		expect(registry.providerWaits()).toEqual([])
 		expect(registry.hasWaitingRequests()).toBe(false)
 	})

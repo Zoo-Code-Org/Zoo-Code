@@ -124,6 +124,19 @@ describe("FileIndexWriter", () => {
 		expect(failures.list()).toEqual([])
 	})
 
+	it("drops the old hash when a stop lands while the delete is in flight", async () => {
+		const { writer, store, cache, failures } = setup()
+		const controller = new AbortController()
+		store.deletePointsByFilePath.mockImplementation(async () => controller.abort())
+		const outcome = await writer
+			.replace("/ws/a.ts", "h1", [block(1)], controller.signal)
+			.catch((error: unknown) => error)
+		expect(outcome).toBe(controller.signal.reason)
+		expect(cache.deleteHash).toHaveBeenCalledExactlyOnceWith("/ws/a.ts")
+		expect(cache.updateHash).not.toHaveBeenCalled()
+		expect(failures.list()).toEqual([])
+	})
+
 	it("drops the old hash once its points are deleted, so a failed replacement is re-indexed", async () => {
 		const { writer, embedder, store, cache } = setup()
 		embedder.createEmbeddings.mockRejectedValue(Object.assign(new Error("bad"), { status: 400 }))

@@ -33,8 +33,9 @@ export class FileIndexWriter {
 				await this.attempt(relativePath, hash, "delete", this.store.rateLimitScope, signal, () =>
 					this.store.deletePointsByFilePath(filePath),
 				)
-				// The old points are gone, so the old hash must not let an unchanged file skip re-indexing.
-				if (!signal?.aborted) this.cache.deleteHash(filePath)
+				// The old points are gone, so the old hash must not let an unchanged file skip re-indexing,
+				// even when a stop landed while the delete was in flight.
+				this.cache.deleteHash(filePath)
 			}
 			for (let offset = 0; offset < selected.length; offset += this.batchSize) {
 				const batch = selected.slice(offset, offset + this.batchSize)

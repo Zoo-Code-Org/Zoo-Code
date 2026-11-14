@@ -3,7 +3,7 @@ import { Ignore } from "ignore"
 import { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import { stat } from "fs/promises"
 import * as path from "path"
-import { generateRelativeFilePath } from "../shared/get-relative-path"
+import { generateNormalizedAbsolutePath, generateRelativeFilePath } from "../shared/get-relative-path"
 import { getWorkspacePathForContext } from "../../../utils/path"
 import { scannerExtensions } from "../shared/supported-extensions"
 import * as vscode from "vscode"
@@ -197,16 +197,28 @@ export class DirectoryScanner implements IDirectoryScanner {
 			return { stats: { processed: processedCount, skipped: skippedCount }, totalBlockCount }
 		}
 
-		const oldHashes = this.cacheManager.getAllHashes()
-		for (const cachedFilePath of Object.keys(oldHashes)) {
-			if (processedFiles.has(cachedFilePath)) continue
+		const removalCandidates = new Map<string, string>()
+		for (const cachedFilePath of Object.keys(this.cacheManager.getAllHashes())) {
+			removalCandidates.set(generateRelativeFilePath(cachedFilePath, scanWorkspace), cachedFilePath)
+		}
+		// A file whose first write failed has no hash, but its failure entry means partial points may exist.
+		for (const failure of this.failures.list()) {
+			if (!removalCandidates.has(failure.path)) {
+				removalCandidates.set(failure.path, generateNormalizedAbsolutePath(failure.path, scanWorkspace))
+			}
+		}
+		const processedRelative = new Set(
+			[...processedFiles].map((filePath) => generateRelativeFilePath(filePath, scanWorkspace)),
+		)
+		for (const [relativePath, removedFilePath] of removalCandidates) {
+			if (processedRelative.has(relativePath)) continue
 			if (signal?.aborted) break
-			const removed = await writer.remove(cachedFilePath, signal)
+			const removed = await writer.remove(removedFilePath, signal)
 			if (!removed && !signal?.aborted) {
 				this.reportError(
-					new Error(t("embeddings:scanner.unknownErrorDeletingPoints", { filePath: cachedFilePath })),
+					new Error(t("embeddings:scanner.unknownErrorDeletingPoints", { filePath: removedFilePath })),
 					"scanDirectory:deleteRemovedFiles",
-					cachedFilePath,
+					removedFilePath,
 					scanWorkspace,
 					onError,
 				)

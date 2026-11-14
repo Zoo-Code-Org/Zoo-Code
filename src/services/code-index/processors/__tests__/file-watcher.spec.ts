@@ -469,6 +469,8 @@ describe("FileWatcher", () => {
 			)
 			mockVectorStore.deletePointsByFilePath.mockImplementation(async () => void order.push("delete"))
 			mockCacheManager.getHash.mockReturnValue(undefined)
+			mockCacheManager.updateHash.mockImplementation(() => void order.push("hash"))
+			mockCacheManager.deleteHash.mockImplementation(() => void order.push("unhash"))
 			await mockOnDidChange({ fsPath: path })
 			await flushBatch()
 			await mockOnDidDelete({ fsPath: path })
@@ -476,7 +478,8 @@ describe("FileWatcher", () => {
 			expect(order).toEqual([])
 			finishUpsert()
 			await vi.advanceTimersByTimeAsync(0)
-			expect(order).toEqual(["upsert", "delete"])
+			// The delete wins: its points and hash removal come after the change's writes.
+			expect(order).toEqual(["upsert", "hash", "delete", "unhash"])
 		})
 
 		it("clears a stale read failure when the content is unchanged", async () => {
@@ -495,21 +498,39 @@ describe("FileWatcher", () => {
 		})
 
 		it.each([
-			["File is too large", "h", 1],
-			["File is ignored by .rooignore or .gitignore", "h", 1],
-			["File is too large", undefined, 0],
-		])("a change skipped as %s with cached hash %s removes old points %i times", async (reason, hash, removals) => {
-			watcherWithRegistry()
-			mockCacheManager.getHash.mockReturnValue(hash)
-			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
-				path,
-				status: "skipped",
-				reason,
-			})
-			await runChange()
-			expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledTimes(removals)
-			expect(mockCacheManager.deleteHash).toHaveBeenCalledTimes(removals)
-		})
+			{ reason: "File is too large", hash: "h", failed: false, removed: true },
+			{ reason: "File is ignored by .rooignore or .gitignore", hash: "h", failed: false, removed: true },
+			{ reason: "File is too large", hash: undefined, failed: true, removed: true },
+			{ reason: "File is too large", hash: undefined, failed: false, removed: false },
+		])(
+			"a change skipped as $reason (hash $hash, failure entry $failed) removes points: $removed",
+			async ({ reason, hash, failed, removed }) => {
+				const failures = watcherWithRegistry()
+				const relativePath = nodePath.normalize("src/file.ts")
+				if (failed) {
+					failures.renew(relativePath, "h0")
+					failures.record(relativePath, "h0", "upsert", "down", 3, "exhausted")
+				}
+				mockCacheManager.getHash.mockReturnValue(hash)
+				vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+					path,
+					status: "skipped",
+					reason,
+				})
+				const summary = await runChange()
+				if (removed) {
+					expect(mockVectorStore.deletePointsByFilePath).toHaveBeenCalledExactlyOnceWith(path)
+					expect(mockCacheManager.deleteHash).toHaveBeenCalledExactlyOnceWith(path)
+					expect(summary.processedFiles).toEqual([{ path, status: "success" }])
+				} else {
+					expect(mockVectorStore.deletePointsByFilePath).not.toHaveBeenCalled()
+					expect(mockCacheManager.deleteHash).not.toHaveBeenCalled()
+					expect(summary.processedFiles).toEqual([{ path, status: "skipped", reason }])
+				}
+				expect(failures.list()).toEqual([])
+				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			},
+		)
 
 		it("writes nothing after the session signal aborts", async () => {
 			watcherWithRegistry()

@@ -25,7 +25,8 @@ export class CodeIndexOrchestrator {
 	private scanPromise?: Promise<void>
 	private stopPromise?: Promise<void>
 	private scanDone = false
-	private watcherBatchPending = false
+	// A count, not a flag: the watcher queues batches, so one batch can finish while another is pending.
+	private pendingWatcherBatches = 0
 	private recoverySubscriptions: vscode.Disposable[] = []
 	private readonly scanExecutor: CodeIndexScanExecutor
 
@@ -59,7 +60,7 @@ export class CodeIndexOrchestrator {
 			this.stateManager.setSystemState("Indexing", formatProviderWaitMessage(this.pacers.providerWaits()))
 			return
 		}
-		if (!this.scanDone || this.watcherBatchPending) return
+		if (!this.scanDone || this.pendingWatcherBatches > 0) return
 		if (this.failures.list().length > 0) {
 			this.stateManager.setSystemState("Standby", t("embeddings:orchestrator.indexingFilesFailed"))
 			return
@@ -81,7 +82,7 @@ export class CodeIndexOrchestrator {
 
 			this._fileWatcherSubscriptions = [
 				this.fileWatcher.onDidStartBatchProcessing(() => {
-					this.watcherBatchPending = true
+					this.pendingWatcherBatches++
 				}),
 				this.fileWatcher.onBatchProgressUpdate(({ processedInBatch, totalInBatch, currentFile }) => {
 					if (signal.aborted || this.stateManager.state === "Stopping") return
@@ -94,7 +95,7 @@ export class CodeIndexOrchestrator {
 						currentFile ? path.basename(currentFile) : undefined,
 					)
 					// The watcher reports progress after the batch-finished event; settle the status again.
-					if (processedInBatch === totalInBatch && !this.watcherBatchPending) {
+					if (processedInBatch === totalInBatch && this.pendingWatcherBatches === 0) {
 						this.updateRecoveryStatus(signal)
 					}
 				}),
@@ -102,7 +103,7 @@ export class CodeIndexOrchestrator {
 					if (summary?.batchError) {
 						console.error(`[CodeIndexOrchestrator] Batch processing failed:`, summary.batchError)
 					}
-					this.watcherBatchPending = false
+					this.pendingWatcherBatches = Math.max(0, this.pendingWatcherBatches - 1)
 					this.updateRecoveryStatus(signal)
 				}),
 			]
@@ -271,7 +272,7 @@ export class CodeIndexOrchestrator {
 		this._fileWatcherSubscriptions = []
 		this.recoverySubscriptions.forEach((sub) => sub.dispose())
 		this.recoverySubscriptions = []
-		this.watcherBatchPending = false
+		this.pendingWatcherBatches = 0
 	}
 
 	/**
