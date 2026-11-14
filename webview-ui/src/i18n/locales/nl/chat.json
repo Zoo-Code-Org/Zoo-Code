@@ -20,7 +20,8 @@
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",
 	"fileChangesInConversation": {
-		"header": "{{count}} bestand(en) gewijzigd in dit gesprek"
+		"header_one": "{{count}} bestand gewijzigd in dit gesprek",
+		"header_other": "{{count}} bestanden gewijzigd in dit gesprek"
 	},
 	"retry": {
 		"title": "Opnieuw proberen",
@@ -287,7 +288,7 @@
 		"triggerLabelOff": "Automatisch goedkeuren uit",
 		"triggerLabelOffShort": "Uit",
 		"triggerLabel_zero": "0 automatisch goedgekeurd",
-		"triggerLabel_one": "1 automatisch goedgekeurd",
+		"triggerLabel_one": "{{count}} automatisch goedgekeurd",
 		"triggerLabel_other": "{{count}} automatisch goedgekeurd",
 		"triggerLabelAll": "BRRR"
 	},
@@ -315,7 +316,7 @@
 		"truncation": {
 			"title": "Context ingekort",
 			"inProgress": "Context aan het inkorten...",
-			"messagesRemoved": "{{count}} bericht verwijderd",
+			"messagesRemoved_one": "{{count}} bericht verwijderd",
 			"messagesRemoved_other": "{{count}} berichten verwijderd",
 			"description": "Oudere berichten zijn uit het gesprek verwijderd om binnen de limiet van het contextvenster te blijven. Dit is een snelle maar minder contextbehoudende aanpak in vergelijking met samenvoeging."
 		}
@@ -349,7 +350,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Limiet voor automatisch goedgekeurde verzoeken bereikt",
-			"description": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoek(en) bereikt. Wil je de teller resetten en doorgaan met de taak?",
+			"description_one": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoek bereikt. Wil je de teller resetten en doorgaan met de taak?",
+			"description_other": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoeken bereikt. Wil je de teller resetten en doorgaan met de taak?",
 			"button": "Resetten en doorgaan"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +363,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo wil de codebase doorzoeken op <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo wil de codebase doorzoeken op <code>{{query}}</code> in <code>{{path}}</code>",
-		"didSearch_one": "1 resultaat gevonden",
+		"didSearch_one": "{{count}} resultaat gevonden",
 		"didSearch_other": "{{count}} resultaten gevonden",
 		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)"
 	},
