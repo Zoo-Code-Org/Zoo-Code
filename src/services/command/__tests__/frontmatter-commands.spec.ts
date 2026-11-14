@@ -22,6 +22,28 @@ describe("Command loading with frontmatter", () => {
 		vi.clearAllMocks()
 	})
 
+	it.each(["javascript", "js", "JS"])("does not execute %s metadata during lookup or discovery", async (language) => {
+		const executed = vi.fn()
+		vi.stubGlobal("frontmatterExecuted", executed)
+		try {
+			const content = `---${language}\n(globalThis.frontmatterExecuted(), {description: "Injected"})\n---\nBody`
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readFile = vi.fn().mockResolvedValue(content)
+			mockFs.readdir = vi
+				.fn()
+				.mockResolvedValue([{ name: "example.md", isFile: () => true, isSymbolicLink: () => false }])
+			const command = await getCommand("/test/cwd", "example")
+			expect(command?.description).toBeUndefined()
+			expect(command?.content).toBe(content)
+			const commands = await getCommands("/test/cwd")
+			expect(commands.length).toBeGreaterThan(0)
+			expect(commands.every((item) => item.description === undefined && item.content === content)).toBe(true)
+			expect(executed).not.toHaveBeenCalled()
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	describe("getCommand with frontmatter", () => {
 		it("should load command with description from frontmatter", async () => {
 			const commandContent = `---
