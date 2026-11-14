@@ -56,6 +56,15 @@ export type ShellToken = string | { op: "glob"; pattern: string } | { op: string
  *   disagree about where the comment ends, so the scan refuses the input
  *   instead of guessing. A carriage return that is the CR of a CRLF pair is
  *   a line ending for both models and does not trigger this refusal.
+ * - `ambiguous-escape`: a backslash inside a legacy backtick region that
+ *   escapes `$`, a backtick, `"`, or `\`. The shell removes those backslashes
+ *   and re-parses what remains, so the command it runs is not the text this
+ *   scan extracts: an escaped inner backtick makes that inner region live
+ *   syntax, and the payload it runs never reaches the segment lists. The read
+ *   models disagree about what the region contains, so the scan refuses the
+ *   input instead of guessing at every site where it reads a region's bytes.
+ *   A backslash before any other byte survives literally in both readings and
+ *   does not trigger this refusal.
  * - `payload-glob`: a glob word inside a re-scanned substitution payload.
  *   The tokenizer keeps only the literal `glob` for such a word, which
  *   under-approximates the files bash expands the pattern to. The scan
@@ -85,6 +94,7 @@ export type QuoteType =
 	| "tokenize-failure"
 	| "ambiguous-opener"
 	| "ambiguous-comment"
+	| "ambiguous-escape"
 	| "payload-glob"
 	| "placeholder-glob"
 
@@ -98,8 +108,9 @@ export type QuoteType =
  * closer, a raw NUL byte, substitution nesting beyond the re-scan depth cap,
  * the shell tokenizer rejecting the masked command, a `{` opener joined to
  * its `$` across a carriage-return continuation, a comment that ends at a
- * lone carriage return, a glob word inside a re-scanned substitution payload,
- * or a host glob word carrying a masked construct. `commands` then holds the
+ * lone carriage return, a backslash escape inside a legacy backtick region,
+ * a glob word inside a re-scanned substitution payload, or a host glob word
+ * carrying a masked construct. `commands` then holds the
  * raw input as one opaque token.
  * Callers can surface the error without splitting unsafe fragments.
  *
@@ -157,6 +168,8 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 			"ambiguous parameter-expansion opener (a carriage return sits in the line continuation before `{`)",
 		"ambiguous-comment":
 			"comment terminated by a lone carriage return (the executing shell reads the comment as extending past it)",
+		"ambiguous-escape":
+			"backslash escape inside a backtick region (the executing shell re-parses the payload with the escape removed)",
 		"payload-glob": "glob pattern inside a substitution payload (glob expansion cannot be accounted for)",
 		"placeholder-glob":
 			"glob word carrying a command substitution (substitution expansion cannot be accounted for)",
@@ -167,6 +180,7 @@ function unterminatedQuoteMessage(quoteType: QuoteType, openIndex: number, comma
 		quoteType === "nesting-too-deep" ||
 		quoteType === "ambiguous-opener" ||
 		quoteType === "ambiguous-comment" ||
+		quoteType === "ambiguous-escape" ||
 		quoteType === "payload-glob" ||
 		quoteType === "placeholder-glob"
 			? labels[quoteType]
@@ -632,6 +646,16 @@ function scanShellSyntax(text: string): ScanOutcome {
 		message: unterminatedQuoteMessage(kind, openIndex, text),
 	})
 
+	// Whether the shell removes this backslash inside a legacy backtick region,
+	// discarding it and re-parsing what follows. The re-parse is what makes
+	// these escapes unaccountable: the command bash runs is the stripped text,
+	// not the region this scan masks. A backslash before any other byte — a
+	// line continuation included — survives literally in both readings, and a
+	// backslash with no following byte closes nothing and belongs to the
+	// unterminated-region refusal instead.
+	const escapesBacktickRegion = (next: string | undefined): boolean =>
+		next === "$" || next === "`" || next === '"' || next === "\\"
+
 	// Reject a raw NUL before any masking. NUL is this scan's placeholder
 	// sentinel. An input containing one could degrade a masked placeholder
 	// into inert literal text. That would hide a substitution from the lists.
@@ -872,6 +896,17 @@ function scanShellSyntax(text: string): ScanOutcome {
 			while (i < to) {
 				const char = text[i]
 				if (char === "\\" && (quote !== "'" || escapedQuote)) {
+					// A backslash inside a backtick region is refused before
+					// the pair is consumed, as in the live-text scan: the
+					// shell's first pass over the region removes it (and the
+					// quotes this walk tracks are invisible to that pass)
+					// and re-parses what remains, so the region's live
+					// content here is not what the executing shell runs.
+					// Stryker disable next-line ConditionalExpression,ArithmeticOperator,BlockStatement: an input reaching this branch is refused by the payload's own re-scan with the same kind and index, so no input distinguishes these replacements.
+					if (frames[frames.length - 1]?.backtick && escapesBacktickRegion(text[i + 1])) {
+						// Stryker disable next-line StringLiteral: same equivalence as the guard above — this kind is never the one a reachable input reports from here.
+						return errorAt("ambiguous-escape", i)
+					}
 					// Inside plain single quotes a backslash is literal, so only
 					// an unquoted, double-quoted, or ANSI-C-quoted backslash
 					// pairs with the next character.
@@ -1550,6 +1585,13 @@ function scanShellSyntax(text: string): ScanOutcome {
 			const top = frames[frames.length - 1]
 			if (top) {
 				if (top.escaped && char === "\\") {
+					// The backtick-region refusal of the live-text scan applies
+					// here too: this walk reads heredoc bodies and arithmetic
+					// interiors, and a backtick region in one of those carries
+					// the same shell re-parse of the stripped text.
+					if (top.kind === "backtick" && escapesBacktickRegion(text[i + 1])) {
+						return errorAt("ambiguous-escape", i)
+					}
 					// A backslash-newline pair is removed by the shell before
 					// tokenizing, so recording it as a word-continuation end
 					// would exempt a `#` that follows from the comment rule and
@@ -2094,6 +2136,15 @@ function scanShellSyntax(text: string): ScanOutcome {
 
 		if (top) {
 			if (top.escaped && char === "\\") {
+				// Inside a legacy backtick region the shell removes the backslash
+				// before `$`, a backtick, `"`, or `\` and re-parses the result, so
+				// the region's content bash runs is not the text this scan masks.
+				// The disagreement is unaccountable, so the input fails closed
+				// before the pair is consumed.
+				if (top.kind === "backtick" && escapesBacktickRegion(text[i + 1])) {
+					outcome.error = errorAt("ambiguous-escape", i)
+					return outcome
+				}
 				// A backslash-newline pair is removed by the shell before
 				// tokenizing, so recording it as a word-continuation end would
 				// exempt a `#` that follows from the comment rule and hide a

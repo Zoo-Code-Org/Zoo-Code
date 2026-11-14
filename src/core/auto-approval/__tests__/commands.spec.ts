@@ -594,6 +594,25 @@ describe("getCommandDecision — integration with dangerous substitution checks"
 		)
 	})
 
+	it("fails closed when an escaped backtick inside a backtick region hides an executable payload", () => {
+		// bash removes the backslash before an inner backtick and runs the
+		// payload it opens: `echo `echo \`rm x`` executes `rm x`, while the
+		// scan's extraction hands back a word whose leading backtick hides it,
+		// and the allowlisted `echo` carried the command to an approval. The
+		// parser now refuses the input, so the allowlist never carries it.
+		expect(getCommandDecision("echo `echo \\`rm x\\``", ["echo", "ls", "touch", "x"], ["rm"])).toBe(
+			"malformed_command",
+		)
+	})
+
+	it("splits a backgrounded command chain at the lone & before checking the lists", () => {
+		// bash backgrounds the left side and runs the right side as its own
+		// command. The decision layer must see both commands: the denied `rm`
+		// segments independently and blocks the whole chain, never riding the
+		// allowlisted `echo a` to an approval.
+		expect(getCommandDecision("echo a & rm x", ["echo a", "ls"], ["rm"])).toBe("auto_deny")
+	})
+
 	it("fails closed when a comment's lone-CR terminator hides an executable tail", () => {
 		// bash reads the whole first line — the quote opener included — as
 		// comment text and executes the following line, while the scan ends

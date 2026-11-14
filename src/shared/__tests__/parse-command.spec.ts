@@ -42,6 +42,15 @@ describe("parseCommand", () => {
 			expect(parseCommand("a ; b").commands).toEqual(["a", "b"])
 			expect(parseCommand("a | b").commands).toEqual(["a", "b"])
 		})
+
+		it("splits on a lone &", () => {
+			// A lone `&` is one of the flush operators: bash backgrounds the
+			// left side and runs the right side as its own command, so the
+			// decomposition must split there or the right-hand command rides
+			// the left-hand word past the lists.
+			expect(parseCommand("a & b").commands).toEqual(["a", "b"])
+			expect(parseCommand("echo a & rm x").commands).toEqual(["echo a", "rm x"])
+		})
 	})
 
 	describe("genuine multi-statement scripts (unquoted newlines)", () => {
@@ -2650,6 +2659,156 @@ describe("parseCommand", () => {
 			const comment = parseCommand("echo # c\r\nrm -rf /\n")
 			expect(comment.parseError).toBeNull()
 			expect(comment.commands).toEqual(["echo", "rm -rf /"])
+		})
+
+		it("refuses an escaped backtick inside a backtick region", () => {
+			// bash removes a backslash before `$`, a backtick, `"`, or `\` inside
+			// a legacy backtick region and re-parses what remains, so the payload
+			// the executing shell runs is not the text this scan extracts. An
+			// escaped inner backtick makes the inner region live syntax there:
+			// `echo `echo \`rm x`` runs `rm x` while the extraction hands back a
+			// word whose leading backtick hides it from the lists. The scan
+			// refuses instead of guessing — the same shared-error channel as the
+			// ambiguous-opener and ambiguous-comment refusals.
+			const shapes: Array<[string, number]> = [
+				["echo `echo \\`rm x\\``", 11],
+				["echo `a \\`b \\`rm x\\``", 8],
+				["echo `echo \\`hi\\``", 11],
+			]
+			for (const [input, escapeIndex] of shapes) {
+				const { commands, parseError } = parseCommand(input)
+				// The index pins the refusal to the escape itself: a guard that
+				// tested a narrower byte set would still refuse these inputs,
+				// one byte later, when it reached the next escape.
+				expect(parseError).toEqual(
+					expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: escapeIndex }),
+				)
+				expect(commands).toEqual([input])
+			}
+			// The message names the disagreement by its own label: not the
+			// generic "unterminated ..." form, because no region is unclosed.
+			const message = parseCommand(shapes[0][0]).parseError?.message ?? ""
+			expect(message).toContain(
+				"backslash escape inside a backtick region (the executing shell re-parses the payload with the escape removed)",
+			)
+			expect(message).not.toContain("unterminated")
+		})
+
+		it("refuses every region-special escape inside a backtick region", () => {
+			// The second parse removes the backslash before `$`, a backtick, `"`,
+			// or `\`, so each of the four turns the extracted payload text into a
+			// different command than the one the region's text appears to hold.
+			// An escaped `$(` inside the region becomes a live substitution bash
+			// runs while the extraction keeps it inert word text.
+			// Each byte of the escaped class is refused at the escape itself: a
+			// guard testing a narrower byte set would still refuse, one byte
+			// later at the next escape, so the index is what pins the class.
+			const escapedDollar = "echo `echo \\$(rm x)`"
+			expect(parseCommand(escapedDollar).parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 11 }),
+			)
+			const escapedQuote = 'echo `echo \\"$(rm x)\\"`'
+			expect(parseCommand(escapedQuote).parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 11 }),
+			)
+			// An escaped backslash pairs with the following escape, shifting every
+			// later pairing against the shell's reading. Both models still refuse
+			// these bytes; the refusal now names the escape, not the lost closer,
+			// and its position pins that the escaped backslash — not the later
+			// escaped backtick — is what the refusal fires on.
+			const escapedBackslash = "echo `a \\\\`rm x\\``"
+			expect(parseCommand(escapedBackslash).parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 8 }),
+			)
+		})
+
+		it("refuses an escaped backtick in a backtick region nested inside any tracked context", () => {
+			// The region can hide behind a command substitution, on a heredoc
+			// opener line's live remainder, or on a heredoc body line: each walk
+			// that tracks a backtick region refuses the escape at its own site,
+			// before any payload survives to be re-scanned.
+			const nested = "echo $(`echo \\`rm x\\``)"
+			const nestedResult = parseCommand(nested)
+			expect(nestedResult.parseError?.quoteType).toBe("ambiguous-escape")
+			expect(nestedResult.commands).toEqual([nested])
+			const remainder = "cat <<E `echo \\`rm x\\``\nE\n"
+			const remainderResult = parseCommand(remainder)
+			// The openIndex pins the refusal to the escape byte in the opener
+			// line's remainder (index 14). Without this walk's own site the same
+			// bytes are only refused later, when the extracted payload is
+			// re-scanned at its own smaller index — the input still fails closed,
+			// but the refusal would no longer stand where the disagreement is.
+			expect(remainderResult.parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 14 }),
+			)
+			expect(remainderResult.commands).toEqual([remainder])
+			// Same position argument for the unterminated opener-line region:
+			// the refusal fires on the escape byte in the remainder (index 11).
+			const remainderUnterminated = "cat <<E `a \\`rm x\nE\n"
+			expect(parseCommand(remainderUnterminated).parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 11 }),
+			)
+			// A region on the opener line that closes cleanly and whose payload
+			// carries no second trigger: this walk's own refusal is the only
+			// thing that keeps `echo \$HOME`'s escaped dollar from being masked
+			// into opaque host text and riding the heredoc word past the lists.
+			const remainderSoleRefusal = "cat <<E `echo \\$HOME`\nE\n"
+			expect(parseCommand(remainderSoleRefusal).parseError).toEqual(
+				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 14 }),
+			)
+			const body = "cat <<E\n`echo \\`rm x\\``\nE\n"
+			const bodyResult = parseCommand(body)
+			expect(bodyResult.parseError?.quoteType).toBe("ambiguous-escape")
+			expect(bodyResult.commands).toEqual([body])
+			// Legacy `$[...]` arithmetic extracts its interior for the same
+			// second-parse reason; the interior walk refuses there too.
+			const legacyArith = "echo $[ `a \\`rm x\\`` ]"
+			expect(parseCommand(legacyArith).parseError?.quoteType).toBe("ambiguous-escape")
+		})
+
+		it("keeps ordinary escapes on the parse path when no backtick region re-parses them", () => {
+			// The discriminator for the refusal above. Outside a backtick region a
+			// backtick escape is literal word text both models read alike; inside
+			// a region a backslash-newline continuation and a backslash before any
+			// non-special byte survive the shell's backslash removal unchanged.
+			// These shapes stay parseable and byte-identical.
+			const hostEscape = parseCommand("echo a\\`b")
+			expect(hostEscape.parseError).toBeNull()
+			expect(hostEscape.commands).toEqual(["echo a`b"])
+			const continuation = parseCommand("echo `a\\\nb`")
+			expect(continuation.parseError).toBeNull()
+			const plainPair = parseCommand("echo `ls \\;x`")
+			expect(plainPair.parseError).toBeNull()
+			// An unescaped backtick region still masks opaquely to its closer:
+			// only the region-special escapes added a re-parse the scan cannot
+			// account for.
+			const plainRegion = parseCommand("echo `rm x`")
+			expect(plainRegion.parseError).toBeNull()
+			expect(plainRegion.commands).toEqual(["echo", "rm x"])
+		})
+
+		it("refuses only backtick regions, not every frame, at each refusal site", () => {
+			// The accept path through each of the three refusal sites. Inside a
+			// double-quoted frame (heredoc body walk) and outside any frame
+			// (heredoc opener-line remainder) the shell removes the same
+			// backslashes during ordinary expansion, so the models never
+			// disagree there and these shapes must stay parseable.
+			const dqInBody = parseCommand('cat <<E\necho "\\$HOME"\nE\n')
+			expect(dqInBody.parseError).toBeNull()
+			const remainderEscape = parseCommand("cat <<E a\\$HOME\nE\n")
+			expect(remainderEscape.parseError).toBeNull()
+			// An escaped backtick inside a command-substitution frame in a
+			// heredoc body: the frame is not a backtick region, the shell does
+			// not second-parse it, and its payload extracts normally.
+			const bodySubFrame = parseCommand("cat <<E\necho $(a\\`b)\nE\n")
+			expect(bodySubFrame.parseError).toBeNull()
+			expect(bodySubFrame.commands).toEqual(["cat <<E\necho $(a\\`b)\nE", "a`b"])
+			// A backslash as the region's final byte pairs with the end of
+			// input: the shell reports the region unterminated, and the refusal
+			// must name that disagreement, not invent an escape one byte
+			// earlier than any class pair exists.
+			const trailingBackslash = parseCommand("echo `a\\")
+			expect(trailingBackslash.parseError?.quoteType).toBe("backtick")
 		})
 
 		it("keeps a carriage return inside a delimiter word from joining a dollar to a quote byte", () => {
