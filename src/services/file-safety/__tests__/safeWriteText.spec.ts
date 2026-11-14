@@ -1,7 +1,7 @@
 import * as fs from "fs/promises"
 import * as fsSync from "fs"
 import { execFile } from "child_process"
-import type { ChildProcess } from "child_process"
+import type { ChildProcess, ExecFileException } from "child_process"
 import * as path from "path"
 
 import { PostCommitDurabilityError, resolveLockKey, safeWriteText, StagingPathError } from "../safeWriteText"
@@ -172,6 +172,13 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// The staging-directory grant names the account it grants from the process
+			// environment, so this row pins the account rather than inheriting whatever the host
+			// happens to carry: with neither USERNAME nor USER, _grantPrivateDaclWindows takes its
+			// skip path and one of the three icacls calls never happens, which is a state a runner
+			// can reach and this row cannot.
+			vi.stubEnv("USERNAME", "staging-acl-user")
+			vi.stubEnv("USER", "")
 
 			// options is undefined: the self-staged check and the optional-chained
 			// DACL runner lookup must not dereference it
@@ -180,13 +187,78 @@ describe("safeWriteText", () => {
 			expect(fs.rmdir).toHaveBeenCalledTimes(1)
 			expect(fs.rmdir).toHaveBeenCalledWith(expect.stringContaining(".file-safety-staging"))
 			if (process.platform === "win32") {
-				// default platform is win32: the staging DACL hardening, the DACL save
-				// and the DACL restore all ran through the default icacls path
-				// (options?.execFileRunner must not throw when options is undefined)
-				expect(vi.mocked(execFile)).toHaveBeenCalledTimes(3)
+				// default platform is win32: the staging hardening grant, the target DACL save
+				// and the post-commit restore all ran through the default icacls path
+				// (options?.execFileRunner must not throw when options is undefined). Named by
+				// argument rather than by a bare count, so a missing step reports which step.
+				const icaclsCalls = vi.mocked(execFile).mock.calls.map(function (call) {
+					return (call[1] ?? []).map(String)
+				})
+				const grants = icaclsCalls.filter(function (args) {
+					return args.includes("/inheritance:r")
+				})
+				const saves = icaclsCalls.filter(function (args) {
+					return args.includes("/save")
+				})
+				const restores = icaclsCalls.filter(function (args) {
+					return args.includes("/restore")
+				})
+				expect(grants).toHaveLength(1)
+				expect(saves).toHaveLength(1)
+				expect(restores).toHaveLength(1)
+				expect(icaclsCalls).toHaveLength(3)
+				expect(grants[0]?.[3]).toBe("staging-acl-user:(OI)(CI)F")
 				expect(vi.mocked(fs.unlink)).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.acl"))
 			}
+			vi.unstubAllEnvs()
 		})
+		it.skipIf(process.platform !== "win32")(
+			"skips the staging-directory grant and reports the leftover exposure when no account name resolves",
+			async () => {
+				const targetPath = "/tmp/test-dir/target.txt"
+				const warnings: string[] = []
+				vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+				vi.mocked(fsSync.openSync).mockReturnValue(1)
+				// Both account sources cleared: the state a host reaches when its environment
+				// carries neither USERNAME nor USER. The grant never runs, so the two calls left
+				// are the target DACL save and the post-commit restore, named by argument.
+				vi.stubEnv("USERNAME", "")
+				vi.stubEnv("USER", "")
+
+				await expect(
+					safeWriteText(targetPath, "hello", {
+						platform: "win32",
+						onWarning: (message: string) => warnings.push(message),
+					}),
+				).resolves.toBeUndefined()
+
+				const icaclsCalls = vi.mocked(execFile).mock.calls.map(function (call) {
+					return (call[1] ?? []).map(String)
+				})
+				expect(icaclsCalls).toHaveLength(2)
+				expect(
+					icaclsCalls.filter(function (args) {
+						return args.includes("/inheritance:r")
+					}),
+				).toEqual([])
+				expect(
+					icaclsCalls.filter(function (args) {
+						return args.includes("/save")
+					}),
+				).toHaveLength(1)
+				expect(
+					icaclsCalls.filter(function (args) {
+						return args.includes("/restore")
+					}),
+				).toHaveLength(1)
+				expect(
+					warnings.some(function (message) {
+						return message.includes("may be readable by other accounts")
+					}),
+				).toBe(true)
+				vi.unstubAllEnvs()
+			},
+		)
 
 		it("does not remove the staging directory when the caller supplies its own tempPath", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
@@ -667,6 +739,87 @@ describe("safeWriteText", () => {
 			// no unlink (no backup to delete; DACL skipped via platform:linux)
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
+		it("keeps a multi-chunk backup complete when the destination write comes up short", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			// More than one 64 KiB chunk of distinct bytes, so a wrong source position or a
+			// wrong destination offset lands bytes that differ from the right ones. The period
+			// 251 does not divide the chunk size, which is what makes an offset error visible.
+			const source = Buffer.alloc(70 * 1024)
+			for (let i = 0; i < source.length; i++) {
+				source[i] = i % 251
+			}
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fs.copyFile).mockResolvedValue(undefined)
+			// The descriptor the copy writes into is the seeded backup (7); the target is read
+			// through 9 and the staged temp through 1, so an assertion can name who got which
+			// byte instead of trusting the call order alone.
+			vi.mocked(fsSync.openSync).mockImplementation((...args: unknown[]) => {
+				const openedPath = String(args[0])
+				if (openedPath.includes("safeWriteText.bak_")) {
+					return 7
+				}
+				if (openedPath === targetPath) {
+					return 9
+				}
+				return 1
+			})
+			// readSync answers from the recorded source instead of the default immediate EOF,
+			// so the production copy loop runs for two chunks rather than being short-circuited.
+			vi.mocked(fsSync.readSync).mockImplementation((...args: unknown[]) => {
+				const buffer = args[1]
+				if (!Buffer.isBuffer(buffer)) {
+					return 0
+				}
+				const position = typeof args[4] === "number" ? args[4] : 0
+				const offset = typeof args[2] === "number" ? args[2] : 0
+				const length = typeof args[3] === "number" ? args[3] : 0
+				const bytes = Math.min(length, Math.max(0, source.length - position))
+				if (bytes === 0) {
+					return 0
+				}
+				source.copy(buffer, offset, position, position + bytes)
+				return bytes
+			})
+			const copiedChunks: Buffer[] = []
+			let shortWriteLeft = 1
+			// The seeded backup descriptor reports one short write, 40000 of the 65536 bytes
+			// asked for, and every other call reports the full request.
+			vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) => {
+				const fd = args[0]
+				const buffer = args[1]
+				const offset = typeof args[2] === "number" ? args[2] : 0
+				const length = typeof args[3] === "number" ? args[3] : 0
+				if (!Buffer.isBuffer(buffer) || fd !== 7) {
+					return length
+				}
+				const granted = shortWriteLeft > 0 && length > 40000 ? 40000 : length
+				if (granted < length) {
+					shortWriteLeft = 0
+				}
+				copiedChunks.push(Buffer.from(buffer.subarray(offset, offset + granted)))
+				return granted
+			})
+
+			await expect(safeWriteText(targetPath, "new content", { backup: true })).resolves.toBeUndefined()
+
+			const seedOpen = vi.mocked(fsSync.openSync).mock.calls.find(function (call) {
+				return String(call[0]).includes("safeWriteText.bak_") && call[1] === "wx"
+			})
+			expect(seedOpen?.[2]).toBe(0o600)
+			// The first chunk went in at offset 0 and the short write forced a second call at
+			// the offset the destination actually reached, with only the remainder asked for.
+			expect(fsSync.writeSync).toHaveBeenCalledWith(7, expect.any(Buffer), 0, 65536)
+			expect(fsSync.writeSync).toHaveBeenCalledWith(7, expect.any(Buffer), 40000, 65536 - 40000)
+			// The tail chunk landed in one call at offset 0 of a fresh buffer.
+			expect(fsSync.writeSync).toHaveBeenCalledWith(7, expect.any(Buffer), 0, 70 * 1024 - 65536)
+			const copied = Buffer.concat(copiedChunks)
+			expect(copied.length).toBe(source.length)
+			expect(copied.equals(source)).toBe(true)
+			expect(fsSync.closeSync).toHaveBeenCalledWith(7)
+			expect(fsSync.closeSync).toHaveBeenCalledWith(9)
+			// The loop under test is this code's own, not fs.copyFile's.
+			expect(fs.copyFile).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 5: win32 DACL path ──────────────────────────────────────────────
@@ -946,6 +1099,62 @@ describe("safeWriteText", () => {
 
 			// no dump file created or unlinked
 			expect(fs.unlink).not.toHaveBeenCalled()
+		})
+
+		it("win32: holds the staging write until the staging-directory grant has returned", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+			// Held as an array entry rather than a bare function value, because expect() on a
+			// function value in this suite only offers call matchers.
+			const held: Array<(error: ExecFileException | null, stdout: string, stderr: string) => void> = []
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				// Only the grant is held, so this row is about the privacy barrier rather than
+				// about icacls in general: the dump and the restore complete as soon as asked.
+				if ((args ?? []).map(String).includes("/inheritance:r")) {
+					if (typeof cb === "function") {
+						held.push(cb)
+					}
+					return fakeChild
+				}
+				if (typeof cb === "function") cb(null, "", "")
+				return fakeChild
+			})
+
+			const write = safeWriteText(targetPath, "data", { platform: "win32" })
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			// The grant is the only icacls call attempted and no descriptor has been opened
+			// for staged bytes yet: the hardening is awaited, not merely ordered before them.
+			expect(vi.mocked(execFile).mock.calls).toHaveLength(1)
+			expect(vi.mocked(fsSync.openSync).mock.calls).toHaveLength(0)
+			expect(held.length).toBe(1)
+
+			held[0]?.(null, "", "")
+			await expect(write).resolves.toBeUndefined()
+
+			expect(vi.mocked(fs.rename)).toHaveBeenCalledTimes(1)
+			const calls = vi.mocked(execFile).mock.calls.map(function (call) {
+				return (call[1] ?? []).map(String)
+			})
+			expect(
+				calls.filter(function (args) {
+					return args.includes("/save")
+				}),
+			).toHaveLength(1)
+			expect(
+				calls.filter(function (args) {
+					return args.includes("/restore")
+				}),
+			).toHaveLength(1)
+			const grantOrder =
+				vi.mocked(execFile).mock.invocationCallOrder[
+					calls.findIndex(function (args) {
+						return args.includes("/inheritance:r")
+					})
+				]
+			const firstOpenOrder = vi.mocked(fsSync.openSync).mock.invocationCallOrder[0]
+			expect(grantOrder).toBeLessThan(firstOpenOrder!)
 		})
 
 		it("win32: strips inherited ACEs from the staging directory before staging content", async () => {
