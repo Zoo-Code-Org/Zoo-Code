@@ -41,6 +41,15 @@ afterAll(() => {
 	}
 })
 
+// Each test gets its own shadow + workspace repo, so the shared temp dir would otherwise
+// hold one git repository pair per test until the afterAll. Removing them as soon as the test
+// ends is what keeps the git-heavy setup below inside its hook budget on Windows CI workers,
+// where the retry absorbs the window in which git's own handles and antivirus scans still
+// hold the just-used repository.
+const rmScratch = async (dir: string) => {
+	await fs.rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
+}
+
 const initWorkspaceRepo = async ({
 	workspaceDir,
 	userName = "Roo Code",
@@ -83,10 +92,16 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 		let workspaceGit: SimpleGit
 		let testFile: string
 		let service: RepoPerTaskCheckpointService
+		let shadowDir: string
+		let workspaceDir: string
 
+		// One test setup spawns about 14 git subprocesses: workspace repo init plus shadow repo
+		// init. On a Windows CI worker, where vitest.config.ts gives this lane two workers and
+		// every spawn is scanned, that can outrun the 20s hook budget from vitest.config.ts, so
+		// setup and cleanup get the same 60s allowance the afterAll cleanup already carries.
 		beforeEach(async () => {
-			const shadowDir = path.join(tmpDir, `${prefix}-${Date.now()}`)
-			const workspaceDir = path.join(tmpDir, `workspace-${Date.now()}`)
+			shadowDir = path.join(tmpDir, `${prefix}-${Date.now()}`)
+			workspaceDir = path.join(tmpDir, `workspace-${Date.now()}`)
 			const repo = await initWorkspaceRepo({ workspaceDir })
 
 			workspaceGit = repo.git
@@ -94,11 +109,17 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 
 			service = await klass.create({ taskId, shadowDir, workspaceDir, log: () => {} })
 			await service.initShadowGit()
-		})
+		}, 60_000)
 
 		afterEach(async () => {
 			vitest.restoreAllMocks()
-		})
+
+			// The standalone tests below already delete the scratch repos they create; this hook
+			// does the same for the pair created above, so the temp dir never accumulates one
+			// repository pair per test for the ~40 tests that share these hooks.
+			await rmScratch(shadowDir)
+			await rmScratch(workspaceDir)
+		}, 60_000)
 
 		afterAll(async () => {
 			await fs.rm(tmpDir, { recursive: true, force: true })
@@ -1164,6 +1185,22 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 					// Clean up external git directory
 					await fs.rm(externalGitDir, { recursive: true, force: true })
 				}
+			})
+		})
+
+		describe(`${klass.name}#scratchCleanup`, () => {
+			let markedFile: string
+
+			it("writes a marker into the repository its hooks created", async () => {
+				markedFile = path.join(workspaceDir, "scratch-marker.txt")
+
+				await fs.writeFile(markedFile, "written by the marker test")
+
+				expect(await fileExistsAtPath(markedFile)).toBe(true)
+			})
+
+			it("removes the marker with the repository before the next test runs", async () => {
+				expect(await fileExistsAtPath(markedFile)).toBe(false)
 			})
 		})
 	},
