@@ -25,6 +25,10 @@ type OperationId =
 	| "stale-save-a"
 	| "abandon-b"
 	| "reject-a"
+	| "rename-a"
+	| "auto-title-a"
+	| "auto-title-b"
+	| "delete-a"
 type RecordMap = Partial<Record<TaskId, HistoryItem>>
 
 interface PreparedWrite {
@@ -34,7 +38,7 @@ interface PreparedWrite {
 }
 
 interface OperationState {
-	phase: "idle" | "read" | "prepared" | "revalidated" | "done" | "rejected" | "failed"
+	phase: "idle" | "read" | "prepared" | "revalidated" | "done" | "rejected" | "skipped" | "failed"
 	snapshot?: RecordMap
 	writes?: PreparedWrite[]
 	writeIndex: number
@@ -64,6 +68,13 @@ interface OperationSpec {
 	externalSnapshot?: boolean
 	allowRefreshAfterRead?: boolean
 	publishCacheAtEnd?: boolean
+	/**
+	 * "auto-title" mirrors TaskHistoryStore.setAutoTitleIfAbsent: under the file lock the write is
+	 * skipped when the persisted record is gone or already carries an autoTitle, and a commit copies
+	 * only autoTitle into the host cache.
+	 * "delete" removes the persisted record.
+	 */
+	kind?: "auto-title" | "delete"
 	isEnabled?(snapshot: RecordMap): boolean
 	buildWrites(snapshot: RecordMap): HistoryItem[]
 }
@@ -113,6 +124,12 @@ const semanticLandmarks = {
 		state.commits.filter((entry) => entry.operationId === "complete-a").length === 1 &&
 		state.caches.A["child-a"]?.status === "completed" &&
 		state.caches.A.parent?.status === "delegated",
+	"auto-title-skipped-after-delete": (state: ModelState) =>
+		Object.values(state.operations).some((operation) => operation.phase === "skipped") &&
+		state.operations["delete-a"]?.phase === "done" &&
+		state.disk["child-a"] === undefined,
+	"manual-and-auto-title-coexist": (state: ModelState) =>
+		Boolean(state.disk["child-a"]?.title) && Boolean(state.disk["child-a"]?.autoTitle),
 } satisfies Record<string, (state: ModelState) => boolean>
 
 function item(id: TaskId, overrides: Partial<HistoryItem> = {}): HistoryItem {
@@ -248,6 +265,32 @@ const operationSpecs: Record<OperationId, OperationSpec> = {
 			return [abandoned.child, abandoned.parent]
 		},
 	},
+	"rename-a": {
+		id: "rename-a",
+		host: "A",
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "child-a"), title: "manual" }],
+	},
+	"auto-title-a": {
+		id: "auto-title-a",
+		host: "A",
+		kind: "auto-title",
+		isEnabled: (snapshot) => snapshot["child-a"] !== undefined,
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "child-a"), autoTitle: "generated-a" }],
+	},
+	"auto-title-b": {
+		id: "auto-title-b",
+		host: "B",
+		kind: "auto-title",
+		isEnabled: (snapshot) => snapshot["child-a"] !== undefined,
+		buildWrites: (snapshot) => [{ ...getRequired(snapshot, "child-a"), autoTitle: "generated-b" }],
+	},
+	"delete-a": {
+		id: "delete-a",
+		host: "A",
+		kind: "delete",
+		isEnabled: (snapshot) => snapshot["child-a"] !== undefined,
+		buildWrites: (snapshot) => [getRequired(snapshot, "child-a")],
+	},
 	"reject-a": {
 		id: "reject-a",
 		host: "A",
@@ -316,6 +359,13 @@ function nextSteps(state: ModelState, scenario: Scenario): TraceStep[] {
 						const target = next.operations[spec.id]!
 						const targetWrite = target.writes![target.writeIndex]!
 						next.locks[targetWrite.taskId] = spec.id
+						const persisted = next.disk[targetWrite.taskId]
+						if (spec.kind === "auto-title" && (!persisted || persisted.autoTitle)) {
+							target.phase = "skipped"
+							delete next.locks[targetWrite.taskId]
+							delete next.hostMutexes[spec.host]
+							return
+						}
 						try {
 							target.candidate = mergeHistoryDelta(
 								next.disk[targetWrite.taskId],
@@ -342,15 +392,29 @@ function nextSteps(state: ModelState, scenario: Scenario): TraceStep[] {
 						throw new Error(`${spec.id} committed without owning ${targetWrite.taskId}`)
 					}
 					const previous = next.disk[targetWrite.taskId]
-					next.disk[targetWrite.taskId] = target.candidate
-					if (!spec.publishCacheAtEnd) next.caches[spec.host][targetWrite.taskId] = target.candidate
-					next.commits.push({
-						operationId: spec.id,
-						taskId: targetWrite.taskId,
-						previous,
-						delta: targetWrite.delta,
-						next: target.candidate,
-					})
+					if (spec.kind === "delete") {
+						delete next.disk[targetWrite.taskId]
+						delete next.caches[spec.host][targetWrite.taskId]
+					} else {
+						next.disk[targetWrite.taskId] = target.candidate
+						const cached = next.caches[spec.host][targetWrite.taskId]
+						if (spec.kind === "auto-title" && cached) {
+							// setAutoTitleIfAbsent copies only autoTitle so the cache stays this host's save baseline.
+							next.caches[spec.host][targetWrite.taskId] = {
+								...cached,
+								autoTitle: target.candidate.autoTitle,
+							}
+						} else if (!spec.publishCacheAtEnd) {
+							next.caches[spec.host][targetWrite.taskId] = target.candidate
+						}
+						next.commits.push({
+							operationId: spec.id,
+							taskId: targetWrite.taskId,
+							previous,
+							delta: targetWrite.delta,
+							next: target.candidate,
+						})
+					}
 					delete next.locks[targetWrite.taskId]
 					target.candidate = undefined
 					target.writeIndex++
@@ -680,6 +744,59 @@ const scenarios: Scenario[] = [
 			],
 		},
 		check: () => [],
+	},
+	{
+		name: "auto title vs manual rename",
+		operations: [operationSpecs["rename-a"], operationSpecs["auto-title-b"]],
+		check: (state) => {
+			if (state.operations["rename-a"]?.phase !== "done" || state.operations["auto-title-b"]?.phase !== "done") {
+				return []
+			}
+			const record = state.disk["child-a"]
+			return record?.title === "manual" && record.autoTitle === "generated-b"
+				? []
+				: ["auto title and manual title did not both survive"]
+		},
+	},
+	{
+		name: "auto title vs stale save",
+		operations: [operationSpecs["stale-save-a"], operationSpecs["auto-title-b"]],
+		check: (state) => {
+			if (
+				state.operations["stale-save-a"]?.phase !== "done" ||
+				state.operations["auto-title-b"]?.phase !== "done"
+			) {
+				return []
+			}
+			const record = state.disk["child-a"]
+			return record?.autoTitle === "generated-b" && record.tokensOut === 1
+				? []
+				: ["stale save erased the auto title or lost its own update"]
+		},
+	},
+	{
+		name: "auto title vs delete",
+		operations: [operationSpecs["delete-a"], operationSpecs["auto-title-b"]],
+		check: (state) => {
+			const autoTitle = state.operations["auto-title-b"]?.phase
+			if (state.operations["delete-a"]?.phase !== "done" || (autoTitle !== "done" && autoTitle !== "skipped")) {
+				return []
+			}
+			return state.disk["child-a"] === undefined ? [] : ["auto title resurrected a deleted record"]
+		},
+	},
+	{
+		name: "auto title never overwritten",
+		operations: [operationSpecs["auto-title-a"], operationSpecs["auto-title-b"]],
+		check: (state) => {
+			const phases = [state.operations["auto-title-a"]?.phase, state.operations["auto-title-b"]?.phase]
+			if (!phases.every((phase) => phase === "done" || phase === "skipped")) return []
+			const titleCommits = state.commits.filter((entry) => entry.taskId === "child-a" && entry.delta.autoTitle)
+			const first = titleCommits[0]
+			return titleCommits.length === 1 && state.disk["child-a"]?.autoTitle === first?.next.autoTitle
+				? []
+				: ["a second auto title overwrote the first"]
+		},
 	},
 ]
 

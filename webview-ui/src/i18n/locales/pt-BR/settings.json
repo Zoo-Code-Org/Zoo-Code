@@ -77,6 +77,7 @@
 			"summaryCopied": "{{copied}} de {{total}} arquivos copiados",
 			"detailFailed": "Inicie uma nova tentativa de importação para tentar novamente.",
 			"detailTasksImported_one": "{{count}} de {{total}} histórico de tarefa importado.",
+			"detailTasksImported_many": "{{count}} de {{total}} históricos de tarefas importados.",
 			"detailTasksImported_other": "{{count}} de {{total}} históricos de tarefas importados.",
 			"detailPreparing": "Preparando a importação do histórico do Roo Code.",
 			"progressAriaLabel": "Progresso da importação do histórico do Roo Code"
@@ -951,7 +952,9 @@
 		"useAzure": "Usar Azure",
 		"azureApiVersion": "Definir versão da API Azure",
 		"gemini": {
-			"freeRequests": "* Gratuito até {{count}} requisições por minuto. Depois disso, a cobrança depende do tamanho do prompt.",
+			"freeRequests_one": "* Gratuito até {{count}} requisição por minuto. Depois disso, a cobrança depende do tamanho do prompt.",
+			"freeRequests_many": "* Gratuito até {{count}} requisições por minuto. Depois disso, a cobrança depende do tamanho do prompt.",
+			"freeRequests_other": "* Gratuito até {{count}} requisições por minuto. Depois disso, a cobrança depende do tamanho do prompt.",
 			"pricingDetails": "Para mais informações, consulte os detalhes de preços.",
 			"billingEstimate": "* A cobrança é uma estimativa - o custo exato depende do tamanho do prompt."
 		}

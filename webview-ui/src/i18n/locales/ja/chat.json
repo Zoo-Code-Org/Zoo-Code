@@ -20,7 +20,7 @@
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
 	"fileChangesInConversation": {
-		"header": "この会話で {{count}} 個のファイルが変更されました"
+		"header_other": "この会話で {{count}} 個のファイルが変更されました"
 	},
 	"tokenProgress": {
 		"availableSpace": "利用可能な空き容量: {{amount}} トークン",
@@ -287,7 +287,6 @@
 		"triggerLabelOff": "自動承認オフ",
 		"triggerLabelOffShort": "オフ",
 		"triggerLabel_zero": "0個の自動承認",
-		"triggerLabel_one": "1個の自動承認済み",
 		"triggerLabel_other": "{{count}}個の自動承認済み",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +304,6 @@
 		"truncation": {
 			"title": "コンテキスト切り詰め",
 			"inProgress": "コンテキストを切り詰め中...",
-			"messagesRemoved": "{{count}}件のメッセージを削除",
 			"messagesRemoved_other": "{{count}}件のメッセージを削除",
 			"description": "コンテキストウィンドウの制限内に収めるため、古いメッセージが会話から削除されました。これは圧縮と比較して高速ですが、コンテキストの保持性が低いアプローチです。"
 		}
@@ -349,7 +347,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "自動承認リクエスト制限に達しました",
-			"description": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
+			"description_other": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
 			"button": "リセットして続行"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +359,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zooはコードベースで <code>{{query}}</code> を検索したい",
 		"wantsToSearchWithPath": "Zooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
-		"didSearch_one": "1件の結果が見つかりました",
 		"didSearch_other": "{{count}}件の結果が見つかりました",
 		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
 	},
@@ -432,9 +429,7 @@
 	},
 	"tooManyTools": {
 		"title": "有効になっているツールが多すぎます",
-		"toolsPart_one": "{{count}} ツール",
 		"toolsPart_other": "{{count}} ツール",
-		"serversPart_one": "{{count}} MCP サーバー",
 		"serversPart_other": "{{count}} MCP サーバー",
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"
