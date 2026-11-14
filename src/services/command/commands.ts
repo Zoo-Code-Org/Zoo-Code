@@ -10,6 +10,24 @@ import { getBuiltInCommands, getBuiltInCommand } from "./built-in-commands"
  */
 const MAX_DEPTH = 5
 
+// Workspace frontmatter is data. gray-matter otherwise allows headers to select eval.
+function parseCommandFrontmatter(content: string) {
+	const normalized = content.replace(/^\uFEFF/, "")
+	if (normalized.startsWith("---") && normalized[3] !== "-") {
+		const { name } = matter.language(normalized)
+		if (name && !["yaml", "yml", "json"].includes(name.toLowerCase())) {
+			throw new Error("Unsupported command frontmatter language")
+		}
+	}
+
+	const rejectJavaScript = () => {
+		throw new Error("Executable command frontmatter is disabled")
+	}
+	return matter(normalized, {
+		engines: { javascript: rejectJavaScript, js: rejectJavaScript },
+	})
+}
+
 export interface Command {
 	name: string
 	content: string
@@ -221,7 +239,7 @@ async function tryLoadCommand(
 
 		try {
 			// Try to parse frontmatter with gray-matter
-			parsed = matter(content)
+			parsed = parseCommandFrontmatter(content)
 			description =
 				typeof parsed.data.description === "string" && parsed.data.description.trim()
 					? parsed.data.description.trim()
@@ -306,7 +324,7 @@ async function scanCommandDirectory(
 
 				try {
 					// Try to parse frontmatter with gray-matter
-					parsed = matter(content)
+					parsed = parseCommandFrontmatter(content)
 					description =
 						typeof parsed.data.description === "string" && parsed.data.description.trim()
 							? parsed.data.description.trim()
