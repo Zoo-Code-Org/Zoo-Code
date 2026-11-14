@@ -6,7 +6,8 @@
 		"cancel": "Batal",
 		"select": "Pilih",
 		"add": "Tambah Header",
-		"remove": "Hapus"
+		"remove": "Hapus",
+		"reset": "Reset"
 	},
 	"search": {
 		"placeholder": "Cari pengaturan...",
@@ -247,7 +248,9 @@
 			"bedrockRegionRequired": "Wilayah AWS diperlukan",
 			"ollamaBaseUrlRequired": "URL dasar Ollama diperlukan",
 			"baseUrlRequired": "URL dasar diperlukan",
-			"openRouterApiKeyRequired": "Kunci API OpenRouter diperlukan"
+			"openRouterApiKeyRequired": "Kunci API OpenRouter diperlukan",
+			"bedrockProfileRequired": "Profil AWS diperlukan",
+			"modelDimensionMinValue": "Dimensi model harus lebih besar dari 0"
 		},
 		"optional": "opsional",
 		"advancedConfigLabel": "Konfigurasi Lanjutan",
@@ -261,7 +264,21 @@
 		"workspaceToggleLabel": "Aktifkan pengindeksan untuk ruang kerja ini",
 		"workspaceDisabledMessage": "Pengindeksan dikonfigurasi tetapi tidak diaktifkan untuk ruang kerja ini.",
 		"autoEnableDefaultLabel": "Aktifkan pengindeksan secara otomatis untuk ruang kerja baru",
-		"sembleProvider": "Semble - Lokal"
+		"sembleProvider": "Semble - Lokal",
+		"providerLabel": "Provider Embeddings",
+		"selectProviderPlaceholder": "Pilih provider",
+		"openAiCompatibleModelDimensionLabel": "Dimensi Embedding:",
+		"openAiCompatibleModelDimensionPlaceholder": "misalnya, 1536",
+		"openAiCompatibleModelDimensionDescription": "Dimensi embedding (ukuran output) untuk model kamu. Periksa dokumentasi provider kamu untuk nilai ini. Nilai umum: 384, 768, 1536, 3072.",
+		"selectModelPlaceholder": "Pilih model",
+		"ollamaUrlLabel": "Ollama URL:",
+		"qdrantKeyLabel": "Qdrant Key:",
+		"unsavedSettingsMessage": "Silakan simpan pengaturan kamu sebelum memulai proses pengindeksan.",
+		"settingsTitle": "Pengaturan Pengindeksan",
+		"disabledMessage": "Pengindeksan codebase saat ini dinonaktifkan. Aktifkan di pengaturan global untuk mengkonfigurasi opsi pengindeksan.",
+		"saveSuccess": "Pengaturan berhasil disimpan",
+		"close": "Tutup",
+		"searchMinScoreResetTooltip": "Reset ke nilai default (0.4)"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Anda dapat mengonfigurasi pintasan global untuk pengaturan ini <SettingsLink>di preferensi IDE Anda</SettingsLink>.",
@@ -286,7 +303,8 @@
 			"protected": {
 				"label": "Sertakan file yang dilindungi",
 				"description": "Izinkan Zoo membuat dan mengedit file yang dilindungi (seperti .rooignore dan file konfigurasi .roo/) tanpa memerlukan persetujuan."
-			}
+			},
+			"delayLabel": "Delay setelah menulis untuk memungkinkan diagnostik mendeteksi masalah potensial"
 		},
 		"allowlists": {
 			"label": "Daftar izin",
@@ -336,7 +354,8 @@
 			"deniedCommandsDescription": "Prefix perintah yang akan ditolak secara otomatis tanpa memerlukan persetujuan. Dalam kasus konflik dengan perintah yang diizinkan, pencocokan prefix terpanjang diprioritaskan. Tambahkan * untuk menolak semua perintah.",
 			"commandPlaceholder": "Masukkan prefix perintah (misalnya, 'git ')",
 			"deniedCommandPlaceholder": "Masukkan prefix perintah untuk ditolak (misalnya, 'rm -rf')",
-			"addButton": "Tambah"
+			"addButton": "Tambah",
+			"autoDenied": "Perintah dengan awalan `{{prefix}}` telah dilarang oleh pengguna. Jangan menghindari pembatasan ini dengan menjalankan perintah lain."
 		},
 		"apiRequestLimit": {
 			"title": "Permintaan Maks",
@@ -348,7 +367,9 @@
 		},
 		"maxLimits": {
 			"description": "Secara otomatis membuat permintaan hingga batas ini sebelum meminta persetujuan untuk melanjutkan."
-		}
+		},
+		"disabledAriaLabel": "Persetujuan otomatis dinonaktifkan - pilih opsi terlebih dahulu",
+		"selectOptionsFirst": "Pilih setidaknya satu opsi di bawah ini untuk mengaktifkan persetujuan otomatis"
 	},
 	"providers": {
 		"configProfile": "Profil Konfigurasi",
@@ -459,7 +480,8 @@
 			"label": "Refresh Model",
 			"loading": "Merefresh daftar model...",
 			"success": "Daftar model berhasil direfresh!",
-			"error": "Gagal merefresh daftar model. Silakan coba lagi."
+			"error": "Gagal merefresh daftar model. Silakan coba lagi.",
+			"hint": "Silakan buka kembali pengaturan untuk melihat model terbaru."
 		},
 		"getRequestyApiKey": "Dapatkan Requesty API Key",
 		"getRequestyBaseUrl": "Base URL",
@@ -588,7 +610,10 @@
 			"speculativeDecoding": "Aktifkan Speculative Decoding",
 			"draftModelId": "Draft Model ID",
 			"draftModelDesc": "Draft model harus dari keluarga model yang sama agar speculative decoding bekerja dengan benar.",
-			"description": "LM Studio memungkinkan kamu menjalankan model secara lokal di komputer. Untuk instruksi cara memulai, lihat <a>panduan quickstart</a> mereka. Kamu juga perlu memulai fitur <b>local server</b> LM Studio untuk menggunakannya dengan ekstensi ini. <span>Catatan:</span> Zoo Code menggunakan prompt kompleks dan bekerja terbaik dengan model Claude. Model yang kurang mampu mungkin tidak bekerja seperti yang diharapkan."
+			"description": "LM Studio memungkinkan kamu menjalankan model secara lokal di komputer. Untuk instruksi cara memulai, lihat <a>panduan quickstart</a> mereka. Kamu juga perlu memulai fitur <b>local server</b> LM Studio untuk menggunakannya dengan ekstensi ini. <span>Catatan:</span> Zoo Code menggunakan prompt kompleks dan bekerja terbaik dengan model Claude. Model yang kurang mampu mungkin tidak bekerja seperti yang diharapkan.",
+			"modelId": "Model ID",
+			"selectDraftModel": "Pilih Draft Model",
+			"noModelsFound": "Tidak ada draft model ditemukan. Pastikan LM Studio berjalan dengan Server Mode diaktifkan."
 		},
 		"ollama": {
 			"baseUrl": "Base URL (opsional)",
@@ -599,7 +624,8 @@
 			"thinking": "Aktifkan Thinking",
 			"thinkingHelp": "Aktifkan thinking native Ollama untuk model reasoning (mis. qwen3, deepseek-r1). Saat diaktifkan, reasoning model dialirkan dan ditampilkan secara terpisah. Model yang tidak didukung akan mengabaikan pengaturan ini.",
 			"description": "Ollama memungkinkan kamu menjalankan model secara lokal di komputer. Untuk instruksi cara memulai, lihat panduan quickstart mereka.",
-			"warning": "Catatan: Zoo Code menggunakan prompt kompleks dan bekerja terbaik dengan model Claude. Model yang kurang mampu mungkin tidak bekerja seperti yang diharapkan."
+			"warning": "Catatan: Zoo Code menggunakan prompt kompleks dan bekerja terbaik dengan model Claude. Model yang kurang mampu mungkin tidak bekerja seperti yang diharapkan.",
+			"modelId": "Model ID"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -644,7 +670,11 @@
 					"description": "Biaya per juta token untuk menulis ke cache. Ini adalah harga yang dikenakan ketika prompt di-cache untuk pertama kalinya."
 				}
 			},
-			"resetDefaults": "Reset ke Default"
+			"resetDefaults": "Reset ke Default",
+			"computerUse": {
+				"label": "Computer Use",
+				"description": "Apakah model ini mampu berinteraksi dengan browser?"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "Rate limit",
@@ -684,6 +714,19 @@
 			"signInDescription": "Masuk untuk menggunakan Zoo Gateway dengan akun Anda",
 			"authenticated": "Terautentikasi",
 			"authenticatedAs": "Terautentikasi sebagai {{name}}"
+		},
+		"providerDocumentation": "Dokumentasi {{provider}}",
+		"model": "Model",
+		"useHostHeader": "Gunakan Host header kustom",
+		"awsServiceTierStandardDesc": "Performa dan biaya yang seimbang",
+		"awsServiceTierFlexDesc": "Biaya lebih rendah, latensi lebih tinggi untuk tugas non-kritikal",
+		"awsServiceTierPriorityDesc": "Performa tercepat untuk aplikasi mission-critical",
+		"claudeCode": {
+			"pathLabel": "Jalur Kode Claude",
+			"description": "Jalur opsional ke Claude Code CLI Anda. Defaultnya adalah 'claude' jika tidak diatur.",
+			"placeholder": "Default: claude",
+			"maxTokensLabel": "Token Output Maks",
+			"maxTokensDescription": "Jumlah maksimum token output untuk respons Claude Code. Default adalah 8000."
 		}
 	},
 	"checkpoints": {
@@ -711,7 +754,8 @@
 	"contextManagement": {
 		"description": "Kontrol informasi apa yang disertakan dalam context window AI, mempengaruhi penggunaan token dan kualitas respons",
 		"autoCondenseContext": {
-			"name": "Secara otomatis memicu kondensasi konteks cerdas"
+			"name": "Secara otomatis memicu kondensasi konteks cerdas",
+			"description": "Ketika diaktifkan, Zoo akan secara otomatis mengondensasi konteks ketika ambang batas tercapai. Ketika dinonaktifkan, kamu masih dapat memicu kondensasi konteks secara manual."
 		},
 		"diagnostics": {
 			"includeMessages": {
@@ -741,7 +785,8 @@
 			"defaultProfile": "Default Global (semua profil)",
 			"defaultDescription": "Ketika konteks mencapai persentase ini, akan secara otomatis dikondensasi untuk semua profil kecuali mereka memiliki pengaturan kustom",
 			"profileDescription": "Ambang batas kustom untuk profil ini saja (menimpa default global)",
-			"usesGlobal": "(menggunakan global {{threshold}}%)"
+			"usesGlobal": "(menggunakan global {{threshold}}%)",
+			"inheritDescription": "Profil ini mewarisi ambang batas default global ({{threshold}}%)"
 		},
 		"openTabs": {
 			"label": "Batas konteks tab terbuka",
@@ -780,6 +825,32 @@
 		"enableSubfolderRules": {
 			"label": "Aktifkan aturan subfolder",
 			"description": "Temukan dan muat file .roo/rules dan AGENTS.md secara rekursif dari subdirektori. Berguna untuk monorepo dengan aturan per-paket."
+		},
+		"autoCondenseContextPercent": {
+			"label": "Ambang batas untuk memicu kondensasi konteks cerdas",
+			"description": "Ketika context window mencapai ambang batas ini, Zoo akan secara otomatis mengondensasikannya."
+		},
+		"condensingApiConfiguration": {
+			"label": "Konfigurasi API untuk Kondensasi Konteks",
+			"description": "Pilih konfigurasi API mana yang akan digunakan untuk operasi kondensasi konteks. Biarkan tidak dipilih untuk menggunakan konfigurasi aktif saat ini.",
+			"useCurrentConfig": "Default"
+		},
+		"customCondensingPrompt": {
+			"label": "Prompt Kondensasi Konteks Kustom",
+			"description": "Kustomisasi system prompt yang digunakan untuk kondensasi konteks. Biarkan kosong untuk menggunakan prompt default.",
+			"placeholder": "Masukkan prompt kondensasi kustom kamu di sini...\n\nKamu dapat menggunakan struktur yang sama dengan prompt default:\n- Previous Conversation\n- Current Work\n- Key Technical Concepts\n- Relevant Files and Code\n- Problem Solving\n- Pending Tasks and Next Steps",
+			"reset": "Reset ke Default",
+			"hint": "Kosong = gunakan prompt default"
+		},
+		"maxConcurrentFileReads": {
+			"label": "Batas pembacaan file bersamaan",
+			"description": "Jumlah maksimum file yang dapat diproses oleh tool 'read_file' secara bersamaan. Nilai yang lebih tinggi dapat mempercepat pembacaan beberapa file kecil tetapi meningkatkan penggunaan memori."
+		},
+		"maxReadFile": {
+			"label": "Ambang batas auto-truncate pembacaan file",
+			"description": "Zoo membaca sejumlah baris ini ketika model menghilangkan nilai start/end. Jika angka ini kurang dari total file, Zoo menghasilkan indeks nomor baris dari definisi kode. Kasus khusus: -1 menginstruksikan Zoo untuk membaca seluruh file (tanpa indexing), dan 0 menginstruksikannya untuk tidak membaca baris dan hanya menyediakan indeks baris untuk konteks minimal. Nilai yang lebih rendah meminimalkan penggunaan konteks awal, memungkinkan pembacaan rentang baris yang tepat selanjutnya. Permintaan start/end eksplisit tidak dibatasi oleh pengaturan ini.",
+			"lines": "baris",
+			"always_full_read": "Selalu baca seluruh file"
 		}
 	},
 	"terminal": {
@@ -788,7 +859,8 @@
 			"description": "Tampilkan keluaran perintah dalam keadaan diciutkan, termasuk terminal inline. Perluas secara manual bila diperlukan. Cara perintah dijalankan tidak berubah."
 		},
 		"basic": {
-			"label": "Pengaturan Terminal: Dasar"
+			"label": "Pengaturan Terminal: Dasar",
+			"description": "Pengaturan terminal dasar"
 		},
 		"advanced": {
 			"label": "Pengaturan Terminal: Lanjutan",
@@ -845,6 +917,14 @@
 			"description": "Secara default Zoo Code menggunakan shell yang dikonfigurasi VS Code. Pilih profil shell dari daftar untuk memilih profil shell berbasis jalur yang diekspos oleh VS Code. Profil hanya sumber (mis., entri PowerShell bawaan) tidak dapat tercantum di sini. <0>Pelajari lebih lanjut</0>",
 			"configureButton": "Pilih profil default di VS Code",
 			"noProfiles": "(tidak ada profil berbasis jalur di terminal.integrated.profiles)"
+		},
+		"outputLineLimit": {
+			"label": "Batas keluaran terminal",
+			"description": "Menyimpan baris pertama dan terakhir dan membuang yang tengah agar tetap di bawah batas. Turunkan untuk menghemat token; naikkan untuk memberi Zoo lebih banyak detail tengah. Zoo melihat placeholder di mana konten dilewati.<0>Pelajari lebih lanjut</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "Batas karakter terminal",
+			"description": "Override batas baris untuk mencegah masalah memori dengan memberlakukan cap keras pada ukuran output. Jika terlampaui, simpan awal dan akhir lalu tampilkan placeholder ke Zoo di mana konten dilewati. <0>Pelajari lebih lanjut</0>"
 		}
 	},
 	"advancedSettings": {
@@ -854,6 +934,23 @@
 		"todoList": {
 			"label": "Aktifkan alat daftar tugas",
 			"description": "Saat diaktifkan, Zoo dapat membuat dan mengelola daftar tugas untuk melacak kemajuan tugas. Ini membantu mengatur tugas kompleks menjadi langkah-langkah yang dapat dikelola."
+		},
+		"diff": {
+			"label": "Aktifkan editing melalui diff",
+			"description": "Ketika diaktifkan, Zoo akan dapat mengedit file lebih cepat dan akan secara otomatis menolak penulisan file penuh yang terpotong",
+			"strategy": {
+				"label": "Strategi diff",
+				"options": {
+					"standard": "Standard (Single block)",
+					"multiBlock": "Eksperimental: Multi-block diff",
+					"unified": "Eksperimental: Unified diff"
+				},
+				"descriptions": {
+					"standard": "Strategi diff standard menerapkan perubahan ke satu blok kode pada satu waktu.",
+					"unified": "Strategi unified diff mengambil beberapa pendekatan untuk menerapkan diff dan memilih pendekatan terbaik.",
+					"multiBlock": "Strategi multi-block diff memungkinkan memperbarui beberapa blok kode dalam file dalam satu permintaan."
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -991,7 +1088,8 @@
 			"reservedKeys": "Body Tambahan tidak dapat menimpa field yang dikelola Zoo Code: {{keys}}."
 		},
 		"arn": {
-			"regionMismatch": "Peringatan: Region di ARN kamu ({{arnRegion}}) tidak cocok dengan region yang kamu pilih ({{region}}). Ini dapat menyebabkan masalah akses. Provider akan menggunakan region dari ARN."
+			"regionMismatch": "Peringatan: Region di ARN kamu ({{arnRegion}}) tidak cocok dengan region yang kamu pilih ({{region}}). Ini dapat menyebabkan masalah akses. Provider akan menggunakan region dari ARN.",
+			"invalidFormat": "Format ARN tidak valid. Silakan periksa persyaratan format."
 		},
 		"modelAvailability": "Model ID ({{modelId}}) yang kamu berikan tidak tersedia. Silakan pilih model yang berbeda.",
 		"modelDeprecated": "Model ini tidak lagi tersedia. Silakan pilih model yang berbeda.",
@@ -1018,6 +1116,11 @@
 			"inputPrice": "misalnya 0.0001",
 			"outputPrice": "misalnya 0.0002",
 			"cacheWritePrice": "misalnya 0.00005"
+		},
+		"modelId": {
+			"lmStudio": "misalnya meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "misalnya lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "misalnya llama3.1"
 		}
 	},
 	"defaults": {
@@ -1047,7 +1150,9 @@
 			"input": "Input",
 			"output": "Output",
 			"cacheReads": "Pembacaan cache"
-		}
+		},
+		"label": "Tingkat layanan",
+		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel."
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1097,7 +1202,8 @@
 			"intro": "Untuk menjaga konteks Anda tetap ringan, kami merekomendasikan hanya membuat skills tersedia untuk mode yang membutuhkannya.",
 			"anyMode": "Mode apa pun (tersedia di mana-mana)",
 			"save": "Simpan",
-			"cancel": "Batal"
+			"cancel": "Batal",
+			"description": "Pilih mode mana yang dapat menggunakan skill ini"
 		},
 		"createDialog": {
 			"title": "Buat Skill Baru",
@@ -1107,7 +1213,11 @@
 			"sourceLabel": "Lokasi",
 			"modeLabel": "Mode (opsional)",
 			"create": "Buat",
-			"cancel": "Batal"
+			"cancel": "Batal",
+			"descriptionLabel": "Deskripsi",
+			"modePlaceholder": "Mode apa saja",
+			"modeHint": "Batasi skill ini ke mode tertentu",
+			"modeAny": "Mode apa saja"
 		},
 		"source": {
 			"global": "Global (tersedia di semua proyek)",
@@ -1120,7 +1230,13 @@
 			"descriptionRequired": "Deskripsi diperlukan",
 			"descriptionTooLong": "Deskripsi harus 1024 karakter atau kurang"
 		},
-		"footer": "Buat skills Anda sendiri dengan mode Skill Writer, tersedia di <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Buat skills Anda sendiri dengan mode Skill Writer, tersedia di <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"modeAny": "Mode apa saja",
+		"modeCount": "{{count}} mode",
+		"diagnostics": {
+			"title": "Beberapa skill tidak dapat dimuat",
+			"description": "Perbaiki frontmatter YAML di file SKILL.md yang tercantum, lalu buka ulang atau muat ulang halaman ini."
+		}
 	},
 	"language": {
 		"description": "Bahasa dan tampilan tanggal/waktu.",
@@ -1157,5 +1273,12 @@
 			"relative": "5 menit lalu",
 			"hover": "(arahkan kursor: {{value}})"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "Nonaktifkan prompt caching",
+		"description": "Ketika dicentang, Zoo tidak akan menggunakan prompt caching untuk model ini."
+	},
+	"limitMaxTokensDescription": "Batasi jumlah maksimum token dalam respons",
+	"maxOutputTokensLabel": "Token output maksimum",
+	"maxTokensGenerateDescription": "Token maksimum untuk dihasilkan dalam respons"
 }

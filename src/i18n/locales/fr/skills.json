@@ -14,6 +14,7 @@
 		"skill_not_found": "Compétence \"{{name}}\" introuvable",
 		"container_skill_read_only": "La compétence \"{{name}}\" provient d'un dossier de compétences lié par un lien symbolique ({{path}}) et ne peut pas être déplacée ni supprimée ici. Modifie-la dans son dossier source.",
 		"symlink_escapes_skill": "Impossible de déplacer la compétence : le lien symbolique {{link}} pointe hors du dossier de la compétence et serait cassé au nouvel emplacement.",
-		"move_restore_failed": "Le déplacement du skill a échoué ({{error}}) et son dossier d'origine n'a pas pu être restauré dans {{path}}. Ton skill est en sécurité dans {{backupPath}} ; remets-le en place manuellement."
+		"move_restore_failed": "Le déplacement du skill a échoué ({{error}}) et son dossier d'origine n'a pas pu être restauré dans {{path}}. Ton skill est en sécurité dans {{backupPath}} ; remets-le en place manuellement.",
+		"outside_skills_root": "Impossible de mettre à jour SKILL.md en dehors des dossiers de compétences {{source}} : {{path}}"
 	}
 }

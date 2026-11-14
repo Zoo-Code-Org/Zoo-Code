@@ -6,7 +6,8 @@
 		"cancel": "キャンセル",
 		"select": "選択",
 		"add": "ヘッダーを追加",
-		"remove": "削除"
+		"remove": "削除",
+		"reset": "リセット"
 	},
 	"search": {
 		"placeholder": "設定を検索...",
@@ -247,7 +248,9 @@
 			"bedrockRegionRequired": "AWS リージョンは必須です",
 			"ollamaBaseUrlRequired": "OllamaのベースURLが必要です",
 			"baseUrlRequired": "ベースURLが必要です",
-			"openRouterApiKeyRequired": "OpenRouter APIキーが必要です"
+			"openRouterApiKeyRequired": "OpenRouter APIキーが必要です",
+			"bedrockProfileRequired": "AWS プロファイルは必須です",
+			"modelDimensionMinValue": "モデルの次元は0より大きくなければなりません"
 		},
 		"optional": "オプション",
 		"advancedConfigLabel": "詳細設定",
@@ -261,7 +264,21 @@
 		"workspaceToggleLabel": "このワークスペースのインデックス作成を有効にする",
 		"workspaceDisabledMessage": "インデックス作成は設定済みですが、このワークスペースでは有効になっていません。",
 		"autoEnableDefaultLabel": "新しいワークスペースのインデックス作成を自動的に有効にする",
-		"sembleProvider": "Semble - ローカル"
+		"sembleProvider": "Semble - ローカル",
+		"providerLabel": "埋め込みプロバイダー",
+		"selectProviderPlaceholder": "プロバイダーを選択",
+		"openAiCompatibleModelDimensionLabel": "埋め込みディメンション：",
+		"openAiCompatibleModelDimensionPlaceholder": "例：1536",
+		"openAiCompatibleModelDimensionDescription": "モデルの埋め込みディメンション（出力サイズ）。この値についてはプロバイダーのドキュメントを確認してください。一般的な値：384、768、1536、3072。",
+		"selectModelPlaceholder": "モデルを選択",
+		"ollamaUrlLabel": "Ollama URL：",
+		"qdrantKeyLabel": "Qdrantキー：",
+		"unsavedSettingsMessage": "インデックス作成プロセスを開始する前に設定を保存してください。",
+		"settingsTitle": "インデックス設定",
+		"disabledMessage": "コードベースインデックスは現在無効になっています。グローバル設定で有効にしてインデックスオプションを構成してください。",
+		"saveSuccess": "設定が正常に保存されました",
+		"close": "閉じる",
+		"searchMinScoreResetTooltip": "デフォルト値（0.4）にリセット"
 	},
 	"autoApprove": {
 		"toggleShortcut": "<SettingsLink>IDEの環境設定</SettingsLink>で、この設定のグローバルショートカットを設定できます。",
@@ -286,7 +303,8 @@
 			"protected": {
 				"label": "保護されたファイルを含める",
 				"description": "Zooが保護されたファイル（.rooignoreや.roo/設定ファイルなど）を承認なしで作成・編集することを許可します。"
-			}
+			},
+			"delayLabel": "診断が潜在的な問題を検出できるよう、書き込み後に遅延を設ける"
 		},
 		"allowlists": {
 			"label": "許可リスト",
@@ -336,7 +354,8 @@
 			"deniedCommandsDescription": "承認を求めることなく自動的に拒否されるコマンドプレフィックス。許可されたコマンドとの競合がある場合、最長プレフィックスマッチが優先されます。すべてのコマンドを拒否するには * を追加します。",
 			"commandPlaceholder": "コマンドプレフィックスを入力（例：'git '）",
 			"deniedCommandPlaceholder": "拒否するコマンドプレフィックスを入力（例：'rm -rf'）",
-			"addButton": "追加"
+			"addButton": "追加",
+			"autoDenied": "プレフィックス `{{prefix}}` を持つコマンドはユーザーによって禁止されています。別のコマンドを実行してこの制限を回避しないでください。"
 		},
 		"apiRequestLimit": {
 			"title": "最大リクエスト数",
@@ -348,7 +367,9 @@
 		},
 		"maxLimits": {
 			"description": "これらの上限まで自動的にリクエストを行い、その後継続の承認を求めます。"
-		}
+		},
+		"disabledAriaLabel": "自動承認が無効です - 最初にオプションを選択してください",
+		"selectOptionsFirst": "自動承認を有効にするには、以下のオプションを少なくとも1つ選択してください"
 	},
 	"providers": {
 		"configProfile": "設定プロファイル",
@@ -459,7 +480,8 @@
 			"label": "モデルを更新",
 			"loading": "モデルリストを更新中...",
 			"success": "モデルリストが正常に更新されました！",
-			"error": "モデルリストの更新に失敗しました。もう一度お試しください。"
+			"error": "モデルリストの更新に失敗しました。もう一度お試しください。",
+			"hint": "最新のモデルを表示するには設定を再度開いてください。"
 		},
 		"getRequestyApiKey": "Requesty APIキーを取得",
 		"getRequestyBaseUrl": "ベースURL",
@@ -588,7 +610,10 @@
 			"speculativeDecoding": "推論デコーディングを有効化",
 			"draftModelId": "ドラフトモデルID",
 			"draftModelDesc": "推論デコーディングが正しく機能するには、ドラフトモデルは同じモデルファミリーから選択する必要があります。",
-			"description": "LM Studioを使用すると、ローカルコンピューターでモデルを実行できます。始め方については、<a>クイックスタートガイド</a>をご覧ください。また、この拡張機能で使用するには、LM Studioの<b>ローカルサーバー</b>機能を起動する必要があります。<span>注意：</span>Zoo Codeは複雑なプロンプトを使用し、Claudeモデルで最適に動作します。能力の低いモデルは期待通りに動作しない場合があります。"
+			"description": "LM Studioを使用すると、ローカルコンピューターでモデルを実行できます。始め方については、<a>クイックスタートガイド</a>をご覧ください。また、この拡張機能で使用するには、LM Studioの<b>ローカルサーバー</b>機能を起動する必要があります。<span>注意：</span>Zoo Codeは複雑なプロンプトを使用し、Claudeモデルで最適に動作します。能力の低いモデルは期待通りに動作しない場合があります。",
+			"modelId": "モデルID",
+			"selectDraftModel": "ドラフトモデルを選択",
+			"noModelsFound": "ドラフトモデルが見つかりません。LM Studioがサーバーモードで実行されていることを確認してください。"
 		},
 		"ollama": {
 			"baseUrl": "ベースURL（オプション）",
@@ -599,7 +624,8 @@
 			"thinking": "思考を有効化",
 			"thinkingHelp": "推論モデル（例: qwen3、deepseek-r1）に対してOllamaのネイティブな思考を有効にします。有効にすると、モデルの推論が個別にストリーミングおよび表示されます。サポートされていないモデルはこの設定を無視します。",
 			"description": "Ollamaを使用すると、ローカルコンピューターでモデルを実行できます。始め方については、クイックスタートガイドをご覧ください。",
-			"warning": "注意：Zoo Codeは複雑なプロンプトを使用し、Claudeモデルで最適に動作します。能力の低いモデルは期待通りに動作しない場合があります。"
+			"warning": "注意：Zoo Codeは複雑なプロンプトを使用し、Claudeモデルで最適に動作します。能力の低いモデルは期待通りに動作しない場合があります。",
+			"modelId": "モデルID"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -644,7 +670,11 @@
 					"description": "キャッシュへの書き込みの100万トークンあたりのコスト。これはプロンプトが初めてキャッシュされる際に課金される価格です。"
 				}
 			},
-			"resetDefaults": "デフォルトにリセット"
+			"resetDefaults": "デフォルトにリセット",
+			"computerUse": {
+				"label": "コンピューター使用",
+				"description": "このモデルはブラウザとの対話が可能ですか？"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "レート制限",
@@ -684,6 +714,19 @@
 			"signInDescription": "Zoo Gateway をアカウントで使用するにはサインインしてください",
 			"authenticated": "認証済み",
 			"authenticatedAs": "{{name}} として認証済み"
+		},
+		"providerDocumentation": "{{provider}}のドキュメント",
+		"model": "モデル",
+		"useHostHeader": "カスタムHostヘッダーを使用",
+		"awsServiceTierStandardDesc": "バランスの取れたパフォーマンスとコスト",
+		"awsServiceTierFlexDesc": "低コスト、非クリティカルなタスクのレイテンシが高い",
+		"awsServiceTierPriorityDesc": "ミッションクリティカルなアプリケーション向けの最速パフォーマンス",
+		"claudeCode": {
+			"pathLabel": "クロードコードパス",
+			"description": "Claude Code CLIへのオプションパス。設定されていない場合、デフォルトは「claude」です。",
+			"placeholder": "デフォルト：claude",
+			"maxTokensLabel": "最大出力トークン",
+			"maxTokensDescription": "Claude Codeレスポンスの最大出力トークン数。デフォルトは8000です。"
 		}
 	},
 	"checkpoints": {
@@ -711,7 +754,8 @@
 	"contextManagement": {
 		"description": "AIのコンテキストウィンドウに含まれる情報を制御し、token使用量とレスポンスの品質に影響します",
 		"autoCondenseContext": {
-			"name": "インテリジェントなコンテキスト圧縮を自動的にトリガーする"
+			"name": "インテリジェントなコンテキスト圧縮を自動的にトリガーする",
+			"description": "有効にすると、Zooは閾値に達したときに自動的にコンテキストを圧縮します。無効にすると、手動でコンテキスト圧縮をトリガーできます。"
 		},
 		"openTabs": {
 			"label": "オープンタブコンテキスト制限",
@@ -753,7 +797,8 @@
 			"defaultProfile": "グローバルデフォルト（全プロファイル）",
 			"defaultDescription": "コンテキストがこの割合に達すると、カスタム設定がない限り、すべてのプロファイルで自動的に圧縮されます",
 			"profileDescription": "このプロファイルのみのカスタムしきい値（グローバルデフォルトを上書き）",
-			"usesGlobal": "（グローバル {{threshold}}% を使用）"
+			"usesGlobal": "（グローバル {{threshold}}% を使用）",
+			"inheritDescription": "このプロファイルはグローバルデフォルトしきい値を継承します（{{threshold}}%）"
 		},
 		"maxImageFileSize": {
 			"label": "最大画像ファイルサイズ",
@@ -780,6 +825,32 @@
 		"enableSubfolderRules": {
 			"label": "サブフォルダルールを有効化",
 			"description": "サブディレクトリから.roo/rulesとAGENTS.mdファイルを再帰的に検出してロードします。パッケージごとのルールを持つモノレポに便利です。"
+		},
+		"autoCondenseContextPercent": {
+			"label": "インテリジェントなコンテキスト圧縮をトリガーするしきい値",
+			"description": "コンテキストウィンドウがこのしきい値に達すると、Zooは自動的に圧縮します。"
+		},
+		"condensingApiConfiguration": {
+			"label": "コンテキスト圧縮用のAPI設定",
+			"description": "コンテキスト圧縮操作に使用するAPI設定を選択します。選択しない場合は現在のアクティブな設定が使用されます。",
+			"useCurrentConfig": "現在の設定を使用"
+		},
+		"customCondensingPrompt": {
+			"label": "カスタムコンテキスト圧縮プロンプト",
+			"description": "コンテキスト圧縮に使用するシステムプロンプトをカスタマイズします。空のままにするとデフォルトのプロンプトが使用されます。",
+			"placeholder": "ここにカスタム圧縮プロンプトを入力してください...\n\nデフォルトプロンプトと同じ構造を使用できます：\n- 過去の会話\n- 現在の作業\n- 重要な技術的概念\n- 関連するファイルとコード\n- 問題解決\n- 保留中のタスクと次のステップ",
+			"reset": "デフォルトにリセット",
+			"hint": "空 = デフォルトプロンプトを使用"
+		},
+		"maxReadFile": {
+			"label": "ファイル読み込み自動切り詰めしきい値",
+			"description": "モデルが開始/終了の値を指定しない場合、Zooはこの行数を読み込みます。この数がファイルの総行数より少ない場合、Zooはコード定義の行番号インデックスを生成します。特殊なケース：-1はZooにファイル全体を読み込むよう指示し（インデックス作成なし）、0は行を読み込まず最小限のコンテキストのために行インデックスのみを提供するよう指示します。低い値は初期コンテキスト使用量を最小限に抑え、後続の正確な行範囲の読み込みを可能にします。明示的な開始/終了の要求はこの設定による制限を受けません。",
+			"lines": "行",
+			"always_full_read": "常にファイル全体を読み込む"
+		},
+		"maxConcurrentFileReads": {
+			"label": "同時ファイル読み取り制限",
+			"description": "read_file ツールが同時に処理できるファイルの最大数。値を高くすると複数の小さなファイルの読み取りが速くなる可能性がありますが、メモリ使用量が増加します。"
 		}
 	},
 	"terminal": {
@@ -788,7 +859,8 @@
 			"description": "インラインターミナルを含むコマンド出力を折りたたんで表示します。必要に応じて手動で展開できます。コマンドの実行方法は変わりません。"
 		},
 		"basic": {
-			"label": "ターミナル設定：基本"
+			"label": "ターミナル設定：基本",
+			"description": "基本的なターミナル設定"
 		},
 		"advanced": {
 			"label": "ターミナル設定：詳細",
@@ -845,6 +917,14 @@
 			"description": "デフォルトでは Zoo Code は VS Code に設定されたシェルを使用します。VS Code が公開するパスベースのシェルプロファイルを選択するには一覧からシェルプロファイルを選択してください。ソースのみのプロファイル（例：組み込みの PowerShell エントリ）はここに表示できません。 <0>詳細を見る</0>",
 			"configureButton": "VS Code でデフォルトプロファイルを選択",
 			"noProfiles": "(terminal.integrated.profiles にパスベースのプロファイルが見つかりません)"
+		},
+		"outputLineLimit": {
+			"label": "ターミナル出力制限",
+			"description": "制限内に収めるため最初と最後の行を保持し、中間を削除します。トークンを節約するには下げる；Zooに中間の詳細を与えるには上げる。Zooはコンテンツがスキップされた箇所にプレースホルダーを表示します。<0>詳細情報</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "ターミナル文字制限",
+			"description": "出力サイズにハードキャップを適用してメモリ問題を防ぐため、行制限を上書きします。超過した場合、最初と最後を保持し、コンテンツがスキップされた箇所にZooにプレースホルダーを表示します。<0>詳細情報</0>"
 		}
 	},
 	"advancedSettings": {
@@ -854,6 +934,23 @@
 		"todoList": {
 			"label": "ToDoリストツールを有効にする",
 			"description": "有効にすると、Zooはタスクの進捗を追跡するためのToDoリストを作成・管理できます。これにより、複雑なタスクを管理しやすいステップに整理できます。"
+		},
+		"diff": {
+			"label": "diff経由の編集を有効化",
+			"description": "有効にすると、Zooはファイルをより迅速に編集でき、切り詰められた全ファイル書き込みを自動的に拒否します。",
+			"strategy": {
+				"label": "Diff戦略",
+				"options": {
+					"standard": "標準（単一ブロック）",
+					"multiBlock": "実験的：マルチブロックdiff",
+					"unified": "実験的：統合diff"
+				},
+				"descriptions": {
+					"standard": "標準diff戦略は一度に1つのコードブロックに変更を適用します。",
+					"unified": "統合diff戦略はdiffを適用するための複数のアプローチを取り、最良のアプローチを選択します。",
+					"multiBlock": "マルチブロックdiff戦略は、1つのリクエストでファイル内の複数のコードブロックを更新できます。"
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -991,7 +1088,8 @@
 			"reservedKeys": "追加ボディではZoo Codeが管理するフィールドを上書きできません：{{keys}}。"
 		},
 		"arn": {
-			"regionMismatch": "警告：ARN内のリージョン（{{arnRegion}}）が選択したリージョン（{{region}}）と一致しません。これによりアクセスの問題が発生する可能性があります。プロバイダーはARNのリージョンを使用します。"
+			"regionMismatch": "警告：ARN内のリージョン（{{arnRegion}}）が選択したリージョン（{{region}}）と一致しません。これによりアクセスの問題が発生する可能性があります。プロバイダーはARNのリージョンを使用します。",
+			"invalidFormat": "ARNの形式が無効です。フォーマット要件を確認してください。"
 		},
 		"modelAvailability": "指定されたモデルID（{{modelId}}）は利用できません。別のモデルを選択してください。",
 		"modelDeprecated": "このモデルは利用できなくなりました。別のモデルを選択してください。",
@@ -1018,6 +1116,11 @@
 			"inputPrice": "例：0.0001",
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
+		},
+		"modelId": {
+			"lmStudio": "例：meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "例：lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "例：llama3.1"
 		}
 	},
 	"defaults": {
@@ -1047,7 +1150,9 @@
 			"input": "入力",
 			"output": "出力",
 			"cacheReads": "キャッシュ読み取り"
-		}
+		},
+		"label": "サービスティア",
+		"tooltip": "APIリクエストをより速く処理するには、優先処理サービスティアをお試しください。低価格でレイテンシが高い場合は、フレックス処理ティアをお試しください。"
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1097,7 +1202,8 @@
 			"intro": "コンテキストを軽く保つために、必要なモードのみでスキルを利用可能にすることをお勧めします。",
 			"anyMode": "任意のモード（どこでも利用可能）",
 			"save": "保存",
-			"cancel": "キャンセル"
+			"cancel": "キャンセル",
+			"description": "このスキルを使用できるモードを選択します"
 		},
 		"createDialog": {
 			"title": "新しいスキルを作成",
@@ -1107,7 +1213,11 @@
 			"sourceLabel": "場所",
 			"modeLabel": "モード（オプション）",
 			"create": "作成",
-			"cancel": "キャンセル"
+			"cancel": "キャンセル",
+			"descriptionLabel": "説明",
+			"modePlaceholder": "全てのモード",
+			"modeHint": "このスキルを特定のモードに制限する",
+			"modeAny": "全てのモード"
 		},
 		"source": {
 			"global": "グローバル（すべてのプロジェクトで利用可能）",
@@ -1120,7 +1230,13 @@
 			"descriptionRequired": "説明は必須です",
 			"descriptionTooLong": "説明は1024文字以内である必要があります"
 		},
-		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。"
+		"footer": "スキルライターモードで独自のスキルを作成します。<MarketplaceLink>モードマーケットプレイス</MarketplaceLink>で入手可能です。",
+		"modeAny": "任意のモード",
+		"modeCount": "{{count}} モード",
+		"diagnostics": {
+			"title": "一部のスキルを読み込めませんでした",
+			"description": "該当する SKILL.md ファイルの YAML フロントマターを修正してから、このページを再表示してください。"
+		}
 	},
 	"language": {
 		"description": "言語と日付/時刻の表示。",
@@ -1157,5 +1273,12 @@
 			"relative": "5分前",
 			"hover": "(ホバー: {{value}})"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "プロンプトキャッシュを無効化",
+		"description": "チェックすると、Zooはこのモデルに対してプロンプトキャッシュを使用しません。"
+	},
+	"limitMaxTokensDescription": "レスポンスの最大トークン数を制限する",
+	"maxOutputTokensLabel": "最大出力トークン",
+	"maxTokensGenerateDescription": "レスポンスで生成する最大トークン数"
 }
