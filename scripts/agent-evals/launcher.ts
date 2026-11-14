@@ -1,20 +1,45 @@
+import { buildDownloaderEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import { execFile, spawn } from "node:child_process"
 import fs from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
 import { promisify } from "node:util"
-import { downloadAndUnzipVSCode } from "@vscode/test-electron"
+import { fileURLToPath } from "node:url"
 import { IpcClient } from "@roo-code/ipc"
 import { IpcMessageType } from "@roo-code/types"
 import { buildChildEnvironment, buildLaunchArgs } from "./isolation.ts"
-import type { AgentClient, AgentHost, AgentRuntime } from "./runner.ts"
+import type { AgentClient, AgentHost, AgentRuntime, FinalWorkspaceSnapshot } from "./runner.ts"
+import type { AgentFixtureWorkspaceFile } from "./contract.ts"
 import { identityUnavailable, measured, type MeasuredString, type TraceRunIdentity } from "./trace.ts"
 
 const execFileAsync = promisify(execFile)
 
+export const downloadVSCodeIsolated = async (
+	options: { version?: string; cachePath?: string },
+	downloader = new URL("./download-vscode.mjs", import.meta.url),
+): Promise<string> => {
+	if (typeof options !== "object" || options === null) throw new Error("download options required")
+	const { stdout } = await execFileAsync(
+		process.execPath,
+		[fileURLToPath(downloader), options.version ?? "stable", options.cachePath ?? ""],
+		{ env: buildDownloaderEnvironment(process.env), timeout: 300_000 },
+	).catch(() => {
+		// Download errors can include authenticated proxy URLs in stderr.
+		// Do not propagate subprocess output into repetition diagnostics.
+		throw new Error("VS Code download failed")
+	})
+	const executable: unknown = JSON.parse(stdout)
+	if (typeof executable !== "string" || !path.isAbsolute(executable)) throw new Error("invalid VS Code executable")
+	return executable
+}
+
 export interface HostRuntimeOptions {
+	// Repository root of the evaluated extension. Reads of package metadata,
+	// commit identity, and the extension source all stay inside it.
 	root: string
 	artifactsDir: string
+	// Test seam for the download boundary; caches always live in private scratch.
+	downloadVSCode?: (options: { version: string; cachePath: string }) => Promise<string>
 	now?: () => number
 	pause?: (ms: number) => Promise<void>
 	// Optional --extensionTestsPath module. The module's run() must never
@@ -26,9 +51,11 @@ export interface HostRuntimeOptions {
 
 const readCommit = async (root: string): Promise<MeasuredString> => {
 	try {
-		const fromCi = process.env.GITHUB_SHA
-		if (fromCi && /^[0-9a-f]{40}$/i.test(fromCi)) return { available: true, value: fromCi }
-		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], { cwd: root, timeout: 5_000 })
+		const { stdout } = await execFileAsync("git", ["rev-parse", "HEAD"], {
+			cwd: root,
+			timeout: 5_000,
+			env: buildWorktreeEnvironment(process.env),
+		})
 		const sha = stdout.trim()
 		return /^[0-9a-f]{40}$/i.test(sha)
 			? { available: true, value: sha }
@@ -49,6 +76,58 @@ const readJsonField = async (
 	} catch {
 		return { available: false, reason: "fileUnreadable" }
 	}
+}
+
+const FINAL_WORKSPACE_MAX_FILES = 4_096
+const FINAL_WORKSPACE_MAX_FILE_BYTES = 1_048_576
+const FINAL_WORKSPACE_MAX_TOTAL_BYTES = 8_388_608
+const FINAL_WORKSPACE_SKIPPED_DIRS = new Set(["node_modules", ".git"])
+
+// Bounded final-workspace capture. The walker skips dependency and VCS
+// directories, caps file count and size, and reports truncation instead of
+// reading unbounded agent-written trees. Paths stay relative and forward
+// slashed, matching the fixture workspace file shape.
+export async function readWorkspaceFiles(workspaceRoot: string): Promise<FinalWorkspaceSnapshot> {
+	const files: AgentFixtureWorkspaceFile[] = []
+	let truncated = false
+	let totalBytes = 0
+	const visit = async (dir: string, prefix: string): Promise<void> => {
+		const entries = await fs.readdir(dir, { withFileTypes: true })
+		for (const entry of entries) {
+			if (files.length >= FINAL_WORKSPACE_MAX_FILES || totalBytes > FINAL_WORKSPACE_MAX_TOTAL_BYTES) {
+				truncated = true
+				return
+			}
+			const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name
+			const full = path.join(dir, entry.name)
+			if (entry.isDirectory()) {
+				if (FINAL_WORKSPACE_SKIPPED_DIRS.has(entry.name)) continue
+				await visit(full, relativePath)
+				continue
+			}
+			if (!entry.isFile()) continue
+			const stat = await fs.stat(full)
+			if (
+				stat.size > FINAL_WORKSPACE_MAX_FILE_BYTES ||
+				totalBytes + stat.size > FINAL_WORKSPACE_MAX_TOTAL_BYTES
+			) {
+				truncated = true
+				continue
+			}
+			const bytes = await fs.readFile(full)
+			if (
+				bytes.byteLength > FINAL_WORKSPACE_MAX_FILE_BYTES ||
+				totalBytes + bytes.byteLength > FINAL_WORKSPACE_MAX_TOTAL_BYTES
+			) {
+				truncated = true
+				continue
+			}
+			totalBytes += bytes.byteLength
+			files.push({ path: relativePath, content: bytes.toString("utf8") })
+		}
+	}
+	await visit(workspaceRoot, "")
+	return { files, truncated }
 }
 
 // The only place where VS Code is downloaded, spawned, isolated and torn
@@ -80,9 +159,9 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 			const pkg = JSON.parse(await fs.readFile(path.join(root, "apps/vscode-e2e/package.json"), "utf8")) as {
 				devDependencies: Record<string, string>
 			}
-			const executable = await downloadAndUnzipVSCode({
+			const executable = await (options.downloadVSCode ?? downloadVSCodeIsolated)({
 				version: pkg.devDependencies["@types/vscode"] ?? "1.100.0",
-				cachePath: path.join(root, "apps/vscode-e2e/.vscode-test"),
+				cachePath: path.join(temp, "vscode-cache"),
 			})
 			const args = buildLaunchArgs(
 				workspace,
@@ -195,6 +274,10 @@ export function createHostRuntime(options: HostRuntimeOptions): AgentRuntime {
 				platform: fallback.platform,
 				arch: fallback.arch,
 			}
+		},
+		async readFinalWorkspace(): Promise<FinalWorkspaceSnapshot> {
+			if (!temp) throw new Error("workspace not created")
+			return readWorkspaceFiles(path.join(temp, "workspace"))
 		},
 	}
 }

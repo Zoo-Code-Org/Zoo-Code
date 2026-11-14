@@ -9,6 +9,9 @@ catalogs:
     '@types/node':
       specifier: 22.20.5
       version: 22.20.5
+    '@types/proper-lockfile':
+      specifier: 4.1.4
+      version: 4.1.4
     '@vitest/coverage-v8':
       specifier: 4.1.12
       version: 4.1.12
@@ -18,6 +21,9 @@ catalogs:
     eslint-plugin-turbo:
       specifier: 2.11.10
       version: 2.11.10
+    proper-lockfile:
+      specifier: 4.1.2
+      version: 4.1.2
     turbo:
       specifier: 2.11.10
       version: 2.11.10
@@ -71,6 +77,9 @@ importers:
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.5
+      '@types/proper-lockfile':
+        specifier: 'catalog:'
+        version: 4.1.4
       '@vscode/test-electron':
         specifier: 2.5.2
         version: 2.5.2
@@ -98,6 +107,9 @@ importers:
       prettier:
         specifier: 3.9.10
         version: 3.9.10
+      proper-lockfile:
+        specifier: 'catalog:'
+        version: 4.1.2
       rimraf:
         specifier: 6.0.1
         version: 6.0.1
@@ -593,7 +605,7 @@ importers:
         specifier: ^7.0.0
         version: 7.2.0
       proper-lockfile:
-        specifier: ^4.1.2
+        specifier: 'catalog:'
         version: 4.1.2
       ps-tree:
         specifier: ^1.2.0
@@ -675,7 +687,7 @@ importers:
         specifier: 4.2.5
         version: 4.2.5
       '@types/proper-lockfile':
-        specifier: 4.1.4
+        specifier: 'catalog:'
         version: 4.1.4
       '@types/ps-tree':
         specifier: 1.1.6
