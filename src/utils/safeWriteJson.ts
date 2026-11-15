@@ -244,6 +244,21 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		} catch {
 			recoveryTarget = lockKey
 		}
+		// Confinement has to be decided before recovery touches anything, not afterwards.
+		// The scan below deletes and renames leftovers beside whatever recoveryTarget names,
+		// and when the alias moved while this writer waited for the lock that name can sit
+		// outside the scope the caller declared: the check further down would then refuse the
+		// write after a foreign directory had already been edited by it. Same predicates as
+		// the other two confinement checks and it does not replace the one below, which is
+		// what rejects a target that moves again after recovery and what keeps the strict
+		// dangling-link rejection inside the protected block. A write whose alias never moved
+		// reaches the same refusal through an earlier check and with the same error type.
+		if (options?.confineTo) {
+			const scopeRoot = await _resolveScopeRoot(options.confineTo)
+			if (_escapesScope(scopeRoot, await _resolveScopeRoot(recoveryTarget))) {
+				throw new ConfinedPathEscapeError(absoluteFilePath, recoveryTarget, scopeRoot)
+			}
+		}
 		const recovery = await recoverInterruptedReplacement(recoveryTarget).catch((error: unknown) => {
 			const code = getErrorCode(error) ?? "unknown"
 			options?.trace?.({ stage: "recover", detail: `failed:${code}` })

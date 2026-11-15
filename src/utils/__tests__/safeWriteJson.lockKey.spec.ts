@@ -6,7 +6,7 @@ import path from "path"
 import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
-import { safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 vi.mock("../fileLock", () => ({
@@ -278,4 +278,76 @@ it("does not log a cleanup error when the safety net finds the temp file already
 	renameSpy.mockRestore()
 	unlinkSpy.mockRestore()
 	consoleError.mockRestore()
+})
+
+describe("safeWriteJson confinement when the alias moves under the lock", () => {
+	it("refuses a confined write whose alias moved outside the declared scope while the lock was held, without scanning or editing the directory it would have recovered from", async () => {
+		const order: string[] = []
+		const scope = await makeDir("lockkey-scope-")
+		const outside = await makeDir("lockkey-outside-")
+		const insideReferent = path.join(scope, "item.json")
+		const outsideReferent = path.join(outside, "item.json")
+		currentLink = path.join(scope, "link.json")
+
+		// A leftover beside the outside referent, named the way jsonFileRecovery names a
+		// staged copy, so the unchanged-listing assertion below is not vacuous: had recovery
+		// run beside this directory it would have scanned this entry and renamed or deleted it.
+		const leftover = path.join(outside, ".item.json.new_planted.tmp")
+		await fs.writeFile(leftover, "staged")
+		const outsideBefore = (await fs.readdir(outside)).sort()
+
+		// The alias moves inside the lock acquisition below, so the resolution that runs after
+		// the lock is taken names a directory outside the declared scope.
+		let flipped = false
+
+		// Identity resolutions: each helper sees exactly the path it was handed, so the scope
+		// comparison is between the two directories this row built.
+		// realpath follows the alias the way a real one would: it names the referent the link
+		// currently points at, which is the answer every helper below gets. The alias is the only
+		// path whose answer changes during the row.
+		mockedRealpath.mockImplementation(async (target) => {
+			order.push("resolve")
+			if (String(target) === currentLink) {
+				return flipped ? outsideReferent : insideReferent
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => {
+			order.push("lstat")
+			return symlinkStat(target)
+		})
+		// The alias points inside the declared scope while the lock key is resolved and while
+		// the lock is taken. It moves while this writer holds the lock, which is the window
+		// the confinement contract has to cover: recovery scans beside whatever the alias
+		// names afterwards, so a decision taken before the mutation is the only one that can
+		// still refuse without having already edited a foreign directory.
+		mockedReadlink.mockImplementation(async (target) => {
+			if (target !== currentLink) {
+				return Promise.reject(new Error("not a link"))
+			}
+			return flipped ? outsideReferent : insideReferent
+		})
+		let released = false
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			order.push("lock:" + path.basename(String(key)))
+			flipped = true
+			return async () => {
+				order.push("release")
+				released = true
+			}
+		})
+
+		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: scope })).rejects.toThrow(
+			ConfinedPathEscapeError,
+		)
+
+		// Refused before recovery mutated anything: the outside directory is the directory it
+		// was, planted staged copy included, and the lock this writer took is released rather
+		// than left for the stale timeout.
+		expect((await fs.readdir(outside)).sort()).toEqual(outsideBefore)
+		expect(existsSync(leftover)).toBe(true)
+		expect(released).toBe(true)
+		expect(order.filter((entry) => entry === "release")).toHaveLength(1)
+		expect(order.filter((entry) => entry === "lock:item.json")).toHaveLength(1)
+	})
 })

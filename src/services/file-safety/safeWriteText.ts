@@ -641,6 +641,25 @@ export async function safeWriteText(
 						} finally {
 							fsSync.closeSync(backupFd)
 						}
+						// The recovery copy is an entry inside dirPath, and the only directory fsync in
+						// this function runs after the commit rename below. A crash between that rename
+						// and that fsync can leave the rename on disk while the entry naming the recovery
+						// copy has not reached it, which is the one case where PostCommitDurabilityError
+						// hands the caller a backupPath for a copy that no longer exists: the content
+						// survived into the renamed-to directory but the name for the copy did not.
+						// Synchronizing dirPath here, while a failure is still a pre-commit failure, means
+						// a directory-entry failure leaves the target at its previous content and the catch
+						// below removes the copy, instead of the caller having to recover from a write that
+						// already committed. The cost is one extra fsync on the backup path; the fsync after
+						// the rename stays, because that rename changes a different entry in this directory.
+						if (platform !== "win32") {
+							const backupDirFd = fsSync.openSync(dirPath, "r")
+							try {
+								_fsyncFile(backupDirFd)
+							} finally {
+								fsSync.closeSync(backupDirFd)
+							}
+						}
 					} catch (backupError: unknown) {
 						// A partial backup must not outlive this attempt: it is not a complete copy
 						// of anything, and once the write fails nothing else removes it.
