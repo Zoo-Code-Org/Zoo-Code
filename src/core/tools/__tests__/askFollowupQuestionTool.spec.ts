@@ -245,6 +245,45 @@ describe("AskFollowupQuestionTool", () => {
 		expect(result.content).toEqual([{ type: "text", text: "<user_message>\nparsed: @/allowed\n</user_message>" }])
 	})
 
+	it("expands only the user segment of a mixed answer", async () => {
+		const params = { question: "What?", follow_up: [{ text: "A" }] }
+		askMock.mockResolvedValue({
+			text: "@/secret @/mine",
+			images: [],
+			segments: [
+				{ text: "@/secret ", source: "generated" },
+				{ text: "@/mine", source: "user" },
+			],
+		})
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		await processUserContentMentions({
+			userContent: [mockTask.userMessageContent[0]],
+			cwd: "/test",
+			fileContextTracker: {} as FileContextTracker,
+		})
+		expect(vi.mocked(parseMentions).mock.calls.map((call) => call[0])).toEqual(["@/mine"])
+	})
+
+	it.each([
+		{ label: "missing", segments: undefined },
+		{ label: "not matching the text", segments: [{ text: "@/other", source: "user" }] },
+		{ label: "invalid", segments: [{ text: "@/secret", source: "system" }] },
+	])("expands nothing when the segments are $label", async ({ segments }) => {
+		const params = { question: "What?", follow_up: [{ text: "A" }] }
+		askMock.mockResolvedValue({ text: "@/secret", images: [], segments })
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		await processUserContentMentions({
+			userContent: [mockTask.userMessageContent[0]],
+			cwd: "/test",
+			fileContextTracker: {} as FileContextTracker,
+		})
+		expect(parseMentions).not.toHaveBeenCalled()
+	})
+
 	it("does not authorize the feedback block when the user answer is null", async () => {
 		const params = { question: "What?", follow_up: [{ text: "A" }] }
 		askMock.mockResolvedValue({ text: null, images: [] })

@@ -7550,7 +7550,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				[],
 				undefined,
 				undefined,
-				[{ text: "Edited message with preserved images", source: "user" }],
+				[{ text: "Edited message with preserved images", source: "generated" }],
 			)
 		})
 
@@ -7609,7 +7609,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				[],
 				undefined,
 				undefined,
-				[{ text: "Edited message with file attachment", source: "user" }],
+				[{ text: "Edited message with file attachment", source: "generated" }],
 			)
 		})
 	})
@@ -8142,7 +8142,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 
 				expect(mockCline.overwriteClineMessages).toHaveBeenCalled()
 				expect(mockCline.submitUserMessage).toHaveBeenCalledWith(largeEditedContent, [], undefined, undefined, [
-					{ text: largeEditedContent, source: "user" },
+					{ text: largeEditedContent, source: "generated" },
 				])
 			})
 

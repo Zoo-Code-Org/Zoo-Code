@@ -3,7 +3,7 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage } from "@roo-code/types"
+import type { ExtensionMessage, MentionSegment } from "@roo-code/types"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -62,6 +62,10 @@ interface ChatTextAreaProps {
 	/** Programmatic updates preserve the chat box authorization scope. */
 	/** Sets generated text, such as an enhanced prompt. Falls back to `setInputValue`. */
 	setInputValueGenerated?: (value: string) => void
+	/** Reads the draft's segments. Null means all user text. */
+	getInputSegments?: () => MentionSegment[] | null
+	/** Sets the value with its segments, for prompt history. */
+	setInputValueWithSegments?: (value: string, segments: MentionSegment[] | null) => void
 	sendingDisabled: boolean
 	selectApiConfigDisabled: boolean
 	placeholderText: string
@@ -89,6 +93,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			inputValue,
 			setInputValue,
 			setInputValueGenerated,
+			getInputSegments,
+			setInputValueWithSegments,
 			selectApiConfigDisabled,
 			placeholderText,
 			selectedImages,
@@ -270,6 +276,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			cwd,
 			inputValue: normalizedInputValue,
 			setInputValue,
+			getSegments: getInputSegments,
+			setInputValueWithSegments,
 		})
 
 		// Fetch git commits when Git is selected or when typing a hash.

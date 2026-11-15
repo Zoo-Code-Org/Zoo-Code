@@ -1167,6 +1167,61 @@ describe("attemptCompletionTool", () => {
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
 			})
 
+			it.each([
+				{
+					label: "mixed origin",
+					segments: [
+						{ text: "@/secret ", source: "generated" },
+						{ text: "@/mine", source: "user" },
+					],
+					text: "@/secret @/mine",
+					expanded: ["@/mine"],
+				},
+				{ label: "missing", segments: undefined, text: "@/secret", expanded: [] },
+				{
+					label: "not matching the text",
+					segments: [{ text: "@/other", source: "user" }],
+					text: "@/secret",
+					expanded: [],
+				},
+				{
+					label: "invalid",
+					segments: [{ text: "@/secret", source: "system" }],
+					text: "@/secret",
+					expanded: [],
+				},
+			])("expands only authorized text when the segments are $label", async ({ segments, text, expanded }) => {
+				const block: ToolUse<"attempt_completion"> = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text, images: [], segments })
+				vi.mocked(parseMentions).mockImplementation(async (input) => ({
+					text: `parsed: ${input}`,
+					contentBlocks: [],
+				}))
+				vi.mocked(parseMentions).mockClear()
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "",
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				await processUserContentMentions({
+					userContent: [mockTask.userMessageContent![0]],
+					cwd: "/test",
+					fileContextTracker: {} as FileContextTracker,
+				})
+				expect(vi.mocked(parseMentions).mock.calls.map((call) => call[0])).toEqual(expanded)
+			})
+
 			it("pushes an authorized feedback block that mention processing expands", async () => {
 				const block: ToolUse<"attempt_completion"> = {
 					type: "tool_use",

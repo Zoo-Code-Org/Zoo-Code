@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid"
 
 import type { MentionSegment, QueuedMessage } from "@roo-code/types"
 
-import { userSegments } from "../../shared/mentionSegments"
+import { applyEdit, generatedSegments } from "../../shared/mentionSegments"
 
 export interface QueueEvents {
 	stateChanged: [messages: QueuedMessage[]]
@@ -69,11 +69,11 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 			return false
 		}
 
+		// Only the changed text becomes user text. Unchanged generated text stays generated.
+		message.segments = applyEdit(message.segments ?? generatedSegments(message.text), message.text, text)
 		message.timestamp = Date.now()
 		message.text = text
 		message.images = images
-		// The edited text is user-authored, so it replaces any recorded segments.
-		message.segments = userSegments(text)
 		this.emit("stateChanged", this._messages)
 		return true
 	}

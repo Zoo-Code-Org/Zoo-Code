@@ -79,12 +79,33 @@ describe("MessageQueueService segments", () => {
 		expect(queue.addMessage("ctx mine", undefined, segments)?.segments).toEqual(segments)
 	})
 
-	it("replaces the segments with user text when the user edits the message", () => {
+	it("keeps unchanged generated text generated when the user saves without edits", () => {
 		const queue = new MessageQueueService()
 		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
 
-		queue.updateMessage(message.id, "edited @/y")
+		queue.updateMessage(message.id, "ctx @/x")
 
-		expect(queue.messages[0]?.segments).toEqual([{ text: "edited @/y", source: "user" }])
+		expect(queue.messages[0]?.segments).toEqual([{ text: "ctx @/x", source: "generated" }])
+	})
+
+	it("marks only the appended text as user text", () => {
+		const queue = new MessageQueueService()
+		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
+
+		queue.updateMessage(message.id, "ctx @/x mine")
+
+		expect(queue.messages[0]?.segments).toEqual([
+			{ text: "ctx @/x", source: "generated" },
+			{ text: " mine", source: "user" },
+		])
+	})
+
+	it("treats a message without segments as generated", () => {
+		const queue = new MessageQueueService()
+		const message = queue.addMessage("old @/x")!
+
+		queue.updateMessage(message.id, "old @/x")
+
+		expect(queue.messages[0]?.segments).toEqual([{ text: "old @/x", source: "generated" }])
 	})
 })

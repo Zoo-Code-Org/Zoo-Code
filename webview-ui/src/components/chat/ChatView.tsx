@@ -819,6 +819,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setInputValue(value)
 	}, [])
 
+	// Prompt history restores a draft together with its segments.
+	const getInputSegments = useCallback(() => segmentsRef.current, [])
+	const setInputValueWithSegments = useCallback((value: string, segments: MentionSegment[] | null) => {
+		segmentsRef.current = segments
+		inputValueRef.current = value
+		setInputValue(value)
+	}, [])
+
 	// Handle stop button click from textarea
 	const handleStopTask = useCallback(() => {
 		vscode.postMessage({ type: "cancelTask" })
@@ -1975,6 +1983,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				setInputValue={setInputValueFromUser}
 				// Generated text replaces the value and authorizes nothing.
 				setInputValueGenerated={setInputValueGenerated}
+				getInputSegments={getInputSegments}
+				setInputValueWithSegments={setInputValueWithSegments}
 				sendingDisabled={sendingDisabled || isProfileDisabled}
 				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}

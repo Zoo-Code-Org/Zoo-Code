@@ -92,7 +92,7 @@ import {
 	openGitHubAccountManagement,
 } from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
-import { normalizeSegments, userSegments, userText } from "../../shared/mentionSegments"
+import { generatedSegments, normalizeSegments, userText } from "../../shared/mentionSegments"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
@@ -2635,8 +2635,8 @@ export const webviewMessageHandler = async (
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {
-				// The edit box holds only text the user typed.
-				const editSegments = userSegments(message.text)
+				// Stored messages carry no segments, so fail closed: nothing is expanded.
+				const editSegments = generatedSegments(message.text)
 				const resolved = await resolveIncomingImages({
 					text: message.text,
 					images: message.images,

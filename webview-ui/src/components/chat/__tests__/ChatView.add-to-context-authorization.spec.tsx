@@ -4,7 +4,7 @@ import React from "react"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { renderWithExtensionState, waitFor, act, fireEvent } from "@/utils/test-utils"
 
-import ChatView, { ChatViewProps } from "../ChatView"
+import ChatView, { ChatViewProps, ChatViewRef } from "../ChatView"
 
 // Mock vscode API
 const { mockPostMessage } = vi.hoisted(() => ({ mockPostMessage: vi.fn() }))
@@ -304,5 +304,19 @@ describe("ChatView - add-to-context mention segments", () => {
 			text: "enhanced with @/secret",
 			segments: [generated("enhanced with @/secret")],
 		})
+	})
+
+	it("sends generated segments when the imperative acceptInput submits", async () => {
+		const ref = React.createRef<ChatViewRef>()
+		renderWithExtensionState(<ChatView ref={ref} {...defaultProps} />)
+
+		await addGeneratedContext({ segments: [generated("context with @/secret code")] })
+		await act(async () => {
+			ref.current!.acceptInput()
+		})
+		await waitFor(() => expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "newTask" })))
+
+		const message = mockPostMessage.mock.calls.find(([m]) => m.type === "newTask")?.[0]
+		expect(message).toMatchObject({ segments: [generated("context with @/secret code")] })
 	})
 })

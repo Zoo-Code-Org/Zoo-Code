@@ -1,5 +1,5 @@
-import { ClineMessage, HistoryItem } from "@roo-code/types"
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { ClineMessage, HistoryItem, MentionSegment } from "@roo-code/types"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 interface UsePromptHistoryProps {
 	clineMessages: ClineMessage[] | undefined
@@ -7,6 +7,10 @@ interface UsePromptHistoryProps {
 	cwd: string | undefined
 	inputValue: string
 	setInputValue: (value: string) => void
+	/** Reads the draft's segments. Null means all user text. */
+	getSegments?: () => MentionSegment[] | null
+	/** Sets the value with its segments. Falls back to `setInputValue`. */
+	setInputValueWithSegments?: (value: string, segments: MentionSegment[] | null) => void
 }
 
 export interface UsePromptHistoryReturn {
@@ -30,6 +34,8 @@ export const usePromptHistory = ({
 	cwd,
 	inputValue,
 	setInputValue,
+	getSegments,
+	setInputValueWithSegments,
 }: UsePromptHistoryProps): UsePromptHistoryReturn => {
 	// Maximum number of prompts to keep in history for memory management
 	const MAX_PROMPT_HISTORY_SIZE = 100
@@ -37,6 +43,8 @@ export const usePromptHistory = ({
 	// Prompt history navigation state
 	const [historyIndex, setHistoryIndex] = useState(-1)
 	const [tempInput, setTempInput] = useState("")
+	// Segments of the draft that history navigation replaced.
+	const tempSegmentsRef = useRef<MentionSegment[] | null>(null)
 	const [promptHistory, setPromptHistory] = useState<string[]>([])
 
 	// Initialize prompt history with hybrid approach: conversation messages if in task, otherwise task history
@@ -111,22 +119,31 @@ export const usePromptHistory = ({
 			if (!historicalPrompt) return false
 
 			setHistoryIndex(newIndex)
-			setInputValue(historicalPrompt)
+			// Stored prompts carry no segments, so they authorize nothing.
+			if (setInputValueWithSegments) {
+				setInputValueWithSegments(historicalPrompt, [{ text: historicalPrompt, source: "generated" }])
+			} else {
+				setInputValue(historicalPrompt)
+			}
 			setCursorPosition(textarea, cursorPos, historicalPrompt.length)
 
 			return true
 		},
-		[promptHistory, setInputValue, setCursorPosition],
+		[promptHistory, setInputValue, setInputValueWithSegments, setCursorPosition],
 	)
 
 	// Helper to return to current input
 	const returnToCurrentInput = useCallback(
 		(textarea: HTMLTextAreaElement, cursorPos: "start" | "end" = "end") => {
 			setHistoryIndex(-1)
-			setInputValue(tempInput)
+			if (setInputValueWithSegments) {
+				setInputValueWithSegments(tempInput, tempSegmentsRef.current)
+			} else {
+				setInputValue(tempInput)
+			}
 			setCursorPosition(textarea, cursorPos, tempInput.length)
 		},
-		[tempInput, setInputValue, setCursorPosition],
+		[tempInput, setInputValue, setInputValueWithSegments, setCursorPosition],
 	)
 
 	const handleHistoryNavigation = useCallback(
@@ -147,6 +164,7 @@ export const usePromptHistory = ({
 						// Save current input if starting navigation
 						if (historyIndex === -1) {
 							setTempInput(inputValue)
+							tempSegmentsRef.current = getSegments?.() ?? null
 						}
 						return navigateToHistory(historyIndex + 1, textarea, "start")
 					}
@@ -167,7 +185,7 @@ export const usePromptHistory = ({
 			}
 			return false
 		},
-		[promptHistory, historyIndex, inputValue, navigateToHistory, returnToCurrentInput],
+		[promptHistory, historyIndex, inputValue, getSegments, navigateToHistory, returnToCurrentInput],
 	)
 
 	const resetHistoryNavigation = useCallback(() => {

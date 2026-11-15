@@ -36,6 +36,11 @@ const { resolveImageMentions } = vi.hoisted(() => ({
 }))
 vi.mock("../../mentions/resolveImageMentions", () => ({ resolveImageMentions }))
 
+vi.mock("../../task-persistence", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence")>()),
+	saveTaskMessages: vi.fn(),
+}))
+
 const generated = (text: string): MentionSegment => ({ text, source: "generated" })
 const user = (text: string): MentionSegment => ({ text, source: "user" })
 
@@ -47,6 +52,8 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		postMessageToWebview: ReturnType<typeof vi.fn>
 		getCurrentTask: ReturnType<typeof vi.fn>
 		getState: ReturnType<typeof vi.fn>
+		postStateToWebview: ReturnType<typeof vi.fn>
+		contextProxy: { globalStorageUri: { fsPath: string } }
 	}
 	let providerAsClineProvider: ClineProvider
 	let currentTask: {
@@ -65,6 +72,8 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			getCurrentTask: vi.fn(() => currentTask),
 			getState: vi.fn().mockResolvedValue({ maxImageFileSize: 5, maxTotalImageSize: 20 }),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			contextProxy: { globalStorageUri: { fsPath: "/tmp/storage" } },
 		}
 		providerAsClineProvider = provider as unknown as ClineProvider
 	})
@@ -128,18 +137,24 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		expect(provider.createTask).toHaveBeenCalledWith(text, [], undefined, expect.anything(), undefined)
 	})
 
-	it("scans the edited text for images and treats it as user text", async () => {
+	it("authorizes nothing in an edited message", async () => {
+		const submitUserMessage = vi.fn()
 		const editTask = {
+			taskId: "task-1",
 			clineMessages: [{ ts: 1, type: "say", say: "user_feedback", text: "old" }],
 			apiConversationHistory: [],
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
-			submitUserMessage: vi.fn(),
+			submitUserMessage,
+			messageManager: { rewindToTimestamp: vi.fn() },
 		}
 		provider.getCurrentTask.mockReturnValue(editTask)
 		const message: WebviewMessage = { type: "editMessageConfirm", messageTs: 1, text: "see @/a.png" }
-		await webviewMessageHandler(providerAsClineProvider, message).catch(() => {})
+		await webviewMessageHandler(providerAsClineProvider, message)
 
-		expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: "see @/a.png" }))
+		expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: "" }))
+		expect(submitUserMessage).toHaveBeenCalledWith("see @/a.png", expect.anything(), undefined, undefined, [
+			generated("see @/a.png"),
+		])
 	})
 })
