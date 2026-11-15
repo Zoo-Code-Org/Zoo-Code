@@ -17,7 +17,7 @@ export const waitFor = (
 		const timeoutId = setTimeout(() => {
 			settled = true
 			if (intervalId) clearTimeout(intervalId)
-			reject(new Error(`Timeout after ${Math.floor(timeout / 1000)}s`))
+			reject(new Error(`Timeout after ${Math.floor(timeout / 1000)}s on ${condition.toString().slice(0, 240)}`))
 		}, timeout)
 
 		const cleanup = () => {
