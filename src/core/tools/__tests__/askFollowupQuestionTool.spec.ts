@@ -266,6 +266,31 @@ describe("AskFollowupQuestionTool", () => {
 		expect(vi.mocked(parseMentions).mock.calls.map((call) => call[0])).toEqual(["@/mine"])
 	})
 
+	it("keeps generated text between user segments and expands both user segments", async () => {
+		const params = { question: "What?", follow_up: [{ text: "A" }] }
+		askMock.mockResolvedValue({
+			text: "@/a @/secret @/b",
+			images: [],
+			segments: [
+				{ text: "@/a ", source: "user" },
+				{ text: "@/secret ", source: "generated" },
+				{ text: "@/b", source: "user" },
+			],
+		})
+		vi.mocked(parseMentions).mockImplementation(async (input) => ({ text: `parsed: ${input}`, contentBlocks: [] }))
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		const result = await processUserContentMentions({
+			userContent: [mockTask.userMessageContent[0]],
+			cwd: "/test",
+			fileContextTracker: {} as FileContextTracker,
+		})
+		expect(result.content).toEqual([
+			{ type: "text", text: "<user_message>\nparsed: @/a @/secret parsed: @/b\n</user_message>" },
+		])
+	})
+
 	it.each([
 		{ label: "missing", segments: undefined },
 		{ label: "not matching the text", segments: [{ text: "@/other", source: "user" }] },

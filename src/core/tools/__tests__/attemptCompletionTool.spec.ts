@@ -1167,6 +1167,48 @@ describe("attemptCompletionTool", () => {
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
 			})
 
+			it("keeps generated text between user segments and expands both user segments", async () => {
+				const block: ToolUse<"attempt_completion"> = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({
+					response: "messageResponse",
+					text: "@/a @/secret @/b",
+					images: [],
+					segments: [
+						{ text: "@/a ", source: "user" },
+						{ text: "@/secret ", source: "generated" },
+						{ text: "@/b", source: "user" },
+					],
+				})
+				vi.mocked(parseMentions).mockImplementation(async (input) => ({
+					text: `parsed: ${input}`,
+					contentBlocks: [],
+				}))
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "",
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				const result = await processUserContentMentions({
+					userContent: [mockTask.userMessageContent![0]],
+					cwd: "/test",
+					fileContextTracker: {} as FileContextTracker,
+				})
+				expect(result.content).toEqual([
+					{ type: "text", text: "<user_message>\nparsed: @/a @/secret parsed: @/b\n</user_message>" },
+				])
+			})
+
 			it.each([
 				{
 					label: "mixed origin",

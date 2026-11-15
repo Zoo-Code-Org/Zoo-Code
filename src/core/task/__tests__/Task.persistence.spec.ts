@@ -16,6 +16,9 @@ import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { PendingActionSettlementError, Task } from "../Task"
+import { parseMentions } from "../../mentions"
+import { processUserContentMentions } from "../../mentions/processUserContentMentions"
+import type { FileContextTracker } from "../../context-tracking/FileContextTracker"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -2216,6 +2219,73 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).toHaveBeenCalled()
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
 			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
+		})
+	})
+
+	describe("resumeTaskFromHistory response mentions", () => {
+		const resumeWith = async (response: { text: string; segments?: unknown }) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resume-mentions",
+					number: 1,
+					ts: Date.now(),
+					task: "Resumed task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiate = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", ...response } as never)
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: [{ type: "text", text: "Hi" }] }])
+			mockProvider.taskHistoryStore.get = vi
+				.fn()
+				.mockReturnValue({ id: "resume-mentions", status: "interrupted" })
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			vi.mocked(parseMentions).mockClear()
+			const processed = await processUserContentMentions({
+				userContent: initiate.mock.calls[0][0],
+				cwd: "/test",
+				fileContextTracker: {} as FileContextTracker,
+			})
+			return { processed, parsed: vi.mocked(parseMentions).mock.calls.map((call) => call[0]) }
+		}
+
+		it("expands a user segment and keeps the wrapper", async () => {
+			const text = "read @/allowed please"
+			const { processed, parsed } = await resumeWith({ text, segments: [{ text, source: "user" }] })
+
+			expect(parsed).toEqual([text])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: `<user_message>\nprocessed: ${text}\n</user_message>`,
+			})
+		})
+
+		it.each([
+			{ label: "omitted", segments: undefined },
+			{ label: "not matching the text", segments: [{ text: "other", source: "user" }] },
+		])("expands nothing when the segments are $label", async ({ segments }) => {
+			const { processed, parsed } = await resumeWith({ text: "read @/secret", segments })
+
+			expect(parsed).toEqual([])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: "<user_message>\nread @/secret\n</user_message>",
+			})
+		})
+
+		it("pushes no response block for an empty response", async () => {
+			const { processed, parsed } = await resumeWith({ text: "" })
+
+			expect(parsed).toEqual([])
+			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
 		})
 	})
 
