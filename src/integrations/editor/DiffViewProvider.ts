@@ -809,7 +809,20 @@ export class DiffViewProvider {
 			// carries its own ENOENT tolerance for a file that disappears between this stat and
 			// the unlink, and a failed unlink throws before the field is cleared below, so a
 			// retained session still owns the placeholder and a retry path still has it recorded.
-			if (placeholderPath && (await fs.stat(placeholderPath).catch(() => null))?.size === 0) {
+			// Only ENOENT answers the question the size check is asking, namely that nothing stands at
+			// this path. An EACCES or an I/O failure answers that the answer is unknown, and clearing the
+			// ownership on an unknown answer leaves the placeholder on disk with the session reset and
+			// nobody left to remove it. Propagate anything that is not ENOENT into the catch below, which
+			// hands the created-directories snapshot back and keeps the ownership recorded for a retry.
+			const placeholderStat = placeholderPath
+				? await fs.stat(placeholderPath).catch((statError: unknown) => {
+						if (isEnoent(statError)) {
+							return null
+						}
+						throw statError
+					})
+				: null
+			if (placeholderPath && placeholderStat?.size === 0) {
 				await this.removeCreatedFile(placeholderPath)
 			}
 			this.placeholderPath = undefined
