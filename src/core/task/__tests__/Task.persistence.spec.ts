@@ -2268,9 +2268,29 @@ describe("Task persistence", () => {
 			})
 		})
 
+		it("expands only the user segments of an interleaved answer", async () => {
+			const text = "@/a @/secret @/b"
+			const { processed, parsed } = await resumeWith({
+				text,
+				segments: [
+					{ text: "@/a ", source: "user" },
+					{ text: "@/secret ", source: "generated" },
+					{ text: "@/b", source: "user" },
+				],
+			})
+
+			expect(parsed).toEqual(["@/a ", "@/b"])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: "<user_message>\nprocessed: @/a @/secret processed: @/b\n</user_message>",
+			})
+		})
+
 		it.each([
 			{ label: "omitted", segments: undefined },
 			{ label: "not matching the text", segments: [{ text: "other", source: "user" }] },
+			{ label: "matching but generated only", segments: [{ text: "read @/secret", source: "generated" }] },
+			{ label: "matching but of an invalid source", segments: [{ text: "read @/secret", source: "system" }] },
 		])("expands nothing when the segments are $label", async ({ segments }) => {
 			const { processed, parsed } = await resumeWith({ text: "read @/secret", segments })
 

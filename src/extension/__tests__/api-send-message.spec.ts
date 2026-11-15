@@ -153,4 +153,34 @@ describe("API - SendMessage Command", () => {
 		})
 		expect(mockPostMessageToWebview).toHaveBeenCalledTimes(1)
 	})
+
+	describe("when the webview is not launched", () => {
+		const user = (text: string) => ({ text, source: "user" as const })
+
+		it.each([
+			{ label: "text and images", text: "see @/file.ts", images: ["img"], expected: [user("see @/file.ts")] },
+			{ label: "empty text", text: "", images: undefined, expected: [] },
+			{ label: "missing text", text: undefined, images: undefined, expected: [] },
+		])("submits the user text directly with $label", async ({ text, images, expected }) => {
+			const submitUserMessage = vi.fn().mockResolvedValue(undefined)
+			Object.assign(mockProvider, {
+				viewLaunched: false,
+				getCurrentTask: vi.fn().mockReturnValue({ submitUserMessage }),
+			})
+
+			await api.sendMessage(text, images)
+
+			expect(submitUserMessage).toHaveBeenCalledWith(text ?? "", images, undefined, undefined, expected)
+			expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+		})
+
+		it("logs and drops the message when there is no current task", async () => {
+			Object.assign(mockProvider, { viewLaunched: false })
+
+			await api.sendMessage("see @/file.ts")
+
+			expect(mockLog).toHaveBeenCalledWith(expect.stringContaining("no current task"))
+			expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+		})
+	})
 })
