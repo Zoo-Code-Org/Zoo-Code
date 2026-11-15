@@ -126,6 +126,24 @@ describe("handleRequestProviderInfo", () => {
 		})
 	})
 
+	it("keys an untagged endpoint by its name next to a tagged one", async () => {
+		const [tagged] = ENDPOINTS.data.endpoints
+		const untagged = { name: "Provider B", context_length: 32000, pricing: { prompt: "0.000001" } }
+		fetchSpy.mockResolvedValue(jsonResponse({ data: { ...ENDPOINTS.data, endpoints: [tagged, untagged] } }))
+
+		await send({ kind: "openRouterModelProviders", modelId: "openai/gpt-4o" })
+
+		const { values } = postMessageToWebview.mock.calls[0]![0]
+		expect(Object.keys(values.data)).toEqual(["openai", "Provider B"])
+		expect(values.data["Provider B"]).toMatchObject({
+			label: "Provider B",
+			maxTokens: 32000,
+			contextWindow: 32000,
+			inputPrice: 1,
+			supportsPromptCache: false,
+		})
+	})
+
 	it("returns no providers for an image-output model", async () => {
 		const body = { data: { ...ENDPOINTS.data, architecture: { output_modalities: ["image"] } } }
 		fetchSpy.mockResolvedValue(jsonResponse(body))
@@ -135,12 +153,35 @@ describe("handleRequestProviderInfo", () => {
 		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: {} })
 	})
 
-	it("returns null for a schema-invalid key response", async () => {
-		fetchSpy.mockResolvedValue(jsonResponse({ data: { label: 1 } }))
+	it.each([
+		["openRouterKeyInfo", { apiKey: "k" }, { data: { label: 1 } }, null],
+		["requestyKeyInfo", { apiKey: "k" }, { name: 1 }, null],
+		["openRouterModelProviders", { modelId: "m" }, { data: { id: "m" } }, {}],
+	])("returns the fallback and logs when %s gets a schema-invalid body", async (kind, params, body, fallback) => {
+		fetchSpy.mockResolvedValue(jsonResponse(body))
+
+		await send({ kind, ...params })
+
+		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: fallback })
+		expect(console.error).toHaveBeenCalled()
+	})
+
+	it("rejects a response body above the size cap", async () => {
+		const cancel = vi.fn()
+		const oversized = new ReadableStream<Uint8Array>({
+			pull: (controller) => controller.enqueue(new Uint8Array(512 * 1024)),
+			cancel,
+		})
+		fetchSpy.mockResolvedValue(new Response(oversized, { status: 200 }))
 
 		await send({ kind: "openRouterKeyInfo", apiKey: "k" })
 
-		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: null })
+		expect(cancel).toHaveBeenCalled()
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			error: "Provider info request failed",
+		})
 	})
 
 	it("posts an error without the configured URL when the request fails", async () => {

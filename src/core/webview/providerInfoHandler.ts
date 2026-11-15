@@ -7,6 +7,8 @@ import { parseApiPrice } from "../../shared/cost"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 
 const FETCH_TIMEOUT_MS = 10_000
+// Far above any real provider response. The cap stops a configured endpoint from filling host memory.
+const MAX_BODY_BYTES = 1024 * 1024
 const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
 
 const openRouterKeyInfoSchema = z.object({
@@ -66,6 +68,27 @@ const requestyKeyInfoSchema = z.object({
 	}),
 })
 
+async function readBoundedText(response: Response): Promise<string> {
+	// Count bytes as they arrive. Content-Length can be missing or wrong.
+	const reader = response.body?.getReader()
+	const chunks: Uint8Array[] = []
+	let total = 0
+
+	while (reader) {
+		const { done, value } = await reader.read()
+		if (done) break
+
+		total += value.byteLength
+		if (total > MAX_BODY_BYTES) {
+			await reader.cancel()
+			throw new Error("Response body too large")
+		}
+		chunks.push(value)
+	}
+
+	return Buffer.concat(chunks).toString("utf8")
+}
+
 async function getJson(url: string, headers?: Record<string, string>): Promise<unknown> {
 	const response = await fetch(url, {
 		method: "GET",
@@ -77,7 +100,7 @@ async function getJson(url: string, headers?: Record<string, string>): Promise<u
 		throw new Error(`Request failed with status code ${response.status}`)
 	}
 
-	return response.json()
+	return JSON.parse(await readBoundedText(response))
 }
 
 async function getOpenRouterKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {

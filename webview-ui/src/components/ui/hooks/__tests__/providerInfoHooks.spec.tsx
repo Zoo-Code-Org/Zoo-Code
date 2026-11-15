@@ -1,4 +1,5 @@
 import React from "react"
+import type { MockInstance } from "vitest"
 import { act, renderHook, waitFor } from "@testing-library/react"
 import { QueryClientProvider, type UseQueryResult } from "@tanstack/react-query"
 
@@ -52,7 +53,22 @@ describe("requestProviderInfo", () => {
 		vi.useRealTimers()
 	})
 
+	// Each settlement path must remove the exact listener it added and clear its timer.
+	const expectCleanedUp = (add: MockInstance, remove: MockInstance) => {
+		const added = add.mock.calls.filter(([type]) => type === "message").map(([, listener]) => listener)
+		const removed = remove.mock.calls.filter(([type]) => type === "message").map(([, listener]) => listener)
+		expect(added).toHaveLength(1)
+		expect(removed).toEqual(added)
+		expect(vi.getTimerCount()).toBe(0)
+	}
+
+	const spyOnListeners = () => {
+		vi.useFakeTimers()
+		return [vi.spyOn(window, "addEventListener"), vi.spyOn(window, "removeEventListener")] as const
+	}
+
 	it("posts the kind and params with a request id and resolves with the reply data", async () => {
+		const [add, remove] = spyOnListeners()
 		const { sent } = stubHost(() => ({ data: { ok: true } }))
 
 		await expect(
@@ -68,18 +84,22 @@ describe("requestProviderInfo", () => {
 				values: { kind: "openRouterKeyInfo", apiKey: "k", baseUrl: "https://x.test" },
 			},
 		])
+		expectCleanedUp(add, remove)
 	})
 
 	it("rejects with the host error message", async () => {
+		const [add, remove] = spyOnListeners()
 		stubHost(() => ({ error: "Provider info request failed" }))
 
 		await expect(requestProviderInfo("requestyKeyInfo", { apiKey: "k" })).rejects.toThrow(
 			"Provider info request failed",
 		)
+
+		expectCleanedUp(add, remove)
 	})
 
 	it("ignores replies for other request ids and rejects on timeout", async () => {
-		vi.useFakeTimers()
+		const [add, remove] = spyOnListeners()
 		stubHost(() => null)
 
 		const promise = requestProviderInfo("requestyKeyInfo", { apiKey: "k" })
@@ -90,9 +110,11 @@ describe("requestProviderInfo", () => {
 				data: { type: "providerInfo", requestId: "other", values: { data: { stolen: true } } },
 			}),
 		)
+		expect(remove).not.toHaveBeenCalledWith("message", expect.anything())
 		await act(() => vi.advanceTimersByTimeAsync(15_000))
 
 		await settled
+		expectCleanedUp(add, remove)
 	})
 })
 
