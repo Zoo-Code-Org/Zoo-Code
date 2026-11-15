@@ -16,6 +16,8 @@ import { throwIfAborted } from "../utils/abort-signal"
 
 import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./modelCache"
 
+const MAX_ENDPOINTS_BODY_BYTES = 1024 * 1024
+
 /**
  * OpenRouterBaseModel
  */
@@ -159,6 +161,8 @@ export async function getOpenRouterModelEndpoints(
 		// forever, and later callers would join that pending promise instead of retrying.
 		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`, {
 			timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+			// The base URL can come from user settings. The cap stops a huge body from filling host memory.
+			maxContentLength: MAX_ENDPOINTS_BODY_BYTES,
 		})
 		const result = openRouterModelEndpointsResponseSchema.safeParse(response.data)
 		const data = result.success ? result.data.data : response.data.data

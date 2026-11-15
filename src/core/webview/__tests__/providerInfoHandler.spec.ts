@@ -1,7 +1,10 @@
 import type { WebviewMessage } from "@roo-code/types"
 
 import type { ClineProvider } from "../ClineProvider"
+import { getOpenRouterModelEndpoints } from "../../../api/providers/fetchers/openrouter"
 import { handleRequestProviderInfo } from "../providerInfoHandler"
+
+vi.mock("../../../api/providers/fetchers/openrouter", () => ({ getOpenRouterModelEndpoints: vi.fn() }))
 
 const KEY_INFO = {
 	label: "sk-or-v1-...abc",
@@ -20,24 +23,6 @@ const REQUESTY_KEY_INFO = {
 	config: {},
 }
 
-const ENDPOINTS = {
-	data: {
-		id: "openai/gpt-4o",
-		name: "GPT-4o",
-		description: "desc",
-		architecture: { input_modalities: ["text", "image"], output_modalities: ["text"] },
-		endpoints: [
-			{
-				name: "OpenAI | gpt-4o",
-				tag: "openai",
-				context_length: 128000,
-				max_completion_tokens: 16384,
-				pricing: { prompt: "0.000005", completion: "0.000015", input_cache_read: "0.0000025" },
-			},
-		],
-	},
-}
-
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status })
 
 describe("handleRequestProviderInfo", () => {
@@ -50,6 +35,7 @@ describe("handleRequestProviderInfo", () => {
 
 	beforeEach(() => {
 		postMessageToWebview.mockReset()
+		vi.mocked(getOpenRouterModelEndpoints).mockReset()
 		fetchSpy = vi.spyOn(globalThis, "fetch")
 		vi.spyOn(console, "error").mockImplementation(() => {})
 	})
@@ -124,6 +110,7 @@ describe("handleRequestProviderInfo", () => {
 		await send({ kind: "openRouterModelProviders" })
 
 		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(getOpenRouterModelEndpoints).not.toHaveBeenCalled()
 		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: {} })
 	})
 
@@ -135,56 +122,25 @@ describe("handleRequestProviderInfo", () => {
 		expect(fetchSpy.mock.calls[0]![1]!.signal).toBeInstanceOf(AbortSignal)
 	})
 
-	it("maps OpenRouter endpoints to model info keyed by provider tag", async () => {
-		fetchSpy.mockResolvedValue(jsonResponse(ENDPOINTS))
+	it("delegates OpenRouter model providers to the shared endpoint fetcher", async () => {
+		const providers = { "provider-a": { contextWindow: 128000, supportsPromptCache: true } }
+		vi.mocked(getOpenRouterModelEndpoints).mockResolvedValue(providers)
 
-		await send({ kind: "openRouterModelProviders", modelId: "openai/gpt-4o" })
+		await send({ kind: "openRouterModelProviders", modelId: "openai/gpt-4o", baseUrl: "https://proxy.test/v1" })
 
-		expect(fetchSpy.mock.calls[0]![0]).toBe("https://openrouter.ai/api/v1/models/openai/gpt-4o/endpoints")
-		const { values } = postMessageToWebview.mock.calls[0]![0]
-		expect(values.data.openai).toMatchObject({
-			label: "openai",
-			maxTokens: 16384,
-			contextWindow: 128000,
-			supportsImages: true,
-			supportsPromptCache: true,
-			inputPrice: 5,
-			outputPrice: 15,
-			cacheReadsPrice: 2.5,
+		expect(getOpenRouterModelEndpoints).toHaveBeenCalledWith("openai/gpt-4o", {
+			openRouterBaseUrl: "https://proxy.test/v1",
 		})
-	})
-
-	it("keys an untagged endpoint by its name next to a tagged one", async () => {
-		const [tagged] = ENDPOINTS.data.endpoints
-		const untagged = { name: "Provider B", context_length: 32000, pricing: { prompt: "0.000001" } }
-		fetchSpy.mockResolvedValue(jsonResponse({ data: { ...ENDPOINTS.data, endpoints: [tagged, untagged] } }))
-
-		await send({ kind: "openRouterModelProviders", modelId: "openai/gpt-4o" })
-
-		const { values } = postMessageToWebview.mock.calls[0]![0]
-		expect(Object.keys(values.data)).toEqual(["openai", "Provider B"])
-		expect(values.data["Provider B"]).toMatchObject({
-			label: "Provider B",
-			maxTokens: 32000,
-			contextWindow: 32000,
-			inputPrice: 1,
-			supportsPromptCache: false,
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			values: { data: { "provider-a": { ...providers["provider-a"], label: "provider-a" } } },
 		})
-	})
-
-	it("returns no providers for an image-output model", async () => {
-		const body = { data: { ...ENDPOINTS.data, architecture: { output_modalities: ["image"] } } }
-		fetchSpy.mockResolvedValue(jsonResponse(body))
-
-		await send({ kind: "openRouterModelProviders", modelId: "m" })
-
-		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: {} })
 	})
 
 	it.each([
 		["openRouterKeyInfo", { apiKey: "k" }, { data: { label: 1 } }, null],
 		["requestyKeyInfo", { apiKey: "k" }, { name: 1 }, null],
-		["openRouterModelProviders", { modelId: "m" }, { data: { id: "m" } }, {}],
 	])("returns the fallback and logs when %s gets a schema-invalid body", async (kind, params, body, fallback) => {
 		fetchSpy.mockResolvedValue(jsonResponse(body))
 

@@ -1,9 +1,9 @@
 import { z } from "zod"
 
-import type { ModelInfo, ProviderInfoKind, ProviderInfoParams, WebviewMessage } from "@roo-code/types"
+import type { ProviderInfoKind, ProviderInfoParams, ProviderInfoResultMap, WebviewMessage } from "@roo-code/types"
 
 import type { ClineProvider } from "./ClineProvider"
-import { parseApiPrice } from "../../shared/cost"
+import { getOpenRouterModelEndpoints } from "../../api/providers/fetchers/openrouter"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 
 const FETCH_TIMEOUT_MS = 10_000
@@ -22,39 +22,6 @@ const openRouterKeyInfoSchema = z.object({
 			interval: z.string(),
 		}),
 		limit: z.number().nullable(),
-	}),
-})
-
-const priceSchema = z.union([z.string(), z.number()]).optional()
-
-const openRouterEndpointsSchema = z.object({
-	data: z.object({
-		id: z.string(),
-		name: z.string(),
-		description: z.string().optional(),
-		architecture: z
-			.object({
-				input_modalities: z.array(z.string()).nullish(),
-				output_modalities: z.array(z.string()).nullish(),
-				tokenizer: z.string().nullish(),
-			})
-			.nullish(),
-		endpoints: z.array(
-			z.object({
-				name: z.string(),
-				tag: z.string().optional(),
-				context_length: z.number(),
-				max_completion_tokens: z.number().nullish(),
-				pricing: z
-					.object({
-						prompt: priceSchema,
-						completion: priceSchema,
-						input_cache_read: priceSchema,
-						input_cache_write: priceSchema,
-					})
-					.optional(),
-			}),
-		),
 	}),
 })
 
@@ -119,43 +86,14 @@ async function getOpenRouterKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
 	return result.data.data
 }
 
+// Reuse the shared fetcher. It returns {} on failure, which the webview treats as no providers.
+// The key is the provider label, so the webview select can show it.
 async function getOpenRouterModelProviders({ modelId, baseUrl }: ProviderInfoParams) {
-	const models: Record<string, ModelInfo & { label: string }> = {}
+	if (!modelId) return {}
 
-	if (!modelId) return models
+	const endpoints = await getOpenRouterModelEndpoints(modelId, { openRouterBaseUrl: baseUrl })
 
-	const body = await getJson(`${baseUrl || OPENROUTER_DEFAULT_BASE_URL}/models/${modelId}/endpoints`)
-	const result = openRouterEndpointsSchema.safeParse(body)
-
-	if (!result.success) {
-		console.error("OpenRouter API response validation failed:", result.error)
-		return models
-	}
-
-	const { description, architecture, endpoints } = result.data.data
-
-	// Skip image generation models (models that output images).
-	if (architecture?.output_modalities?.includes("image")) return models
-
-	for (const endpoint of endpoints) {
-		const label = endpoint.tag ?? endpoint.name
-		const cacheReadsPrice = parseApiPrice(endpoint.pricing?.input_cache_read)
-
-		models[label] = {
-			maxTokens: endpoint.max_completion_tokens || endpoint.context_length,
-			contextWindow: endpoint.context_length,
-			supportsImages: architecture?.input_modalities?.includes("image") ?? false,
-			supportsPromptCache: typeof cacheReadsPrice !== "undefined",
-			cacheReadsPrice,
-			cacheWritesPrice: parseApiPrice(endpoint.pricing?.input_cache_write),
-			inputPrice: parseApiPrice(endpoint.pricing?.prompt),
-			outputPrice: parseApiPrice(endpoint.pricing?.completion),
-			description,
-			label,
-		}
-	}
-
-	return models
+	return Object.fromEntries(Object.entries(endpoints).map(([label, info]) => [label, { ...info, label }]))
 }
 
 async function getRequestyKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
@@ -176,7 +114,7 @@ async function getRequestyKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
 	return result.data
 }
 
-const fetchers: Record<ProviderInfoKind, (params: ProviderInfoParams) => Promise<unknown>> = {
+const fetchers: { [K in ProviderInfoKind]: (params: ProviderInfoParams) => Promise<ProviderInfoResultMap[K]> } = {
 	openRouterKeyInfo: getOpenRouterKeyInfo,
 	openRouterModelProviders: getOpenRouterModelProviders,
 	requestyKeyInfo: getRequestyKeyInfo,

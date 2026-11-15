@@ -1,29 +1,25 @@
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 
+import type { ProviderInfoResultMap } from "@roo-code/types"
+
 import { requestProviderInfo } from "./requestProviderInfo"
 
-export type RequestyKeyInfo = {
-	name: string
-	monthly_limit: string
-	monthly_spend: string
-	org_balance: string
-	config: { aliases?: Record<string, unknown> }
-}
+type RequestyKeyInfo = ProviderInfoResultMap["requestyKeyInfo"]
 
 async function getRequestyKeyInfo(baseUrl?: string, apiKey?: string) {
 	if (!apiKey) return null
 
 	try {
-		return await requestProviderInfo<RequestyKeyInfo | null>("requestyKeyInfo", { apiKey, baseUrl })
+		return await requestProviderInfo("requestyKeyInfo", { apiKey, baseUrl })
 	} catch (error) {
 		console.error("Error fetching Requesty key info:", error)
 		return null
 	}
 }
 
-type UseRequestyKeyInfoOptions = Omit<UseQueryOptions<RequestyKeyInfo | null>, "queryKey" | "queryFn">
+type UseRequestyKeyInfoOptions = Omit<UseQueryOptions<RequestyKeyInfo>, "queryKey" | "queryFn">
 export const useRequestyKeyInfo = (baseUrl?: string, apiKey?: string, options?: UseRequestyKeyInfoOptions) => {
-	return useQuery<RequestyKeyInfo | null>({
+	return useQuery<RequestyKeyInfo>({
 		queryKey: ["requesty-key-info", baseUrl, apiKey],
 		queryFn: () => getRequestyKeyInfo(baseUrl, apiKey),
 		staleTime: 30 * 1000, // 30 seconds

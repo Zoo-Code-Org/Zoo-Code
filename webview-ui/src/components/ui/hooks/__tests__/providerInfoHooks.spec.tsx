@@ -90,22 +90,22 @@ describe("requestProviderInfo", () => {
 	it("gives each request its own id and settles out-of-order replies by id", async () => {
 		const { sent } = stubHost(() => null)
 
-		const first = requestProviderInfo<string>("requestyKeyInfo", { apiKey: "a" })
-		const second = requestProviderInfo<string>("requestyKeyInfo", { apiKey: "b" })
+		const first = requestProviderInfo("requestyKeyInfo", { apiKey: "a" })
+		const second = requestProviderInfo("requestyKeyInfo", { apiKey: "b" })
 		const [idA, idB] = sent.map((message) => message.requestId)
 		expect(idA).not.toBe(idB)
 
 		for (const [requestId, data] of [
-			[idB, "second"],
-			[idA, "first"],
+			[idB, { name: "second" }],
+			[idA, { name: "first" }],
 		]) {
 			window.dispatchEvent(
 				new MessageEvent("message", { data: { type: "providerInfo", requestId, values: { data } } }),
 			)
 		}
 
-		await expect(first).resolves.toBe("first")
-		await expect(second).resolves.toBe("second")
+		await expect(first).resolves.toMatchObject({ name: "first" })
+		await expect(second).resolves.toMatchObject({ name: "second" })
 	})
 
 	it("rejects with the host error message", async () => {
@@ -132,7 +132,7 @@ describe("requestProviderInfo", () => {
 			}),
 		)
 		expect(remove).not.toHaveBeenCalledWith("message", expect.anything())
-		await act(() => vi.advanceTimersByTimeAsync(15_000))
+		await act(() => vi.advanceTimersByTimeAsync(20_000))
 
 		await settled
 		expectCleanedUp(add, remove)

@@ -1,18 +1,16 @@
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 
-import type { ModelInfo } from "@roo-code/types"
+import type { ProviderInfoResultMap } from "@roo-code/types"
 
 import { requestProviderInfo } from "./requestProviderInfo"
 
 export const OPENROUTER_DEFAULT_PROVIDER_NAME = "[default]"
 
-type OpenRouterModelProvider = ModelInfo & {
-	label: string
-}
+type OpenRouterModelProvider = ProviderInfoResultMap["openRouterModelProviders"][string]
 
 async function getOpenRouterProvidersForModel(modelId: string, baseUrl?: string) {
 	try {
-		return await requestProviderInfo<Record<string, OpenRouterModelProvider>>("openRouterModelProviders", {
+		return await requestProviderInfo("openRouterModelProviders", {
 			modelId,
 			baseUrl,
 		})

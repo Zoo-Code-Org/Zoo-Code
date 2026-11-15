@@ -332,8 +332,37 @@ describe("OpenRouter API", () => {
 				"https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-4/endpoints",
 				{
 					timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+					maxContentLength: 1024 * 1024,
 				},
 			)
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for an image-output model", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: {
+					data: {
+						id: "vendor/image-model",
+						name: "Image Model",
+						architecture: { output_modalities: ["image"] },
+						endpoints: [{ provider_name: "P", context_length: 1000 }],
+					},
+				},
+			})
+
+			await expect(getOpenRouterModelEndpoints("vendor/image-model")).resolves.toEqual({})
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for a body without an endpoints list", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: { id: "m" } } })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getOpenRouterModelEndpoints("m")).resolves.toEqual({})
 
 			getSpy.mockRestore()
 		})

@@ -1,12 +1,16 @@
-import type { ExtensionMessage, ProviderInfoKind, ProviderInfoParams } from "@roo-code/types"
+import type { ExtensionMessage, ProviderInfoKind, ProviderInfoParams, ProviderInfoResultMap } from "@roo-code/types"
 
 import { vscode } from "@src/utils/vscode"
 
-const TIMEOUT_MS = 15_000
+// Longer than every host-side fetch timeout (15 s at most), so the host answers first.
+const TIMEOUT_MS = 20_000
 
 /** Ask the extension host to run a provider lookup. The webview CSP allows no provider origins. */
-export const requestProviderInfo = <T>(kind: ProviderInfoKind, params: ProviderInfoParams): Promise<T> =>
-	new Promise<T>((resolve, reject) => {
+export const requestProviderInfo = <K extends ProviderInfoKind>(
+	kind: K,
+	params: ProviderInfoParams,
+): Promise<ProviderInfoResultMap[K]> =>
+	new Promise<ProviderInfoResultMap[K]>((resolve, reject) => {
 		const requestId = crypto.randomUUID()
 
 		const cleanup = () => {
@@ -29,7 +33,7 @@ export const requestProviderInfo = <T>(kind: ProviderInfoKind, params: ProviderI
 			if (message.error) {
 				reject(new Error(message.error))
 			} else {
-				resolve(message.values?.data as T)
+				resolve(message.values?.data as ProviderInfoResultMap[K])
 			}
 		}
 
