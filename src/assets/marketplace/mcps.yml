@@ -1147,6 +1147,33 @@ items:
           - name: Prerequisites
             key: PREREQUISITES
             placeholder: Requires Node.js 18+ and Genkit SDK installation
+    - id: getyoutubetranscript
+      name: GetYouTubeTranscript
+      description:
+          YouTube transcripts and YouTube data for AI agents over MCP. Get the transcript of a video with optional
+          timestamps, search YouTube, and list channel uploads and playlist videos. All tools are read-only. Needs an
+          API key. A new account gets 100 free credits.
+      author: GetYouTubeTranscript
+      url: https://github.com/tubeagentkit/youtube-mcp
+      tags:
+          - youtube
+          - transcripts
+          - video
+          - research
+      content:
+          - name: Remote Server (API Key)
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://getyoutubetranscript.com/api/mcp",
+                  "headers": {
+                    "Authorization": "Bearer {{GETYOUTUBETRANSCRIPT_API_KEY}}"
+                  }
+                }
+            parameters:
+                - name: GetYouTubeTranscript API Key
+                  key: GETYOUTUBETRANSCRIPT_API_KEY
+                  placeholder: your_getyoutubetranscript_api_key
     - id: git
       name: Git Tools
       description: Provides Git repository interaction and automation tools for reading, searching, and manipulating Git
