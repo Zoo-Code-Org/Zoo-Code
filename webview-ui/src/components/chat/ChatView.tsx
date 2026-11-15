@@ -20,10 +20,26 @@ import { getCostBreakdownIfNeeded } from "@src/utils/costFormatting"
 import { batchNearby } from "@src/utils/batchNearby"
 import { isBoundary, isIgnorableBetweenTargets } from "@src/utils/chatBatchingPredicates"
 
-import type { ClineAsk, ClineSayTool, ClineMessage, ExtensionMessage, AudioType, SuggestionItem } from "@roo-code/types"
+import type {
+	ClineAsk,
+	ClineSayTool,
+	ClineMessage,
+	ExtensionMessage,
+	AudioType,
+	SuggestionItem,
+	MentionSegment,
+} from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
 import { findLast } from "@roo/array"
+import {
+	applyEdit,
+	generatedSegments,
+	joinSegments,
+	normalizeSegments,
+	trimSegments,
+	userSegments,
+} from "@roo/mentionSegments"
 import { combineApiRequests } from "@roo/combineApiRequests"
 import { combineCommandSequences } from "@roo/combineCommandSequences"
 import { getApiMetrics } from "@roo/getApiMetrics"
@@ -205,9 +221,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 	const autoApproveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const userRespondedRef = useRef<boolean>(false)
-	// Null means the chat box value is fully user-authored. A string names
-	// the only substring that may have mentions expanded.
-	const authorizedMentionRef = useRef<string | null>(null)
+	// Origin of each part of the chat box value. Null means all of it is user text.
+	const segmentsRef = useRef<MentionSegment[] | null>(null)
 	const [currentFollowUpTs, setCurrentFollowUpTs] = useState<number | null>(null)
 	const [aggregatedCostsMap, setAggregatedCostsMap] = useState<
 		Map<
@@ -635,7 +650,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		setSelectedImages([])
 		setClineAsk(undefined)
 		setEnableButtons(false)
-		authorizedMentionRef.current = null
+		segmentsRef.current = null
 		// Do not reset mode here as it should persist.
 		// setPrimaryButtonKey(undefined)
 		// setSecondaryButtonKey(undefined)
@@ -647,8 +662,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	 * @param images - Array of image data URLs to send with the message
 	 */
 	const handleSendMessage = useCallback(
-		(text: string, images: string[]) => {
+		(text: string, images: string[], segmentsOverride?: MentionSegment[]) => {
 			text = text.trim()
+			// Trimmed chat box segments. A value that does not match the text is all generated.
+			const trimmed = segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text)
+			const segments = segmentsOverride
+				? trimSegments(segmentsOverride)
+				: joinSegments(trimmed) === text
+					? trimmed
+					: generatedSegments(text)
 
 			if (text || images.length > 0) {
 				// Intercept when the active provider is retired — show a
@@ -675,11 +697,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							type: "queueMessage",
 							text,
 							images,
-							authorizedMentionText: authorizedMentionRef.current ?? text,
+							segments,
 						})
 						setInputValue("")
 						setSelectedImages([])
-						authorizedMentionRef.current = null
+						segmentsRef.current = null
 					} catch (error) {
 						console.error(
 							`Failed to queue message: ${error instanceof Error ? error.message : String(error)}`,
@@ -697,10 +719,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						type: "newTask",
 						text,
 						images,
-						// Null means the user authored the whole value.
-						authorizedMentionText: authorizedMentionRef.current ?? text,
+						segments,
 					})
-					authorizedMentionRef.current = null
+					segmentsRef.current = null
 				} else if (clineAskRef.current) {
 					if (clineAskRef.current === "followup") {
 						markFollowUpAsAnswered()
@@ -723,7 +744,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								askResponse: "messageResponse",
 								text,
 								images,
-								authorizedMentionText: authorizedMentionRef.current ?? text,
+								segments,
 							})
 							break
 						// There is no other case that a textfield should be enabled.
@@ -735,7 +756,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						askResponse: "messageResponse",
 						text,
 						images,
-						authorizedMentionText: authorizedMentionRef.current ?? text,
+						segments,
 					})
 				}
 
@@ -753,23 +774,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 
 	const handleSetChatBoxMessage = useCallback(
-		(text: string, images: string[], authorizedMentionText?: string) => {
-			// Avoid nested template literals by breaking down the logic
-			let newValue = text
-
-			if (inputValue !== "") {
-				newValue = inputValue + " " + text
+		(text: string, images: string[], inserted?: MentionSegment[]) => {
+			// Segments that are missing or do not match the text are all generated.
+			const insertedSegments = normalizeSegments(text, inserted)
+			if (inputValue === "") {
+				segmentsRef.current = insertedSegments
+				setInputValue(text)
+			} else {
+				segmentsRef.current = [
+					...(segmentsRef.current ?? userSegments(inputValue)),
+					...generatedSegments(" "),
+					...insertedSegments,
+				]
+				setInputValue(inputValue + " " + text)
 			}
-
-			// An omitted field authorizes nothing from the inserted text.
-			const insertedAuthorization = typeof authorizedMentionText === "string" ? authorizedMentionText : ""
-			// Empty box: the named substring is the only authorized part.
-			// Typed box text is user-authored, so it stays the authorized
-			// part and the inserted substring is dropped (fail closed).
-			authorizedMentionRef.current =
-				inputValue === "" ? insertedAuthorization : (authorizedMentionRef.current ?? inputValue)
-
-			setInputValue(newValue)
 			setSelectedImages([...selectedImages, ...images])
 		},
 		[inputValue, selectedImages],
@@ -780,18 +798,24 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		vscode.postMessage({ type: "clearTask" })
 	}, [])
 
-	// A manual edit re-authors the whole chat box value.
+	// A manual edit marks only the changed text as user text.
 	const setInputValueFromUser = useCallback(
 		(value: string | ((prev: string) => string)) => {
-			authorizedMentionRef.current = null
-			setInputValue(value)
+			const previous = inputValueRef.current
+			const next = typeof value === "function" ? value(previous) : value
+			if (segmentsRef.current) {
+				segmentsRef.current = applyEdit(segmentsRef.current, previous, next)
+			}
+			inputValueRef.current = next
+			setInputValue(next)
 		},
 		[setInputValue],
 	)
 
-	// Generated text never widens the scope: a null scope keeps only the prior text.
+	// Generated text replaces the whole value and authorizes nothing.
 	const setInputValueGenerated = useCallback((value: string) => {
-		authorizedMentionRef.current ??= inputValueRef.current
+		segmentsRef.current = generatedSegments(value)
+		inputValueRef.current = value
 		setInputValue(value)
 	}, [])
 
@@ -809,9 +833,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				type: "queueMessage",
 				text,
 				images: selectedImages,
-				authorizedMentionText: authorizedMentionRef.current ?? text,
+				segments: segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text),
 			})
-			authorizedMentionRef.current = null
+			segmentsRef.current = null
 			setInputValue("")
 			setSelectedImages([])
 		}
@@ -854,6 +878,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							images: images,
 						})
 						// Clear input state after sending
+						segmentsRef.current = null
 						setInputValue("")
 						setSelectedImages([])
 					} else {
@@ -880,6 +905,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								images: images,
 							})
 							// Clear input state after sending
+							segmentsRef.current = null
 							setInputValue("")
 							setSelectedImages([])
 						} else {
@@ -935,6 +961,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							images: images,
 						})
 						// Clear input state after sending
+						segmentsRef.current = null
 						setInputValue("")
 						setSelectedImages([])
 					} else {
@@ -989,14 +1016,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							handleChatReset()
 							break
 						case "sendMessage":
-							handleSendMessage(message.text ?? "", message.images ?? [])
-							break
-						case "setChatBoxMessage":
-							handleSetChatBoxMessage(
+							handleSendMessage(
 								message.text ?? "",
 								message.images ?? [],
-								message.authorizedMentionText,
+								normalizeSegments(message.text ?? "", message.segments),
 							)
+							break
+						case "setChatBoxMessage":
+							handleSetChatBoxMessage(message.text ?? "", message.images ?? [], message.segments)
 							break
 						case "primaryButtonClick":
 							handlePrimaryButtonClick(message.text ?? "", message.images ?? [])
@@ -1518,22 +1545,25 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			if (event?.shiftKey) {
 				// Always append to existing text, don't overwrite.
-				// The suggestion is model text, so only the prior draft stays authorized.
-				authorizedMentionRef.current ??= inputValueRef.current
-				setInputValue((currentValue: string) => {
-					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
-				})
+				// The suggestion is model text, so it stays generated.
+				const currentValue = inputValueRef.current
+				const separator = currentValue !== "" ? " \n" : ""
+				segmentsRef.current = [
+					...(segmentsRef.current ?? userSegments(currentValue)),
+					...generatedSegments(separator + answer),
+				]
+				inputValueRef.current = currentValue + separator + answer
+				setInputValue(inputValueRef.current)
 			} else {
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed
 				const preservedInput = inputValueRef.current
-				const preservedAuthorization = authorizedMentionRef.current
-				// A suggestion is model text, so it authorizes no mention.
-				authorizedMentionRef.current = ""
-				handleSendMessage(answer, [])
-				// Restore the input value and its scope after sending
+				const preservedSegments = segmentsRef.current
+				// A suggestion is model text, so it is generated.
+				handleSendMessage(answer, [], generatedSegments(answer))
+				// Restore the input value and its segments after sending
 				setInputValue(preservedInput)
-				authorizedMentionRef.current = preservedAuthorization
+				segmentsRef.current = preservedSegments
 			}
 		},
 		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered],
@@ -1689,13 +1719,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
 				const text = inputValue.trim()
+				const trimmed = segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text)
 				vscode.postMessage({
 					type: "queueMessage",
 					text,
 					images: selectedImages,
-					authorizedMentionText: authorizedMentionRef.current ?? text,
+					segments: joinSegments(trimmed) === text ? trimmed : generatedSegments(text),
 				})
-				authorizedMentionRef.current = null
+				segmentsRef.current = null
 				setInputValue("")
 				setSelectedImages([])
 				return
@@ -1942,8 +1973,8 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				ref={textAreaRef}
 				inputValue={inputValue}
 				setInputValue={setInputValueFromUser}
-				// Generated text keeps the recorded authorization scope.
-				setInputValuePreservingAuthorization={setInputValueGenerated}
+				// Generated text replaces the value and authorizes nothing.
+				setInputValueGenerated={setInputValueGenerated}
 				sendingDisabled={sendingDisabled || isProfileDisabled}
 				selectApiConfigDisabled={sendingDisabled && clineAsk !== "api_req_failed"}
 				placeholderText={placeholderText}

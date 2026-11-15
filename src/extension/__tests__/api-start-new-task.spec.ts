@@ -89,7 +89,7 @@ describe("API - startNewTask routing", () => {
 			{
 				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
 				toolRepetitionSoftLimit: 0,
-				authorizedMentionText: "new task",
+				segments: [{ text: "new task", source: "user" }],
 			},
 			configuration,
 		)

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import type { ClineProvider } from "../ClineProvider"
+import type { MentionSegment } from "@roo-code/types"
 import type { WebviewMessage } from "../../../shared/WebviewMessage"
 
 vi.mock("../../../i18n", () => ({
@@ -35,7 +36,10 @@ const { resolveImageMentions } = vi.hoisted(() => ({
 }))
 vi.mock("../../mentions/resolveImageMentions", () => ({ resolveImageMentions }))
 
-describe("webviewMessageHandler mention authorization forwarding", () => {
+const generated = (text: string): MentionSegment => ({ text, source: "generated" })
+const user = (text: string): MentionSegment => ({ text, source: "user" })
+
+describe("webviewMessageHandler mention segment forwarding", () => {
 	// Narrow double: the handler under test only touches these members.
 	// The single cast at construction keeps every use site type-checked.
 	let provider: {
@@ -65,118 +69,72 @@ describe("webviewMessageHandler mention authorization forwarding", () => {
 		providerAsClineProvider = provider as unknown as ClineProvider
 	})
 
-	it("forwards the authorized mention substring from the webview message", async () => {
-		const message: WebviewMessage = {
-			type: "newTask",
-			text: "context @/secret\nuser line",
-			authorizedMentionText: "user line",
-		}
-		await webviewMessageHandler(providerAsClineProvider, message)
+	const text = "context @/secret\nuser line"
+	const segments = [generated("context @/secret\n"), user("user line")]
+	// Segments that the handler must replace with all generated text.
+	const rejected = [
+		{ label: "omitted", segments: undefined },
+		{ label: "not matching the text", segments: [user("other")] },
+		{ label: "invalid", segments: [{ text, source: "system" }] },
+	]
 
-		expect(provider.createTask).toHaveBeenCalledWith(
-			"context @/secret\nuser line",
-			[],
-			undefined,
-			expect.objectContaining({ authorizedMentionText: "user line" }),
-			undefined,
-		)
+	describe.each([
+		{
+			type: "newTask" as const,
+			read: () => provider.createTask.mock.calls[0],
+			segmentsOf: (call: unknown[]) => (call[3] as { segments: MentionSegment[] }).segments,
+		},
+		{
+			type: "askResponse" as const,
+			read: () => currentTask.handleWebviewAskResponse.mock.calls[0],
+			segmentsOf: (call: unknown[]) => call[3] as MentionSegment[],
+		},
+		{
+			type: "queueMessage" as const,
+			read: () => currentTask.messageQueueService.addMessage.mock.calls[0],
+			segmentsOf: (call: unknown[]) => call[2] as MentionSegment[],
+		},
+	])("$type", ({ type, read, segmentsOf }) => {
+		const send = (extra: Record<string, unknown>) =>
+			webviewMessageHandler(providerAsClineProvider, {
+				type,
+				askResponse: "messageResponse",
+				...extra,
+			} as WebviewMessage)
+
+		it("forwards matching segments", async () => {
+			await send({ text, segments })
+			expect(segmentsOf(read()!)).toEqual(segments)
+		})
+
+		it.each(rejected)("treats segments that are $label as all generated", async ({ segments: bad }) => {
+			await send({ text, segments: bad })
+			expect(segmentsOf(read()!)).toEqual([generated(text)])
+		})
+
+		it.each([
+			{ label: "user segment", segments: [user("see @/a.png")], expected: "see @/a.png" },
+			{ label: "generated segment", segments: [generated("see @/a.png")], expected: "" },
+		])("scans only user text for images with a $label", async ({ segments: given, expected }) => {
+			await send({ text: "see @/a.png", segments: given })
+			expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: expected }))
+		})
 	})
 
-	it("passes an empty authorized substring when the webview omits it", async () => {
-		const message: WebviewMessage = {
-			type: "newTask",
-			text: "generated @/path from selected code",
-		}
+	it("keeps the original text and images when it forwards", async () => {
+		const message: WebviewMessage = { type: "newTask", text, segments }
 		await webviewMessageHandler(providerAsClineProvider, message)
 
-		expect(provider.createTask).toHaveBeenCalledWith(
-			"generated @/path from selected code",
-			[],
-			undefined,
-			expect.objectContaining({ authorizedMentionText: "" }),
-			undefined,
-		)
+		expect(provider.createTask).toHaveBeenCalledWith(text, [], undefined, expect.anything(), undefined)
 	})
 
-	it("forwards the authorized substring with the ask response", async () => {
-		const message: WebviewMessage = {
-			type: "askResponse",
-			askResponse: "messageResponse",
-			text: "context @/secret\nuser line",
-			authorizedMentionText: "user line",
-		}
-		await webviewMessageHandler(providerAsClineProvider, message)
-
-		expect(currentTask.handleWebviewAskResponse).toHaveBeenCalledWith(
-			"messageResponse",
-			"context @/secret\nuser line",
-			[],
-			"user line",
-		)
-	})
-
-	it("treats an omitted authorized substring on an ask response as empty", async () => {
-		const message: WebviewMessage = {
-			type: "askResponse",
-			askResponse: "messageResponse",
-			text: "generated @/path",
-		}
-		await webviewMessageHandler(providerAsClineProvider, message)
-
-		expect(currentTask.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "generated @/path", [], "")
-	})
-
-	it("passes an empty authorized substring when a queued message omits it", async () => {
-		const message: WebviewMessage = { type: "queueMessage", text: "generated @/path" }
-		await webviewMessageHandler(providerAsClineProvider, message)
-
-		expect(currentTask.messageQueueService.addMessage).toHaveBeenCalledWith("generated @/path", [], "")
-	})
-
-	it("forwards the authorized substring with a queued message", async () => {
-		const message: WebviewMessage = {
-			type: "queueMessage",
-			text: "context @/secret\nuser line",
-			authorizedMentionText: "user line",
-		}
-		await webviewMessageHandler(providerAsClineProvider, message)
-
-		expect(currentTask.messageQueueService.addMessage).toHaveBeenCalledWith(
-			"context @/secret\nuser line",
-			[],
-			"user line",
-		)
-	})
-
-	it.each([
-		{ label: "an authorized substring", authorizedMentionText: "user @/a.png", expected: "user @/a.png" },
-		{ label: "an omitted field", authorizedMentionText: undefined, expected: "" },
-	])("scans only the authorized text for image mentions with $label", async ({ authorizedMentionText, expected }) => {
-		const message: WebviewMessage = {
-			type: "newTask",
-			text: "generated @/b.png user @/a.png",
-			authorizedMentionText,
-		}
-		await webviewMessageHandler(providerAsClineProvider, message)
-
-		expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: expected }))
-		expect(provider.createTask).toHaveBeenCalledWith(
-			"generated @/b.png user @/a.png",
-			[],
-			undefined,
-			expect.anything(),
-			undefined,
-		)
-	})
-
-	it("scans the edited text for images and authorizes it as user typed", async () => {
-		const submitUserMessage = vi.fn()
+	it("scans the edited text for images and treats it as user text", async () => {
 		const editTask = {
 			clineMessages: [{ ts: 1, type: "say", say: "user_feedback", text: "old" }],
 			apiConversationHistory: [],
 			overwriteClineMessages: vi.fn(),
 			overwriteApiConversationHistory: vi.fn(),
-			submitUserMessage,
+			submitUserMessage: vi.fn(),
 		}
 		provider.getCurrentTask.mockReturnValue(editTask)
 		const message: WebviewMessage = { type: "editMessageConfirm", messageTs: 1, text: "see @/a.png" }

@@ -1,4 +1,5 @@
-import { userMentionContent } from "../mentions/processUserContentMentions"
+import { userMentionContent, wrapUserMessage } from "../mentions/processUserContentMentions"
+import { normalizeSegments } from "../../shared/mentionSegments"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { MAX_FOLLOW_UP_SUGGESTIONS } from "../prompts/tools/native-tools/ask_followup_question"
@@ -74,18 +75,11 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			}
 
 			task.consecutiveMistakeCount = 0
-			const { text, images, authorizedMentionText } = await task.ask(
-				"followup",
-				JSON.stringify(follow_up_json),
-				false,
-			)
+			const { text, images, segments } = await task.ask("followup", JSON.stringify(follow_up_json), false)
 			const safeText = text ?? ""
 			await task.say("user_feedback", safeText, images)
-			// Authorizes only the chat-box substring the webview named. The
-			// tool result repeats the text by design.
-			task.userMessageContent.push(
-				userMentionContent(`<user_message>\n${safeText}\n</user_message>`, authorizedMentionText ?? ""),
-			)
+			// Only user segments expand. The tool result repeats the text by design.
+			task.userMessageContent.push(userMentionContent(wrapUserMessage(normalizeSegments(safeText, segments))))
 			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)

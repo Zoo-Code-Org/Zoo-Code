@@ -226,7 +226,7 @@ describe("AskFollowupQuestionTool", () => {
 
 	it("pushes an authorized feedback block that mention processing expands", async () => {
 		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({ text: "@/allowed", images: [], authorizedMentionText: "@/allowed" })
+		askMock.mockResolvedValue({ text: "@/allowed", images: [], segments: [{ text: "@/allowed", source: "user" }] })
 
 		await tool.execute(params, mockTask, mockCallbacks)
 

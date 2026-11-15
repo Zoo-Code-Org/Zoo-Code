@@ -428,6 +428,8 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
+const noUserSegments = expect.not.arrayContaining([expect.objectContaining({ source: "user" })])
+
 describe("ClineProvider", () => {
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
@@ -748,8 +750,8 @@ describe("ClineProvider", () => {
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: expect.stringContaining("selected code"),
-				// Generated context is never the authorized substring.
-				authorizedMentionText: "",
+				// Generated context has no user segment.
+				segments: noUserSegments,
 			})
 			expect(sidebar.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 			expect(tab.postMessage).not.toHaveBeenCalled()
@@ -941,7 +943,7 @@ describe("ClineProvider", () => {
 					invoke: "setChatBoxMessage",
 					text: expect.stringContaining("selected code"),
 					// Generated context is never the authorized substring.
-					authorizedMentionText: "",
+					segments: noUserSegments,
 				})
 				expect(visible.postMessage).toHaveBeenCalledWith({ type: "action", action: "focusInput" })
 				expect(vscode.commands.executeCommand).not.toHaveBeenCalled()
@@ -971,7 +973,7 @@ describe("ClineProvider", () => {
 					invoke: "setChatBoxMessage",
 					text: expect.stringContaining("selected code"),
 					// Generated context is never the authorized substring.
-					authorizedMentionText: "",
+					segments: noUserSegments,
 				})
 				expect(tab.postMessage).not.toHaveBeenCalled()
 				expect(panel.reveal).not.toHaveBeenCalled()
@@ -1032,7 +1034,7 @@ describe("ClineProvider", () => {
 					expect.stringContaining("selected code"),
 					undefined,
 					undefined,
-					{ authorizedMentionText: "" },
+					{ segments: noUserSegments },
 				)
 				expect(tabTask).not.toHaveBeenCalled()
 			} finally {
@@ -1058,7 +1060,7 @@ describe("ClineProvider", () => {
 			["fixCode", "FIX"],
 			["improveCode", "IMPROVE"],
 		] as const)(
-			"forwards user-authored code action input as authorizedMentionText for %s",
+			"forwards user-authored code action input as a user segment for %s",
 			async (command, promptType) => {
 				const task = new Task(defaultTaskOptions)
 				const createTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
@@ -1069,7 +1071,7 @@ describe("ClineProvider", () => {
 					})
 					// A regression that always sends "" would fail this assertion.
 					expect(createTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
-						authorizedMentionText: "@/allowed",
+						segments: expect.arrayContaining([{ text: "@/allowed", source: "user" }]),
 					})
 				} finally {
 					createTask.mockRestore()
@@ -1077,7 +1079,7 @@ describe("ClineProvider", () => {
 			},
 		)
 
-		test("forwards user-authored terminal action input as authorizedMentionText", async () => {
+		test("forwards user-authored terminal action input as a user segment", async () => {
 			const task = new Task(defaultTaskOptions)
 			const sidebarTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
 			const tabTask = vi.spyOn(tabProvider, "createTask").mockResolvedValue(task)
@@ -1090,7 +1092,7 @@ describe("ClineProvider", () => {
 				// A regression that always sends "" would fail this assertion.
 				expect(tabTask).toHaveBeenCalledOnce()
 				expect(tabTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
-					authorizedMentionText: "@/allowed",
+					segments: expect.arrayContaining([{ text: "@/allowed", source: "user" }]),
 				})
 				expect(sidebarTask).not.toHaveBeenCalled()
 			} finally {
@@ -7548,7 +7550,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				[],
 				undefined,
 				undefined,
-				"Edited message with preserved images",
+				[{ text: "Edited message with preserved images", source: "user" }],
 			)
 		})
 
@@ -7607,7 +7609,7 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				[],
 				undefined,
 				undefined,
-				"Edited message with file attachment",
+				[{ text: "Edited message with file attachment", source: "user" }],
 			)
 		})
 	})
@@ -8139,13 +8141,9 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				await messageHandler({ type: "editMessageConfirm", messageTs: 2000, text: largeEditedContent })
 
 				expect(mockCline.overwriteClineMessages).toHaveBeenCalled()
-				expect(mockCline.submitUserMessage).toHaveBeenCalledWith(
-					largeEditedContent,
-					[],
-					undefined,
-					undefined,
-					largeEditedContent,
-				)
+				expect(mockCline.submitUserMessage).toHaveBeenCalledWith(largeEditedContent, [], undefined, undefined, [
+					{ text: largeEditedContent, source: "user" },
+				])
 			})
 
 			test("handles deleting messages with large payloads", async () => {

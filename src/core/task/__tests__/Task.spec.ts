@@ -3528,10 +3528,14 @@ describe("Cline", () => {
 							type: "text",
 							text: "Regular text with 'some/path' (see below for file content)",
 						} as const,
-						userMentionContent(
-							"<user_message>Text with 'some/path' (see below for file content) in user_message tags</user_message>",
-							"Text with 'some/path' (see below for file content) in user_message tags",
-						),
+						userMentionContent([
+							{ text: "<user_message>", source: "generated" },
+							{
+								text: "Text with 'some/path' (see below for file content) in user_message tags",
+								source: "user",
+							},
+							{ text: "</user_message>", source: "generated" },
+						]),
 						{
 							type: "tool_result",
 							tool_use_id: "test-id",
@@ -3592,14 +3596,18 @@ describe("Cline", () => {
 				})
 
 				it.each([
-					{ label: "empty string", authorizedMentionText: "" },
-					{ label: "omitted option", authorizedMentionText: undefined },
-				])("does not expand task text when authorization is $label", async ({ authorizedMentionText }) => {
+					{
+						label: "all generated",
+						segments: [{ text: "read '@/secret' please", source: "generated" as const }],
+					},
+					{ label: "omitted", segments: undefined },
+					{ label: "not matching the text", segments: [{ text: "other", source: "user" as const }] },
+				])("does not expand task text when segments are $label", async ({ segments }) => {
 					const [cline, task] = Task.create({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
 						task: "read '@/secret' please",
-						authorizedMentionText,
+						segments,
 					})
 
 					// Wait until the loop reached mention processing, then stop it.
@@ -3616,7 +3624,7 @@ describe("Cline", () => {
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
 						task: taskText,
-						authorizedMentionText: taskText,
+						segments: [{ text: taskText, source: "user" }],
 					})
 
 					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
@@ -3631,7 +3639,10 @@ describe("Cline", () => {
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
 						task: "context @/context.txt\nchosen @/chosen.txt",
-						authorizedMentionText: "chosen @/chosen.txt",
+						segments: [
+							{ text: "context @/context.txt\n", source: "generated" },
+							{ text: "chosen @/chosen.txt", source: "user" },
+						],
 					})
 
 					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
@@ -4261,12 +4272,17 @@ describe("Cline", () => {
 				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"], "")
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					[{ text: "test message", source: "generated" }],
+				)
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			})
 
-			it("forwards the authorized substring to the ask response", async () => {
+			it("forwards the segments to the ask response", async () => {
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -4275,12 +4291,16 @@ describe("Cline", () => {
 				})
 				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
 
-				await task.submitUserMessage("a @/x b", [], undefined, undefined, "b")
+				const segments = [
+					{ text: "a @/x ", source: "generated" as const },
+					{ text: "b", source: "user" as const },
+				]
+				await task.submitUserMessage("a @/x b", [], undefined, undefined, segments)
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "a @/x b", [], "b")
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "a @/x b", [], segments)
 			})
 
-			it("trims the authorized substring the same way as the text", async () => {
+			it("trims the segments the same way as the text", async () => {
 				const task = new Task({
 					provider: mockProvider,
 					apiConfiguration: mockApiConfig,
@@ -4289,9 +4309,16 @@ describe("Cline", () => {
 				})
 				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
 
-				await task.submitUserMessage("  @/chosen.txt  ", [], undefined, undefined, "  @/chosen.txt  ")
+				await task.submitUserMessage("  @/chosen.txt  ", [], undefined, undefined, [
+					{ text: "  @/chosen.txt  ", source: "user" },
+				])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "@/chosen.txt", [], "@/chosen.txt")
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"@/chosen.txt",
+					[],
+					[{ text: "@/chosen.txt", source: "user" }],
+				)
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
@@ -4384,7 +4411,12 @@ describe("Cline", () => {
 				task.clineMessages = []
 				await task.submitUserMessage("new task", ["image1.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"], "")
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"new task",
+					["image1.png"],
+					[{ text: "new task", source: "generated" }],
+				)
 
 				// Clear mock
 				handleResponseSpy.mockClear()
@@ -4404,7 +4436,7 @@ describe("Cline", () => {
 					"messageResponse",
 					"follow-up message",
 					["image2.png"],
-					"",
+					[{ text: "follow-up message", source: "generated" }],
 				)
 			})
 
@@ -8251,7 +8283,7 @@ describe("Queued message processing after condense", () => {
 		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
 
 		// Queue a message during condensing
-		task.messageQueueService.addMessage("queued text", ["img1.png"], "queued")
+		task.messageQueueService.addMessage("queued text", ["img1.png"], [{ text: "queued text", source: "user" }])
 
 		// Use fake timers to capture setTimeout(0) in processQueuedMessages
 		vi.useFakeTimers()
@@ -8261,7 +8293,9 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"], undefined, undefined, "queued")
+		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"], undefined, undefined, [
+			{ text: "queued text", source: "user" },
+		])
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
@@ -8297,7 +8331,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined, undefined, undefined, "")
+		expect(spyA).toHaveBeenCalledWith("A message", undefined, undefined, undefined, undefined)
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
@@ -8307,7 +8341,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyB).toHaveBeenCalledWith("B message", undefined, undefined, undefined, "")
+		expect(spyB).toHaveBeenCalledWith("B message", undefined, undefined, undefined, undefined)
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
 	})
 })

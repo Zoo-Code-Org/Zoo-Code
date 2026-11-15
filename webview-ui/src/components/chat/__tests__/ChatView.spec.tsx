@@ -1242,7 +1242,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "follow-up question during spinner",
 				images: [],
-				authorizedMentionText: "follow-up question during spinner",
+				segments: [{ text: "follow-up question during spinner", source: "user" }],
 			})
 		})
 
@@ -1314,7 +1314,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				askResponse: "messageResponse",
 				text: "follow-up after completion",
 				images: [],
-				authorizedMentionText: "follow-up after completion",
+				segments: [{ text: "follow-up after completion", source: "user" }],
 			})
 		})
 
@@ -1374,7 +1374,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during queue drain",
 				images: [],
-				authorizedMentionText: "message during queue drain",
+				segments: [{ text: "message during queue drain", source: "user" }],
 			})
 		})
 
@@ -1438,7 +1438,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during command execution",
 				images: [],
-				authorizedMentionText: "message during command execution",
+				segments: [{ text: "message during command execution", source: "user" }],
 			})
 		})
 
@@ -1559,11 +1559,11 @@ describe("ChatView - Follow-up Suggestions", () => {
 			askResponse: "messageResponse",
 			text: "Use code mode",
 			images: [],
-			authorizedMentionText: "",
+			segments: [{ text: "Use code mode", source: "generated" }],
 		})
 	})
 
-	it("authorizes only the typed draft when a shift-clicked suggestion is appended", async () => {
+	it("keeps a shift-clicked suggestion generated and the typed draft user text", async () => {
 		const { getByRole, getByTestId } = renderChatView()
 
 		mockPostMessage({
@@ -1597,7 +1597,13 @@ describe("ChatView - Follow-up Suggestions", () => {
 
 		await waitFor(() => {
 			expect(vscode.postMessage).toHaveBeenCalledWith(
-				expect.objectContaining({ type: "askResponse", authorizedMentionText: "mine" }),
+				expect.objectContaining({
+					type: "askResponse",
+					segments: [
+						{ text: "mine", source: "user" },
+						{ text: " \nUse @/secret", source: "generated" },
+					],
+				}),
 			)
 		})
 	})
@@ -1639,7 +1645,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Use invalid mode",
 				images: [],
-				authorizedMentionText: "",
+				segments: [{ text: "Use invalid mode", source: "generated" }],
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
@@ -1700,7 +1706,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Valid answer",
 				images: [],
-				authorizedMentionText: "",
+				segments: [{ text: "Valid answer", source: "generated" }],
 			})
 		})
 	})

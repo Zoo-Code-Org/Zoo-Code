@@ -1,4 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk"
+import type { MentionSegment } from "@roo-code/types"
 
 import { parseMentions, MentionContentBlock } from "./index"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
@@ -8,14 +9,24 @@ import type { SkillLookup } from "../../services/skills/skillInvocation"
 type TextPart = Anthropic.Messages.TextBlockParam
 type ImagePart = Anthropic.Messages.ImageBlockParam
 
-// Authorization stays in memory and cannot be forged by message text or restored history.
-const authorizedInputs = new WeakMap<TextPart, { text: string; input: string }>()
+// Origin labels stay in memory and cannot be forged by message text or restored history.
+const segmentedBlocks = new WeakMap<TextPart, { text: string; segments: MentionSegment[] }>()
 
-/** Call only at a user-input boundary, before adding lower-trust context. */
-export function userMentionContent(text: string, input: string): TextPart {
+/** Call only at a user-input boundary. Only `user` segments may have mentions expanded. */
+export function userMentionContent(segments: MentionSegment[]): TextPart {
+	const text = segments.map((s) => s.text).join("")
 	const block: TextPart = { type: "text", text }
-	if (input && text.includes(input)) authorizedInputs.set(block, { text, input })
+	segmentedBlocks.set(block, { text, segments })
 	return block
+}
+
+/** Wraps segments in the `<user_message>` tags. The tags are generated text. */
+export function wrapUserMessage(segments: MentionSegment[]): MentionSegment[] {
+	return [
+		{ text: "<user_message>\n", source: "generated" },
+		...segments,
+		{ text: "\n</user_message>", source: "generated" },
+	]
 }
 
 export interface ProcessUserContentMentionsResult {
@@ -72,46 +83,38 @@ export async function processUserContentMentions({
 		await Promise.all(
 			userContent.map(async (block) => {
 				if (block.type === "text") {
-					const authorized = authorizedInputs.get(block)
-					if (authorized && authorized.text === block.text) {
-						const result = await parseMentions(
-							authorized.input,
-							cwd,
-							fileContextTracker,
-							rooIgnoreController,
-							showRooIgnoredFiles,
-							includeDiagnosticMessages,
-							maxDiagnosticMessages,
-							skillsManager,
-							currentMode,
-						)
-						// Capture the first mode found
-						if (!commandMode && result.mode) {
-							commandMode = result.mode
+					const labeled = segmentedBlocks.get(block)
+					if (labeled && labeled.text === block.text) {
+						let text = ""
+						const extra: TextPart[] = []
+						for (const segment of labeled.segments) {
+							if (segment.source !== "user") {
+								text += segment.text
+								continue
+							}
+							const result = await parseMentions(
+								segment.text,
+								cwd,
+								fileContextTracker,
+								rooIgnoreController,
+								showRooIgnoredFiles,
+								includeDiagnosticMessages,
+								maxDiagnosticMessages,
+								skillsManager,
+								currentMode,
+							)
+							// Capture the first mode found
+							if (!commandMode && result.mode) {
+								commandMode = result.mode
+							}
+							text += result.text
+							// File/folder content as separate blocks (formatted like read_file results)
+							extra.push(...contentBlocksToTextParts(result.contentBlocks))
+							if (result.slashCommandHelp) {
+								extra.push({ type: "text" as const, text: result.slashCommandHelp })
+							}
 						}
-
-						// Build the blocks array:
-						// 1. User's text (with @ mentions replaced by clean paths)
-						// 2. File/folder content blocks (formatted like read_file results)
-						// 3. Slash command help (if any)
-						const blocks: Array<TextPart | ImagePart> = [
-							{
-								...block,
-								text: block.text.replace(authorized.input, () => result.text),
-							},
-						]
-
-						// Add file/folder content as separate blocks
-						if (result.contentBlocks.length > 0) {
-							blocks.push(...contentBlocksToTextParts(result.contentBlocks))
-						}
-
-						if (result.slashCommandHelp) {
-							blocks.push({
-								type: "text" as const,
-								text: result.slashCommandHelp,
-							})
-						}
+						const blocks: Array<TextPart | ImagePart> = [{ ...block, text }, ...extra]
 						return blocks
 					}
 

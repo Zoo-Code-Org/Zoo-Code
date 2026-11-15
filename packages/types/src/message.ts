@@ -368,6 +368,18 @@ export const tokenUsageSchema = z.object({
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
 
 /**
+ * MentionSegment
+ */
+
+/** A part of a message with a known origin. Only `user` parts may have mentions expanded. */
+export const mentionSegmentSchema = z.object({
+	text: z.string(),
+	source: z.enum(["user", "generated"]),
+})
+
+export type MentionSegment = z.infer<typeof mentionSegmentSchema>
+
+/**
  * QueuedMessage
  */
 
@@ -376,8 +388,8 @@ export const queuedMessageSchema = z.object({
 	id: z.string(),
 	text: z.string(),
 	images: z.array(z.string()).optional(),
-	/** User-authored substring of `text` that may have mentions expanded. */
-	authorizedMentionText: z.string().optional(),
+	/** Origin of each part of `text`. Absent means all generated. */
+	segments: z.array(mentionSegmentSchema).optional(),
 })
 
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>

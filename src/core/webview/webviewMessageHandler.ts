@@ -30,6 +30,7 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
+	type MentionSegment,
 } from "@roo-code/types"
 import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
@@ -91,6 +92,7 @@ import {
 	openGitHubAccountManagement,
 } from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
+import { normalizeSegments, userSegments, userText } from "../../shared/mentionSegments"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
@@ -227,18 +229,14 @@ export const webviewMessageHandler = async (
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
 	 */
-	const resolveIncomingImages = async (payload: {
-		text?: string
-		images?: string[]
-		authorizedMentionText?: string
-	}) => {
+	const resolveIncomingImages = async (payload: { text?: string; images?: string[]; segments: MentionSegment[] }) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
 		const state = await provider.getState()
-		// Scan only the authorized substring, so generated mentions attach no images.
+		// Scan only user segments, so generated mentions attach no images.
 		const resolved = await resolveImageMentions({
-			text: payload.authorizedMentionText ?? "",
+			text: userText(payload.segments),
 			images,
 			cwd: getCurrentCwd(),
 			rooIgnoreController: currentTask?.rooIgnoreController,
@@ -247,8 +245,9 @@ export const webviewMessageHandler = async (
 		})
 		return { text, images: resolved.images }
 	}
-	const authorizedTextOf = (message: { authorizedMentionText?: unknown }) =>
-		typeof message.authorizedMentionText === "string" ? message.authorizedMentionText : ""
+	// Fails closed: segments that are missing or do not match the text are all generated.
+	const segmentsOf = (message: { text?: string; segments?: unknown }) =>
+		normalizeSegments(message.text ?? "", message.segments)
 	/**
 	 * Shared utility to find message indices based on timestamp.
 	 * When multiple messages share the same timestamp (e.g., after condense),
@@ -445,7 +444,7 @@ export const webviewMessageHandler = async (
 		editedContent: string,
 		restoreCheckpoint?: boolean,
 		images?: string[],
-		authorizedMentionText = "",
+		segments?: MentionSegment[],
 	): Promise<void> => {
 		const currentCline = provider.getCurrentTask()
 		if (!currentCline) {
@@ -565,7 +564,7 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images, undefined, undefined, authorizedMentionText)
+			await currentCline.submitUserMessage(editedContent, images, undefined, undefined, segments)
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -723,7 +722,7 @@ export const webviewMessageHandler = async (
 				const resolved = await resolveIncomingImages({
 					text: message.text,
 					images: message.images,
-					authorizedMentionText: authorizedTextOf(message),
+					segments: segmentsOf(message),
 				})
 				await provider.createTask(
 					resolved.text,
@@ -731,9 +730,7 @@ export const webviewMessageHandler = async (
 					undefined,
 					{
 						taskId: message.taskId,
-						// Fail closed when the webview omits the authorized
-						// substring, so generated context cannot expand.
-						authorizedMentionText: authorizedTextOf(message),
+						segments: segmentsOf(message),
 					},
 					message.taskConfiguration,
 				)
@@ -754,19 +751,15 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
+				const segments = segmentsOf(message)
 				const resolved = await resolveIncomingImages({
 					text: message.text,
 					images: message.images,
-					authorizedMentionText: authorizedTextOf(message),
+					segments,
 				})
-				provider.getCurrentTask()?.handleWebviewAskResponse(
-					message.askResponse!,
-					resolved.text,
-					resolved.images,
-					// Fail closed when the webview omits the authorized
-					// substring.
-					authorizedTextOf(message),
-				)
+				provider
+					.getCurrentTask()
+					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images, segments)
 			}
 			break
 
@@ -2642,18 +2635,19 @@ export const webviewMessageHandler = async (
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {
-				// The edit box holds only text the user typed, so all of it is authorized.
+				// The edit box holds only text the user typed.
+				const editSegments = userSegments(message.text)
 				const resolved = await resolveIncomingImages({
 					text: message.text,
 					images: message.images,
-					authorizedMentionText: message.text,
+					segments: editSegments,
 				})
 				await handleEditMessageConfirm(
 					message.messageTs,
 					resolved.text,
 					message.restoreCheckpoint,
 					resolved.images,
-					message.text,
+					editSegments,
 				)
 			}
 			break
@@ -4062,17 +4056,9 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
-			const resolved = await resolveIncomingImages({
-				text: message.text,
-				images: message.images,
-				authorizedMentionText: authorizedTextOf(message),
-			})
-			provider.getCurrentTask()?.messageQueueService.addMessage(
-				resolved.text,
-				resolved.images,
-				// Fail closed when the webview omits the authorized substring.
-				authorizedTextOf(message),
-			)
+			const segments = segmentsOf(message)
+			const resolved = await resolveIncomingImages({ text: message.text, images: message.images, segments })
+			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images, segments)
 			break
 		}
 		case "removeQueuedMessage": {

@@ -68,3 +68,23 @@ describe("MessageQueueService claims", () => {
 		expect(queue.hasUnclaimed()).toBe(true)
 	})
 })
+
+describe("MessageQueueService segments", () => {
+	it("stores the segments with the message", () => {
+		const queue = new MessageQueueService()
+		const segments = [
+			{ text: "ctx ", source: "generated" as const },
+			{ text: "mine", source: "user" as const },
+		]
+		expect(queue.addMessage("ctx mine", undefined, segments)?.segments).toEqual(segments)
+	})
+
+	it("replaces the segments with user text when the user edits the message", () => {
+		const queue = new MessageQueueService()
+		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
+
+		queue.updateMessage(message.id, "edited @/y")
+
+		expect(queue.messages[0]?.segments).toEqual([{ text: "edited @/y", source: "user" }])
+	})
+})

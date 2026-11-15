@@ -69,7 +69,7 @@ interface MockChatTextAreaProps {
 	onSend: () => void
 	inputValue?: string
 	setInputValue?: (value: string) => void
-	setInputValuePreservingAuthorization?: (value: string) => void
+	setInputValueGenerated?: (value: string) => void
 }
 
 // ChatTextArea double: an input whose Enter triggers onSend and whose
@@ -85,7 +85,7 @@ vi.mock("../ChatTextArea", async () => {
 		React.useEffect(() => {
 			const listener = (event: MessageEvent) => {
 				if (event.data?.type === "enhancedPrompt" && typeof event.data.text === "string") {
-					const update = props.setInputValuePreservingAuthorization ?? props.setInputValue
+					const update = props.setInputValueGenerated ?? props.setInputValue
 					update?.(event.data.text)
 				}
 			}
@@ -184,42 +184,71 @@ const getChatBoxValue = () => {
 	return input?.value ?? ""
 }
 
-describe("ChatView - add-to-context mention authorization", () => {
+const generated = (text: string) => ({ text, source: "generated" as const })
+const user = (text: string) => ({ text, source: "user" as const })
+
+describe("ChatView - add-to-context mention segments", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 	})
 
-	it("sends no authorized substring when add-to-context carries no user input", async () => {
+	it("sends all generated segments when add-to-context carries no user input", async () => {
 		const { getByTestId } = renderChatView()
 
-		await addGeneratedContext({ authorizedMentionText: "" })
+		await addGeneratedContext({ segments: [generated("context with @/secret code")] })
 		const message = await sendNewTask(getByTestId)
 
-		expect(message).toMatchObject({ text: "context with @/secret code", authorizedMentionText: "" })
+		expect(message).toMatchObject({
+			text: "context with @/secret code",
+			segments: [generated("context with @/secret code")],
+		})
 	})
 
-	it("sends only the user-authored substring the extension authorized", async () => {
+	it("keeps the user segment the extension named", async () => {
 		const { getByTestId } = renderChatView()
 
-		await addGeneratedContext({ authorizedMentionText: "explain this" })
+		await addGeneratedContext({ segments: [generated("context with @/secret "), user("code")] })
 		const message = await sendNewTask(getByTestId)
 
-		expect(message).toMatchObject({ authorizedMentionText: "explain this" })
+		expect(message).toMatchObject({ segments: [generated("context with @/secret "), user("code")] })
 	})
 
-	it("authorizes nothing from inserted text when the sender omits the field", async () => {
+	it("treats text as generated when the sender omits segments", async () => {
 		const { getByTestId } = renderChatView()
 
 		await addGeneratedContext({})
 		const message = await sendNewTask(getByTestId)
 
-		expect(message).toMatchObject({ authorizedMentionText: "" })
+		expect(message).toMatchObject({ segments: [generated("context with @/secret code")] })
 	})
 
-	it("re-authorizes the whole value after a manual edit", async () => {
+	it("treats text as generated when the segments do not match it", async () => {
 		const { getByTestId } = renderChatView()
 
-		await addGeneratedContext({ authorizedMentionText: "" })
+		await addGeneratedContext({ segments: [user("something else")] })
+		const message = await sendNewTask(getByTestId)
+
+		expect(message).toMatchObject({ segments: [generated("context with @/secret code")] })
+	})
+
+	it("marks only the typed text as user text after a manual edit", async () => {
+		const { getByTestId } = renderChatView()
+
+		await addGeneratedContext({ segments: [generated("context with @/secret code")] })
+
+		const input = getByTestId("chat-textarea").querySelector("input")!
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "context with @/secret code and @/ok" } })
+		})
+
+		const message = await sendNewTask(getByTestId)
+		expect(message).toMatchObject({
+			segments: [generated("context with @/secret code"), user(" and @/ok")],
+		})
+	})
+
+	it("keeps all text user text when nothing generated was added", async () => {
+		const { getByTestId } = renderChatView()
 
 		const input = getByTestId("chat-textarea").querySelector("input")!
 		await act(async () => {
@@ -227,26 +256,36 @@ describe("ChatView - add-to-context mention authorization", () => {
 		})
 
 		const message = await sendNewTask(getByTestId)
-		expect(message).toMatchObject({ authorizedMentionText: "my own task with @/ok" })
+		expect(message).toMatchObject({ segments: [user("my own task with @/ok")] })
 	})
 
-	it("keeps the authorization scope when an enhanced prompt replaces the text", async () => {
+	it("appends inserted segments after typed text", async () => {
 		const { getByTestId } = renderChatView()
 
-		await addGeneratedContext({ authorizedMentionText: "" })
-
+		const input = getByTestId("chat-textarea").querySelector("input")!
 		await act(async () => {
-			window.postMessage({ type: "enhancedPrompt", text: "enhanced text with @/path" }, "*")
+			fireEvent.change(input, { target: { value: "mine" } })
+		})
+		await act(async () => {
+			window.postMessage(
+				{
+					type: "invoke",
+					invoke: "setChatBoxMessage",
+					text: "ctx @/secret",
+					segments: [generated("ctx @/secret")],
+				},
+				"*",
+			)
 		})
 		await waitFor(() => {
-			expect(getChatBoxValue()).toBe("enhanced text with @/path")
+			expect(getChatBoxValue()).toBe("mine ctx @/secret")
 		})
 
 		const message = await sendNewTask(getByTestId)
-		expect(message).toMatchObject({ authorizedMentionText: "" })
+		expect(message).toMatchObject({ segments: [user("mine"), generated(" ctx @/secret")] })
 	})
 
-	it("authorizes only the typed text when an enhanced prompt replaces a manual draft", async () => {
+	it("makes an enhanced prompt all generated, even over a typed draft", async () => {
 		const { getByTestId } = renderChatView()
 
 		const input = getByTestId("chat-textarea").querySelector("input")!
@@ -261,6 +300,9 @@ describe("ChatView - add-to-context mention authorization", () => {
 		})
 
 		const message = await sendNewTask(getByTestId)
-		expect(message).toMatchObject({ text: "enhanced with @/secret", authorizedMentionText: "my draft" })
+		expect(message).toMatchObject({
+			text: "enhanced with @/secret",
+			segments: [generated("enhanced with @/secret")],
+		})
 	})
 })

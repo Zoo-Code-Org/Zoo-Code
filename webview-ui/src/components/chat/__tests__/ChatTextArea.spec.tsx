@@ -282,16 +282,16 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).toHaveBeenCalledWith("Enhanced test prompt")
 		})
 
-		it("routes the enhanced prompt through the authorization-preserving setter when provided", () => {
+		it("routes the enhanced prompt through the generated-text setter when provided", () => {
 			const setInputValue = vi.fn()
-			const setInputValuePreservingAuthorization = vi.fn()
+			const setInputValueGenerated = vi.fn()
 			Object.defineProperty(document, "execCommand", { value: undefined, writable: true })
 
 			render(
 				<ChatTextArea
 					{...defaultProps}
 					setInputValue={setInputValue}
-					setInputValuePreservingAuthorization={setInputValuePreservingAuthorization}
+					setInputValueGenerated={setInputValueGenerated}
 					inputValue="Original prompt"
 				/>,
 			)
@@ -300,13 +300,13 @@ describe("ChatTextArea", () => {
 				new MessageEvent("message", { data: { type: "enhancedPrompt", text: "Enhanced test prompt" } }),
 			)
 
-			expect(setInputValuePreservingAuthorization).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValueGenerated).toHaveBeenCalledWith("Enhanced test prompt")
 			expect(setInputValue).not.toHaveBeenCalled()
 		})
 
-		it("routes the native enhanced-prompt input event through the preserving setter, then manual edits through setInputValue", () => {
+		it("routes the native enhanced-prompt input event through the generated-text setter, then manual edits through setInputValue", () => {
 			const setInputValue = vi.fn()
-			const setInputValuePreservingAuthorization = vi.fn()
+			const setInputValueGenerated = vi.fn()
 			// Mimic the browser: execCommand fires an input event on the textarea.
 			const target: { el?: HTMLTextAreaElement } = {}
 			Object.defineProperty(document, "execCommand", {
@@ -323,7 +323,7 @@ describe("ChatTextArea", () => {
 				<ChatTextArea
 					{...defaultProps}
 					setInputValue={setInputValue}
-					setInputValuePreservingAuthorization={setInputValuePreservingAuthorization}
+					setInputValueGenerated={setInputValueGenerated}
 					inputValue="Original prompt"
 				/>,
 			)
@@ -336,7 +336,7 @@ describe("ChatTextArea", () => {
 				)
 			})
 
-			expect(setInputValuePreservingAuthorization).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValueGenerated).toHaveBeenCalledWith("Enhanced test prompt")
 			expect(setInputValue).not.toHaveBeenCalled()
 
 			fireEvent.change(textarea, { target: { value: "typed by hand" } })

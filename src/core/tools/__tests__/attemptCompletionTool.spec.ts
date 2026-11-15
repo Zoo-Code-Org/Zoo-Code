@@ -1179,7 +1179,7 @@ describe("attemptCompletionTool", () => {
 					response: "messageResponse",
 					text: "@/allowed",
 					images: [],
-					authorizedMentionText: "@/allowed",
+					segments: [{ text: "@/allowed", source: "user" }],
 				})
 				vi.mocked(parseMentions).mockImplementation(async (text) => ({
 					text: `parsed: ${text}`,

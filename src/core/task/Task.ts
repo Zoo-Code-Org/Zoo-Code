@@ -57,6 +57,7 @@ import {
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
+	type MentionSegment,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -135,7 +136,8 @@ import {
 	checkpointRestore,
 	checkpointDiff,
 } from "../checkpoints"
-import { processUserContentMentions, userMentionContent } from "../mentions/processUserContentMentions"
+import { joinSegments, normalizeSegments, trimSegments } from "../../shared/mentionSegments"
+import { processUserContentMentions, userMentionContent, wrapUserMessage } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
@@ -255,8 +257,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
 	task?: string
-	/** User-authored portion of a generated support prompt; empty disables expansion. */
-	authorizedMentionText?: string
+	/** Origin of each part of `task`. Absent means all generated, so no mention expands. */
+	segments?: MentionSegment[]
 	images?: string[]
 	historyItem?: HistoryItem
 	experiments?: Record<string, boolean>
@@ -462,7 +464,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
-	private askResponseAuthorizedMentionText?: string
+	private askResponseSegments?: MentionSegment[]
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -706,10 +708,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
 
-	private readonly authorizedMentionText?: string
+	private readonly segments?: MentionSegment[]
 
 	constructor({
-		authorizedMentionText,
+		segments,
 		provider,
 		apiConfiguration,
 		enableCheckpoints = true,
@@ -734,7 +736,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
-		this.authorizedMentionText = authorizedMentionText
+		this.segments = segments
 
 		this.resetAssistantMessagePersistence()
 
@@ -1269,12 +1271,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
-		this.handleWebviewAskResponse(
-			resolution.response,
-			message.text,
-			message.images,
-			message.authorizedMentionText ?? "",
-		)
+		this.handleWebviewAskResponse(resolution.response, message.text, message.images, message.segments)
 		if (resolution.requiresDurableAck) {
 			return message.id
 		}
@@ -1944,8 +1941,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		response: ClineAskResponse
 		text?: string
 		images?: string[]
-		/** User-authored substring of `text` that may have mentions expanded. */
-		authorizedMentionText?: string
+		/** Origin of each part of `text`. */
+		segments?: MentionSegment[]
 		queuedMessageId?: string
 		/**
 		 * Present when the ask was resolved by an automatic (policy) denial
@@ -2161,7 +2158,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Store the auto-approval timeout so it can be cancelled if user interacts
 			this.autoApprovalTimeoutRef = setTimeout(() => {
 				const { askResponse, text, images } = approval.fn()
-				this.handleWebviewAskResponse(askResponse, text, images, "")
+				this.handleWebviewAskResponse(askResponse, text, images)
 				this.autoApprovalTimeoutRef = undefined
 			}, approval.timeout)
 			timeouts.push(this.autoApprovalTimeoutRef)
@@ -2464,14 +2461,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				response: this.askResponse!,
 				text: this.askResponseText,
 				images: this.askResponseImages,
-				authorizedMentionText: this.askResponseAuthorizedMentionText ?? "",
+				segments: this.askResponseSegments,
 				queuedMessageId,
 				autoDenyDetail: this.pendingAutoDenyDetail,
 			}
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
-			this.askResponseAuthorizedMentionText = undefined
+			this.askResponseSegments = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2498,7 +2495,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		askResponse: ClineAskResponse,
 		text?: string,
 		images?: string[],
-		authorizedMentionText = "",
+		segments?: MentionSegment[],
 	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
@@ -2506,7 +2503,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
-		this.askResponseAuthorizedMentionText = authorizedMentionText
+		this.askResponseSegments = segments
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2647,11 +2644,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
-		authorizedMentionText = "",
+		segments?: MentionSegment[],
 	): Promise<void> {
 		try {
-			text = (text ?? "").trim()
-			authorizedMentionText = authorizedMentionText.trim()
+			// Trim the text and its segments together so they stay equal.
+			const trimmed = trimSegments(normalizeSegments(text ?? "", segments))
+			text = joinSegments(trimmed)
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {
@@ -2683,7 +2681,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images, authorizedMentionText)
+				this.handleWebviewAskResponse("messageResponse", text, images, trimmed)
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
 			}
@@ -3193,10 +3191,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Task starting
 			await this.initiateTaskLoop([
-				// Without explicit authorization nothing expands. Task text
-				// can carry generated context, so callers must state the
-				// user-authored part.
-				userMentionContent(`<user_message>\n${task}\n</user_message>`, this.authorizedMentionText ?? ""),
+				// Task text can carry generated context. Without segments
+				// nothing expands.
+				userMentionContent(wrapUserMessage(normalizeSegments(task ?? "", this.segments))),
 				...imageBlocks,
 			]).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
@@ -3336,7 +3333,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.markInitialized()
 
-			const { response, text, images, authorizedMentionText } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, segments } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -3458,10 +3455,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
 
 			if (responseText) {
-				// Only the chat-box substring the webview authorized expands.
-				newUserContent.push(
-					userMentionContent(`<user_message>\n${responseText}\n</user_message>`, authorizedMentionText ?? ""),
-				)
+				// Only user segments expand.
+				newUserContent.push(userMentionContent(wrapUserMessage(normalizeSegments(responseText, segments))))
 			}
 
 			if (responseImages && responseImages.length > 0) {
@@ -6585,13 +6580,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				const queued = this.messageQueueService.dequeueMessage()
 				if (queued) {
 					setTimeout(() => {
-						this.submitUserMessage(
-							queued.text,
-							queued.images,
-							undefined,
-							undefined,
-							queued.authorizedMentionText ?? "",
-						).catch((err) => console.error(`[Task] Failed to submit queued message:`, err))
+						this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.segments).catch(
+							(err) => console.error(`[Task] Failed to submit queued message:`, err),
+						)
 					}, 0)
 				}
 			}

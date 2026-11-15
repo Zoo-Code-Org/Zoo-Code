@@ -60,7 +60,8 @@ interface ChatTextAreaProps {
 	inputValue: string
 	setInputValue: (value: string) => void
 	/** Programmatic updates preserve the chat box authorization scope. */
-	setInputValuePreservingAuthorization?: (value: string) => void
+	/** Sets generated text, such as an enhanced prompt. Falls back to `setInputValue`. */
+	setInputValueGenerated?: (value: string) => void
 	sendingDisabled: boolean
 	selectApiConfigDisabled: boolean
 	placeholderText: string
@@ -87,7 +88,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		{
 			inputValue,
 			setInputValue,
-			setInputValuePreservingAuthorization,
+			setInputValueGenerated,
 			selectApiConfigDisabled,
 			placeholderText,
 			selectedImages,
@@ -158,9 +159,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			return () => document.removeEventListener("mousedown", handleClickOutside)
 		}, [showDropdown])
 
-		// Generated text routes through this setter so it never clears the
-		// chat box authorization scope.
-		const setInputValueProgrammatic = setInputValuePreservingAuthorization ?? setInputValue
+		// Generated text routes through this setter so it is never marked as user text.
+		const setInputValueProgrammatic = setInputValueGenerated ?? setInputValue
 
 		const programmaticInsertRef = useRef(false)
 
@@ -213,7 +213,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							message.text +
 							" " +
 							currentValue.slice(cursorPos)
-						setInputValueProgrammatic(newValue)
+						// The user chose this text, so it is a normal edit.
+						setInputValue(newValue)
 
 						// Set cursor position after the inserted text
 						const newCursorPos = cursorPos + prefix.length + message.text.length + 1
@@ -244,7 +245,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			window.addEventListener("message", messageHandler)
 			return () => window.removeEventListener("message", messageHandler)
-		}, [setInputValueProgrammatic, searchRequestId, normalizedInputValue])
+		}, [setInputValue, setInputValueProgrammatic, searchRequestId, normalizedInputValue])
 
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
