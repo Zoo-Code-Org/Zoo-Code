@@ -75,6 +75,28 @@ export class ConfinedPathEscapeError extends Error {
 }
 
 /**
+ * Thrown when the identity this writer took the advisory lock on no longer names the file
+ * the write is about to edit. The key is the referent the alias named when the key was
+ * computed; a third party that retargets the alias - or renames another file onto it -
+ * while this writer holds the lock would otherwise have this writer heal, merge, stage
+ * and rename onto a file no lock names, and report durable success for it. Refused
+ * rather than retried: choosing a different key means choosing which writer waits, which
+ * this writer cannot decide on another writer's behalf.
+ */
+export class LockIdentityChangedError extends Error {
+	constructor(
+		readonly requestedPath: string,
+		readonly lockedKey: string,
+		readonly resolvedKey: string,
+	) {
+		super(
+			`Refusing to write ${resolvedKey}: ${requestedPath} no longer names the file this writer locked (${lockedKey}).`,
+		)
+		this.name = "LockIdentityChangedError"
+	}
+}
+
+/**
  * Canonicalize the directory a write is confined to. The publish target is fully
  * resolved through symlinks, so the scope has to be resolved the same way or a
  * scope path that itself runs through a symlink (macOS /var -> /private/var is the
@@ -259,6 +281,23 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				throw new ConfinedPathEscapeError(absoluteFilePath, recoveryTarget, scopeRoot)
 			}
 		}
+
+		// The identity the lock was taken on has to still be the identity this write is about
+		// to edit. recoveryTarget is the alias as it reads now, so when the alias was
+		// retargeted while this writer waited for the lock, the file this write would heal,
+		// merge and publish is a file no lock names. The comparison is skipped in the two
+		// shapes where the two spellings are known to differ for a reason that is not an
+		// alias moving: a resolution that handed back the path it was given is the shape of a
+		// target that does not exist yet, and resolveLockKey canonicalized the parent
+		// directory of that same path when it computed the key, so a first write into a
+		// symlinked directory differs in spelling by construction; and the dangling-link
+		// fallback above chose the lock key itself, which is the same identity. This runs
+		// after the confinement check above on purpose: a target that escaped the declared
+		// scope is the caller's own error to receive, and it must not be re-labelled as an
+		// identity change.
+		if (recoveryTarget !== absoluteFilePath && recoveryTarget !== lockKey) {
+			throw new LockIdentityChangedError(absoluteFilePath, lockKey, recoveryTarget)
+		}
 		const recovery = await recoverInterruptedReplacement(recoveryTarget).catch((error: unknown) => {
 			const code = getErrorCode(error) ?? "unknown"
 			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
@@ -284,6 +323,18 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			if (_escapesScope(scopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
 				throw new ConfinedPathEscapeError(absoluteFilePath, resolvedTargetPath, scopeRoot)
 			}
+		}
+
+		// The same question again after the recovery pass and before anything is read,
+		// staged, or renamed: recovery may have just renamed a leftover onto the file this
+		// write locked, and the alias can be retargeted between that scan and this
+		// re-resolution, which is the window a rename beside the target - not only a rename
+		// out of the scope - leaves open. The skipped shapes are the two described above.
+		// What this comparison does not distinguish is an alias that was replaced by a
+		// regular file under the same spelling: that resolves back to the path it was given
+		// and is indistinguishable, from here, from a target that is not there yet.
+		if (resolvedTargetPath !== absoluteFilePath && resolvedTargetPath !== lockKey) {
+			throw new LockIdentityChangedError(absoluteFilePath, lockKey, resolvedTargetPath)
 		}
 
 		// If a merge callback was provided, read the current file under the lock

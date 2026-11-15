@@ -6,7 +6,7 @@ import path from "path"
 import type { BigIntStats } from "fs"
 import * as fs from "fs/promises"
 import { acquireFileLock } from "../fileLock"
-import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, LockIdentityChangedError, safeWriteJson } from "../safeWriteJson"
 import { resolveLockKey } from "../../services/file-safety/safeWriteText"
 
 vi.mock("../fileLock", () => ({
@@ -349,5 +349,152 @@ describe("safeWriteJson confinement when the alias moves under the lock", () => 
 		expect(released).toBe(true)
 		expect(order.filter((entry) => entry === "release")).toHaveLength(1)
 		expect(order.filter((entry) => entry === "lock:item.json")).toHaveLength(1)
+	})
+})
+
+describe("safeWriteJson refuses a lock whose identity moved out from under it", () => {
+	it("refuses an alias that moved to another in-scope target while this writer waited for the lock", async () => {
+		const order: string[] = []
+		const scope = await makeDir("lockkey-identity-")
+		const lockedTarget = path.join(scope, "item.json")
+		const movedTarget = path.join(scope, "moved.json")
+		currentLink = path.join(scope, "link.json")
+
+		// The second target lies INSIDE the declared scope, so every confinement check this
+		// write runs passes for it, and the only thing that can tell the file the lock was
+		// taken on apart from the file the alias now names is the identity comparison. A
+		// staged copy is planted beside it, named the way jsonFileRecovery names one, so the
+		// assertions below are not vacuous: had this write gone on, the recovery scan would
+		// have found this entry and the commit rename would have landed on the file it
+		// belongs to.
+		await fs.writeFile(lockedTarget, JSON.stringify({ which: "locked" }))
+		await fs.writeFile(movedTarget, JSON.stringify({ which: "moved" }))
+		const movedLeftover = path.join(scope, ".moved.json.new_planted.tmp")
+		await fs.writeFile(movedLeftover, "staged")
+		const scopeBefore = (await fs.readdir(scope)).sort()
+
+		// The alias moves inside the lock acquisition below: the key this writer took names
+		// item.json, and every resolution that runs after the lock is held names moved.json
+		// instead.
+		let flipped = false
+		mockedRealpath.mockImplementation(async (target) => {
+			order.push("resolve")
+			if (String(target) === currentLink) {
+				return flipped ? movedTarget : lockedTarget
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => {
+			order.push("lstat")
+			return symlinkStat(target)
+		})
+		mockedReadlink.mockImplementation(async (target) => {
+			if (target !== currentLink) {
+				return Promise.reject(new Error("not a link"))
+			}
+			return flipped ? movedTarget : lockedTarget
+		})
+		let released = false
+		let lockTakes = 0
+		mockedAcquireFileLock.mockImplementation(async (key) => {
+			lockTakes += 1
+			order.push("lock:" + path.basename(String(key)))
+			flipped = true
+			return async () => {
+				order.push("release")
+				released = true
+			}
+		})
+
+		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: scope })).rejects.toThrow(
+			LockIdentityChangedError,
+		)
+
+		// Refused outright rather than retried under a new key, and refused before the
+		// recovery pass ran: the scope directory is what it was, the staged copy beside the
+		// second target is neither removed nor overwritten, and neither target carries this
+		// write's payload.
+		expect((await fs.readdir(scope)).sort()).toEqual(scopeBefore)
+		expect(existsSync(movedLeftover)).toBe(true)
+		expect(JSON.parse(await fs.readFile(movedTarget, "utf8"))).toEqual({ which: "moved" })
+		expect(JSON.parse(await fs.readFile(lockedTarget, "utf8"))).toEqual({ which: "locked" })
+
+		// The lock this writer took is released exactly once, by the finally block, rather
+		// than left for the stale timeout, and it was taken on the identity it chose.
+		expect(released).toBe(true)
+		expect(lockTakes).toBe(1)
+		expect(order.filter((entry) => entry === "release")).toHaveLength(1)
+		expect(order.filter((entry) => entry === "lock:item.json")).toHaveLength(1)
+	})
+
+	it("refuses the publication when the alias is retargeted onto another in-scope target after the recovery pass", async () => {
+		const scope = await makeDir("lockkey-recovery-")
+		const lockedTarget = path.join(scope, "item.json")
+		const movedTarget = path.join(scope, "moved.json")
+		currentLink = path.join(scope, "link.json")
+
+		await fs.writeFile(lockedTarget, JSON.stringify({ which: "locked" }))
+		await fs.writeFile(movedTarget, JSON.stringify({ which: "moved" }))
+		// A staged copy that belongs to the SECOND target. The recovery pass scans beside the
+		// file the alias named when the key was computed, and jsonFileRecovery treats a
+		// leftover as belonging only to the target its name was derived from, so this entry is
+		// still here - and still active - when the re-resolution that names the publish target
+		// happens.
+		const movedLeftover = path.join(scope, ".moved.json.new_planted.tmp")
+		await fs.writeFile(movedLeftover, "staged")
+		const scopeBefore = (await fs.readdir(scope)).sort()
+
+		// This row declares confineTo, so the alias is resolved four times before this write
+		// could publish, and the fourth resolution is the one the ask names: the first answers
+		// the confinement check that runs before the lock is taken, the second computes the
+		// lock key, the third chooses the directory the recovery pass scans, and the fourth is
+		// the re-resolution that names the merge target and the commit-rename target. Flipping
+		// as that fourth answer is produced puts the move after the recovery call and before
+		// the merge read, the staging, and the rename. The count is asserted below so that a
+		// change in this order fails the row loudly instead of moving the flip into a
+		// different window unnoticed.
+		let aliasAnswers = 0
+		let flipped = false
+		mockedRealpath.mockImplementation(async (target) => {
+			if (String(target) === currentLink) {
+				aliasAnswers += 1
+				if (aliasAnswers === 4) {
+					flipped = true
+				}
+				return flipped ? movedTarget : lockedTarget
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) => {
+			if (target !== currentLink) {
+				return Promise.reject(new Error("not a link"))
+			}
+			return flipped ? movedTarget : lockedTarget
+		})
+		let released = false
+		let lockTakes = 0
+		mockedAcquireFileLock.mockImplementation(async () => {
+			lockTakes += 1
+			return async () => {
+				released = true
+			}
+		})
+
+		await expect(safeWriteJson(currentLink, { id: "task-1" }, { confineTo: scope })).rejects.toThrow(
+			LockIdentityChangedError,
+		)
+
+		// The recovery pass had already run beside the locked file, and this write still
+		// refused before reading, staging, or renaming anything: the staged copy beside the
+		// second target survives untouched, neither target carries this write's payload, and
+		// the scope listing is what it was.
+		expect((await fs.readdir(scope)).sort()).toEqual(scopeBefore)
+		expect(existsSync(movedLeftover)).toBe(true)
+		expect(JSON.parse(await fs.readFile(movedTarget, "utf8"))).toEqual({ which: "moved" })
+		expect(JSON.parse(await fs.readFile(lockedTarget, "utf8"))).toEqual({ which: "locked" })
+		expect(released).toBe(true)
+		expect(lockTakes).toBe(1)
+		expect(aliasAnswers).toBe(4)
 	})
 })
