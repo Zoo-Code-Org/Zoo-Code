@@ -194,6 +194,34 @@ describe("ChatView approval button behavior", () => {
 		})
 	})
 
+	it.each([
+		{ label: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+		{ label: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+	])("sends the typed feedback as user segments with $askResponse", async ({ label, askResponse }) => {
+		const { getByText, getByRole } = renderChatView()
+
+		await act(async () => {
+			hydrateState(commandAsk())
+		})
+		await waitFor(() => expect(getByText(label)).toBeInTheDocument())
+
+		await act(async () => {
+			fireEvent.input(getByRole("textbox"), { target: { value: "use @/ok" } })
+		})
+		await act(async () => {
+			fireEvent.click(getByText(label))
+		})
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "askResponse",
+				askResponse,
+				text: "use @/ok",
+				segments: [{ text: "use @/ok", source: "user" }],
+			}),
+		)
+	})
+
 	it("never shows Run/Deny buttons when the command ask is already answered (auto-approved)", async () => {
 		const { queryByText } = renderChatView()
 
