@@ -32,7 +32,9 @@ type TaskPersistenceAccess = {
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
-	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
+	initiateTaskLoop: (
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	) => Promise<void>
 }
 
 function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
@@ -1258,7 +1260,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
-			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
 			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
 			// The synthetic tool_result must be recorded as an error so the history
 			// cannot be misread as a successful completion of the interrupted call.
@@ -1330,7 +1332,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
-			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
 			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
 			// The pre-existing result is preserved untouched; the synthesized one
 			// for the unanswered tool call is marked as an error.
@@ -2204,7 +2206,10 @@ describe("Task persistence", () => {
 			const initiate = vi
 				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
 				.mockImplementation(async (content) => {
-					await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "user", content })
+					await getTaskPersistenceAccess(task).addToApiConversationHistory({
+						role: "user",
+						content: await content,
+					})
 				})
 
 			await getTaskPersistenceAccess(task).resumePendingTaskAction(lifecycleAction)
@@ -2248,7 +2253,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			return {
-				processed: { content: initiate.mock.calls[0][0] },
+				processed: { content: await initiate.mock.calls[0][0] },
 				parsed: vi.mocked(parseMentions).mock.calls.map((call) => call[0]),
 			}
 		}

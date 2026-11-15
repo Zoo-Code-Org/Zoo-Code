@@ -3190,12 +3190,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
 			// Task starting
-			await this.initiateTaskLoop([
-				// Task text can carry generated context. Without segments
-				// nothing expands.
-				...(await this.userInputContent(task ?? "", this.segments)),
-				...imageBlocks,
-			]).catch((error) => {
+			// Task text can carry generated context. Without segments
+			// nothing expands. The loop waits for the content after it shows the request row.
+			await this.initiateTaskLoop(
+				this.userInputContent(task ?? "", this.segments).then((content) => [...content, ...imageBlocks]),
+			).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
 				// during delegation or user cancellation to prevent unhandled rejections.
 				if (this.abandoned === true || this.abortReason === "user_cancelled") {
@@ -3452,27 +3451,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Unexpected: No existing API conversation history")
 			}
 
-			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
-
-			if (responseText) {
-				// Only user segments expand.
-				newUserContent.push(...(await this.userInputContent(responseText, segments)))
-			}
-
-			if (responseImages && responseImages.length > 0) {
-				newUserContent.push(...formatResponse.imageBlocks(responseImages))
-			}
-
-			// Ensure we have at least some content to send to the API.
-			// If newUserContent is empty, add a minimal resumption message.
-			if (newUserContent.length === 0) {
-				newUserContent.push({
-					type: "text",
-					text: "[TASK RESUMPTION] Resuming task...",
-				})
-			}
-
 			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+
+			// Only user segments expand.
+			const expanded = responseText ? this.userInputContent(responseText, segments) : Promise.resolve([])
+			const newUserContent = expanded.then((content) => {
+				const blocks: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent, ...content]
+
+				if (responseImages && responseImages.length > 0) {
+					blocks.push(...formatResponse.imageBlocks(responseImages))
+				}
+
+				// Ensure we have at least some content to send to the API.
+				// If blocks is empty, add a minimal resumption message.
+				if (blocks.length === 0) {
+					blocks.push({
+						type: "text",
+						text: "[TASK RESUMPTION] Resuming task...",
+					})
+				}
+
+				return blocks
+			})
 
 			// Task resuming from history item.
 			await this.initiateTaskLoop(newUserContent)
@@ -3970,13 +3970,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return content
 	}
 
-	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
+	private async initiateTaskLoop(
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		// `getCheckpointService` wraps its full body in a try/catch and returns
 		// `undefined` on failure (see src/core/checkpoints/index.ts), so the
 		// returned promise cannot reject. `void` is sufficient — no `.catch`
 		// arm needed.
 		void getCheckpointService(this)
+
+		// The loop awaits a pending value later. Mark it handled so an early rejection
+		// does not reach the process as unhandled.
+		if (!Array.isArray(userContent)) userContent.catch(() => {})
 
 		let nextUserContent = userContent
 		let includeFileDetails = true
@@ -4009,17 +4015,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async recursivelyMakeClineRequests(
-		userContent: Anthropic.Messages.ContentBlockParam[],
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
 		includeFileDetails: boolean = false,
 	): Promise<boolean> {
 		interface StackItem {
 			userContent: Anthropic.Messages.ContentBlockParam[]
+			pendingContent?: Promise<Anthropic.Messages.ContentBlockParam[]> // Resolved after the request row shows
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
 		}
 
-		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
+		const stack: StackItem[] = [
+			Array.isArray(userContent)
+				? { userContent, includeFileDetails, retryAttempt: 0 }
+				: { userContent: [], pendingContent: userContent, includeFileDetails, retryAttempt: 0 },
+		]
 
 		while (stack.length > 0) {
 			const currentItem = stack.pop()!
@@ -4090,6 +4101,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					apiProtocol,
 				}),
 			)
+
+			// Mention expansion can take time. The request row already shows.
+			if (currentItem.pendingContent) {
+				currentUserContent.push(...(await currentItem.pendingContent))
+			}
 
 			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
 

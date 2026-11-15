@@ -6697,6 +6697,45 @@ describe("Cline", () => {
 			expect(errorSpy).toHaveBeenCalled()
 		})
 
+		it("shows the request row before pending user content resolves", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			const addToHistory = vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue()
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				throw new Error("stop after history")
+			})
+			task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+				}
+				return undefined as never
+			})
+
+			let resolveContent: (content: Anthropic.TextBlockParam[]) => void = () => {}
+			const pending = new Promise<Anthropic.TextBlockParam[]>((resolve) => (resolveContent = resolve))
+			const run = task.recursivelyMakeClineRequests(pending, false).catch(() => {})
+
+			await vi.waitFor(() => expect(saySpy).toHaveBeenCalledWith("api_req_started", expect.any(String)))
+			expect(addToHistory).not.toHaveBeenCalled()
+
+			resolveContent([{ type: "text", text: "expanded input" }])
+			await run
+
+			expect(addToHistory).toHaveBeenCalledWith(
+				expect.objectContaining({
+					content: expect.arrayContaining([{ type: "text", text: "expanded input" }]),
+				}),
+			)
+		})
+
 		it("fetches model metadata before caching the streaming model", async () => {
 			const task = new Task({
 				provider: mockProvider,
