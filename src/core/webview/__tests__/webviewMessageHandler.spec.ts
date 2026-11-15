@@ -3549,6 +3549,72 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
 		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
 	})
+
+	it("preserves a deny entry only the configuration global layer holds", async () => {
+		// The user added "curl" to the user-level deny list directly in
+		// settings.json while the dialog was open. The extension-state copy the
+		// split consults is never refreshed by such an edit, and neither the
+		// dialog baseline nor the submitted list names the entry, so the
+		// save-start configuration global layer is the only source that can
+		// classify it as an external addition; without that source the save's
+		// Global write would delete it from the user's settings file.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The dialog displayed nothing for this key and saved nothing back.
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [] },
+		})
+
+		// The Global write re-admits the file-side entry instead of clearing
+		// the layer that holds it.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// The preserved entry is disclosed like the other external additions,
+		// and the state copy keeps the layer the save wrote.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("1 entry was"))
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("curl"))
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl"])
+	})
+
+	it("still promotes a genuinely new entry when the configuration global layer already holds another", async () => {
+		// The accept side of the external-addition union: "curl" lives in the
+		// configuration global layer and the state copy the dialog displayed,
+		// so it is existing knowledge kept in place, while "aws" - held by no
+		// layer at save start - keeps the brand-new promotion path into the
+		// global write.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["curl"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl", "aws"] },
+			commandListBaseline: { deniedCommands: ["curl"] },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl", "aws"], vscode.ConfigurationTarget.Global)
+		// The kept entry is not dropped by the split either.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// Nothing was classified as an external addition: no warning.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl", "aws"])
+	})
 })
 
 describe("webviewMessageHandler - terminalProfile", () => {

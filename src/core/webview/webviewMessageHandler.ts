@@ -915,10 +915,21 @@ export const webviewMessageHandler = async (
 						// them as external additions would repeat a false "settings file
 						// changed" warning on every save. A sender that shows no lists
 						// sends no baseline, and its submitted list is written
-						// unclassified.
+						// unclassified. The union covers every layer that can hold an
+						// entry at save start: the extension-state global copy is not
+						// refreshed when the settings file is edited directly, so an
+						// entry only the configuration's own global layer holds would be
+						// invisible to a union of the state copy and the workspace layer,
+						// and the global write below would delete it from the user file.
 						const baseline = message.commandListBaseline?.[key]
 						const externallyAdded = Array.isArray(baseline)
-							? [...new Set([...currentScopes.workspace, ...currentScopes.global])].filter(
+							? [
+									...new Set([
+										...currentScopes.workspace,
+										...currentScopes.global,
+										...configGlobalAtSaveStart,
+									]),
+								].filter(
 									(entry) =>
 										!baseline.includes(entry) &&
 										!incoming.includes(entry) &&
