@@ -3,17 +3,12 @@ import { WindowsWorkspaceRootStrategy } from "../strategies/WindowsWorkspaceRoot
 import { WorkspaceRootStrategy } from "../strategies/WorkspaceRootStrategy"
 import { WorkspaceRootCanonicalizer } from "../WorkspaceRootCanonicalizer"
 
+afterEach(() => vi.restoreAllMocks())
+
 it("normalizes roots once in the factory before any path comparisons", () => {
-	const normalizeAbsoluteRoot = vi
-		.fn<WorkspaceRootStrategy["normalizeAbsoluteRoot"]>()
-		.mockReturnValueOnce("/aliases/project")
-		.mockReturnValueOnce("/storage/project")
-	const pathsEqual = vi.fn((left: string, right: string) => left === right)
-	const strategy: WorkspaceRootStrategy = {
-		normalizeAbsoluteRoot,
-		pathsEqual,
-		toMatcherAbsolutePath: vi.fn((value: string) => value),
-	}
+	const strategy = new PosixWorkspaceRootStrategy()
+	const normalizeAbsoluteRoot = vi.spyOn(strategy, "normalizeAbsoluteRoot")
+	const pathsEqual = vi.spyOn(strategy, "pathsEqual")
 
 	const canonicalizer = WorkspaceRootCanonicalizer.forStrategy("/aliases/project/", "/storage/project/", strategy)
 

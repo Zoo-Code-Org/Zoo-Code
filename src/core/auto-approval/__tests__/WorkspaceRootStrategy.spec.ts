@@ -1,4 +1,5 @@
 import { isFileMatchedByPatterns } from "../filePatterns"
+import { PosixWorkspaceRootStrategy } from "../strategies/PosixWorkspaceRootStrategy"
 import { WorkspaceRootStrategy } from "../strategies/WorkspaceRootStrategy"
 
 describe("WorkspaceRootStrategy.forPlatform", () => {
@@ -43,13 +44,10 @@ describe("WorkspaceRootStrategy.forPlatform", () => {
 	})
 
 	it("uses one selected strategy for candidates, every pattern, and both workspace roots", () => {
-		const toMatcherAbsolutePath = vi.fn((value: string) => value)
-		const normalizeAbsoluteRoot = vi
-			.fn<WorkspaceRootStrategy["normalizeAbsoluteRoot"]>()
-			.mockReturnValueOnce("/aliases/project")
-			.mockReturnValueOnce("/storage/project")
-		const pathsEqual = vi.fn((left: string, right: string) => left === right)
-		const strategy: WorkspaceRootStrategy = { toMatcherAbsolutePath, normalizeAbsoluteRoot, pathsEqual }
+		const strategy = new PosixWorkspaceRootStrategy()
+		const toMatcherAbsolutePath = vi.spyOn(strategy, "toMatcherAbsolutePath")
+		const normalizeAbsoluteRoot = vi.spyOn(strategy, "normalizeAbsoluteRoot")
+		const pathsEqual = vi.spyOn(strategy, "pathsEqual")
 		const selectStrategy = vi.spyOn(WorkspaceRootStrategy, "forPlatform").mockReturnValue(strategy)
 
 		expect(
