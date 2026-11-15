@@ -461,15 +461,6 @@ export class ClineProvider
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
 
-	/**
-	 * The profile this view's buffered configuration was read whole from: the loadViewState seed,
-	 * a profile activation, or a whole-configuration write. A name together with an overlay stamped
-	 * for that same name is a complete profile rather than a partial patch, and getState() serves
-	 * such a pair without borrowing absent fields from the shared store. Cleared whenever the
-	 * overlay is dropped or replaced by a provider switch.
-	 */
-	private viewApiConfigurationProfileName?: string
-
 	// Bumped whenever the buffer is cleared (reset/import), so an in-flight load can tell
 	// that its captured state was invalidated while it awaited the profile lookup.
 	private viewLocalStateGeneration = 0
@@ -1157,16 +1148,6 @@ export class ClineProvider
 			}
 
 			this.viewLocalState = mergedState
-			// Stamp the pair only when the overlay is the one this lookup resolved. An overlay that an
-			// in-flight edit replaced above is this view's own patch rather than a profile read whole, and
-			// the name guard above deletes the overlay outright; neither carries a pair, so neither is
-			// stamped and getState() keeps layering them over the shared store as it does today.
-			this.viewApiConfigurationProfileName =
-				mergedState.apiConfiguration !== undefined &&
-				mergedState.apiConfiguration === loadedState.apiConfiguration &&
-				mergedState.currentApiConfigName === loadedState.currentApiConfigName
-					? loadedState.currentApiConfigName
-					: undefined
 			this.log(`[loadViewState] Loaded state for viewId ${this.viewId}`)
 		} catch (error) {
 			this.log(
@@ -4365,22 +4346,10 @@ export class ClineProvider
 		// display and start tasks with a profile it never picked. Return this view's pair, and fall back
 		// to the shared pair when this view holds no pin - the rule the mode line below already follows
 		// for mode.
-		// A pair - a profile name together with an overlay stamped as read whole from that profile -
-		// is this view's own configuration, so serve it as it is: an optional field the profile does not
-		// carry stays absent instead of picking up whatever the last committing view put in the shared
-		// store, which is how a pinned OpenRouter profile started tasks on another profile's endpoint.
-		// A view holding no pair - no name, an overlay built by a partial patch, or a provider switch that
-		// replaced the overlay - keeps layering its own edits over the store's current settings, so a
-		// shared mutation it never carried is still visible to it.
-		const pinnedViewApiConfiguration =
-			this.viewLocalState.currentApiConfigName !== undefined &&
-			this.viewApiConfigurationProfileName === this.viewLocalState.currentApiConfigName
-				? this.viewLocalState.apiConfiguration
-				: undefined
-		const viewApiConfiguration: ProviderSettings = pinnedViewApiConfiguration ?? {
-			...providerSettings,
-			...this.viewLocalState.apiConfiguration,
-		}
+		// The pin is this view's pair, but it must not mask a shared value the view never carried:
+		// layer it over the store's current settings rather than replacing them, so a mutation that
+		// moved the shared settings after the pin is still visible to every consumer of getState.
+		const viewApiConfiguration: ProviderSettings = { ...providerSettings, ...this.viewLocalState.apiConfiguration }
 		const viewApiConfigName =
 			this.viewLocalState.currentApiConfigName ?? stateValues.currentApiConfigName ?? "default"
 
@@ -4743,7 +4712,6 @@ export class ClineProvider
 	private _clearViewLocalState(): void {
 		this.viewLocalStateGeneration += 1
 		this.viewLocalState = {}
-		this.viewApiConfigurationProfileName = undefined
 	}
 
 	// dev
@@ -6552,13 +6520,8 @@ export class ClineProvider
 			const val = values.apiConfiguration
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.apiConfiguration
-				this.viewApiConfigurationProfileName = undefined
 			} else {
 				this.viewLocalState.apiConfiguration = val
-				// A whole-configuration write belongs to the name this view holds right now; an activation
-				// writes the profile's settings and its name together, so the stamp lands whichever of the
-				// two arrives last and a pair only forms when both have.
-				this.viewApiConfigurationProfileName = this.viewLocalState.currentApiConfigName
 			}
 		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
 			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
@@ -6569,22 +6532,13 @@ export class ClineProvider
 				return acc
 			}, {} as ProviderSettings)
 
-			if ("apiProvider" in providerSettingsUpdate) {
-				// A provider change is not a partial edit: the patch replaces the overlay with the new
-				// provider's own keys, so the overlay is no longer a profile read whole and reads go back
-				// to layering it over the shared store.
-				this.viewApiConfigurationProfileName = undefined
-				this.viewLocalState.apiConfiguration = providerSettingsUpdate
-			} else {
-				// A partial provider edit is applied to the configuration this view already serves - its
-				// pinned profile's settings when it holds a pair - so editing one provider key cannot drop
-				// the fields that profile carries, and the stamp travels with the seeded overlay rather
-				// than being re-derived from the shared store on the next read.
-				this.viewLocalState.apiConfiguration = {
-					...(this.viewLocalState.apiConfiguration ?? {}),
-					...providerSettingsUpdate,
-				}
-			}
+			this.viewLocalState.apiConfiguration =
+				"apiProvider" in providerSettingsUpdate
+					? providerSettingsUpdate
+					: {
+							...(this.viewLocalState.apiConfiguration ?? {}),
+							...providerSettingsUpdate,
+						}
 		}
 	}
 
