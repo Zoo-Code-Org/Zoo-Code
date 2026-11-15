@@ -2652,18 +2652,32 @@ describe("DiffViewProvider", () => {
 		// per row and the module defaults go back at the end of it, because beforeEach only clears call
 		// data, not implementations - the same reason the rows below restore the stat default they replace.
 		type PersistedFile = { bytes: string }
-		const makePersistedDocument = (callOrder: string[], file: PersistedFile) => ({
-			isDirty: true,
-			getText: () => "partial model output",
-			positionAt: (offset: number) => ({ line: 0, character: offset }),
-			uri: { fsPath: mockTargetPath, path: mockTargetPath },
-			save: vi.fn(async () => {
-				callOrder.push("save")
-				// A confirmed save persists the buffer, and the restore ahead of it emptied the buffer.
-				file.bytes = ""
-				return true
-			}),
-		})
+		const makePersistedDocument = (callOrder: string[], file: PersistedFile) => {
+			// The buffer is a holder the rows can see through, and the save persists whatever was last
+			// written into this document. Assigning the empty string inside the double, as this helper
+			// used to, reports the emptying outcome whether or not the discard issued its replacement,
+			// which is the thing the assertions in the rows below are meant to prove.
+			const buffer = { text: "partial model output" }
+			return {
+				isDirty: true,
+				getText: () => buffer.text,
+				positionAt: (offset: number) => ({ line: 0, character: offset }),
+				uri: { fsPath: mockTargetPath, path: mockTargetPath },
+				save: vi.fn(async () => {
+					callOrder.push("save")
+					// The text the production edit asked into this document is recorded on the replace
+					// double it was built from, so persisting that recorded text makes the empty-file
+					// assertion evidence of the replacement. On a path that issued no replacement this
+					// buffer's own content is what lands in the file.
+					const lastReplacement = mockWorkspaceEdit.replace.mock.calls.at(-1)
+					if (typeof lastReplacement?.[2] === "string") {
+						buffer.text = lastReplacement[2]
+					}
+					file.bytes = buffer.text
+					return true
+				}),
+			}
+		}
 		const withPersistedFile = (file: PersistedFile): void => {
 			// The cast is the one the filled-file row that preceded these helpers already used for the
 			// stat double: the double carries only the size the cleanup asks about.
