@@ -106,6 +106,7 @@ vi.mock("react-i18next", () => ({
 
 const RUN_BUTTON_LABEL = "chat:runCommand.title"
 const DENY_BUTTON_LABEL = "chat:reject.title"
+const RESUME_BUTTON_LABEL = "chat:resumeTask.title"
 const START_NEW_TASK_BUTTON_LABEL = "chat:startNewTask.title"
 const SEE_NEW_CHANGES_BUTTON_LABEL = "chat:seeNewChanges.title"
 const RESTORE_CHANGES_BUTTON_LABEL = "chat:restoreChanges.title"
@@ -138,10 +139,12 @@ const defaultProps: ChatViewProps = {
 const renderChatView = (props: Partial<ChatViewProps> = {}) =>
 	renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 
-const commandAsk = (): ClineMessage[] => [
+const askMessages = (ask: string): ClineMessage[] => [
 	{ type: "say", say: "task", ts: 1, text: "Initial task" },
-	{ type: "ask", ask: "command", ts: 2, text: "echo hi", partial: false },
+	{ type: "ask", ask, ts: 2, text: "echo hi", partial: false },
 ]
+
+const commandAsk = (): ClineMessage[] => askMessages("command")
 
 const autoApprovedCommandAsk = (): ClineMessage[] => [
 	{ type: "say", say: "task", ts: 1, text: "Initial task" },
@@ -194,32 +197,72 @@ describe("ChatView approval button behavior", () => {
 		})
 	})
 
-	it.each([
-		{ label: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
-		{ label: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
-	])("sends the typed feedback as user segments with $askResponse", async ({ label, askResponse }) => {
-		const { getByText, getByRole } = renderChatView()
+	describe("approval feedback segments", () => {
+		const typed = async (input: HTMLElement) => {
+			fireEvent.input(input, { target: { value: "use @/ok" } })
+		}
+		// The extension fills the box with text that has no user segments.
+		const generated = async () => {
+			window.postMessage({ type: "invoke", invoke: "setChatBoxMessage", text: "ctx @/secret" }, "*")
+		}
 
-		await act(async () => {
-			hydrateState(commandAsk())
-		})
-		await waitFor(() => expect(getByText(label)).toBeInTheDocument())
+		it.each([
+			{ ask: "command", button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+			{ ask: "command", button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+			{ ask: "resume_task", button: RESUME_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+		])("sends user segments for typed text with $ask $askResponse", async ({ ask, button, askResponse }) => {
+			const { getByText, getByRole } = renderChatView()
 
-		await act(async () => {
-			fireEvent.input(getByRole("textbox"), { target: { value: "use @/ok" } })
-		})
-		await act(async () => {
-			fireEvent.click(getByText(label))
+			await act(async () => {
+				hydrateState(askMessages(ask))
+			})
+			await waitFor(() => expect(getByText(button)).toBeInTheDocument())
+
+			await act(async () => {
+				await typed(getByRole("textbox"))
+			})
+			await act(async () => {
+				fireEvent.click(getByText(button))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					askResponse,
+					text: "use @/ok",
+					segments: [{ text: "use @/ok", source: "user" }],
+				}),
+			)
 		})
 
-		expect(vscode.postMessage).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: "askResponse",
-				askResponse,
-				text: "use @/ok",
-				segments: [{ text: "use @/ok", source: "user" }],
-			}),
-		)
+		it.each([
+			{ button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+			{ button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+		])("keeps generated text generated with $askResponse", async ({ button, askResponse }) => {
+			const { getByText, getByRole } = renderChatView()
+
+			await act(async () => {
+				hydrateState(askMessages("command"))
+			})
+			await waitFor(() => expect(getByText(button)).toBeInTheDocument())
+
+			await act(async () => {
+				await generated()
+			})
+			await waitFor(() => expect(getByRole("textbox")).toHaveValue("ctx @/secret"))
+			await act(async () => {
+				fireEvent.click(getByText(button))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					askResponse,
+					text: "ctx @/secret",
+					segments: [{ text: "ctx @/secret", source: "generated" }],
+				}),
+			)
+		})
 	})
 
 	it("never shows Run/Deny buttons when the command ask is already answered (auto-approved)", async () => {

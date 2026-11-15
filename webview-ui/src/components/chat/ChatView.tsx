@@ -223,6 +223,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const userRespondedRef = useRef<boolean>(false)
 	// Origin of each part of the chat box value. Null means all of it is user text.
 	const segmentsRef = useRef<MentionSegment[] | null>(null)
+	// Trimmed chat box segments for the text. A value that does not match the text is all generated.
+	const segmentsFor = useCallback((text: string) => {
+		const trimmed = segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text)
+		return joinSegments(trimmed) === text ? trimmed : generatedSegments(text)
+	}, [])
 	const [currentFollowUpTs, setCurrentFollowUpTs] = useState<number | null>(null)
 	const [aggregatedCostsMap, setAggregatedCostsMap] = useState<
 		Map<
@@ -664,13 +669,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const handleSendMessage = useCallback(
 		(text: string, images: string[], segmentsOverride?: MentionSegment[]) => {
 			text = text.trim()
-			// Trimmed chat box segments. A value that does not match the text is all generated.
-			const trimmed = segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text)
-			const segments = segmentsOverride
-				? trimSegments(segmentsOverride)
-				: joinSegments(trimmed) === text
-					? trimmed
-					: generatedSegments(text)
+			const segments = segmentsOverride ? trimSegments(segmentsOverride) : segmentsFor(text)
 
 			if (text || images.length > 0) {
 				// Intercept when the active provider is retired — show a
@@ -770,6 +769,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			isStreaming,
 			messageQueue.length,
 			apiConfiguration.apiProvider,
+			segmentsFor,
 		], // messagesRef and clineAskRef are stable
 	)
 
@@ -841,13 +841,13 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				type: "queueMessage",
 				text,
 				images: selectedImages,
-				segments: segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text),
+				segments: segmentsFor(text),
 			})
 			segmentsRef.current = null
 			setInputValue("")
 			setSelectedImages([])
 		}
-	}, [inputValue, selectedImages])
+	}, [inputValue, selectedImages, segmentsFor])
 
 	// Resets the approval button UI to its hidden/disabled state. Shared by the
 	// manual click handlers and by the backend-driven clearApprovalButtons
@@ -884,9 +884,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							askResponse: "yesButtonClicked",
 							text: trimmedInput,
 							images: images,
-							segments: segmentsRef.current
-								? trimSegments(segmentsRef.current)
-								: userSegments(trimmedInput ?? ""),
+							segments: segmentsFor(trimmedInput ?? ""),
 						})
 						// Clear input state after sending
 						segmentsRef.current = null
@@ -914,9 +912,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								askResponse: "yesButtonClicked",
 								text: trimmedInput,
 								images: images,
-								segments: segmentsRef.current
-									? trimSegments(segmentsRef.current)
-									: userSegments(trimmedInput ?? ""),
+								segments: segmentsFor(trimmedInput ?? ""),
 							})
 							// Clear input state after sending
 							segmentsRef.current = null
@@ -941,7 +937,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons, segmentsFor],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -973,9 +969,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							askResponse: "noButtonClicked",
 							text: trimmedInput,
 							images: images,
-							segments: segmentsRef.current
-								? trimSegments(segmentsRef.current)
-								: userSegments(trimmedInput ?? ""),
+							segments: segmentsFor(trimmedInput ?? ""),
 						})
 						// Clear input state after sending
 						segmentsRef.current = null
@@ -992,7 +986,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons],
+		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons, segmentsFor],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)
@@ -1736,12 +1730,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
 				const text = inputValue.trim()
-				const trimmed = segmentsRef.current ? trimSegments(segmentsRef.current) : userSegments(text)
 				vscode.postMessage({
 					type: "queueMessage",
 					text,
 					images: selectedImages,
-					segments: joinSegments(trimmed) === text ? trimmed : generatedSegments(text),
+					segments: segmentsFor(text),
 				})
 				segmentsRef.current = null
 				setInputValue("")
