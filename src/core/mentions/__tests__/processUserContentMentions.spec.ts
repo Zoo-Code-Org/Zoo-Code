@@ -95,12 +95,32 @@ describe("processUserContentMentions authorization", () => {
 		})
 	})
 
-	it("does not trust restored, copied, or modified blocks", async () => {
-		const block = userMentionContent([user("@/allowed")])
-		const copy = { ...block }
-		block.text += " @/secret"
-		await process([copy, block, userMentionContent([gen("context @/secret")])])
+	it.each([
+		{ label: "spread copy", change: (b: Anthropic.TextBlockParam) => ({ ...b }) },
+		{ label: "structured clone", change: (b: Anthropic.TextBlockParam) => structuredClone(b) },
+		{ label: "JSON round trip", change: (b: Anthropic.TextBlockParam) => JSON.parse(JSON.stringify(b)) },
+		{ label: "edited text", change: (b: Anthropic.TextBlockParam) => Object.assign(b, { text: b.text + " @/x" }) },
+	])("does not trust a block after $label", async ({ change }) => {
+		await process([change(userMentionContent([user("@/allowed")]))])
 		expect(parseMentions).not.toHaveBeenCalled()
+	})
+
+	it("does not trust all generated segments", async () => {
+		await process([userMentionContent([gen("context @/secret")])])
+		expect(parseMentions).not.toHaveBeenCalled()
+	})
+
+	it("keeps labels out of the serialized block", () => {
+		expect(JSON.parse(JSON.stringify(userMentionContent([user("@/a"), gen("b")])))).toEqual({
+			type: "text",
+			text: "@/ab",
+		})
+	})
+
+	it("trusts the same block after the array is copied", async () => {
+		const block = userMentionContent([user("@/allowed")])
+		await process([...[block]].map((b) => b))
+		expect(parseMentions).toHaveBeenCalledTimes(1)
 	})
 
 	it("passes image blocks through unchanged next to a user block", async () => {
