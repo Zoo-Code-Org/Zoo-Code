@@ -33,6 +33,7 @@ test("keeps the skills list reachable when many diagnostics arrive", async ({ mo
 		return {
 			diagnosticsListScrolls:
 				Boolean(list) && (list as HTMLElement).scrollHeight > (list as HTMLElement).clientHeight,
+			diagnosticsListOverflowY: list ? getComputedStyle(list).overflowY : "",
 			addSkillInsidePane:
 				Boolean(addSkill) &&
 				Math.round((addSkill as HTMLElement).getBoundingClientRect().bottom) <= Math.round(pane.bottom),
@@ -45,6 +46,10 @@ test("keeps the skills list reachable when many diagnostics arrive", async ({ mo
 	// flags the skills scroller for its own scrolled content in both configurations at this
 	// fixture size, so it cannot tell the bounded list from the unbounded one.
 	expect(layout.diagnosticsListScrolls).toBe(true)
+	// scrollHeight measures content extent, not user scrollability: a clipped list reports
+	// an overflowing scrollHeight too. The computed longhand is asserted alongside it so
+	// the bound cannot regress into a list no user can scroll.
+	expect(["auto", "scroll"].indexOf(layout.diagnosticsListOverflowY)).toBeGreaterThanOrEqual(0)
 	expect(layout.addSkillInsidePane).toBe(true)
 	expect(layout.skillsScrollerHeight).toBeGreaterThanOrEqual(40)
 })
