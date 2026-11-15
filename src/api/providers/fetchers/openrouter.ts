@@ -151,9 +151,13 @@ export async function getOpenRouterModels(
 export async function getOpenRouterModelEndpoints(
 	modelId: string,
 	options?: ApiHandlerOptions,
+	// untrustedBaseUrl: the base URL comes from unsaved webview settings. Reject schema-invalid
+	// bodies and keep the URL out of error logs.
+	opts?: { untrustedBaseUrl?: boolean },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
+	const untrusted = opts?.untrustedBaseUrl === true
 
 	try {
 		// This request runs outside getModels()' single-flight, so it needs its own bound:
@@ -169,6 +173,7 @@ export async function getOpenRouterModelEndpoints(
 
 		if (!result.success) {
 			console.error("OpenRouter model endpoints response is invalid", result.error.format())
+			if (untrusted) return models
 		}
 
 		const { id, architecture, endpoints } = data
@@ -188,8 +193,11 @@ export async function getOpenRouterModelEndpoints(
 			})
 		}
 	} catch (error) {
+		// The error text can carry a configured host name.
 		console.error(
-			`Error fetching OpenRouter model endpoints: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
+			untrusted
+				? `Error fetching OpenRouter model endpoints: ${error instanceof Error ? error.name : "unknown"}`
+				: `Error fetching OpenRouter model endpoints: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 		)
 	}
 

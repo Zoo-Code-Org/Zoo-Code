@@ -357,6 +357,37 @@ describe("OpenRouter API", () => {
 			getSpy.mockRestore()
 		})
 
+		it("with untrustedBaseUrl returns no endpoints for a non-numeric context_length", async () => {
+			const axios = await import("axios")
+			const body = { data: { id: "m", name: "M", endpoints: [{ provider_name: "P", context_length: "bad" }] } }
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: body })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getOpenRouterModelEndpoints("m", undefined, { untrustedBaseUrl: true })).resolves.toEqual({})
+			// Trusted callers keep the lenient fallback.
+			await expect(getOpenRouterModelEndpoints("m")).resolves.toHaveProperty("P")
+
+			getSpy.mockRestore()
+		})
+
+		it("with untrustedBaseUrl logs no host name when the request fails", async () => {
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockRejectedValue(new Error("getaddrinfo ENOTFOUND secret.example.com"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await getOpenRouterModelEndpoints(
+				"m",
+				{ openRouterBaseUrl: "https://secret.example.com" },
+				{ untrustedBaseUrl: true },
+			)
+
+			expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.example.com")
+
+			getSpy.mockRestore()
+		})
+
 		it("returns no endpoints for a body without an endpoints list", async () => {
 			const axios = await import("axios")
 			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: { id: "m" } } })

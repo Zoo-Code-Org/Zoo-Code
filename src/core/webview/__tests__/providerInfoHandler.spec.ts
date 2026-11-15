@@ -128,9 +128,11 @@ describe("handleRequestProviderInfo", () => {
 
 		await send({ kind: "openRouterModelProviders", modelId: "openai/gpt-4o", baseUrl: "https://proxy.test/v1" })
 
-		expect(getOpenRouterModelEndpoints).toHaveBeenCalledWith("openai/gpt-4o", {
-			openRouterBaseUrl: "https://proxy.test/v1",
-		})
+		expect(getOpenRouterModelEndpoints).toHaveBeenCalledWith(
+			"openai/gpt-4o",
+			{ openRouterBaseUrl: "https://proxy.test/v1" },
+			{ untrustedBaseUrl: true },
+		)
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "providerInfo",
 			requestId: "req-1",
