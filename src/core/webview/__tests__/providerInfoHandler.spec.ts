@@ -107,6 +107,34 @@ describe("handleRequestProviderInfo", () => {
 		})
 	})
 
+	it("fetches Requesty key info from a custom base URL with auth headers", async () => {
+		fetchSpy.mockResolvedValue(jsonResponse(REQUESTY_KEY_INFO))
+
+		await send({ kind: "requestyKeyInfo", apiKey: "rk", baseUrl: "https://router.custom.example/v1" })
+
+		const [url, init] = fetchSpy.mock.calls[0]!
+		expect(url).not.toBe("https://api.requesty.ai/x/apikey")
+		expect(String(url)).toMatch(/^https:\/\/[^/]*custom\.example\/.*x\/apikey$/)
+		expect(init).toMatchObject({
+			headers: { Authorization: "Bearer rk", "Content-Type": "application/json" },
+		})
+	})
+
+	it("returns no providers and sends no request without a modelId", async () => {
+		await send({ kind: "openRouterModelProviders" })
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(postMessageToWebview.mock.calls[0]![0].values).toEqual({ data: {} })
+	})
+
+	it("passes an abort signal with the request", async () => {
+		fetchSpy.mockResolvedValue(jsonResponse({ data: KEY_INFO }))
+
+		await send({ kind: "openRouterKeyInfo", apiKey: "k" })
+
+		expect(fetchSpy.mock.calls[0]![1]!.signal).toBeInstanceOf(AbortSignal)
+	})
+
 	it("maps OpenRouter endpoints to model info keyed by provider tag", async () => {
 		fetchSpy.mockResolvedValue(jsonResponse(ENDPOINTS))
 
@@ -184,8 +212,29 @@ describe("handleRequestProviderInfo", () => {
 		})
 	})
 
-	it("posts an error without the configured URL when the request fails", async () => {
-		fetchSpy.mockResolvedValue(jsonResponse({}, 401))
+	it("accepts a body of exactly the size cap and rejects one byte more", async () => {
+		const MAX = 1024 * 1024
+		const padded = (bytes: number) => {
+			const head = '{"data":null,"pad":"'
+			const tail = '"}'
+			return head + "a".repeat(bytes - head.length - tail.length) + tail
+		}
+
+		fetchSpy.mockResolvedValueOnce(new Response(padded(MAX), { status: 200 }))
+		await send({ kind: "openRouterKeyInfo", apiKey: "k" })
+		expect(postMessageToWebview.mock.calls[0]![0].error).toBeUndefined()
+
+		fetchSpy.mockResolvedValueOnce(new Response(padded(MAX + 1), { status: 200 }))
+		await send({ kind: "openRouterKeyInfo", apiKey: "k" })
+		expect(postMessageToWebview.mock.calls[1]![0].error).toBe("Provider info request failed")
+	})
+
+	it.each([
+		["a failed status", () => jsonResponse({}, 401)],
+		["a non-JSON 2xx body", () => new Response("<html>", { status: 200 })],
+		["a rejected fetch", () => Promise.reject(new Error("https://secret.example.com/key refused"))],
+	])("posts a generic error that leaks no URL on %s", async (_name, makeResponse) => {
+		fetchSpy.mockImplementation(async () => makeResponse())
 
 		await send({ kind: "openRouterKeyInfo", apiKey: "k", baseUrl: "https://secret.example.com" })
 
@@ -193,6 +242,23 @@ describe("handleRequestProviderInfo", () => {
 			type: "providerInfo",
 			requestId: "req-1",
 			error: "Provider info request failed",
+		})
+		const logged = JSON.stringify([vi.mocked(provider.log).mock.calls, vi.mocked(console.error).mock.calls])
+		expect(logged).not.toContain("secret.example.com")
+	})
+
+	it.each([
+		["apiKey", 5],
+		["baseUrl", {}],
+		["modelId", ["m"]],
+	])("rejects a non-string %s without a request", async (field, value) => {
+		await send({ kind: "openRouterKeyInfo", [field]: value })
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(postMessageToWebview).toHaveBeenCalledWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			error: "Invalid provider info request",
 		})
 	})
 
@@ -203,7 +269,7 @@ describe("handleRequestProviderInfo", () => {
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "providerInfo",
 			requestId: "req-1",
-			error: "Unknown provider info kind",
+			error: "Invalid provider info request",
 		})
 	})
 })

@@ -185,25 +185,33 @@ const fetchers: Record<ProviderInfoKind, (params: ProviderInfoParams) => Promise
 const isProviderInfoKind = (kind: unknown): kind is ProviderInfoKind =>
 	typeof kind === "string" && Object.hasOwn(fetchers, kind)
 
+// Non-string params fail the parse, so a bad value never reaches a fetcher.
+const providerInfoParamsSchema = z.object({
+	apiKey: z.string().optional(),
+	baseUrl: z.string().optional(),
+	modelId: z.string().optional(),
+})
+
 /**
  * Fetch provider key and model info in the extension host so the webview CSP
  * needs no provider origins. The webview sends unsaved settings values, so the
  * handler reads credentials from the message, not from saved config.
  */
 export async function handleRequestProviderInfo(provider: ClineProvider, message: WebviewMessage): Promise<void> {
-	const { kind, ...params } = (message.values ?? {}) as { kind?: unknown } & ProviderInfoParams
+	const { kind, ...rawParams } = message.values ?? {}
+	const parsed = providerInfoParamsSchema.safeParse(rawParams)
 
-	if (!isProviderInfoKind(kind)) {
+	if (!isProviderInfoKind(kind) || !parsed.success) {
 		await provider.postMessageToWebview({
 			type: "providerInfo",
 			requestId: message.requestId,
-			error: "Unknown provider info kind",
+			error: "Invalid provider info request",
 		})
 		return
 	}
 
 	try {
-		const data = await fetchers[kind](params)
+		const data = await fetchers[kind](parsed.data)
 		await provider.postMessageToWebview({ type: "providerInfo", requestId: message.requestId, values: { data } })
 	} catch (error) {
 		// Log the kind only. The error text can carry a configured URL.

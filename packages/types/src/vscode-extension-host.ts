@@ -23,10 +23,6 @@ import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
 
-/**
- * ExtensionMessage
- * Extension -> Webview | CLI
- */
 /** Provider lookups the extension host runs for the webview, keeping provider origins out of the CSP. */
 export type ProviderInfoKind = "openRouterKeyInfo" | "openRouterModelProviders" | "requestyKeyInfo"
 
@@ -36,6 +32,10 @@ export interface ProviderInfoParams {
 	modelId?: string
 }
 
+/**
+ * ExtensionMessage
+ * Extension -> Webview | CLI
+ */
 export interface ExtensionMessage {
 	type:
 		| "action"

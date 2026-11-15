@@ -87,6 +87,27 @@ describe("requestProviderInfo", () => {
 		expectCleanedUp(add, remove)
 	})
 
+	it("gives each request its own id and settles out-of-order replies by id", async () => {
+		const { sent } = stubHost(() => null)
+
+		const first = requestProviderInfo<string>("requestyKeyInfo", { apiKey: "a" })
+		const second = requestProviderInfo<string>("requestyKeyInfo", { apiKey: "b" })
+		const [idA, idB] = sent.map((message) => message.requestId)
+		expect(idA).not.toBe(idB)
+
+		for (const [requestId, data] of [
+			[idB, "second"],
+			[idA, "first"],
+		]) {
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "providerInfo", requestId, values: { data } } }),
+			)
+		}
+
+		await expect(first).resolves.toBe("first")
+		await expect(second).resolves.toBe("second")
+	})
+
 	it("rejects with the host error message", async () => {
 		const [add, remove] = spyOnListeners()
 		stubHost(() => ({ error: "Provider info request failed" }))

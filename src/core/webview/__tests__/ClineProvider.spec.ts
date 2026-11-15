@@ -3076,6 +3076,9 @@ describe("ClineProvider", () => {
 
 			expect(csp).toBeDefined()
 			expect(csp).toContain("connect-src vscode-webview://test-csp-source ")
+			if (build === "getHtmlContent") {
+				expect(csp).toContain("connect-src vscode-webview://test-csp-source https://us.i.posthog.com;")
+			}
 			expect(csp).not.toContain("evil.example")
 			expect(csp).not.toContain("requesty")
 			expect(csp).not.toContain("openrouter")
