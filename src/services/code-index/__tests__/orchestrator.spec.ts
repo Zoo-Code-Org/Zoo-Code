@@ -1,3 +1,4 @@
+import * as nodePath from "path"
 import { CodeIndexOrchestrator } from "../orchestrator"
 import { FileFailureRegistry } from "../file-failure-registry"
 import { ProviderPacerRegistry } from "../provider-pacer"
@@ -479,9 +480,9 @@ describe("CodeIndexOrchestrator", () => {
 	})
 
 	describe("CI-OR-04: fatal parser failure", () => {
-		const fatal = new ParserFatalError("timeout", "src/hang.ts", "no reply")
+		const fatal = new ParserFatalError("timeout", nodePath.join("/test/workspace", "src", "hang.ts"), "no reply")
 		const category = "embeddings:orchestrator.parserFatalCategory.timeout"
-		const fatalMessage = `embeddings:orchestrator.parserFatal: src/hang.ts ${category}`
+		const fatalMessage = `embeddings:orchestrator.parserFatal: ${nodePath.join("src", "hang.ts")} ${category}`
 
 		it("from the scan ends in Error, aborts the session and keeps the new collection and cache", async () => {
 			const context = setup()

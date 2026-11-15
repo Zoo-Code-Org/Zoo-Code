@@ -11,6 +11,7 @@ import type { ProviderPacerRegistry } from "./provider-pacer"
 import type { ParseWorkerClient } from "./parse-worker-client"
 import { ParserFatalError } from "./parser-errors"
 import { formatProviderWaitMessage } from "./shared/provider-wait-message"
+import { generateRelativeFilePath } from "./shared/get-relative-path"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { t } from "../../i18n"
@@ -35,7 +36,7 @@ export class CodeIndexOrchestrator {
 	constructor(
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly stateManager: CodeIndexStateManager,
-		workspacePath: string,
+		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
 		private readonly vectorStore: IVectorStore,
 		scanner: DirectoryScanner,
@@ -252,7 +253,7 @@ export class CodeIndexOrchestrator {
 		this.stateManager.setSystemState(
 			"Error",
 			t("embeddings:orchestrator.parserFatal", {
-				filePath: error.filePath,
+				filePath: generateRelativeFilePath(error.filePath, this.workspacePath),
 				category: t(`embeddings:orchestrator.parserFatalCategory.${error.category}`),
 			}),
 		)

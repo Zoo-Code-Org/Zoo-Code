@@ -19,6 +19,7 @@ export interface ICodeParser {
 			maxBlockLines?: number
 			content?: string
 			fileHash?: string
+			signal?: AbortSignal
 		},
 	): Promise<CodeBlock[]>
 }

@@ -225,7 +225,7 @@ export class FileWatcher implements IFileWatcher {
 	}
 
 	private async indexFile(filePath: string, signal: AbortSignal | undefined): Promise<FileProcessingResult> {
-		const result = await this.processFile(filePath)
+		const result = await this.filePreparation.prepareFile(filePath, signal)
 		if (result.status === "missing") return this.removeFile(filePath, signal)
 		if (result.status === "local_error") {
 			// An AbortError comes from a closed parse session: cancellation, not a failed file.

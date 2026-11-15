@@ -364,6 +364,7 @@ describe("CodeIndexManager reliability", () => {
 				.spyOn(manager as unknown as { _recreateServices(): Promise<void> }, "_recreateServices")
 				.mockImplementation(async () => {
 					attach(manager, fresh)
+					// The double provides no members; these tests never search.
 					manager["_searchService"] = {} as unknown as (typeof manager)["_searchService"]
 				})
 		}
@@ -435,7 +436,7 @@ describe("CodeIndexManager reliability", () => {
 		})
 
 		it.each([true, false])(
-			"CI-MG-07: a settings change that recreates services keeps the fatal Error (latch set: %s)",
+			"CI-MG-07: a settings change that recreates services keeps the fatal Error only while latched (latch set: %s)",
 			async (latched) => {
 				const { manager, stateManager } = makeManager()
 				configure(manager, { requiresRestart: true })
@@ -487,6 +488,7 @@ describe("CodeIndexManager reliability", () => {
 				const { manager, stateManager } = makeManager()
 				const order: string[] = []
 				configure(manager)
+				// The double provides no members; it only marks the services as created.
 				manager["_serviceFactory"] = {} as unknown as (typeof manager)["_serviceFactory"]
 				attach(manager, orchestratorDouble(order, "stale"))
 				withFatalFailure(manager, stateManager)
@@ -505,6 +507,7 @@ describe("CodeIndexManager reliability", () => {
 				const { manager, stateManager } = makeManager()
 				const order: string[] = []
 				configure(manager)
+				// The double provides no members; it only marks the services as created.
 				manager["_serviceFactory"] = {} as unknown as (typeof manager)["_serviceFactory"]
 				const stale = orchestratorDouble(order, "stale")
 				attach(manager, stale)

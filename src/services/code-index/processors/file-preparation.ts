@@ -16,7 +16,7 @@ export const SKIP_TOO_LARGE = "File is too large"
 export class FilePreparation {
 	constructor(private readonly dependencies: FilePreparationDependencies) {}
 
-	public async prepareFile(filePath: string): Promise<FileProcessingResult> {
+	public async prepareFile(filePath: string, signal?: AbortSignal): Promise<FileProcessingResult> {
 		const dependencies = this.dependencies
 		let content: string
 		try {
@@ -36,7 +36,7 @@ export class FilePreparation {
 			if (dependencies.cacheManager.getHash(filePath) === newHash) {
 				return this.skippedResult(filePath, SKIP_UNCHANGED)
 			}
-			const blocks = await dependencies.parser.parseFile(filePath, { content, fileHash: newHash })
+			const blocks = await dependencies.parser.parseFile(filePath, { content, fileHash: newHash, signal })
 			return { path: filePath, status: "processed_for_batching", newHash, blocks }
 		} catch (error) {
 			return { path: filePath, status: "local_error", activity: "parse", error: error as Error }

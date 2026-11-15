@@ -177,7 +177,11 @@ export class DirectoryScanner implements IDirectoryScanner {
 
 				let blocks: CodeBlock[]
 				try {
-					blocks = await this.codeParser.parseFile(filePath, { content, fileHash: currentFileHash })
+					blocks = await this.codeParser.parseFile(filePath, {
+						content,
+						fileHash: currentFileHash,
+						signal,
+					})
 				} catch (error) {
 					if (error instanceof ParserFatalError) {
 						const relativePath = generateRelativeFilePath(filePath, scanWorkspace)

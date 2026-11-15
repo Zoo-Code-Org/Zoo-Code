@@ -31,6 +31,7 @@ interface PendingParse {
 
 interface ParseSession {
 	closed: boolean
+	signal?: AbortSignal
 	queue: PendingParse[]
 	active?: PendingParse
 	worker?: ParseWorker
@@ -64,16 +65,24 @@ export class ParseWorkerClient implements ICodeParser {
 
 	open(signal: AbortSignal): void {
 		this.close(this.session)
-		const session: ParseSession = { closed: false, queue: [] }
+		const session: ParseSession = { closed: false, queue: [], signal }
 		this.session = session
 		if (signal.aborted) this.close(session)
 		else signal.addEventListener("abort", () => this.close(session), { once: true })
 	}
 
-	async parseFile(filePath: string, options?: { content?: string; fileHash?: string }): Promise<CodeBlock[]> {
-		const content = options?.content ?? (await readFile(filePath, "utf8"))
+	/**
+		* A caller passing `signal` is bound to the session opened with that signal; work from an older session
+		* rejects with `AbortError` rather than running on, or closing, a newer one.
+		*/
+	async parseFile(
+		filePath: string,
+		options?: { content?: string; fileHash?: string; signal?: AbortSignal },
+	): Promise<CodeBlock[]> {
 		const session = this.session
-		if (session.closed) throw abortError()
+		const content = options?.content ?? (await readFile(filePath, "utf8"))
+		if (session.closed || session !== this.session) throw abortError()
+		if (options?.signal && options.signal !== session.signal) throw abortError()
 		return new Promise<CodeBlock[]>((resolve, reject) => {
 			const request = { id: ++this.nextId, filePath, content, fileHash: options?.fileHash ?? "" }
 			session.queue.push({ request, resolve, reject })

@@ -184,6 +184,22 @@ describe("ParseWorkerClient", () => {
 		expect(factory).toHaveBeenCalledOnce()
 	})
 
+	it("CI-PW-11: a parse bound to an earlier session's signal rejects without touching the current session", async () => {
+		const { client, controller, factory, workers } = setup()
+		const next = new AbortController()
+		client.open(next.signal)
+		const stale = client.parseFile("old.ts", { ...options, signal: controller.signal })
+		await expect(stale).rejects.toMatchObject({ name: "AbortError" })
+		expect(factory).not.toHaveBeenCalled()
+
+		const current = client.parseFile("new.ts", { ...options, signal: next.signal })
+		await drain()
+		expect(workers[0].requests.map((request) => request.filePath)).toEqual(["new.ts"])
+		workers[0].reply(0, [block])
+		expect(await current).toEqual([block])
+		expect(workers[0].terminate).not.toHaveBeenCalled()
+	})
+
 	it.each([
 		["exit", (worker: MockWorker) => worker.emit("exit", 1)],
 		["error", (worker: MockWorker) => worker.emit("error", new Error("idle crash"))],

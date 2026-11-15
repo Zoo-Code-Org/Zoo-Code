@@ -4,8 +4,9 @@ import nodePath from "path"
 import * as vscode from "vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
 import { FileWatcher } from "../file-watcher"
-import { FilePreparation } from "../file-preparation"
+import { FilePreparation, SKIP_UNCHANGED } from "../file-preparation"
 import { FileFailureRegistry } from "../../file-failure-registry"
 import { ProviderPacerRegistry } from "../../provider-pacer"
 import { ParserFatalError } from "../../parser-errors"
@@ -477,16 +478,41 @@ describe("FileWatcher", () => {
 
 		it("sends one telemetry event for a nonfatal parse failure and none for a read failure", async () => {
 			watcherWithRegistry()
+			const parseFailure = new Error("bad")
+			const readFailure = new Error("busy")
 			vi.spyOn(FilePreparation.prototype, "prepareFile")
-				.mockResolvedValueOnce({ path, status: "local_error", activity: "parse", error: new Error("bad") })
-				.mockResolvedValueOnce({ path, status: "local_error", activity: "read", error: new Error("busy") })
-			await runChange()
+				.mockResolvedValueOnce({ path, status: "local_error", activity: "parse", error: parseFailure })
+				.mockResolvedValueOnce({ path, status: "local_error", activity: "read", error: readFailure })
+			const parseSummary = await runChange()
+			expect(parseSummary.processedFiles).toEqual([
+				{ path, status: "local_error", activity: "parse", error: parseFailure },
+			])
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledExactlyOnceWith(
+				TelemetryEventName.CODE_INDEX_ERROR,
+				{ error: "Parse failed", location: "FileWatcher.indexFile" },
+			)
+			const batchPromise = waitForNextBatch()
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			const readSummary = await batchPromise
+			expect(readSummary.processedFiles).toEqual([
+				{ path, status: "local_error", activity: "read", error: readFailure },
+			])
 			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledOnce()
+		})
+
+		it("passes the batch's session signal to preparation so the parse is bound to that session", async () => {
+			watcherWithRegistry()
+			const prepare = vi
+				.spyOn(FilePreparation.prototype, "prepareFile")
+				.mockResolvedValueOnce({ path, status: "skipped", reason: SKIP_UNCHANGED })
+			const controller = new AbortController()
+			await fileWatcher.initialize(controller.signal)
 			const batchPromise = waitForNextBatch()
 			await mockOnDidChange({ fsPath: path })
 			await flushBatch()
 			await batchPromise
-			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledOnce()
+			expect(prepare).toHaveBeenCalledExactlyOnceWith(path, controller.signal)
 		})
 
 		it("CI-FW-02: prepared blocks are passed to the writer, which embeds and stores the hash", async () => {
