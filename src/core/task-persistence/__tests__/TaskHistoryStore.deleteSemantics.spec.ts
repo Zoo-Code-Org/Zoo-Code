@@ -77,13 +77,13 @@ async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): 
 		return false
 	}
 	// The unlink removes the file and leaves the per-task directory in place, so both sides
-	// still carry an identity here. Basenames are compared exactly by default, because on a
-	// filesystem that keeps case two ways two spellings are two files, and a lock key naming
-	// one of them cannot stand for the other. The folded comparison is kept only for the
-	// platforms whose default filesystem cannot tell the two spellings apart -- NTFS on
-	// Windows, case-insensitive APFS/HFS+ on macOS -- which is the platform fact the folding
-	// was written for and nothing wider. Where a box's filesystem contradicts its platform
-	// name the row added below fails loudly instead of passing quietly.
+	// still carry an identity here. Basenames are compared exactly when they agree, and where
+	// they differ the answer comes from the filesystem and not from the platform name: the
+	// measurement that decides is the dev+ino pair below, which is the same measurement the
+	// calibration row further down computes and requires this helper to agree with. Apple
+	// supports case-sensitive APFS on macOS and a Linux box can be mounted over a
+	// case-insensitive filesystem, so no platform string can say whether two spellings are
+	// one file on the box that is running it.
 	const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
 	const keyDirectory = await fileIdentity(path.dirname(lockKey))
 	if (expectedDirectory === null || keyDirectory !== expectedDirectory) {
@@ -91,10 +91,19 @@ async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): 
 	}
 	const keyBasename = path.basename(lockKey)
 	const expectedBasename = path.basename(expectedPath)
-	if (process.platform === "win32" || process.platform === "darwin") {
-		return keyBasename.toLowerCase() === expectedBasename.toLowerCase()
+	if (keyBasename === expectedBasename) {
+		return true
 	}
-	return keyBasename === expectedBasename
+	// Different spellings: the directory itself is asked whether it keeps them apart.
+	const keyIdentity = await fileIdentity(lockKey)
+	const expectedIdentity = await fileIdentity(expectedPath)
+	if (keyIdentity === null || expectedIdentity === null) {
+		// One side or both have no identity to compare, which is the shape the delete rows are
+		// in after the unlink. With nothing measured the exact comparison above stays the
+		// only acceptance this helper offers.
+		return false
+	}
+	return keyIdentity === expectedIdentity
 }
 
 function storeInternals(store: TaskHistoryStore): {

@@ -1003,6 +1003,27 @@ describe("safeWriteJson", () => {
 		expect(left).not.toContain("elsewhere.json")
 		expect(left.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
+	test("refuses a confined write whose target is the scope root itself", async () => {
+		const scopeRoot = path.join(tempDir, "scope-root-as-target")
+		await fs.mkdir(scopeRoot)
+		// The shipped rule is that the scope root counts as outside: a file write cannot land on
+		// the directory that declares the scope (src/utils/safeWriteJson.ts 124-131). No earlier row
+		// here passed the scope root as the written path - every one of the 17 confineTo calls in
+		// this file writes a path.join of a directory and a .json basename - so deleting the
+		// empty-relative branch at line 130 left every row in this file passing. This row is the
+		// row that makes that branch load-bearing.
+		const error = await safeWriteJson(scopeRoot, { mcpServers: {} }, { confineTo: scopeRoot }).then(
+			() => undefined,
+			(reason: unknown) => reason,
+		)
+		expect(error).toBeInstanceOf(ConfinedPathEscapeError)
+		// Refused before the lock and before any staging: the scope root is still an empty
+		// directory and its parent carries neither a lock directory nor a staged temp.
+		expect(await fs.readdir(scopeRoot)).toEqual([])
+		const parent = await fs.readdir(tempDir)
+		expect(parent.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+		expect(parent).not.toContain("scope-root-as-target.lock")
+	})
 	test("rejects an out-of-scope target before the advisory lock is taken", async () => {
 		vi.resetModules()
 		const projectDir = path.join(tempDir, "order-project-plain")
@@ -1414,6 +1435,212 @@ describe("safeWriteJson", () => {
 		}
 		await safeWriteJson(target, { written: "payload" }, { confineTo: projectDir })
 		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
+	})
+	test("propagates an ancestor that vanished while the lock was held instead of calling it replaced", async () => {
+		const projectDir = path.join(tempDir, "collection-enoent-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory, stat"), { code: "ENOENT" })
+		// The acquireFileLock spy is the double the recovery rows already use, and it marks the
+		// moment the lock is held, which is the window the ancestor pin runs in: the pin collects
+		// the chain in src/utils/safeWriteJson.ts 203-226 and the first re-verification is the
+		// separate call at 162-201, so a failure raised here is a failure of the collection.
+		// Reachability stated plainly rather than pretended: the publish creates the targets
+		// parent before it takes the lock (mkdir at line 289, comment at 218-219), so for a single
+		// writer every component is already there when it is collected, and the only sequence
+		// that finds one missing is a peer removing it between that mkdir and the pin. This
+		// double stands in for that peer; no claim is made that a real writer performed one.
+		const realAcquire = fileLockModule.acquireFileLock
+		const realStat = (await vi.importActual<typeof import("fs/promises")>("fs/promises")).stat
+		let locked = false
+		const acquireSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async (key: string) => {
+			const release = await realAcquire(key)
+			locked = true
+			return release
+		})
+		const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (candidate) => {
+			const lookedUp = String(candidate)
+			if (locked && path.resolve(lookedUp) === path.resolve(ancestor)) {
+				throw enoent
+			}
+			return realStat(lookedUp)
+		})
+		let captured: unknown = null
+		try {
+			captured = await safeWriteJson(target, { written: "payload" }, { confineTo: projectDir }).then(
+				() => undefined,
+				(reason: unknown) => reason,
+			)
+		} finally {
+			statSpy.mockRestore()
+			acquireSpy.mockRestore()
+		}
+		// The raw stat failure reaches the caller unchanged, and it is not dressed as a
+		// containment failure: turning a missing pinned directory into AncestorReplacedError is
+		// what the verification at 162-201 does, and this never reached it.
+		expect(captured).toBe(enoent)
+		expect(captured).not.toBeInstanceOf(AncestorReplacedError)
+		expect(await fs.readdir(ancestor)).toEqual([])
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+	test("propagates a non-ENOENT ancestor lookup failure raised while collecting the chain", async () => {
+		const projectDir = path.join(tempDir, "collection-eacces-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const eacces = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+		// Same fixture and the same two doubles as the row above, with the injected code changed.
+		// A permission error says nothing about whether the directory was replaced, so it must
+		// reach the caller as itself, and it must do so from the collection rather than from
+		// the verification that knows how to relabel a missing directory.
+		const realAcquire = fileLockModule.acquireFileLock
+		const realStat = (await vi.importActual<typeof import("fs/promises")>("fs/promises")).stat
+		let locked = false
+		const acquireSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async (key: string) => {
+			const release = await realAcquire(key)
+			locked = true
+			return release
+		})
+		const statSpy = vi.spyOn(fs, "stat").mockImplementation(async (candidate) => {
+			const lookedUp = String(candidate)
+			if (locked && path.resolve(lookedUp) === path.resolve(ancestor)) {
+				throw eacces
+			}
+			return realStat(lookedUp)
+		})
+		let captured: unknown = null
+		try {
+			captured = await safeWriteJson(target, { written: "payload" }, { confineTo: projectDir }).then(
+				() => undefined,
+				(reason: unknown) => reason,
+			)
+		} finally {
+			statSpy.mockRestore()
+			acquireSpy.mockRestore()
+		}
+		expect(captured).toBe(eacces)
+		expect(captured).not.toBeInstanceOf(AncestorReplacedError)
+		// Nothing published and nothing left behind: the write stopped before staging, so no
+		// staged temp and no lock directory survive it.
+		expect(await fs.readdir(ancestor)).toEqual([])
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+	test("leaves a lock another writer holds at the swapped path alone when the confined write fails", async () => {
+		const projectDir = path.join(tempDir, "foreign-lock-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const swappedIn = path.join(tempDir, "foreign-lock-elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		// The foreign lock is planted by proper-lockfile itself, in the directory the swap is going
+		// to move into, by a call that is not this writes. Its survival below therefore cannot be
+		// residue of a lock this write ever owned.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const foreignPath = path.join(swappedIn, "mcp.json")
+		const foreignRelease = await realLockfile.lock(foreignPath, {
+			stale: fileLockModule.LOCK_STALE_MS,
+			realpath: false,
+			retries: 0,
+		})
+		// The acquire double is the one the recovery rows already use, with the release closure
+		// supplied by the double instead of by the lock module. The claim below is about the paths
+		// safeWriteJson acts on, not about how the lock module keeps its own bookkeeping: measured
+		// on this box (node v25.9.0, win32, proper-lockfile 4.1.2) a real release follows the path
+		// string it was handed and does remove a foreign lock sitting at the swapped path, and
+		// that is the lock modules behaviour rather than anything safeWriteJson itself does, so no
+		// row here asserts it and the ask about the release stays open for the shipped-line ruling.
+		let acquired = 0
+		let released = 0
+		const acquireSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async () => {
+			acquired += 1
+			return async () => {
+				released += 1
+			}
+		})
+		let swapped = false
+		let captured: unknown = null
+		try {
+			captured = await safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					trace: (event) => {
+						if (event.stage !== "write-start" || swapped) return
+						swapped = true
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+					},
+				},
+			).then(
+				() => undefined,
+				(reason: unknown) => reason,
+			)
+			expect(captured).toBeInstanceOf(AncestorReplacedError)
+			expect(path.basename((captured as AncestorReplacedError).directory)).toBe("settings")
+			expect((captured as AncestorReplacedError).message).toContain("nothing was published")
+			// The write took the lock once and handed back exactly one release before rejecting.
+			expect(acquired).toBe(1)
+			expect(released).toBe(1)
+			// The other writers lock is still there. Nothing in the refusal path removes a directory at
+			// the path the target name now resolves to, which after the swap is the directory the
+			// foreign lock lives in.
+			expect(fsSyncActual.existsSync(path.join(swappedIn, "mcp.json.lock"))).toBe(true)
+			// Nothing was published into that directory either: the foreign lock is its only entry.
+			expect((await fs.readdir(swappedIn)).filter((entry) => !entry.endsWith(".lock"))).toEqual([])
+		} finally {
+			acquireSpy.mockRestore()
+			await foreignRelease()
+		}
+	})
+	test("gives up on a lock another writer holds instead of waiting out the stale window", async () => {
+		const scope = path.join(tempDir, "held-lock-scope")
+		await fs.mkdir(scope, { recursive: true })
+		const target = path.join(scope, "held.json")
+		await fs.writeFile(target, JSON.stringify({ other: "writer" }), "utf8")
+		// Another writer holds the lock at the very path this write wants, and it holds it fresh,
+		// well inside the stale window: the lock is planted by proper-lockfile with the same
+		// staleness the shipped code passes, so the only way this write can get through is to wait
+		// the owner out or to take the lock from under it.
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const otherRelease = await realLockfile.lock(target, {
+			stale: fileLockModule.LOCK_STALE_MS,
+			realpath: false,
+			retries: 0,
+		})
+		let captured: unknown = null
+		let waitedMs = 0
+		let releaseFailure: unknown = null
+		try {
+			const startedAt = Date.now()
+			captured = await safeWriteJson(target, { written: "payload" }, { confineTo: scope }).then(
+				() => undefined,
+				(reason: unknown) => reason,
+			)
+			waitedMs = Date.now() - startedAt
+		} finally {
+			// Captured rather than thrown so the assertions below are about what the write decided.
+			try {
+				await otherRelease()
+			} catch (reason: unknown) {
+				releaseFailure = reason
+			}
+		}
+		// The write does not wait for the other writer to die: it gives up and reports the lock.
+		// The retry schedule is the bound this box can state: src/utils/fileLock.ts 39-52 retries 5
+		// times with a 1000 ms ceiling on any single wait, so the give-up is seconds, while
+		// LOCK_STALE_MS at src/utils/fileLock.ts:10 is the 31_000 ms a stale owner is allowed to
+		// keep. The row asserts the gap between the two, which is the assertion the ask says is
+		// missing, and it says nothing about how long the other writer actually lives.
+		expect(captured).toBeInstanceOf(Error)
+		expect(String((captured as Error).message)).toMatch(/lock/i)
+		expect(waitedMs).toBeLessThan(fileLockModule.LOCK_STALE_MS)
+		// The other writer never lost its lock: its release succeeded, and the file still holds the
+		// bytes it wrote, so the give-up above is a refusal rather than a steal.
+		expect(releaseFailure).toBeNull()
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ other: "writer" })
 	})
 	test("refuses the commit when a moved ancestor's old name is replaced by a link back to it", async () => {
 		const projectDir = path.join(tempDir, "moved-back-project")
