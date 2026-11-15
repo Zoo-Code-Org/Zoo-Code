@@ -142,9 +142,7 @@ function createTask(preventFocusDisruption = false): Task {
 			saveChanges,
 			saveDirectly,
 			scrollToFirstDiff: vi.fn(),
-			pushToolWriteResult: vi
-				.fn()
-				.mockResolvedValue('{"path":"src/index.ts","operation":"modified","notice":"baseline"}'),
+			pushToolWriteResult: vi.fn().mockResolvedValue(PROVIDER_RESULT),
 		},
 		observationRegistry: {
 			get: registryGet,
@@ -163,13 +161,29 @@ function createTask(preventFocusDisruption = false): Task {
 	return task as unknown as Task
 }
 
-async function runExecute(preventFocusDisruption = false): Promise<void> {
-	await applyDiffTool.execute({ path: REL_PATH, diff: DIFF }, createTask(preventFocusDisruption), {
+// The provider's own result string, spelled once so the double above and the assertions below read
+// the same literal: the tool reports what the provider returned, so this is the value every
+// successful-save case expects to see handed to pushToolResult.
+const PROVIDER_RESULT = '{"path":"src/index.ts","operation":"modified","notice":"baseline"}'
+// The notice the tool appends when the turn carried a single SEARCH/REPLACE block
+// (ApplyDiffTool.ts:311-319). Spelled here so the assertion below is exact rather than a
+// substring match; if the shipped wording moves, this line moves with it.
+const SINGLE_BLOCK_NOTICE =
+	"\n<notice>Making multiple related changes in a single apply_diff is more efficient. If other changes are needed in this file, please include them as additional SEARCH/REPLACE blocks.</notice>"
+
+// The helper hands back the two callbacks it installs instead of swallowing them, so a case can
+// assert what the tool reported. A helper that returns void makes "no error callback occurred"
+// unaskable, which is what the reviewer row names.
+function runExecute(preventFocusDisruption = false) {
+	const handleError = vi.fn<ToolCallbacks["handleError"]>().mockResolvedValue(undefined)
+	const pushToolResult = vi.fn<ToolCallbacks["pushToolResult"]>()
+	const run = applyDiffTool.execute({ path: REL_PATH, diff: DIFF }, createTask(preventFocusDisruption), {
 		askApproval,
-		handleError: vi.fn().mockResolvedValue(undefined),
-		pushToolResult: vi.fn(),
+		handleError,
+		pushToolResult,
 		toolCallId: "tool-call-write-kind",
 	})
+	return { handleError, pushToolResult, run }
 }
 
 // The mocked-provider suite replays an apply_diff turn that is matched on a tool result of
@@ -200,15 +214,22 @@ describe("ApplyDiffTool write kind", () => {
 	})
 
 	it("publishes the accepted hunk through the diff-view save as an edit", async () => {
-		await runExecute()
+		const { handleError, pushToolResult, run } = runExecute()
+		await run
 
 		expect(saveChanges).toHaveBeenCalledTimes(1)
 		expect(saveChanges).toHaveBeenCalledWith(false, 0, "edit", false, undefined)
 		expect(saveDirectly).not.toHaveBeenCalled()
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("publishes the accepted hunk through the guarded direct save as an edit", async () => {
-		await runExecute(true)
+		const { handleError, pushToolResult, run } = runExecute(true)
+		await run
 
 		expect(saveDirectly).toHaveBeenCalledTimes(1)
 		expect(saveDirectly).toHaveBeenCalledWith(
@@ -223,39 +244,68 @@ describe("ApplyDiffTool write kind", () => {
 			undefined,
 		)
 		expect(saveChanges).not.toHaveBeenCalled()
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("records its own read as an incomplete observation so the edit guard accepts the publish", async () => {
-		await runExecute()
+		const { handleError, pushToolResult, run } = runExecute()
+		await run
 
 		expect(registryObserve).toHaveBeenCalledTimes(1)
 		expect(registryObserve).toHaveBeenCalledWith(ABSOLUTE_PATH, READ_TOKEN, false)
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("keeps a matching complete read complete rather than downgrading it to the hunk", async () => {
 		registryGet.mockReturnValue({ version: READ_TOKEN, complete: true })
 
-		await runExecute()
+		const { handleError, pushToolResult, run } = runExecute()
+		await run
 
 		expect(registryObserve).toHaveBeenCalledTimes(1)
 		expect(registryObserve).toHaveBeenCalledWith(ABSOLUTE_PATH, READ_TOKEN, true)
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("leaves an observation of an older version exactly as the model earned it", async () => {
 		registryGet.mockReturnValue({ version: "9:9:9:9:9", complete: true })
 
-		await runExecute()
+		const { handleError, pushToolResult, run } = runExecute()
+		await run
 
 		expect(registryObserve).not.toHaveBeenCalled()
 		expect(saveChanges).toHaveBeenCalledWith(false, 0, "edit", false, undefined)
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 
 	it("records nothing when the read is not stat-matched, leaving the publish unobserved", async () => {
 		armStatDrift(true)
 
-		await runExecute()
+		const { handleError, pushToolResult, run } = runExecute()
+		await run
 
 		expect(registryObserve).not.toHaveBeenCalled()
 		expect(saveChanges).toHaveBeenCalledWith(false, 0, "edit", false, undefined)
+		// The tool reported the provider's own result with the single-block notice the shipped code
+		// appends, and took no error path: a save on its own does not prove a reported turn.
+		expect(pushToolResult).toHaveBeenCalledTimes(1)
+		expect(pushToolResult.mock.calls[0]?.[0]).toBe(PROVIDER_RESULT + SINGLE_BLOCK_NOTICE)
+		expect(handleError).not.toHaveBeenCalled()
 	})
 })

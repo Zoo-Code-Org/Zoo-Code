@@ -71,23 +71,27 @@ vi.mock("../../../utils/fs", () => ({
 }))
 
 // Mock path
-vi.mock("path", () => ({
-	resolve: vi.fn((cwd: string, relPath?: string) => (relPath === undefined ? cwd : `${cwd}/${relPath}`)),
-	isAbsolute: vi.fn((p: string) => p.startsWith("/")),
-	basename: vi.fn((path) => path.split("/").pop()),
-	dirname: vi.fn((path) => path.split("/").slice(0, -1).join("/") || "/"),
-	join: (...args: string[]) => args.join("/"),
-	sep: "/",
-	// guardedWrite's workspace containment compares paths lexically, so the double needs
-	// a POSIX relative() that matches the resolve()/join() doubles above.
-	relative: (from: string, to: string) => {
-		const f = from.split("/").filter(Boolean)
-		const t = to.split("/").filter(Boolean)
-		let i = 0
-		while (i < f.length && i < t.length && f[i] === t[i]) i++
-		return [...Array.from({ length: f.length - i }, () => ".."), ...t.slice(i)].join("/")
-	},
-}))
+vi.mock("path", async () => {
+	// Real POSIX resolution rather than string concatenation. path.posix.resolve replaces the base
+	// when the next argument is already absolute and collapses "." and ".." segments, which is what
+	// the containment line of the guarded publish depends on (guardedWrite.ts:367-382;
+	// DiffViewProvider.saveDirectly resolves through this same module). A concatenating double turns
+	// an absolute target into a path under cwd, so an absolute escape reads as inside the root and
+	// the guard that exists to refuse it never sees one. POSIX rather than the host path module,
+	// because these fixtures are slash-separated on every host.
+	const posix = (await vi.importActual<typeof import("path")>("path")).posix
+	return {
+		resolve: posix.resolve,
+		isAbsolute: posix.isAbsolute,
+		basename: posix.basename,
+		dirname: posix.dirname,
+		join: posix.join,
+		sep: "/",
+		// The containment check compares the resolved target against the resolved root, so it needs the
+		// same POSIX relative() that the resolve() above comes from.
+		relative: posix.relative,
+	}
+})
 
 // Mock vscode
 vi.mock("vscode", () => ({
@@ -1093,7 +1097,9 @@ describe("DiffViewProvider", () => {
 			)
 
 			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
-			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/../outside.ts`, "new content")
+			// The normalized location rather than `${mockCwd}/../outside.ts`: real resolution collapses the
+			// parent-directory segment, and the guard binds the publish to that same spelling.
+			expect(safeWriteText).toHaveBeenCalledWith("/mock/outside.ts", "new content")
 		})
 
 		it("rejects the same escape when no approval was obtained", async () => {
@@ -1107,6 +1113,79 @@ describe("DiffViewProvider", () => {
 			).rejects.toThrow("Path resolves outside the workspace")
 
 			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("rejects an absolute target that resolves outside the root, with no approval", async () => {
+			// The double's own example from the ask: resolving an absolute second argument must REPLACE cwd.
+			// A concatenating double produced `${mockCwd}//outside.ts`, the lexical relative() dropped the
+			// empty segment and reported the target as inside the root, and the guard published an escape it
+			// should have refused. This row fails against that double and passes against real resolution.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(
+				diffViewProvider.saveDirectly("/outside.ts", "new content", false, true, 1000, "create"),
+			).rejects.toThrow("Path resolves outside the workspace")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("publishes an absolute target inside the root at its normalized location", async () => {
+			// The same replacement seen from the inside: an absolute spelling of a path that does lie under
+			// cwd has to resolve to that path instead of to cwd with the absolute text appended. The publish
+			// target is what a later reader can verify, so it is asserted literally.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+
+			await diffViewProvider.saveDirectly("/mock/cwd/inside.ts", "new content", false, true, 1000, "create")
+
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith("/mock/cwd/inside.ts", "new content")
+		})
+
+		it("rejects an approved outside target whose canonical identity does not match", async () => {
+			// The approval is bound to the identity captured before it was asked for: a different identity is
+			// a different target, so the guard refuses it even with the flag set.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+
+			await expect(
+				diffViewProvider.saveDirectly(
+					"/outside.ts",
+					"new content",
+					false,
+					true,
+					1000,
+					"create",
+					undefined,
+					true,
+					"/mock/cwd/other.ts",
+				),
+			).rejects.toThrow("approved target no longer resolves")
+
+			expect(safeWriteText).not.toHaveBeenCalled()
+		})
+
+		it("publishes an absolute outside target only with the matching approval identity", async () => {
+			// The identity is spelled literally rather than re-derived through the mocked module, so the row
+			// does not use the double as its own oracle: the guard has to reach this exact path on its own.
+			// Under a concatenating double the target and this identity are different strings and the row
+			// fails; under real resolution they are the same path and it publishes.
+			vi.mocked(fs.access).mockRejectedValue({ code: "ENOENT" })
+
+			await diffViewProvider.saveDirectly(
+				"/outside.ts",
+				"new content",
+				false,
+				true,
+				1000,
+				"create",
+				undefined,
+				true,
+				"/outside.ts",
+			)
+
+			const { safeWriteText } = await import("../../../services/file-safety/safeWriteText")
+			expect(safeWriteText).toHaveBeenCalledWith("/outside.ts", "new content")
 		})
 
 		it("does not save a dirty buffer in the memory-only diagnostics path", async () => {

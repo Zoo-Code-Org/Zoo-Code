@@ -393,7 +393,26 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		// post-read token the tool cannot prove the version it read, so the read
 		// authorizes nothing and the save falls back to the re-read remediation.
 		const stat = vi.mocked((await import("fs/promises")).default.stat)
-		stat.mockRejectedValue(Object.assign(new Error("EACCES"), { code: "EACCES" }))
+		// Pin WHICH of the two bracketing stats fails, keyed to the interleaving with the read
+		// rather than to a call index: the pre-read stat is the one that runs before the read.
+		// Flipping the injected failure to the pre-read side makes the roles assertion at the end of
+		// this row fail, so the row tests the post-read failure its title names instead of the
+		// pre-read failure the row above already pins.
+		const readFile = vi.mocked((await import("fs/promises")).default.readFile)
+		let readStarted = false
+		readFile.mockImplementation(async () => {
+			readStarted = true
+			return "original file content\n"
+		})
+		const statRoles: string[] = []
+		stat.mockImplementation(async () => {
+			if (!readStarted) {
+				statRoles.push("pre:ok")
+				return { dev: 1n, ino: 2n, size: 22n, mtimeNs: 100n, ctimeNs: 100n } as unknown as BigIntStats
+			}
+			statRoles.push("post:threw")
+			throw Object.assign(new Error("EACCES"), { code: "EACCES" })
+		})
 
 		await tool.execute({ path: "src/thing.ts", diff: "unified diff" }, mockTask as Task, {
 			askApproval: mockAskApproval,
@@ -406,6 +425,9 @@ describe("ApplyDiffTool.execute - guarded write (S4b, epic #1375)", () => {
 		expect(mockSaveDirectly).toHaveBeenCalled()
 		expect(mockHandleError).not.toHaveBeenCalled()
 		expect(stat).toHaveBeenCalledTimes(2)
+		// The absent observation here is the POST-read gap rather than a doubled pre-read failure:
+		// the pre-read stat resolved and only the second one threw.
+		expect(statRoles).toEqual(["pre:ok", "post:threw"])
 	})
 
 	it("carries the outside-workspace approval and its canonical identity to the guarded save", async () => {

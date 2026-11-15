@@ -1203,12 +1203,37 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			vi.mocked(fsSync.openSync).mockReturnValue(1)
-			vi.mocked(execFile).mockImplementation((_cmd, _args, _opts, cb) => {
+			// The grant callback is held instead of completed. With a callback that answers on the spot,
+			// the invocation-order assertion at the end of this row is satisfied by any call sequence,
+			// including one where the writer never awaited the grant and opened the staging file alongside
+			// it. Holding the callback is what makes the wait observable.
+			const held: Array<(error: ExecFileException | null, stdout: string, stderr: string) => void> = []
+			vi.mocked(execFile).mockImplementation((_cmd, args, _opts, cb) => {
+				// Only the staging-directory grant is held: the dump and the restore answer as soon as asked,
+				// so this row is about the privacy barrier rather than about icacls in general.
+				if ((args ?? []).map(String).includes("/inheritance:r")) {
+					if (typeof cb === "function") {
+						held.push(cb)
+					}
+					return fakeChild
+				}
 				if (typeof cb === "function") cb(null, "", "")
 				return fakeChild
 			})
 
-			await safeWriteText(targetPath, "data", { platform: "win32" })
+			const write = safeWriteText(targetPath, "data", { platform: "win32" })
+			// Release the grant on every path, including a failing assertion below, so the row does not
+			// leave a callback outstanding for the next row to inherit.
+			try {
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				// With the grant still outstanding the staging file has not been opened at all: the barrier
+				// is awaited, not merely earlier in a list of call indices.
+				expect(held).toHaveLength(1)
+				expect(vi.mocked(fsSync.openSync).mock.calls).toHaveLength(0)
+			} finally {
+				held[0]?.(null, "", "")
+			}
+			await expect(write).resolves.toBeUndefined()
 
 			// mkdirSync's mode is ignored by Windows directory creation and chmodSync does not
 			// establish a DACL, so the privacy of the staged bytes has to come from an explicit
@@ -1224,9 +1249,9 @@ describe("safeWriteText", () => {
 			expect(grantArgs[2]).toBe("/grant:r")
 			expect(grantArgs[3]).toBe("staging-acl-user:(OI)(CI)F")
 
-			// Order is the finding: the grant has to precede the first open of the staging
-			// file, or the content sits in the inherited directory readable to whoever the
-			// parent admitted until the step-5 restore.
+			// Order is the finding the reviewer row already named: the grant precedes the first open of
+			// the staging file. The assertions above pin that ordering as a wait rather than as an
+			// index comparison; this line is the one that was here before.
 			expect(vi.mocked(execFile).mock.invocationCallOrder[0]).toBeLessThan(
 				vi.mocked(fsSync.openSync).mock.invocationCallOrder[0],
 			)

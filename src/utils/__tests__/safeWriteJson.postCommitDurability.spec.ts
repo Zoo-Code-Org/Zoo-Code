@@ -117,6 +117,9 @@ describe("safeWriteJson post-commit durability", () => {
 		// This module writes the staged file through a stream, so the pre-commit failure is
 		// injected on that stream.
 		let tempWriteAttempted = false
+		// Set inside the open handler below: it records whether the staged file was already on
+		// disk when the permission error landed, which is the ordering the ask names.
+		let stagedFileExistedAtInjection = false
 		const writeStreamActual = actuals.writeStream
 		if (writeStreamActual === null) {
 			throw new Error("fs mock did not capture the real createWriteStream")
@@ -129,8 +132,20 @@ describe("safeWriteJson post-commit durability", () => {
 					// the write never reached a staged file at all.
 					tempWriteAttempted = true
 					const stream = writeStreamActual(stagedPath, { encoding: "utf8" })
-					process.nextTick(() => {
-						stream.emit("error", Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }))
+					// Inject on the stream's own open event rather than on a timer. The old injection
+					// fired on process.nextTick whether or not the staged file had been created yet, so
+					// the cleanup below ran against a staging file that might not exist and the row could
+					// not tell the two apart. Waiting for "open" puts the failure after the staging file
+					// exists, which is the situation the residue assertion is about.
+					stream.once("open", () => {
+						// The open had happened and the file is on disk by the time the error lands:
+						// this pins the ordering the ask names instead of leaving it to the timer.
+						stagedFileExistedAtInjection = fsSync.existsSync(stagedPath)
+						stream.destroy(
+							Object.assign(new Error("EACCES: permission denied, open '" + stagedPath + "'"), {
+								code: "EACCES",
+							}),
+						)
 					})
 					return stream
 				}
@@ -141,6 +156,9 @@ describe("safeWriteJson post-commit durability", () => {
 		await expect(safeWriteJson(targetPath, { version: "new" })).rejects.toThrow("EACCES: permission denied")
 
 		expect(tempWriteAttempted).toBe(true)
+		// The failure arrived after the open: the staged file existed when the error landed, so
+		// the residue assertion below inspects cleanup of a file that really was there.
+		expect(stagedFileExistedAtInjection).toBe(true)
 		// Nothing was published: the target still holds the previous content, and the staged
 		// file this write created is gone again - the failure handler removed it.
 		expect(JSON.parse(await fs.readFile(targetPath, "utf8"))).toEqual({ version: "old" })
