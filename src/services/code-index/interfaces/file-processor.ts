@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
 import type { FileFailureActivity } from "../file-failure-registry"
+import type { ParserFatalError } from "../parser-errors"
 
 /**
  * Interface for code file parser
@@ -76,6 +77,9 @@ export interface IFileWatcher extends vscode.Disposable {
 	 * The event payload contains a summary of the batch operation.
 	 */
 	readonly onDidFinishBatchProcessing: vscode.Event<BatchProcessingSummary>
+
+	/** Fired when a parse fails fatally (timeout, crash or worker exit); the orchestrator ends the attempt. */
+	readonly onParserFatal: vscode.Event<ParserFatalError>
 
 	/**
 	 * Processes a file

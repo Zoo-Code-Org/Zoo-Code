@@ -203,11 +203,13 @@
 		"statusTitle": "狀態",
 		"indexingFilesRetrying": "索引失敗的檔案數：{{count}}。正在重試 {{path}}：{{reason}}",
 		"indexingFilesFailed": "索引失敗的檔案數：{{count}}。{{path}} 的自動重試已結束：{{reason}}",
+		"indexingFilesAwaitingRetry": "索引失敗的檔案數：{{count}}。剖析在 {{path}} 處停止，等待手動重試：{{reason}}",
 		"failedFileDetails": "失敗檔案詳細資訊",
 		"failedFileReason": "原因",
 		"failedFileStates": {
 			"retrying": "等待自動重試",
-			"exhausted": "自動重試已結束"
+			"exhausted": "自動重試已結束",
+			"awaiting-retry": "等待手動重試"
 		},
 		"failedFileActivities": {
 			"read": "讀取檔案",

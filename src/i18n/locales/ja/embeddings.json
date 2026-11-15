@@ -61,6 +61,12 @@
 		"providerWaiting": "{{service}} を待機中です。インデックス作成は自動的に再開されます",
 		"providerWaitingUntil": "{{service}} を待機中です。インデックス作成は {{time}} に自動的に再開されます",
 		"indexingFilesFailed": "ファイルのエラーが残っています。自動再試行の予定はありません。部分的なインデックスを利用できます。",
+		"parserFatal": "インデックス作成を停止しました：{{filePath}} でパーサーが{{category}}。既存のインデックスデータは保持されます。再試行するには、インデックス作成を開始するか、インデックス作成を無効にしてから再度有効にしてください。",
+		"parserFatalCategory": {
+			"timeout": "タイムアウトしました",
+			"crash": "クラッシュしました",
+			"exit": "予期せず終了しました"
+		},
 		"indexingStopping": "インデックス作成を停止中...",
 		"indexingFailedNoBlocks": "インデックス作成に失敗しました：コードブロックが正常にインデックス化されませんでした。これは通常、エンベッダーの設定問題を示しています。",
 		"fileWatcherStarted": "ファイルウォッチャーが開始されました。",

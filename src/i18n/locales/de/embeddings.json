@@ -61,6 +61,12 @@
 		"providerWaiting": "Warten auf {{service}}; die Indexierung wird automatisch fortgesetzt",
 		"providerWaitingUntil": "Warten auf {{service}}; die Indexierung wird um {{time}} automatisch fortgesetzt",
 		"indexingFilesFailed": "Es bestehen weiterhin Dateifehler. Keine automatischen Wiederholungen ausstehend. Ein Teilindex ist verfügbar.",
+		"parserFatal": "Indexierung gestoppt: Der Parser ist bei {{filePath}} {{category}}. Vorhandene Indexdaten bleiben erhalten. Starte die Indexierung oder deaktiviere und aktiviere sie erneut, um es noch einmal zu versuchen.",
+		"parserFatalCategory": {
+			"timeout": "in eine Zeitüberschreitung gelaufen",
+			"crash": "abgestürzt",
+			"exit": "unerwartet beendet worden"
+		},
 		"indexingStopping": "Indexierung wird gestoppt...",
 		"indexingFailedNoBlocks": "Indizierung fehlgeschlagen: Keine Code-Blöcke wurden erfolgreich indiziert. Dies deutet normalerweise auf ein Embedder-Konfigurationsproblem hin.",
 		"fileWatcherStarted": "Datei-Watcher gestartet.",

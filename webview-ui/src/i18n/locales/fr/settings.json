@@ -176,11 +176,13 @@
 		"statusTitle": "Statut",
 		"indexingFilesRetrying": "Fichiers en échec d'indexation : {{count}}. Nouvelle tentative pour {{path}} : {{reason}}",
 		"indexingFilesFailed": "Fichiers en échec d'indexation : {{count}}. Nouvelle tentative automatique terminée pour {{path}} : {{reason}}",
+		"indexingFilesAwaitingRetry": "Fichiers en échec d'indexation : {{count}}. L'analyse s'est arrêtée sur {{path}} et attend une nouvelle tentative explicite : {{reason}}",
 		"failedFileDetails": "Détails des fichiers en échec",
 		"failedFileReason": "Raison",
 		"failedFileStates": {
 			"retrying": "Nouvelle tentative automatique en attente",
-			"exhausted": "Nouvelle tentative automatique terminée"
+			"exhausted": "Nouvelle tentative automatique terminée",
+			"awaiting-retry": "En attente d'une nouvelle tentative explicite"
 		},
 		"failedFileActivities": {
 			"read": "Lire le fichier",

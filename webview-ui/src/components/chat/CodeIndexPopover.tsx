@@ -724,9 +724,11 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 									{failedFileSummary && failedFileSummary.count > 0 && (
 										<p className="m-0" role="status">
 											{t(
-												failedFileSummary.state === "retrying"
-													? "settings:codeIndex.indexingFilesRetrying"
-													: "settings:codeIndex.indexingFilesFailed",
+												failedFileSummary.state === "awaiting-retry"
+													? "settings:codeIndex.indexingFilesAwaitingRetry"
+													: failedFileSummary.state === "retrying"
+														? "settings:codeIndex.indexingFilesRetrying"
+														: "settings:codeIndex.indexingFilesFailed",
 												{ ...failedFileSummary },
 											)}
 										</p>

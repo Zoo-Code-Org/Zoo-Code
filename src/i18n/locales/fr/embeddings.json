@@ -61,6 +61,12 @@
 		"providerWaiting": "En attente de {{service}} ; l’indexation reprend automatiquement",
 		"providerWaitingUntil": "En attente de {{service}} ; l’indexation reprend automatiquement à {{time}}",
 		"indexingFilesFailed": "Des fichiers restent en échec. Aucune nouvelle tentative automatique en attente. Un index partiel est disponible.",
+		"parserFatal": "Indexation arrêtée : l'analyseur {{category}} sur {{filePath}}. Les données d'index existantes sont conservées. Lancez l'indexation, ou désactivez-la puis réactivez-la, pour réessayer.",
+		"parserFatalCategory": {
+			"timeout": "a dépassé le délai",
+			"crash": "a planté",
+			"exit": "s'est arrêté de façon inattendue"
+		},
 		"indexingStopping": "Arrêt de l'indexation en cours...",
 		"indexingFailedNoBlocks": "Échec de l'indexation : Aucun bloc de code n'a été indexé avec succès. Cela indique généralement un problème de configuration de l'embedder.",
 		"fileWatcherStarted": "Surveillant de fichiers démarré.",

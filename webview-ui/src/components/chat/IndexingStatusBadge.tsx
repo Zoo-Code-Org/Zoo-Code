@@ -86,9 +86,11 @@ export const IndexingStatusBadge: React.FC<IndexingStatusBadgeProps> = ({ classN
 		const failureText =
 			summary && summary.count > 0
 				? t(
-						summary.state === "retrying"
-							? "settings:codeIndex.indexingFilesRetrying"
-							: "settings:codeIndex.indexingFilesFailed",
+						summary.state === "awaiting-retry"
+							? "settings:codeIndex.indexingFilesAwaitingRetry"
+							: summary.state === "retrying"
+								? "settings:codeIndex.indexingFilesRetrying"
+								: "settings:codeIndex.indexingFilesFailed",
 						{ ...summary },
 					)
 				: `${t("settings:codeIndex.failedFileDetails")} (${indexingStatus.failedFiles?.length ?? 0})`

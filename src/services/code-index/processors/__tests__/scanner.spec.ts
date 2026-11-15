@@ -2,6 +2,7 @@
 
 import { DirectoryScanner } from "../scanner"
 import { ParserLoadError } from "../parser"
+import { ParserFatalError } from "../../parser-errors"
 import { FileFailureRegistry } from "../../file-failure-registry"
 import { ProviderPacerRegistry } from "../../provider-pacer"
 import { stat } from "fs/promises"
@@ -751,6 +752,38 @@ describe("DirectoryScanner", () => {
 				expect(mockCacheManager.updateHash).toHaveBeenCalledWith("test/file2.js", expect.any(String))
 			},
 		)
+
+		it("CI-SC-04: a ParserFatalError records awaiting-retry and rethrows; AbortError records nothing", async () => {
+			const failures = new FileFailureRegistry()
+			const fatalScanner = new DirectoryScanner(
+				mockEmbedder,
+				mockVectorStore,
+				mockCodeParser,
+				mockCacheManager,
+				mockIgnoreInstance,
+				undefined,
+				failures,
+				new ProviderPacerRegistry(),
+			)
+			const fatal = new ParserFatalError("crash", "test/file1.js", "Aborted()")
+			mockCodeParser.parseFile.mockImplementation(async (filePath: string) => {
+				if (filePath === "test/file1.js") throw fatal
+				throw new DOMException("Parsing stopped", "AbortError")
+			})
+
+			await expect(fatalScanner.scanDirectory("/test")).rejects.toBe(fatal)
+
+			expect(failures.list()).toEqual([
+				expect.objectContaining({
+					path: nodePath.normalize("test/file1.js"),
+					activity: "parse",
+					state: "awaiting-retry",
+				}),
+			])
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			expect(mockVectorStore.upsertPoints).not.toHaveBeenCalled()
+			expect(mockCacheManager.updateHash).not.toHaveBeenCalled()
+		})
 
 		it("should not process deleted files when signal is aborted", async () => {
 			const { listFiles } = await import("../../../glob/list-files")

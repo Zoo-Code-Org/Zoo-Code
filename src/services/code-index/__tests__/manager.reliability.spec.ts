@@ -5,6 +5,7 @@ import { CodeIndexManager } from "../manager"
 import { CodeIndexStateManager } from "../state-manager"
 import { CacheManager, CacheReadError } from "../cache-manager"
 import type { CodeIndexOrchestrator } from "../orchestrator"
+import { WorkspaceIndexingEnablementManager } from "../workspace-indexing-enablement-manager"
 
 vi.mock("vscode", () => {
 	const emitter = function () {
@@ -33,6 +34,27 @@ vi.mock("../semble", () => ({
 	}),
 }))
 vi.mock("../../../i18n", () => ({ t: (key: string) => key }))
+// Real service recreation runs in CI-MG-07; these doubles stand in for the services it builds.
+vi.mock("../service-factory", () => ({
+	CodeIndexServiceFactory: vi.fn().mockImplementation(function () {
+		return { createServices: () => ({ embedder: {}, vectorStore: {}, scanner: {}, fileWatcher: {} }) }
+	}),
+}))
+vi.mock("../orchestrator", () => ({
+	CodeIndexOrchestrator: vi.fn().mockImplementation(function () {
+		return { stopIndexing: async () => {}, startIndexing: async () => {}, isScanning: false }
+	}),
+}))
+vi.mock("../search-service", () => ({
+	CodeIndexSearchService: vi.fn().mockImplementation(function () {
+		return {}
+	}),
+}))
+vi.mock("../../../core/ignore/RooIgnoreController", () => ({
+	RooIgnoreController: vi.fn().mockImplementation(function () {
+		return { initialize: async () => {} }
+	}),
+}))
 vi.mock("../config-manager", () => ({
 	CodeIndexConfigManager: vi.fn().mockImplementation(function (contextProxy: unknown) {
 		return {
@@ -303,6 +325,201 @@ describe("CodeIndexManager reliability", () => {
 				}
 			},
 		)
+	})
+
+	describe("fatal parser latch", () => {
+		const fatalMessage = "parser timed out on src/hang.ts"
+
+		function withFatalFailure(manager: CodeIndexManager, stateManager: CodeIndexStateManager) {
+			manager["failureRegistry"].renew("src/hang.ts", "h")
+			manager["failureRegistry"].record("src/hang.ts", "h", "parse", "timeout", 1, "awaiting-retry")
+			stateManager.setSystemState("Error", fatalMessage)
+		}
+
+		function configure(manager: CodeIndexManager, options: { requiresRestart?: boolean; enabled?: boolean } = {}) {
+			const contextProxy = {}
+			manager["_configManager"] = {
+				isFeatureEnabled: options.enabled ?? true,
+				isFeatureConfigured: true,
+				currentEmbedderProvider: providerIdentifiers.openai,
+				loadConfiguration: async () => ({ requiresRestart: options.requiresRestart ?? false }),
+				getContextProxy: () => contextProxy,
+			} as unknown as (typeof manager)["_configManager"]
+			return contextProxy
+		}
+
+		function orchestratorDouble(order: string[], name: string, state: OrchestratorDouble["state"] = "Error") {
+			return {
+				startIndexing: vi.fn(async () => void order.push(`${name}.start`)),
+				stopIndexing: vi.fn(async () => void order.push(`${name}.stop`)),
+				isScanning: false,
+				state,
+			} satisfies OrchestratorDouble
+		}
+
+		/** Replaces service recreation with one that attaches `fresh`, as the real one builds a new orchestrator. */
+		function recreateWith(manager: CodeIndexManager, fresh: OrchestratorDouble) {
+			vi.spyOn(CacheManager.prototype, "initialize").mockResolvedValue(undefined)
+			return vi
+				.spyOn(manager as unknown as { _recreateServices(): Promise<void> }, "_recreateServices")
+				.mockImplementation(async () => {
+					attach(manager, fresh)
+					manager["_searchService"] = {} as unknown as (typeof manager)["_searchService"]
+				})
+		}
+
+		it("CI-MG-05: with awaiting-retry set, initialize() starts nothing", async () => {
+			const { manager, stateManager } = makeManager()
+			const order: string[] = []
+			const contextProxy = configure(manager)
+			withFatalFailure(manager, stateManager)
+			const recreate = recreateWith(manager, orchestratorDouble(order, "fresh", "Standby"))
+
+			await manager.initialize(contextProxy as Parameters<CodeIndexManager["initialize"]>[0])
+
+			expect(recreate).toHaveBeenCalledOnce()
+			expect(order).toEqual([])
+			expect(manager["failureRegistry"].hasAwaitingRetry()).toBe(true)
+		})
+
+		it("CI-MG-05: Start Indexing clears the latch and starts once after the failed attempt stops", async () => {
+			const { manager, stateManager } = makeManager()
+			const order: string[] = []
+			configure(manager)
+			const stale = orchestratorDouble(order, "stale")
+			attach(manager, stale)
+			withFatalFailure(manager, stateManager)
+			const fresh = orchestratorDouble(order, "fresh", "Standby")
+			recreateWith(manager, fresh)
+
+			await Promise.all([manager.startIndexing(), manager.startIndexing()])
+
+			expect(order).toEqual(["stale.stop", "fresh.start"])
+			expect(manager["failureRegistry"].hasAwaitingRetry()).toBe(false)
+			expect(manager.getCurrentStatus().failedFiles).toEqual([])
+		})
+
+		it("CI-MG-05: Start Indexing clears the latch with the Semble provider", async () => {
+			const { manager, stateManager } = makeManager()
+			configure(manager)
+			withFatalFailure(manager, stateManager)
+			const startSemble = vi.fn(async () => {})
+			// The double provides only startIndexing, the one Semble member a start uses.
+			const semble = { startIndexing: startSemble } as unknown as (typeof manager)["_sembleProvider"]
+			manager["_sembleProvider"] = semble
+
+			await manager.startIndexing()
+
+			expect(startSemble).toHaveBeenCalledOnce()
+			expect(manager["failureRegistry"].hasAwaitingRetry()).toBe(false)
+		})
+
+		it("CI-MG-06: the summary prefers awaiting-retry over retrying and exhausted", () => {
+			const { manager } = makeManager()
+			const registry = manager["failureRegistry"]
+			for (const [path, state] of [
+				["a.ts", "retrying"],
+				["b.ts", "exhausted"],
+				["c.ts", "awaiting-retry"],
+			] as const) {
+				registry.renew(path, "h")
+				registry.record(path, "h", "parse", `${state} reason`, 1, state)
+			}
+			expect(manager.getCurrentStatus().failedFileSummary).toEqual({
+				path: "c.ts",
+				activity: "parse",
+				reason: "awaiting-retry reason",
+				state: "awaiting-retry",
+				count: 3,
+			})
+		})
+
+		it.each([true, false])(
+			"CI-MG-07: a settings change that recreates services keeps the fatal Error (latch set: %s)",
+			async (latched) => {
+				const { manager, stateManager } = makeManager()
+				configure(manager, { requiresRestart: true })
+				attach(manager, orchestratorDouble([], "stale"))
+				stateManager.setSystemState("Error", fatalMessage)
+				if (latched) withFatalFailure(manager, stateManager)
+
+				await manager.handleSettingsChange()
+
+				expect(stateManager.getCurrentStatus()).toMatchObject(
+					latched ? { systemStatus: "Error", message: fatalMessage } : { systemStatus: "Standby" },
+				)
+			},
+		)
+
+		it.each(["global", "workspace"] as const)(
+			"CI-MG-08: %s disable after a fatal failure shows Standby with the failed file listed",
+			async (scope) => {
+				const { manager, stateManager } = makeManager()
+				attach(manager, orchestratorDouble([], "stale"))
+				withFatalFailure(manager, stateManager)
+				if (scope === "global") {
+					configure(manager, { enabled: false })
+					await manager.handleSettingsChange()
+				} else {
+					await manager.setWorkspaceEnabled(false)
+					await manager.stopIndexing()
+				}
+
+				const status = manager.getCurrentStatus()
+				expect(status.systemStatus).toBe("Standby")
+				expect(status.message).toBe("embeddings:orchestrator.indexingFilesFailed")
+				expect(status.failedFiles).toEqual([expect.objectContaining({ state: "awaiting-retry" })])
+			},
+		)
+
+		describe("CI-WV-02: workspace enablement after a fatal failure", () => {
+			function enablement(manager: CodeIndexManager) {
+				// The double provides only the provider members setEnabled() uses.
+				const provider = {
+					contextProxy: {},
+					log: vi.fn(),
+					postMessageToWebview: vi.fn(async () => {}),
+				} as unknown as Parameters<WorkspaceIndexingEnablementManager["setEnabled"]>[1]
+				return { indexing: new WorkspaceIndexingEnablementManager(manager), provider }
+			}
+
+			it("enabling runs initialize() then one start that clears the latch", async () => {
+				const { manager, stateManager } = makeManager()
+				const order: string[] = []
+				configure(manager)
+				manager["_serviceFactory"] = {} as unknown as (typeof manager)["_serviceFactory"]
+				attach(manager, orchestratorDouble(order, "stale"))
+				withFatalFailure(manager, stateManager)
+				const fresh = orchestratorDouble(order, "fresh", "Standby")
+				recreateWith(manager, fresh)
+				const { indexing, provider } = enablement(manager)
+
+				await indexing.setEnabled(true, provider)
+				await vi.waitFor(() => expect(fresh.startIndexing).toHaveBeenCalledOnce())
+
+				expect(order).toEqual(["stale.stop", "fresh.start"])
+				expect(manager["failureRegistry"].hasAwaitingRetry()).toBe(false)
+			})
+
+			it("toggling the workspace off and on starts exactly one attempt and clears the latch", async () => {
+				const { manager, stateManager } = makeManager()
+				const order: string[] = []
+				configure(manager)
+				manager["_serviceFactory"] = {} as unknown as (typeof manager)["_serviceFactory"]
+				const stale = orchestratorDouble(order, "stale")
+				attach(manager, stale)
+				withFatalFailure(manager, stateManager)
+				const { indexing, provider } = enablement(manager)
+
+				await indexing.setEnabled(false, provider)
+				expect(stateManager.state).toBe("Standby")
+				await indexing.setEnabled(true, provider)
+				await vi.waitFor(() => expect(stale.startIndexing).toHaveBeenCalledOnce())
+
+				expect(order).toEqual(["stale.stop", "stale.start"])
+				expect(manager["failureRegistry"].hasAwaitingRetry()).toBe(false)
+			})
+		})
 	})
 
 	it("CI-MG-04: a CacheReadError from initialize() ends in Error and keeps existing data", async () => {

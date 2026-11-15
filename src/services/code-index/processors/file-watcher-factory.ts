@@ -14,6 +14,7 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 		rooIgnoreController,
 		failureRegistry,
 		pacers,
+		parser,
 	}: FileWatcherFactoryOptions): IFileWatcher {
 		return new FileWatcher(
 			workspacePath,
@@ -26,6 +27,7 @@ export class FileWatcherFactory implements IFileWatcherFactory {
 			getEmbeddingBatchSize(),
 			failureRegistry,
 			pacers,
+			parser,
 		)
 	}
 }

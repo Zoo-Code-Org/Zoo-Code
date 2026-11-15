@@ -8,7 +8,7 @@ import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { EmbedderFactory } from "./embedders/embedder-factory"
 import { EmbedderValidationManager } from "./embedders/embedder-validation-manager"
 import { VectorStoreFactory } from "./vector-store/vector-store-factory"
-import { codeParser, DirectoryScanner } from "./processors"
+import { DirectoryScanner } from "./processors"
 import { DirectoryScannerFactory } from "./processors/directory-scanner-factory"
 import { FileWatcherFactory } from "./processors/file-watcher-factory"
 import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
@@ -36,6 +36,7 @@ export class CodeIndexServiceFactory {
 		private readonly cacheManager: CacheManager,
 		private readonly failureRegistry: FileFailureRegistry,
 		private readonly pacers: ProviderPacerRegistry,
+		private readonly parser: ICodeParser,
 	) {}
 
 	/**
@@ -72,7 +73,7 @@ export class CodeIndexServiceFactory {
 		const config = this.configManager.getConfig()
 		const embedder = this.embedderFactory.create(config, this.pacers)
 		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath, this.pacers)
-		const parser = codeParser
+		const parser = this.parser
 		const scanner = this.directoryScannerFactory.create({
 			embedder,
 			vectorStore,
@@ -92,6 +93,7 @@ export class CodeIndexServiceFactory {
 			rooIgnoreController,
 			failureRegistry: this.failureRegistry,
 			pacers: this.pacers,
+			parser,
 		})
 
 		return {

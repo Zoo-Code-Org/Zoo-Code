@@ -176,11 +176,13 @@
 		"statusTitle": "状态",
 		"indexingFilesRetrying": "索引失败的文件数：{{count}}。正在重试 {{path}}：{{reason}}",
 		"indexingFilesFailed": "索引失败的文件数：{{count}}。{{path}} 的自动重试已结束：{{reason}}",
+		"indexingFilesAwaitingRetry": "索引失败的文件数：{{count}}。解析在 {{path}} 处停止，等待手动重试：{{reason}}",
 		"failedFileDetails": "失败文件详情",
 		"failedFileReason": "原因",
 		"failedFileStates": {
 			"retrying": "等待自动重试",
-			"exhausted": "自动重试已结束"
+			"exhausted": "自动重试已结束",
+			"awaiting-retry": "等待手动重试"
 		},
 		"failedFileActivities": {
 			"read": "读取文件",

@@ -13,9 +13,7 @@ export interface ParseRequest {
 	fileHash: string
 }
 
-type ParseReply =
-	| { id: number; blocks: CodeBlock[] }
-	| { id: number; error: { name: string; message: string } }
+type ParseReply = { id: number; blocks: CodeBlock[] } | { id: number; error: { name: string; message: string } }
 
 export interface ParseWorker {
 	postMessage(request: ParseRequest): void

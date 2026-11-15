@@ -217,11 +217,13 @@
 		"statusTitle": "Trạng thái",
 		"indexingFilesRetrying": "Số tệp bị lỗi lập chỉ mục: {{count}}. Đang thử lại {{path}}: {{reason}}",
 		"indexingFilesFailed": "Số tệp bị lỗi lập chỉ mục: {{count}}. Đã kết thúc thử lại tự động cho {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Số tệp bị lỗi lập chỉ mục: {{count}}. Việc phân tích đã dừng ở {{path}} và đang chờ thử lại thủ công: {{reason}}",
 		"failedFileDetails": "Chi tiết tệp bị lỗi",
 		"failedFileReason": "Lý do",
 		"failedFileStates": {
 			"retrying": "Đang chờ thử lại tự động",
-			"exhausted": "Đã kết thúc thử lại tự động"
+			"exhausted": "Đã kết thúc thử lại tự động",
+			"awaiting-retry": "Đang chờ thử lại thủ công"
 		},
 		"failedFileActivities": {
 			"read": "Đọc tệp",

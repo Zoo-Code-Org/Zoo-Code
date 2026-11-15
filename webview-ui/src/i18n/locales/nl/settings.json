@@ -217,11 +217,13 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "Bestanden met indexeringsfouten: {{count}}. Nieuwe poging voor {{path}}: {{reason}}",
 		"indexingFilesFailed": "Bestanden met indexeringsfouten: {{count}}. Automatische nieuwe poging beëindigd voor {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Bestanden met indexeringsfouten: {{count}}. Het parsen is gestopt bij {{path}} en wacht op een expliciete nieuwe poging: {{reason}}",
 		"failedFileDetails": "Details van mislukte bestanden",
 		"failedFileReason": "Reden",
 		"failedFileStates": {
 			"retrying": "Automatische nieuwe poging in afwachting",
-			"exhausted": "Automatische nieuwe poging beëindigd"
+			"exhausted": "Automatische nieuwe poging beëindigd",
+			"awaiting-retry": "Wacht op expliciete nieuwe poging"
 		},
 		"failedFileActivities": {
 			"read": "Bestand lezen",

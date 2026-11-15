@@ -176,11 +176,13 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "Dateien mit Indexierungsfehlern: {{count}}. Erneuter Versuch für {{path}}: {{reason}}",
 		"indexingFilesFailed": "Dateien mit Indexierungsfehlern: {{count}}. Automatische Wiederholung für {{path}} beendet: {{reason}}",
+		"indexingFilesAwaitingRetry": "Dateien mit Indexierungsfehlern: {{count}}. Das Parsen wurde bei {{path}} gestoppt und wartet auf einen ausdrücklichen neuen Versuch: {{reason}}",
 		"failedFileDetails": "Details zu fehlgeschlagenen Dateien",
 		"failedFileReason": "Grund",
 		"failedFileStates": {
 			"retrying": "Automatische Wiederholung ausstehend",
-			"exhausted": "Automatische Wiederholung beendet"
+			"exhausted": "Automatische Wiederholung beendet",
+			"awaiting-retry": "Wartet auf ausdrücklichen neuen Versuch"
 		},
 		"failedFileActivities": {
 			"read": "Datei lesen",

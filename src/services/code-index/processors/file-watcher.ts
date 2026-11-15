@@ -3,9 +3,18 @@ import { BATCH_SEGMENT_THRESHOLD } from "../constants"
 import { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import { Ignore } from "ignore"
 import { scannerExtensions } from "../shared/supported-extensions"
-import { IFileWatcher, FileProcessingResult, IEmbedder, IVectorStore, BatchProcessingSummary } from "../interfaces"
-import { codeParser } from "./parser"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import {
+	IFileWatcher,
+	FileProcessingResult,
+	IEmbedder,
+	IVectorStore,
+	BatchProcessingSummary,
+	ICodeParser,
+} from "../interfaces"
 import { FilePreparation, SKIP_UNCHANGED } from "./file-preparation"
+import { ParserFatalError } from "../parser-errors"
 import { CacheManager } from "../cache-manager"
 import { Package } from "../../../shared/package"
 import { type FileFailureRegistry, UNKNOWN_REVISION } from "../file-failure-registry"
@@ -37,6 +46,7 @@ export class FileWatcher implements IFileWatcher {
 		currentFile?: string
 	}>()
 	private readonly _onDidFinishBatchProcessing = new vscode.EventEmitter<BatchProcessingSummary>()
+	private readonly _onParserFatal = new vscode.EventEmitter<ParserFatalError>()
 
 	/**
 	 * Event emitted when a batch of files begins processing
@@ -52,6 +62,8 @@ export class FileWatcher implements IFileWatcher {
 	 * Event emitted when a batch of files has finished processing
 	 */
 	public readonly onDidFinishBatchProcessing = this._onDidFinishBatchProcessing.event
+
+	public readonly onParserFatal = this._onParserFatal.event
 
 	/**
 	 * Creates a new file watcher
@@ -72,6 +84,7 @@ export class FileWatcher implements IFileWatcher {
 		batchSegmentThreshold: number | undefined,
 		private readonly failures: FileFailureRegistry,
 		private readonly pacers: ProviderPacerRegistry,
+		parser: ICodeParser,
 	) {
 		this.ignoreController = ignoreController || new RooIgnoreController(workspacePath)
 		if (ignoreInstance) {
@@ -83,7 +96,7 @@ export class FileWatcher implements IFileWatcher {
 			ignoreInstance: this.ignoreInstance,
 			fileSystem: vscode.workspace.fs,
 			cacheManager: this.cacheManager,
-			parser: codeParser,
+			parser,
 		})
 		// Get the configurable batch size from VSCode settings, fallback to default
 		// If not provided in constructor, try to get from VSCode settings
@@ -215,12 +228,24 @@ export class FileWatcher implements IFileWatcher {
 		const result = await this.processFile(filePath)
 		if (result.status === "missing") return this.removeFile(filePath, signal)
 		if (result.status === "local_error") {
-			if (!signal?.aborted) {
+			// An AbortError comes from a closed parse session: cancellation, not a failed file.
+			if (!signal?.aborted && result.error?.name !== "AbortError") {
 				const relativePath = generateRelativeFilePath(filePath, this.workspacePath)
 				const revision = result.newHash ?? UNKNOWN_REVISION
 				const reason = result.error instanceof Error ? result.error.message : String(result.error)
+				const fatal = result.error instanceof ParserFatalError ? result.error : undefined
+				const activity = result.activity ?? "read"
+				const state = fatal ? "awaiting-retry" : "exhausted"
 				this.failures.renew(relativePath, revision)
-				this.failures.record(relativePath, revision, result.activity ?? "read", reason, 1, "exhausted")
+				this.failures.record(relativePath, revision, activity, reason, 1, state)
+				if (fatal) {
+					this._onParserFatal.fire(fatal)
+				} else if (activity === "parse") {
+					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+						error: "Parse failed",
+						location: "FileWatcher.indexFile",
+					})
+				}
 			}
 			return result
 		}

@@ -61,6 +61,12 @@
 		"providerWaiting": "{{service}} bekleniyor; dizinleme otomatik olarak devam eder",
 		"providerWaitingUntil": "{{service}} bekleniyor; dizinleme {{time}} zamanında otomatik olarak devam eder",
 		"indexingFilesFailed": "Dosya hataları devam ediyor. Bekleyen otomatik yeniden deneme yok. Kısmi indeks kullanılabilir.",
+		"parserFatal": "İndeksleme durdu: ayrıştırıcı {{filePath}} üzerinde {{category}}. Mevcut indeks verileri korunur. Yeniden denemek için indekslemeyi başlatın veya indekslemeyi devre dışı bırakıp yeniden etkinleştirin.",
+		"parserFatalCategory": {
+			"timeout": "zaman aşımına uğradı",
+			"crash": "çöktü",
+			"exit": "beklenmedik şekilde sonlandı"
+		},
 		"indexingStopping": "İndeksleme durduruluyor...",
 		"indexingFailedNoBlocks": "İndeksleme başarısız: Hiçbir kod bloğu başarıyla indekslenemedi. Bu genellikle bir embedder yapılandırma sorunu olduğunu gösterir.",
 		"fileWatcherStarted": "Dosya izleyici başlatıldı.",

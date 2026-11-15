@@ -880,7 +880,7 @@ export interface FailedFileStatus {
 	path: string
 	activity: "read" | "parse" | "embed" | "upsert" | "delete"
 	reason: string
-	state: "retrying" | "exhausted"
+	state: "retrying" | "exhausted" | "awaiting-retry"
 }
 
 export interface FailedFileSummary extends FailedFileStatus {

@@ -217,11 +217,13 @@
 		"statusTitle": "Estat",
 		"indexingFilesRetrying": "Fitxers amb errors d'indexació: {{count}}. S'està reintentant {{path}}: {{reason}}",
 		"indexingFilesFailed": "Fitxers amb errors d'indexació: {{count}}. El reintent automàtic ha finalitzat per a {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Fitxers amb errors d'indexació: {{count}}. L'anàlisi s'ha aturat a {{path}} i espera un reintent explícit: {{reason}}",
 		"failedFileDetails": "Detalls dels fitxers amb errors",
 		"failedFileReason": "Motiu",
 		"failedFileStates": {
 			"retrying": "Reintent automàtic pendent",
-			"exhausted": "Reintent automàtic finalitzat"
+			"exhausted": "Reintent automàtic finalitzat",
+			"awaiting-retry": "A l'espera d'un reintent explícit"
 		},
 		"failedFileActivities": {
 			"read": "Llegir el fitxer",

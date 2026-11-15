@@ -3,7 +3,7 @@ import type { IndexingErrorClassification } from "./shared/indexing-errors"
 import type { RetryBudget, RetryFailure } from "./shared/retry-policy"
 
 export type FileFailureActivity = "read" | "parse" | "embed" | "upsert" | "delete"
-export type FileFailureState = "retrying" | "exhausted"
+export type FileFailureState = "retrying" | "exhausted" | "awaiting-retry"
 export const REMOVAL_REVISION = "removed"
 export const UNKNOWN_REVISION = "unread"
 
@@ -51,7 +51,8 @@ export class FileFailureRegistry {
 			this.revisions.set(path, current)
 			const failure = this.entries.get(path)
 			if (failure) {
-				this.entries.set(path, { ...failure, revision, state: "exhausted" })
+				const state = failure.state === "awaiting-retry" ? failure.state : "exhausted"
+				this.entries.set(path, { ...failure, revision, state })
 				this.changed()
 			}
 		}
@@ -104,8 +105,26 @@ export class FileFailureRegistry {
 			current.failures.clear()
 			current.budgets.clear()
 		}
-		for (const [path, failure] of this.entries) this.entries.set(path, { ...failure, state: "exhausted" })
+		for (const [path, failure] of this.entries) {
+			if (failure.state !== "awaiting-retry") this.entries.set(path, { ...failure, state: "exhausted" })
+		}
 		this.changed()
+	}
+
+	/** True while a fatal parser failure blocks automatic indexing starts. */
+	hasAwaitingRetry(): boolean {
+		return [...this.entries.values()].some((failure) => failure.state === "awaiting-retry")
+	}
+
+	clearAwaitingRetry(): void {
+		let removed = false
+		for (const [path, failure] of this.entries) {
+			if (failure.state !== "awaiting-retry") continue
+			this.entries.delete(path)
+			this.revisions.get(path)?.failures.clear()
+			removed = true
+		}
+		if (removed) this.changed()
 	}
 
 	list(): FailedFile[] {

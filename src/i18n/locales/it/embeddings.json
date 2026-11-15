@@ -61,6 +61,12 @@
 		"providerWaiting": "In attesa di {{service}}; l’indicizzazione riprende automaticamente",
 		"providerWaitingUntil": "In attesa di {{service}}; l’indicizzazione riprende automaticamente alle {{time}}",
 		"indexingFilesFailed": "Persistono errori nei file. Nessun nuovo tentativo automatico in attesa. È disponibile un indice parziale.",
+		"parserFatal": "Indicizzazione interrotta: il parser {{category}} su {{filePath}}. I dati di indice esistenti vengono mantenuti. Avvia l'indicizzazione, oppure disattivala e riattivala, per riprovare.",
+		"parserFatalCategory": {
+			"timeout": "è andato in timeout",
+			"crash": "si è bloccato",
+			"exit": "è terminato in modo imprevisto"
+		},
 		"indexingStopping": "Arresto dell'indicizzazione in corso...",
 		"indexingFailedNoBlocks": "Indicizzazione fallita: Nessun blocco di codice è stato indicizzato con successo. Questo di solito indica un problema di configurazione dell'embedder.",
 		"fileWatcherStarted": "Monitoraggio file avviato.",

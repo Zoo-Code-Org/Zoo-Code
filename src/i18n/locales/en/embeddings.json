@@ -61,6 +61,12 @@
 		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
 		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
 		"indexingFilesFailed": "File failures remain. No automatic retries pending. Partial index available.",
+		"parserFatal": "Indexing stopped: the parser {{category}} on {{filePath}}. Existing index data is kept. Start Indexing, or disable and re-enable indexing, to retry.",
+		"parserFatalCategory": {
+			"timeout": "timed out",
+			"crash": "crashed",
+			"exit": "exited unexpectedly"
+		},
 		"indexingStopping": "Stopping indexing...",
 		"indexingFailedNoBlocks": "Indexing failed: No code blocks were successfully indexed. This usually indicates an embedder configuration issue.",
 		"fileWatcherStarted": "File watcher started.",

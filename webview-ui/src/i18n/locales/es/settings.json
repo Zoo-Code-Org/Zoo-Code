@@ -176,11 +176,13 @@
 		"statusTitle": "Estado",
 		"indexingFilesRetrying": "Archivos con errores de indexación: {{count}}. Reintentando {{path}}: {{reason}}",
 		"indexingFilesFailed": "Archivos con errores de indexación: {{count}}. El reintento automático terminó para {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Archivos con errores de indexación: {{count}}. El análisis se detuvo en {{path}} y espera un reintento explícito: {{reason}}",
 		"failedFileDetails": "Detalles de archivos con errores",
 		"failedFileReason": "Motivo",
 		"failedFileStates": {
 			"retrying": "Reintento automático pendiente",
-			"exhausted": "Reintento automático terminado"
+			"exhausted": "Reintento automático terminado",
+			"awaiting-retry": "En espera de un reintento explícito"
 		},
 		"failedFileActivities": {
 			"read": "Leer archivo",

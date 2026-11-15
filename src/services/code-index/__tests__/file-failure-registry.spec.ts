@@ -70,4 +70,30 @@ describe("FileFailureRegistry", () => {
 		registry.clear("a.ts", "one")
 		expect(registry.list().map((failure) => failure.path)).toEqual(["b.ts"])
 	})
+
+	it("CI-FR-04: awaiting-retry survives a reset and a new revision; only clearAwaitingRetry removes it", () => {
+		const registry = new FileFailureRegistry()
+		const changed = vi.fn()
+		registry.onDidChange(changed)
+		registry.renew("a.ts", "one")
+		registry.record("a.ts", "one", "parse", "timeout", 1, "awaiting-retry")
+		registry.renew("b.ts", "one")
+		registry.record("b.ts", "one", "embed", "down", 3, "retrying")
+		expect(registry.hasAwaitingRetry()).toBe(true)
+
+		registry.resetAllBudgets()
+		registry.renew("a.ts", "two")
+		expect(registry.list()).toEqual([
+			expect.objectContaining({ path: "a.ts", state: "awaiting-retry" }),
+			expect.objectContaining({ path: "b.ts", state: "exhausted" }),
+		])
+
+		changed.mockClear()
+		registry.clearAwaitingRetry()
+		expect(registry.hasAwaitingRetry()).toBe(false)
+		expect(registry.list().map((failure) => failure.path)).toEqual(["b.ts"])
+		expect(changed).toHaveBeenCalledOnce()
+		registry.clearAwaitingRetry()
+		expect(changed).toHaveBeenCalledOnce()
+	})
 })

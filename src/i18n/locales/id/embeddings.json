@@ -61,6 +61,12 @@
 		"providerWaiting": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis",
 		"providerWaitingUntil": "Menunggu {{service}}; pengindeksan dilanjutkan secara otomatis pada {{time}}",
 		"indexingFilesFailed": "Masih ada kegagalan file. Tidak ada percobaan ulang otomatis yang tertunda. Indeks parsial tersedia.",
+		"parserFatal": "Pengindeksan berhenti: parser {{category}} pada {{filePath}}. Data indeks yang ada tetap disimpan. Mulai Pengindeksan, atau nonaktifkan lalu aktifkan kembali pengindeksan, untuk mencoba lagi.",
+		"parserFatalCategory": {
+			"timeout": "melewati batas waktu",
+			"crash": "mengalami crash",
+			"exit": "berhenti secara tak terduga"
+		},
 		"indexingStopping": "Menghentikan pengindeksan...",
 		"indexingFailedNoBlocks": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks. Ini biasanya menunjukkan masalah konfigurasi embedder.",
 		"fileWatcherStarted": "Pemantau file dimulai.",

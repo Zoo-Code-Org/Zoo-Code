@@ -217,11 +217,13 @@
 		"statusTitle": "Durum",
 		"indexingFilesRetrying": "İndeksleme hatası olan dosyalar: {{count}}. {{path}} yeniden deneniyor: {{reason}}",
 		"indexingFilesFailed": "İndeksleme hatası olan dosyalar: {{count}}. {{path}} için otomatik yeniden deneme sona erdi: {{reason}}",
+		"indexingFilesAwaitingRetry": "İndeksleme hatası olan dosyalar: {{count}}. Ayrıştırma {{path}} üzerinde durdu ve açık bir yeniden deneme bekliyor: {{reason}}",
 		"failedFileDetails": "Başarısız dosya ayrıntıları",
 		"failedFileReason": "Neden",
 		"failedFileStates": {
 			"retrying": "Otomatik yeniden deneme bekliyor",
-			"exhausted": "Otomatik yeniden deneme sona erdi"
+			"exhausted": "Otomatik yeniden deneme sona erdi",
+			"awaiting-retry": "Açık bir yeniden deneme bekleniyor"
 		},
 		"failedFileActivities": {
 			"read": "Dosya okuma",

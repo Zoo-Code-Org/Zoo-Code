@@ -61,6 +61,12 @@
 		"providerWaiting": "Esperando a {{service}}; la indexación se reanuda automáticamente",
 		"providerWaitingUntil": "Esperando a {{service}}; la indexación se reanuda automáticamente a las {{time}}",
 		"indexingFilesFailed": "Siguen existiendo errores en archivos. No hay reintentos automáticos pendientes. Hay un índice parcial disponible.",
+		"parserFatal": "Indexación detenida: el analizador {{category}} con {{filePath}}. Se conservan los datos de índice existentes. Inicia la indexación, o desactívala y vuelve a activarla, para reintentar.",
+		"parserFatalCategory": {
+			"timeout": "agotó el tiempo de espera",
+			"crash": "falló",
+			"exit": "terminó inesperadamente"
+		},
 		"indexingStopping": "Deteniendo la indexación...",
 		"indexingFailedNoBlocks": "Indexación fallida: No se indexaron exitosamente bloques de código. Esto usualmente indica un problema de configuración del incrustador.",
 		"fileWatcherStarted": "Monitor de archivos iniciado.",

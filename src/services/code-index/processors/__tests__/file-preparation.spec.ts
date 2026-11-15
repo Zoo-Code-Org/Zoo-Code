@@ -4,6 +4,7 @@ import { FileType, Uri } from "vscode"
 import type { CodeBlock, ICodeParser } from "../../interfaces"
 import { MAX_FILE_SIZE_BYTES } from "../../constants"
 import { ParserLoadError } from "../parser"
+import { ParserFatalError } from "../../parser-errors"
 import { FilePreparation } from "../file-preparation"
 import type { FilePreparationDependencies } from "../file-preparation-dependencies"
 
@@ -177,6 +178,17 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			})
 			expect(dependencies.parser.parseFile).not.toHaveBeenCalled()
 		}
+	})
+
+	it.each([
+		["ParserFatalError", new ParserFatalError("exit", filePath, "exited")],
+		["AbortError", new DOMException("Parsing stopped", "AbortError")],
+	])("CI-FP-04: a %s passes through local_error unchanged", async (_label, error) => {
+		const dependencies = setup()
+		dependencies.parser.parseFile.mockRejectedValue(error)
+		const result = await new FilePreparation(dependencies).prepareFile(filePath)
+		expect(result).toEqual({ path: filePath, status: "local_error", activity: "parse", error })
+		expect(result.error).toBe(error)
 	})
 
 	it("calls service methods with their original receivers", async () => {

@@ -3,10 +3,13 @@
 import nodePath from "path"
 import * as vscode from "vscode"
 
+import { TelemetryService } from "@roo-code/telemetry"
 import { FileWatcher } from "../file-watcher"
 import { FilePreparation } from "../file-preparation"
 import { FileFailureRegistry } from "../../file-failure-registry"
 import { ProviderPacerRegistry } from "../../provider-pacer"
+import { ParserFatalError } from "../../parser-errors"
+import type { ICodeParser } from "../../interfaces"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
@@ -19,6 +22,8 @@ vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
 	},
 }))
 
+vi.mock("@roo-code/telemetry", () => ({ TelemetryService: { instance: { captureEvent: vi.fn() } } }))
+
 // Mock dependencies
 vi.mock("../../cache-manager")
 vi.mock("../../../core/ignore/RooIgnoreController", () => ({
@@ -29,19 +34,21 @@ vi.mock("../../../core/ignore/RooIgnoreController", () => ({
 	}),
 }))
 vi.mock("ignore")
-vi.mock("../parser", () => ({
-	codeParser: {
-		parseFile: vi.fn().mockImplementation(async (filePath: string) => [
-			{
-				file_path: filePath,
-				content: "test content",
-				start_line: 1,
-				end_line: 1,
-				segmentHash: `segment-${filePath}`,
-			},
-		]),
-	},
-}))
+
+const parser: ICodeParser = {
+	parseFile: async (filePath: string) => [
+		{
+			file_path: filePath,
+			identifier: null,
+			type: "function",
+			content: "test content",
+			start_line: 1,
+			end_line: 1,
+			fileHash: "h",
+			segmentHash: `segment-${filePath}`,
+		},
+	],
+}
 
 const createMockEventEmitter = () => {
 	const listeners = new Set<(event: any) => void>()
@@ -184,6 +191,7 @@ describe("FileWatcher", () => {
 			undefined,
 			new FileFailureRegistry(),
 			new ProviderPacerRegistry(),
+			parser,
 		)
 	})
 
@@ -386,6 +394,7 @@ describe("FileWatcher", () => {
 				undefined,
 				failures,
 				new ProviderPacerRegistry(),
+				parser,
 			)
 			return failures
 		}
@@ -425,6 +434,60 @@ describe("FileWatcher", () => {
 				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
 			},
 		)
+
+		it("CI-FW-04: a ParserFatalError records awaiting-retry and fires onParserFatal once", async () => {
+			const failures = watcherWithRegistry()
+			const fatal = new ParserFatalError("timeout", path, "no reply")
+			const onFatal = vi.fn()
+			fileWatcher.onParserFatal(onFatal)
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "local_error",
+				activity: "parse",
+				error: fatal,
+			})
+			await runChange()
+			expect(failures.list()).toEqual([
+				expect.objectContaining({
+					path: nodePath.normalize("src/file.ts"),
+					activity: "parse",
+					state: "awaiting-retry",
+				}),
+			])
+			expect(failures.hasAwaitingRetry()).toBe(true)
+			expect(onFatal).toHaveBeenCalledExactlyOnceWith(fatal)
+			expect(TelemetryService.instance.captureEvent).not.toHaveBeenCalled()
+		})
+
+		it("CI-FW-04: an AbortError from a closed parse session records nothing", async () => {
+			const failures = watcherWithRegistry()
+			const onFatal = vi.fn()
+			fileWatcher.onParserFatal(onFatal)
+			vi.spyOn(FilePreparation.prototype, "prepareFile").mockResolvedValueOnce({
+				path,
+				status: "local_error",
+				activity: "parse",
+				error: Object.assign(new Error("Parsing stopped"), { name: "AbortError" }),
+			})
+			await runChange()
+			expect(failures.list()).toEqual([])
+			expect(onFatal).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureEvent).not.toHaveBeenCalled()
+		})
+
+		it("sends one telemetry event for a nonfatal parse failure and none for a read failure", async () => {
+			watcherWithRegistry()
+			vi.spyOn(FilePreparation.prototype, "prepareFile")
+				.mockResolvedValueOnce({ path, status: "local_error", activity: "parse", error: new Error("bad") })
+				.mockResolvedValueOnce({ path, status: "local_error", activity: "read", error: new Error("busy") })
+			await runChange()
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledOnce()
+			const batchPromise = waitForNextBatch()
+			await mockOnDidChange({ fsPath: path })
+			await flushBatch()
+			await batchPromise
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledOnce()
+		})
 
 		it("CI-FW-02: prepared blocks are passed to the writer, which embeds and stores the hash", async () => {
 			watcherWithRegistry()

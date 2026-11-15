@@ -217,11 +217,13 @@
 		"statusTitle": "상태",
 		"indexingFilesRetrying": "인덱싱에 실패한 파일: {{count}}. {{path}} 재시도 중: {{reason}}",
 		"indexingFilesFailed": "인덱싱에 실패한 파일: {{count}}. {{path}} 자동 재시도 종료: {{reason}}",
+		"indexingFilesAwaitingRetry": "인덱싱에 실패한 파일: {{count}}. {{path}}에서 구문 분석이 중지되어 명시적 재시도를 기다리고 있습니다: {{reason}}",
 		"failedFileDetails": "실패한 파일 세부 정보",
 		"failedFileReason": "이유",
 		"failedFileStates": {
 			"retrying": "자동 재시도 대기 중",
-			"exhausted": "자동 재시도 종료"
+			"exhausted": "자동 재시도 종료",
+			"awaiting-retry": "명시적 재시도 대기 중"
 		},
 		"failedFileActivities": {
 			"read": "파일 읽기",

@@ -61,6 +61,12 @@
 		"providerWaiting": "Esperant {{service}}; la indexació es reprèn automàticament",
 		"providerWaitingUntil": "Esperant {{service}}; la indexació es reprèn automàticament a les {{time}}",
 		"indexingFilesFailed": "Encara hi ha errors en fitxers. No hi ha reintents automàtics pendents. Hi ha un índex parcial disponible.",
+		"parserFatal": "La indexació s'ha aturat: l'analitzador {{category}} amb {{filePath}}. Es conserven les dades d'índex existents. Inicia la indexació, o desactiva-la i torna-la a activar, per tornar-ho a provar.",
+		"parserFatalCategory": {
+			"timeout": "ha superat el temps d'espera",
+			"crash": "ha fallat",
+			"exit": "s'ha tancat inesperadament"
+		},
 		"indexingStopping": "S'està aturant la indexació...",
 		"indexingFailedNoBlocks": "Indexació fallida: No s'ha indexat cap bloc de codi amb èxit. Això normalment indica un problema de configuració de l'embedder.",
 		"fileWatcherStarted": "Monitor de fitxers iniciat.",

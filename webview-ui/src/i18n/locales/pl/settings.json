@@ -217,11 +217,13 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "Pliki z błędami indeksowania: {{count}}. Ponawianie próby dla {{path}}: {{reason}}",
 		"indexingFilesFailed": "Pliki z błędami indeksowania: {{count}}. Automatyczne ponawianie zakończone dla {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Pliki z błędami indeksowania: {{count}}. Analiza zatrzymała się na {{path}} i czeka na jawne ponowienie: {{reason}}",
 		"failedFileDetails": "Szczegóły plików z błędami",
 		"failedFileReason": "Powód",
 		"failedFileStates": {
 			"retrying": "Oczekiwanie na automatyczne ponowienie",
-			"exhausted": "Automatyczne ponawianie zakończone"
+			"exhausted": "Automatyczne ponawianie zakończone",
+			"awaiting-retry": "Oczekuje na jawne ponowienie"
 		},
 		"failedFileActivities": {
 			"read": "Odczyt pliku",

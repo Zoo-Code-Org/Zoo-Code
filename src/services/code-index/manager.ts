@@ -10,6 +10,7 @@ import { CacheManager } from "./cache-manager"
 import { SembleProvider } from "./semble"
 import { FileFailureRegistry } from "./file-failure-registry"
 import { ProviderPacerRegistry } from "./provider-pacer"
+import { ParseWorkerClient } from "./parse-worker-client"
 import { formatProviderWaitMessage } from "./shared/provider-wait-message"
 import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
@@ -32,6 +33,7 @@ export class CodeIndexManager {
 	// One registry and pacer set per workspace: recreating services must not reset retry budgets or provider waits.
 	private readonly failureRegistry = new FileFailureRegistry()
 	private readonly pacers = new ProviderPacerRegistry()
+	private readonly parser = new ParseWorkerClient()
 	private startInFlight?: Promise<void>
 	// Separate from startInFlight: the recovery path awaits startInFlight, which initialize() sets.
 	private errorStartInFlight?: Promise<void>
@@ -222,6 +224,8 @@ export class CodeIndexManager {
 	private startIndexingInBackground(): void {
 		// Initialization awaits the cache read; indexing may have been disabled meanwhile.
 		if (!this.isFeatureEnabled || !this.isWorkspaceEnabled) return
+		// After a fatal parser failure only an explicit start may parse again (R4).
+		if (this.failureRegistry.hasAwaitingRetry()) return
 		void this.startOrchestrator().catch((error) => {
 			console.error("[CodeIndexManager] Background indexing failed:", error)
 		})
@@ -247,14 +251,16 @@ export class CodeIndexManager {
 			return
 		}
 
+		const running = this.errorStartInFlight ?? this.startInFlight
+		if (running) return running
+		this.failureRegistry.clearAwaitingRetry()
+
 		// Delegate to semble provider if active
 		if (this._sembleProvider) {
 			await this._sembleProvider.startIndexing()
 			return
 		}
 
-		const running = this.errorStartInFlight ?? this.startInFlight
-		if (running) return running
 		this.failureRegistry.resetAllBudgets()
 
 		if (this.getCurrentStatus().systemStatus === "Error") {
@@ -279,12 +285,16 @@ export class CodeIndexManager {
 	 * Stops any in-progress indexing operation and the file watcher.
 	 * Repeated calls while stopping return the same promise.
 	 */
-	public stopIndexing(): Promise<void> {
+	public async stopIndexing(): Promise<void> {
 		if (this._sembleProvider) {
 			this._sembleProvider.stopIndexing()
-			return Promise.resolve()
+			return
 		}
-		return this._orchestrator?.stopIndexing() ?? Promise.resolve()
+		await this._orchestrator?.stopIndexing()
+		// A fatal parser failure already aborted the session, so the orchestrator wrote nothing.
+		if (!this.isWorkspaceEnabled && this._stateManager.state === "Error") {
+			this._stateManager.setSystemState("Standby", "Indexing not enabled for this workspace")
+		}
 	}
 
 	/**
@@ -378,7 +388,10 @@ export class CodeIndexManager {
 			reason: failure.reason,
 			state: failure.state,
 		}))
-		const representative = failedFiles.find((failure) => failure.state === "retrying") ?? failedFiles.at(0)
+		const representative =
+			failedFiles.find((failure) => failure.state === "awaiting-retry") ??
+			failedFiles.find((failure) => failure.state === "retrying") ??
+			failedFiles.at(0)
 		const failedFileSummary: FailedFileSummary | undefined = representative && {
 			...representative,
 			count: failedFiles.length,
@@ -454,6 +467,7 @@ export class CodeIndexManager {
 			this._cacheManager!,
 			this.failureRegistry,
 			this.pacers,
+			this.parser,
 		)
 
 		const ignoreInstance = ignore()
@@ -503,6 +517,7 @@ export class CodeIndexManager {
 			fileWatcher,
 			this.failureRegistry,
 			this.pacers,
+			this.parser,
 		)
 
 		// (Re)Initialize search service
@@ -515,8 +530,8 @@ export class CodeIndexManager {
 			this.pacers,
 		)
 
-		// Clear any error state after successful recreation
-		this._stateManager.setSystemState("Standby", "")
+		// A fatal-parser Error stays until an explicit start or disable (R29).
+		if (!this.failureRegistry.hasAwaitingRetry()) this._stateManager.setSystemState("Standby", "")
 	}
 
 	/**

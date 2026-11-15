@@ -61,6 +61,12 @@
 		"providerWaiting": "Wachten op {{service}}; de indexering wordt automatisch hervat",
 		"providerWaitingUntil": "Wachten op {{service}}; de indexering wordt automatisch hervat om {{time}}",
 		"indexingFilesFailed": "Er zijn nog bestandsfouten. Geen automatische nieuwe pogingen in afwachting. Een gedeeltelijke index is beschikbaar.",
+		"parserFatal": "Indexering gestopt: de parser {{category}} bij {{filePath}}. Bestaande indexgegevens blijven behouden. Start de indexering, of schakel indexering uit en weer in, om het opnieuw te proberen.",
+		"parserFatalCategory": {
+			"timeout": "kreeg een time-out",
+			"crash": "is gecrasht",
+			"exit": "is onverwacht afgesloten"
+		},
 		"indexingStopping": "Indexering wordt gestopt...",
 		"indexingFailedNoBlocks": "Indexering mislukt: Geen codeblokken werden succesvol geïndexeerd. Dit duidt meestal op een embedder configuratieprobleem.",
 		"fileWatcherStarted": "Bestandsmonitor gestart.",

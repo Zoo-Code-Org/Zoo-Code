@@ -217,11 +217,13 @@
 		"statusTitle": "Stato",
 		"indexingFilesRetrying": "File con errori di indicizzazione: {{count}}. Nuovo tentativo per {{path}}: {{reason}}",
 		"indexingFilesFailed": "File con errori di indicizzazione: {{count}}. Nuovo tentativo automatico terminato per {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "File con errori di indicizzazione: {{count}}. L'analisi si è fermata su {{path}} e attende un nuovo tentativo esplicito: {{reason}}",
 		"failedFileDetails": "Dettagli dei file con errori",
 		"failedFileReason": "Motivo",
 		"failedFileStates": {
 			"retrying": "Nuovo tentativo automatico in attesa",
-			"exhausted": "Nuovo tentativo automatico terminato"
+			"exhausted": "Nuovo tentativo automatico terminato",
+			"awaiting-retry": "In attesa di un nuovo tentativo esplicito"
 		},
 		"failedFileActivities": {
 			"read": "Leggere il file",

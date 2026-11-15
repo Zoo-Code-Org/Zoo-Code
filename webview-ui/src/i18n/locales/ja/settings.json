@@ -217,11 +217,13 @@
 		"statusTitle": "ステータス",
 		"indexingFilesRetrying": "インデックス作成に失敗したファイル数：{{count}}。{{path}} を再試行中：{{reason}}",
 		"indexingFilesFailed": "インデックス作成に失敗したファイル数：{{count}}。{{path}} の自動再試行は終了しました：{{reason}}",
+		"indexingFilesAwaitingRetry": "インデックス作成に失敗したファイル数：{{count}}。{{path}} で解析が停止し、明示的な再試行を待っています：{{reason}}",
 		"failedFileDetails": "失敗したファイルの詳細",
 		"failedFileReason": "理由",
 		"failedFileStates": {
 			"retrying": "自動再試行待ち",
-			"exhausted": "自動再試行終了"
+			"exhausted": "自動再試行終了",
+			"awaiting-retry": "明示的な再試行を待機中"
 		},
 		"failedFileActivities": {
 			"read": "ファイルの読み込み",

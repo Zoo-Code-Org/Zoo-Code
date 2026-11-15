@@ -61,6 +61,12 @@
 		"providerWaiting": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục",
 		"providerWaitingUntil": "Đang chờ {{service}}; việc lập chỉ mục tự động tiếp tục lúc {{time}}",
 		"indexingFilesFailed": "Vẫn còn tệp bị lỗi. Không có lần thử lại tự động nào đang chờ. Có thể dùng chỉ mục một phần.",
+		"parserFatal": "Đã dừng lập chỉ mục: trình phân tích {{category}} khi xử lý {{filePath}}. Dữ liệu chỉ mục hiện có được giữ nguyên. Hãy bắt đầu lập chỉ mục, hoặc tắt rồi bật lại lập chỉ mục, để thử lại.",
+		"parserFatalCategory": {
+			"timeout": "đã hết thời gian chờ",
+			"crash": "đã gặp sự cố",
+			"exit": "đã thoát bất ngờ"
+		},
 		"indexingStopping": "Đang dừng lập chỉ mục...",
 		"indexingFailedNoBlocks": "Lập chỉ mục thất bại: Không có khối mã nào được lập chỉ mục thành công. Điều này thường cho thấy vấn đề cấu hình embedder.",
 		"fileWatcherStarted": "Trình theo dõi tệp đã khởi động.",

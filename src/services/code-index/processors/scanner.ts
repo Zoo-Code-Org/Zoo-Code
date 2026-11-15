@@ -28,6 +28,7 @@ import { type FileFailureRegistry, UNKNOWN_REVISION, type FileFailureActivity } 
 import type { ProviderPacerRegistry } from "../provider-pacer"
 import { FileIndexWriter } from "../file-index-writer"
 import { readSource, SOURCE_MISSING } from "../shared/indexing-errors"
+import { ParserFatalError } from "../parser-errors"
 
 export class DirectoryScanner implements IDirectoryScanner {
 	private readonly batchSegmentThreshold: number
@@ -178,6 +179,14 @@ export class DirectoryScanner implements IDirectoryScanner {
 				try {
 					blocks = await this.codeParser.parseFile(filePath, { content, fileHash: currentFileHash })
 				} catch (error) {
+					if (error instanceof ParserFatalError) {
+						const relativePath = generateRelativeFilePath(filePath, scanWorkspace)
+						this.failures.renew(relativePath, currentFileHash)
+						this.failures.record(relativePath, currentFileHash, "parse", error.message, 1, "awaiting-retry")
+						throw error
+					}
+					// A closed parse session rejects with AbortError: cancellation, not a failed file.
+					if (error instanceof Error && error.name === "AbortError") return
 					// Covers ParserLoadError: the hash stays unstored so Start Indexing retries the unchanged file.
 					recordLocalFailure(filePath, currentFileHash, "parse", error)
 					return

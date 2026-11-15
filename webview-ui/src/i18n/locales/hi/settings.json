@@ -217,11 +217,13 @@
 		"statusTitle": "स्थिति",
 		"indexingFilesRetrying": "इंडेक्सिंग में विफल फ़ाइलें: {{count}}। {{path}} के लिए फिर से कोशिश की जा रही है: {{reason}}",
 		"indexingFilesFailed": "इंडेक्सिंग में विफल फ़ाइलें: {{count}}। {{path}} के लिए स्वचालित पुनः प्रयास समाप्त: {{reason}}",
+		"indexingFilesAwaitingRetry": "इंडेक्सिंग में विफल फ़ाइलें: {{count}}। {{path}} पर पार्सिंग रुक गई और स्पष्ट पुनः प्रयास की प्रतीक्षा में है: {{reason}}",
 		"failedFileDetails": "विफल फ़ाइलों का विवरण",
 		"failedFileReason": "कारण",
 		"failedFileStates": {
 			"retrying": "स्वचालित पुनः प्रयास लंबित",
-			"exhausted": "स्वचालित पुनः प्रयास समाप्त"
+			"exhausted": "स्वचालित पुनः प्रयास समाप्त",
+			"awaiting-retry": "स्पष्ट पुनः प्रयास की प्रतीक्षा"
 		},
 		"failedFileActivities": {
 			"read": "फ़ाइल पढ़ना",

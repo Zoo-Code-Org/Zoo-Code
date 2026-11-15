@@ -245,6 +245,7 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "Files with indexing failures: {{count}}. Retrying {{path}}: {{reason}}",
 		"indexingFilesFailed": "Files with indexing failures: {{count}}. Automatic retry ended for {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Files with indexing failures: {{count}}. Parsing stopped at {{path}} and awaits an explicit retry: {{reason}}",
 		"providerWaiting": "Waiting for {{service}}; indexing resumes automatically",
 		"providerWaitingUntil": "Waiting for {{service}}; indexing resumes automatically at {{time}}",
 		"providerPaused": "Waiting for {{service}}",
@@ -253,7 +254,8 @@
 		"failedFileReason": "Reason",
 		"failedFileStates": {
 			"retrying": "Automatic retry pending",
-			"exhausted": "Automatic retry ended"
+			"exhausted": "Automatic retry ended",
+			"awaiting-retry": "Awaiting explicit retry"
 		},
 		"failedFileActivities": {
 			"read": "Read file",

@@ -404,9 +404,12 @@ describe("CodeIndexPopover indexing reliability", () => {
 		expect(screen.queryByText("waiting.ts")).not.toBeInTheDocument()
 	})
 
-	it.each(["retrying", "exhausted"] as const)("shows %s summary and expandable file details", (state) => {
+	it.each([
+		["retrying", "indexingFilesRetrying"],
+		["exhausted", "indexingFilesFailed"],
+		["awaiting-retry", "indexingFilesAwaitingRetry"],
+	] as const)("CI-UI-01: shows %s summary and expandable file details", (state, summaryKey) => {
 		renderStatusPopover(failedStatus(state))
-		const summaryKey = state === "retrying" ? "indexingFilesRetrying" : "indexingFilesFailed"
 		expect(screen.getByRole("status")).toHaveTextContent(
 			`settings:codeIndex.${summaryKey}: 1 / src/failed.ts / Provider unavailable`,
 		)

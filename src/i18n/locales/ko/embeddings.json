@@ -61,6 +61,12 @@
 		"providerWaiting": "{{service}} 대기 중; 인덱싱이 자동으로 재개됩니다",
 		"providerWaitingUntil": "{{service}} 대기 중; {{time}}에 인덱싱이 자동으로 재개됩니다",
 		"indexingFilesFailed": "파일 오류가 남아 있습니다. 예정된 자동 재시도가 없습니다. 부분 인덱스를 사용할 수 있습니다.",
+		"parserFatal": "인덱싱이 중지되었습니다: {{filePath}}에서 파서가 {{category}}. 기존 인덱스 데이터는 유지됩니다. 다시 시도하려면 인덱싱을 시작하거나, 인덱싱을 비활성화했다가 다시 활성화하세요.",
+		"parserFatalCategory": {
+			"timeout": "시간 초과되었습니다",
+			"crash": "충돌했습니다",
+			"exit": "예기치 않게 종료되었습니다"
+		},
 		"indexingStopping": "인덱싱 중지 중...",
 		"indexingFailedNoBlocks": "인덱싱 실패: 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 일반적으로 임베더 구성 문제를 나타냅니다.",
 		"fileWatcherStarted": "파일 감시자가 시작되었습니다.",

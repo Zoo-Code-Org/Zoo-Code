@@ -217,11 +217,13 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "File dengan kegagalan pengindeksan: {{count}}. Mencoba ulang {{path}}: {{reason}}",
 		"indexingFilesFailed": "File dengan kegagalan pengindeksan: {{count}}. Percobaan ulang otomatis berakhir untuk {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "File dengan kegagalan pengindeksan: {{count}}. Parsing berhenti di {{path}} dan menunggu percobaan ulang eksplisit: {{reason}}",
 		"failedFileDetails": "Detail file yang gagal",
 		"failedFileReason": "Alasan",
 		"failedFileStates": {
 			"retrying": "Percobaan ulang otomatis tertunda",
-			"exhausted": "Percobaan ulang otomatis berakhir"
+			"exhausted": "Percobaan ulang otomatis berakhir",
+			"awaiting-retry": "Menunggu percobaan ulang eksplisit"
 		},
 		"failedFileActivities": {
 			"read": "Baca file",

@@ -61,6 +61,12 @@
 		"providerWaiting": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione",
 		"providerWaitingUntil": "Oczekiwanie na {{service}}; indeksowanie zostanie automatycznie wznowione o {{time}}",
 		"indexingFilesFailed": "Nadal występują błędy plików. Brak oczekujących automatycznych ponowień. Dostępny jest częściowy indeks.",
+		"parserFatal": "Indeksowanie zatrzymane: parser {{category}} przy pliku {{filePath}}. Istniejące dane indeksu zostają zachowane. Rozpocznij indeksowanie albo wyłącz i ponownie włącz indeksowanie, aby spróbować ponownie.",
+		"parserFatalCategory": {
+			"timeout": "przekroczył limit czasu",
+			"crash": "uległ awarii",
+			"exit": "nieoczekiwanie zakończył działanie"
+		},
 		"indexingStopping": "Zatrzymywanie indeksowania...",
 		"indexingFailedNoBlocks": "Indeksowanie nie powiodło się: Żadne bloki kodu nie zostały pomyślnie zaindeksowane. To zwykle wskazuje na problem z konfiguracją embeddera.",
 		"fileWatcherStarted": "Monitor plików uruchomiony.",

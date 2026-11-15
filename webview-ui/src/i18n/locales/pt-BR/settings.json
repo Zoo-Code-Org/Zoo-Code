@@ -217,11 +217,13 @@
 		"statusTitle": "Status",
 		"indexingFilesRetrying": "Arquivos com falhas de indexação: {{count}}. Tentando novamente {{path}}: {{reason}}",
 		"indexingFilesFailed": "Arquivos com falhas de indexação: {{count}}. Nova tentativa automática encerrada para {{path}}: {{reason}}",
+		"indexingFilesAwaitingRetry": "Arquivos com falhas de indexação: {{count}}. A análise parou em {{path}} e aguarda uma nova tentativa explícita: {{reason}}",
 		"failedFileDetails": "Detalhes dos arquivos com falhas",
 		"failedFileReason": "Motivo",
 		"failedFileStates": {
 			"retrying": "Nova tentativa automática pendente",
-			"exhausted": "Nova tentativa automática encerrada"
+			"exhausted": "Nova tentativa automática encerrada",
+			"awaiting-retry": "Aguardando nova tentativa explícita"
 		},
 		"failedFileActivities": {
 			"read": "Ler arquivo",

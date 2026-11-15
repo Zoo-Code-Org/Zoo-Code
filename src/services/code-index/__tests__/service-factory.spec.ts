@@ -62,6 +62,7 @@ const mockGetModelDimension = getModelDimension as MockedFunction<typeof getMode
 describe("CodeIndexServiceFactory", () => {
 	const failures = new FileFailureRegistry()
 	const pacers = new ProviderPacerRegistry()
+	const parser = { parseFile: vitest.fn(), open: vitest.fn() }
 	let factory: CodeIndexServiceFactory
 	let embedderFactory: EmbedderFactory
 	let vectorStoreFactory: VectorStoreFactory
@@ -79,7 +80,14 @@ describe("CodeIndexServiceFactory", () => {
 
 		mockCacheManager = {}
 
-		factory = new CodeIndexServiceFactory(mockConfigManager, "/test/workspace", mockCacheManager, failures, pacers)
+		factory = new CodeIndexServiceFactory(
+			mockConfigManager,
+			"/test/workspace",
+			mockCacheManager,
+			failures,
+			pacers,
+			parser,
+		)
 	})
 
 	describe("createEmbedder", () => {

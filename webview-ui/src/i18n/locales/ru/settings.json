@@ -217,11 +217,13 @@
 		"statusTitle": "Статус",
 		"indexingFilesRetrying": "Файлов с ошибками индексации: {{count}}. Повторная попытка для {{path}}: {{reason}}",
 		"indexingFilesFailed": "Файлов с ошибками индексации: {{count}}. Автоматические повторные попытки для {{path}} завершены: {{reason}}",
+		"indexingFilesAwaitingRetry": "Файлов с ошибками индексации: {{count}}. Разбор остановлен на {{path}} и ожидает явной повторной попытки: {{reason}}",
 		"failedFileDetails": "Подробности файлов с ошибками",
 		"failedFileReason": "Причина",
 		"failedFileStates": {
 			"retrying": "Ожидается автоматическая повторная попытка",
-			"exhausted": "Автоматические повторные попытки завершены"
+			"exhausted": "Автоматические повторные попытки завершены",
+			"awaiting-retry": "Ожидает явной повторной попытки"
 		},
 		"failedFileActivities": {
 			"read": "Чтение файла",

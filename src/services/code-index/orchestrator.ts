@@ -8,6 +8,8 @@ import { CacheManager } from "./cache-manager"
 import { CodeIndexScanExecutor } from "./code-index-scan-executor"
 import type { FileFailureRegistry } from "./file-failure-registry"
 import type { ProviderPacerRegistry } from "./provider-pacer"
+import type { ParseWorkerClient } from "./parse-worker-client"
+import { ParserFatalError } from "./parser-errors"
 import { formatProviderWaitMessage } from "./shared/provider-wait-message"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
@@ -40,6 +42,7 @@ export class CodeIndexOrchestrator {
 		private readonly fileWatcher: IFileWatcher,
 		private readonly failures: FileFailureRegistry,
 		private readonly pacers: ProviderPacerRegistry,
+		private readonly parser: Pick<ParseWorkerClient, "open">,
 	) {
 		this.scanExecutor = new CodeIndexScanExecutor(workspacePath, scanner, vectorStore, stateManager)
 	}
@@ -81,6 +84,7 @@ export class CodeIndexOrchestrator {
 			await this.fileWatcher.initialize(signal)
 
 			this._fileWatcherSubscriptions = [
+				this.fileWatcher.onParserFatal((error) => this.failParser(error, signal)),
 				this.fileWatcher.onDidStartBatchProcessing(() => {
 					this.pendingWatcherBatches++
 				}),
@@ -147,6 +151,7 @@ export class CodeIndexOrchestrator {
 		this.scanDone = false
 		this._abortController = new AbortController()
 		const signal = this._abortController.signal
+		this.parser.open(signal)
 		this.recoverySubscriptions = [
 			this.failures.onDidChange(() => this.updateRecoveryStatus(signal)),
 			this.pacers.onDidChange(() => this.updateRecoveryStatus(signal)),
@@ -188,6 +193,10 @@ export class CodeIndexOrchestrator {
 			}
 			this.updateRecoveryStatus(signal)
 		} catch (error: any) {
+			if (error instanceof ParserFatalError) {
+				this.failParser(error, signal)
+				return
+			}
 			// A stop aborts in-flight work; that is not an indexing failure.
 			if (error?.name === "AbortError" || signal.aborted) {
 				console.log("[CodeIndexOrchestrator] Indexing aborted by user.")
@@ -226,6 +235,29 @@ export class CodeIndexOrchestrator {
 			)
 			this.disposeWatcher()
 		}
+	}
+
+	/**
+	 * Ends the attempt after a fatal parse failure. Existing index data and cache are kept; aborting the
+	 * session stops queued writes and closes the parse session.
+	 */
+	private failParser(error: ParserFatalError, signal: AbortSignal): void {
+		const controller = this._abortController
+		if (!controller || controller.signal !== signal || signal.aborted) return
+		console.error("[CodeIndexOrchestrator] Fatal parser failure:", error)
+		TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+			error: `Parser ${error.category}`,
+			location: "failParser",
+		})
+		this.stateManager.setSystemState(
+			"Error",
+			t("embeddings:orchestrator.parserFatal", {
+				filePath: error.filePath,
+				category: t(`embeddings:orchestrator.parserFatalCategory.${error.category}`),
+			}),
+		)
+		controller.abort()
+		this.disposeWatcher()
 	}
 
 	/**

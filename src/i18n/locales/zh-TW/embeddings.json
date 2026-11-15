@@ -61,6 +61,12 @@
 		"providerWaiting": "正在等待 {{service}}；索引將自動恢復",
 		"providerWaitingUntil": "正在等待 {{service}}；索引將於 {{time}} 自動恢復",
 		"indexingFilesFailed": "仍有檔案失敗。沒有待執行的自動重試。部分索引可供使用。",
+		"parserFatal": "索引已停止：剖析器在處理 {{filePath}} 時{{category}}。現有索引資料已保留。請開始索引，或停用後重新啟用索引以重試。",
+		"parserFatalCategory": {
+			"timeout": "逾時",
+			"crash": "當機",
+			"exit": "意外結束"
+		},
 		"indexingStopping": "正在停止索引...",
 		"indexingFailedNoBlocks": "索引失敗：沒有程式碼區塊被成功索引。這通常表示 Embedder 設定問題。",
 		"fileWatcherStarted": "檔案監控已啟動。",

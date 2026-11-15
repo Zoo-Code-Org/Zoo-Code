@@ -1,6 +1,8 @@
 import { CodeIndexOrchestrator } from "../orchestrator"
 import { FileFailureRegistry } from "../file-failure-registry"
 import { ProviderPacerRegistry } from "../provider-pacer"
+import { ParserFatalError } from "../parser-errors"
+import { ParseWorkerClient, type ParseWorker } from "../parse-worker-client"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import type { BatchProcessingSummary, IDirectoryScanner } from "../interfaces"
@@ -16,14 +18,17 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 
 vi.mock("../../../i18n", () => ({
-	t: (key: string, params?: { errorMessage?: string }) =>
-		params?.errorMessage ? `${key}: ${params.errorMessage}` : key,
+	t: (key: string, params?: { errorMessage?: string; filePath?: string; category?: string }) => {
+		if (params?.errorMessage) return `${key}: ${params.errorMessage}`
+		if (params?.filePath) return `${key}: ${params.filePath} ${params.category}`
+		return key
+	},
 }))
 
 type ScanResult = Awaited<ReturnType<IDirectoryScanner["scanDirectory"]>>
 const emptyScan: ScanResult = { stats: { processed: 0, skipped: 0 }, totalBlockCount: 0 }
 
-function setup() {
+function setup(parser: ConstructorParameters<typeof CodeIndexOrchestrator>[9] = { open: vi.fn() }) {
 	let currentState = "Standby"
 	const stateManager = {
 		get state() {
@@ -48,11 +53,13 @@ function setup() {
 		deleteCollection: vi.fn().mockResolvedValue(undefined),
 	}
 	const scanner = { scanDirectory: vi.fn<IDirectoryScanner["scanDirectory"]>().mockResolvedValue(emptyScan) }
+	const fatal = liveListeners<ParserFatalError>()
 	const fileWatcher = {
 		initialize: vi.fn().mockResolvedValue(undefined),
 		onDidStartBatchProcessing: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		onBatchProgressUpdate: vi.fn().mockReturnValue({ dispose: vi.fn() }),
 		onDidFinishBatchProcessing: vi.fn().mockReturnValue({ dispose: vi.fn() }),
+		onParserFatal: vi.fn(fatal.subscribe),
 		dispose: vi.fn(),
 	}
 	const failures = new FileFailureRegistry()
@@ -69,8 +76,20 @@ function setup() {
 		fileWatcher as unknown as Arguments[6],
 		failures,
 		pacers,
+		parser,
 	)
-	return { orchestrator, stateManager, cacheManager, vectorStore, scanner, fileWatcher, failures, pacers }
+	return {
+		orchestrator,
+		stateManager,
+		cacheManager,
+		vectorStore,
+		scanner,
+		fileWatcher,
+		failures,
+		pacers,
+		parser,
+		fireParserFatal: fatal.fire,
+	}
 }
 
 /** A scanner that waits until its signal aborts, then returns normally. */
@@ -416,10 +435,102 @@ describe("CodeIndexOrchestrator", () => {
 			await Promise.all([first, second])
 		})
 
+		it("CI-OR-05: a stop during a parse that never replies reaches Standby within 2 s", async () => {
+			vi.useFakeTimers()
+			try {
+				const worker: ParseWorker = {
+					postMessage: vi.fn(),
+					on: vi.fn(),
+					// Never settles: stop must not wait for the worker to exit.
+					terminate: vi.fn(() => new Promise<number>(() => {})),
+				}
+				const client = new ParseWorkerClient(() => worker)
+				const context = setup(client)
+				context.scanner.scanDirectory.mockImplementation(async () => {
+					await client.parseFile("/test/workspace/a.ts", { content: "const a = 1", fileHash: "h" })
+					return emptyScan
+				})
+				const start = context.orchestrator.startIndexing()
+				await vi.advanceTimersByTimeAsync(0)
+				expect(worker.postMessage).toHaveBeenCalledOnce()
+
+				let stopped = false
+				const stop = context.orchestrator.stopIndexing().then(() => {
+					stopped = true
+				})
+				await vi.advanceTimersByTimeAsync(1_999)
+				expect(stopped).toBe(true)
+				await Promise.all([stop, start])
+				expect(worker.terminate).toHaveBeenCalledOnce()
+				expect(context.orchestrator.state).toBe("Standby")
+				expect(context.failures.list()).toEqual([])
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
 		it("preserves Error across a stop", async () => {
 			const context = setup()
 			context.vectorStore.initialize.mockRejectedValue(new Error("down"))
 			await context.orchestrator.startIndexing()
+			await context.orchestrator.stopIndexing()
+			expect(context.orchestrator.state).toBe("Error")
+		})
+	})
+
+	describe("CI-OR-04: fatal parser failure", () => {
+		const fatal = new ParserFatalError("timeout", "src/hang.ts", "no reply")
+		const category = "embeddings:orchestrator.parserFatalCategory.timeout"
+		const fatalMessage = `embeddings:orchestrator.parserFatal: src/hang.ts ${category}`
+
+		it("from the scan ends in Error, aborts the session and keeps the new collection and cache", async () => {
+			const context = setup()
+			context.vectorStore.initialize.mockResolvedValue(true)
+			let scanSignal: AbortSignal | undefined
+			context.scanner.scanDirectory.mockImplementation(async (_dir, _onError, _onIndexed, _onParsed, signal) => {
+				scanSignal = signal
+				throw fatal
+			})
+
+			await context.orchestrator.startIndexing()
+
+			expect(context.parser.open).toHaveBeenCalledExactlyOnceWith(scanSignal)
+			expect(scanSignal?.aborted).toBe(true)
+			expect(context.orchestrator.state).toBe("Error")
+			expect(context.stateManager.setSystemState).toHaveBeenLastCalledWith("Error", fatalMessage)
+			expect(context.vectorStore.clearCollection).not.toHaveBeenCalled()
+			// The only cache clear is the new-collection reset before the scan.
+			expect(context.cacheManager.clearCacheFile).toHaveBeenCalledOnce()
+			expect(context.fileWatcher.dispose).toHaveBeenCalled()
+			expect(vi.mocked(TelemetryService.instance.captureEvent).mock.calls).toEqual([
+				[TelemetryEventName.CODE_INDEX_ERROR, { error: "Parser timeout", location: "failParser" }],
+			])
+
+			context.failures.renew("late.ts", "h")
+			context.failures.record("late.ts", "h", "embed", "late", 1, "exhausted")
+			expect(context.orchestrator.state).toBe("Error")
+		})
+
+		it("from the watcher ends in Error once and aborts the session", async () => {
+			const context = setup()
+			await context.orchestrator.startIndexing()
+			expect(context.orchestrator.state).toBe("Indexed")
+			const sessionSignal: AbortSignal = context.fileWatcher.initialize.mock.calls[0][0]
+
+			context.fireParserFatal(fatal)
+			context.fireParserFatal(fatal)
+
+			expect(sessionSignal.aborted).toBe(true)
+			expect(context.orchestrator.state).toBe("Error")
+			expect(context.stateManager.setSystemState).toHaveBeenLastCalledWith("Error", fatalMessage)
+			expect(context.fileWatcher.dispose).toHaveBeenCalledOnce()
+			expect(context.vectorStore.clearCollection).not.toHaveBeenCalled()
+			expect(context.cacheManager.clearCacheFile).not.toHaveBeenCalled()
+			expect(TelemetryService.instance.captureEvent).toHaveBeenCalledOnce()
+
+			context.failures.renew("late.ts", "h")
+			context.failures.record("late.ts", "h", "embed", "late", 1, "exhausted")
+			expect(context.orchestrator.state).toBe("Error")
 			await context.orchestrator.stopIndexing()
 			expect(context.orchestrator.state).toBe("Error")
 		})

@@ -1,6 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/parser.spec.ts
 
-import { CodeParser, codeParser, ParserLoadError } from "../parser"
+import { CodeParser, ParserLoadError } from "../parser"
 import { loadRequiredLanguageParsers } from "../../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
@@ -359,8 +359,9 @@ describe("CodeParser", () => {
 		})
 	})
 
-	describe("singleton instance", () => {
+	describe("repeated parses", () => {
 		it("should maintain parser state across calls", async () => {
+			const reused = new CodeParser()
 			// Capture each parsed root, so the result reflects the input rather than an earlier fixed capture.
 			const echoRoot = (node: { text: string }) => [
 				{
@@ -378,8 +379,8 @@ describe("CodeParser", () => {
 			mockLanguageParser.js.query.captures.mockImplementationOnce(echoRoot).mockImplementationOnce(echoRoot)
 			const first = "const firstValue = 'singleton parser first input with enough text'"
 			const second = "const secondValue = 'singleton parser second input with enough text'"
-			const result1 = await codeParser.parseFile("test.js", { content: first })
-			const result2 = await codeParser.parseFile("test.js", { content: second })
+			const result1 = await reused.parseFile("test.js", { content: first })
+			const result2 = await reused.parseFile("test.js", { content: second })
 			expect(result1.map((block) => block.content)).toEqual([first])
 			expect(result2.map((block) => block.content)).toEqual([second])
 		})
