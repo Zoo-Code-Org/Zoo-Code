@@ -1345,7 +1345,7 @@ describe("attemptCompletionTool", () => {
 					fileContextTracker: {} as FileContextTracker,
 				})
 				expect(parseMentions).not.toHaveBeenCalled()
-				expect(result.content).toEqual([{ type: "text", text: "<user_message>\nundefined\n</user_message>" }])
+				expect(result.content).toEqual([{ type: "text", text: "<user_message>\n\n</user_message>" }])
 			})
 
 			it("does not clear pending metadata when stale delegation continues without an action id", async () => {

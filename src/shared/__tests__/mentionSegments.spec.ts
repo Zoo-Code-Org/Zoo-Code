@@ -71,6 +71,16 @@ describe("mentionSegments", () => {
 			expect(applyEdit([gen("x")], "ab", "abc")).toEqual(generatedSegments("abc"))
 		})
 
+		it.each([
+			["aa", "aaa"],
+			["aaa", "aa"],
+			["abab", "ab"],
+			["ab", "abab"],
+		])("keeps the joined text equal to the new value for %s -> %s", (oldValue, newValue) => {
+			const result = applyEdit([gen(oldValue)], oldValue, newValue)
+			expect(joinSegments(result)).toBe(newValue)
+		})
+
 		it("does not authorize a generated mention after an unrelated edit", () => {
 			const result = applyEdit([gen("see @/secret")], "see @/secret", "see @/secret now")
 			expect(userText(result)).toBe(" now")

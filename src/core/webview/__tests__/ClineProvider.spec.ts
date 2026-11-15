@@ -428,7 +428,12 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
-const noUserSegments = expect.not.arrayContaining([expect.objectContaining({ source: "user" })])
+// Matches a non-empty segment list that holds only generated text.
+const noUserSegments = {
+	asymmetricMatch: (value: unknown) =>
+		Array.isArray(value) && value.length > 0 && value.every((segment) => segment?.source === "generated"),
+	toString: () => "onlyGeneratedSegments",
+}
 
 describe("ClineProvider", () => {
 	beforeAll(() => {

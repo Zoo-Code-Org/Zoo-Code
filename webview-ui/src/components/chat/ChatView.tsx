@@ -884,6 +884,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							askResponse: "yesButtonClicked",
 							text: trimmedInput,
 							images: images,
+							segments: segmentsRef.current
+								? trimSegments(segmentsRef.current)
+								: userSegments(trimmedInput ?? ""),
 						})
 						// Clear input state after sending
 						segmentsRef.current = null
@@ -911,6 +914,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 								askResponse: "yesButtonClicked",
 								text: trimmedInput,
 								images: images,
+								segments: segmentsRef.current
+									? trimSegments(segmentsRef.current)
+									: userSegments(trimmedInput ?? ""),
 							})
 							// Clear input state after sending
 							segmentsRef.current = null
@@ -967,6 +973,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							askResponse: "noButtonClicked",
 							text: trimmedInput,
 							images: images,
+							segments: segmentsRef.current
+								? trimSegments(segmentsRef.current)
+								: userSegments(trimmedInput ?? ""),
 						})
 						// Clear input state after sending
 						segmentsRef.current = null

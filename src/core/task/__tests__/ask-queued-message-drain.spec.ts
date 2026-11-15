@@ -53,6 +53,17 @@ describe("Task.ask queued message drain", () => {
 		expect(result.text).toBe("picked answer")
 	})
 
+	it("forwards the queued message segments to the ask response", async () => {
+		const task = await createTask()
+		const segments = [{ text: "@/a", source: "user" as const }]
+
+		const askPromise = task.ask("followup", "Q?", false)
+		task.messageQueueService.addMessage("@/a", undefined, segments)
+
+		const result = await askPromise
+		expect(result.segments).toEqual(segments)
+	})
+
 	it("does not consume queued messages for command_output asks", async () => {
 		const task = await createTask()
 

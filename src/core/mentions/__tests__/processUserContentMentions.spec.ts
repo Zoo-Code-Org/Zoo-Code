@@ -102,4 +102,56 @@ describe("processUserContentMentions authorization", () => {
 		await process([copy, block, userMentionContent([gen("context @/secret")])])
 		expect(parseMentions).not.toHaveBeenCalled()
 	})
+
+	it("passes image blocks through unchanged next to a user block", async () => {
+		const image: Anthropic.Messages.ImageBlockParam = {
+			type: "image",
+			source: { type: "base64", media_type: "image/png", data: "abc" },
+		}
+		const result = await process([userMentionContent([user("@/allowed")]), image])
+		expect(result.content[result.content.length - 1]).toBe(image)
+	})
+
+	it.each([
+		{ showRooIgnoredFiles: true, includeDiagnosticMessages: false, maxDiagnosticMessages: 3, currentMode: "ask" },
+		{ showRooIgnoredFiles: false, includeDiagnosticMessages: true, maxDiagnosticMessages: 50, currentMode: "code" },
+	])("passes the flags to parseMentions: %o", async (flags) => {
+		await processUserContentMentions({
+			userContent: [userMentionContent([user("@/allowed")])],
+			cwd: "/test",
+			fileContextTracker: {} as FileContextTracker,
+			...flags,
+		})
+		expect(parseMentions).toHaveBeenCalledWith(
+			"@/allowed",
+			"/test",
+			expect.anything(),
+			undefined,
+			flags.showRooIgnoredFiles,
+			flags.includeDiagnosticMessages,
+			flags.maxDiagnosticMessages,
+			undefined,
+			flags.currentMode,
+		)
+	})
+
+	it("keeps the mode of the first slash command", async () => {
+		vi.mocked(parseMentions)
+			.mockResolvedValueOnce({ text: "one", contentBlocks: [], mode: "architect" })
+			.mockResolvedValueOnce({ text: "two", contentBlocks: [], mode: "debug" })
+		const result = await process([userMentionContent([user("/a"), gen(" "), user("/b")])])
+		expect(result.mode).toBe("architect")
+	})
+
+	it("orders the extra blocks by segment after the text block", async () => {
+		vi.mocked(parseMentions)
+			.mockResolvedValueOnce({ text: "one", contentBlocks: [{ type: "file", path: "a", content: "A" }] })
+			.mockResolvedValueOnce({ text: "two", contentBlocks: [{ type: "file", path: "b", content: "B" }] })
+		const result = await process([userMentionContent([user("@/a"), gen(" "), user("@/b")])])
+		expect(result.content).toEqual([
+			{ type: "text", text: "one two" },
+			{ type: "text", text: "A" },
+			{ type: "text", text: "B" },
+		])
+	})
 })

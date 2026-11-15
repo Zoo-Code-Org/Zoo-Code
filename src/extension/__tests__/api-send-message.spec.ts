@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as vscode from "vscode"
 
 import { API } from "../api"
+import { userSegments } from "../../shared/mentionSegments"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
@@ -53,6 +54,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images: undefined,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -72,6 +74,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -90,6 +93,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: undefined,
 			images,
+			segments: userSegments(""),
 		})
 	})
 
@@ -103,6 +107,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: undefined,
 			images: undefined,
+			segments: userSegments(""),
 		})
 	})
 
@@ -129,6 +134,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images: undefined,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -150,6 +156,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images,
+			segments: userSegments(messageText ?? ""),
 		})
 		expect(mockPostMessageToWebview).toHaveBeenCalledTimes(1)
 	})

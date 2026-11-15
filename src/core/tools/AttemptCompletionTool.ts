@@ -248,7 +248,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			const feedbackText = `<user_message>\n${text}\n</user_message>`
 			// Only user segments expand. The tool result repeats the text by design.
-			task.userMessageContent.push(userMentionContent(wrapUserMessage(normalizeSegments(String(text), segments))))
+			task.userMessageContent.push(userMentionContent(wrapUserMessage(normalizeSegments(text ?? "", segments))))
 			pushToolResult(formatResponse.toolResult(feedbackText, images))
 		} catch (error) {
 			await handleError("inspecting site", error as Error)
