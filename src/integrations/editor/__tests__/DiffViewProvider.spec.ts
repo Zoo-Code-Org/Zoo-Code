@@ -392,6 +392,33 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["documentWasPinned"]).toBe(true)
 			expect(diffViewProvider["documentWasOpen"]).toBe(true)
 		})
+
+		it("leaves the placeholder unowned when opening a file the user already had on disk", async () => {
+			// editType modify means the file already exists, so open() writes no placeholder and must
+			// not claim ownership of one: a modify discard that believed the claim would unlink the
+			// user's real file. The ownership assignment sits inside the if (!fileExists) block, and
+			// this is the row that fails if it moves out of it.
+			const existingUri = makeUri(`${mockCwd}/existing.ts`)
+			const mockEditor = makeTextEditor({ document: makeTextDocument({ uri: existingUri }) })
+			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(mockEditor)
+			vi.mocked(vscode.commands.executeCommand).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.onDidOpenTextDocument).mockImplementation((callback) => {
+				setTimeout(() => {
+					callback(makeTextDocument({ uri: existingUri }))
+				}, 0)
+				return { dispose: vi.fn() }
+			})
+			vi.mocked(vscode.window).visibleTextEditors = [mockEditor]
+			diffViewProvider.editType = "modify"
+
+			await diffViewProvider.open("existing.ts")
+
+			// No placeholder was written, so nothing is owned. The getter is asserted alongside the
+			// field it reads, because no other row drives it through an open() of an existing file.
+			expect(fs.writeFile).not.toHaveBeenCalled()
+			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
+			expect(diffViewProvider.ownsPlaceholder).toBe(false)
+		})
 	})
 
 	describe("scrollToFirstDiff method", () => {
@@ -875,12 +902,49 @@ describe("DiffViewProvider", () => {
 			warn.mockRestore()
 		})
 
+		it("reports an in-memory open failure as its own field when openTextDocument rejects and the file is not shown", async () => {
+			const reason = new Error("TextDocumentService refused to open the document")
+			vi.mocked(vscode.workspace.openTextDocument).mockRejectedValueOnce(reason)
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+			// With openFile false the document is opened in memory only, and the write above is still
+			// the commit point: a rejection in the in-memory branch reports itself alongside the
+			// committed outcome instead of replacing it.
+			expect(result.finalContent).toBe("new content")
+			expect(result.openFailure).toContain("TextDocumentService refused to open the document")
+			expect(vscode.window.showTextDocument).not.toHaveBeenCalled()
+			warn.mockRestore()
+		})
+
+		it("reports the failure of the in-memory save as its own field when doc.save rejects", async () => {
+			const reason = new Error("file service refused to save the opened document")
+			const dirtyDoc = makeTextDocument({ uri: makeUri(`${mockCwd}/test.ts`) })
+			Object.assign(dirtyDoc, { isDirty: true, save: vi.fn().mockRejectedValue(reason) })
+			vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(dirtyDoc)
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", false, false, 0)
+
+			// doc.save() sits inside the same try as openTextDocument(), so its rejection is reported
+			// the same way instead of escaping saveDirectly as a publish failure.
+			expect(result.finalContent).toBe("new content")
+			expect(result.openFailure).toContain("file service refused to save the opened document")
+			expect(dirtyDoc.save).toHaveBeenCalledTimes(1)
+			warn.mockRestore()
+		})
+
 		it("should store results for formatFileWriteResponse", async () => {
-			await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 1000)
+			const result = await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 1000)
 
 			// Verify internal state was updated
 			expect(diffViewProvider.newProblemsMessage).toBe("")
 			expect(diffViewProvider.userEdits).toBeUndefined()
+
+			// The success path: an open that completed leaves no opening failure behind, so a change that
+			// reported one unconditionally would fail here.
+			expect(result.openFailure).toBeUndefined()
 			expect(diffViewProvider["relPath"]).toBe("test.ts")
 			expect(diffViewProvider["newContent"]).toBe("new content")
 		})
@@ -1520,6 +1584,11 @@ describe("DiffViewProvider", () => {
 				order.push("save")
 				return false
 			})
+
+			const closeAllDiffViews = vi.fn().mockResolvedValue(undefined)
+			const disposeActiveEditorListener = vi.fn()
+			diffViewProvider["closeAllDiffViews"] = closeAllDiffViews
+			diffViewProvider["disposeActiveEditorListener"] = disposeActiveEditorListener
 			Object.assign(diffViewProvider, {
 				relPath: "mock-target-file.ts",
 				newContent: "content",
@@ -1533,6 +1602,12 @@ describe("DiffViewProvider", () => {
 
 			expect(order).toEqual(["save"])
 			expect(diffViewProvider["placeholderPath"]).toBe(mockTargetPath)
+
+			// And nothing past the commit point ran: a false save stopped saveChanges before it closed the
+			// diff views and before it stopped tracking the active editor, so moving either of those above
+			// the save guard fails this row.
+			expect(closeAllDiffViews).not.toHaveBeenCalled()
+			expect(disposeActiveEditorListener).not.toHaveBeenCalled()
 		})
 
 		it("saveChanges() commits an already-clean document and releases placeholder ownership", async () => {
@@ -1746,8 +1821,9 @@ describe("DiffViewProvider", () => {
 				relPath: "mock-target-file.ts",
 				activeDiffEditor: editor,
 				editType: "create",
-				createdDirs: [],
+				createdDirs: [`${mockCwd}/mock-parent`, `${mockCwd}/mock-parent/mock-nested`],
 				originalContent: "",
+				placeholderPath: mockTargetPath,
 			})
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			vi.mocked(vscode.window.tabGroups.close).mockRejectedValueOnce(new Error("close vetoed"))
@@ -1777,6 +1853,17 @@ describe("DiffViewProvider", () => {
 				expect.anything(),
 				"",
 			)
+
+			// The sweep never started: the placeholder this edit owned is still owned, the directory
+			// snapshot is untouched, and neither unlink nor rmdir ran, because the rollback stopped at the
+			// refused close before the sweep instead of deleting underneath a buffer it could not discard.
+			expect(diffViewProvider.ownsPlaceholder).toBe(true)
+			expect(diffViewProvider["createdDirs"]).toEqual([
+				`${mockCwd}/mock-parent`,
+				`${mockCwd}/mock-parent/mock-nested`,
+			])
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
 
 		it("revertChanges() stops the rollback without closing when the buffer restore is refused", async () => {
@@ -1814,8 +1901,9 @@ describe("DiffViewProvider", () => {
 				relPath: "mock-target-file.ts",
 				activeDiffEditor: editor,
 				editType: "create",
-				createdDirs: [],
+				createdDirs: [`${mockCwd}/mock-parent`, `${mockCwd}/mock-parent/mock-nested`],
 				originalContent: "",
+				placeholderPath: mockTargetPath,
 			})
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(false)
 
@@ -1837,6 +1925,17 @@ describe("DiffViewProvider", () => {
 			expect(vscode.workspace.applyEdit).toHaveBeenCalled()
 			expect(streamedBuffer.save).not.toHaveBeenCalled()
 			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+
+			// The sweep never started: the placeholder this edit owned is still owned, the directory
+			// snapshot is untouched, and neither unlink nor rmdir ran. The rollback stopped at the refused
+			// restore, before it deleted anything this edit created.
+			expect(diffViewProvider.ownsPlaceholder).toBe(true)
+			expect(diffViewProvider["createdDirs"]).toEqual([
+				`${mockCwd}/mock-parent`,
+				`${mockCwd}/mock-parent/mock-nested`,
+			])
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
 
 		it("revertChanges() stops the rollback without closing when the clean save is not confirmed", async () => {
@@ -1877,8 +1976,9 @@ describe("DiffViewProvider", () => {
 				relPath: "mock-target-file.ts",
 				activeDiffEditor: editor,
 				editType: "create",
-				createdDirs: [],
+				createdDirs: [`${mockCwd}/mock-parent`, `${mockCwd}/mock-parent/mock-nested`],
 				originalContent: "",
+				placeholderPath: mockTargetPath,
 			})
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 
@@ -1897,6 +1997,17 @@ describe("DiffViewProvider", () => {
 			// rollback before the close.
 			expect(streamedBuffer.save).toHaveBeenCalledTimes(1)
 			expect(vscode.window.tabGroups.close).not.toHaveBeenCalled()
+
+			// The sweep never started: the placeholder this edit owned is still owned, the directory
+			// snapshot is untouched, and neither unlink nor rmdir ran. An unconfirmed save stops the
+			// rollback before the artifact sweep, which is what keeps a half-confirmed file owned.
+			expect(diffViewProvider.ownsPlaceholder).toBe(true)
+			expect(diffViewProvider["createdDirs"]).toEqual([
+				`${mockCwd}/mock-parent`,
+				`${mockCwd}/mock-parent/mock-nested`,
+			])
+			expect(fs.unlink).not.toHaveBeenCalled()
+			expect(fs.rmdir).not.toHaveBeenCalled()
 		})
 
 		it("revertChanges() closes the file tab when the file was not open and untouched", async () => {
@@ -2799,8 +2910,16 @@ describe("DiffViewProvider", () => {
 			const document = makeAbandonedDocument(callOrder)
 			openAbandonedView(document, [`${mockCwd}/mock-dir`], callOrder)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
+			vi.mocked(fs.access).mockResolvedValue(undefined)
+			// One preview tab the diff evicted when it opened, whose file is still on disk: the discard
+			// path has to put it back even though the tab close is what failed.
+			const evictedPreview = makeUri(`${mockCwd}/evicted-preview.ts`)
+			const showCallsBeforeDiscard = vi.mocked(vscode.window.showTextDocument).mock.calls.length
 			Object.assign(diffViewProvider, {
 				closeAllDiffViews: vi.fn().mockRejectedValue(new Error("close rejected")),
+				snapshotPreviewTabs: [
+					{ uri: evictedPreview, scrollLine: undefined, viewColumn: vscode.ViewColumn.One },
+				],
 			})
 			vi.mocked(fs.unlink).mockResolvedValue(undefined)
 
@@ -2809,6 +2928,12 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(mockTargetPath)
 			expect(fs.rmdir).toHaveBeenCalledWith(`${mockCwd}/mock-dir`)
 			expect(diffViewProvider["placeholderPath"] as string | undefined).toBeUndefined()
+
+			// The sweep completed, so the preview-tab restore ran even though the close failed: the
+			// evicted preview tab is re-shown exactly once, and the editorFailure throw at the end of the
+			// method cannot skip it - moving restorePreviewTabs() after that throw fails this row.
+			expect(vi.mocked(vscode.window.showTextDocument).mock.calls.length).toBe(showCallsBeforeDiscard + 1)
+			expect(vi.mocked(vscode.window.showTextDocument).mock.lastCall?.[0]).toBe(evictedPreview)
 		})
 
 		it("disposes the touch listeners and cancels the deferred scroll while the buffer restore is still pending", async () => {
@@ -3352,14 +3477,32 @@ describe("DiffViewProvider", () => {
 		})
 	})
 
-	describe("blocking rows this unit owns at head d52c1614f6e4", () => {
+	describe("rollback and reset behavior this unit settles without a directive", () => {
 		// Each it below closes a line of the 50 blocking rows the mutation-diff leg published at
 		// p1066/u6-execute-error-path-cleanup d52c1614f6e4. The lines named here are the ones this
 		// unit's own diff defines: for each of them no earlier-merging unit in the chain
 		// (U3 #1931, U4 #1929, U5a #1930, U5b #2435) adds the same line against its own merge base,
 		// so the construct is this unit's to settle and no suppression directive is used anywhere.
+		// The names below describe behavior rather than quoting line numbers, because a name that
+		// quotes a line number goes stale against the next head. The mapping to the published blocking
+		// rows stays in this comment and travels with the PR body rather than with the names: nothing
+		// in this repository reads a test name to find a mutation row - scripts/stryker-diff.mjs matches
+		// test file names against source file names (its lines 337 to 341) and the PR comment workflow
+		// reads the Stryker report JSON - so renaming cannot orphan a row.
 		const settleRelPath = "settled-target-file.ts"
 		const settleTargetPath = `${mockCwd}/settled-target-file.ts`
+
+		// The rollback reads only deref() off the task reference, and deref() off that task's
+		// providerRef, so these fixtures carry nothing else and are not assignable to Task.
+		// One cast inside this helper replaces the six `as unknown as WeakRef<Task>` casts these
+		// rows used to repeat: AGENTS.md asks for a single cast, made where the value is built,
+		// with the faked members named - deref on the reference, providerRef.deref on the task.
+		// The literal also carries [Symbol.toStringTag] because this project's Node typings
+		// declare that property on WeakRef, so a plain object literal is not assignable to the field.
+		const makeTaskRef = (task?: unknown): WeakRef<Task> => ({
+			[Symbol.toStringTag]: "WeakRef",
+			deref: () => task as Task | undefined,
+		})
 
 		// revertChanges() reads only uri/getText/positionAt/isDirty/save off the diff document,
 		// so the double stays that narrow and every input the rollback decides on is an argument.
@@ -3405,7 +3548,7 @@ describe("DiffViewProvider", () => {
 			})
 		}
 
-		it("line 596: reports no different path when the session flag is up but its retained path is gone", () => {
+		it("reports no different path when the session flag is up but its retained path is gone", () => {
 			// The guard's other exit. isEditing can stay true with relPath already cleared by a reset
 			// whose tab close rejected, and falling through to the comparison would then call every
 			// later write a second write, because undefined differs from every path.
@@ -3414,7 +3557,7 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider.isEditingDifferentPath("any/path.ts")).toBe(false)
 		})
 
-		it("line 833: restores the recorded content rather than an empty buffer when a new-file rollback meets a dirty diff buffer", async () => {
+		it("restores the recorded content rather than an empty buffer when a new-file rollback meets a dirty diff buffer", async () => {
 			const document = makeRollbackDocument("partial model output", true, true)
 			Object.assign(diffViewProvider, {
 				relPath: settleRelPath,
@@ -3437,7 +3580,7 @@ describe("DiffViewProvider", () => {
 			expect(replacedText).toBe("the content the file held before this write")
 		})
 
-		it("line 833: falls back to an empty buffer text, not a placeholder string, when a new-file rollback has no recorded original", async () => {
+		it("falls back to an empty buffer text, not a placeholder string, when a new-file rollback has no recorded original", async () => {
 			const document = makeRollbackDocument("partial model output", true, true)
 			Object.assign(diffViewProvider, {
 				relPath: settleRelPath,
@@ -3460,7 +3603,7 @@ describe("DiffViewProvider", () => {
 			expect(replacedText).toBe("")
 		})
 
-		it("line 841: reports the unconfirmed save of the diff buffer it just restored, naming the path and the stopped work", async () => {
+		it("reports the unconfirmed save of the diff buffer it just restored, naming the path and the stopped work", async () => {
 			// applyEdit confirmed, document.save() did not: the rollback stops before any close or
 			// unlink, and the report is the only thing the caller gets, so it has to carry the reason.
 			const document = makeRollbackDocument("partial model output", true, false)
@@ -3486,7 +3629,7 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
-		it("line 883: restores the recorded content rather than an empty buffer when an existing file is rolled back", async () => {
+		it("restores the recorded content rather than an empty buffer when an existing file is rolled back", async () => {
 			const document = makeRollbackDocument("streamed content", false, true)
 			Object.assign(diffViewProvider, {
 				relPath: settleRelPath,
@@ -3505,7 +3648,7 @@ describe("DiffViewProvider", () => {
 			expect(replacedText).toBe("the content the file held before this write")
 		})
 
-		it("line 883: strips an empty buffer text rather than a stand-in when a modify rollback has no recorded original", async () => {
+		it("strips an empty buffer text rather than a stand-in when a modify rollback has no recorded original", async () => {
 			const document = makeRollbackDocument("streamed content", false, true)
 			Object.assign(diffViewProvider, {
 				relPath: settleRelPath,
@@ -3524,7 +3667,7 @@ describe("DiffViewProvider", () => {
 			expect(replacedText).toBe("")
 		})
 
-		it("lines 896 and 901 and 902 and 904: rolls back to the centralized defaults when the task behind the rollback is gone", async () => {
+		it("rolls back to the centralized defaults when the task behind the rollback is gone", async () => {
 			// revertChanges() reads its auto-close settings through taskRef -> providerRef -> getState().
 			// Any link of that chain can already be gone by the time a denial lands, and a rollback that
 			// throws while reading them would take the session teardown with it. It must instead fall
@@ -3538,7 +3681,7 @@ describe("DiffViewProvider", () => {
 				createdDirs: [],
 				originalContent: "original",
 			})
-			diffViewProvider["taskRef"] = { deref: () => undefined } as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef()
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
@@ -3553,7 +3696,7 @@ describe("DiffViewProvider", () => {
 			expect(args[4]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES)
 		})
 
-		it("line 896: rolls back to the centralized defaults when the task no longer holds a provider", async () => {
+		it("rolls back to the centralized defaults when the task no longer holds a provider", async () => {
 			const document = makeRollbackDocument("streamed content", false, true)
 			const keepOrClose = vi.fn().mockResolvedValue(undefined)
 			Object.assign(diffViewProvider, {
@@ -3563,9 +3706,7 @@ describe("DiffViewProvider", () => {
 				createdDirs: [],
 				originalContent: "original",
 			})
-			diffViewProvider["taskRef"] = {
-				deref: () => ({ providerRef: { deref: () => undefined } }),
-			} as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef({ providerRef: { deref: () => undefined } })
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
@@ -3578,7 +3719,7 @@ describe("DiffViewProvider", () => {
 			expect(args[4]).toBe(DEFAULT_AUTO_CLOSE_ZOO_OPENED_NEW_FILES)
 		})
 
-		it("lines 902 and 904: carries the settings the state holds through the rollback path", async () => {
+		it("carries the settings the state holds through the rollback path", async () => {
 			// The rollback path is the one the auto-close decision table never exercised: every row of
 			// that table drives saveChanges(). Opting in on the rollback path has to close the tab, or
 			// the settings would mean one thing on accept and another on deny.
@@ -3595,14 +3736,13 @@ describe("DiffViewProvider", () => {
 				userTouchedDocument: false,
 				userTouchedDiffEditor: false,
 			})
-			diffViewProvider["taskRef"] = {
-				deref: () =>
-					makeTaskDouble({
-						autoCloseZooOpenedFiles: true,
-						autoCloseZooOpenedFilesAfterUserEdited: true,
-						autoCloseZooOpenedNewFiles: true,
-					}),
-			} as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef(
+				makeTaskDouble({
+					autoCloseZooOpenedFiles: true,
+					autoCloseZooOpenedFilesAfterUserEdited: true,
+					autoCloseZooOpenedNewFiles: true,
+				}),
+			)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = closeFileTab
@@ -3614,7 +3754,7 @@ describe("DiffViewProvider", () => {
 			expect(showEditedFile).not.toHaveBeenCalled()
 		})
 
-		it("lines 918 to 921: forwards the three settings in the slots the decision reads them from", async () => {
+		it("forwards the three settings in the slots the decision reads them from", async () => {
 			// The outcome of this footing cannot tell the two unreadable settings apart: with the base
 			// auto-close off and a modify rollback, the tab is kept whichever value the after-user-edited
 			// and new-files arguments hold. Only the arguments themselves can show that the values state
@@ -3633,14 +3773,13 @@ describe("DiffViewProvider", () => {
 				userTouchedDocument: false,
 				userTouchedDiffEditor: false,
 			})
-			diffViewProvider["taskRef"] = {
-				deref: () =>
-					makeTaskDouble({
-						autoCloseZooOpenedFiles: false,
-						autoCloseZooOpenedFilesAfterUserEdited: true,
-						autoCloseZooOpenedNewFiles: false,
-					}),
-			} as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef(
+				makeTaskDouble({
+					autoCloseZooOpenedFiles: false,
+					autoCloseZooOpenedFilesAfterUserEdited: true,
+					autoCloseZooOpenedNewFiles: false,
+				}),
+			)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
@@ -3652,7 +3791,7 @@ describe("DiffViewProvider", () => {
 			expect(args[3]).toBe(true)
 			expect(args[4]).toBe(false)
 		})
-		it("lines 918 to 921: pins the new-files argument in its own slot on the same unreadable footing", async () => {
+		it("pins the new-files argument in its own slot on the same unreadable footing", async () => {
 			// The row above sets the two settings the decision cannot read to distinct values only for the
 			// after-user-edited slot; autoCloseZooOpenedNewFiles shares its value with the base setting
 			// there, so dropping its forward would pass. Flipping only that flag here makes the same
@@ -3670,14 +3809,13 @@ describe("DiffViewProvider", () => {
 				userTouchedDocument: false,
 				userTouchedDiffEditor: false,
 			})
-			diffViewProvider["taskRef"] = {
-				deref: () =>
-					makeTaskDouble({
-						autoCloseZooOpenedFiles: false,
-						autoCloseZooOpenedFilesAfterUserEdited: false,
-						autoCloseZooOpenedNewFiles: true,
-					}),
-			} as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef(
+				makeTaskDouble({
+					autoCloseZooOpenedFiles: false,
+					autoCloseZooOpenedFilesAfterUserEdited: false,
+					autoCloseZooOpenedNewFiles: true,
+				}),
+			)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["keepOrCloseEditedFile"] = keepOrClose
@@ -3690,7 +3828,7 @@ describe("DiffViewProvider", () => {
 			expect(args[4]).toBe(true)
 		})
 
-		it("lines 902 and 904: keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
+		it("keeps the tab on the rollback path when the user touched the document and the after-user-edited setting is off", async () => {
 			// The touched-document branch is the only one where autoCloseZooOpenedFilesAfterUserEdited decides
 			// the outcome on a modify rollback, and it is the only branch where autoCloseZooOpenedNewFiles is
 			// unreadable. Setting the three flags to distinct values here means a wrong forwarded value moves
@@ -3708,14 +3846,13 @@ describe("DiffViewProvider", () => {
 				userTouchedDocument: true,
 				userTouchedDiffEditor: false,
 			})
-			diffViewProvider["taskRef"] = {
-				deref: () =>
-					makeTaskDouble({
-						autoCloseZooOpenedFiles: true,
-						autoCloseZooOpenedFilesAfterUserEdited: false,
-						autoCloseZooOpenedNewFiles: false,
-					}),
-			} as unknown as WeakRef<Task>
+			diffViewProvider["taskRef"] = makeTaskRef(
+				makeTaskDouble({
+					autoCloseZooOpenedFiles: true,
+					autoCloseZooOpenedFilesAfterUserEdited: false,
+					autoCloseZooOpenedNewFiles: false,
+				}),
+			)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValue(true)
 			diffViewProvider["closeAllDiffViews"] = vi.fn().mockResolvedValue(undefined)
 			diffViewProvider["closeFileTab"] = closeFileTab
@@ -3727,7 +3864,7 @@ describe("DiffViewProvider", () => {
 			expect(showEditedFile).toHaveBeenCalledWith(settleTargetPath)
 		})
 
-		it("lines 1209 and 1211: stops the rollback and reports the refused restore of the file-scheme buffer by name", async () => {
+		it("stops the rollback and reports the refused restore of the file-scheme buffer by name", async () => {
 			// The diff-side restore confirms; the plain file-scheme buffer holding the same unapproved
 			// content is the one VS Code refuses to put back. Closing it anyway would hand the user a
 			// save prompt over exactly the content this rollback discards.
@@ -3765,7 +3902,7 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
-		it("lines 1558 and 1559 and 1563 and 1564 and 1569 and 1570 and 1571: clears every session field the reset owns, not only the ones with a visible effect", async () => {
+		it("clears every session field the reset owns, not only the ones with a visible effect", async () => {
 			// A flag that survives reset() is read by the NEXT edit as if it described that edit:
 			// documentWasOpen decides whether the tab is restored instead of closed, the two touched
 			// flags decide auto-close, and streamedLines/preDiagnostics/snapshotPreviewTabs carry one
