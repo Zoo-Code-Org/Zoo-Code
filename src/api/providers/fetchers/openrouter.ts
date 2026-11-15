@@ -12,7 +12,7 @@ import {
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { parseApiPrice } from "../../../shared/cost"
 
-import { throwIfAborted } from "../utils/abort-signal"
+import { hasUsableTimeout, mergeAbortSignalAndTimeout, throwIfAborted, toSdkTimeoutMs } from "../utils/abort-signal"
 
 import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./modelCache"
 
@@ -158,13 +158,16 @@ export async function getOpenRouterModelEndpoints(
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
 	const untrusted = opts?.untrustedBaseUrl === true
+	const timeoutMs = hasUsableTimeout(opts?.timeoutMs) ? opts.timeoutMs : MODEL_CATALOG_FETCH_TIMEOUT_MS
 
 	try {
 		// This request runs outside getModels()' single-flight, so it needs its own bound:
 		// a stalled endpoint response would otherwise keep the caller's catalog load pending
 		// forever, and later callers would join that pending promise instead of retrying.
 		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`, {
-			timeout: opts?.timeoutMs ?? MODEL_CATALOG_FETCH_TIMEOUT_MS,
+			timeout: toSdkTimeoutMs(timeoutMs),
+			// Also bound the whole body read, in case the transport stops its timer after the headers.
+			signal: mergeAbortSignalAndTimeout(undefined, timeoutMs),
 			// The base URL can come from user settings. The cap stops a huge body from filling host memory.
 			maxContentLength: MAX_ENDPOINTS_BODY_BYTES,
 		})
