@@ -206,7 +206,8 @@ describe("ParseWorkerClient", () => {
 		const { client, controller, factory, workers } = setup()
 		let finishRead!: (content: string) => void
 		readFile.mockReturnValueOnce(new Promise<string>((resolve) => (finishRead = resolve)))
-		const stale = client.parseFile("old.ts", { signal: controller.signal }).catch((error: unknown) => error)
+		// No signal: only the session captured before the read can reject this stale parse.
+		const stale = client.parseFile("old.ts").catch((error: unknown) => error)
 		await drain()
 		expect(readFile).toHaveBeenCalledWith("old.ts", "utf8")
 

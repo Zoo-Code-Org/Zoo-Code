@@ -149,6 +149,18 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		expect(dependencies.parser.parseFile).toHaveBeenCalledWith(filePath, { content, fileHash: hash })
 	})
 
+	it("forwards the caller's session signal to the parser", async () => {
+		const dependencies = setup()
+		const signal = new AbortController().signal
+		await new FilePreparation(dependencies).prepareFile(filePath, signal)
+		// Without it, a read finishing after a restart would parse on the new session.
+		expect(dependencies.parser.parseFile).toHaveBeenCalledExactlyOnceWith(filePath, {
+			content,
+			fileHash: hash,
+			signal,
+		})
+	})
+
 	it("CI-FP-03: returns parsed blocks and the hash at the size limit and never embeds", async () => {
 		const dependencies = setup()
 		dependencies.fileSystem.stat.mockResolvedValue({

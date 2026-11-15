@@ -406,7 +406,7 @@ describe("CodeIndexManager reliability", () => {
 			configure(manager)
 			const stale = orchestratorDouble(order, "stale")
 			// The failed start never settles, as when the completion-marker upsert outlives the fatal abort.
-			stale.startIndexing.mockImplementation(() => new Promise<void>(() => {}))
+			stale.startIndexing.mockImplementation(() => new Promise<undefined>(() => {}))
 			attach(manager, stale)
 			void manager.startIndexing()
 			withFatalFailure(manager, stateManager)
