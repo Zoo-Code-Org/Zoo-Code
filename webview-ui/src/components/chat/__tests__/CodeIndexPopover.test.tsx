@@ -23,7 +23,9 @@ vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string, parameters?: Record<string, unknown>) =>
-			key === "settings:codeIndex.indexingFilesRetrying" || key === "settings:codeIndex.indexingFilesFailed"
+			key === "settings:codeIndex.indexingFilesRetrying" ||
+			key === "settings:codeIndex.indexingFilesFailed" ||
+			key === "settings:codeIndex.indexingFilesAwaitingRetry"
 				? `${key}: ${parameters?.count} / ${parameters?.path} / ${parameters?.reason}`
 				: key.startsWith("settings:codeIndex.provider")
 					? translation.t(key, parameters)
