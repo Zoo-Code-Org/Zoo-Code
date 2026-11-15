@@ -510,14 +510,99 @@ describe("safeWriteText", () => {
 			expect(fs.unlink).not.toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"))
 		})
 
+		it("flushes the directory entry naming the backup before the commit rename so a later directory failure cannot strand the recovery copy", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Distinct fds so the recorded order can say which flush belongs to which file:
+			// 1 for the staged temp and the target read, 8 for the seeded backup, 7 for the
+			// parent directory.
+			vi.mocked(fsSync.openSync).mockImplementation((target) => {
+				const name = String(target)
+				if (name === dirPath) {
+					return 7
+				}
+				if (name.includes("safeWriteText.bak_")) {
+					return 8
+				}
+				return 1
+			})
+			const order: string[] = []
+			vi.mocked(fsSync.fsyncSync).mockImplementation((fd) => {
+				order.push("fsync:" + String(fd))
+			})
+			vi.mocked(fs.rename).mockImplementation(async () => {
+				order.push("rename")
+			})
+
+			await safeWriteText(targetPath, "new data", { backup: true, platform: "linux" })
+
+			// The backup is an entry inside dirPath. Before this change the only directory flush
+			// in the function ran after the commit rename, so a crash between the two could
+			// leave the rename durable while the name of the recovery copy was not - the one
+			// case where the backupPath handed to PostCommitDurabilityError points at a copy
+			// that no longer exists. The directory is now flushed before the rename, where a
+			// failure is still a pre-commit failure, and the flush after the rename stays
+			// because that rename changed a different entry in the same directory.
+			const backupFlush = order.indexOf("fsync:8")
+			const firstDirFlush = order.indexOf("fsync:7")
+			const renameAt = order.indexOf("rename")
+			expect(backupFlush).toBeGreaterThanOrEqual(0)
+			expect(firstDirFlush).toBeGreaterThan(backupFlush)
+			expect(firstDirFlush).toBeLessThan(renameAt)
+			expect(renameAt).toBeGreaterThanOrEqual(0)
+			expect(order.filter((entry) => entry === "fsync:7")).toHaveLength(2)
+			expect(order.lastIndexOf("fsync:7")).toBeGreaterThan(renameAt)
+		})
+
+		it("a failed directory flush for the backup entry is a pre-commit failure that removes the copy and never runs the rename", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			const dirPath = path.dirname(targetPath)
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			vi.mocked(fsSync.openSync).mockImplementation((target) => (String(target) === dirPath ? 7 : 1))
+			vi.mocked(fsSync.fsyncSync).mockImplementation((fd) => {
+				if (fd === 7) {
+					throw new Error("EIO: directory flush failed")
+				}
+			})
+
+			const error = await safeWriteText(targetPath, "new data", {
+				backup: true,
+				platform: "linux",
+			}).catch((caught: unknown) => caught)
+
+			// The failure lands before the commit rename: the target still holds its previous
+			// content, the write is not reported as a post-commit durability failure, and the
+			// half-useful copy is removed instead of left beside a target whose writer was told
+			// nothing had failed.
+			expect(error).toBeInstanceOf(Error)
+			expect(String((error as Error).message)).toContain("EIO: directory flush failed")
+			expect(error).not.toBeInstanceOf(PostCommitDurabilityError)
+			expect(fs.rename).not.toHaveBeenCalled()
+			const backupUnlinks = vi
+				.mocked(fs.unlink)
+				.mock.calls.filter((call: unknown[]) => String(call[0]).includes("safeWriteText.bak_"))
+			expect(backupUnlinks).toHaveLength(1)
+		})
+
 		it("a failed post-commit directory fsync does not roll the backup back over the published content", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			const dirPath = path.dirname(targetPath)
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
-			// The file fd opens normally; the parent-directory open after the commit
-			// rename fails, which is the post-commit durability failure.
+			// The file fd opens normally. A backup:true write now opens the parent directory
+			// twice: once before the commit rename, to flush the entry that names the recovery
+			// copy, and once after it, to flush the entry the rename changed. This case is about
+			// the post-rename open, so the first directory open succeeds and the second fails,
+			// which is the post-commit durability failure.
+			let dirOpens = 0
 			vi.mocked(fsSync.openSync).mockImplementation((target) => {
-				if (String(target) === dirPath) throw new Error("EBADF")
+				if (String(target) === dirPath) {
+					dirOpens += 1
+					if (dirOpens > 1) {
+						throw new Error("EBADF")
+					}
+					return 1
+				}
 				return 1
 			})
 
@@ -560,9 +645,17 @@ describe("safeWriteText", () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			const dirPath = path.dirname(targetPath)
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Two directory opens happen on this path now: one before the commit rename for the
+			// entry naming the backup, one after it for the entry the rename changed. This case
+			// wants the post-rename one to fail.
+			let dirOpens = 0
 			vi.mocked(fsSync.openSync).mockImplementation((target) => {
 				if (String(target) === dirPath) {
-					throw new Error("EBADF")
+					dirOpens += 1
+					if (dirOpens > 1) {
+						throw new Error("EBADF")
+					}
+					return 1
 				}
 				return 1
 			})
