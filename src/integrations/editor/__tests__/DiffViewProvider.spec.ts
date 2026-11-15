@@ -2644,6 +2644,38 @@ describe("DiffViewProvider", () => {
 				}),
 			})
 
+		// A file the mocked fs can read. The header double resolves save to a promise and reports a
+		// zero-byte stat on its own, so a save that writes nothing over the file is invisible to it, and
+		// these rows need the opposite: the double's save persists what the restored buffer left behind
+		// into a holder that the mocked stat and the mocked readFile both report, so an emptying save
+		// that runs over another writer's content is a change a later read can see. The holder is fresh
+		// per row and the module defaults go back at the end of it, because beforeEach only clears call
+		// data, not implementations - the same reason the rows below restore the stat default they replace.
+		type PersistedFile = { bytes: string }
+		const makePersistedDocument = (callOrder: string[], file: PersistedFile) => ({
+			isDirty: true,
+			getText: () => "partial model output",
+			positionAt: (offset: number) => ({ line: 0, character: offset }),
+			uri: { fsPath: mockTargetPath, path: mockTargetPath },
+			save: vi.fn(async () => {
+				callOrder.push("save")
+				// A confirmed save persists the buffer, and the restore ahead of it emptied the buffer.
+				file.bytes = ""
+				return true
+			}),
+		})
+		const withPersistedFile = (file: PersistedFile): void => {
+			// The cast is the one the filled-file row that preceded these helpers already used for the
+			// stat double: the double carries only the size the cleanup asks about.
+			vi.mocked(fs.stat).mockImplementation(async () => ({ size: file.bytes.length }) as unknown as Stats)
+			vi.mocked(fs.readFile).mockImplementation(async () => file.bytes)
+		}
+		const restoreFileDoubles = (): void => {
+			// The header defaults, put back so no later row inherits this row's view of the file.
+			vi.mocked(fs.stat).mockImplementation(async () => ({ size: 0 }) as unknown as Stats)
+			vi.mocked(fs.readFile).mockResolvedValue("file content")
+		}
+
 		it("never persists the unapproved buffer: blanks it with an empty replacement, then deletes the placeholder", async () => {
 			const callOrder: string[] = []
 			const document = makeAbandonedDocument(callOrder)
@@ -2674,29 +2706,67 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
 		})
 
-		it("releases the placeholder instead of unlinking a path another writer filled", async () => {
+		it("releases the placeholder instead of emptying or unlinking a path another writer filled", async () => {
 			// The field only names the path open() created empty - it does not prove this edit still
 			// owns the file. A second provider working the same path can write and save approved
 			// content into that file while this abandoned session still carries the field, and the
 			// unlink the cleanup used to run unconditionally deletes that approved write. The bytes
-			// are somebody else's now, so only the ownership is released here.
+			// are somebody else's now, so only the ownership is released here. The emptying save that
+			// used to run ahead of the size check is skipped with it, because TextDocument.save() writes
+			// the file: saving the restored buffer here would put an empty file over these 42 bytes
+			// before the sweep ever looked at the size, and the read below is what proves it did not.
 			const callOrder: string[] = []
-			const document = makeAbandonedDocument(callOrder)
+			const file: PersistedFile = { bytes: "x".repeat(42) }
+			const document = makePersistedDocument(callOrder, file)
+			withPersistedFile(file)
 			openAbandonedView(document, [], callOrder)
-			// 42 bytes on disk: not the empty placeholder this edit created.
-			vi.mocked(fs.stat).mockResolvedValueOnce({ size: 42 } as unknown as Stats)
 			vi.mocked(vscode.workspace.applyEdit).mockResolvedValueOnce(true)
 
 			await diffViewProvider.discardUnapprovedStream()
 
-			// The buffer work still happened (the restore is mocked to resolve, so it is not
-			// recorded in the order list):
-			expect(callOrder).toEqual(["save", "closeDiffViews", "closeFileTab"])
-			// ...but the file with content in it is not unlinked, and the ownership is released so
+			// A later read still finds the other writer's 42 bytes, and the save never ran to change them.
+			expect(await fs.readFile(mockTargetPath)).toBe("x".repeat(42))
+			expect(document.save).not.toHaveBeenCalled()
+			expect(callOrder).toEqual(["closeDiffViews", "closeFileTab"])
+			// ...and the file with content in it is not unlinked, and the ownership is released so
 			// the caller can reset the session without a later cleanup deleting the write again.
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(diffViewProvider["placeholderPath"]).toBeUndefined()
 			expect(diffViewProvider["ownsPlaceholder"]).toBe(false)
+			restoreFileDoubles()
+		})
+		it("empties and removes the placeholder it still owns, and the save still puts the emptied bytes on it", async () => {
+			// The direction the new ownership question must not break, and it is a different kind of proof
+			// from the row above: it fails if the guard is written backwards, not if the guard is removed.
+			// While the file is still the zero-byte placeholder open() created, the save still runs, and what
+			// it puts on that file is the emptied buffer the sweep then removes.
+			const callOrder: string[] = []
+			const file: PersistedFile = { bytes: "" }
+			const document = makePersistedDocument(callOrder, file)
+			withPersistedFile(file)
+			const bytesAtUnlink: string[] = []
+			vi.mocked(fs.unlink).mockImplementation(async () => {
+				bytesAtUnlink.push(file.bytes)
+			})
+			openAbandonedView(document, [], callOrder)
+			vi.mocked(vscode.workspace.applyEdit).mockImplementationOnce(async () => {
+				callOrder.push("applyEdit")
+				return true
+			})
+
+			await diffViewProvider.discardUnapprovedStream()
+
+			expect(document.save).toHaveBeenCalledTimes(1)
+			expect(callOrder).toEqual(["applyEdit", "save", "closeDiffViews", "closeFileTab"])
+			// The file was byte-empty at the moment the sweep took it, which is the claim the ownership
+			// question is there to protect, and the read after the cleanup sees the empty bytes the save
+			// wrote rather than the content the model streamed.
+			expect(bytesAtUnlink).toEqual([""])
+			expect(await fs.readFile(mockTargetPath)).toBe("")
+			expect(fs.unlink).toHaveBeenCalledWith(expect.stringContaining("mock-target-file.ts"))
+			expect(diffViewProvider["ownsPlaceholder"]).toBe(false)
+			vi.mocked(fs.unlink).mockResolvedValue(undefined)
+			restoreFileDoubles()
 		})
 
 		it("restores a modify buffer in memory and never saves the target file", async () => {
@@ -3231,9 +3301,13 @@ describe("DiffViewProvider", () => {
 			// reset() does not clear relPath, and saveDirectly() sets it for an approved write.
 			// Without ownership tracking the discard would unlink that approved file: an approved
 			// write_to_file to A, then a new write_to_file whose block exits through a rollback
-			// path before open() ever ran, still sees relPath === A.
+			// path before open() ever ran, still sees relPath === A. The save is the same shape: with no
+			// placeholder this edit created no file, so the emptying save has nothing of its own to write
+			// there, and the 42 bytes a later read still finds are what proves it stayed off the file.
 			const callOrder: string[] = []
-			const document = makeAbandonedDocument(callOrder)
+			const file: PersistedFile = { bytes: "x".repeat(42) }
+			const document = makePersistedDocument(callOrder, file)
+			withPersistedFile(file)
 			Object.assign(diffViewProvider, {
 				relPath: "previously-approved-file.ts",
 				activeDiffEditor: { document },
@@ -3251,6 +3325,9 @@ describe("DiffViewProvider", () => {
 			// without touching a file the user approved.
 			expect(mockWorkspaceEdit.replace).toHaveBeenCalledTimes(1)
 			expect(mockWorkspaceEdit.replace.mock.calls[0][2]).toBe("")
+			expect(document.save).not.toHaveBeenCalled()
+			expect(await fs.readFile("previously-approved-file.ts")).toBe("x".repeat(42))
+			restoreFileDoubles()
 		})
 
 		it("removes the placeholder that a new-file open() wrote, driven through the public methods", async () => {

@@ -585,6 +585,27 @@ export class DiffViewProvider {
 	}
 
 	/**
+	 * Whether the file on disk is still the zero-byte placeholder open() created for this edit. The
+	 * getter above only names the path, and the path is not proof that this edit still owns the file,
+	 * so the saving half of the abandoned-stream rollback asks the disk rather than the field. A file
+	 * with content in it belongs to whoever wrote that content, so its bytes must not be emptied over.
+	 * ENOENT means nothing is on disk to overwrite, so the emptying save may run exactly as it did
+	 * before; any other stat failure proves nothing about the bytes, and unproven bytes are preserved
+	 * by skipping the save.
+	 */
+	private async stillOwnsEmptyPlaceholderOnDisk(placeholderPath: string | undefined): Promise<boolean> {
+		if (placeholderPath === undefined) {
+			return false
+		}
+		try {
+			const stats = await fs.stat(placeholderPath)
+			return stats.size === 0
+		} catch (error: unknown) {
+			return isEnoent(error)
+		}
+	}
+
+	/**
 	 * Whether an active edit session belongs to a different path than the one a
 	 * call is about to write. A session is retained when its rollback could not
 	 * complete (a refused save keeps \`isEditing\` and the dirty buffer so the
@@ -723,10 +744,25 @@ export class DiffViewProvider {
 						// unlink would delete the file underneath it, leaving the buffer one save away
 						// from recreating it - the same hazard revertChanges() refuses, so the rollback
 						// stops here with the placeholder still owned and the session still retryable.
-						if (!(await document.save())) {
-							throw new Error(
-								`Rollback could not save the restored buffer for ${this.relPath}; its clean state is unconfirmed, so the cleanup stopped before closing tabs or deleting the placeholder.`,
-							)
+						// Ownership is re-validated against the disk ahead of the save below. Another provider can save
+						// approved content at this path in the window between this stream's edit above and this cleanup,
+						// and TextDocument.save() writes the file: an unconditional save here puts an empty file over
+						// those bytes before the size check in the sweep below ever looks at them, and the approved
+						// content is gone even when that later size-gated removal skips the unlink. Only a file that is
+						// still the zero-byte placeholder open() created is this edit's to empty. When the bytes on disk
+						// are somebody else's, the save is skipped so they survive and the claim is released - the same
+						// signal the sweep below gives for a filled file - and the buffer keeps its restored content,
+						// which is the shape a modify rollback already accepts: closeFileTab() filters dirty tabs out, so
+						// an unsaved buffer prompts nobody.
+						if (await this.stillOwnsEmptyPlaceholderOnDisk(placeholderPath)) {
+							if (!(await document.save())) {
+								throw new Error(
+									`Rollback could not save the restored buffer for ${this.relPath}; its clean state is unconfirmed, so the cleanup stopped before closing tabs or deleting the placeholder.`,
+								)
+							}
+						} else {
+							// Not this edit's to empty: leave the persisted bytes alone and stop claiming the path.
+							this.placeholderPath = undefined
 						}
 					}
 				}
