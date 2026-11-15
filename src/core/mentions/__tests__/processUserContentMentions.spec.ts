@@ -82,8 +82,9 @@ describe("processUserContentMentions authorization", () => {
 	})
 
 	it("does not expand all generated segments", async () => {
-		await process([userMentionContent([gen("@/secret")])])
+		const result = await process([userMentionContent([gen("@/secret")])])
 		expect(parseMentions).not.toHaveBeenCalled()
+		expect(result).toEqual({ content: [{ type: "text", text: "@/secret" }], mode: undefined })
 	})
 
 	it("wraps segments in tags that stay generated", async () => {
@@ -101,13 +102,10 @@ describe("processUserContentMentions authorization", () => {
 		{ label: "JSON round trip", change: (b: Anthropic.TextBlockParam) => JSON.parse(JSON.stringify(b)) },
 		{ label: "edited text", change: (b: Anthropic.TextBlockParam) => Object.assign(b, { text: b.text + " @/x" }) },
 	])("does not trust a block after $label", async ({ change }) => {
-		await process([change(userMentionContent([user("@/allowed")]))])
+		const block = change(userMentionContent([user("@/allowed")]))
+		const result = await process([block])
 		expect(parseMentions).not.toHaveBeenCalled()
-	})
-
-	it("does not trust all generated segments", async () => {
-		await process([userMentionContent([gen("context @/secret")])])
-		expect(parseMentions).not.toHaveBeenCalled()
+		expect(result).toEqual({ content: [block], mode: undefined })
 	})
 
 	it("keeps labels out of the serialized block", () => {
@@ -119,8 +117,9 @@ describe("processUserContentMentions authorization", () => {
 
 	it("trusts the same block after the array is copied", async () => {
 		const block = userMentionContent([user("@/allowed")])
-		await process([...[block]].map((b) => b))
+		const result = await process([...[block]].map((b) => b))
 		expect(parseMentions).toHaveBeenCalledTimes(1)
+		expect(result.content[0]).toEqual({ type: "text", text: "parsed: @/allowed" })
 	})
 
 	it("passes image blocks through unchanged next to a user block", async () => {
