@@ -707,15 +707,17 @@ describe("safeWriteText", () => {
 			expect((error as PostCommitDurabilityError).backupPath).toBeNull()
 		})
 
-		it("swallows an ENOENT from the backup-directory open as if the target itself were absent, and commits the rename anyway", async () => {
+		it("propagates an ENOENT from the backup-directory open before the commit rename, and removes the partial copy", async () => {
 			const targetPath = "/tmp/test-dir/target.txt"
 			const dirPath = path.dirname(targetPath)
 			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
 			// A backup:true write opens dirPath twice: once before the commit rename, to flush
 			// the entry that names the recovery copy, and once after it, to flush the entry the
-			// rename changed. This row fails the FIRST of them with an error that carries
-			// code ENOENT, which is the shape a missing directory reports, and lets the
-			// post-rename open through so the row can tell the two apart afterwards.
+			// rename changed. This row fails the FIRST of them with an error that carries code
+			// ENOENT, the shape a missing directory reports, and lets the post-rename open
+			// through so the row can tell the two apart afterwards. The target itself is there -
+			// the row answers the target existence check for it - so this failure says nothing
+			// about whether the target exists.
 			let dirOpens = 0
 			vi.mocked(fsSync.openSync).mockImplementation((target) => {
 				if (String(target) === dirPath) {
@@ -737,31 +739,22 @@ describe("safeWriteText", () => {
 				return caught
 			})
 
-			// What the shipped code actually does, measured rather than intended. The backup
-			// block's own catch removes the half-useful copy and rethrows, and the catch around
-			// that block tests only the errno - it cannot tell an ENOENT from opening dirPath
-			// apart from the ENOENT that means the target is not there yet. So the failure is
-			// swallowed, no recovery copy is made, and the write goes on to publish.
-			expect(error).toBeUndefined()
-			expect(dirOpens).toBe(2)
-			expect(fs.rename).toHaveBeenCalledTimes(1)
-			expect(fs.rename).toHaveBeenCalledWith(expect.stringContaining("safeWriteText_"), targetPath)
-			// The partial copy is removed by the backup block's own catch, so the swallowing does
-			// not leave a hidden copy beside the published target. The staged temp is not
-			// unlinked here because on this path the commit rename above is what makes it the
-			// target: a successful publish leaves exactly one unlink behind, and it is the
-			// copy's.
+			// What the fix has to do here: an ENOENT may be answered by going ahead without a
+			// recovery copy only when it is the answer to whether the target exists. This errno
+			// came from opening dirPath to flush the entry naming the copy, so it has to reach the
+			// caller before the commit rename rather than be read as an absent target - swallowing
+			// it would publish the new content with no recovery copy of the old content at all.
+			expect(error).toBeInstanceOf(Error)
+			expect((error as NodeJS.ErrnoException).code).toBe("ENOENT")
+			expect(dirOpens).toBe(1)
+			expect(fs.rename).not.toHaveBeenCalled()
+			// The backup block's own catch removes the half-useful copy before the failure reaches
+			// the caller, which is the cleanup this ask asked to keep: the unlink that names the
+			// backup spelling is the copy's, and it is the only backup-spelling unlink.
 			const backupUnlinks = vi
 				.mocked(fs.unlink)
 				.mock.calls.filter((call: unknown[]) => String(call[0]).includes("safeWriteText.bak_"))
 			expect(backupUnlinks).toHaveLength(1)
-			expect(vi.mocked(fs.unlink).mock.calls).toHaveLength(1)
-
-			// Whether this is the expectation the reviewer wants is a ruling this row does not
-			// make. The follow-up asked that the ENOENT exception be limited to the target
-			// existence check, which would turn the swallow above into a failure of the write.
-			// If that swallowing is itself the defect, then a green row here pins the shipped
-			// behaviour and not the asked-for one.
 		})
 	})
 

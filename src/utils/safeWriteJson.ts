@@ -154,6 +154,27 @@ function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): stri
 }
 
 /**
+ * The lock key the identity in hand names today, which is what a writer compares with the key
+ * its own lock was taken on. A resolution that succeeded is already fully canonical -
+ * fs.realpath resolves every component of the path it returns - and canonicalizing it again
+ * returns the same string, so such a resolution already names its own key and this spends no
+ * syscall on it. Only a resolution that handed back the path it was given needs the walk, and
+ * that walk is the one resolveLockKey itself performs: a target that does not exist yet is
+ * keyed through its nearest existing ancestor, which is what makes a first write into a
+ * symlinked directory queue on the same key every other writer to that file uses. A regular
+ * file that replaced an alias under the same spelling resolves back to that spelling as well,
+ * and this is where the two are told apart - the walk returns the key of the file standing
+ * under that spelling, which is not the key of the file the lock names.
+ */
+async function currentLockKey(resolution: string, requestedPath: string): Promise<string> {
+	if (resolution !== requestedPath) {
+		return resolution
+	}
+
+	return resolveLockKey(requestedPath)
+}
+
+/**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
@@ -283,20 +304,20 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		}
 
 		// The identity the lock was taken on has to still be the identity this write is about
-		// to edit. recoveryTarget is the alias as it reads now, so when the alias was
-		// retargeted while this writer waited for the lock, the file this write would heal,
-		// merge and publish is a file no lock names. The comparison is skipped in the two
-		// shapes where the two spellings are known to differ for a reason that is not an
-		// alias moving: a resolution that handed back the path it was given is the shape of a
-		// target that does not exist yet, and resolveLockKey canonicalized the parent
-		// directory of that same path when it computed the key, so a first write into a
-		// symlinked directory differs in spelling by construction; and the dangling-link
-		// fallback above chose the lock key itself, which is the same identity. This runs
-		// after the confinement check above on purpose: a target that escaped the declared
-		// scope is the caller's own error to receive, and it must not be re-labelled as an
-		// identity change.
-		if (recoveryTarget !== absoluteFilePath && recoveryTarget !== lockKey) {
-			throw new LockIdentityChangedError(absoluteFilePath, lockKey, recoveryTarget)
+		// to edit, and what is compared is the key that identity implies today rather than a
+		// spelling. A retargeted alias and an alias that a regular file replaced under the same
+		// spelling both put this write in front of a file no lock names, and the second one
+		// resolves back to the very spelling it was given, so a check that skips "the resolution
+		// handed back the path it was given" cannot see it at all. currentLockKey below re-derives
+		// the key from the identity in hand, which is how canonical-parent handling is kept for a
+		// target that does not exist yet - resolveLockKey canonicalized that same path's parent
+		// when it computed the key this writer waits on - and it re-resolves nothing that a
+		// successful resolution already settled. This runs after the confinement check above on
+		// purpose: a target that escaped the declared scope is the caller's own error to receive,
+		// and it must not be re-labelled as an identity change.
+		const recoveryKey = await currentLockKey(recoveryTarget, absoluteFilePath)
+		if (recoveryKey !== lockKey) {
+			throw new LockIdentityChangedError(absoluteFilePath, lockKey, recoveryKey)
 		}
 		const recovery = await recoverInterruptedReplacement(recoveryTarget).catch((error: unknown) => {
 			const code = getErrorCode(error) ?? "unknown"
@@ -325,16 +346,17 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			}
 		}
 
-		// The same question again after the recovery pass and before anything is read,
-		// staged, or renamed: recovery may have just renamed a leftover onto the file this
-		// write locked, and the alias can be retargeted between that scan and this
-		// re-resolution, which is the window a rename beside the target - not only a rename
-		// out of the scope - leaves open. The skipped shapes are the two described above.
-		// What this comparison does not distinguish is an alias that was replaced by a
-		// regular file under the same spelling: that resolves back to the path it was given
-		// and is indistinguishable, from here, from a target that is not there yet.
-		if (resolvedTargetPath !== absoluteFilePath && resolvedTargetPath !== lockKey) {
-			throw new LockIdentityChangedError(absoluteFilePath, lockKey, resolvedTargetPath)
+		// The same question again after the recovery pass and before anything is read, staged,
+		// or renamed: recovery may have just renamed a leftover onto the file this write locked,
+		// and the alias can be retargeted, or replaced by a regular file, between that scan and
+		// this re-resolution, which is the window a rename beside the target - not only a rename
+		// out of the scope - leaves open. A replacement under the same spelling resolves back to
+		// the spelling it was given, and currentLockKey re-derives the key for exactly that
+		// shape, so what is named here is the key of the file standing under that spelling rather
+		// than the key of the file this writer locked.
+		const publishKey = await currentLockKey(resolvedTargetPath, absoluteFilePath)
+		if (publishKey !== lockKey) {
+			throw new LockIdentityChangedError(absoluteFilePath, lockKey, publishKey)
 		}
 
 		// If a merge callback was provided, read the current file under the lock

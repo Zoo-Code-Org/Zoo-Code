@@ -497,4 +497,132 @@ describe("safeWriteJson refuses a lock whose identity moved out from under it", 
 		expect(lockTakes).toBe(1)
 		expect(aliasAnswers).toBe(4)
 	})
+
+	it("refuses the recovery pass and the publication when a regular file replaces the alias while this writer waits for the lock", async () => {
+		const scope = await makeDir("lockkey-regular-")
+		const lockedTarget = path.join(scope, "item.json")
+		const aliasPath = path.join(scope, "link.json")
+		currentLink = aliasPath
+
+		// The alias names the file this writer locked. A peer then removes the link and puts a regular
+		// file in its place under the same spelling, which is what a rename onto the link name does, and
+		// the writer standing at the alias now resolves to that regular file: realpath succeeds on it,
+		// so the resolution hands back the very spelling it was asked about. A guard that reads "the
+		// resolution returned the path it was given" as proof that nothing moved lets this writer run the
+		// recovery pass beside the regular file and publish onto it while holding a lock that names a
+		// different file. A staged copy is planted under the name recovery derives for the alias
+		// spelling, carrying the bytes its owner staged, so the assertions below are not vacuous: had
+		// this write reached the recovery pass it would have found this entry and renamed it onto the
+		// regular file, destroying a staged state this writer never locked.
+		await fs.writeFile(lockedTarget, JSON.stringify({ which: "locked" }))
+		const aliasLeftover = path.join(scope, ".link.json.new_planted.tmp")
+		await fs.writeFile(aliasLeftover, "staged")
+		const scopeBefore = (await fs.readdir(scope)).sort()
+
+		let flipped = false
+		mockedRealpath.mockImplementation(async (target) => {
+			// Before the flip the alias answers with the file this writer locked, which is the state the
+			// lock key was computed from. Afterwards it answers with its own spelling, which is what a
+			// regular file standing at that spelling answers.
+			if (String(target) === currentLink && !flipped) {
+				return lockedTarget
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink ? lockedTarget : Promise.reject(new Error("not a link")),
+		)
+		let released = false
+		let lockTakes = 0
+		mockedAcquireFileLock.mockImplementation(async () => {
+			lockTakes += 1
+			// The swap lands while this writer waits for the lock, so every resolution under the lock -
+			// the recovery resolution included - sees the regular file.
+			flipped = true
+			return async () => {
+				released = true
+			}
+		})
+
+		const error = await safeWriteJson(aliasPath, { id: "task-1" }).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(LockIdentityChangedError)
+		expect((error as LockIdentityChangedError).lockedKey).toBe(lockedTarget)
+		expect((error as LockIdentityChangedError).resolvedKey).toBe(aliasPath)
+		// The write refused before the recovery pass ran: the staged copy beside the alias spelling is
+		// untouched and still carries the bytes its owner staged, the regular file was not published
+		// onto, the locked file still carries its own content rather than this write's payload, the
+		// scope listing is what it was, and the lock this writer took was released instead of left for
+		// the stale timeout.
+		expect(await fs.readFile(aliasLeftover, "utf8")).toBe("staged")
+		expect(existsSync(aliasPath)).toBe(false)
+		expect(JSON.parse(await fs.readFile(lockedTarget, "utf8"))).toEqual({ which: "locked" })
+		expect((await fs.readdir(scope)).sort()).toEqual(scopeBefore)
+		expect(released).toBe(true)
+		expect(lockTakes).toBe(1)
+	})
+
+	it("refuses the publication when a regular file replaces the alias after the recovery pass", async () => {
+		const scope = await makeDir("lockkey-regular-after-")
+		const lockedTarget = path.join(scope, "item.json")
+		const aliasPath = path.join(scope, "link.json")
+		currentLink = aliasPath
+		await fs.writeFile(lockedTarget, JSON.stringify({ which: "locked" }))
+		const aliasLeftover = path.join(scope, ".link.json.new_planted.tmp")
+		await fs.writeFile(aliasLeftover, "staged")
+		const scopeBefore = (await fs.readdir(scope)).sort()
+
+		// The recovery pass resolves and scans before the publish resolution runs, so the swap is placed
+		// on the third answer this row's alias receives: the first is the lock-key resolution taken
+		// before the lock, the second is the recovery resolution, and the third is the publish
+		// re-resolution the commit rename is about to act on. Only answers to this row's alias are
+		// counted, because the parent-directory canonicalization asks other spellings as well.
+		let aliasAnswers = 0
+		let flipped = false
+		mockedRealpath.mockImplementation(async (target) => {
+			if (String(target) === currentLink) {
+				aliasAnswers += 1
+				if (aliasAnswers === 3) {
+					flipped = true
+				}
+				return flipped ? String(target) : lockedTarget
+			}
+			return String(target)
+		})
+		mockedLstat.mockImplementation(async (target) => symlinkStat(target))
+		mockedReadlink.mockImplementation(async (target) =>
+			target === currentLink ? lockedTarget : Promise.reject(new Error("not a link")),
+		)
+		let released = false
+		let lockTakes = 0
+		mockedAcquireFileLock.mockImplementation(async () => {
+			lockTakes += 1
+			return async () => {
+				released = true
+			}
+		})
+
+		const error = await safeWriteJson(aliasPath, { id: "task-1" }).catch((caught: unknown) => caught)
+
+		expect(error).toBeInstanceOf(LockIdentityChangedError)
+		expect((error as LockIdentityChangedError).lockedKey).toBe(lockedTarget)
+		expect((error as LockIdentityChangedError).resolvedKey).toBe(aliasPath)
+		// The recovery pass had already run beside the locked file, and this write still refused before
+		// reading, staging, or renaming anything: the staged copy beside the alias spelling survives
+		// with its own bytes, nothing was published onto the regular file, neither file carries this
+		// write's payload, the scope listing is what it was, and the lock was released.
+		expect(await fs.readFile(aliasLeftover, "utf8")).toBe("staged")
+		expect(existsSync(aliasPath)).toBe(false)
+		expect(JSON.parse(await fs.readFile(lockedTarget, "utf8"))).toEqual({ which: "locked" })
+		expect((await fs.readdir(scope)).sort()).toEqual(scopeBefore)
+		expect(released).toBe(true)
+		expect(lockTakes).toBe(1)
+		// Four answers to this row's alias before the refusal, pinned because the guard re-resolves the
+		// spelling it was given only when a resolution handed that spelling back: the lock-key
+		// resolution taken before the lock, the recovery resolution, the publish re-resolution that got
+		// the swap, and this guard's own re-resolution, which is what tells the regular file standing
+		// there apart from the file this writer locked.
+		expect(aliasAnswers).toBe(4)
+	})
 })

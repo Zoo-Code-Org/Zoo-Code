@@ -589,8 +589,28 @@ export async function safeWriteText(
 		try {
 			// -- Step 3 (backup:true): durable copy target -> backup ----
 			if (options?.backup) {
+				// The target-absence question is asked here, on its own, so that the catch around the
+				// block below can swallow exactly the answer this check gives rather than any ENOENT
+				// raised inside that block: an ENOENT from opening dirPath to flush the entry that
+				// names the recovery copy, or from the copy itself, says nothing about whether the
+				// target exists, and swallowing it lets the commit rename publish with no recovery
+				// copy of the previous content at all.
+				let backupTargetAbsent = false
 				try {
-					await fs.access(targetPath)
+					try {
+						await fs.access(targetPath)
+					} catch (absenceError: unknown) {
+						// The answer is recorded and then rethrown whatever it was, so that the copy
+						// block below is skipped for a target that is not there yet: only the catch
+						// around this whole block can tell that the ENOENT it is being handed was the
+						// answer to this question, and it is that catch which permits the write to go
+						// ahead with no recovery copy rather than a swallowed copy failure.
+						if (errorCode(absenceError) === "ENOENT") {
+							backupTargetAbsent = true
+						}
+
+						throw absenceError
+					}
 					backupPath = _tempName(dirPath, "safeWriteText.bak")
 					// Copy, never move. Renaming the target away leaves the canonical path absent for
 					// the whole commit window: readers see a missing file, and a concurrent
@@ -669,7 +689,12 @@ export async function safeWriteText(
 					}
 					releaseBackupOnSuccess = true
 				} catch (err: unknown) {
-					if (errorCode(err) !== "ENOENT") throw err
+					// Only the answer the check above gave may be swallowed here, and only when it was
+					// ENOENT: a target that is not there yet is written without a recovery copy, which
+					// is what backup:true promises for a file that does not exist. Any other ENOENT from
+					// this block - the copy, the flush of the copy, or the flush of the directory entry
+					// naming it - is a failure of the write and reaches the caller before the rename.
+					if (!backupTargetAbsent || errorCode(err) !== "ENOENT") throw err
 				}
 			}
 
