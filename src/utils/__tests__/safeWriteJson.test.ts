@@ -13,6 +13,8 @@ const fsPromisesActuals = vi.hoisted(() => ({
 	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
 	unlink: undefined as (typeof import("fs/promises"))["unlink"] | undefined,
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
+	chmod: undefined as (typeof import("fs/promises"))["chmod"] | undefined,
+	stat: undefined as (typeof import("fs/promises"))["stat"] | undefined,
 }))
 
 vi.mock("fs/promises", async () => {
@@ -20,6 +22,8 @@ vi.mock("fs/promises", async () => {
 	fsPromisesActuals.rename = actual.rename
 	fsPromisesActuals.unlink = actual.unlink
 	fsPromisesActuals.writeFile = actual.writeFile
+	fsPromisesActuals.chmod = actual.chmod
+	fsPromisesActuals.stat = actual.stat
 	// Start with all actual implementations.
 	const mockedFs = {
 		...actual,
@@ -29,6 +33,11 @@ vi.mock("fs/promises", async () => {
 		unlink: vi.fn(actual.unlink),
 		access: vi.fn(actual.access),
 		stat: vi.fn(actual.stat),
+		// chmod defaults to the actual chmod, so a test that does not override it really
+		// copies the mode and cannot have its chmod silently swallowed; a test that wants a
+		// refused copy must override it to throw, which is what the mode-copy rows at the end
+		// of this file do.
+		chmod: vi.fn(actual.chmod),
 		open: vi.fn(actual.open),
 		mkdtemp: vi.fn(actual.mkdtemp),
 		rm: vi.fn(actual.rm),
@@ -1160,6 +1169,163 @@ describe("safeWriteJson", () => {
 		)
 		expect(leftovers).toEqual([])
 
+		consoleErrorSpy.mockRestore()
+	})
+
+	// CWE-732 follow-up on the publish-time mode copy, placed at the layer the failure lives
+	// in: this is _copyTargetMode's own reaction, not an integration or e2e wrapper. The staged
+	// mode in the first two rows is what those rows report through the double, not what a host
+	// measured, so they prove how the code reacts to a refused or unreadable mode read and prove
+	// nothing about how a real filesystem would report a mode-copy failure. They run on every
+	// platform, Windows included, because the mode numbers they compare are supplied here rather
+	// than asked of the host - which is why the 0o600-preservation row above is
+	// test.skipIf(process.platform === "win32") and these are not.
+
+	test("refuses the publish when the staged file will not take the target's mode", async () => {
+		const initialData = { message: "Initial, must survive a refused mode copy" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const targetStats = await fsPromisesActuals.stat!(currentTestFilePath)
+		const targetMode = targetStats.mode & 0o777
+		// A mode the publish cannot reproduce, picked so that it differs from whatever the host
+		// reports for the target on any platform.
+		const otherMode = targetMode ^ 0o077
+		const refusal = Object.assign(new Error("EPERM: operation not permitted, chmod"), { code: "EPERM" })
+		// The publish reads only .mode off the stats object, so a copy of the target's real stats
+		// carrying a different mode is enough to drive the branch.
+		const statsWithMode = (mode: number): Awaited<ReturnType<typeof fs.stat>> => ({ ...targetStats, mode })
+
+		let stagedPath = ""
+		// The module-level chmod double keeps its call history across rows in this file, so the
+		// count below is measured from here and not from the start of the run.
+		const chmodSpy = vi
+			.mocked(fs.chmod)
+			.mockClear()
+			.mockImplementation(async (filePath) => {
+				stagedPath = String(filePath)
+				throw refusal
+			})
+		const statSpy = vi.mocked(fs.stat).mockImplementation(async (filePath) => {
+			// The target is stat'd first, so the mode the publish tries to copy is the real one;
+			// the staged file is stat'd only inside the refused-copy branch, where this answers.
+			if (stagedPath !== "" && String(filePath) === stagedPath) {
+				return statsWithMode(otherMode)
+			}
+			return fsPromisesActuals.stat!(filePath)
+		})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).rejects.toThrow(refusal)
+
+		// One attempt, on the staged file, asking for the mode the target carries.
+		expect(chmodSpy).toHaveBeenCalledTimes(1)
+		expect(chmodSpy.mock.calls[0]?.[1]).toBe(targetMode)
+		expect(stagedPath).not.toBe(currentTestFilePath)
+		// The refusal is logged with the wording the publish emits at safeWriteJson.ts:491.
+		expect(consoleErrorSpy.mock.calls.some((call) => String(call[0]).includes("Failed to copy mode"))).toBe(true)
+		// The target never left its path, so a reader still sees the previous content, and the
+		// staged file went away through the caller's failure path rather than being left beside it.
+		expect(await readFileContent(currentTestFilePath)).toEqual(initialData)
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+
+		chmodSpy.mockRestore()
+		statSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
+	})
+
+	test("publishes when the copy is refused but the staged file already carries the target's mode", async () => {
+		const initialData = { message: "Initial, must survive a refused copy that changed nothing" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const targetStats = await fsPromisesActuals.stat!(currentTestFilePath)
+		const targetMode = targetStats.mode & 0o777
+		const refusal = Object.assign(new Error("EPERM: operation not permitted, chmod"), { code: "EPERM" })
+		const statsWithMode = (mode: number): Awaited<ReturnType<typeof fs.stat>> => ({ ...targetStats, mode })
+
+		let stagedPath = ""
+		// The module-level chmod double keeps its call history across rows in this file, so the
+		// count below is measured from here and not from the start of the run.
+		const chmodSpy = vi
+			.mocked(fs.chmod)
+			.mockClear()
+			.mockImplementation(async (filePath) => {
+				stagedPath = String(filePath)
+				throw refusal
+			})
+		const statSpy = vi.mocked(fs.stat).mockImplementation(async (filePath) => {
+			// The staged file reports the target's own mode, as a umask that already produced it
+			// or a filesystem that ignores POSIX modes would.
+			if (stagedPath !== "" && String(filePath) === stagedPath) {
+				return statsWithMode(targetMode)
+			}
+			return fsPromisesActuals.stat!(filePath)
+		})
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).resolves.toBeUndefined()
+
+		expect(chmodSpy).toHaveBeenCalledTimes(1)
+		// Both lines the publish emits on this path, in the order it emits them: the
+		// already-matches line at safeWriteJson.ts:494-496, then the failed-copy line at 497.
+		const messages = consoleErrorSpy.mock.calls.map((call) => String(call[0]))
+		const copiedNoMode = messages.findIndex((message) => message.includes("Copied no mode onto"))
+		const failedCopy = messages.findIndex((message) => message.includes("Failed to copy mode"))
+		expect(copiedNoMode).toBeGreaterThanOrEqual(0)
+		expect(failedCopy).toBeGreaterThanOrEqual(0)
+		expect(copiedNoMode).toBeLessThan(failedCopy)
+		// The publish still landed, and the staged file is not left beside the target.
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+
+		chmodSpy.mockRestore()
+		statSpy.mockRestore()
+		consoleErrorSpy.mockRestore()
+	})
+
+	test("publishes with the staged file's own mode when the target's mode cannot be read", async () => {
+		const initialData = { message: "Initial, must survive an unreadable target mode" }
+		const newData = { message: "New content" }
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify(initialData))
+
+		const unreadable = Object.assign(new Error("EACCES: permission denied, stat"), { code: "EACCES" })
+		const statSpy = vi.mocked(fs.stat).mockImplementation(async (filePath) => {
+			// The publish stats the target before it stats anything else, and stats the staged
+			// file only inside the copy branch, so the target's basename separates the two calls
+			// without depending on how this host spells the temporary file's name.
+			if (path.basename(String(filePath)) === path.basename(currentTestFilePath)) {
+				throw unreadable
+			}
+			return fsPromisesActuals.stat!(filePath)
+		})
+		// Same reason as the two rows above: this row asserts that no chmod happens at all, so
+		// its count starts here.
+		const chmodSpy = vi.mocked(fs.chmod).mockClear()
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		await expect(safeWriteJson(currentTestFilePath, newData)).resolves.toBeUndefined()
+
+		// Logged with the wording emitted at safeWriteJson.ts:475, and the write went on without
+		// a mode copy: the function returns at 477 with the mode left unset, so 480 is never
+		// reached and no chmod of any kind happens.
+		expect(consoleErrorSpy.mock.calls.some((call) => String(call[0]).includes("Could not read the mode of"))).toBe(
+			true,
+		)
+		expect(chmodSpy).not.toHaveBeenCalled()
+		expect(await readFileContent(currentTestFilePath)).toEqual(newData)
+		const leftovers = (await fs.readdir(tempDir)).filter(
+			(entry) => entry.includes(".new_") || entry.includes(".bak_"),
+		)
+		expect(leftovers).toEqual([])
+
+		statSpy.mockRestore()
 		consoleErrorSpy.mockRestore()
 	})
 })
