@@ -37,6 +37,7 @@ vi.mock("fs/promises", () => ({
 vi.mock("../../../tree-sitter/languageParser")
 vi.mock("../../../tree-sitter/markdownParser")
 
+const treeDelete = vi.fn()
 const mockLanguageParser = {
 	js: {
 		parser: {
@@ -48,6 +49,7 @@ const mockLanguageParser = {
 					children: [],
 					type: "program",
 				},
+				delete: treeDelete,
 			})),
 		},
 		query: {
@@ -179,6 +181,43 @@ describe("CodeParser", () => {
 			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
 			expect(Array.isArray(result)).toBe(true)
 			expect(loadRequiredLanguageParsers).toHaveBeenCalledTimes(2)
+		})
+
+		it("passes the constructor source directory to the grammar loader", async () => {
+			await new CodeParser("/wasm/dir").parseFile("test.js", { content: "const test = 123" })
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledWith(["test.js"], "/wasm/dir")
+		})
+
+		it.each([
+			["directly", new Error("Aborted(OOM)")],
+			["through cause", new Error("load failed", { cause: new Error("memory access out of bounds") })],
+		])("CI-PA-03: a load error matching isParserAbort %s is rethrown unchanged", async (_label, abort) => {
+			vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(abort)
+			const failure = await parser["parseContent"]("test.js", "const test = 123", "hash").catch(
+				(error: unknown) => error,
+			)
+			expect(failure).toBe(abort)
+			expect(failure).not.toBeInstanceOf(ParserLoadError)
+		})
+
+		it("CI-PA-03: a pending load that aborts is rethrown unchanged to the waiting call", async () => {
+			const abort = new Error("Aborted()")
+			parser["pendingLoads"].set("js", Promise.reject(abort))
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBe(abort)
+		})
+
+		it("CI-PA-02: deletes the tree after a successful parse", async () => {
+			await parser["parseContent"]("test.js", "const test = 123", "hash")
+			expect(treeDelete).toHaveBeenCalledOnce()
+		})
+
+		it("CI-PA-02: deletes the tree when capturing fails", async () => {
+			const captureError = new Error("capture failed")
+			mockLanguageParser.js.query.captures.mockImplementationOnce(() => {
+				throw captureError
+			})
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBe(captureError)
+			expect(treeDelete).toHaveBeenCalledOnce()
 		})
 	})
 

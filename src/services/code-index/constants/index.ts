@@ -5,6 +5,7 @@ export const MAX_BLOCK_CHARS = 1000
 export const MIN_BLOCK_CHARS = 50
 export const MIN_CHUNK_REMAINDER_CHARS = 200 // Minimum characters for the *next* chunk after a split
 export const MAX_CHARS_TOLERANCE_FACTOR = 1.15 // 15% tolerance for max chars
+export const PARSE_TIMEOUT_MS = 10_000
 
 /**Search */
 export const DEFAULT_SEARCH_MIN_SCORE = CODEBASE_INDEX_DEFAULTS.DEFAULT_SEARCH_MIN_SCORE

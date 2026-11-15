@@ -1,15 +1,14 @@
 import { readFile } from "fs/promises"
 import { createHash } from "crypto"
 import * as path from "path"
-import { Node } from "web-tree-sitter"
+import type { Node, QueryCapture } from "web-tree-sitter"
 import { LanguageParser, loadRequiredLanguageParsers } from "../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../tree-sitter/markdownParser"
-import { ICodeParser, CodeBlock } from "../interfaces"
-import { scannerExtensions, shouldUseFallbackChunking } from "../shared/supported-extensions"
+import { extensions as scannerExtensions } from "../../tree-sitter/extensions"
+import { isFallbackExtension } from "../../shared/fallback-extensions"
+import type { ICodeParser, CodeBlock } from "../interfaces"
+import { isParserAbort } from "../parser-errors"
 import { MAX_BLOCK_CHARS, MIN_BLOCK_CHARS, MIN_CHUNK_REMAINDER_CHARS, MAX_CHARS_TOLERANCE_FACTOR } from "../constants"
-import { TelemetryService } from "@roo-code/telemetry"
-import { TelemetryEventName } from "@roo-code/types"
-import { sanitizeErrorMessage } from "../shared/validation-helpers"
 
 /** An eligible file's language parser failed to load; the failure is not cached, so a later call retries. */
 export class ParserLoadError extends Error {
@@ -22,14 +21,20 @@ export class ParserLoadError extends Error {
 	}
 }
 
+// A WASM abort while loading a grammar is a crash, not a load failure, so it must not become ParserLoadError.
+function toLoadError(extension: string, error: unknown): unknown {
+	if (isParserAbort(error) || (error instanceof Error && isParserAbort(error.cause))) return error
+	return new ParserLoadError(extension, error)
+}
+
 /**
  * Implementation of the code parser interface
  */
 export class CodeParser implements ICodeParser {
 	private loadedParsers: LanguageParser = {}
 	private pendingLoads: Map<string, Promise<LanguageParser>> = new Map()
-	// Markdown files are now supported using the custom markdown parser
-	// which extracts headers and sections for semantic indexing
+
+	constructor(private readonly sourceDirectory?: string) {}
 
 	/**
 	 * Parses a code file into code blocks
@@ -65,11 +70,6 @@ export class CodeParser implements ICodeParser {
 				fileHash = this.createFileHash(content)
 			} catch (error) {
 				console.error(`Error reading file ${filePath}:`, error)
-				TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-					error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-					stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-					location: "parseFile",
-				})
 				return []
 			}
 		}
@@ -113,7 +113,7 @@ export class CodeParser implements ICodeParser {
 		}
 
 		// Check if this extension should use fallback chunking
-		if (shouldUseFallbackChunking(`.${ext}`)) {
+		if (isFallbackExtension(`.${ext}`)) {
 			return this._performFallbackChunking(filePath, content, fileHash, seenSegmentHashes)
 		}
 
@@ -125,15 +125,10 @@ export class CodeParser implements ICodeParser {
 					await pendingLoad
 				} catch (error) {
 					console.error(`Error in pending parser load for ${filePath}:`, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "parseContent:loadParser",
-					})
-					throw new ParserLoadError(ext, error)
+					throw toLoadError(ext, error)
 				}
 			} else {
-				const loadPromise = loadRequiredLanguageParsers([filePath])
+				const loadPromise = loadRequiredLanguageParsers([filePath], this.sourceDirectory)
 				this.pendingLoads.set(ext, loadPromise)
 				try {
 					const newParsers = await loadPromise
@@ -142,12 +137,7 @@ export class CodeParser implements ICodeParser {
 					}
 				} catch (error) {
 					console.error(`Error loading language parser for ${filePath}:`, error)
-					TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-						error: sanitizeErrorMessage(error instanceof Error ? error.message : String(error)),
-						stack: error instanceof Error ? sanitizeErrorMessage(error.stack || "") : undefined,
-						location: "parseContent:loadParser",
-					})
-					throw new ParserLoadError(ext, error)
+					throw toLoadError(ext, error)
 				} finally {
 					this.pendingLoads.delete(ext)
 				}
@@ -161,11 +151,22 @@ export class CodeParser implements ICodeParser {
 		}
 
 		const tree = language.parser.parse(content)
+		try {
+			const captures = tree ? language.query.captures(tree.rootNode) : []
+			return this.blocksFromCaptures(captures, filePath, content, fileHash, seenSegmentHashes)
+		} finally {
+			// Trees hold WASM heap; one worker parses a whole workspace.
+			tree?.delete()
+		}
+	}
 
-		// We don't need to get the query string from languageQueries since it's already loaded
-		// in the language object
-		const captures = tree ? language.query.captures(tree.rootNode) : []
-
+	private blocksFromCaptures(
+		captures: QueryCapture[],
+		filePath: string,
+		content: string,
+		fileHash: string,
+		seenSegmentHashes: Set<string>,
+	): CodeBlock[] {
 		// Check if captures are empty
 		if (captures.length === 0) {
 			if (content.length >= MIN_BLOCK_CHARS) {
