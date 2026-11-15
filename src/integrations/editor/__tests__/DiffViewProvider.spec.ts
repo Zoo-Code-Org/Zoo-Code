@@ -3778,6 +3778,15 @@ describe("DiffViewProvider", () => {
 				userTouchedDocument: true,
 				userTouchedDiffEditor: true,
 				snapshotPreviewTabs: [makePreviewTab(`${mockCwd}/leftover-preview.ts`)],
+				// The three fields below have no visible effect, which is why this case used to
+				// stop at the flags above: createdDirs lists the directories this edit created
+				// and would roll back, newContent is the content the edit accumulated for its
+				// write, and originalContent is the file's content on disk before the edit,
+				// which revertChanges() needs to put back. reset() clears all three, and a
+				// stale one would be read by the next edit exactly like the flags above.
+				createdDirs: [`${mockCwd}/new-parent`, `${mockCwd}/new-parent/nested`],
+				newContent: "new content",
+				originalContent: "Original content\n",
 			})
 
 			await diffViewProvider.reset()
@@ -3789,6 +3798,9 @@ describe("DiffViewProvider", () => {
 			expect(diffViewProvider["streamedLines"]).toEqual([])
 			expect(diffViewProvider["preDiagnostics"]).toEqual([])
 			expect(diffViewProvider["snapshotPreviewTabs"]).toEqual([])
+			expect(diffViewProvider["createdDirs"]).toEqual([])
+			expect(diffViewProvider["newContent"]).toBeUndefined()
+			expect(diffViewProvider["originalContent"]).toBeUndefined()
 		})
 	})
 })
