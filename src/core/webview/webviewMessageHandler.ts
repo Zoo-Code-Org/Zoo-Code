@@ -445,6 +445,7 @@ export const webviewMessageHandler = async (
 		editedContent: string,
 		restoreCheckpoint?: boolean,
 		images?: string[],
+		authorizedMentionText = "",
 	): Promise<void> => {
 		const currentCline = provider.getCurrentTask()
 		if (!currentCline) {
@@ -564,7 +565,7 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images)
+			await currentCline.submitUserMessage(editedContent, images, undefined, undefined, authorizedMentionText)
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -2641,12 +2642,18 @@ export const webviewMessageHandler = async (
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				// The edit box holds only text the user typed, so all of it is authorized.
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					authorizedMentionText: message.text,
+				})
 				await handleEditMessageConfirm(
 					message.messageTs,
 					resolved.text,
 					message.restoreCheckpoint,
 					resolved.images,
+					message.text,
 				)
 			}
 			break

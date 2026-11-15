@@ -1563,6 +1563,45 @@ describe("ChatView - Follow-up Suggestions", () => {
 		})
 	})
 
+	it("authorizes only the typed draft when a shift-clicked suggestion is appended", async () => {
+		const { getByRole, getByTestId } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{ type: "say", say: "task", ts: Date.now() - 1000, text: "Initial task" },
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({ question: "Next?", suggest: [{ answer: "Use @/secret" }] }),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Use @/secret" }))
+		const input = getByTestId("chat-textarea").querySelector("input")! as HTMLInputElement
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "mine" } })
+		})
+		vscodePostMessageMock.cleanup()
+
+		await act(async () => {
+			fireEvent.click(suggestion, { shiftKey: true })
+		})
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "askResponse", authorizedMentionText: "mine" }),
+			)
+		})
+	})
+
 	it("does not switch modes for an unknown malformed object mode suggestion", async () => {
 		const { getByRole } = renderChatView()
 

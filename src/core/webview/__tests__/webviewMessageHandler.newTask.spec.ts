@@ -168,4 +168,20 @@ describe("webviewMessageHandler mention authorization forwarding", () => {
 			undefined,
 		)
 	})
+
+	it("scans the edited text for images and authorizes it as user typed", async () => {
+		const submitUserMessage = vi.fn()
+		const editTask = {
+			clineMessages: [{ ts: 1, type: "say", say: "user_feedback", text: "old" }],
+			apiConversationHistory: [],
+			overwriteClineMessages: vi.fn(),
+			overwriteApiConversationHistory: vi.fn(),
+			submitUserMessage,
+		}
+		provider.getCurrentTask.mockReturnValue(editTask)
+		const message: WebviewMessage = { type: "editMessageConfirm", messageTs: 1, text: "see @/a.png" }
+		await webviewMessageHandler(providerAsClineProvider, message).catch(() => {})
+
+		expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: "see @/a.png" }))
+	})
 })

@@ -1517,7 +1517,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 
 			if (event?.shiftKey) {
-				// Always append to existing text, don't overwrite
+				// Always append to existing text, don't overwrite.
+				// The suggestion is model text, so only the prior draft stays authorized.
+				authorizedMentionRef.current ??= inputValueRef.current
 				setInputValue((currentValue: string) => {
 					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
 				})
@@ -1686,7 +1688,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// Special case: during command_output, queue the message instead of
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
-				vscode.postMessage({ type: "queueMessage", text: inputValue.trim(), images: selectedImages })
+				const text = inputValue.trim()
+				vscode.postMessage({
+					type: "queueMessage",
+					text,
+					images: selectedImages,
+					authorizedMentionText: authorizedMentionRef.current ?? text,
+				})
+				authorizedMentionRef.current = null
 				setInputValue("")
 				setSelectedImages([])
 				return

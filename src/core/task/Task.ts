@@ -2651,6 +2651,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	): Promise<void> {
 		try {
 			text = (text ?? "").trim()
+			authorizedMentionText = authorizedMentionText.trim()
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {

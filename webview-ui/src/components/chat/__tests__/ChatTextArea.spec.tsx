@@ -304,6 +304,46 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).not.toHaveBeenCalled()
 		})
 
+		it("routes the native enhanced-prompt input event through the preserving setter, then manual edits through setInputValue", () => {
+			const setInputValue = vi.fn()
+			const setInputValuePreservingAuthorization = vi.fn()
+			// Mimic the browser: execCommand fires an input event on the textarea.
+			const target: { el?: HTMLTextAreaElement } = {}
+			Object.defineProperty(document, "execCommand", {
+				value: vi.fn((_cmd: string, _ui: boolean, value: string) => {
+					if (target.el) {
+						fireEvent.change(target.el, { target: { value } })
+					}
+					return true
+				}),
+				writable: true,
+			})
+
+			const { container } = render(
+				<ChatTextArea
+					{...defaultProps}
+					setInputValue={setInputValue}
+					setInputValuePreservingAuthorization={setInputValuePreservingAuthorization}
+					inputValue="Original prompt"
+				/>,
+			)
+			const textarea = container.querySelector("textarea")!
+			target.el = textarea
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "enhancedPrompt", text: "Enhanced test prompt" } }),
+				)
+			})
+
+			expect(setInputValuePreservingAuthorization).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValue).not.toHaveBeenCalled()
+
+			fireEvent.change(textarea, { target: { value: "typed by hand" } })
+
+			expect(setInputValue).toHaveBeenCalledWith("typed by hand")
+		})
+
 		it("should not crash when textarea ref is not available", () => {
 			const setInputValue = vi.fn()
 

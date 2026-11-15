@@ -4280,6 +4280,20 @@ describe("Cline", () => {
 				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "a @/x b", [], "b")
 			})
 
+			it("trims the authorized substring the same way as the text", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				await task.submitUserMessage("  @/chosen.txt  ", [], undefined, undefined, "  @/chosen.txt  ")
+
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "@/chosen.txt", [], "@/chosen.txt")
+			})
+
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
 				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "ask" }))
 				vi.spyOn(mockProvider, "setMode").mockResolvedValue(undefined)
