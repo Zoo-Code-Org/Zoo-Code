@@ -4,7 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import { AncestorReplacedError, TargetMovedError } from "../../services/file-safety/safeWriteText"
-import { ConfinedPathEscapeError, safeWriteJson } from "../safeWriteJson"
+import { ConfinedPathEscapeError, safeWriteJson, type SafeWriteJsonTraceStage } from "../safeWriteJson"
 import * as fileLockModule from "../fileLock"
 
 // Capture actual implementations before the vi.mock factory runs,
@@ -1152,6 +1152,110 @@ describe("safeWriteJson", () => {
 		const root = await fs.readdir(tempDir)
 		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
 	})
+	test("refuses a referent that moves outside the scope after the recovery pass and writes nothing", async () => {
+		const projectDir = path.join(tempDir, "retarget-project")
+		const outsideDir = path.join(tempDir, "retarget-outside")
+		await fs.mkdir(projectDir, { recursive: true })
+		await fs.mkdir(outsideDir, { recursive: true })
+		const target = path.join(projectDir, "mcp.json")
+		const outsideFile = path.join(outsideDir, "elsewhere.json")
+		await fs.writeFile(target, JSON.stringify({ inside: "original" }), "utf8")
+		await fs.writeFile(outsideFile, "OUTSIDE BYTES", "utf8")
+		// A leftover replacement file beside the target is what makes the recovery pass report
+		// foundLeftovers, and the trace event it fires is the moment this row moves the
+		// referent. Hanging the move on that event puts it between the heal and the strict
+		// resolution after it -- the window the finding names -- instead of hoping it lands
+		// there. The move is a spelling change in what the target resolves to, the shape the
+		// finding describes; the row says nothing about whether a real writer performs one
+		// inside that window.
+		const leftover = `.mcp.json.new_${Date.now()}_abcdef.tmp`
+		await fs.writeFile(path.join(projectDir, leftover), "leftover", "utf8")
+		let retargeted = false
+		let recoveryRan = false
+		const realpathSpy = vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			const p = String(candidate)
+			if (p === target && retargeted) {
+				return outsideFile
+			}
+			return p
+		})
+		const trace = vi.fn((event: { stage: SafeWriteJsonTraceStage; detail?: string }) => {
+			if (event.stage === "recover") {
+				recoveryRan = true
+				retargeted = true
+			}
+		})
+		const merge = vi.fn(async () => ({ merged: true }))
+		let captured: unknown = null
+		try {
+			await safeWriteJson(target, { mcpServers: {} }, { confineTo: projectDir, merge, trace })
+		} catch (error: unknown) {
+			captured = error
+		} finally {
+			realpathSpy.mockRestore()
+		}
+
+		// The recovery pass ran first, so the move landed inside the window rather than around it.
+		expect(recoveryRan).toBe(true)
+		expect(captured).toBeInstanceOf(ConfinedPathEscapeError)
+		if (captured instanceof ConfinedPathEscapeError) {
+			// The error names the destination this write was authorized against and the one the
+			// path resolves to now. Naming only the second would hide that the first was authorized.
+			expect(captured.requestedPath).toBe(target)
+			expect(captured.resolvedPath).toBe(outsideFile)
+			expect(captured.confineTo).toBe(projectDir)
+		}
+		// Rejected before the merge read and before anything was staged, and nothing moved on
+		// either side of the move: the bytes outside the scope are the bytes that were there.
+		expect(merge).not.toHaveBeenCalled()
+		expect(await fs.readFile(outsideFile, "utf8")).toBe("OUTSIDE BYTES")
+		expect(await fs.readFile(target, "utf8")).toBe(JSON.stringify({ inside: "original" }))
+		expect(await fs.readdir(projectDir)).toEqual(["mcp.json"])
+		expect(await fs.readdir(outsideDir)).toEqual(["elsewhere.json"])
+		// The advisory lock is released rather than left for the stale timeout, and the leftover
+		// the recovery pass consumed is not sitting beside the target either.
+		const root = await fs.readdir(tempDir)
+		expect(root.filter((entry) => entry.includes(".new_") || entry.endsWith(".lock"))).toEqual([])
+	})
+	test("publishes onto a referent that moves after the recovery pass while staying inside the scope", async () => {
+		const projectDir = path.join(tempDir, "retarget-inside-project")
+		await fs.mkdir(projectDir, { recursive: true })
+		const target = path.join(projectDir, "mcp.json")
+		const movedTarget = path.join(projectDir, "renamed-mcp.json")
+		await fs.writeFile(target, JSON.stringify({ inside: "original" }), "utf8")
+		await fs.writeFile(movedTarget, JSON.stringify({ moved: "original" }), "utf8")
+		// The same command as the row above: the move lands after the heal and before the
+		// strict resolution after it. Here the new referent is still inside the declared scope,
+		// which is the direction the guard must keep accepting.
+		const leftover = `.mcp.json.new_${Date.now()}_abcdef.tmp`
+		await fs.writeFile(path.join(projectDir, leftover), "leftover", "utf8")
+		let retargeted = false
+		let recoveryRan = false
+		vi.spyOn(fs, "realpath").mockImplementation(async (candidate) => {
+			const p = String(candidate)
+			if (p === target && retargeted) {
+				return movedTarget
+			}
+			return p
+		})
+		const trace = vi.fn((event: { stage: SafeWriteJsonTraceStage; detail?: string }) => {
+			if (event.stage === "recover") {
+				recoveryRan = true
+				retargeted = true
+			}
+		})
+		await safeWriteJson(target, { mcpServers: { shared: true } }, { confineTo: projectDir, trace })
+		expect(recoveryRan).toBe(true)
+		// The guard rejects only a move that leaves the declared scope, so the write follows the
+		// new referent instead of stopping, and the file the move left behind keeps its bytes.
+		expect(JSON.parse(await fs.readFile(movedTarget, "utf8"))).toEqual({ mcpServers: { shared: true } })
+		expect(JSON.parse(await fs.readFile(target, "utf8"))).toEqual({ inside: "original" })
+		expect((await fs.readdir(projectDir)).filter((entry) => !entry.endsWith(".lock"))).toEqual([
+			"mcp.json",
+			"renamed-mcp.json",
+		])
+	})
+
 	test("refuses the write when an ancestor is swapped for a link before staging, after the merge read", async () => {
 		const projectDir = path.join(tempDir, "swap-project")
 		const ancestor = path.join(projectDir, "settings")

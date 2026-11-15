@@ -395,15 +395,26 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		}
 
 		// Strict resolution after the heal: the target this write publishes to, decided once the
-		// leftovers beside the referent are gone. Where it differs from the path the
-		// confinement pins were computed against, the pins move with it and the declared scope
-		// is re-asserted before any byte moves.
+		// leftovers beside the referent are gone. A spelling change that recovery makes visible
+		// counts as the destination this write was already authorized against only when it still
+		// lands inside the scope the caller named, so the scope is re-authorized on the newly
+		// resolved value BEFORE it is accepted. Accepting first and then re-asserting hands the
+		// pinned check the very value it is meant to test and asks it to compare that value with
+		// itself, which cannot fail, while the directories it does re-verify are the ones the
+		// change left in place.
 		resolvedTargetPath = await resolvePublishTarget(absoluteFilePath)
 		if (
+			confinedScopeRoot !== undefined &&
 			expectedResolvedPath !== undefined &&
 			expectedAncestorIdentities !== undefined &&
 			resolvedTargetPath !== expectedResolvedPath
 		) {
+			if (_escapesScope(confinedScopeRoot, await _resolveScopeRoot(resolvedTargetPath))) {
+				// The first argument is the destination this write was authorized against rather than the
+				// caller's spelling: the spelling still resolves inside the scope, and what moved is the
+				// referent the resolution after the heal picked up. Naming both is the point.
+				throw new ConfinedPathEscapeError(expectedResolvedPath, resolvedTargetPath, confinedScopeRoot)
+			}
 			expectedResolvedPath = resolvedTargetPath
 			await _assertConfinementStillHolds(absoluteFilePath, expectedResolvedPath, expectedAncestorIdentities)
 		}

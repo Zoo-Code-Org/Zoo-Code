@@ -77,15 +77,24 @@ async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): 
 		return false
 	}
 	// The unlink removes the file and leaves the per-task directory in place, so both sides
-	// still carry an identity here. Case is folded because it is not significant on Windows,
-	// where the alias spelling appears.
+	// still carry an identity here. Basenames are compared exactly by default, because on a
+	// filesystem that keeps case two ways two spellings are two files, and a lock key naming
+	// one of them cannot stand for the other. The folded comparison is kept only for the
+	// platforms whose default filesystem cannot tell the two spellings apart -- NTFS on
+	// Windows, case-insensitive APFS/HFS+ on macOS -- which is the platform fact the folding
+	// was written for and nothing wider. Where a box's filesystem contradicts its platform
+	// name the row added below fails loudly instead of passing quietly.
 	const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
 	const keyDirectory = await fileIdentity(path.dirname(lockKey))
-	return (
-		expectedDirectory !== null &&
-		keyDirectory === expectedDirectory &&
-		path.basename(lockKey).toLowerCase() === path.basename(expectedPath).toLowerCase()
-	)
+	if (expectedDirectory === null || keyDirectory !== expectedDirectory) {
+		return false
+	}
+	const keyBasename = path.basename(lockKey)
+	const expectedBasename = path.basename(expectedPath)
+	if (process.platform === "win32" || process.platform === "darwin") {
+		return keyBasename.toLowerCase() === expectedBasename.toLowerCase()
+	}
+	return keyBasename === expectedBasename
 }
 
 function storeInternals(store: TaskHistoryStore): {
@@ -339,5 +348,42 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
 			expect(writtenIds).toEqual([])
 		})
+	})
+})
+
+describe("the lock-key helper's case rule", () => {
+	let probeDir: string
+
+	beforeEach(async () => {
+		probeDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "TaskHistoryStore-case-rule-")))
+	})
+
+	afterEach(async () => {
+		await fs.rm(probeDir, { recursive: true, force: true })
+	})
+
+	it("accepts a case-distinct basename only where the filesystem folds the two names into one file", async () => {
+		// The row does not rule on what a platform does with case. It makes both spellings, asks
+		// the filesystem whether they are one file or two, and requires the helper to agree with
+		// that answer. Where the directory keeps the spellings apart, a lock key naming one
+		// must not be accepted as naming the other; before this row the folded basename
+		// comparison was the only thing behind that acceptance, with nothing but the two
+		// directory pins to stop a key naming a different file. If a box's filesystem ever
+		// contradicts its platform name, this row fails loudly instead of passing quietly.
+		const expectedPath = path.join(probeDir, "history.json")
+		const caseDistinctKey = path.join(probeDir, "HISTORY.json")
+		await fs.writeFile(expectedPath, "{}", "utf8")
+		await fs.writeFile(caseDistinctKey, "[]", "utf8")
+
+		const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
+		const keyDirectory = await fileIdentity(path.dirname(caseDistinctKey))
+		expect(expectedDirectory).not.toBeNull()
+		// The two spellings sit in one directory, so the basename is the only thing that can differ.
+		expect(keyDirectory).toBe(expectedDirectory)
+		const oneFile = (await fileIdentity(expectedPath)) === (await fileIdentity(caseDistinctKey))
+		expect(await lockKeyNamesTheSameFile(caseDistinctKey, expectedPath)).toBe(oneFile)
+		// The same spelling is the same file on every platform, which is the direction the delete
+		// rows above depend on.
+		expect(await lockKeyNamesTheSameFile(expectedPath, expectedPath)).toBe(true)
 	})
 })
