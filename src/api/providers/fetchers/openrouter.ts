@@ -153,7 +153,7 @@ export async function getOpenRouterModelEndpoints(
 	options?: ApiHandlerOptions,
 	// untrustedBaseUrl: the base URL comes from unsaved webview settings. Reject schema-invalid
 	// bodies and keep the URL out of error logs.
-	opts?: { untrustedBaseUrl?: boolean },
+	opts?: { untrustedBaseUrl?: boolean; timeoutMs?: number },
 ): Promise<Record<string, ModelInfo>> {
 	const models: Record<string, ModelInfo> = {}
 	const baseURL = options?.openRouterBaseUrl || "https://openrouter.ai/api/v1"
@@ -164,7 +164,7 @@ export async function getOpenRouterModelEndpoints(
 		// a stalled endpoint response would otherwise keep the caller's catalog load pending
 		// forever, and later callers would join that pending promise instead of retrying.
 		const response = await axios.get<OpenRouterModelEndpointsResponse>(`${baseURL}/models/${modelId}/endpoints`, {
-			timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+			timeout: opts?.timeoutMs ?? MODEL_CATALOG_FETCH_TIMEOUT_MS,
 			// The base URL can come from user settings. The cap stops a huge body from filling host memory.
 			maxContentLength: MAX_ENDPOINTS_BODY_BYTES,
 		})

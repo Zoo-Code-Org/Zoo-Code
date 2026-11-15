@@ -94,7 +94,7 @@ async function getOpenRouterModelProviders({ modelId, baseUrl }: ProviderInfoPar
 	const endpoints = await getOpenRouterModelEndpoints(
 		modelId,
 		{ openRouterBaseUrl: baseUrl },
-		{ untrustedBaseUrl: true },
+		{ untrustedBaseUrl: true, timeoutMs: FETCH_TIMEOUT_MS },
 	)
 
 	return Object.fromEntries(Object.entries(endpoints).map(([label, info]) => [label, { ...info, label }]))

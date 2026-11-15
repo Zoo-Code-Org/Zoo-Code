@@ -357,15 +357,39 @@ describe("OpenRouter API", () => {
 			getSpy.mockRestore()
 		})
 
-		it("with untrustedBaseUrl returns no endpoints for a non-numeric context_length", async () => {
+		it.each([
+			["a non-numeric", "bad", false],
+			["a numeric", 4096, true],
+		])("with untrustedBaseUrl handles %s context_length", async (_name, contextLength, accepted) => {
 			const axios = await import("axios")
-			const body = { data: { id: "m", name: "M", endpoints: [{ provider_name: "P", context_length: "bad" }] } }
+			const endpoint = { name: "P", provider_name: "P", context_length: contextLength }
+			const body = { data: { id: "m", name: "M", endpoints: [endpoint] } }
 			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: body })
 			vi.spyOn(console, "error").mockImplementation(() => {})
 
-			await expect(getOpenRouterModelEndpoints("m", undefined, { untrustedBaseUrl: true })).resolves.toEqual({})
-			// Trusted callers keep the lenient fallback.
-			await expect(getOpenRouterModelEndpoints("m")).resolves.toHaveProperty("P")
+			const result = await getOpenRouterModelEndpoints("m", undefined, { untrustedBaseUrl: true })
+
+			if (accepted) {
+				expect(Object.keys(result)).toEqual(["P"])
+				expect(result["P"]).toMatchObject({ contextWindow: 4096 })
+			} else {
+				expect(result).toEqual({})
+				// Trusted callers keep the lenient fallback.
+				await expect(getOpenRouterModelEndpoints("m")).resolves.toHaveProperty("P")
+			}
+
+			getSpy.mockRestore()
+		})
+
+		it("uses the caller timeout when given", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "m", name: "M", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("m", undefined, { timeoutMs: 10_000 })
+
+			expect(getSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeout: 10_000 }))
 
 			getSpy.mockRestore()
 		})

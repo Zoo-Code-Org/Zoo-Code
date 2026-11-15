@@ -131,7 +131,7 @@ describe("handleRequestProviderInfo", () => {
 		expect(getOpenRouterModelEndpoints).toHaveBeenCalledWith(
 			"openai/gpt-4o",
 			{ openRouterBaseUrl: "https://proxy.test/v1" },
-			{ untrustedBaseUrl: true },
+			{ untrustedBaseUrl: true, timeoutMs: 10_000 },
 		)
 		expect(postMessageToWebview).toHaveBeenCalledWith({
 			type: "providerInfo",
