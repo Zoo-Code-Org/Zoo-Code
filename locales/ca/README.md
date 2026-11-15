@@ -49,8 +49,10 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 
 ## Novetats a la v3.98.0
 
+- Prova la propera subscripció Zoo Pass. 2 setmanes d'accés gratuït; places limitades
+  https://www.zoocode.dev/pass
 - **Títols de tasques automàtics i més control dels models:** Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.
-- **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra, obtén la llista més recent de models de Friendli i mantén Zoo Gateway al primer lloc de la configuració de proveïdors.
+- **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra i obtén la llista més recent de models de Friendli.
 - **Xats i edicions més segurs i responsius:** Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON.
 
 ## Què pot fer Zoo Code per TU?

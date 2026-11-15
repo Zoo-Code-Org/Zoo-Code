@@ -49,8 +49,10 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 
 ## Neu in v3.98.0
 
+- Teste das kommende Zoo Pass-Abonnement. 2 Wochen kostenloser Zugang; begrenzte Plätze
+  https://www.zoocode.dev/pass
 - **Automatische Aufgabentitel und feinere Modellsteuerung:** Erstelle Titel für neue Root-Aufgaben automatisch und probiere die experimentelle Einstellung für dynamischen Reasoning-Aufwand aus.
-- **Erweiterte Modell- und Anbieterunterstützung:** Nutze GPT-6.1 Terra, rufe die aktuelle Friendli-Modellliste ab und behalte Zoo Gateway in den Anbietereinstellungen an erster Stelle.
+- **Erweiterte Modell- und Anbieterunterstützung:** Nutze GPT-6.1 Terra und rufe die aktuelle Friendli-Modellliste ab.
 - **Sicherere, reaktionsschnellere Chats und Bearbeitungen:** Breche OpenAI-Native- und Requesty-Anfragen sauber ab, schütze Diffs außerhalb des Workspace vor versehentlicher Auto-Genehmigung, wechsle UI-Sprachen konsistent und vermeide mehrdeutige JSON-Backup-Wiederherstellungen.
 
 ## Was kann Zoo Code für DICH tun?

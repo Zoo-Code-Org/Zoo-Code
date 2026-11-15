@@ -33,6 +33,9 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 		t: (key: string, options?: { version?: string }) => {
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What is new in Zoo Code v3.90.0",
+				"chat:announcement.release.highlight0":
+					"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
+				"chat:announcement.release.highlight0Url": "https://www.zoocode.dev/pass",
 				"chat:announcement.release.highlight1":
 					"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
 				"chat:announcement.release.highlight2":
@@ -56,6 +59,11 @@ describe("Announcement", () => {
 
 		expect(screen.getByText("Zoo Code 3.90.0 Released")).toBeInTheDocument()
 		expect(screen.getByText("What is new in Zoo Code v3.90.0")).toBeInTheDocument()
+		const zooPassHighlight = screen.getAllByRole("listitem")[0]
+		expect(zooPassHighlight).toHaveTextContent(
+			"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
+		)
+		expect(zooPassHighlight).toHaveTextContent("https://www.zoocode.dev/pass")
 		expect(
 			screen.getByText(
 				"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
@@ -73,10 +81,14 @@ describe("Announcement", () => {
 		).toBeInTheDocument()
 	})
 
-	it("renders exactly three release highlight bullets", () => {
+	it("renders four release highlight bullets with Zoo Pass first", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
-		expect(screen.getAllByRole("listitem")).toHaveLength(3)
+		const highlights = screen.getAllByRole("listitem")
+		expect(highlights).toHaveLength(4)
+		expect(highlights[0]).toHaveTextContent(
+			"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spotshttps://www.zoocode.dev/pass",
+		)
 	})
 
 	it("links support users to the Zoo Code GitHub repository", () => {

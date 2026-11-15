@@ -48,8 +48,10 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 
 ## Điểm mới trong v3.98.0
 
+- Xem trước gói đăng ký Zoo Pass sắp ra mắt. 2 tuần truy cập miễn phí; số chỗ có hạn
+  https://www.zoocode.dev/pass
 - **Tiêu đề tác vụ tự động và kiểm soát mô hình chi tiết hơn:** Tự động tạo tiêu đề cho tác vụ gốc mới và thử cài đặt thử nghiệm về mức nỗ lực suy luận động.
-- **Hỗ trợ mô hình và nhà cung cấp mở rộng:** Sử dụng GPT-6.1 Terra, lấy danh sách mô hình Friendli mới nhất và giữ Zoo Gateway ở vị trí đầu tiên trong cài đặt nhà cung cấp.
+- **Hỗ trợ mô hình và nhà cung cấp mở rộng:** Sử dụng GPT-6.1 Terra và lấy danh sách mô hình Friendli mới nhất.
 - **Trò chuyện và chỉnh sửa an toàn, phản hồi nhanh hơn:** Hủy yêu cầu OpenAI Native và Requesty gọn gàng, bảo vệ diff bên ngoài workspace khỏi việc tự động phê duyệt ngoài ý muốn, chuyển đổi ngôn ngữ UI nhất quán và tránh khôi phục bản sao lưu JSON mơ hồ.
 
 ## Zoo Code có thể làm gì cho BẠN?

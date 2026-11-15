@@ -48,8 +48,10 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 
 ## Yang Baru di v3.98.0
 
+- Pratinjau langganan Zoo Pass yang akan datang. Akses gratis 2 minggu; tempat terbatas
+  https://www.zoocode.dev/pass
 - **Judul tugas otomatis dan kontrol model yang lebih detail:** Buat judul untuk tugas root baru secara otomatis dan coba setelan eksperimental dynamic thinking-effort.
-- **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra, ambil daftar model Friendli terbaru, dan tetapkan Zoo Gateway sebagai yang pertama di setelan penyedia.
+- **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra dan ambil daftar model Friendli terbaru.
 - **Obrolan dan edit yang lebih aman serta responsif:** Batalkan permintaan OpenAI Native dan Requesty dengan bersih, lindungi diff di luar workspace dari persetujuan otomatis yang tidak disengaja, ganti bahasa UI secara konsisten, dan hindari pemulihan backup JSON yang ambigu.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?

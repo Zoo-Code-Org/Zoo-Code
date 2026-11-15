@@ -323,8 +323,10 @@
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Co nowego w Zoo Code v3.98.0",
+			"highlight0": "Wypróbuj nadchodzącą subskrypcję Zoo Pass. 2 tygodnie bezpłatnego dostępu; ograniczona liczba miejsc",
+			"highlight0Url": "https://www.zoocode.dev/pass",
 			"highlight1": "Automatyczne tytuły zadań i dokładniejsza kontrola modeli: Automatycznie generuj tytuły nowych zadań głównych i wypróbuj eksperymentalne ustawienie dynamicznego nakładu myślenia.",
-			"highlight2": "Szersza obsługa modeli i dostawców: Korzystaj z GPT-6.1 Terra, pobieraj najnowszą listę modeli Friendli i utrzymuj Zoo Gateway na pierwszym miejscu w ustawieniach dostawców.",
+			"highlight2": "Szersza obsługa modeli i dostawców: Korzystaj z GPT-6.1 Terra i pobieraj najnowszą listę modeli Friendli.",
 			"highlight3": "Bezpieczniejsze i bardziej responsywne czaty oraz edycje: Poprawnie anuluj żądania OpenAI Native i Requesty, chroń diffy poza obszarem roboczym przed przypadkową automatyczną akceptacją, spójnie zmieniaj język interfejsu i unikaj niejednoznacznego przywracania kopii zapasowych JSON."
 		}
 	},

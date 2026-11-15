@@ -45,8 +45,10 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 
 ## v3.98.0 新功能
 
+- 預覽即將推出的 Zoo Pass 訂閱。2 週免費使用；名額有限
+  https://www.zoocode.dev/pass
 - **自動任務標題與更精細的模型控制：** 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。
-- **擴充的模型與供應商支援：** 使用 GPT-6.1 Terra，取得最新的 Friendli 模型清單，並在供應商設定中讓 Zoo Gateway 保持首位。
+- **擴充的模型與供應商支援：** 使用 GPT-6.1 Terra 並取得最新的 Friendli 模型清單。
 - **更安全、回應更迅速的對話與編輯：** 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。
 
 ## Zoo Code 能為您做什麼？

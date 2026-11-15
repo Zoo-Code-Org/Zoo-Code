@@ -45,6 +45,11 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 					<div className="mb-4">
 						<p className="mb-3">{t("chat:announcement.release.heading")}</p>
 						<ul className="list-disc list-inside text-sm space-y-1.5">
+							<li>
+								{t("chat:announcement.release.highlight0")}
+								<br />
+								{t("chat:announcement.release.highlight0Url")}
+							</li>
 							<li>{t("chat:announcement.release.highlight1")}</li>
 							<li>{t("chat:announcement.release.highlight2")}</li>
 							<li>{t("chat:announcement.release.highlight3")}</li>
