@@ -146,4 +146,58 @@ describe("safeWriteJson post-commit durability", () => {
 		expect(JSON.parse(await fs.readFile(targetPath, "utf8"))).toEqual({ version: "old" })
 		expect(await fs.readdir(dir)).toEqual(["history_item.json"])
 	})
+
+	it("rejects a staged write whose stream destroys itself, and leaves no residue", async () => {
+		// The sibling test above pushes an error event onto a live stream. A real storage failure -
+		// a full volume, a handle revoked under the writer - reaches this module as the write stream
+		// destroying itself with an error attached, which is a different path through Node: destroy
+		// reports the reason once and then closes the stream for good. This injects that shape, so
+		// what is proven is the rejection wired to the stream's own error channel (safeWriteJson.ts
+		// 434) rather than a hand-pushed event on a stream that is still open.
+		let tempWriteAttempted = false
+		let destroyedStream: FsWriteStream | undefined
+		const writeStreamActual = actuals.writeStream
+		if (writeStreamActual === null) {
+			throw new Error("fs mock did not capture the real createWriteStream")
+		}
+		vi.mocked(fsSync.createWriteStream).mockImplementation(
+			(...args: Parameters<typeof fsSync.createWriteStream>) => {
+				const stagedPath = String(args[0])
+				if (stagedPath.includes(".new_")) {
+					// Pin the injection: without this flag the test would also pass on a run where the
+					// write never reached a staged file at all.
+					tempWriteAttempted = true
+					const stream = writeStreamActual(stagedPath, { encoding: "utf8" })
+					const reason = Object.assign(new Error("ENOSPC: no space left on device"), {
+						code: "ENOSPC",
+					})
+					process.nextTick(() => {
+						stream.destroy(reason)
+					})
+					destroyedStream = stream
+					return stream
+				}
+				return writeStreamActual(stagedPath, { encoding: "utf8" })
+			},
+		)
+
+		let rejection: unknown
+		try {
+			await safeWriteJson(targetPath, { version: "new" })
+			throw new Error("expected the destroyed stream to reject the write")
+		} catch (error: unknown) {
+			rejection = error
+		}
+
+		expect((rejection as Error).message).toContain("ENOSPC: no space left on device")
+		// The reason travels with the rejection: a caller that loses the errno cannot tell a full
+		// volume from a permissions problem when it reports the failure to the model.
+		expect((rejection as { code?: string }).code).toBe("ENOSPC")
+		expect(tempWriteAttempted).toBe(true)
+		expect(destroyedStream?.destroyed).toBe(true)
+		// Nothing was published: the target still holds the previous content, and the staged file
+		// the destroyed stream had open is gone again - the failure handler removed it.
+		expect(JSON.parse(await fs.readFile(targetPath, "utf8"))).toEqual({ version: "old" })
+		expect(await fs.readdir(dir)).toEqual(["history_item.json"])
+	})
 })

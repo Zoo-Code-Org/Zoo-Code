@@ -932,6 +932,61 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second")
 		})
 
+		it("two concurrent updates on one path - the second waits while the first publication is open", async () => {
+			// The test above waits for both writes to settle, so it can only report the order the chain
+			// produced. This one holds the first publish open and asks the question the chain exists to
+			// answer: is the second write still queued, or has it already published behind the first?
+			const reg = new ObservationRegistry()
+			reg.observe(abs("held.txt"), "v1")
+			mockedComputeVersionToken.mockResolvedValue("v1")
+			const task = createMockTask({ observationRegistry: reg })
+
+			let releaseFirstPublish: () => void = () => {}
+			const firstPublishOpen = new Promise<void>((resolve) => {
+				releaseFirstPublish = resolve
+			})
+			let publishes = 0
+			mockedSafeWriteText.mockImplementation(async () => {
+				publishes += 1
+				if (publishes === 1) {
+					// A real await: the link the guard is running on is parked inside the publish, the
+					// way it is parked when the disk is the slow part.
+					await firstPublishOpen
+					mockedComputeVersionToken.mockResolvedValue("v2")
+				}
+			})
+
+			const settled: string[] = []
+			const p1 = guardedWrite(task, "held.txt", "first", "update")
+			const p2 = guardedWrite(task, "held.txt", "second", "update")
+			p1.then(
+				() => settled.push("first"),
+				() => settled.push("first-rejected"),
+			)
+			p2.then(
+				() => settled.push("second"),
+				() => settled.push("second-rejected"),
+			)
+
+			// Drain the chain: both calls have enqueued, the first has reached its publish, and the
+			// second has had every chance to run its own link had the chain not serialised it.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(publishes).toBe(1)
+			expect(settled).toEqual([])
+
+			releaseFirstPublish()
+			await Promise.allSettled([p1, p2])
+
+			// Released, the second link runs: against the observation the first publish refreshed, and
+			// in submission order, which is the chain's whole contract.
+			expect(publishes).toBe(2)
+			expect(settled).toEqual(["first", "second"])
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("held.txt"), "first")
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("held.txt"), "second")
+		})
+
 		it("observed-absent then two concurrent creates - the second publishes against the refreshed observation", async () => {
 			const reg = new ObservationRegistry()
 			reg.observe(abs("absent.txt"), "v1") // read before, file later vanished

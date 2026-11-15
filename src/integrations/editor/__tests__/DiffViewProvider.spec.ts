@@ -2169,6 +2169,62 @@ describe("DiffViewProvider", () => {
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
 		})
 
+		it("keeps the buffer dirty when a keystroke lands while the publish is in flight", async () => {
+			// The test above hands the buffer a second spelling and trusts that the publish is the window
+			// in which it gets noticed. Here the publish is held open, the keystroke is typed inside that
+			// window, and every step writes into one log, so what is proven is the sequence - bytes
+			// written, buffer moved, discard decision taken after both - rather than the mere existence
+			// of two different texts.
+			const eventLog: string[] = []
+			let releasePublish: () => void = () => {}
+			const publishOpen = new Promise<void>((resolve) => {
+				releasePublish = resolve
+			})
+			let typedDuringPublish = false
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn(() => (typedDuringPublish ? "typed while the publish was open" : "new content")),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document, () => eventLog.push("revert"))
+			vi.mocked(safeWriteText).mockImplementation(async () => {
+				eventLog.push("publish-start")
+				await publishOpen
+				eventLog.push("publish-end")
+			})
+
+			const saving = diffViewProvider.saveChanges(false)
+			// Type only once the publish is demonstrably open: a keystroke before the write or after it
+			// would be a different scenario, and the sibling test already covers that one.
+			for (let attempt = 0; attempt < 2_000 && !eventLog.includes("publish-start"); attempt++) {
+				await new Promise((resolve) => setTimeout(resolve, 1))
+			}
+			expect(eventLog).toContain("publish-start")
+			typedDuringPublish = true
+			eventLog.push("keystroke")
+			releasePublish()
+			await saving
+
+			expect(eventLog).toEqual(["publish-start", "keystroke", "publish-end"])
+			expect(safeWriteText).toHaveBeenCalledWith(`${mockCwd}/test.ts`, Buffer.from("new content"))
+			// The discard decision runs after the publish and compares the buffer against the text it
+			// captured before awaiting the write. The keystroke is newer than the published bytes, so a
+			// revert would discard text the user typed: the buffer stays dirty and the close helpers
+			// leave it alone.
+			expect(dirtyEditor.document.isDirty).toBe(true)
+			expect(vi.mocked(vscode.commands.executeCommand)).not.toHaveBeenCalledWith("workbench.action.files.revert")
+			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
+		})
+
 		it("activates the document before the revert so the command is scoped to it, then restores the focus", async () => {
 			// workbench.action.files.revert takes no resource argument: with the Open
 			// Editors view focused it force-reverts every selected editor, otherwise the
@@ -2198,6 +2254,42 @@ describe("DiffViewProvider", () => {
 			expect(calls[0]).toEqual([dirtyEditor.document, { preserveFocus: false, preview: false }])
 			expect(vi.mocked(vscode.commands.executeCommand)).toHaveBeenCalledWith("workbench.action.files.revert")
 			expect(calls[1]).toEqual([previousEditor.document, { preserveFocus: false, preview: false }])
+		})
+
+		it("records activation, revert and focus restoration in one ordered event array", async () => {
+			// What scopes the revert to this document is that this document was activated first; what gives
+			// the user their focus back is that the previous editor is activated after the revert. Three
+			// assertions about three calls can be satisfied in any order, so each call appends to one array
+			// and the array is asserted whole.
+			const eventLog: string[] = []
+			const previousEditor = mockTextEditor(`${mockCwd}/other.ts`, "other")
+			vi.mocked(vscode.window).activeTextEditor = previousEditor
+			const dirtyEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: true,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = dirtyEditor
+			revertClearsDirty(dirtyEditor.document, () => eventLog.push("revert"))
+			// The declared API type names a Uri; the provider hands this call a document, so the identity is
+			// read from whichever shape the call actually carried.
+			vi.mocked(vscode.window.showTextDocument).mockImplementation(async (target: vscode.Uri) => {
+				const revealed = target as unknown as { fsPath?: string; uri?: { fsPath: string } }
+				eventLog.push(`activate:${revealed.uri?.fsPath ?? revealed.fsPath ?? "unidentified"}`)
+				return previousEditor
+			})
+
+			await diffViewProvider.saveChanges(false)
+
+			expect(eventLog).toEqual([`activate:${mockCwd}/test.ts`, "revert", `activate:${mockCwd}/other.ts`])
 		})
 
 		it("does not restore focus when the user had no active editor", async () => {
@@ -2391,6 +2483,43 @@ describe("DiffViewProvider", () => {
 			expect(fs.unlink).not.toHaveBeenCalled()
 			expect(vi.mocked(vscode.window.showTextDocument)).not.toHaveBeenCalled()
 			expect(diffViewProvider["closeAllDiffViews"]).toHaveBeenCalled()
+		})
+
+		it("moves an older stored observation to the token the adoption measured, carrying its completeness", async () => {
+			// The test above seeds the observation with the very token it later asserts, so an adoption that
+			// wrote nothing back would still pass. Here the stored version is older than the one on disk:
+			// the token the adoption re-measures is visibly different from what the registry held, so the
+			// write-back is proven, and the completeness that came with the original read is proven to
+			// travel with it instead of being quietly upgraded.
+			const cleanEditor = {
+				document: {
+					uri: { fsPath: `${mockCwd}/test.ts`, scheme: "file" },
+					getText: vi.fn().mockReturnValue("new content"),
+					lineCount: 0,
+					encoding: "utf8",
+					isDirty: false,
+					save: vi.fn().mockResolvedValue(undefined),
+				},
+				selection: { active: { line: 0, character: 0 }, anchor: { line: 0, character: 0 } },
+				edit: vi.fn().mockResolvedValue(true),
+				revealRange: vi.fn(),
+			} as unknown as vscode.TextEditor
+			diffViewProvider["activeDiffEditor"] = cleanEditor
+			diffViewProvider.editType = "modify"
+			mockTask.observationRegistry.observe(`${mockCwd}/test.ts`, "older-token", false)
+			vi.mocked(computeVersionToken).mockResolvedValue("moved")
+			vi.mocked(fs.stat).mockResolvedValue(previewStats)
+			vi.mocked(fs.readFile).mockResolvedValue("new content")
+
+			await expect(diffViewProvider.saveChanges(false)).resolves.toMatchObject({ newProblemsMessage: "" })
+
+			const observation = mockTask.observationRegistry.get(`${mockCwd}/test.ts`)
+			expect(observation?.version).toBe(versionTokenOfStat(previewStats))
+			expect(observation?.version).not.toBe("older-token")
+			// The disk already matching the content this save intended says nothing about whether the
+			// model saw the whole file: a partial read stays partial after adoption.
+			expect(observation?.complete).toBe(false)
+			expect(fs.unlink).not.toHaveBeenCalled()
 		})
 
 		it("does not adopt an autosaved match for an edit that was never authorized", async () => {

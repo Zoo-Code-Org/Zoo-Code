@@ -76,15 +76,19 @@ async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): 
 	if (typeof lockKey !== "string") {
 		return false
 	}
-	// The unlink removes the file and leaves the per-task directory in place, so both sides
-	// still carry an identity here. Case is folded because it is not significant on Windows,
-	// where the alias spelling appears.
+	// The unlink removes the file and leaves the per-task directory in place, so both sides still
+	// carry an identity here, and that identity is what tolerates the two spellings of one path on
+	// the Windows runner: the NTFS 8.3 alias differs in the DIRECTORY spelling
+	// (C:/Users/RUNNER~1/... for C:/Users/runneradmin/...), and dev:ino equates those. The leaf gets
+	// no such licence. Folding case here accepts a key that names a different file, so a delete
+	// could hold a lock on one file while unlinking another - the interleaving this lock exists to
+	// prevent. The basename has to match character for character.
 	const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
 	const keyDirectory = await fileIdentity(path.dirname(lockKey))
 	return (
 		expectedDirectory !== null &&
 		keyDirectory === expectedDirectory &&
-		path.basename(lockKey).toLowerCase() === path.basename(expectedPath).toLowerCase()
+		path.basename(lockKey) === path.basename(expectedPath)
 	)
 }
 
@@ -215,6 +219,36 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			expect(onWrite).toHaveBeenCalledTimes(1)
 			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
 			expect(writtenIds).not.toContain("locked-delete")
+		})
+
+		it("locks the exact basename it unlinks and refuses a key naming a differently cased file", async () => {
+			// The directory half of the identity comparison already tolerates the two spellings of one
+			// temp directory on the Windows runner. The leaf half must not fold case: two names in one
+			// directory that differ only in case are two files wherever the filesystem is
+			// case-sensitive, and a delete that locks one of them while unlinking the other is exactly
+			// the interleaving the lock exists to prevent. This pins the key the real delete hands
+			// withFileLock, then pins what the comparison refuses.
+			const store = createStore()
+			await store.initialize()
+			await store.upsert(makeHistoryItem({ id: "casing-delete" }))
+			vi.mocked(withFileLock).mockClear()
+
+			await store.delete("casing-delete")
+
+			const expectedPath = historyFilePath(storagePath, "casing-delete")
+			const lockKey = vi.mocked(withFileLock).mock.calls[0][0]
+			expect(await lockKeyNamesTheSameFile(lockKey, expectedPath)).toBe(true)
+
+			// The negative case: one directory, one leaf that differs only in case. The two fixture
+			// guards below keep this from being a tautology -- they show the pair really does share a
+			// directory identity and really does differ in the leaf the comparison is about.
+			const lookAlike = path.join(path.dirname(expectedPath), path.basename(expectedPath).toUpperCase())
+			expect(path.basename(lookAlike)).not.toBe(path.basename(expectedPath))
+			expect(await fileIdentity(path.dirname(lookAlike))).toBe(await fileIdentity(path.dirname(expectedPath)))
+			expect(await lockKeyNamesTheSameFile(lookAlike, expectedPath)).toBe(false)
+			// And the same pair the other way round, so the refusal is about the leaf rather than
+			// about which spelling was handed in first.
+			expect(await lockKeyNamesTheSameFile(expectedPath, lookAlike)).toBe(false)
 		})
 
 		it("swallows a lock acquisition failure, evicts cache and mtime, and still writes through once", async () => {
