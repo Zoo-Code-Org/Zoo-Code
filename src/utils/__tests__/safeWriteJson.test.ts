@@ -1546,12 +1546,12 @@ describe("safeWriteJson", () => {
 			retries: 0,
 		})
 		// The acquire double is the one the recovery rows already use, with the release closure
-		// supplied by the double instead of by the lock module. The claim below is about the paths
-		// safeWriteJson acts on, not about how the lock module keeps its own bookkeeping: measured
-		// on this box (node v25.9.0, win32, proper-lockfile 4.1.2) a real release follows the path
-		// string it was handed and does remove a foreign lock sitting at the swapped path, and
-		// that is the lock modules behaviour rather than anything safeWriteJson itself does, so no
-		// row here asserts it and the ask about the release stays open for the shipped-line ruling.
+		// supplied by the double instead of by the lock module. The claim below is about what
+		// safeWriteJson itself publishes and removes on the refusal path, which is nothing at the
+		// path the target name now resolves to: it is not a claim about the lock modules release
+		// step, because the double supplies that step here and the row below exercises the real
+		// one. Measured on this box (node v25.9.0, win32, proper-lockfile 4.1.2) a real release
+		// follows the path string it was handed and does remove a foreign lock at the swapped path.
 		let acquired = 0
 		let released = 0
 		const acquireSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async () => {
@@ -1594,6 +1594,92 @@ describe("safeWriteJson", () => {
 			acquireSpy.mockRestore()
 			await foreignRelease()
 		}
+	})
+	test("hands the release the real acquisition returned to the swapped path and records what it removes", async () => {
+		// This row is the row above with the ask from the verdict at this head applied to the
+		// double: the acquisition is delegated to the real acquireFileLock, and the release that
+		// acquisition returned is wrapped, counted and awaited, so the release step is exercised
+		// instead of supplied. The directories, the foreign lock planted by proper-lockfile in the
+		// directory the swap is going to move into, the swap driven from write-start and the
+		// assertions kept after the rejection are the row above. Measured on this box (node
+		// v25.9.0, win32, proper-lockfile 4.1.2) and reported here rather than assumed: the
+		// release closure came from a lock taken at the ancestor path before the swap, it follows
+		// the path string it was handed, and after the swap that string names the directory the
+		// swap moved in, so it lands on the foreign lock and removes it. Whether that release
+		// ought to be bound to the directory it acquired is the shipped-line question this unit
+		// has been holding open, and no claim is made here that this row settles it.
+		const projectDir = path.join(tempDir, "delegated-release-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const swappedIn = path.join(tempDir, "delegated-release-elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		const realLockfile = await vi.importActual<typeof import("proper-lockfile")>("proper-lockfile")
+		const foreignPath = path.join(swappedIn, "mcp.json")
+		const foreignRelease = await realLockfile.lock(foreignPath, {
+			stale: fileLockModule.LOCK_STALE_MS,
+			realpath: false,
+			retries: 0,
+		})
+		let acquired = 0
+		let released = 0
+		// Captured before the spy is installed: calling the namespace property from inside the
+		// implementation would recurse through the spy itself.
+		const realAcquire = fileLockModule.acquireFileLock
+		const acquireSpy = vi.spyOn(fileLockModule, "acquireFileLock").mockImplementation(async (key: string) => {
+			acquired += 1
+			const delegatedRelease = await realAcquire(key)
+			return async () => {
+				released += 1
+				await delegatedRelease()
+			}
+		})
+		let swapped = false
+		let captured: unknown = null
+		let foreignReleaseError: unknown = null
+		try {
+			captured = await safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					trace: (event) => {
+						if (event.stage !== "write-start" || swapped) return
+						swapped = true
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+					},
+				},
+			).then(
+				() => undefined,
+				(reason: unknown) => reason,
+			)
+			expect(captured).toBeInstanceOf(AncestorReplacedError)
+			expect(path.basename((captured as AncestorReplacedError).directory)).toBe("settings")
+			expect((captured as AncestorReplacedError).message).toContain("nothing was published")
+			// The write took the lock once and handed back exactly one release before rejecting,
+			// and that release was awaited: both counters move only inside the delegating double.
+			expect(acquired).toBe(1)
+			expect(released).toBe(1)
+			// The foreign lock is gone. The awaited release followed the path string the lock was
+			// taken under, which after the swap names the directory the swap moved in.
+			expect(fsSyncActual.existsSync(path.join(swappedIn, "mcp.json.lock"))).toBe(false)
+			// The directory the lock was actually taken in still holds this writes own marker,
+			// renamed aside by the swap: the release did not travel there either, and that is the
+			// identity the shipped-line question is about.
+			expect(fsSyncActual.existsSync(path.join(ancestor + "-moved-aside", "mcp.json.lock"))).toBe(true)
+			// Nothing was published into the swapped-in directory: with the foreign lock gone it is
+			// empty, so no staged temp and no committed file reached it.
+			expect(await fs.readdir(swappedIn)).toEqual([])
+		} finally {
+			acquireSpy.mockRestore()
+			try {
+				await foreignRelease()
+			} catch (releaseFailure: unknown) {
+				// Recorded rather than swallowed, and asserted below at the line the measurement put it on.
+				foreignReleaseError = releaseFailure
+			}
+		}
+		expect(foreignReleaseError).toBeNull()
 	})
 	test("gives up on a lock another writer holds instead of waiting out the stale window", async () => {
 		const scope = path.join(tempDir, "held-lock-scope")
