@@ -85,6 +85,7 @@ describe("Announcement", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
 		const highlights = screen.getAllByRole("listitem")
+		expect(screen.getByRole("list")).toHaveClass("list-none", "p-0")
 		expect(highlights).toHaveLength(4)
 		expect(highlights[0]).toHaveTextContent(
 			"🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spotshttps://www.zoocode.dev/pass",

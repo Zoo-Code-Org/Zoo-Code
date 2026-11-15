@@ -45,7 +45,7 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 				<div>
 					<div className="mb-4">
 						<p className="mb-3">{t("chat:announcement.release.heading")}</p>
-						<ul className="list-disc list-inside text-sm space-y-1.5">
+						<ul className="list-none p-0 text-sm space-y-1.5">
 							<li>
 								{t("chat:announcement.release.highlight0")}
 								<br />
