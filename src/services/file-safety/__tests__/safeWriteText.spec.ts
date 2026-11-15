@@ -1361,6 +1361,65 @@ describe("resolveLockKey", () => {
 		)
 		expect(fs.readlink).toHaveBeenCalledTimes(8)
 	})
+
+	it("propagates a search-permission failure on the publish target instead of guessing a key", async () => {
+		// A parent directory this process may not search fails realpath on the path with EACCES
+		// while realpath of that same directory still succeeds - exactly the shape in which the
+		// fallback walk returns a plausible key. Swallowing the EACCES would give this writer a
+		// key built from the literal path while a writer that could search the directory gets
+		// the canonical one, so two writers would take two locks for one file and a
+		// read-modify-write under them would lose one side.
+		const alias = path.resolve("/tmp/unsearchable/file.json")
+		const canonicalDir = path.resolve("/tmp/canonical-parent")
+		const eacces = Object.assign(new Error("EACCES: permission denied, " + alias), { code: "EACCES" })
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(false))
+		vi.mocked(fs.realpath).mockImplementation(async (p) => {
+			const s = String(p)
+			if (s === alias) throw eacces
+			if (s === path.dirname(alias)) return canonicalDir
+			return s
+		})
+		// Everything the fallback walk needs is set up to answer, so the only thing this
+		// test can react to is what resolveLockKey does with the EACCES.
+		vi.mocked(fs.readlink).mockRejectedValue(enoent)
+
+		await expect(resolveLockKey(alias)).rejects.toMatchObject({ code: "EACCES" })
+		expect(fs.readlink).not.toHaveBeenCalled()
+	})
+
+	it("propagates a readlink failure whose code says nothing about the link", async () => {
+		// realpath answers ENOENT and lstat answers symlink: a dangling link, the case this
+		// function exists to tolerate. The readlink then fails with EIO, which says nothing
+		// about whether the path is a link - a failing share, a short read - and answering
+		// that with the literal path would put this writer on a lock keyed by a spelling no
+		// other writer computes.
+		const alias = path.resolve("/tmp/dangling/file.json")
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const eio = Object.assign(new Error("EIO: i/o error, readlink"), { code: "EIO" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		vi.mocked(fs.readlink).mockRejectedValue(eio)
+
+		await expect(resolveLockKey(alias)).rejects.toMatchObject({ code: "EIO" })
+	})
+
+	it("ends the walk when readlink honestly answers that there is no link to follow", async () => {
+		// EINVAL is what readlink answers when the lstat saw a link and the readlink found a
+		// plain file, and ENOTDIR when a component stopped being a directory mid-walk. Both
+		// are truthful answers of "there is no link here", so the walk still ends at the key
+		// reached instead of propagating: only codes that carry no information about the link
+		// may stop this function from returning a key.
+		const alias = path.resolve("/tmp/swapped/file.json")
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		vi.mocked(fs.realpath).mockRejectedValue(enoent)
+		vi.mocked(fs.lstat).mockResolvedValue(_fileStats(true))
+		for (const code of ["EINVAL", "ENOTDIR"]) {
+			vi.mocked(fs.readlink).mockRejectedValue(Object.assign(new Error(code + ": readlink"), { code }))
+			await expect(resolveLockKey(alias)).resolves.toBe(alias)
+		}
+		expect(fs.readlink).toHaveBeenCalledTimes(2)
+	})
 })
 
 describe("caller-supplied staging path", () => {

@@ -249,6 +249,14 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
 	}
 }
 
+const NO_LINK_ERROR_CODES = new Set(["ENOENT", "EINVAL", "ENOTDIR"])
+
+/** Whether a link-walk failure carries a code that means "there is no link to follow here". */
+function isNoLinkFailure(error: unknown): boolean {
+	const code = getErrorCode(error)
+	return code !== undefined && NO_LINK_ERROR_CODES.has(code)
+}
+
 /**
  * Lock key for a publish target: the symlink referent when the path is an
  * existing symlink, the path itself otherwise. Unlike resolvePublishTarget this
@@ -257,17 +265,34 @@ async function canonicalDirKey(absoluteFilePath: string): Promise<string> {
  * and backup mode keeps a copy beside it).
  * The walk is bounded so a two-link cycle terminates, and every key it returns is
  * canonicalized through canonicalDirKey.
+ * A parent directory this process may not search makes realpath fail with EACCES on the
+ * path while canonicalDirKey can still canonicalize through that directory, so only
+ * ENOENT - "this path is not there yet" - may start the fallback walk; every other
+ * failure of resolvePublishTarget propagates. A readlink failure likewise only ends the
+ * walk when its code means "no link to follow" (ENOENT, EINVAL, ENOTDIR): a code that
+ * says nothing about the link (EACCES, ELOOP, EIO) propagates too, because a key guessed
+ * from a path this process could not read hands out a second lock for one file.
  */
 export async function resolveLockKey(absoluteFilePath: string): Promise<string> {
 	try {
 		return await canonicalDirKey(await resolvePublishTarget(absoluteFilePath))
-	} catch {
+	} catch (error) {
+		// Only "this path is not there yet" may start the fallback walk. Any other failure of
+		// resolvePublishTarget (EACCES or EIO on a parent directory among them) says nothing
+		// about the chain, and a key built from the literal path would put this writer on a
+		// different lock than a writer that could read the directory.
+		if (getErrorCode(error) !== "ENOENT") throw error
 		// A real readlink throws for anything that is not a link, so a normal chain
 		// ends the walk. Two links that point at each other never would, so the
-		// walk is bounded and callers use the key they actually reached.
+		// walk is bounded and callers use the key they actually reached. A failure whose
+		// code means "no link to follow" ends the walk the same way; any other failure
+		// propagates instead of ending the walk with undefined.
 		let key = absoluteFilePath
 		for (let depth = 0; depth < 8; depth++) {
-			const target = await fs.readlink(key).catch(() => undefined)
+			const target = await fs.readlink(key).catch((readlinkError: unknown) => {
+				if (isNoLinkFailure(readlinkError)) return undefined
+				throw readlinkError
+			})
 			if (target === undefined) return await canonicalDirKey(key)
 			key = await canonicalDirKey(path.resolve(path.dirname(key), target))
 		}
