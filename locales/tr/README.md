@@ -49,11 +49,11 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 
 ## v3.98.0'daki Yenilikler
 
-- Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer
-  https://www.zoocode.dev/pass
-- **Otomatik görev başlıkları ve daha hassas model kontrolü:** Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.
-- **Genişletilmiş model ve sağlayıcı desteği:** GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.
-- **Daha güvenli ve duyarlı sohbetler ile düzenlemeler:** OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın.
+- 🎟️ Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Otomatik görev başlıkları ve daha hassas model kontrolü:** Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.
+- 🔌 **Genişletilmiş model ve sağlayıcı desteği:** GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.
+- 🛡️ **Daha güvenli ve duyarlı sohbetler ile düzenlemeler:** OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

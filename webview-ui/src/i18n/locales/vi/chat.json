@@ -324,11 +324,11 @@
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Có gì mới trong Zoo Code v3.98.0",
-			"highlight0": "Xem trước gói đăng ký Zoo Pass sắp ra mắt. 2 tuần truy cập miễn phí; số chỗ có hạn",
+			"highlight0": "🎟️ Xem trước gói đăng ký Zoo Pass sắp ra mắt. 2 tuần truy cập miễn phí; số chỗ có hạn",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Tiêu đề tác vụ tự động và kiểm soát mô hình chi tiết hơn: Tự động tạo tiêu đề cho tác vụ gốc mới và thử cài đặt thử nghiệm về mức nỗ lực suy luận động.",
-			"highlight2": "Hỗ trợ mô hình và nhà cung cấp mở rộng: Sử dụng GPT-6.1 Terra và lấy danh sách mô hình Friendli mới nhất.",
-			"highlight3": "Trò chuyện và chỉnh sửa an toàn, phản hồi nhanh hơn: Hủy yêu cầu OpenAI Native và Requesty gọn gàng, bảo vệ diff bên ngoài workspace khỏi việc tự động phê duyệt ngoài ý muốn, chuyển đổi ngôn ngữ UI nhất quán và tránh khôi phục bản sao lưu JSON mơ hồ."
+			"highlight1": "🏷️ Tiêu đề tác vụ tự động và kiểm soát mô hình chi tiết hơn: Tự động tạo tiêu đề cho tác vụ gốc mới và thử cài đặt thử nghiệm về mức nỗ lực suy luận động.",
+			"highlight2": "🔌 Hỗ trợ mô hình và nhà cung cấp mở rộng: Sử dụng GPT-6.1 Terra và lấy danh sách mô hình Friendli mới nhất.",
+			"highlight3": "🛡️ Trò chuyện và chỉnh sửa an toàn, phản hồi nhanh hơn: Hủy yêu cầu OpenAI Native và Requesty gọn gàng, bảo vệ diff bên ngoài workspace khỏi việc tự động phê duyệt ngoài ý muốn, chuyển đổi ngôn ngữ UI nhất quán và tránh khôi phục bản sao lưu JSON mơ hồ."
 		}
 	},
 	"costs": {

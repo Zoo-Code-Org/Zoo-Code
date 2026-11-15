@@ -323,11 +323,11 @@
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Nouveautés de Zoo Code v3.98.0",
-			"highlight0": "Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées",
+			"highlight0": "🎟️ Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Titres de tâches automatiques et contrôle plus précis des modèles : Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.",
-			"highlight2": "Prise en charge étendue des modèles et fournisseurs : Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.",
-			"highlight3": "Chats et modifications plus sûrs et réactifs : Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON."
+			"highlight1": "🏷️ Titres de tâches automatiques et contrôle plus précis des modèles : Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.",
+			"highlight2": "🔌 Prise en charge étendue des modèles et fournisseurs : Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.",
+			"highlight3": "🛡️ Chats et modifications plus sûrs et réactifs : Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON."
 		}
 	},
 	"costs": {

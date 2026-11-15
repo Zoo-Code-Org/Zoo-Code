@@ -48,11 +48,11 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 
 ## What's New in v3.98.0
 
-- Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots
-  https://www.zoocode.dev/pass
-- **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
-- **Expanded model and provider support:** Use GPT-6.1 Terra and fetch the latest Friendli model list.
-- **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
+- 🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
+- 🔌 **Expanded model and provider support:** Use GPT-6.1 Terra and fetch the latest Friendli model list.
+- 🛡️ **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
 
 <details>
   <summary>🌐 Available languages</summary>

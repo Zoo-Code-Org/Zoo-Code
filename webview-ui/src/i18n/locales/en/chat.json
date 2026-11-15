@@ -342,11 +342,11 @@
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "What is new in Zoo Code v3.98.0",
-			"highlight0": "Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
+			"highlight0": "🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Automatic task titles and finer model control: Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.",
-			"highlight2": "Expanded model and provider support: Use GPT-6.1 Terra and fetch the latest Friendli model list.",
-			"highlight3": "Safer, more responsive chats and edits: Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery."
+			"highlight1": "🏷️ Automatic task titles and finer model control: Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.",
+			"highlight2": "🔌 Expanded model and provider support: Use GPT-6.1 Terra and fetch the latest Friendli model list.",
+			"highlight3": "🛡️ Safer, more responsive chats and edits: Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery."
 		}
 	},
 	"reasoning": {

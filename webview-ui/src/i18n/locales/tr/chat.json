@@ -324,11 +324,11 @@
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
 			"heading": "Zoo Code v3.98.0'daki yenilikler",
-			"highlight0": "Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer",
+			"highlight0": "🎟️ Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Otomatik görev başlıkları ve daha hassas model kontrolü: Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.",
-			"highlight2": "Genişletilmiş model ve sağlayıcı desteği: GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.",
-			"highlight3": "Daha güvenli ve duyarlı sohbetler ile düzenlemeler: OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın."
+			"highlight1": "🏷️ Otomatik görev başlıkları ve daha hassas model kontrolü: Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.",
+			"highlight2": "🔌 Genişletilmiş model ve sağlayıcı desteği: GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.",
+			"highlight3": "🛡️ Daha güvenli ve duyarlı sohbetler ile düzenlemeler: OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın."
 		}
 	},
 	"costs": {

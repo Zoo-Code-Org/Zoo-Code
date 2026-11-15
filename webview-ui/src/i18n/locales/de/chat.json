@@ -323,11 +323,11 @@
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
 			"heading": "Was ist neu in Zoo Code v3.98.0",
-			"highlight0": "Teste das kommende Zoo Pass-Abonnement. 2 Wochen kostenloser Zugang; begrenzte Plätze",
+			"highlight0": "🎟️ Teste das kommende Zoo Pass-Abonnement. 2 Wochen kostenloser Zugang; begrenzte Plätze",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Automatische Aufgabentitel und feinere Modellsteuerung: Erstelle Titel für neue Root-Aufgaben automatisch und probiere die experimentelle Einstellung für dynamischen Reasoning-Aufwand aus.",
-			"highlight2": "Erweiterte Modell- und Anbieterunterstützung: Nutze GPT-6.1 Terra und rufe die aktuelle Friendli-Modellliste ab.",
-			"highlight3": "Sicherere, reaktionsschnellere Chats und Bearbeitungen: Breche OpenAI-Native- und Requesty-Anfragen sauber ab, schütze Diffs außerhalb des Workspace vor versehentlicher Auto-Genehmigung, wechsle UI-Sprachen konsistent und vermeide mehrdeutige JSON-Backup-Wiederherstellungen."
+			"highlight1": "🏷️ Automatische Aufgabentitel und feinere Modellsteuerung: Erstelle Titel für neue Root-Aufgaben automatisch und probiere die experimentelle Einstellung für dynamischen Reasoning-Aufwand aus.",
+			"highlight2": "🔌 Erweiterte Modell- und Anbieterunterstützung: Nutze GPT-6.1 Terra und rufe die aktuelle Friendli-Modellliste ab.",
+			"highlight3": "🛡️ Sicherere, reaktionsschnellere Chats und Bearbeitungen: Breche OpenAI-Native- und Requesty-Anfragen sauber ab, schütze Diffs außerhalb des Workspace vor versehentlicher Auto-Genehmigung, wechsle UI-Sprachen konsistent und vermeide mehrdeutige JSON-Backup-Wiederherstellungen."
 		}
 	},
 	"costs": {

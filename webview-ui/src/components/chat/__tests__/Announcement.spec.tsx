@@ -34,14 +34,14 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 			const translations: Record<string, string> = {
 				"chat:announcement.release.heading": "What is new in Zoo Code v3.90.0",
 				"chat:announcement.release.highlight0":
-					"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
+					"🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
 				"chat:announcement.release.highlight0Url": "https://www.zoocode.dev/pass",
 				"chat:announcement.release.highlight1":
-					"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
+					"🏷️ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
 				"chat:announcement.release.highlight2":
-					"🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
+					"🔌 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
 				"chat:announcement.release.highlight3":
-					"⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
+					"🛡️ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
 			}
 
 			if (key === "chat:announcement.title") {
@@ -61,22 +61,22 @@ describe("Announcement", () => {
 		expect(screen.getByText("What is new in Zoo Code v3.90.0")).toBeInTheDocument()
 		const zooPassHighlight = screen.getAllByRole("listitem")[0]
 		expect(zooPassHighlight).toHaveTextContent(
-			"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
+			"🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots",
 		)
 		expect(zooPassHighlight).toHaveTextContent("https://www.zoocode.dev/pass")
 		expect(
 			screen.getByText(
-				"✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
+				"🏷️ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
+				"🔌 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
 			),
 		).toBeInTheDocument()
 		expect(
 			screen.getByText(
-				"⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
+				"🛡️ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails.",
 			),
 		).toBeInTheDocument()
 	})
@@ -87,7 +87,7 @@ describe("Announcement", () => {
 		const highlights = screen.getAllByRole("listitem")
 		expect(highlights).toHaveLength(4)
 		expect(highlights[0]).toHaveTextContent(
-			"Preview the upcoming Zoo Pass subscription. 2 week free access; limited spotshttps://www.zoocode.dev/pass",
+			"🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spotshttps://www.zoocode.dev/pass",
 		)
 	})
 
@@ -100,19 +100,24 @@ describe("Announcement", () => {
 	it("posts each announcement link to the extension host exactly once", () => {
 		render(<Announcement hideAnnouncement={vi.fn()} />)
 
+		fireEvent.click(screen.getByRole("link", { name: "https://www.zoocode.dev/pass" }))
 		fireEvent.click(screen.getByRole("link", { name: "GitHub" }))
 		fireEvent.click(screen.getByRole("link", { name: "X" }))
 		fireEvent.click(screen.getByRole("link", { name: "Discord" }))
 		fireEvent.click(screen.getByRole("link", { name: "Reddit" }))
 
-		expect(vscode.postMessage).toHaveBeenCalledTimes(4)
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(1, { type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "openExternal", url: "https://x.com/ZooCodeDev" })
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(3, {
+		expect(vscode.postMessage).toHaveBeenCalledTimes(5)
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(1, {
+			type: "openExternal",
+			url: "https://www.zoocode.dev/pass",
+		})
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(2, { type: "openExternal", url: EXTERNAL_LINKS.GITHUB_REPO })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(3, { type: "openExternal", url: "https://x.com/ZooCodeDev" })
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(4, {
 			type: "openExternal",
 			url: "https://discord.gg/VxfP4Vx3gX",
 		})
-		expect(vscode.postMessage).toHaveBeenNthCalledWith(4, {
+		expect(vscode.postMessage).toHaveBeenNthCalledWith(5, {
 			type: "openExternal",
 			url: "https://www.reddit.com/r/ZooCode/",
 		})

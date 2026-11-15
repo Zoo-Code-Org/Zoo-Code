@@ -45,11 +45,11 @@ Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
 
 ## v3.98.0 新增内容
 
-- 预览即将推出的 Zoo Pass 订阅。2 周免费使用；名额有限
-  https://www.zoocode.dev/pass
-- **自动任务标题与更精细的模型控制：** 自动为新的根任务生成标题，并尝试实验性的动态思考力度设置。
-- **扩展的模型与供应商支持：** 使用 GPT-6.1 Terra 并获取最新的 Friendli 模型列表。
-- **更安全、响应更迅速的对话与编辑：** 正常取消 OpenAI Native 和 Requesty 请求，防止工作区外的 diff 被意外自动批准，一致地切换界面语言，并避免有歧义的 JSON 备份恢复。
+- 🎟️ 预览即将推出的 Zoo Pass 订阅。2 周免费使用；名额有限
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **自动任务标题与更精细的模型控制：** 自动为新的根任务生成标题，并尝试实验性的动态思考力度设置。
+- 🔌 **扩展的模型与供应商支持：** 使用 GPT-6.1 Terra 并获取最新的 Friendli 模型列表。
+- 🛡️ **更安全、响应更迅速的对话与编辑：** 正常取消 OpenAI Native 和 Requesty 请求，防止工作区外的 diff 被意外自动批准，一致地切换界面语言，并避免有歧义的 JSON 备份恢复。
 
 ## Zoo Code 能为您做什么？
 

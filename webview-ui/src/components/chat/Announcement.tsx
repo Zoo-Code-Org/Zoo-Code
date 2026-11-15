@@ -26,6 +26,7 @@ interface AnnouncementProps {
 const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 	const { t } = useAppTranslation()
 	const [open, setOpen] = useState(true)
+	const zooPassUrl = t("chat:announcement.release.highlight0Url")
 
 	return (
 		<Dialog
@@ -48,7 +49,12 @@ const Announcement = ({ hideAnnouncement }: AnnouncementProps) => {
 							<li>
 								{t("chat:announcement.release.highlight0")}
 								<br />
-								{t("chat:announcement.release.highlight0Url")}
+								<a
+									href={zooPassUrl}
+									className="text-vscode-textLink-foreground"
+									onClick={openExternal(zooPassUrl)}>
+									{zooPassUrl}
+								</a>
 							</li>
 							<li>{t("chat:announcement.release.highlight1")}</li>
 							<li>{t("chat:announcement.release.highlight2")}</li>

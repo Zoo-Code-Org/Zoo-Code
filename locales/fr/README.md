@@ -49,11 +49,11 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 
 ## Nouveautés de la v3.98.0
 
-- Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées
-  https://www.zoocode.dev/pass
-- **Titres de tâches automatiques et contrôle plus précis des modèles :** Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.
-- **Prise en charge étendue des modèles et fournisseurs :** Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.
-- **Chats et modifications plus sûrs et réactifs :** Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON.
+- 🎟️ Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Titres de tâches automatiques et contrôle plus précis des modèles :** Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.
+- 🔌 **Prise en charge étendue des modèles et fournisseurs :** Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.
+- 🛡️ **Chats et modifications plus sûrs et réactifs :** Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

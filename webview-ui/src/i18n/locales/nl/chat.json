@@ -296,11 +296,11 @@
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
 			"heading": "Wat is er nieuw in Zoo Code v3.98.0",
-			"highlight0": "Bekijk een voorbeeld van het komende Zoo Pass-abonnement. 2 weken gratis toegang; beperkte plaatsen",
+			"highlight0": "🎟️ Bekijk een voorbeeld van het komende Zoo Pass-abonnement. 2 weken gratis toegang; beperkte plaatsen",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "Automatische taaktitels en fijnere modelregeling: Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.",
-			"highlight2": "Uitgebreidere ondersteuning voor modellen en providers: Gebruik GPT-6.1 Terra en haal de nieuwste Friendli-modellenlijst op.",
-			"highlight3": "Veiligere, responsievere chats en bewerkingen: Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups."
+			"highlight1": "🏷️ Automatische taaktitels en fijnere modelregeling: Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.",
+			"highlight2": "🔌 Uitgebreidere ondersteuning voor modellen en providers: Gebruik GPT-6.1 Terra en haal de nieuwste Friendli-modellenlijst op.",
+			"highlight3": "🛡️ Veiligere, responsievere chats en bewerkingen: Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups."
 		}
 	},
 	"reasoning": {

@@ -323,11 +323,11 @@
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
 			"heading": "Zoo Code v3.98.0 の新機能",
-			"highlight0": "近日登場予定の Zoo Pass サブスクリプションをプレビュー。2 週間無料でアクセス可能。限定枠",
+			"highlight0": "🎟️ 近日登場予定の Zoo Pass サブスクリプションをプレビュー。2 週間無料でアクセス可能。限定枠",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "自動タスクタイトルと細かなモデル制御: 新しいルートタスクのタイトルを自動生成し、動的な思考量の試験的設定を試せます。",
-			"highlight2": "モデルとプロバイダーのサポートを拡大: GPT-6.1 Terra を利用し、Friendli の最新モデル一覧を取得できます。",
-			"highlight3": "より安全で応答性の高いチャットと編集: OpenAI Native と Requesty のリクエストを正常にキャンセルし、ワークスペース外の diff が誤って自動承認されるのを防ぎ、UI 言語を一貫して切り替え、曖昧な JSON バックアップ復旧を回避します。"
+			"highlight1": "🏷️ 自動タスクタイトルと細かなモデル制御: 新しいルートタスクのタイトルを自動生成し、動的な思考量の試験的設定を試せます。",
+			"highlight2": "🔌 モデルとプロバイダーのサポートを拡大: GPT-6.1 Terra を利用し、Friendli の最新モデル一覧を取得できます。",
+			"highlight3": "🛡️ より安全で応答性の高いチャットと編集: OpenAI Native と Requesty のリクエストを正常にキャンセルし、ワークスペース外の diff が誤って自動承認されるのを防ぎ、UI 言語を一貫して切り替え、曖昧な JSON バックアップ復旧を回避します。"
 		}
 	},
 	"costs": {

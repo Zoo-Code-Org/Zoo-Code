@@ -345,11 +345,11 @@
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
 			"heading": "Zoo Code v3.98.0 新功能",
-			"highlight0": "預覽即將推出的 Zoo Pass 訂閱。2 週免費使用；名額有限",
+			"highlight0": "🎟️ 預覽即將推出的 Zoo Pass 訂閱。2 週免費使用；名額有限",
 			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "自動任務標題與更精細的模型控制: 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。",
-			"highlight2": "擴充的模型與供應商支援: 使用 GPT-6.1 Terra 並取得最新的 Friendli 模型清單。",
-			"highlight3": "更安全、回應更迅速的對話與編輯: 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。"
+			"highlight1": "🏷️ 自動任務標題與更精細的模型控制: 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。",
+			"highlight2": "🔌 擴充的模型與供應商支援: 使用 GPT-6.1 Terra 並取得最新的 Friendli 模型清單。",
+			"highlight3": "🛡️ 更安全、回應更迅速的對話與編輯: 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。"
 		}
 	},
 	"reasoning": {
