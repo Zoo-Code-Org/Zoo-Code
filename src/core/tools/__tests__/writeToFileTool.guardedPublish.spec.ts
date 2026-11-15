@@ -312,6 +312,35 @@ describe("WriteToFileTool guarded publish", () => {
 			expect(fsDouble.readFile).toHaveBeenCalledWith(ABSOLUTE_PATH, "utf-8")
 		})
 
+		it("orders the bracket, the read, the record and the publish in one event log", async () => {
+			// What this arm claims to the guard is a sequence, not four independent facts: the version
+			// was measured before the read, measured again after it, recorded from those two
+			// measurements, and only then published against that record. Asserting the four effects
+			// separately cannot tell an order swap from the real thing, so every step writes into the
+			// same log.
+			const { task, observe, saveDirectly } = createHarness(true, true, eventLog)
+			observe.mockImplementation(() => {
+				eventLog.push("observe")
+			})
+			fsDouble.stat.mockImplementation(async () => {
+				eventLog.push("stat")
+				return READ_STATS
+			})
+			fsDouble.readFile.mockImplementation(async () => {
+				eventLog.push("read")
+				return OLD_CONTENT
+			})
+
+			await runHandle(task, eventLog)
+
+			// The bracket is two stats with the read between them; the record comes only after the
+			// second one agrees with the first, and the ask and the publish come after the record, so
+			// the publish can only ever compare against an observation that already exists.
+			expect(eventLog).toEqual(["stat", "read", "stat", "observe", "ask", "publish"])
+			expect(observe.mock.calls).toEqual([[ABSOLUTE_PATH, READ_TOKEN, true]])
+			expect(saveDirectly.mock.calls[0][5]).toBe("update")
+		})
+
 		it("withholds the observation when the bracketing stats disagree", async () => {
 			fsDouble.stat.mockReset()
 			fsDouble.stat.mockResolvedValueOnce(READ_STATS).mockResolvedValueOnce(MOVED_STATS)
@@ -427,6 +456,34 @@ describe("WriteToFileTool guarded publish", () => {
 			expect(eventLog).toEqual(["ask", "publish"])
 			expect(saveChanges.mock.calls[0][4]).toBeUndefined()
 			expect(saveDirectly).not.toHaveBeenCalled()
+		})
+	})
+
+	describe("canonicalize argument", () => {
+		it("hands the canonicalize step the absolute path the approval is about, in both publish arms", async () => {
+			vi.mocked(isPathOutsideWorkspace).mockReturnValue(true)
+
+			// The order the sibling test pins is one half of the contract; this is the other half. The
+			// identity captured before the ask must be computed from the path the tool resolved - not
+			// from the relative spelling the model wrote - and it must be computed exactly once,
+			// because a second resolution after the approval is a different identity from the one the
+			// reviewer saw. The doubled module records its own arguments, so nothing here supplies the
+			// value the publish is later checked against.
+			const directLog: string[] = []
+			const direct = createHarness(true, true, directLog)
+			await runHandle(direct.task, directLog)
+			expect(canonicalizeForApproval).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(canonicalizeForApproval).mock.calls).toEqual([[ABSOLUTE_PATH, REL_PATH]])
+			expect(direct.saveDirectly.mock.calls[0][8]).toBe(CANONICAL_TARGET)
+
+			vi.mocked(canonicalizeForApproval).mockClear()
+			writeToFileTool.resetPartialState()
+			const previewLog: string[] = []
+			const preview = createHarness(false, true, previewLog)
+			await runHandle(preview.task, previewLog)
+			expect(canonicalizeForApproval).toHaveBeenCalledTimes(1)
+			expect(vi.mocked(canonicalizeForApproval).mock.calls).toEqual([[ABSOLUTE_PATH, REL_PATH]])
+			expect(preview.saveChanges.mock.calls[0][4]).toBe(CANONICAL_TARGET)
 		})
 	})
 })

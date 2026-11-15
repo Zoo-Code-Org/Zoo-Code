@@ -265,4 +265,70 @@ describe("ApplyDiffTool guarded publish", () => {
 		await runExecute(task)
 		expect(saveChanges.mock.calls[0][4]).toBeUndefined()
 	})
+
+	it("records the read only when the bracketing stats agree, and carries the prior observation", async () => {
+		// The token this tool hands the registry is a claim about ONE unchanged version, so both
+		// ends of the bracket have to succeed and agree. Each case below re-runs the publish with a
+		// different shape of failure or a different stored observation and asserts what the
+		// registry is told, which is what the compare-and-swap later trusts.
+		const movedStats = {
+			dev: 1n,
+			ino: 3n,
+			size: 4n,
+			mtimeNs: 10n,
+			ctimeNs: 11n,
+			isSymbolicLink: () => false,
+		} as unknown as BigIntStats
+		const failedStat = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+		async function observeFor(
+			configureStats: (stat: MockedFunction<(p: string, o: { bigint: true }) => Promise<BigIntStats>>) => void,
+			priorObservation?: { version: string; complete: boolean },
+		): Promise<{ version: string; complete: boolean }[]> {
+			// Same priming as beforeEach, per case: the module doubles are shared, and a case that
+			// inherited the previous case's stat queue would assert the wrong thing.
+			vi.clearAllMocks()
+			vi.mocked(isPathOutsideWorkspace).mockReturnValue(false)
+			fsDouble.readFile.mockResolvedValue("old\n")
+			configureStats(fsDouble.stat)
+			applyDiffTool.resetPartialState()
+			const { task, observe } = createHarness(false, priorObservation)
+			await runExecute(task)
+			return observe.mock.calls.map(([recordedPath, version, complete]) =>
+				recordedPath === ABSOLUTE_PATH ? { version, complete } : { version: "other-path", complete },
+			)
+		}
+
+		// A stat that fails on either side of the read says nothing about the version, so the read
+		// cannot be recorded at all: an observation built from half a bracket would let the publish
+		// compare against a version the tool never proved.
+		expect(
+			await observeFor((stat) => stat.mockRejectedValueOnce(failedStat).mockResolvedValue(READ_STATS)),
+		).toEqual([])
+		expect(
+			await observeFor((stat) => stat.mockResolvedValueOnce(READ_STATS).mockRejectedValueOnce(failedStat)),
+		).toEqual([])
+		// The file changed under the read: the two stats describe two versions, so neither token is
+		// the version the patch was computed against.
+		expect(
+			await observeFor((stat) => stat.mockResolvedValueOnce(READ_STATS).mockResolvedValueOnce(movedStats)),
+		).toEqual([])
+
+		// The prior-observation matrix, with an agreeing bracket on every row.
+		expect(await observeFor((stat) => stat.mockResolvedValue(READ_STATS))).toEqual([
+			{ version: READ_TOKEN, complete: false },
+		])
+		expect(
+			await observeFor((stat) => stat.mockResolvedValue(READ_STATS), { version: READ_TOKEN, complete: false }),
+		).toEqual([{ version: READ_TOKEN, complete: false }])
+		expect(
+			await observeFor((stat) => stat.mockResolvedValue(READ_STATS), { version: READ_TOKEN, complete: true }),
+		).toEqual([{ version: READ_TOKEN, complete: true }])
+		// A prior that names a different version is left exactly as the model earned it: refreshing
+		// it to the version this read saw would hand the guard a token for content the model never
+		// saw, and completeness from a view the model never had.
+		expect(
+			await observeFor((stat) => stat.mockResolvedValue(READ_STATS), { version: "0:0:9:9:9", complete: true }),
+		).toEqual([])
+	})
 })
