@@ -236,13 +236,14 @@ describe("ChatView approval button behavior", () => {
 		})
 
 		it.each([
-			{ button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
-			{ button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
-		])("keeps generated text generated with $askResponse", async ({ button, askResponse }) => {
+			{ ask: "command", button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+			{ ask: "command", button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+			{ ask: "resume_task", button: RESUME_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+		])("keeps generated text generated with $ask $askResponse", async ({ ask, button, askResponse }) => {
 			const { getByText, getByRole } = renderChatView()
 
 			await act(async () => {
-				hydrateState(askMessages("command"))
+				hydrateState(askMessages(ask))
 			})
 			await waitFor(() => expect(getByText(button)).toBeInTheDocument())
 
