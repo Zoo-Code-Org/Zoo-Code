@@ -15,6 +15,7 @@ import {
 
 import { createDirectoriesForFile } from "../../utils/fs"
 import { arePathsEqual, getReadablePath } from "../../utils/path"
+import { getErrorCode } from "../../utils/errorCode"
 import { formatResponse } from "../../core/prompts/responses"
 import { diagnosticsToProblemsString, getNewDiagnostics } from "../diagnostics"
 import { Task } from "../../core/task/Task"
@@ -23,7 +24,7 @@ import { DecorationController } from "./DecorationController"
 
 /** Narrow ENOENT test so a rollback can tolerate a file or dir that never landed. */
 function isEnoent(error: unknown): boolean {
-	return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"
+	return getErrorCode(error) === "ENOENT"
 }
 
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
@@ -708,7 +709,6 @@ export class DiffViewProvider {
 						// A refused restore leaves the unapproved content in the buffer: closing the tabs and sweeping
 						// the artifacts underneath it would strand that content with nothing left that can recover it,
 						// so this stops the rollback outright, exactly as an unconfirmed save of the restored buffer
-						// does below. The catch restores the createdDirs snapshot and the placeholder stays owned,
 						// does below. The catch restores the createdDirs snapshot and the placeholder stays owned,
 						// which is what tells the caller to skip reset() and keep the session for a retry.
 						throw new Error(
