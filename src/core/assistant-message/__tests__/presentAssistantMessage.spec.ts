@@ -113,9 +113,11 @@ describe("a dropped tool call still runs the parse-failure teardown", () => {
 	// can still be torn down.
 	let task: Task
 	let pushToolResultToUserContent: Mock
+	let finalizeToolAsk: Mock
 
 	beforeEach(() => {
 		pushToolResultToUserContent = vi.fn().mockReturnValue(true)
+		finalizeToolAsk = vi.fn().mockResolvedValue(undefined)
 		task = {
 			taskId: "task-id",
 			instanceId: "instance-id",
@@ -137,6 +139,7 @@ describe("a dropped tool call still runs the parse-failure teardown", () => {
 			recordToolError: vi.fn(),
 			pushToolResultToUserContent,
 			getTaskMode: vi.fn().mockResolvedValue("code"),
+			finalizePartialToolAsk: finalizeToolAsk,
 		} as unknown as Task
 	})
 
@@ -150,6 +153,8 @@ describe("a dropped tool call still runs the parse-failure teardown", () => {
 		await presentAssistantMessage(task, snapshot)
 
 		expect(teardownSpy).toHaveBeenCalledTimes(1)
+		expect(finalizeToolAsk).toHaveBeenCalledTimes(1)
+		expect(finalizeToolAsk.mock.invocationCallOrder[0]).toBeLessThan(teardownSpy.mock.invocationCallOrder[0])
 		expect(teardownSpy).toHaveBeenCalledWith(
 			task,
 			expect.objectContaining({ toolCallId: "call-1" }),
@@ -173,6 +178,8 @@ describe("a dropped tool call still runs the parse-failure teardown", () => {
 		await presentAssistantMessage(task, snapshot)
 
 		expect(teardownSpy).toHaveBeenCalledTimes(1)
+		expect(finalizeToolAsk).toHaveBeenCalledTimes(1)
+		expect(finalizeToolAsk.mock.invocationCallOrder[0]).toBeLessThan(teardownSpy.mock.invocationCallOrder[0])
 		expect(pushToolResultToUserContent).toHaveBeenCalledTimes(1)
 		const payload = pushToolResultToUserContent.mock.calls[0][0]
 		expect(String(payload.content)).toContain("ENOSPC: no space left on device, write")

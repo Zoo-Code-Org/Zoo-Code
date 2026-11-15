@@ -113,6 +113,14 @@ async function reportedErrorFromParseFailureTeardown(
 		pushToolResult: (content: ToolResponse) => (reported ??= typeof content === "string" ? content : undefined),
 		toolCallId,
 	}
+	// The dropped call never reaches handle(), so the finalize handle() runs ahead of this same
+	// teardown boundary has to run here too: a streaming delta can have opened a partial tool ask,
+	// and leaving it loading is the stuck state this path exists to prevent. Same order as
+	// BaseTool.handle(), and a failed finalize is logged and set aside so the parse failure still
+	// reaches the tool. Mirrored from BaseTool.handle() lines 164 to 166.
+	await cline.finalizePartialToolAsk().catch((finalizeError: unknown) => {
+		console.error(`Error finalizing ${toolName} partial tool ask:`, finalizeError)
+	})
 	await tool.onParameterParseFailure(cline, callbacks, new Error(errorMessage))
 	return reported
 }
