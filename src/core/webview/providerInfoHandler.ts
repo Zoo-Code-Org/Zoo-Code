@@ -1,0 +1,195 @@
+import { z } from "zod"
+
+import type { ModelInfo, ProviderInfoKind, ProviderInfoParams, WebviewMessage } from "@roo-code/types"
+
+import type { ClineProvider } from "./ClineProvider"
+import { parseApiPrice } from "../../shared/cost"
+import { toRequestyServiceUrl } from "../../shared/utils/requesty"
+
+const FETCH_TIMEOUT_MS = 10_000
+const OPENROUTER_DEFAULT_BASE_URL = "https://openrouter.ai/api/v1"
+
+const openRouterKeyInfoSchema = z.object({
+	data: z.object({
+		label: z.string(),
+		usage: z.number(),
+		is_free_tier: z.boolean(),
+		is_provisioning_key: z.boolean(),
+		rate_limit: z.object({
+			requests: z.number(),
+			interval: z.string(),
+		}),
+		limit: z.number().nullable(),
+	}),
+})
+
+const priceSchema = z.union([z.string(), z.number()]).optional()
+
+const openRouterEndpointsSchema = z.object({
+	data: z.object({
+		id: z.string(),
+		name: z.string(),
+		description: z.string().optional(),
+		architecture: z
+			.object({
+				input_modalities: z.array(z.string()).nullish(),
+				output_modalities: z.array(z.string()).nullish(),
+				tokenizer: z.string().nullish(),
+			})
+			.nullish(),
+		endpoints: z.array(
+			z.object({
+				name: z.string(),
+				tag: z.string().optional(),
+				context_length: z.number(),
+				max_completion_tokens: z.number().nullish(),
+				pricing: z
+					.object({
+						prompt: priceSchema,
+						completion: priceSchema,
+						input_cache_read: priceSchema,
+						input_cache_write: priceSchema,
+					})
+					.optional(),
+			}),
+		),
+	}),
+})
+
+const requestyKeyInfoSchema = z.object({
+	name: z.string(),
+	monthly_limit: z.string(),
+	monthly_spend: z.string(),
+	org_balance: z.string(),
+	config: z.object({
+		aliases: z.record(z.string(), z.any()).optional(),
+	}),
+})
+
+async function getJson(url: string, headers?: Record<string, string>): Promise<unknown> {
+	const response = await fetch(url, {
+		method: "GET",
+		headers,
+		signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+	})
+
+	if (!response.ok) {
+		throw new Error(`Request failed with status code ${response.status}`)
+	}
+
+	return response.json()
+}
+
+async function getOpenRouterKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
+	if (!apiKey) return null
+
+	const body = await getJson(`${baseUrl || OPENROUTER_DEFAULT_BASE_URL}/key`, {
+		Authorization: `Bearer ${apiKey}`,
+	})
+	const result = openRouterKeyInfoSchema.safeParse(body)
+
+	if (!result.success) {
+		console.error("OpenRouter API key info validation failed:", result.error)
+		return null
+	}
+
+	return result.data.data
+}
+
+async function getOpenRouterModelProviders({ modelId, baseUrl }: ProviderInfoParams) {
+	const models: Record<string, ModelInfo & { label: string }> = {}
+
+	if (!modelId) return models
+
+	const body = await getJson(`${baseUrl || OPENROUTER_DEFAULT_BASE_URL}/models/${modelId}/endpoints`)
+	const result = openRouterEndpointsSchema.safeParse(body)
+
+	if (!result.success) {
+		console.error("OpenRouter API response validation failed:", result.error)
+		return models
+	}
+
+	const { description, architecture, endpoints } = result.data.data
+
+	// Skip image generation models (models that output images).
+	if (architecture?.output_modalities?.includes("image")) return models
+
+	for (const endpoint of endpoints) {
+		const label = endpoint.tag ?? endpoint.name
+		const cacheReadsPrice = parseApiPrice(endpoint.pricing?.input_cache_read)
+
+		models[label] = {
+			maxTokens: endpoint.max_completion_tokens || endpoint.context_length,
+			contextWindow: endpoint.context_length,
+			supportsImages: architecture?.input_modalities?.includes("image") ?? false,
+			supportsPromptCache: typeof cacheReadsPrice !== "undefined",
+			cacheReadsPrice,
+			cacheWritesPrice: parseApiPrice(endpoint.pricing?.input_cache_write),
+			inputPrice: parseApiPrice(endpoint.pricing?.prompt),
+			outputPrice: parseApiPrice(endpoint.pricing?.completion),
+			description,
+			label,
+		}
+	}
+
+	return models
+}
+
+async function getRequestyKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
+	if (!apiKey) return null
+
+	const apiKeyUrl = new URL("x/apikey", toRequestyServiceUrl(baseUrl, "api"))
+	const body = await getJson(apiKeyUrl.toString(), {
+		Authorization: `Bearer ${apiKey}`,
+		"Content-Type": "application/json",
+	})
+	const result = requestyKeyInfoSchema.safeParse(body)
+
+	if (!result.success) {
+		console.error("Requesty API key info validation failed:", result.error)
+		return null
+	}
+
+	return result.data
+}
+
+const fetchers: Record<ProviderInfoKind, (params: ProviderInfoParams) => Promise<unknown>> = {
+	openRouterKeyInfo: getOpenRouterKeyInfo,
+	openRouterModelProviders: getOpenRouterModelProviders,
+	requestyKeyInfo: getRequestyKeyInfo,
+}
+
+const isProviderInfoKind = (kind: unknown): kind is ProviderInfoKind =>
+	typeof kind === "string" && Object.hasOwn(fetchers, kind)
+
+/**
+ * Fetch provider key and model info in the extension host so the webview CSP
+ * needs no provider origins. The webview sends unsaved settings values, so the
+ * handler reads credentials from the message, not from saved config.
+ */
+export async function handleRequestProviderInfo(provider: ClineProvider, message: WebviewMessage): Promise<void> {
+	const { kind, ...params } = (message.values ?? {}) as { kind?: unknown } & ProviderInfoParams
+
+	if (!isProviderInfoKind(kind)) {
+		await provider.postMessageToWebview({
+			type: "providerInfo",
+			requestId: message.requestId,
+			error: "Unknown provider info kind",
+		})
+		return
+	}
+
+	try {
+		const data = await fetchers[kind](params)
+		await provider.postMessageToWebview({ type: "providerInfo", requestId: message.requestId, values: { data } })
+	} catch (error) {
+		// Log the kind only. The error text can carry a configured URL.
+		provider.log(`Failed to fetch provider info (${kind})`)
+		console.error(`Error fetching provider info (${kind}):`, error instanceof Error ? error.name : "unknown")
+		await provider.postMessageToWebview({
+			type: "providerInfo",
+			requestId: message.requestId,
+			error: "Provider info request failed",
+		})
+	}
+}

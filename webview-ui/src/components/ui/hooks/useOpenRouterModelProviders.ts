@@ -1,99 +1,25 @@
-import { z } from "zod"
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
 
 import type { ModelInfo } from "@roo-code/types"
 
-import { parseApiPrice } from "@roo/cost"
+import { requestProviderInfo } from "./requestProviderInfo"
 
 export const OPENROUTER_DEFAULT_PROVIDER_NAME = "[default]"
-
-const openRouterEndpointsSchema = z.object({
-	data: z.object({
-		id: z.string(),
-		name: z.string(),
-		description: z.string().optional(),
-		architecture: z
-			.object({
-				input_modalities: z.array(z.string()).nullish(),
-				output_modalities: z.array(z.string()).nullish(),
-				tokenizer: z.string().nullish(),
-			})
-			.nullish(),
-		endpoints: z.array(
-			z.object({
-				name: z.string(),
-				tag: z.string().optional(),
-				context_length: z.number(),
-				max_completion_tokens: z.number().nullish(),
-				pricing: z
-					.object({
-						prompt: z.union([z.string(), z.number()]).optional(),
-						completion: z.union([z.string(), z.number()]).optional(),
-						input_cache_read: z.union([z.string(), z.number()]).optional(),
-						input_cache_write: z.union([z.string(), z.number()]).optional(),
-					})
-					.optional(),
-			}),
-		),
-	}),
-})
 
 type OpenRouterModelProvider = ModelInfo & {
 	label: string
 }
 
 async function getOpenRouterProvidersForModel(modelId: string, baseUrl?: string) {
-	const models: Record<string, OpenRouterModelProvider> = {}
-
 	try {
-		const apiBaseUrl = baseUrl || "https://openrouter.ai/api/v1"
-		const response = await fetch(`${apiBaseUrl}/models/${modelId}/endpoints`, { method: "GET" })
-
-		if (!response.ok) {
-			throw new Error(`Request failed with status code ${response.status}`)
-		}
-
-		const result = openRouterEndpointsSchema.safeParse(await response.json())
-
-		if (!result.success) {
-			console.error("OpenRouter API response validation failed:", result.error)
-			return models
-		}
-
-		const { description, architecture, endpoints } = result.data.data
-
-		// Skip image generation models (models that output images)
-		if (architecture?.output_modalities?.includes("image")) {
-			return models
-		}
-
-		for (const endpoint of endpoints) {
-			const providerName = endpoint.tag ?? endpoint.name
-			const inputPrice = parseApiPrice(endpoint.pricing?.prompt)
-			const outputPrice = parseApiPrice(endpoint.pricing?.completion)
-			const cacheReadsPrice = parseApiPrice(endpoint.pricing?.input_cache_read)
-			const cacheWritesPrice = parseApiPrice(endpoint.pricing?.input_cache_write)
-
-			const modelInfo: OpenRouterModelProvider = {
-				maxTokens: endpoint.max_completion_tokens || endpoint.context_length,
-				contextWindow: endpoint.context_length,
-				supportsImages: architecture?.input_modalities?.includes("image") ?? false,
-				supportsPromptCache: typeof cacheReadsPrice !== "undefined",
-				cacheReadsPrice,
-				cacheWritesPrice,
-				inputPrice,
-				outputPrice,
-				description,
-				label: providerName,
-			}
-
-			models[providerName] = modelInfo
-		}
+		return await requestProviderInfo<Record<string, OpenRouterModelProvider>>("openRouterModelProviders", {
+			modelId,
+			baseUrl,
+		})
 	} catch (error) {
 		console.error(`Error fetching OpenRouter providers:`, error)
+		return {}
 	}
-
-	return models
 }
 
 type UseOpenRouterModelProvidersOptions = Omit<

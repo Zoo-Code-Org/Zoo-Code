@@ -1,45 +1,20 @@
-import { z } from "zod"
 import { useQuery, UseQueryOptions } from "@tanstack/react-query"
-import { toRequestyServiceUrl } from "@roo/utils/requesty"
 
-const requestyKeyInfoSchema = z.object({
-	name: z.string(),
-	monthly_limit: z.string(),
-	monthly_spend: z.string(),
-	org_balance: z.string(),
-	config: z.object({
-		aliases: z.record(z.string(), z.any()).optional(),
-	}),
-})
+import { requestProviderInfo } from "./requestProviderInfo"
 
-export type RequestyKeyInfo = z.infer<typeof requestyKeyInfoSchema>
+export type RequestyKeyInfo = {
+	name: string
+	monthly_limit: string
+	monthly_spend: string
+	org_balance: string
+	config: { aliases?: Record<string, unknown> }
+}
 
 async function getRequestyKeyInfo(baseUrl?: string, apiKey?: string) {
 	if (!apiKey) return null
 
-	const url = toRequestyServiceUrl(baseUrl, "api")
-	const apiKeyUrl = new URL("x/apikey", url)
-
 	try {
-		const response = await fetch(apiKeyUrl.toString(), {
-			method: "GET",
-			headers: {
-				Authorization: `Bearer ${apiKey}`,
-				"Content-Type": "application/json",
-			},
-		})
-
-		if (!response.ok) {
-			throw new Error(`Request failed with status code ${response.status}`)
-		}
-
-		const result = requestyKeyInfoSchema.safeParse(await response.json())
-		if (!result.success) {
-			console.error("Requesty API key info validation failed:", result.error)
-			return null
-		}
-
-		return result.data
+		return await requestProviderInfo<RequestyKeyInfo | null>("requestyKeyInfo", { apiKey, baseUrl })
 	} catch (error) {
 		console.error("Error fetching Requesty key info:", error)
 		return null

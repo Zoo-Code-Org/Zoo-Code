@@ -27,6 +27,15 @@ import type { WorktreeIncludeStatus } from "./worktree.js"
  * ExtensionMessage
  * Extension -> Webview | CLI
  */
+/** Provider lookups the extension host runs for the webview, keeping provider origins out of the CSP. */
+export type ProviderInfoKind = "openRouterKeyInfo" | "openRouterModelProviders" | "requestyKeyInfo"
+
+export interface ProviderInfoParams {
+	apiKey?: string
+	baseUrl?: string
+	modelId?: string
+}
+
 export interface ExtensionMessage {
 	type:
 		| "action"
@@ -66,6 +75,7 @@ export interface ExtensionMessage {
 		| "ttsStart"
 		| "ttsStop"
 		| "fileSearchResults"
+		| "providerInfo"
 		| "toggleApiConfigPin"
 		| "acceptInput"
 		| "setHistoryPreviewCollapsed"
@@ -549,6 +559,7 @@ export interface WebviewMessage {
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
+		| "requestProviderInfo"
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels

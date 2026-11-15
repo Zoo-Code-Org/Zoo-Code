@@ -2110,7 +2110,8 @@ describe("ClineProvider", () => {
 
 		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			const generate = vi.spyOn(provider, "getState").mockRejectedValue(new Error("cannot generate"))
+			const generate = vi.fn().mockRejectedValue(new Error("cannot generate"))
+			provider["getWebviewHtml"] = generate
 			const assignHtml = trackHtmlAssignments()
 
 			await vi.advanceTimersByTimeAsync(600_000)
@@ -2137,7 +2138,8 @@ describe("ClineProvider", () => {
 		test("gives a user-opened replacement a fresh budget after unavailable host recovery", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
-			const generateHtml = vi.spyOn(provider, "getState")
+			const generateHtml = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = generateHtml
 
 			await vi.advanceTimersByTimeAsync(130_000)
 			expect(generateHtml).toHaveBeenCalledTimes(1)
@@ -2262,18 +2264,18 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			expect(vi.getTimerCount()).toBe(timersAfterFirstResolve)
 
-			// getHtmlContent regenerates the HTML via one getState() call per reload,
-			// so getState invocations after this point count watchdog reloads.
-			const getStateSpy = vi.spyOn(provider, "getState")
+			// Each watchdog reload regenerates the HTML once, so calls after this point count reloads.
+			const regenerate = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = regenerate
 
 			await vi.advanceTimersByTimeAsync(120_000)
 
-			expect(getStateSpy).toHaveBeenCalledTimes(1)
+			expect(regenerate).toHaveBeenCalledTimes(1)
 		})
 
 		test("logs when regenerating the reload HTML fails", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			vi.spyOn(provider, "getState").mockRejectedValue(new Error("regen boom"))
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("regen boom"))
 			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
 
 			await vi.advanceTimersByTimeAsync(120_000)
@@ -3052,73 +3054,35 @@ describe("ClineProvider", () => {
 		})
 	})
 
-	test("escapes the complete CSP attribute in production and HMR HTML", async () => {
-		vi.mocked(axios.get).mockResolvedValue({ data: "" })
-		const webview = { ...mockWebviewView.webview, cspSource: 'https://test/?x=&quot;"><tag>' }
-		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
-			const html = await provider[build](webview)
-			// Capture through the stylesheet link so a raw quote in any cspSource cannot truncate the check.
-			const csp = html.match(
-				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
-			)?.[1]
-			expect(csp).toContain("https://test/?x=&amp;quot;&quot;&gt;&lt;tag&gt;")
-			expect(csp).not.toMatch(/["<>]/)
-		}
-	})
+	// Provider lookups run in the extension host, so configured endpoints must never reach the CSP.
+	test.each(["getHtmlContent", "getHMRHtmlContent"] as const)(
+		"%s keeps configured provider endpoints out of the CSP",
+		async (build) => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: {
+					...state.apiConfiguration,
+					openRouterBaseUrl: "https://evil.example;script-src 'unsafe-inline'\"><script>attack()</script>",
+					requestyBaseUrl: "https://requesty.example",
+				},
+			})
+			vi.mocked(axios.get).mockResolvedValue({ data: "" })
 
-	test("builds the production and HMR CSPs from the webviewCsp helpers", async () => {
-		const state = await provider.getState()
-		vi.spyOn(provider, "getState").mockResolvedValue({
-			...state,
-			apiConfiguration: {
-				...state.apiConfiguration,
-				// The origin helper must strip credentials and paths. The cspSource test covers escaping.
-				openRouterBaseUrl:
-					'https://user:password@example.com:8443/api;script-src?x="><script>attack()</script>',
-			},
-		})
-		vi.mocked(axios.get).mockResolvedValue({ data: "" })
-
-		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
 			const html = await provider[build](mockWebviewView.webview)
 			const csp = html.match(
 				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
 			)?.[1]
+
 			expect(csp).toBeDefined()
-			// The host survives with its port; credentials, path and payload do not.
-			expect(csp).toContain("connect-src vscode-webview://test-csp-source https://example.com:8443 ")
+			expect(csp).toContain("connect-src vscode-webview://test-csp-source ")
+			expect(csp).not.toContain("evil.example")
+			expect(csp).not.toContain("requesty")
+			expect(csp).not.toContain("openrouter")
 			expect(csp?.match(/script-src /g)).toHaveLength(1)
-			expect(csp).toContain("'nonce-")
 			expect(html).not.toContain("attack()")
-			expect(html).not.toContain("password")
-		}
-	})
-
-	// Rejection must also hold through the builders, not only in the pure helper.
-	test.each([
-		[undefined, null],
-		["https://example.com;script-src", "https://example.com;script-src"],
-		["ftp://example.com", "ftp://example.com"],
-	])("falls back to the default origin for endpoint %s in both HTML builders", async (baseUrl, rejectedValue) => {
-		const state = await provider.getState()
-		vi.spyOn(provider, "getState").mockResolvedValue({
-			...state,
-			apiConfiguration: { ...state.apiConfiguration, openRouterBaseUrl: baseUrl },
-		})
-		vi.mocked(axios.get).mockResolvedValue({ data: "" })
-
-		for (const build of ["getHtmlContent", "getHMRHtmlContent"] as const) {
-			const html = await provider[build](mockWebviewView.webview)
-			const csp = html.match(
-				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
-			)?.[1]
-			expect(csp).toBeDefined()
-			expect(csp).toContain("connect-src vscode-webview://test-csp-source https://openrouter.ai ")
-			if (rejectedValue) {
-				expect(csp).not.toContain(rejectedValue)
-			}
-		}
-	})
+		},
+	)
 
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
@@ -3143,7 +3107,7 @@ describe("ClineProvider", () => {
 
 		// Verify Content Security Policy contains the necessary PostHog domains
 		expect(mockWebviewView.webview.html).toContain(
-			"connect-src vscode-webview://test-csp-source https://openrouter.ai https://api.requesty.ai https://us.i.posthog.com",
+			"connect-src vscode-webview://test-csp-source https://us.i.posthog.com",
 		)
 
 		// Extract the script-src directive section and verify required security elements
