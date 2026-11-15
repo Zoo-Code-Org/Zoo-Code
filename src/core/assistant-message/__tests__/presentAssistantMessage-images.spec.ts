@@ -64,6 +64,9 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
+			userInputContent: vi.fn(async (text: string) => [
+				{ type: "text", text: `<user_message>\n${text}\n</user_message>` },
+			]),
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,

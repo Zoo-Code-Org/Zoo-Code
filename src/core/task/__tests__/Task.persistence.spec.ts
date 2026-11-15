@@ -17,8 +17,6 @@ import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { PendingActionSettlementError, Task } from "../Task"
 import { parseMentions } from "../../mentions"
-import { processUserContentMentions } from "../../mentions/processUserContentMentions"
-import type { FileContextTracker } from "../../context-tracking/FileContextTracker"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -2246,15 +2244,13 @@ describe("Task persistence", () => {
 				.fn()
 				.mockReturnValue({ id: "resume-mentions", status: "interrupted" })
 
+			vi.mocked(parseMentions).mockClear()
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
-			vi.mocked(parseMentions).mockClear()
-			const processed = await processUserContentMentions({
-				userContent: initiate.mock.calls[0][0],
-				cwd: "/test",
-				fileContextTracker: {} as FileContextTracker,
-			})
-			return { processed, parsed: vi.mocked(parseMentions).mock.calls.map((call) => call[0]) }
+			return {
+				processed: { content: initiate.mock.calls[0][0] },
+				parsed: vi.mocked(parseMentions).mock.calls.map((call) => call[0]),
+			}
 		}
 
 		it("expands a user segment and keeps the wrapper", async () => {

@@ -456,6 +456,6 @@ export async function getLatestTerminalOutput(): Promise<string> {
 	}
 }
 
-// Export processUserContentMentions from its own file
-export { processUserContentMentions } from "./processUserContentMentions"
-export type { ProcessUserContentMentionsResult } from "./processUserContentMentions"
+// Export expandUserMentions from its own file
+export { expandUserMentions } from "./processUserContentMentions"
+export type { ExpandUserMentionsResult } from "./processUserContentMentions"

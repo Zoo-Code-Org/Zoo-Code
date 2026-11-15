@@ -6,11 +6,6 @@ import type { ToolCallbacks } from "../BaseTool"
 import { AskFollowupQuestionTool, askFollowupQuestionTool } from "../AskFollowupQuestionTool"
 import { formatResponse } from "../../prompts/responses"
 import { NativeToolCallParser } from "../../assistant-message/NativeToolCallParser"
-import { processUserContentMentions } from "../../mentions/processUserContentMentions"
-import { parseMentions } from "../../mentions/index"
-import { FileContextTracker } from "../../context-tracking/FileContextTracker"
-
-vi.mock("../../mentions/index", () => ({ parseMentions: vi.fn() }))
 
 describe("AskFollowupQuestionTool", () => {
 	let tool: AskFollowupQuestionTool
@@ -18,17 +13,15 @@ describe("AskFollowupQuestionTool", () => {
 	let mockCallbacks: ToolCallbacks
 	// Kept outside the Task double so tests can re-stub answers without casts.
 	let askMock: ReturnType<typeof vi.fn>
+	let userInputContent: ReturnType<typeof vi.fn>
+	const expandedContent = [{ type: "text", text: "expanded" }]
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-		vi.mocked(parseMentions).mockImplementation(async (text) => ({
-			text: `parsed: ${text}`,
-			contentBlocks: [],
-		}))
-
 		tool = new AskFollowupQuestionTool()
 
 		askMock = vi.fn().mockResolvedValue({ text: "User answer", images: [] })
+		userInputContent = vi.fn().mockResolvedValue(expandedContent)
 		mockTask = {
 			userMessageContent: [],
 			consecutiveMistakeCount: 0,
@@ -37,6 +30,7 @@ describe("AskFollowupQuestionTool", () => {
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
 			ask: askMock,
 			say: vi.fn().mockResolvedValue(undefined),
+			userInputContent,
 		} as unknown as Task
 
 		mockCallbacks = {
@@ -224,105 +218,26 @@ describe("AskFollowupQuestionTool", () => {
 		)
 	})
 
-	it("pushes an authorized feedback block that mention processing expands", async () => {
-		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({ text: "@/allowed", images: [], segments: [{ text: "@/allowed", source: "user" }] })
-
-		await tool.execute(params, mockTask, mockCallbacks)
-
-		// Deleting the push in AskFollowupQuestionTool fails this assertion.
-		expect(mockTask.userMessageContent).toHaveLength(1)
-		const block = mockTask.userMessageContent[0]
-		expect(block).toEqual({ type: "text", text: "<user_message>\n@/allowed\n</user_message>" })
-
-		// The pushed block authorizes expansion of its input.
-		const result = await processUserContentMentions({
-			userContent: [block],
-			cwd: "/test",
-			fileContextTracker: {} as FileContextTracker,
-		})
-		expect(vi.mocked(parseMentions).mock.calls[0]?.[0]).toBe("@/allowed")
-		expect(result.content).toEqual([{ type: "text", text: "<user_message>\nparsed: @/allowed\n</user_message>" }])
-	})
-
-	it("expands only the user segment of a mixed answer", async () => {
-		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({
+	it.each([
+		{ label: "user segments", text: "@/allowed", segments: [{ text: "@/allowed", source: "user" }] },
+		{
+			label: "mixed segments",
 			text: "@/secret @/mine",
-			images: [],
 			segments: [
 				{ text: "@/secret ", source: "generated" },
 				{ text: "@/mine", source: "user" },
 			],
-		})
-
-		await tool.execute(params, mockTask, mockCallbacks)
-
-		await processUserContentMentions({
-			userContent: [mockTask.userMessageContent[0]],
-			cwd: "/test",
-			fileContextTracker: {} as FileContextTracker,
-		})
-		expect(vi.mocked(parseMentions).mock.calls.map((call) => call[0])).toEqual(["@/mine"])
-	})
-
-	it("keeps generated text between user segments and expands both user segments", async () => {
+		},
+		{ label: "missing segments", text: "@/secret", segments: undefined },
+		{ label: "a null answer", text: null, segments: undefined },
+	])("hands the answer with $label to Task.userInputContent", async ({ text, segments }) => {
 		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({
-			text: "@/a @/secret @/b",
-			images: [],
-			segments: [
-				{ text: "@/a ", source: "user" },
-				{ text: "@/secret ", source: "generated" },
-				{ text: "@/b", source: "user" },
-			],
-		})
-		vi.mocked(parseMentions).mockImplementation(async (input) => ({ text: `parsed: ${input}`, contentBlocks: [] }))
+		askMock.mockResolvedValue({ text, images: [], segments })
 
 		await tool.execute(params, mockTask, mockCallbacks)
 
-		const result = await processUserContentMentions({
-			userContent: [mockTask.userMessageContent[0]],
-			cwd: "/test",
-			fileContextTracker: {} as FileContextTracker,
-		})
-		expect(result.content).toEqual([
-			{ type: "text", text: "<user_message>\nparsed: @/a @/secret parsed: @/b\n</user_message>" },
-		])
-	})
-
-	it.each([
-		{ label: "missing", segments: undefined },
-		{ label: "not matching the text", segments: [{ text: "@/other", source: "user" }] },
-		{ label: "invalid", segments: [{ text: "@/secret", source: "system" }] },
-	])("expands nothing when the segments are $label", async ({ segments }) => {
-		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({ text: "@/secret", images: [], segments })
-
-		await tool.execute(params, mockTask, mockCallbacks)
-
-		await processUserContentMentions({
-			userContent: [mockTask.userMessageContent[0]],
-			cwd: "/test",
-			fileContextTracker: {} as FileContextTracker,
-		})
-		expect(parseMentions).not.toHaveBeenCalled()
-	})
-
-	it("does not authorize the feedback block when the user answer is null", async () => {
-		const params = { question: "What?", follow_up: [{ text: "A" }] }
-		askMock.mockResolvedValue({ text: null, images: [] })
-
-		await tool.execute(params, mockTask, mockCallbacks)
-
-		expect(mockTask.userMessageContent).toHaveLength(1)
-		const result = await processUserContentMentions({
-			userContent: [mockTask.userMessageContent[0]],
-			cwd: "/test",
-			fileContextTracker: {} as FileContextTracker,
-		})
-		expect(parseMentions).not.toHaveBeenCalled()
-		expect(result.content).toEqual([{ type: "text", text: "<user_message>\n\n</user_message>" }])
+		expect(userInputContent).toHaveBeenCalledWith(text ?? "", segments)
+		expect(mockTask.userMessageContent).toEqual(expandedContent)
 	})
 
 	it("should pass images from user response to toolResult", async () => {

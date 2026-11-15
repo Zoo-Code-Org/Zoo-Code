@@ -137,7 +137,7 @@ import {
 	checkpointDiff,
 } from "../checkpoints"
 import { joinSegments, normalizeSegments, trimSegments } from "../../shared/mentionSegments"
-import { processUserContentMentions, userMentionContent, wrapUserMessage } from "../mentions/processUserContentMentions"
+import { expandUserMentions, wrapUserMessage } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
@@ -3193,7 +3193,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			await this.initiateTaskLoop([
 				// Task text can carry generated context. Without segments
 				// nothing expands.
-				userMentionContent(wrapUserMessage(normalizeSegments(task ?? "", this.segments))),
+				...(await this.userInputContent(task ?? "", this.segments)),
 				...imageBlocks,
 			]).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
@@ -3456,7 +3456,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (responseText) {
 				// Only user segments expand.
-				newUserContent.push(userMentionContent(wrapUserMessage(normalizeSegments(responseText, segments))))
+				newUserContent.push(...(await this.userInputContent(responseText, segments)))
 			}
 
 			if (responseImages && responseImages.length > 0) {
@@ -3942,6 +3942,34 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Task Loop
 
+	/**
+	 * Builds the content blocks for user input. Only user segments expand mentions.
+	 * A slash command in the input can switch the mode.
+	 */
+	public async userInputContent(text: string, segments?: MentionSegment[]): Promise<Anthropic.TextBlockParam[]> {
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+
+		const { content, mode } = await expandUserMentions({
+			segments: wrapUserMessage(normalizeSegments(text, segments)),
+			cwd: this.cwd,
+			fileContextTracker: this.fileContextTracker,
+			rooIgnoreController: this.rooIgnoreController,
+			showRooIgnoredFiles: state?.showRooIgnoredFiles ?? false,
+			includeDiagnosticMessages: state?.includeDiagnosticMessages ?? true,
+			maxDiagnosticMessages: state?.maxDiagnosticMessages ?? 50,
+			skillsManager: provider?.getSkillsManager(),
+			currentMode: await this.getTaskMode(),
+		})
+
+		// Switch mode if specified in a slash command's frontmatter
+		if (mode && provider && getModeBySlug(mode, state?.customModes)) {
+			await provider.handleModeSwitch(mode, null)
+		}
+
+		return content
+	}
+
 	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		// `getCheckpointService` wraps its full body in a try/catch and returns
@@ -4063,38 +4091,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}),
 			)
 
-			const provider = this.providerRef.deref()
-			const state = provider ? await provider.getState() : undefined
-
-			const showRooIgnoredFiles = state?.showRooIgnoredFiles ?? false
-			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
-			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
-			const currentMode = await this.getTaskMode()
-
-			const { content: parsedUserContent, mode: slashCommandMode } = await processUserContentMentions({
-				userContent: currentUserContent,
-				cwd: this.cwd,
-				fileContextTracker: this.fileContextTracker,
-				rooIgnoreController: this.rooIgnoreController,
-				showRooIgnoredFiles,
-				includeDiagnosticMessages,
-				maxDiagnosticMessages,
-				skillsManager: provider?.getSkillsManager(),
-				currentMode,
-			})
-
-			// Switch mode if specified in a slash command's frontmatter
-			if (slashCommandMode) {
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const state = await provider.getState()
-					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
-					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode, null)
-					}
-				}
-			}
-
 			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
 
 			// Remove any existing environment_details blocks before adding fresh ones.
@@ -4102,7 +4098,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// where the old user message content may already contain environment details from the previous session.
 			// We check for both opening and closing tags to ensure we're matching complete environment detail blocks,
 			// not just mentions of the tag in regular content.
-			const contentWithoutEnvDetails = parsedUserContent.filter((block) => {
+			const contentWithoutEnvDetails = currentUserContent.filter((block) => {
 				if (block.type === "text" && typeof block.text === "string") {
 					// Check if this text block is a complete environment_details block
 					// by verifying it starts with the opening tag and ends with the closing tag

@@ -31,13 +31,9 @@ import { attemptCompletionTool, AttemptCompletionCallbacks } from "../AttemptCom
 import { Task } from "../../task/Task"
 import { AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import * as vscode from "vscode"
-import { processUserContentMentions } from "../../mentions/processUserContentMentions"
-import { parseMentions } from "../../mentions/index"
-import { FileContextTracker } from "../../context-tracking/FileContextTracker"
-
-vi.mock("../../mentions/index", () => ({ parseMentions: vi.fn() }))
 
 describe("attemptCompletionTool", () => {
+	const expandedContent = [{ type: "text" as const, text: "expanded" }]
 	let mockTask: Partial<Task>
 	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
@@ -66,6 +62,7 @@ describe("attemptCompletionTool", () => {
 
 		mockTask = {
 			userMessageContent: [],
+			userInputContent: vi.fn().mockResolvedValue(expandedContent),
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			todoList: undefined,
@@ -1167,72 +1164,19 @@ describe("attemptCompletionTool", () => {
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
 			})
 
-			it("keeps generated text between user segments and expands both user segments", async () => {
-				const block: ToolUse<"attempt_completion"> = {
-					type: "tool_use",
-					name: "attempt_completion",
-					params: { result: "Done" },
-					nativeArgs: { result: "Done" },
-					partial: false,
-				}
-				mockTask.ask = vi.fn().mockResolvedValue({
-					response: "messageResponse",
-					text: "@/a @/secret @/b",
-					images: [],
-					segments: [
-						{ text: "@/a ", source: "user" },
-						{ text: "@/secret ", source: "generated" },
-						{ text: "@/b", source: "user" },
-					],
-				})
-				vi.mocked(parseMentions).mockImplementation(async (input) => ({
-					text: `parsed: ${input}`,
-					contentBlocks: [],
-				}))
-
-				await attemptCompletionTool.handle(mockTask as Task, block, {
-					askApproval: mockAskApproval,
-					handleError: mockHandleError,
-					pushToolResult: mockPushToolResult,
-					toolCallId: "",
-					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
-					toolDescription: mockToolDescription,
-				})
-
-				const result = await processUserContentMentions({
-					userContent: [mockTask.userMessageContent![0]],
-					cwd: "/test",
-					fileContextTracker: {} as FileContextTracker,
-				})
-				expect(result.content).toEqual([
-					{ type: "text", text: "<user_message>\nparsed: @/a @/secret parsed: @/b\n</user_message>" },
-				])
-			})
-
 			it.each([
+				{ label: "user segments", text: "@/allowed", segments: [{ text: "@/allowed", source: "user" }] },
 				{
-					label: "mixed origin",
+					label: "mixed segments",
+					text: "@/secret @/mine",
 					segments: [
 						{ text: "@/secret ", source: "generated" },
 						{ text: "@/mine", source: "user" },
 					],
-					text: "@/secret @/mine",
-					expanded: ["@/mine"],
 				},
-				{ label: "missing", segments: undefined, text: "@/secret", expanded: [] },
-				{
-					label: "not matching the text",
-					segments: [{ text: "@/other", source: "user" }],
-					text: "@/secret",
-					expanded: [],
-				},
-				{
-					label: "invalid",
-					segments: [{ text: "@/secret", source: "system" }],
-					text: "@/secret",
-					expanded: [],
-				},
-			])("expands only authorized text when the segments are $label", async ({ segments, text, expanded }) => {
+				{ label: "missing segments", text: "@/secret", segments: undefined },
+				{ label: "undefined feedback", text: undefined, segments: undefined },
+			])("hands the feedback with $label to Task.userInputContent", async ({ text, segments }) => {
 				const block: ToolUse<"attempt_completion"> = {
 					type: "tool_use",
 					name: "attempt_completion",
@@ -1241,11 +1185,6 @@ describe("attemptCompletionTool", () => {
 					partial: false,
 				}
 				mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text, images: [], segments })
-				vi.mocked(parseMentions).mockImplementation(async (input) => ({
-					text: `parsed: ${input}`,
-					contentBlocks: [],
-				}))
-				vi.mocked(parseMentions).mockClear()
 
 				await attemptCompletionTool.handle(mockTask as Task, block, {
 					askApproval: mockAskApproval,
@@ -1256,96 +1195,8 @@ describe("attemptCompletionTool", () => {
 					toolDescription: mockToolDescription,
 				})
 
-				await processUserContentMentions({
-					userContent: [mockTask.userMessageContent![0]],
-					cwd: "/test",
-					fileContextTracker: {} as FileContextTracker,
-				})
-				expect(vi.mocked(parseMentions).mock.calls.map((call) => call[0])).toEqual(expanded)
-			})
-
-			it("pushes an authorized feedback block that mention processing expands", async () => {
-				const block: ToolUse<"attempt_completion"> = {
-					type: "tool_use",
-					name: "attempt_completion",
-					params: { result: "Done" },
-					nativeArgs: { result: "Done" },
-					partial: false,
-				}
-				mockTask.ask = vi.fn().mockResolvedValue({
-					response: "messageResponse",
-					text: "@/allowed",
-					images: [],
-					segments: [{ text: "@/allowed", source: "user" }],
-				})
-				vi.mocked(parseMentions).mockImplementation(async (text) => ({
-					text: `parsed: ${text}`,
-					contentBlocks: [],
-				}))
-				vi.mocked(parseMentions).mockClear()
-
-				await attemptCompletionTool.handle(mockTask as Task, block, {
-					askApproval: mockAskApproval,
-					handleError: mockHandleError,
-					pushToolResult: mockPushToolResult,
-					toolCallId: "",
-					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
-					toolDescription: mockToolDescription,
-				})
-
-				// Deleting the push in AttemptCompletionTool fails this assertion.
-				expect(mockTask.userMessageContent).toHaveLength(1)
-				const block0 = mockTask.userMessageContent![0]
-				expect(block0).toEqual({ type: "text", text: "<user_message>\n@/allowed\n</user_message>" })
-
-				// The pushed block authorizes expansion of its input.
-				const result = await processUserContentMentions({
-					userContent: [block0],
-					cwd: "/test",
-					fileContextTracker: {} as FileContextTracker,
-				})
-				expect(vi.mocked(parseMentions).mock.calls[0]?.[0]).toBe("@/allowed")
-				expect(result.content).toEqual([
-					{ type: "text", text: "<user_message>\nparsed: @/allowed\n</user_message>" },
-				])
-			})
-
-			it("does not authorize the feedback block when the feedback text is undefined", async () => {
-				const block: ToolUse<"attempt_completion"> = {
-					type: "tool_use",
-					name: "attempt_completion",
-					params: { result: "Done" },
-					nativeArgs: { result: "Done" },
-					partial: false,
-				}
-				mockTask.ask = vi.fn().mockResolvedValue({
-					response: "messageResponse",
-					text: undefined,
-					images: [],
-				})
-				vi.mocked(parseMentions).mockImplementation(async (text) => ({
-					text: `parsed: ${text}`,
-					contentBlocks: [],
-				}))
-				vi.mocked(parseMentions).mockClear()
-
-				await attemptCompletionTool.handle(mockTask as Task, block, {
-					askApproval: mockAskApproval,
-					handleError: mockHandleError,
-					pushToolResult: mockPushToolResult,
-					toolCallId: "",
-					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
-					toolDescription: mockToolDescription,
-				})
-
-				expect(mockTask.userMessageContent).toHaveLength(1)
-				const result = await processUserContentMentions({
-					userContent: [mockTask.userMessageContent![0]],
-					cwd: "/test",
-					fileContextTracker: {} as FileContextTracker,
-				})
-				expect(parseMentions).not.toHaveBeenCalled()
-				expect(result.content).toEqual([{ type: "text", text: "<user_message>\n\n</user_message>" }])
+				expect(mockTask.userInputContent).toHaveBeenCalledWith(text ?? "", segments)
+				expect(mockTask.userMessageContent).toEqual(expandedContent)
 			})
 
 			it("does not clear pending metadata when stale delegation continues without an action id", async () => {

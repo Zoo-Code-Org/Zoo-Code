@@ -1,5 +1,3 @@
-import { userMentionContent, wrapUserMessage } from "../mentions/processUserContentMentions"
-import { normalizeSegments } from "../../shared/mentionSegments"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { MAX_FOLLOW_UP_SUGGESTIONS } from "../prompts/tools/native-tools/ask_followup_question"
@@ -79,7 +77,7 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			const safeText = text ?? ""
 			await task.say("user_feedback", safeText, images)
 			// Only user segments expand. The tool result repeats the text by design.
-			task.userMessageContent.push(userMentionContent(wrapUserMessage(normalizeSegments(safeText, segments))))
+			task.userMessageContent.push(...(await task.userInputContent(safeText, segments)))
 			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)
