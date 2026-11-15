@@ -98,6 +98,18 @@ function createMockTask(options: MockTaskOptions = {}): Task & { abortState: { a
 	return task as unknown as Task & { abortState: { abort: boolean } }
 }
 
+/**
+ * Drain the promise queues a fixed number of times so a row can assert what has and has
+ * not started while an awaited publish is still pending. Wall-clock timers are avoided on
+ * purpose: every file operation in this file is a double, so the only thing between an
+ * assertion and the work it describes is queue depth.
+ */
+async function drainPromiseQueues(turns: number): Promise<void> {
+	for (let turn = 0; turn < turns; turn++) {
+		await new Promise((resolve) => setImmediate(resolve))
+	}
+}
+
 // -- Tests -------------------------------------------------------------------
 
 describe("guardedWrite (S4a, epic #1375)", () => {
@@ -867,6 +879,38 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
 			expect(reg.get(abs("doc.txt"))?.version).toBe("v1")
 		})
+
+		it("records no observation when the post-publish token read fails after an unobserved create", async () => {
+			// Cold-start counterpart of the row above. There is no previous observation to
+			// keep here, so a refresh that invents a token after a failed stat is invisible to
+			// that row: it would hand the model authority over a file whose on-disk token was
+			// never read. The publish must stand and the registry must stay empty.
+			const reg = new ObservationRegistry()
+			// Absent for every access this write makes: the guard pre-checks absence before
+			// choosing the guard and createIfAbsent checks it again under the lock.
+			mockedFsAccess.mockRejectedValue({ code: "ENOENT" })
+			// The publish succeeded and the file vanished before the refresh stat, so the
+			// post-publish token read rejects and tokenAfterPublish normalizes it to undefined.
+			mockedComputeVersionToken.mockRejectedValueOnce({ code: "ENOENT" })
+			const task = createMockTask({ observationRegistry: reg })
+
+			await expect(guardedWrite(task, "cold.txt", "created", "create")).resolves.toBeUndefined()
+
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("cold.txt"), "created")
+			// No token was read after the publish, so no observation may be recorded for it.
+			expect(reg.get(abs("cold.txt"))).toBeUndefined()
+
+			// The file now exists and this task never read it: the next write must be refused
+			// by the read-first guard instead of publishing blind over content nobody observed.
+			mockedFsAccess.mockResolvedValue(undefined)
+			await expect(guardedWrite(task, "cold.txt", "second", "create")).rejects.toThrow(
+				"File already exists at " +
+					"cold.txt" +
+					" and was not read before this write -- read the file first, then retry.",
+			)
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+		})
 	})
 
 	describe("edit", () => {
@@ -912,24 +956,45 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedComputeVersionToken.mockResolvedValue("v1")
 			const task = createMockTask({ observationRegistry: reg })
 
-			// The first publish changes the on-disk state (new token), and the
-			// guarded write refreshes the observation to it, so the second
-			// write CASes against v2 and publishes too: same-task writes are
-			// serialized last-write-wins in submission order, while a token that
-			// moves outside the task's own publish still fails stale.
+			// The first publish stays pending so the assertions below run while the second
+			// write is still queued on the per-path chain, rather than only after both writes
+			// settled: a second write that started its version check and its publish while
+			// the first publish was in flight would keep the call order asserted below and
+			// pass the row as it stood.
+			let releaseFirstPublish: () => void = () => {}
+			const firstPublish = new Promise<void>((resolve) => {
+				releaseFirstPublish = resolve
+			})
 			mockedSafeWriteText.mockImplementation(async () => {
-				mockedComputeVersionToken.mockResolvedValue("v2")
+				if (mockedSafeWriteText.mock.calls.length === 1) {
+					// The first publish changes the on-disk token only when it returns, and the
+					// guarded write refreshes the observation to it under the same lock.
+					await firstPublish
+					mockedComputeVersionToken.mockResolvedValue("v2")
+				}
 			})
 
 			const p1 = guardedWrite(task, "shared.txt", "first", "update")
 			const p2 = guardedWrite(task, "shared.txt", "second", "update")
+			await drainPromiseQueues(25)
+
+			// In flight: the first publish has started and the second write has reached
+			// neither its version check nor its publish.
+			expect(mockedSafeWriteText).toHaveBeenCalledTimes(1)
+			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first")
+			expect(mockedComputeVersionToken).toHaveBeenCalledTimes(1)
+			expect(reg.get(abs("shared.txt"))?.version).toBe("v1")
+
+			releaseFirstPublish()
 			const [r1, r2] = await Promise.allSettled([p1, p2])
 
 			expect(r1.status).toBe("fulfilled")
 			expect(r2.status).toBe("fulfilled")
 			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
-			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(1, abs("shared.txt"), "first")
 			expect(mockedSafeWriteText).toHaveBeenNthCalledWith(2, abs("shared.txt"), "second")
+			// The observation the second write CASed against is the one the first publish
+			// refreshed to v2: same-task writes are last-write-wins in submission order.
+			expect(reg.get(abs("shared.txt"))?.version).toBe("v2")
 		})
 
 		it("observed-absent then two concurrent creates - the second publishes against the refreshed observation", async () => {
@@ -1015,11 +1080,50 @@ describe("guardedWrite (S4a, epic #1375)", () => {
 			mockedComputeVersionToken.mockResolvedValue("v1")
 			const task = createMockTask({ observationRegistry: reg })
 
-			const p1 = guardedWrite(task, "a.txt", "a", "update")
-			const p2 = guardedWrite(task, "b.txt", "b", "update")
-			await Promise.all([p1, p2])
+			// a.txt stays inside its publish until the deferred promise is released, so b.txt
+			// has to finish on its own chain while a.txt is still mid-publish. A single global
+			// FIFO would park b.txt behind a.txt, and this row would then report a write that
+			// never started rather than passing on a count that two chains also produce.
+			let releaseBlockedPublish: () => void = () => {}
+			const blockedPublish = new Promise<void>((resolve) => {
+				releaseBlockedPublish = resolve
+			})
+			let blockedPublishEntered = false
+			let blockedPublishFinished = false
+			mockedSafeWriteText.mockImplementation(async (target) => {
+				if (target === abs("a.txt")) {
+					blockedPublishEntered = true
+					await blockedPublish
+					blockedPublishFinished = true
+				}
+			})
 
-			expect(mockedSafeWriteText).toHaveBeenCalledTimes(2)
+			const blocked = guardedWrite(task, "a.txt", "a", "update")
+			await drainPromiseQueues(25)
+			// b.txt has to finish on its own chain. The drain is bounded on purpose: under one
+			// global FIFO this write never starts, and the row says so instead of hanging until
+			// the per-test timeout waiting for a write that was never run.
+			const otherFinished = await Promise.race([
+				guardedWrite(task, "b.txt", "b", "update").then(() => true),
+				drainPromiseQueues(200).then(() => false),
+			])
+
+			try {
+				// b.txt reached its version check and its publish and finished while a.txt was
+				// still blocked inside its own publish: b.txt never waited on a.txt's chain.
+				expect(otherFinished).toBe(true)
+				expect(blockedPublishEntered).toBe(true)
+				expect(blockedPublishFinished).toBe(false)
+				expect(mockedSafeWriteText).toHaveBeenCalledWith(abs("b.txt"), "b")
+				expect(mockedComputeVersionToken).toHaveBeenCalledWith(abs("b.txt"))
+				expect(reg.get(abs("b.txt"))?.version).toBe("v1")
+			} finally {
+				// Released in cleanup, so a failing assertion above cannot leave this row
+				// holding an unsettled publish behind it.
+				releaseBlockedPublish()
+				await blocked
+			}
+			expect(blockedPublishFinished).toBe(true)
 		})
 	})
 

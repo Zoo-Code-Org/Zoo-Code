@@ -1737,6 +1737,37 @@ describe("caller-supplied staging path", () => {
 		expect(fs.unlink).not.toHaveBeenCalled()
 	})
 
+	it("accepts a staging file whose bigint identity differs from the target's", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		const stagingPath = "/tmp/test-dir/prepared.tmp"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		// Distinct bigint identities are what two different files report, and the identity
+		// comparison in the guard runs only when BOTH stats carry bigint ino/dev. The default
+		// lstat double carries neither, so every acceptance row before this one was accepted by
+		// the typeof guards short-circuiting rather than by the comparison itself.
+		const stagingStats = _fileStatsWithIdentity(11n, 7n)
+		const targetStats = _fileStatsWithIdentity(12n, 7n)
+		vi.mocked(fs.lstat).mockImplementation(async (p: unknown) =>
+			String(p) === path.resolve(stagingPath) ? stagingStats : targetStats,
+		)
+		vi.mocked(fsSync.openSync).mockReturnValue(2)
+		vi.mocked(fsSync.closeSync).mockReturnValue(undefined)
+
+		await safeWriteText(targetPath, "data", { tempPath: stagingPath, platform: "linux" })
+
+		// Accepted, and staged through the file the caller supplied.
+		expect(fsSync.openSync).toHaveBeenCalledWith(stagingPath, "r+")
+		expect(fs.rename).toHaveBeenCalledWith(stagingPath, targetPath)
+		expect(fs.unlink).not.toHaveBeenCalled()
+		// The acceptance came from comparing identities: both identity reads asked for
+		// bigint stats, and the two identities differ.
+		const identityLookups = vi.mocked(fs.lstat).mock.calls.filter((c) => c[1] !== undefined)
+		expect(identityLookups).toHaveLength(2)
+		for (const call of identityLookups) {
+			expect(call[1]).toEqual({ bigint: true })
+		}
+	})
+
 	it("rejects when the target identity cannot be compared for a reason other than a missing target", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)

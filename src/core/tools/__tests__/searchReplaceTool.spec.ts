@@ -488,6 +488,10 @@ describe("searchReplaceTool", () => {
 				const args = mockCline.diffViewProvider.saveDirectly.mock.calls.at(-1)!
 				expect(args[6]).toBeUndefined()
 				expect(args[7]).toBe(true)
+				// The argument after the approval flag is the canonical identity the approval was
+				// captured against. guardedWrite refuses an approved outside-workspace write
+				// without it, so the exact value is asserted, not merely its presence.
+				expect(args[8]).toBe(absoluteFilePath)
 			} finally {
 				// The flag is a module mock. A reset after the assertions only runs when they pass;
 				// a failing assertion would leave it true and the following tests would then fail for
