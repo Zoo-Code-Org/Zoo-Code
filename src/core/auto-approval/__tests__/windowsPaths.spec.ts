@@ -22,6 +22,15 @@ import { matcherForPlatform } from "./matcherForPlatform"
 const WINDOWS_CWD = "C:\\path\\to\\repo"
 const WINDOWS_HOME = "C:\\Users\\me"
 
+const ROOTED_EXCLUSIONS = [
+	"!/**/.env",
+	"!///**/.env",
+	"!////**/.env",
+	"!\\**\\.env",
+	"!\\\\\\**\\.env",
+	"!\\\\\\\\**\\.env",
+]
+
 describe("matching on Windows", () => {
 	const matcher = matcherForPlatform("win32")
 
@@ -110,39 +119,44 @@ describe("matching on Windows", () => {
 		},
 	)
 
-	it.each([undefined, "/ws", "\\ws", "//server/share/ws", "\\\\server\\share\\ws"])(
-		"preserves cross-volume wildcard exclusions and their order with workspace %s",
-		(cwd) => {
-			const input = { filePath: "C:/x/.env", cwd, homeDir: WINDOWS_HOME }
-			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", "!/**/.env"] })).toBe(false)
-			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["!/**/.env", "C:/**"] })).toBe(true)
-			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", "!/**/.env", "C:/x/.env"] })).toBe(
-				true,
-			)
-			expect(
-				matcher().isFileMatchedByPatterns({
-					...input,
-					filePath: "C:/x/notes.md",
-					patterns: ["C:/**", "!/**/.env"],
-				}),
-			).toBe(true)
-			expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["/**"] })).toBe(false)
-		},
-	)
+	it.each(
+		[undefined, "/ws", "\\ws", "//server/share/ws", "\\\\server\\share\\ws"].flatMap((cwd) =>
+			ROOTED_EXCLUSIONS.map((exclusion) => ({ cwd, exclusion })),
+		),
+	)("preserves exclusion $exclusion and its order with workspace $cwd", ({ cwd, exclusion }) => {
+		const input = { filePath: "C:/x/.env", cwd, homeDir: WINDOWS_HOME }
+		expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", exclusion] })).toBe(false)
+		expect(matcher().isFileMatchedByPatterns({ ...input, patterns: [exclusion, "C:/**"] })).toBe(true)
+		expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["C:/**", exclusion, "C:/x/.env"] })).toBe(true)
+		expect(
+			matcher().isFileMatchedByPatterns({
+				...input,
+				filePath: "C:/x/notes.md",
+				patterns: ["C:/**", exclusion],
+			}),
+		).toBe(true)
+		expect(matcher().isFileMatchedByPatterns({ ...input, patterns: ["/**"] })).toBe(false)
+	})
+
+	it.each(ROOTED_EXCLUSIONS)("keeps rooted exclusion %s scoped to a known workspace drive", (exclusion) => {
+		expect(matches("C:/x/.env", ["C:/**", exclusion], "D:/ws")).toBe(true)
+		expect(matches("D:/x/.env", ["D:/**", exclusion], "D:/ws")).toBe(false)
+		expect(matches("D:/x/notes.md", ["D:/**", exclusion], "D:/ws")).toBe(true)
+	})
+
+	it.each(["!//C/x/.env", "!\\\\C\\x\\.env"])("keeps explicit UNC exclusion %s separate from drives", (exclusion) => {
+		const input = { cwd: undefined, patterns: ["C:/**", "//C/x/**", "//other/x/**", exclusion] }
+		expect(matcher().isFileMatchedByPatterns({ ...input, filePath: "C:/x/.env" })).toBe(true)
+		expect(matcher().isFileMatchedByPatterns({ ...input, filePath: "//C/x/.env" })).toBe(false)
+		expect(matcher().isFileMatchedByPatterns({ ...input, filePath: "//other/x/.env" })).toBe(true)
+	})
 
 	it.each([
 		{
-			scenario: "a known workspace drive keeps the exclusion on that drive",
-			cwd: "D:/ws",
+			scenario: "an incomplete UNC exclusion retains rooted semantics",
+			cwd: undefined,
 			filePath: "C:/x/.env",
-			patterns: ["C:/**", "!/**/.env"],
-			allowed: true,
-		},
-		{
-			scenario: "a known workspace drive still excludes its own files",
-			cwd: "D:/ws",
-			filePath: "D:/x/.env",
-			patterns: ["D:/**", "!/**/.env"],
+			patterns: ["C:/**", "!//**"],
 			allowed: false,
 		},
 		{
@@ -198,16 +212,19 @@ describe("matching on Windows", () => {
 		expect(matcher().isFileMatchedByPatterns({ cwd, filePath, patterns })).toBe(allowed)
 	})
 
-	it("checks cross-volume exclusions against an equivalent drive path for a UNC candidate", () => {
-		expect(
-			matcher().isFileMatchedByPatterns({
-				cwd: "//server/share/Project",
-				canonicalCwd: "C:/Storage/Project",
-				filePath: "//server/share/Project/docs/.env",
-				patterns: ["docs/**", "!/C/Storage/**/.env"],
-			}),
-		).toBe(false)
-	})
+	it.each(ROOTED_EXCLUSIONS)(
+		"checks exclusion %s against an equivalent drive path for a UNC candidate",
+		(exclusion) => {
+			expect(
+				matcher().isFileMatchedByPatterns({
+					cwd: "//server/share/Project",
+					canonicalCwd: "C:/Storage/Project",
+					filePath: "//server/share/Project/docs/.env",
+					patterns: ["docs/**", exclusion.replace("**", "C/Storage/**")],
+				}),
+			).toBe(false)
+		},
+	)
 
 	it.each(["//server/sh[a]re/project", "\\\\server\\sh[a]re\\project"])(
 		"keeps an inherited UNC volume literal in rooted grants and exclusions: %s",

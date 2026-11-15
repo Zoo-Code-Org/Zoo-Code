@@ -13,7 +13,7 @@ export class PosixWorkspaceRootStrategy implements WorkspaceRootStrategy {
 		return path.posix.resolve(this.toMatcherAbsolutePath(root)).replace(/\/$/, "")
 	}
 
-	comparisonKey(value: string): string {
-		return value
+	pathsEqual(left: string, right: string): boolean {
+		return left === right
 	}
 }

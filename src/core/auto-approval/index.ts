@@ -10,6 +10,7 @@ import {
 
 import type { DcgDecision } from "../../services/destructive-command-guard/runner"
 import { realpath } from "fs/promises"
+import path from "path"
 
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
@@ -92,7 +93,9 @@ async function resolveCanonicalWorkspaceRoot(cwd: string | undefined): Promise<s
 	if (!cwd) return undefined
 
 	try {
-		return await realpath(cwd)
+		// Read tools resolve paths lexically before accessing the filesystem.
+		// Verify that same root: resolving symlink/.. first can identify a different directory.
+		return await realpath(path.resolve(cwd))
 	} catch (error) {
 		console.error(`[auto-approval] Failed to resolve workspace root ${cwd}:`, error)
 		return undefined

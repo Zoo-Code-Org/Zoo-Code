@@ -31,7 +31,11 @@ export class WindowsWorkspaceRootStrategy implements WorkspaceRootStrategy {
 		return this.toMatcherAbsolutePath(absolutePath, "").replace(/\/$/, "")
 	}
 
-	comparisonKey(value: string): string {
-		return value.toLowerCase()
+	pathsEqual(left: string, right: string): boolean {
+		// Match literal roots with the same case rules as ignore. Whole-string
+		// lowercasing can expand Unicode characters and corrupt prefix offsets.
+		if (left.length !== right.length) return false
+		const literalRight = right.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+		return new RegExp(`^${literalRight}$`, "i").test(left)
 	}
 }

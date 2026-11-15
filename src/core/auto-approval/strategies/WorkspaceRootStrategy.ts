@@ -9,5 +9,5 @@ export abstract class WorkspaceRootStrategy {
 	/** Convert a slash-normalized absolute path into the matcher's platform-specific namespace. */
 	abstract toMatcherAbsolutePath(absolutePath: string, workspaceVolume: string): string
 	abstract normalizeAbsoluteRoot(root: string | undefined): string | undefined
-	abstract comparisonKey(value: string): string
+	abstract pathsEqual(left: string, right: string): boolean
 }

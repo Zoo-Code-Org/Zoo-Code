@@ -434,7 +434,7 @@ export function isFileMatchedByPatterns({
 }: {
 	filePath?: string
 	cwd?: string
-	/** Verified realpath of cwd, used only by read approval. */
+	/** Verified realpath of the lexically resolved cwd, used only by read approval. */
 	canonicalCwd?: string
 	patterns?: string[]
 	isWindows?: boolean
@@ -472,8 +472,11 @@ export function isFileMatchedByPatterns({
 			const alternatives = [{ pattern: negated ? pattern.slice(1) : pattern, candidates }]
 			if (negated && driveCandidates.length) {
 				const rootedExclusion = pathsepsToPosix(rawPattern.slice(1), isWindows)
-				if (rootedExclusion.startsWith("/") && !rootedExclusion.startsWith("//")) {
-					alternatives.push({ pattern: rootedExclusion, candidates: driveCandidates })
+				if (rootedExclusion.startsWith("/") && !WINDOWS_UNC_PREFIX.test(rootedExclusion)) {
+					alternatives.push({
+						pattern: rootedExclusion.replace(/^\/+/, "/"),
+						candidates: driveCandidates,
+					})
 				}
 			}
 			// Apply each rule to both spellings BEFORE advancing to the next rule.

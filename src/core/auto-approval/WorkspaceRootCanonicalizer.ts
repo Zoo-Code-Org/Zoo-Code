@@ -35,9 +35,8 @@ export class WorkspaceRootCanonicalizer {
 	}
 
 	private replaceWorkspaceRootPrefix(value: string, root: string, canonicalRoot: string): string {
-		const comparableValue = this.strategy.comparisonKey(value)
-		const comparableRoot = this.strategy.comparisonKey(root)
-		return comparableValue === comparableRoot || comparableValue.startsWith(`${comparableRoot}/`)
+		const hasRootBoundary = value.length === root.length || value[root.length] === "/"
+		return hasRootBoundary && this.strategy.pathsEqual(value.slice(0, root.length), root)
 			? `${canonicalRoot}${value.slice(root.length)}`
 			: value
 	}

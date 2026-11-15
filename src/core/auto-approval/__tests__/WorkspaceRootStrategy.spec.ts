@@ -10,7 +10,8 @@ describe("WorkspaceRootStrategy.forPlatform", () => {
 		expect(strategy.toMatcherAbsolutePath("/tmp/notes.md", "/C")).toBe("/tmp/notes.md")
 		expect(strategy.toMatcherAbsolutePath("//server/share/notes.md", "/C")).toBe("//server/share/notes.md")
 		expect(strategy.toMatcherAbsolutePath("/tmp/my\\file.md", "/C")).toBe("/tmp/my\\file.md")
-		expect(strategy.comparisonKey("/tmp/NOTES.md")).toBe("/tmp/NOTES.md")
+		expect(strategy.pathsEqual("/tmp/NOTES.md", "/tmp/NOTES.md")).toBe(true)
+		expect(strategy.pathsEqual("/tmp/NOTES.md", "/tmp/notes.md")).toBe(false)
 	})
 
 	it("selects Windows behavior for drives, rooted paths, and the distinct UNC namespace", () => {
@@ -20,7 +21,25 @@ describe("WorkspaceRootStrategy.forPlatform", () => {
 		expect(strategy.toMatcherAbsolutePath("/tmp/notes.md", "/C")).toBe("/C/tmp/notes.md")
 		expect(strategy.toMatcherAbsolutePath("//server/share/notes.md", "/C")).toBe("/UNC/server/share/notes.md")
 		expect(strategy.toMatcherAbsolutePath("//C/share/notes.md", "/C")).not.toBe("/C/share/notes.md")
-		expect(strategy.comparisonKey("/D/Tmp/NOTES.md")).toBe("/d/tmp/notes.md")
+		expect(strategy.pathsEqual("/D/Tmp/NOTES.md", "/d/tmp/notes.md")).toBe(true)
+	})
+
+	it.each([
+		["\u0130", "i\u0307", false],
+		["\u212a", "K", false],
+		["\u00df", "SS", false],
+		["\u017f", "S", false],
+		["\u03a3", "\u03c2", true],
+		["\u03a3", "\u03c3", true],
+		["Project[1]", "Project1", false],
+		["Project(1)", "Project1", false],
+		["Project+", "Projecttt", false],
+		["Project", "Project\n", false],
+	] as const)("compares Windows root names %s and %s without rewriting their identity", (left, right, equal) => {
+		const strategy = WorkspaceRootStrategy.forPlatform(true)
+
+		expect(strategy.pathsEqual(`/C/aliases/${left}`, `/c/ALIASES/${right}`)).toBe(equal)
+		expect(strategy.pathsEqual(`/c/ALIASES/${right}`, `/C/aliases/${left}`)).toBe(equal)
 	})
 
 	it("uses one selected strategy for candidates, every pattern, and both workspace roots", () => {
@@ -29,8 +48,8 @@ describe("WorkspaceRootStrategy.forPlatform", () => {
 			.fn<WorkspaceRootStrategy["normalizeAbsoluteRoot"]>()
 			.mockReturnValueOnce("/aliases/project")
 			.mockReturnValueOnce("/storage/project")
-		const comparisonKey = vi.fn((value: string) => value)
-		const strategy: WorkspaceRootStrategy = { toMatcherAbsolutePath, normalizeAbsoluteRoot, comparisonKey }
+		const pathsEqual = vi.fn((left: string, right: string) => left === right)
+		const strategy: WorkspaceRootStrategy = { toMatcherAbsolutePath, normalizeAbsoluteRoot, pathsEqual }
 		const selectStrategy = vi.spyOn(WorkspaceRootStrategy, "forPlatform").mockReturnValue(strategy)
 
 		expect(
@@ -52,6 +71,6 @@ describe("WorkspaceRootStrategy.forPlatform", () => {
 		expect(normalizeAbsoluteRoot).toHaveBeenCalledTimes(2)
 		expect(normalizeAbsoluteRoot).toHaveBeenNthCalledWith(1, "/aliases/project")
 		expect(normalizeAbsoluteRoot).toHaveBeenNthCalledWith(2, "/storage/project")
-		expect(comparisonKey).toHaveBeenCalled()
+		expect(pathsEqual).toHaveBeenCalled()
 	})
 })

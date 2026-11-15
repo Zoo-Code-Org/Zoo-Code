@@ -8,10 +8,10 @@ it("normalizes roots once in the factory before any path comparisons", () => {
 		.fn<WorkspaceRootStrategy["normalizeAbsoluteRoot"]>()
 		.mockReturnValueOnce("/aliases/project")
 		.mockReturnValueOnce("/storage/project")
-	const comparisonKey = vi.fn((value: string) => value)
+	const pathsEqual = vi.fn((left: string, right: string) => left === right)
 	const strategy: WorkspaceRootStrategy = {
 		normalizeAbsoluteRoot,
-		comparisonKey,
+		pathsEqual,
 		toMatcherAbsolutePath: vi.fn((value: string) => value),
 	}
 
@@ -20,7 +20,7 @@ it("normalizes roots once in the factory before any path comparisons", () => {
 	expect(normalizeAbsoluteRoot).toHaveBeenCalledTimes(2)
 	expect(normalizeAbsoluteRoot).toHaveBeenNthCalledWith(1, "/aliases/project/")
 	expect(normalizeAbsoluteRoot).toHaveBeenNthCalledWith(2, "/storage/project/")
-	expect(comparisonKey).not.toHaveBeenCalled()
+	expect(pathsEqual).not.toHaveBeenCalled()
 
 	expect(canonicalizer.canonicalize("/aliases/project/docs/file.md")).toBe("/storage/project/docs/file.md")
 	expect(canonicalizer.canonicalize("/aliases/project/notes.md")).toBe("/storage/project/notes.md")
@@ -114,6 +114,39 @@ describe("POSIX workspace-root strategy", () => {
 })
 
 describe("Windows workspace-root strategy", () => {
+	it.each([
+		["\u0130", "i\u0307"],
+		["i\u0307", "\u0130"],
+		["\u212a", "K"],
+		["K", "\u212a"],
+	] as const)("does not fabricate an alias for distinct roots %s and %s", (root, sibling) => {
+		const canonicalizer = WorkspaceRootCanonicalizer.forStrategy(
+			`C:/aliases/${root}`,
+			"D:/storage/project",
+			new WindowsWorkspaceRootStrategy(),
+		)
+		const unrelated = `/C/aliases/${sibling}/Docs/NOTES.md`
+
+		expect(canonicalizer.canonicalize(unrelated)).toBe(unrelated)
+		expect(canonicalizer.equivalentPaths(unrelated)).toEqual([unrelated])
+		expect(canonicalizer.canonicalize(`/C/aliases/${root}/Docs/NOTES.md`)).toBe("/D/storage/project/Docs/NOTES.md")
+	})
+
+	it("compares the original root boundary and preserves the entire descendant suffix", () => {
+		const canonicalizer = WorkspaceRootCanonicalizer.forStrategy(
+			"C:/aliases/\u03a3",
+			"D:/storage/project",
+			new WindowsWorkspaceRootStrategy(),
+		)
+
+		expect(canonicalizer.canonicalize("/C/aliases/\u03c2/Docs/NOTES.md")).toBe("/D/storage/project/Docs/NOTES.md")
+		for (const suffix of ["-other", "\n", "2"]) {
+			const unrelated = `/C/aliases/\u03c2${suffix}/Docs/NOTES.md`
+			expect(canonicalizer.canonicalize(unrelated)).toBe(unrelated)
+			expect(canonicalizer.equivalentPaths(unrelated)).toEqual([unrelated])
+		}
+	})
+
 	it("compares case-insensitively across drives without changing descendant case", () => {
 		const canonicalizer = WorkspaceRootCanonicalizer.forStrategy(
 			"C:\\Aliases\\Project",

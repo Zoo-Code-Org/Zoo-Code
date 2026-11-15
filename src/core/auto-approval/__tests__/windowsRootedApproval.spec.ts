@@ -14,6 +14,15 @@ const approvalRoutes = [
 	{ name: "write allowlist", tool: "newFileCreated", setting: "allowedWriteFiles" },
 ] as const
 
+const ROOTED_EXCLUSIONS = [
+	"!/**/.env",
+	"!///**/.env",
+	"!////**/.env",
+	"!\\**\\.env",
+	"!\\\\\\**\\.env",
+	"!\\\\\\\\**\\.env",
+]
+
 async function approval(
 	tool: "readFile" | "newFileCreated",
 	path: string,
@@ -61,17 +70,38 @@ describe("Windows rooted approval rules", () => {
 			},
 		)
 
-		it.each([undefined, "/ws", "//server/share/ws"])(
-			"applies ordered global exclusions when cwd is %s",
-			async (cwd) => {
-				const patterns = ["C:/**", "!/**/.env"]
-				expect(await approval(tool, "C:/x/notes.md", cwd, { [setting]: patterns })).toEqual({
-					decision: "approve",
-				})
-				expect(await approval(tool, "C:/x/.env", cwd, { [setting]: patterns })).toEqual({ decision: "ask" })
-				expect(await approval(tool, "C:/x/.env", cwd, { [setting]: [...patterns, "C:/x/.env"] })).toEqual({
-					decision: "approve",
-				})
+		it.each(
+			[undefined, "/ws", "//server/share/ws"].flatMap((cwd) =>
+				ROOTED_EXCLUSIONS.map((exclusion) => ({ cwd, exclusion })),
+			),
+		)("applies ordered exclusion $exclusion when cwd is $cwd", async ({ cwd, exclusion }) => {
+			const patterns = ["C:/**", exclusion]
+			expect(await approval(tool, "C:/x/notes.md", cwd, { [setting]: patterns })).toEqual({
+				decision: "approve",
+			})
+			expect(await approval(tool, "C:/x/.env", cwd, { [setting]: patterns })).toEqual({ decision: "ask" })
+			expect(await approval(tool, "C:/x/.env", cwd, { [setting]: [exclusion, "C:/**"] })).toEqual({
+				decision: "approve",
+			})
+			expect(await approval(tool, "C:/x/.env", cwd, { [setting]: [...patterns, "C:/x/.env"] })).toEqual({
+				decision: "approve",
+			})
+		})
+
+		it.each(ROOTED_EXCLUSIONS)("keeps exclusion %s on a known workspace drive", async (exclusion) => {
+			const state = { [setting]: ["C:/**", "D:/**", exclusion] }
+			expect(await approval(tool, "C:/x/.env", "D:/ws", state)).toEqual({ decision: "approve" })
+			expect(await approval(tool, "D:/x/.env", "D:/ws", state)).toEqual({ decision: "ask" })
+			expect(await approval(tool, "D:/x/notes.md", "D:/ws", state)).toEqual({ decision: "approve" })
+		})
+
+		it.each(["!//C/x/.env", "!\\\\C\\x\\.env"])(
+			"keeps explicit UNC exclusion %s on its share",
+			async (exclusion) => {
+				const state = { [setting]: ["C:/**", "//C/x/**", "//other/x/**", exclusion] }
+				expect(await approval(tool, "C:/x/.env", undefined, state)).toEqual({ decision: "approve" })
+				expect(await approval(tool, "//C/x/.env", undefined, state)).toEqual({ decision: "ask" })
+				expect(await approval(tool, "//other/x/.env", undefined, state)).toEqual({ decision: "approve" })
 			},
 		)
 
@@ -120,10 +150,10 @@ describe("Windows rooted approval rules", () => {
 		},
 	)
 
-	it("applies rooted UNC rules to reads through the verified drive alias", async () => {
+	it.each(ROOTED_EXCLUSIONS)("applies exclusion %s to reads through the verified drive alias", async (exclusion) => {
 		const cwd = "//server/sh[a]re/project"
 		vi.mocked(fs.realpath).mockResolvedValue("D:/storage/project")
-		const patterns = ["/project/docs/**", "!/**/.env"]
+		const patterns = ["/project/docs/**", exclusion.replace("**", "D/storage/**")]
 		expect(
 			await approval("readFile", "D:/storage/project/docs/notes.md", cwd, { allowedReadFiles: patterns }),
 		).toEqual({
