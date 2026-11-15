@@ -38,6 +38,7 @@ export class CodeIndexManager {
 	private startOwner?: CodeIndexOrchestrator
 	// Separate from startInFlight: the recovery path awaits startInFlight, which initialize() sets.
 	private errorStartInFlight?: Promise<void>
+	private errorStartAttempt?: { recovered: boolean }
 
 	// Flag to prevent race conditions during error recovery
 	private _isRecoveringFromError = false
@@ -257,7 +258,9 @@ export class CodeIndexManager {
 
 		// A start that failed fatally may still await its completion write; a retry must not join it.
 		const isError = this.getCurrentStatus().systemStatus === "Error"
-		const running = this.errorStartInFlight ?? (isError ? undefined : this.startInFlight)
+		// Error after recovery cleared it means the replacement failed; a new start must not join it.
+		const errorStart = isError && this.errorStartAttempt?.recovered ? undefined : this.errorStartInFlight
+		const running = errorStart ?? (isError ? undefined : this.startInFlight)
 		if (running) return running
 		this.failureRegistry.clearAwaitingRetry()
 
@@ -272,12 +275,17 @@ export class CodeIndexManager {
 		if (isError) {
 			// Recovery drops the config manager, so keep its proxy to re-initialize; initialize() starts indexing.
 			const contextProxy = this._configManager?.getContextProxy()
+			const attempt = { recovered: false }
+			this.errorStartAttempt = attempt
 			this.errorStartInFlight = (async () => {
 				await this.recoverFromError()
+				attempt.recovered = true
 				if (!contextProxy) return
 				await this.initialize(contextProxy)
 				await this.startInFlight
 			})().finally(() => {
+				if (this.errorStartAttempt !== attempt) return
+				this.errorStartAttempt = undefined
 				this.errorStartInFlight = undefined
 			})
 			return this.errorStartInFlight

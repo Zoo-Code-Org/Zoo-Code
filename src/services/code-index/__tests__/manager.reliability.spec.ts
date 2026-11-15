@@ -419,6 +419,36 @@ describe("CodeIndexManager reliability", () => {
 			expect(stale.startIndexing).toHaveBeenCalledOnce()
 		})
 
+		it("CI-MG-05: Start Indexing from Error does not join a recovery whose replacement failed", async () => {
+			const { manager, stateManager } = makeManager()
+			const order: string[] = []
+			configure(manager)
+			attach(manager, orchestratorDouble(order, "stale"))
+			withFatalFailure(manager, stateManager)
+			const failed = orchestratorDouble(order, "failed", "Standby")
+			// A second fatal failure sets Error while the completion write never settles.
+			failed.startIndexing.mockImplementation(() => {
+				stateManager.setSystemState("Error", fatalMessage)
+				return new Promise<undefined>(() => {})
+			})
+			const fresh = orchestratorDouble(order, "fresh", "Standby")
+			const recreate = recreateWith(manager, fresh)
+			recreate.mockImplementationOnce(async () => {
+				attach(manager, failed)
+				// The double provides no members; these tests never search.
+				manager["_searchService"] = {} as unknown as (typeof manager)["_searchService"]
+			})
+
+			void manager.startIndexing()
+			await vi.waitFor(() => expect(failed.startIndexing).toHaveBeenCalledOnce())
+			expect(stateManager.state).toBe("Error")
+
+			await manager.startIndexing()
+
+			expect(recreate).toHaveBeenCalledTimes(2)
+			expect(order).toEqual(["stale.stop", "failed.stop", "fresh.start"])
+		})
+
 		it("CI-MG-05: Start Indexing clears the latch with the Semble provider", async () => {
 			const { manager, stateManager } = makeManager()
 			configure(manager)
