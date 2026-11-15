@@ -400,6 +400,25 @@ describe("CodeIndexManager reliability", () => {
 			expect(manager.getCurrentStatus().failedFiles).toEqual([])
 		})
 
+		it("CI-MG-05: Start Indexing after a fatal failure does not join a start still awaiting a write", async () => {
+			const { manager, stateManager } = makeManager()
+			const order: string[] = []
+			configure(manager)
+			const stale = orchestratorDouble(order, "stale")
+			// The failed start never settles, as when the completion-marker upsert outlives the fatal abort.
+			stale.startIndexing.mockImplementation(() => new Promise<void>(() => {}))
+			attach(manager, stale)
+			void manager.startIndexing()
+			withFatalFailure(manager, stateManager)
+			const fresh = orchestratorDouble(order, "fresh", "Standby")
+			recreateWith(manager, fresh)
+
+			await manager.startIndexing()
+
+			expect(order).toEqual(["stale.stop", "fresh.start"])
+			expect(stale.startIndexing).toHaveBeenCalledOnce()
+		})
+
 		it("CI-MG-05: Start Indexing clears the latch with the Semble provider", async () => {
 			const { manager, stateManager } = makeManager()
 			configure(manager)

@@ -35,6 +35,7 @@ export class CodeIndexManager {
 	private readonly pacers = new ProviderPacerRegistry()
 	private readonly parser = new ParseWorkerClient()
 	private startInFlight?: Promise<void>
+	private startOwner?: CodeIndexOrchestrator
 	// Separate from startInFlight: the recovery path awaits startInFlight, which initialize() sets.
 	private errorStartInFlight?: Promise<void>
 
@@ -232,13 +233,16 @@ export class CodeIndexManager {
 	}
 
 	private startOrchestrator(): Promise<void> {
-		if (this.startInFlight) return this.startInFlight
 		const orchestrator = this._orchestrator
-		if (!orchestrator) return Promise.resolve()
-		this.startInFlight = orchestrator.startIndexing().finally(() => {
-			this.startInFlight = undefined
+		if (!orchestrator) return this.startInFlight ?? Promise.resolve()
+		// A replaced orchestrator's start may still be awaiting a write; it must not stand in for the new one.
+		if (this.startInFlight && this.startOwner === orchestrator) return this.startInFlight
+		const start: Promise<void> = orchestrator.startIndexing().finally(() => {
+			if (this.startInFlight === start) this.startInFlight = undefined
 		})
-		return this.startInFlight
+		this.startInFlight = start
+		this.startOwner = orchestrator
+		return start
 	}
 
 	/**
@@ -251,7 +255,9 @@ export class CodeIndexManager {
 			return
 		}
 
-		const running = this.errorStartInFlight ?? this.startInFlight
+		// A start that failed fatally may still await its completion write; a retry must not join it.
+		const isError = this.getCurrentStatus().systemStatus === "Error"
+		const running = this.errorStartInFlight ?? (isError ? undefined : this.startInFlight)
 		if (running) return running
 		this.failureRegistry.clearAwaitingRetry()
 
@@ -263,7 +269,7 @@ export class CodeIndexManager {
 
 		this.failureRegistry.resetAllBudgets()
 
-		if (this.getCurrentStatus().systemStatus === "Error") {
+		if (isError) {
 			// Recovery drops the config manager, so keep its proxy to re-initialize; initialize() starts indexing.
 			const contextProxy = this._configManager?.getContextProxy()
 			this.errorStartInFlight = (async () => {

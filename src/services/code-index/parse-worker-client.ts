@@ -72,9 +72,9 @@ export class ParseWorkerClient implements ICodeParser {
 	}
 
 	/**
-		* A caller passing `signal` is bound to the session opened with that signal; work from an older session
-		* rejects with `AbortError` rather than running on, or closing, a newer one.
-		*/
+	 * A caller passing `signal` is bound to the session opened with that signal; work from an older session
+	 * rejects with `AbortError` rather than running on, or closing, a newer one.
+	 */
 	async parseFile(
 		filePath: string,
 		options?: { content?: string; fileHash?: string; signal?: AbortSignal },

@@ -1,4 +1,6 @@
 vi.mock("@roo-code/telemetry", () => ({ TelemetryService: { instance: { captureEvent: vi.fn() } } }))
+const readFile = vi.hoisted(() => vi.fn<(filePath: string, encoding: string) => Promise<string>>())
+vi.mock("node:fs/promises", () => ({ readFile }))
 
 import { EventEmitter } from "node:events"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -190,6 +192,29 @@ describe("ParseWorkerClient", () => {
 		client.open(next.signal)
 		const stale = client.parseFile("old.ts", { ...options, signal: controller.signal })
 		await expect(stale).rejects.toMatchObject({ name: "AbortError" })
+		expect(factory).not.toHaveBeenCalled()
+
+		const current = client.parseFile("new.ts", { ...options, signal: next.signal })
+		await drain()
+		expect(workers[0].requests.map((request) => request.filePath)).toEqual(["new.ts"])
+		workers[0].reply(0, [block])
+		expect(await current).toEqual([block])
+		expect(workers[0].terminate).not.toHaveBeenCalled()
+	})
+
+	it("CI-PW-11: a host read that finishes after a restart rejects without touching the new session", async () => {
+		const { client, controller, factory, workers } = setup()
+		let finishRead!: (content: string) => void
+		readFile.mockReturnValueOnce(new Promise<string>((resolve) => (finishRead = resolve)))
+		const stale = client.parseFile("old.ts", { signal: controller.signal }).catch((error: unknown) => error)
+		await drain()
+		expect(readFile).toHaveBeenCalledWith("old.ts", "utf8")
+
+		controller.abort()
+		const next = new AbortController()
+		client.open(next.signal)
+		finishRead(options.content)
+		expect(await stale).toMatchObject({ name: "AbortError" })
 		expect(factory).not.toHaveBeenCalled()
 
 		const current = client.parseFile("new.ts", { ...options, signal: next.signal })
