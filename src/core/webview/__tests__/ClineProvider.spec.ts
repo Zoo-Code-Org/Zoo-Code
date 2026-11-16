@@ -428,15 +428,13 @@ afterAll(() => {
 	vi.restoreAllMocks()
 })
 
-type StalledProfile = {
-	name: string
-	apiProvider?: string
-	openRouterModelId?: string
-}
+type StalledProfile = Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>
 
 function stallProviderSettingsProfile(provider: ClineProvider) {
 	let resolveProfile: (value: StalledProfile) => void = () => {}
-	const getProfileSpy = vi.fn(() => {
+	// The manager is public readonly, so this test spies its getProfile instead of
+	// reassigning the field; the reassignment is what the ignored error was about.
+	const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(() => {
 		if (getProfileSpy.mock.calls.length > 1) {
 			throw new Error(
 				"stallProviderSettingsProfile: getProfile called more than once; only one lookup is resolvable",
@@ -444,8 +442,6 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 		}
 		return new Promise<StalledProfile>((resolve) => (resolveProfile = resolve))
 	})
-	// @ts-ignore - Reassign the readonly providerSettingsManager for the test; the double only backs getProfile.
-	provider.providerSettingsManager = { getProfile: getProfileSpy }
 	return { getProfile: getProfileSpy, resolveProfile: (value: StalledProfile) => resolveProfile(value) }
 }
 
@@ -6516,8 +6512,7 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace providerSettingsManager with a failing test double.
-			provider.providerSettingsManager = { getProfile: vi.fn().mockRejectedValue(new Error("profile missing")) }
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(new Error("profile missing"))
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("my-profile")
@@ -6535,13 +6530,15 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace providerSettingsManager with a test double that registers a newer id.
-			provider.providerSettingsManager = {
-				getProfile: vi.fn().mockImplementation(() => {
-					provider["viewStateId"] = "superseded-view"
-					return Promise.resolve({ name: "my-profile", apiProvider: providerIdentifiers.openrouter })
-				}),
-			}
+			// Only getProfile is rewritten, so the lookup itself swaps the id out from under the load.
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(() => {
+				provider["viewStateId"] = "superseded-view"
+				return Promise.resolve({
+					name: "my-profile",
+					id: "my-profile-id",
+					apiProvider: providerIdentifiers.openrouter,
+				})
+			})
 			await provider.saveViewState("currentApiConfigName", "my-profile")
 			await provider["setViewStateId"]("stable-sidebar-view")
 			expect(provider["viewLocalState"]).not.toHaveProperty("apiConfiguration")
@@ -6559,8 +6556,8 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			// No custom modes exist, so nothing can resolve the persisted slug.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
@@ -6591,8 +6588,8 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
+			// No custom modes exist, so nothing can resolve the persisted slug.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
 			await provider.saveViewState("mode", "code")
 			await provider.saveViewState("currentApiConfigName", "cfg-a")
 			const load = provider["setViewStateId"]("stable-sidebar-view")
@@ -6601,13 +6598,22 @@ describe("ClineProvider", () => {
 			// target the pending promise rather than the initial no-op.
 			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
 			// No mutation while the lookup is in flight: the persisted values must win.
-			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			resolveProfile({
+				name: "cfg-a",
+				id: "cfg-a-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
 			await load
 
 			expect(provider["viewLocalState"]).toEqual({
 				mode: "code",
 				currentApiConfigName: "cfg-a",
-				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" },
+				apiConfiguration: {
+					id: "cfg-a-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-x",
+				},
 			})
 			await provider.dispose()
 		})
@@ -6624,12 +6630,12 @@ describe("ClineProvider", () => {
 			)
 			await saver["saveViewState"]("currentApiConfigName", "profile-a")
 			expect(saver["pinnedProfileName"]).toBe("profile-a")
-			// @ts-ignore - The double only backs the profile-store calls of the save path.
-			saver.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("profile-b-id"),
-				listConfig: vi.fn().mockResolvedValue([{ name: "profile-b", id: "profile-b-id" }]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Spy the profile-store calls the save path makes; the manager itself stays real.
+			vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("profile-b-id")
+			vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "profile-b", id: "profile-b-id" },
+			])
+			vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "activated-key" }
 
 			await saver.upsertProviderProfile("profile-b", providerSettings, true)
@@ -6662,12 +6668,12 @@ describe("ClineProvider", () => {
 			// saveViewState is the buffer write on this head: setValue is a ContextProxy pass-through,
 			// so going through setValue here would leave pinnedProfileName undefined.
 			await pinned["saveViewState"]("currentApiConfigName", "shared-profile")
-			// @ts-ignore - The double only backs the profile-store calls of the save path.
-			saver.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("shared-id"),
-				listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Spy the profile-store calls the save path makes; the manager itself stays real.
+			vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+			vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "shared-profile", id: "shared-id" },
+			])
+			vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 
 			await saver.upsertProviderProfile("shared-profile", providerSettings, false)
@@ -6697,12 +6703,12 @@ describe("ClineProvider", () => {
 			// saveViewState is the buffer write on this head: setValue is a ContextProxy pass-through,
 			// so going through setValue here would leave pinnedProfileName undefined.
 			await pinned["saveViewState"]("currentApiConfigName", "shared-profile")
-			// @ts-ignore - The double only backs the profile-store calls of the save path.
-			saver.providerSettingsManager = {
-				saveConfig: vi.fn().mockResolvedValue("shared-id"),
-				listConfig: vi.fn().mockResolvedValue([{ name: "shared-profile", id: "shared-id" }]),
-				setModeConfig: vi.fn().mockResolvedValue(undefined),
-			}
+			// Spy the profile-store calls the save path makes; the manager itself stays real.
+			vi.spyOn(saver.providerSettingsManager, "saveConfig").mockResolvedValue("shared-id")
+			vi.spyOn(saver.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "shared-profile", id: "shared-id" },
+			])
+			vi.spyOn(saver.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			const providerSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "fresh-key" }
 
 			await saver.upsertProviderProfile("shared-profile", providerSettings, true)
