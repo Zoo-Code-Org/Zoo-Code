@@ -520,7 +520,6 @@ export class ClineProvider
 			(message) => this.log(message),
 		)
 
-		ClineProvider.activeInstances.add(this)
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
 
 		this.mdmService = mdmService

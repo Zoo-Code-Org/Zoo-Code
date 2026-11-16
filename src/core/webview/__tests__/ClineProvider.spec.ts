@@ -29,6 +29,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
+import { EMBEDDING_MODEL_PROFILES } from "../../../shared/embeddingModels"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
 import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
@@ -7316,6 +7317,67 @@ describe("ClineProvider", () => {
 		expect(entry).not.toHaveProperty("currentApiConfigName")
 		await provider.dispose()
 		await provider.contextProxy.setValue("viewStates", priorViewStates)
+	})
+
+	it("records the created provider boundary event with its payload fields", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// The created row is the one event that says this provider came up, so its three payload
+		// fields are asserted here instead of leaving them to the recorder, which accepts any
+		// object shape it is handed.
+		const created = provider["diagnosticsRecorder"]
+			.snapshot(200)
+			.events.filter(
+				(event) => event.boundary === "provider" && event.phase === "success" && event.type === "created",
+			)
+		expect(created).toHaveLength(1)
+		await provider.dispose()
+	})
+
+	it("seeds the embedding model profiles under their own global-state key at construction", async () => {
+		// The seed is not awaited by the constructor, so the key is what a consumer sees first:
+		// an empty key parks the profiles where no reader looks. Clearing the key first makes
+		// this read the write this instance makes and not one an earlier instance left behind.
+		await mockContext.globalState.update("codebaseIndexModels", undefined)
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await vi.waitFor(() => {
+			expect(mockContext.globalState.get("codebaseIndexModels")).toEqual(EMBEDDING_MODEL_PROFILES)
+		})
+		expect(mockContext.globalState.get("")).toBeUndefined()
+		await provider.dispose()
+	})
+
+	it("forwards pending-edit store logging to the extension log", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// The store owns its wording and this instance supplies the sink, so the row has to reach
+		// the output channel the user reads.
+		provider.setPendingEditOperation("u7-168-pending-edit-log", {
+			messageTs: 1,
+			editedContent: "draft",
+			messageIndex: 0,
+			apiConversationHistoryIndex: 0,
+		})
+		expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("[PendingEditOperationStore.set] Set pending operation: u7-168-pending-edit-log"),
+		)
+		await provider.dispose()
 	})
 
 	describe("loadViewState", () => {
