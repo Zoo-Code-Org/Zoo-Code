@@ -3,12 +3,7 @@
 import type * as vscode from "vscode"
 import type { WebviewMessage } from "@roo-code/types"
 
-import {
-	makeCompositeDisposable,
-	makeEventEmitter,
-	makeExtensionContext,
-	makeWorkspaceConfiguration,
-} from "../test-utils/vscode"
+import { makeCompositeDisposable, makeEventEmitter, makeExtensionContext } from "../test-utils/vscode"
 
 vi.mock("vscode", () => ({
 	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
@@ -639,33 +634,6 @@ describe("extension.ts", () => {
 			}
 		})
 
-		test("disposes the auth secret-storage listener when seeding rejects activation", async () => {
-			// A rejected seed aborts activation after the auth initializer has
-			// registered its secret-storage listener, and the host does not guarantee
-			// `deactivate()` after a failed activation, so the failure path must
-			// release the retained listener disposable itself.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
-			const dispose = vi.fn()
-			const authListener = { dispose }
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi.fn().mockResolvedValue(authListener),
-			}))
-			try {
-				const { activate } = await import("../extension")
-				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
-
-				// Retained for the success path (deactivate disposes subscriptions) and
-				// disposed on the failure path, exactly once, with the error propagated.
-				expect(mockContext.subscriptions).toContain(authListener)
-				expect(dispose).toHaveBeenCalledExactlyOnceWith()
-			} finally {
-				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
-			}
-		})
-
 		test("shuts down the telemetry service before propagating a seed rejection", async () => {
 			// The telemetry client is created and registered before the seed point,
 			// so a rejected seed must shut it down on the failure path: without
@@ -675,11 +643,6 @@ describe("extension.ts", () => {
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
 			// A never-settling shutdown: activation may only reject once the awaited
@@ -700,8 +663,8 @@ describe("extension.ts", () => {
 					rejected = true
 				})
 
-				// Both teardown steps run on the failure path, in order, exactly once.
-				await vi.waitFor(() => expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"]))
+				// The awaited teardown step runs on the failure path, exactly once.
+				await vi.waitFor(() => expect(teardownOrder).toEqual(["telemetry-shutdown"]))
 
 				// Still unrejected while the awaited shutdown is unsettled: the catch
 				// must not propagate the seed rejection before teardown completes.
@@ -712,7 +675,6 @@ describe("extension.ts", () => {
 			} finally {
 				shutdown.mockReset()
 				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
 			}
 		})
 
@@ -726,11 +688,6 @@ describe("extension.ts", () => {
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
 			// Distinct from the seed error so any masking of the seed rejection is visible.
@@ -750,156 +707,11 @@ describe("extension.ts", () => {
 				expect(channel?.appendLine).toHaveBeenCalledWith(
 					"Failed to shut down telemetry service: shutdown drain failed",
 				)
-				// Teardown still runs in order on this path: listener released before the shutdown call.
-				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"])
+				// The shutdown step still runs on this path.
+				expect(teardownOrder).toEqual(["telemetry-shutdown"])
 			} finally {
 				shutdown.mockReset()
 				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
-			}
-		})
-
-		test("disposes the network proxy resources when seeding rejects activation", async () => {
-			// The debug-proxy resources are initialized before the seed point, and the host
-			// does not guarantee `deactivate()` after a failed activation, so the failure path
-			// must release them too: a retained configuration listener would let a
-			// `debugProxy.*` toggle re-apply proxy configuration inside a dead extension.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
-			const teardownOrder: string[] = []
-			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
-			vi.doMock("../utils/networkProxy", () => ({
-				// The initializer resolves to the aggregate disposable covering the
-				// configuration listener, override cleanup, and fetch-patch restore.
-				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
-				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
-				isProxyEnabled: vi.fn().mockReturnValue(false),
-				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
-			}))
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
-			const { TelemetryService } = await import("@roo-code/telemetry")
-			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
-			shutdown.mockImplementation(() => {
-				teardownOrder.push("telemetry-shutdown")
-				return Promise.resolve()
-			})
-			try {
-				// Debug mode is the only mode in which the proxy initializer acquires
-				// resources, so it is the mode the failed-activation teardown applies to.
-				const vscode = await import("vscode")
-				const devContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
-
-				const { activate } = await import("../extension")
-				await expect(activate(devContext)).rejects.toThrow("seed state write failed")
-
-				// Strict reverse acquisition order: the proxy initializes first, telemetry
-				// second, the auth listener last, so teardown runs auth → telemetry → proxy,
-				// and the proxy disposable is released exactly once.
-				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown", "proxy-disposed"])
-				expect(proxyDispose).toHaveBeenCalledExactlyOnceWith()
-			} finally {
-				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
-				vi.doUnmock("../utils/networkProxy")
-			}
-		})
-
-		// When activation starts with the debug proxy disabled, only the configuration
-		// listener can build the undici dispatcher agent, so the failed-activation
-		// teardown must own that listener-created resource. This runs the real
-		// initializer with undici/global-agent doubles swapped in and gates the seed
-		// rejection until the listener-path install has settled, so the close is
-		// observed through the aggregate dispose rather than the late-import guard.
-		test("closes the listener-created proxy agent when seeding rejects after a mid-session enable", async () => {
-			let rejectSeed: () => void = () => {}
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn(
-					() =>
-						new Promise<void>((_resolve, reject) => {
-							rejectSeed = () => reject(new Error("seed state write failed"))
-						}),
-				),
-			}))
-			const closeSpy = vi.fn().mockResolvedValue(undefined)
-			const proxyAgentCtor = vi.fn().mockImplementation(function () {
-				return { close: closeSpy }
-			})
-			// The slot double mirrors undici's global dispatcher state so the conditional
-			// restore is observable on this teardown path.
-			const defaultDispatcher = { close: vi.fn().mockResolvedValue(undefined) }
-			const dispatcherSlot: { current: unknown } = { current: defaultDispatcher }
-			const setGlobalDispatcher = vi.fn((dispatcher: unknown) => {
-				dispatcherSlot.current = dispatcher
-			})
-			const getGlobalDispatcher = vi.fn(() => dispatcherSlot.current)
-			vi.doMock("undici", () => ({
-				ProxyAgent: proxyAgentCtor,
-				setGlobalDispatcher,
-				getGlobalDispatcher,
-				fetch: vi.fn(),
-			}))
-			vi.doMock("global-agent", () => ({ bootstrap: vi.fn() }))
-			try {
-				const vscode = await import("vscode")
-				const { Package } = await import("../shared/package")
-				let configListener:
-					((event: { affectsConfiguration: (section: string) => boolean }) => void) | undefined
-				vi.mocked(vscode.workspace.onDidChangeConfiguration).mockImplementation((listener) => {
-					configListener = listener as typeof configListener
-					return { dispose: vi.fn() }
-				})
-				// Mutable so flipping enabled=true re-reads exactly like a live settings
-				// toggle: the helper's get() reads the record at call time.
-				const debugProxyValues: Record<string, unknown> = {
-					"debugProxy.enabled": false,
-					"debugProxy.serverUrl": "http://localhost:8080",
-					"debugProxy.tlsInsecure": false,
-				}
-				const otherSections = makeWorkspaceConfiguration()
-				vi.mocked(vscode.workspace.getConfiguration).mockImplementation((section?: string) =>
-					section === Package.name ? makeWorkspaceConfiguration(debugProxyValues) : otherSections,
-				)
-				const fetchBefore = globalThis.fetch
-				try {
-					const devContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
-					const { activate } = await import("../extension")
-					const activation = activate(devContext)
-
-					// Activation has registered the configuration listener and reached the
-					// gated seed: flip the toggle on, as a mid-session settings change would.
-					await vi.waitFor(() => expect(configListener).toBeTypeOf("function"))
-					debugProxyValues["debugProxy.enabled"] = true
-					configListener?.({ affectsConfiguration: () => true })
-					// The listener-path agent is installed before the seed failure arrives, so
-					// the teardown below closes an installed agent, not a late-import one.
-					await vi.waitFor(() => expect(setGlobalDispatcher).toHaveBeenCalledOnce())
-
-					rejectSeed()
-					await expect(activation).rejects.toThrow("seed state write failed")
-
-					// The aggregate owned the listener-created agent: the dispatcher captured
-					// at install is back in the slot and the agent closed exactly once.
-					expect(dispatcherSlot.current).toBe(defaultDispatcher)
-					expect(setGlobalDispatcher).toHaveBeenLastCalledWith(defaultDispatcher)
-					expect(closeSpy).toHaveBeenCalledOnce()
-					// The fetch patch the listener applied is restored by the same teardown.
-					expect(globalThis.fetch).toBe(fetchBefore)
-				} finally {
-					globalThis.fetch = fetchBefore
-					delete process.env.GLOBAL_AGENT_HTTP_PROXY
-					delete process.env.GLOBAL_AGENT_HTTPS_PROXY
-					delete process.env.GLOBAL_AGENT_NO_PROXY
-				}
-			} finally {
-				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("undici")
-				vi.doUnmock("global-agent")
 			}
 		})
 
@@ -912,20 +724,6 @@ describe("extension.ts", () => {
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
-			vi.doMock("../utils/networkProxy", () => ({
-				// The mock returns the aggregate disposable unconditionally; the
-				// mode-gating of the real initializer is pinned in its own spec.
-				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
-				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
-				isProxyEnabled: vi.fn().mockReturnValue(false),
-				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
-			}))
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
 			shutdown.mockImplementation(() => {
@@ -944,14 +742,9 @@ describe("extension.ts", () => {
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
 				// Strict reverse acquisition: the channel was acquired first, so it is
-				// disposed after auth, telemetry, and the proxy — every teardown log
-				// line was still writable when those steps ran.
-				expect(teardownOrder).toEqual([
-					"auth-listener-disposed",
-					"telemetry-shutdown",
-					"proxy-disposed",
-					"channel-disposed",
-				])
+				// disposed after the telemetry shutdown — every teardown log line was
+				// still writable when that step ran.
+				expect(teardownOrder).toEqual(["telemetry-shutdown", "channel-disposed"])
 				expect(channel.dispose).toHaveBeenCalledExactlyOnceWith()
 				// Still registered for the normal deactivate path; the failure-path
 				// dispose must not have replaced the subscription push.
@@ -959,8 +752,6 @@ describe("extension.ts", () => {
 			} finally {
 				shutdown.mockReset()
 				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
-				vi.doUnmock("../utils/networkProxy")
 			}
 		})
 
@@ -974,20 +765,6 @@ describe("extension.ts", () => {
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			const proxyDispose = vi.fn(() => void teardownOrder.push("proxy-disposed"))
-			vi.doMock("../utils/networkProxy", () => ({
-				// The mock returns the aggregate disposable unconditionally; the
-				// mode-gating of the real initializer is pinned in its own spec.
-				initializeNetworkProxy: vi.fn().mockResolvedValue({ dispose: proxyDispose }),
-				getSystemProxyUrl: vi.fn().mockReturnValue(undefined),
-				isProxyEnabled: vi.fn().mockReturnValue(false),
-				createProxyRoutingRequestHandler: vi.fn().mockReturnValue(undefined),
-			}))
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
 			// Only the teardown call is an order marker: installation passes the
 			// channel-logging sink, while clearing passes undefined — the setter's
 			// documented way to restore the default console sink.
@@ -1017,17 +794,11 @@ describe("extension.ts", () => {
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// Reverse acquisition order pins the clear between the proxy release
-				// and the channel dispose: the sink was installed after the channel
-				// it logs through but before the proxy, so it is released after the
-				// proxy — and before the channel, which goes last.
-				expect(teardownOrder).toEqual([
-					"auth-listener-disposed",
-					"telemetry-shutdown",
-					"proxy-disposed",
-					"trace-sink-cleared",
-					"channel-disposed",
-				])
+				// Reverse acquisition order: the sink was installed after the channel
+				// it logs through but before the telemetry client, so it is cleared
+				// after the telemetry shutdown — and before the channel, which goes
+				// last.
+				expect(teardownOrder).toEqual(["telemetry-shutdown", "trace-sink-cleared", "channel-disposed"])
 				// Exactly the install call and the clear: the failure path neither
 				// skips the clear nor repeats it.
 				expect(setPersistenceTraceSink).toHaveBeenCalledTimes(2)
@@ -1036,42 +807,7 @@ describe("extension.ts", () => {
 			} finally {
 				shutdown.mockReset()
 				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
-				vi.doUnmock("../utils/networkProxy")
 				vi.doUnmock("../core/task-persistence/persistenceTrace")
-			}
-		})
-
-		test("propagates the seed rejection when the proxy initializer acquired nothing", async () => {
-			// Outside debug mode the real initializer returns a no-op disposable, so the
-			// failed-activation teardown on the catch path must stay harmless: auth and
-			// telemetry still tear down, and the seed error still reaches the host.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
-			const teardownOrder: string[] = []
-			vi.doMock("../services/zoo-code-auth", () => ({
-				initZooCodeAuth: vi
-					.fn()
-					.mockResolvedValue({ dispose: () => void teardownOrder.push("auth-listener-disposed") }),
-			}))
-			const { TelemetryService } = await import("@roo-code/telemetry")
-			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
-			shutdown.mockImplementation(() => {
-				teardownOrder.push("telemetry-shutdown")
-				return Promise.resolve()
-			})
-			try {
-				// mockContext carries no Development extensionMode, so the unmocked
-				// initializer takes its early return and acquires nothing.
-				const { activate } = await import("../extension")
-				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
-
-				expect(teardownOrder).toEqual(["auth-listener-disposed", "telemetry-shutdown"])
-			} finally {
-				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
-				vi.doUnmock("../services/zoo-code-auth")
 			}
 		})
 

@@ -135,10 +135,8 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize network proxy configuration early, before any network requests.
 	// When proxyUrl is configured, all HTTP/HTTPS traffic will be routed through it.
-	// Only applied in debug mode (F5). The returned disposable covers the debug-proxy
-	// resources; keep it for both the normal deactivate path and the failed-activation
-	// path below.
-	const proxyResources = await initializeNetworkProxy(context, outputChannel)
+	// Only applied in debug mode (F5).
+	await initializeNetworkProxy(context, outputChannel)
 
 	// Set extension path for custom tool registry to find bundled esbuild
 	customToolRegistry.setExtensionPath(context.extensionPath)
@@ -170,11 +168,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	kimiCodeOAuthManager.initialize(context)
 
 	// Initialize Zoo Code auth service for extension session token management.
-	// The returned disposable unregisters the secret-storage listener the
-	// initializer acquires; keep it for both the normal deactivate path and the
-	// failed-activation path below.
-	const authSecretsListener = await initZooCodeAuth(context)
-	context.subscriptions.push(authSecretsListener)
+	await initZooCodeAuth(context)
 
 	// Seed before the terminal registry is initialized: a rejected seed must
 	// abort activation while the registry holds no resources, because its
@@ -188,29 +182,20 @@ export async function activate(context: vscode.ExtensionContext) {
 		await seedCommandList(context.globalState, "deniedCommands")
 	} catch (error) {
 		// Activation aborts here, and `deactivate()` is not guaranteed to run
-		// afterward, so this catch is the only teardown for everything
-		// initialized before the seed point: release the secret-storage
-		// listener, shut down the telemetry client registered above, release
-		// the debug-proxy resources, clear the persistence trace sink, and
-		// dispose the output channel — in strict reverse acquisition order
-		// (auth was acquired last, the output channel first), each step
-		// disposed only after the previous one settles.
-		// Teardown failures are logged rather than rethrown so they cannot mask
-		// the seed rejection; the telemetry service bounds its own drain and
-		// client-flush phases, so a stuck client cannot hang the host here.
-		authSecretsListener.dispose()
+		// afterward, so this catch performs its own teardown before rethrowing:
+		// shut down the telemetry client registered above, clear the
+		// persistence trace sink, and dispose the output channel — in reverse
+		// of the order those three were acquired (the output channel was
+		// first), each step run only after the previous one settles.
+		// Teardown failures are logged or dropped, never rethrown, so they
+		// cannot mask the seed rejection; the telemetry service bounds its own
+		// drain and client-flush phases, so a stuck client cannot hang the
+		// host here.
 		try {
 			await telemetryService.shutdown()
 		} catch (shutdownError) {
 			outputChannel.appendLine(
 				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
-			)
-		}
-		try {
-			proxyResources.dispose()
-		} catch (disposeError) {
-			outputChannel.appendLine(
-				`Failed to dispose network proxy resources: ${disposeError instanceof Error ? disposeError.message : String(disposeError)}`,
 			)
 		}
 		// The persistence trace sink installed above writes its lines through
