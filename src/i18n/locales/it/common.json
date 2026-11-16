@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Sei sicuro di voler reimpostare tutti gli stati e l'archiviazione segreta nell'estensione? Questa azione non può essere annullata.",
-		"delete_config_profile": "Sei sicuro di voler eliminare questo profilo di configurazione?"
+		"delete_config_profile": "Sei sicuro di voler eliminare questo profilo di configurazione?",
+		"requesty_deep_link": "Attivare le credenziali Requesty da un link esterno?",
+		"requesty_deep_link_detail": "Questo sostituirà il provider attivo. Le richieste successive possono inviare il contenuto della conversazione e dell'area di lavoro a:\n{{url}}\n\nContinua solo se hai richiesto queste credenziali e consideri affidabile questa destinazione."
 	},
 	"errors": {
 		"invalid_data_uri": "Formato URI dati non valido",
@@ -126,6 +128,7 @@
 		"rooHistoryImport": {
 			"nothingFound": "Nessuna cronologia di attività Roo Code trovata da importare da {{domain}}.",
 			"alreadyImported_one": "La cronologia di {{count}} attività Roo Code è già stata importata in Zoo Code.",
+			"alreadyImported_many": "Tutte le {{count}} cronologie di attività Roo Code sono già state importate in Zoo Code.",
 			"alreadyImported_other": "Tutte le {{count}} cronologie di attività Roo Code sono già state importate in Zoo Code."
 		}
 	},
@@ -144,11 +147,13 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "Importata {{count}} cronologia di attività Roo Code in Zoo Code.",
+			"success_many": "Importate {{count}} cronologie di attività Roo Code in Zoo Code.",
 			"success_other": "Importate {{count}} cronologie di attività Roo Code in Zoo Code."
 		}
 	},
 	"answers": {
-		"yes": "Sì"
+		"yes": "Sì",
+		"activate_requesty": "Attiva Requesty"
 	},
 	"buttons": {
 		"learn_more": "Scopri di più"

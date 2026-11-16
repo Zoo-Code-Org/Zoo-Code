@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils"
-import { t } from "i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ArrowRight, Check, ListChecks, SquareDashed } from "lucide-react"
 import { useState, useRef, useMemo, useEffect } from "react"
 
@@ -18,6 +18,7 @@ function getTodoIcon(status: TodoStatus | null) {
 
 export function TodoListDisplay({ todos }: { todos: any[] }) {
 	const [isCollapsed, setIsCollapsed] = useState(true)
+	const { t } = useAppTranslation()
 	const ulRef = useRef<HTMLUListElement>(null)
 	const itemRefs = useRef<(HTMLLIElement | null)[]>([])
 	const scrollIndex = useMemo(() => {
