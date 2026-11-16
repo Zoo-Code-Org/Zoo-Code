@@ -3673,6 +3673,73 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl", "aws"])
 	})
+
+	it("retains a baseline entry only the configuration global layer still holds", async () => {
+		// The dialog displayed "curl" and the user kept it, but the extension-
+		// state copy the retained-entry check consults is never refreshed by a
+		// direct settings-file edit, so only the save-start configuration
+		// global layer still holds the entry. A check limited to the state copy
+		// and the workspace layer treats the entry as externally removed and
+		// drops it, and the Global write then deletes it from the user's
+		// settings file despite the user having kept it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration({ globalValue: ["curl"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			commandListBaseline: { deniedCommands: ["curl"], workspaceCommandListsEnabled: true },
+		})
+
+		// The retained entry survives the split and the Global write rewrites
+		// the layer that still holds it, instead of clearing it.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// A kept entry the dialog displayed is retention, not a file-side
+		// change to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl"])
+	})
+
+	it("preserves a configuration-global entry the dialog displayed at the workspace scope", async () => {
+		// The user added "docker" to the user-level list in settings.json while
+		// the dialog was open, and the dialog displayed the same entry from the
+		// workspace layer. The split classifies kept entries against the global
+		// origin set; sourced only from the lagging state copy, it misses the
+		// configuration's own global layer, so "docker" - existing knowledge,
+		// never routed as new - is dropped from the Global write, deleting it
+		// from the user's settings file. The unioned origin set keeps it in the
+		// layer the save-start snapshot found it in, in that layer's order
+		// ahead of the dialog-ordered new entry "aws".
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{ globalValue: ["docker"], workspaceValue: ["docker"] },
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: true },
+		})
+
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		// The workspace layer holds the entry too, and a kept entry present in
+		// both layers stays in both.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		// The displayed entry was kept, not added by the file: no warning.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"])
+	})
 })
 
 describe("webviewMessageHandler - terminalProfile", () => {

@@ -946,14 +946,20 @@ export const webviewMessageHandler = async (
 						// newness — a retained entry that no layer still holds was
 						// removed in the file, and external removal wins over the stale
 						// dialog buffer, mirroring how the external-addition re-admit
-						// above lets the file win over a stale deletion. Entries absent
-						// from the baseline keep their promotion path untouched.
+						// above lets the file win over a stale deletion. "No layer"
+						// covers the same layers as that re-admit union, including the
+						// configuration's own global layer: the extension-state copy is
+						// not refreshed when the settings file is edited directly, so a
+						// retained entry only that layer still holds has not been
+						// removed. Entries absent from the baseline keep their promotion
+						// path untouched.
 						const splitSourceEntries = Array.isArray(baseline)
 							? [...incoming, ...externallyAdded].filter(
 									(entry) =>
 										!baseline.includes(entry) ||
 										currentScopes.workspace.includes(entry) ||
-										currentScopes.global.includes(entry),
+										currentScopes.global.includes(entry) ||
+										configGlobalAtSaveStart.includes(entry),
 								)
 							: [...incoming, ...externallyAdded]
 						// The baseline also carries the gate as the dialog last displayed
@@ -981,7 +987,12 @@ export const webviewMessageHandler = async (
 							// shows the dialog did display. The re-add below restores
 							// the hidden entries this reduced layer drops.
 							currentScopes.workspace.filter((entry) => !promotionHiddenEntries.includes(entry)),
-							currentScopes.global,
+							// The global origin set decides which kept entries the Global
+							// write preserves, so it must cover the same layers as the
+							// retained-entry filter above: an entry only the
+							// configuration's own global layer holds is existing global
+							// knowledge even when the extension-state copy lags behind.
+							[...new Set([...currentScopes.global, ...configGlobalAtSaveStart])],
 						)
 
 						// The hidden set holds entries the dialog could not display,
