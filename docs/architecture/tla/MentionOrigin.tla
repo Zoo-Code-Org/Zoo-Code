@@ -1,27 +1,32 @@
 ---- MODULE MentionOrigin ----
 \* Models applyEdit in src/shared/mentionSegments.ts. The webview calls it on each input event.
 \* Source: text typed by the user. Sink: expandUserMentions expands each user-tagged letter.
-\* Failure: the tags mark more letters as user than the user typed. Generated text then expands.
-\* Invariant: NoOverTagging. User-tagged letters never exceed user-typed letters.
+\* Failure: a letter the user did not type is tagged user. Generated text then expands.
+\* Invariant: NoGeneratedTagged. A letter tagged user is a letter the user typed.
+\* It replaces a count check (user tags <= typed letters). This form implies the count check.
 \* Expected before the run: the edits hold. A change of two ranges would fail with generated text between them.
 \* Result, MaxLen 3: the code retagger FAILS in 3 states. The Both retagger holds in 22,990 states.
-\* MaxLen 4 gives the same verdicts. It holds in 811,914 states and takes 4 minutes.
-\* Prompt history: History AsEdit (restore through applyEdit) fails in 3 states. History Saved holds.
 \* Not modeled: a change of two ranges in one event. It fails with either retagger. A textarea cannot send it.
 \* Replay: paste "@/x" before generated "@/x", then replace the first typed "@". The generated copy turns user.
 \* The finding is real in applyEdit. The fix runs the diff from both ends and keeps "u" only where both agree.
-\* Property test: mentionSegments.spec.ts, "never tags more letters user than the user typed". It fails on the old code.
+\* Property test: mentionSegments.spec.ts, "never tags a generated letter user". It fails on the old code.
+\* Restore: History sets how prompt history and native undo restore a saved draft.
+\* AsEdit (restore through applyEdit) fails in 3 states. Saved holds, and the history hook does this.
+\* Keeping the retained tags and tagging only the new text also fails in 5 states, so undo cannot use it.
+\* AllGenerated (the whole draft turns generated) holds in 26,864 states. ChatTextArea does this for historyUndo.
+\* Tests: ChatTextArea.spec.tsx (history input types) and ChatView.clear-approval-buttons.spec.tsx (delete, undo, send).
+\* Cost of AllGenerated: after an undo or redo the user must retype a mention that was in the draft.
 \* Not modeled: normalizeSegments (the text match check), merge, trim and the host expansion.
-\* Each config sets History. The fixed config is MentionOrigin.cfg. Variants: .Code, .History.
+\* Configs: MentionOrigin.cfg must pass. Must fail: .Code, .History. Must pass: .AllGenerated.
 \* Cost: each run takes under 10 seconds at MaxLen 3. Agent time is not measured.
-\* Review: 0 covered, 1 added (history restore, PR 2421, fixed in 2d6c62ed15), 0 gap.
+\* Review: 0 covered, 3 added (history restore, per-position form, native undo; PR 2421), 0 gap.
 \* The first version came after the code and the reviews. It is not an independent first pass.
 \* No review thread named the equal-letter failure. TLC found it.
 
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANTS Alphabet, MaxLen, MaxInit, Retagger, History
-\* Retagger: "Code" or "Both". History: "Saved" or "AsEdit".
+\* Retagger: "Code" or "Both". History: "Saved", "AsEdit" or "AllGenerated".
 
 VARIABLES text, tags, snap   \* text: letters with true origin. tags: the "u" or "g" flag per letter.
 
@@ -81,8 +86,11 @@ Save == snap' = [t |-> text, g |-> tags] /\ UNCHANGED <<text, tags>>
 
 Restore ==
     /\ snap # <<>>
+    /\ Letters(snap.t) # Letters(text)
     /\ text' = snap.t
-    /\ tags' = IF History = "Saved" THEN snap.g ELSE Retag(Letters(text), tags, Letters(snap.t))
+    /\ tags' = CASE History = "Saved"  -> snap.g
+             [] History = "AsEdit" -> Retag(Letters(text), tags, Letters(snap.t))
+             [] OTHER              -> [p \in 1..Len(snap.t) |-> "g"]
     /\ UNCHANGED snap
 
 Change == \E t \in Edits(text) :
@@ -96,8 +104,7 @@ Spec == Init /\ [][Next]_vars
 
 TypeOK == snap \in {<<>>} \cup [t : Seqs(Cell, MaxLen), g : Seqs(Origins, MaxLen)] /\ text \in Seqs(Cell, MaxLen) /\ tags \in Seqs(Origins, MaxLen) /\ Len(tags) = Len(text)
 
-\* Safety: the host never expands more letters than the user typed.
-NoOverTagging ==
-    Cardinality({p \in 1..Len(tags) : tags[p] = "u"}) <= Cardinality({p \in 1..Len(text) : text[p].o = "u"})
+\* Safety: a generated letter is never tagged user. The bot thread on PR 2421 asked for this per-position form.
+NoGeneratedTagged == \A p \in 1..Len(tags) : tags[p] = "u" => text[p].o = "u"
 
 ====

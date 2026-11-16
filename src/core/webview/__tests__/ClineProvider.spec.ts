@@ -28,6 +28,8 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { defaultModeSlug } from "../../../shared/modes"
+import { joinSegments } from "../../../shared/mentionSegments"
+import type { MentionSegment } from "@roo-code/types"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -433,6 +435,18 @@ const noUserSegments = {
 	asymmetricMatch: (value: unknown) =>
 		Array.isArray(value) && value.length > 0 && value.every((segment) => segment?.source === "generated"),
 	toString: () => "onlyGeneratedSegments",
+}
+
+// The text equals the joined parts, and only the typed input is a user part.
+// The generated context holds a mention and stays generated.
+function expectMixedPayload(call: unknown[], context: string, sources: MentionSegment["source"][]) {
+	const [text, , , options] = call as [string, unknown, unknown, { segments: MentionSegment[] }]
+	const { segments } = options
+	expect(joinSegments(segments)).toBe(text)
+	expect(segments.map((s) => s.source)).toEqual(sources)
+	expect(segments.filter((s) => s.source === "user")).toEqual([{ text: "@/allowed", source: "user" }])
+	expect(segments.filter((s) => s.source === "generated").some((s) => s.text.includes(context))).toBe(true)
+	expect(segments.filter((s) => s.source === "user").some((s) => s.text.includes("@/generated"))).toBe(false)
 }
 
 describe("ClineProvider", () => {
@@ -1071,13 +1085,14 @@ describe("ClineProvider", () => {
 				const createTask = vi.spyOn(provider, "createTask").mockResolvedValue(task)
 				try {
 					await provider.handleCodeAction(command, promptType, {
-						selectedText: "selected code",
+						selectedText: "selected @/generated",
 						userInput: "@/allowed",
 					})
-					// A regression that always sends "" would fail this assertion.
-					expect(createTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
-						segments: expect.arrayContaining([{ text: "@/allowed", source: "user" }]),
-					})
+					expectMixedPayload(createTask.mock.calls[0], "selected @/generated", [
+						"generated",
+						"user",
+						"generated",
+					])
 				} finally {
 					createTask.mockRestore()
 				}
@@ -1092,13 +1107,11 @@ describe("ClineProvider", () => {
 				// No chat focus fired, so the last registered visible provider
 				// (the tab) receives the task, as in the fallback test above.
 				await ClineProvider.handleTerminalAction("terminalFixCommand", "TERMINAL_FIX", {
+					terminalContent: "output @/generated",
 					userInput: "@/allowed",
 				})
-				// A regression that always sends "" would fail this assertion.
 				expect(tabTask).toHaveBeenCalledOnce()
-				expect(tabTask).toHaveBeenCalledWith(expect.any(String), undefined, undefined, {
-					segments: expect.arrayContaining([{ text: "@/allowed", source: "user" }]),
-				})
+				expectMixedPayload(tabTask.mock.calls[0], "output @/generated", ["user", "generated"])
 				expect(sidebarTask).not.toHaveBeenCalled()
 			} finally {
 				sidebarTask.mockRestore()

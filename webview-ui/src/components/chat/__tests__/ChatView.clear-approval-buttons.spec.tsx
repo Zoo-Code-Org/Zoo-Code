@@ -264,6 +264,40 @@ describe("ChatView approval button behavior", () => {
 				}),
 			)
 		})
+
+		it("keeps generated text generated after the user deletes it and undoes", async () => {
+			const { getByText, getByRole } = renderChatView()
+
+			await act(async () => {
+				hydrateState(askMessages("command"))
+			})
+			await waitFor(() => expect(getByText(RUN_BUTTON_LABEL)).toBeInTheDocument())
+
+			await act(async () => {
+				await generated()
+			})
+			await waitFor(() => expect(getByRole("textbox")).toHaveValue("ctx @/secret"))
+			await act(async () => {
+				fireEvent.input(getByRole("textbox"), { target: { value: "" }, inputType: "deleteContentBackward" })
+			})
+			await act(async () => {
+				fireEvent.input(getByRole("textbox"), {
+					target: { value: "ctx @/secret" },
+					inputType: "historyUndo",
+				})
+			})
+			await act(async () => {
+				fireEvent.click(getByText(RUN_BUTTON_LABEL))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					text: "ctx @/secret",
+					segments: [{ text: "ctx @/secret", source: "generated" }],
+				}),
+			)
+		})
 	})
 
 	it("never shows Run/Deny buttons when the command ask is already answered (auto-approved)", async () => {

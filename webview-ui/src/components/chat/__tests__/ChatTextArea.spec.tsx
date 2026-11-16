@@ -709,6 +709,36 @@ describe("ChatTextArea", () => {
 				expect(setInputValueWithSegments).toHaveBeenLastCalledWith("ctx @/a", draft)
 			})
 
+			it.each([
+				{ inputType: "historyUndo", generated: true },
+				{ inputType: "historyRedo", generated: true },
+				{ inputType: "insertText", generated: false },
+			])("marks the draft generated only for $inputType: $generated", ({ inputType, generated }) => {
+				const setInputValue = vi.fn()
+				const setInputValueWithSegments = vi.fn()
+				const { container } = render(
+					<ChatTextArea
+						{...defaultProps}
+						inputValue=""
+						setInputValue={setInputValue}
+						setInputValueWithSegments={setInputValueWithSegments}
+					/>,
+				)
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.input(textarea, { target: { value: "ctx @/secret" }, inputType })
+
+				if (generated) {
+					expect(setInputValueWithSegments).toHaveBeenCalledWith("ctx @/secret", [
+						{ text: "ctx @/secret", source: "generated" },
+					])
+					expect(setInputValue).not.toHaveBeenCalled()
+				} else {
+					expect(setInputValue).toHaveBeenCalledWith("ctx @/secret")
+					expect(setInputValueWithSegments).not.toHaveBeenCalled()
+				}
+			})
+
 			it("should navigate through history with multiple arrow up presses", () => {
 				const setInputValue = vi.fn()
 				const { container } = render(

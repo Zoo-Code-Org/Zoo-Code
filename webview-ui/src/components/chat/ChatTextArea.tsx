@@ -4,6 +4,7 @@ import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
 import type { ExtensionMessage, MentionSegment } from "@roo-code/types"
+import { generatedSegments } from "@roo/mentionSegments"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -633,7 +634,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleInputChange = useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const newValue = e.target.value
-				if (programmaticInsertRef.current) {
+				const inputType = e.nativeEvent instanceof InputEvent ? e.nativeEvent.inputType : ""
+				if (setInputValueWithSegments && inputType.startsWith("history")) {
+					// Undo and redo bring back older text with unknown origin. The whole draft is generated.
+					setInputValueWithSegments(newValue, generatedSegments(newValue))
+				} else if (programmaticInsertRef.current) {
 					programmaticInsertRef.current = false
 					setInputValueProgrammatic(newValue)
 				} else {
@@ -703,6 +708,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[
 				setInputValue,
 				setInputValueProgrammatic,
+				setInputValueWithSegments,
 				setSearchRequestId,
 				setFileSearchResults,
 				setSearchLoading,

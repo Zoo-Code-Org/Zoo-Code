@@ -87,8 +87,8 @@ describe("mentionSegments", () => {
 			expect(twice.filter((s) => s.source === "user").map((s) => s.text)).toEqual(["x"])
 		})
 
-		// Mirrors docs/architecture/tla/MentionOrigin.tla: user-tagged letters never exceed typed letters.
-		it("never tags more letters user than the user typed, for every single edit of up to two steps", () => {
+		// Mirrors docs/architecture/tla/MentionOrigin.tla: a letter tagged user is a letter the user typed.
+		it("never tags a generated letter user, for every single edit of up to two steps", () => {
 			type Cell = { c: string; o: "user" | "generated" }
 			const letters = ["a", "b"]
 			const words = (n: number): string[] =>
@@ -110,9 +110,11 @@ describe("mentionSegments", () => {
 				)
 			const toText = (cells: Cell[]) => cells.map((x) => x.c).join("")
 			const check = (cells: Cell[], segments: MentionSegment[], depth: number) => {
-				const typed = cells.filter((x) => x.o === "user").length
-				const tagged = joinSegments(segments.filter((s) => s.source === "user")).length
-				expect(tagged).toBeLessThanOrEqual(typed)
+				const sources = segments.flatMap((s) => Array.from(s.text, () => s.source))
+				expect(sources).toHaveLength(cells.length)
+				sources.forEach((source, i) => {
+					if (source === "user") expect(cells[i]!.o).toBe("user")
+				})
 				if (depth === 0) return
 				for (const next of edits(cells).filter((c) => c.length <= 5)) {
 					check(next, applyEdit(segments, toText(cells), toText(next)), depth - 1)
