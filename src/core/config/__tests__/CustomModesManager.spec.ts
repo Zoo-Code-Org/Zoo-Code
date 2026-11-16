@@ -882,6 +882,38 @@ describe("CustomModesManager", () => {
 			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "invalid" }])
 			expect(snapshot.definitions.map((mode) => mode.slug)).toEqual(["project-only"])
 		})
+
+		it("keeps a transient existence probe from emptying the file it snapshots", async () => {
+			// The probe that guards creation reports the file missing while it still holds a
+			// definition, which is what a transient failure looks like. A snapshot that creates on
+			// that probe writes an empty definition list over the real one and then snapshots the
+			// emptiness it just produced, so the rollback would restore nothing over definitions.
+			const persistedMode = {
+				slug: "persisted-mode",
+				name: "Persisted",
+				roleDefinition: "r",
+				groups: ["read"] as const,
+			}
+			const original = yaml.stringify({ customModes: [persistedMode] })
+			const files: Record<string, string> = { [mockSettingsPath]: original }
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				const content = files[filePath]
+				if (content === undefined) {
+					throw enoent()
+				}
+				return content
+			})
+			;(fs.writeFile as Mock).mockImplementation(async (filePath: string, content: string) => {
+				files[filePath] = content
+			})
+			;(fileExistsAtPath as Mock).mockImplementation(async (filePath: string) => filePath !== mockSettingsPath)
+
+			const snapshot = await manager.getCustomModeDefinitions(["persisted-mode"])
+
+			expect(snapshot.definitions.map((mode) => mode.slug)).toEqual(["persisted-mode"])
+			expect(snapshot.failures).toEqual([])
+			expect(files[mockSettingsPath]).toBe(original)
+		})
 	})
 	describe("updateModesInFile", () => {
 		it("handles corrupted YAML content gracefully", async () => {

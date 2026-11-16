@@ -314,6 +314,19 @@ export class CustomModesManager {
 		return filePath
 	}
 
+	/**
+	 * The global modes file path, resolved without the create-if-missing write that
+	 * `getCustomModesFilePath` performs. A rollback snapshot is a read. A create driven by a
+	 * transient existence probe would empty the very file the snapshot is about to read: the
+	 * snapshot then reports an empty definition list that it caused, and the rollback would
+	 * restore that emptiness over definitions that were there.
+	 */
+	private async getCustomModesFilePathWithoutCreating(): Promise<string> {
+		const settingsDir = await ensureSettingsDirectoryExists(this.context)
+
+		return path.join(settingsDir, GlobalFileNames.customModes)
+	}
+
 	private async watchCustomModesFiles(): Promise<void> {
 		// Skip if test environment is detected
 		if (process.env.NODE_ENV === "test") {
@@ -421,7 +434,8 @@ export class CustomModesManager {
 	 */
 	public async getCustomModeDefinitions(slugs: readonly string[]): Promise<CustomModesSnapshot> {
 		const wanted = new Set(slugs)
-		const settingsPath = await this.getCustomModesFilePath()
+		// A snapshot must not be the thing that changes the file it is snapshotting.
+		const settingsPath = await this.getCustomModesFilePathWithoutCreating()
 		const roomodesPath = await this.getWorkspaceRoomodes()
 
 		const reads: Array<{ path: string; source: "project" | "global"; read: ModeFileRead }> = []
