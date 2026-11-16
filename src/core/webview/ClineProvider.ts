@@ -3055,6 +3055,15 @@ export class ClineProvider
 					}
 
 					await this.providerSettingsManager.setModeConfig(mode, previousModeConfigId as string)
+					// The durable binding is only half of the undo. This view answers getModeConfigId
+					// from its own cache whenever the cached profile is still in the list, so an entry left
+					// holding the failed activation profile keeps naming the profile whose activation failed
+					// even after the binding is restored: undo the cache entry with the write it came from.
+					if (previousModeConfigId === undefined) {
+						this.localModeConfigIds.delete(mode)
+					} else {
+						this.localModeConfigIds.set(mode, previousModeConfigId)
+					}
 				})
 				await restore("shared provider settings", async () => {
 					if (this.contextProxy.getStateWriteGeneration("apiProvider") !== expectedApiProviderGeneration) {

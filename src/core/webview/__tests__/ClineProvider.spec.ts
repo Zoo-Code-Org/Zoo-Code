@@ -7331,6 +7331,64 @@ describe("ClineProvider", () => {
 			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
 		}
 
+		// The rollback restored the durable binding but left this view answering getModeConfigId
+		// from its own cache, which still named the profile whose activation failed.
+		it("restores this view's cached mode binding together with the durable binding", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			await provider.contextProxy.setProviderSettings({ apiProvider: providerIdentifiers.anthropic })
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "prior-key",
+			}
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("next-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			// The mode starts bound to the prior profile; by the time the rollback runs the durable
+			// binding points at this activation's profile, which is what the restore must recognise
+			// as its own.
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockResolvedValueOnce("prior-id")
+				.mockResolvedValue("next-id")
+			const setModeConfig = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			// The mode binding write lands; the shared provider-settings write is what rejects.
+			vi.spyOn(provider.contextProxy, "setProviderSettings")
+				.mockRejectedValueOnce(new Error("provider settings write failed"))
+				.mockResolvedValue(undefined)
+
+			await expect(
+				provider["persistProviderProfile"](
+					"next-profile",
+					{ apiProvider: providerIdentifiers.openrouter, openRouterModelId: "new-model" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("provider settings write failed")
+
+			expect(setModeConfig).toHaveBeenNthCalledWith(1, "code", "next-id")
+			expect(setModeConfig).toHaveBeenNthCalledWith(2, "code", "prior-id")
+			// The durable binding is back on the prior profile, and so must this view's own answer be:
+			// getModeConfigId reads the per-view cache first and the failed profile is still listed,
+			// so an entry left behind keeps naming the profile whose activation failed even after the
+			// binding was restored.
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("prior-id")
+			await provider.dispose()
+		})
+
 		it("restores the shared writes when the per-view mirror rejects", async () => {
 			const provider = new ClineProvider(
 				mockContext,
