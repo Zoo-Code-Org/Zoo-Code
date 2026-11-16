@@ -1,5 +1,26 @@
 {
 	"greeting": "Добро пожаловать в Zoo Code!",
+	"modelPicker": {
+		"profile": "Профиль:",
+		"selectProfile": "Выбрать профиль",
+		"loadingProfile": "Загрузка профиля…",
+		"searchModels": "Поиск моделей",
+		"providerModels": "Модели текущего провайдера",
+		"modelSettingsHint": "Выбери модель в настройках профиля.",
+		"clearSearch": "Очистить поиск",
+		"reasoningEffort": "Глубина рассуждений",
+		"reasoningEffortValue": "Глубина рассуждений: {{effort}}",
+		"off": "Выкл.",
+		"effort": {
+			"none": "Без рассуждений",
+			"minimal": "Минимальная",
+			"low": "Низкая",
+			"medium": "Средняя",
+			"high": "Высокая",
+			"xhigh": "Очень высокая",
+			"max": "Максимальная"
+		}
+	},
 	"task": {
 		"title": "Задача",
 		"expand": "Развернуть задачу",

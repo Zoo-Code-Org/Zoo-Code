@@ -1,5 +1,26 @@
 {
 	"greeting": "Zoo Code में आपका स्वागत है!",
+	"modelPicker": {
+		"profile": "प्रोफ़ाइल:",
+		"selectProfile": "प्रोफ़ाइल चुनो",
+		"loadingProfile": "प्रोफ़ाइल लोड हो रही है…",
+		"searchModels": "मॉडल खोजो",
+		"providerModels": "मौजूदा प्रदाता के मॉडल",
+		"modelSettingsHint": "प्रोफ़ाइल सेटिंग में मॉडल चुनो।",
+		"clearSearch": "खोज साफ़ करो",
+		"reasoningEffort": "तर्क की गहराई",
+		"reasoningEffortValue": "तर्क की गहराई: {{effort}}",
+		"off": "बंद",
+		"effort": {
+			"none": "कोई नहीं",
+			"minimal": "न्यूनतम",
+			"low": "कम",
+			"medium": "मध्यम",
+			"high": "अधिक",
+			"xhigh": "बहुत अधिक",
+			"max": "अधिकतम"
+		}
+	},
 	"task": {
 		"title": "कार्य",
 		"expand": "कार्य विस्तृत करें",

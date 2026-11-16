@@ -1,5 +1,26 @@
 {
 	"greeting": "Selamat datang di Zoo Code!",
+	"modelPicker": {
+		"profile": "Profil:",
+		"selectProfile": "Pilih profil",
+		"loadingProfile": "Memuat profil…",
+		"searchModels": "Cari model",
+		"providerModels": "Model dari penyedia saat ini",
+		"modelSettingsHint": "Pilih model di pengaturan profil.",
+		"clearSearch": "Hapus pencarian",
+		"reasoningEffort": "Upaya penalaran",
+		"reasoningEffortValue": "Upaya penalaran: {{effort}}",
+		"off": "Nonaktif",
+		"effort": {
+			"none": "Tanpa penalaran",
+			"minimal": "Minimal",
+			"low": "Rendah",
+			"medium": "Sedang",
+			"high": "Tinggi",
+			"xhigh": "Sangat tinggi",
+			"max": "Maksimal"
+		}
+	},
 	"task": {
 		"title": "Tugas",
 		"expand": "Perluas tugas",

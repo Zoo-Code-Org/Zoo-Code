@@ -3,7 +3,7 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage } from "@roo-code/types"
+import { type ExtensionMessage, providerIdentifiers } from "@roo-code/types"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -23,10 +23,12 @@ import {
 import { cn } from "@src/lib/utils"
 import { convertToMentionPath } from "@src/utils/path-mentions"
 import { StandardTooltip } from "@src/components/ui"
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
+import { ProfileQuickSettings } from "./ProfileQuickSettings"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -90,6 +92,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 		const { t } = useAppTranslation()
 		const {
+			apiConfiguration,
 			filePaths,
 			openedTabs,
 			currentApiConfigName,
@@ -105,6 +108,22 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			enterBehavior,
 			lockApiConfigAcrossModes,
 		} = useExtensionState()
+		const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
+		const supportsEffort = selectedModelInfo?.supportsReasoningEffort
+		const hasEffort =
+			(apiConfiguration?.apiProvider === providerIdentifiers.openai &&
+				apiConfiguration.enableReasoningEffort === true) ||
+			supportsEffort === true ||
+			(Array.isArray(supportsEffort) && supportsEffort.length > 0)
+		const selectedEffort =
+			(apiConfiguration?.apiProvider === providerIdentifiers.openai
+				? apiConfiguration.openAiCustomModelInfo?.reasoningEffort
+				: apiConfiguration?.reasoningEffort) ?? selectedModelInfo?.reasoningEffort
+		const reasoningEffort =
+			hasEffort &&
+			(selectedModelInfo?.requiredReasoningEffort || apiConfiguration?.enableReasoningEffort !== false)
+				? selectedEffort
+				: undefined
 
 		// Find the ID and display text for the currently selected API configuration.
 		const { currentConfigId, displayName } = useMemo(() => {
@@ -1309,6 +1328,15 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						<ApiConfigSelector
 							value={currentConfigId}
 							displayName={displayName}
+							modelId={selectedModelId}
+							reasoningEffort={reasoningEffort}
+							quickSettings={(onModelSelected) => (
+								<ProfileQuickSettings
+									key={currentConfigId}
+									disabled={selectApiConfigDisabled}
+									onModelSelected={onModelSelected}
+								/>
+							)}
 							disabled={selectApiConfigDisabled}
 							title={t("chat:selectApiConfig")}
 							onChange={handleApiConfigChange}

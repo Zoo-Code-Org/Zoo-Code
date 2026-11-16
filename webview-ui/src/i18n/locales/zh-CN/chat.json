@@ -1,5 +1,26 @@
 {
 	"greeting": "欢迎使用 Zoo Code！",
+	"modelPicker": {
+		"profile": "配置：",
+		"selectProfile": "选择配置",
+		"loadingProfile": "正在加载配置…",
+		"searchModels": "搜索模型",
+		"providerModels": "当前提供商的模型",
+		"modelSettingsHint": "在配置设置中选择模型。",
+		"clearSearch": "清除搜索",
+		"reasoningEffort": "推理强度",
+		"reasoningEffortValue": "推理强度：{{effort}}",
+		"off": "关闭",
+		"effort": {
+			"none": "无",
+			"minimal": "最低",
+			"low": "低",
+			"medium": "中",
+			"high": "高",
+			"xhigh": "超高",
+			"max": "最高"
+		}
+	},
 	"task": {
 		"title": "任务",
 		"expand": "展开任务",

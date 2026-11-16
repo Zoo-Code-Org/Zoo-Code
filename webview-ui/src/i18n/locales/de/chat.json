@@ -1,5 +1,26 @@
 {
 	"greeting": "Willkommen bei Zoo Code!",
+	"modelPicker": {
+		"profile": "Profil:",
+		"selectProfile": "Profil auswählen",
+		"loadingProfile": "Profil wird geladen…",
+		"searchModels": "Modelle suchen",
+		"providerModels": "Modelle des aktuellen Anbieters",
+		"modelSettingsHint": "Wähle ein Modell in den Profileinstellungen aus.",
+		"clearSearch": "Suche leeren",
+		"reasoningEffort": "Denkaufwand",
+		"reasoningEffortValue": "Denkaufwand: {{effort}}",
+		"off": "Aus",
+		"effort": {
+			"none": "Keiner",
+			"minimal": "Minimal",
+			"low": "Niedrig",
+			"medium": "Mittel",
+			"high": "Hoch",
+			"xhigh": "Sehr hoch",
+			"max": "Maximal"
+		}
+	},
 	"task": {
 		"title": "Aufgabe",
 		"expand": "Aufgabe erweitern",

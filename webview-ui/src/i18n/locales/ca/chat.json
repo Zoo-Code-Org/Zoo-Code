@@ -1,5 +1,26 @@
 {
 	"greeting": "Benvingut a Zoo Code!",
+	"modelPicker": {
+		"profile": "Perfil:",
+		"selectProfile": "Tria un perfil",
+		"loadingProfile": "S'està carregant el perfil…",
+		"searchModels": "Cerca models",
+		"providerModels": "Models del proveïdor actual",
+		"modelSettingsHint": "Tria un model a la configuració del perfil.",
+		"clearSearch": "Esborra la cerca",
+		"reasoningEffort": "Esforç de raonament",
+		"reasoningEffortValue": "Esforç de raonament: {{effort}}",
+		"off": "Desactivat",
+		"effort": {
+			"none": "Cap",
+			"minimal": "Mínim",
+			"low": "Baix",
+			"medium": "Mitjà",
+			"high": "Alt",
+			"xhigh": "Molt alt",
+			"max": "Màxim"
+		}
+	},
 	"task": {
 		"title": "Tasca",
 		"expand": "Expandir tasca",
