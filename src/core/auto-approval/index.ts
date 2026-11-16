@@ -102,6 +102,21 @@ async function resolveCanonicalWorkspaceRoot(cwd: string | undefined): Promise<s
 	}
 }
 
+function hasConflictingReadPaths(tool: ClineSayTool, cwd: string | undefined): boolean {
+	if (process.platform === "win32") return false
+
+	// Complete read messages already carry the native target in content. On POSIX,
+	// display formatting can change literal backslashes into directory separators.
+	// Keep baseline lexical matching when those spellings disagree; do not expand
+	// permissions through a canonical root using a lossy display path.
+	return [tool, ...(tool.batchFiles ?? [])].some(
+		({ path: displayPath, content }) =>
+			typeof displayPath === "string" &&
+			typeof content === "string" &&
+			path.resolve(cwd ?? "", displayPath) !== path.resolve(cwd ?? "", content),
+	)
+}
+
 /**
  * Whether a read-only tool action is fully covered by the read allowlist patterns.
  *
@@ -131,7 +146,7 @@ async function isReadAllowedByPatterns(
 
 	// Task-local root only. Unknown roots keep lexical matching; never resolve
 	// individual file aliases here, since those can point outside the workspace.
-	const canonicalCwd = await resolveCanonicalWorkspaceRoot(cwd)
+	const canonicalCwd = hasConflictingReadPaths(tool, cwd) ? undefined : await resolveCanonicalWorkspaceRoot(cwd)
 	return areAllNamedFilesMatched(
 		tool,
 		(filePath) =>

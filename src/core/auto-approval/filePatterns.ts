@@ -276,9 +276,18 @@ function toMatcherPatternWithPaths(pattern: string, paths: WorkspacePaths, homeD
 	}
 
 	if (normalized.startsWith("~/")) {
+		const home = paths.normalizeSeparators(homeDir)
+		const unc = paths.isWindows ? WINDOWS_UNC_PREFIX.exec(home) : null
+		if (unc) {
+			// Preserve the UNC share as a root and its filesystem names as literals.
+			// Extra separators after ~/ stay relative, as they do with posix.join.
+			const homeRoot = escapePatternLiteral(paths.toMatcherAbsolutePath(home))
+			const homeVolume = escapePatternLiteral(paths.toMatcherAbsolutePath(unc[0]))
+			return `${negation}${resolveMatcherPath(homeRoot, normalized.slice(2).replace(/^\/+/, ""), homeVolume)}`
+		}
 		// Left in the user's own spelling, drive and all, for the absolute branch
 		// just below to rewrite once.
-		normalized = path.posix.join(paths.normalizeSeparators(homeDir), normalized.slice(2))
+		normalized = path.posix.join(home, normalized.slice(2))
 	}
 
 	if (paths.isAbsolutePath(normalized)) {
