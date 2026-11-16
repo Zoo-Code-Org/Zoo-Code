@@ -1,7 +1,7 @@
 import fs from "fs/promises"
 import * as path from "path"
 import { Dirent } from "fs"
-import matter from "gray-matter"
+import { parseFrontmatter } from "../../utils/safeFrontmatter"
 import { getGlobalRooDirectory, getProjectRooDirectoryForCwd } from "../roo-config"
 import { getBuiltInCommands, getBuiltInCommand } from "./built-in-commands"
 
@@ -9,19 +9,6 @@ import { getBuiltInCommands, getBuiltInCommand } from "./built-in-commands"
  * Maximum depth for resolving symlinks to prevent cyclic symlink loops
  */
 const MAX_DEPTH = 5
-
-/** Parse command metadata only after rejecting document-selected executable engines. */
-function parseCommandFrontmatter(content: string) {
-	// gray-matter strips a leading BOM before detecting the opening delimiter.
-	const input = content.replace(/^\uFEFF/, "")
-	if (matter.test(input)) {
-		const { name: language } = matter.language(input)
-		if (language && !["yaml", "yml", "json"].includes(language.toLowerCase())) {
-			throw new Error(`Unsupported command frontmatter language: ${language}`)
-		}
-	}
-	return matter(content)
-}
 
 export interface Command {
 	name: string
@@ -234,7 +221,7 @@ async function tryLoadCommand(
 
 		try {
 			// Try to parse frontmatter with gray-matter
-			parsed = parseCommandFrontmatter(content)
+			parsed = parseFrontmatter(content)
 			description =
 				typeof parsed.data.description === "string" && parsed.data.description.trim()
 					? parsed.data.description.trim()
@@ -319,7 +306,7 @@ async function scanCommandDirectory(
 
 				try {
 					// Try to parse frontmatter with gray-matter
-					parsed = parseCommandFrontmatter(content)
+					parsed = parseFrontmatter(content)
 					description =
 						typeof parsed.data.description === "string" && parsed.data.description.trim()
 							? parsed.data.description.trim()
