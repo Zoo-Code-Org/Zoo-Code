@@ -1463,4 +1463,160 @@ describe("safeWriteJson", () => {
 		await undoEscapedPublish(escaped, Buffer.from("{}"))
 		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
 	})
+	// The byte record alone cannot tell this write's file from a peer's that happens to hold the
+	// same JSON, and it cannot see a peer that rewrote the file in place: after either event the
+	// name and the content both still match. Where the publish recorded the inode and the
+	// timestamps it landed, that is what the undo may match on.
+	test("leaves a peer's same-bytes replacement alone when the publish recorded its inode", async () => {
+		const outside = path.join(tempDir, "undo-identity")
+		await fs.mkdir(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		const ours = JSON.stringify({ ours: true })
+		// A peer replaced the escaped publish with its own file, and that file holds exactly the
+		// bytes this write published: only the inode says the two are not the same file.
+		fsSyncActual.writeFileSync(escaped, ours)
+		const peer = fsSyncActual.statSync(escaped, { bigint: true })
+		const recorded = {
+			dev: peer.dev + 1n,
+			ino: peer.ino + 1n,
+			size: peer.size,
+			mtimeMs: peer.mtimeMs,
+			ctimeMs: peer.ctimeMs,
+		}
+
+		await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+
+		expect(fsSyncActual.existsSync(escaped)).toBe(true)
+		expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+
+		// The identity on disk is the one the publish recorded: the undo runs.
+		const landed = fsSyncActual.statSync(escaped, { bigint: true })
+		await undoEscapedPublish(escaped, Buffer.from(ours), {
+			dev: landed.dev,
+			ino: landed.ino,
+			size: landed.size,
+			mtimeMs: landed.mtimeMs,
+			ctimeMs: landed.ctimeMs,
+		})
+		expect(fsSyncActual.existsSync(escaped)).toBe(false)
+	})
+
+	test("leaves a peer's in-place rewrite alone when the publish recorded its timestamps", async () => {
+		const outside = path.join(tempDir, "undo-identity-rewrite")
+		await fs.mkdir(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		const ours = JSON.stringify({ ours: true })
+		fsSyncActual.writeFileSync(escaped, ours)
+		const onDisk = fsSyncActual.statSync(escaped, { bigint: true })
+		// The identity the publish recorded before a peer rewrote the file in place: same inode,
+		// same length, older timestamps. The byte record still matches afterwards.
+		const recorded = {
+			dev: onDisk.dev,
+			ino: onDisk.ino,
+			size: onDisk.size,
+			mtimeMs: onDisk.mtimeMs - 1000n,
+			ctimeMs: onDisk.ctimeMs - 1000n,
+		}
+
+		await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+
+		expect(fsSyncActual.existsSync(escaped)).toBe(true)
+	})
+
+	// The undo is an undo of a publish. When the failure lands before the commit rename there is
+	// no publish to undo, and a byte-identical file already sitting at the name the post-write
+	// probe lands on is somebody else's file. The swap rides the merge callback, which
+	// safeWriteJson invokes after the in-lock check and before anything is staged, exactly as
+	// in the post-commit pair above; here the commit itself is what fails.
+	test("keeps a byte-identical outside file when the failure lands before the commit", async () => {
+		const projectDir = path.join(tempDir, "precommit-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const swappedIn = path.join(tempDir, "precommit-elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		// A file unrelated to this write already sits at the name the escaped resolution lands
+		// on; the commit mock below gives it this write's exact staged bytes, because a byte
+		// record is precisely what the undo matches on today.
+		fsSyncActual.writeFileSync(path.join(swappedIn, "mcp.json"), "placeholder")
+
+		vi.mocked(fs.rename).mockImplementationOnce(async (from) => {
+			fsSyncActual.writeFileSync(path.join(swappedIn, "mcp.json"), fsSyncActual.readFileSync(String(from)))
+			throw Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		})
+
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+
+		// The file was there before this write started and this write never published onto it:
+		// matching bytes are not permission to delete it.
+		expect(JSON.parse(fsSyncActual.readFileSync(path.join(swappedIn, "mcp.json"), "utf8"))).toEqual({
+			written: "payload",
+		})
+	})
+
+	test("removes this write's staged file before reporting the escape", async () => {
+		const projectDir = path.join(tempDir, "precommit-clean-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		const swappedIn = path.join(tempDir, "precommit-clean-elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		// Different bytes, so the undo is not what could have removed the staged file: this row
+		// asks whether this write's own leftovers are gone by the time the escape is reported.
+		fsSyncActual.writeFileSync(path.join(swappedIn, "mcp.json"), "placeholder")
+
+		vi.mocked(fs.rename).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		})
+
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+
+		// The escape is the error the caller learns, but it must not be reported with this
+		// write's staged file still sitting in the swapped-in directory.
+		const entries = fsSyncActual.readdirSync(swappedIn)
+		expect(entries.filter((entry) => entry.includes(".new_"))).toEqual([])
+	})
+
+	// A staged file is created 0o600 because until the commit it is only ours. A target this
+	// write created used to keep that private mode on the published name, where the pre-stream
+	// code path had handed the same file to the umask.
+	test("widens a target this write created to the default mode after the publish", async () => {
+		const target = path.join(tempDir, "brand-new-shared.json")
+		const previousUmask = process.umask(0o022)
+		// The mode a fresh file would have carried before the staged-file rewrite: the umask's
+		// answer on POSIX, and on win32 - where the mode bits only express the read-only
+		// attribute - a writable file, which is what the same code path produced there.
+		const expectedMode = process.platform === "win32" ? 0o666 : 0o644
+		try {
+			vi.mocked(fs.chmod).mockClear()
+			await safeWriteJson(target, { shared: true })
+			expect(fs.chmod).toHaveBeenCalledWith(target, expectedMode)
+		} finally {
+			process.umask(previousUmask)
+		}
+	})
 })

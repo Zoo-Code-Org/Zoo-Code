@@ -194,16 +194,37 @@ function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string
  * The path alone cannot prove the file is ours: a concurrent writer can replace it
  * between the commit and this re-check, and unlinking on the name would then delete a
  * peer's file. The bytes this write staged are therefore compared with the bytes now on
- * disk, and a mismatch leaves the peer's file untouched. The escape is reported to the
- * caller either way.
+ * disk, and a mismatch leaves the peer's file untouched. Where the publish recorded the
+ * identity it landed with, that identity is what must still be there: a byte record cannot
+ * tell this write's file from a peer's that happens to hold the same JSON, and a peer that
+ * rewrote the file in place keeps both the name and the length.
  * @internal Exported for the escape-undo regression tests.
  */
-export async function undoEscapedPublish(publishedPath: string, expectedBytes: Buffer | undefined): Promise<void> {
+export async function undoEscapedPublish(
+	publishedPath: string,
+	expectedBytes: Buffer | undefined,
+	recordedIdentity?: PublishedIdentity,
+): Promise<void> {
 	if (expectedBytes === undefined) {
 		return
 	}
 	const before = await fs.stat(publishedPath, { bigint: true }).catch(() => undefined)
 	if (!before) {
+		return
+	}
+	// When the publish left an identity record, the file at the escaped name has to be that
+	// file: same inode, same length, same timestamps. A peer that replaced the publish with
+	// its own file - even one holding the very same bytes - moves at least the inode, and a
+	// peer that rewrote it in place moves both timestamps. Either way this write's undo may
+	// not remove it, and the escape is still reported to the caller.
+	if (
+		recordedIdentity !== undefined &&
+		(before.dev !== recordedIdentity.dev ||
+			before.ino !== recordedIdentity.ino ||
+			before.size !== recordedIdentity.size ||
+			before.mtimeMs !== recordedIdentity.mtimeMs ||
+			before.ctimeMs !== recordedIdentity.ctimeMs)
+	) {
 		return
 	}
 	const actualBytes = await fs.readFile(publishedPath).catch(() => undefined)
@@ -217,6 +238,42 @@ export async function undoEscapedPublish(publishedPath: string, expectedBytes: B
 		return
 	}
 	await fs.unlink(publishedPath).catch(() => {})
+}
+
+/**
+ * The identity a publish landed with: the inode, the length, and the timestamps that move
+ * when somebody else writes through the same name.
+ * @internal Exported for the escape-undo regression tests.
+ */
+export type PublishedIdentity = {
+	dev: bigint
+	ino: bigint
+	size: bigint
+	mtimeMs: bigint
+	ctimeMs: bigint
+}
+
+/**
+ * Records the identity a published name carries: the inode the commit rename brought
+ * across, and the timestamps as this write last left them, including any mode this write
+ * applied after the rename. A stat that will not answer costs the undo its strongest
+ * record and falls back to the byte comparison it has always made, rather than failing a
+ * publish that has already landed.
+ */
+async function _recordPublishedIdentity(publishedPath: string): Promise<PublishedIdentity | undefined> {
+	try {
+		const staged = await fs.stat(publishedPath, { bigint: true })
+		return {
+			dev: staged.dev,
+			ino: staged.ino,
+			size: staged.size,
+			mtimeMs: staged.mtimeMs,
+			ctimeMs: staged.ctimeMs,
+		}
+	} catch (statError: unknown) {
+		console.error(`Could not record the identity of the published ${publishedPath}:`, statError)
+		return undefined
+	}
 }
 
 /**
@@ -324,6 +381,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// Set once the commit rename has landed; the rollback below may only restore the
 	// backup while the committed replacement has not been published yet.
 	let committedBeforeTeardown = false
+	let escapeToReport: ConfinedPathEscapeError | undefined
+	let publishedIdentity: PublishedIdentity | undefined
 
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
@@ -455,7 +514,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// descriptor and silently skip the flush the publish depends on.
 		await _flushFileToDisk(actualTempNewFilePath)
 
-		await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
+		const targetModeState = await _copyTargetMode(resolvedTargetPath, actualTempNewFilePath)
 
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
@@ -490,7 +549,24 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// never a restore source. Renaming it back after this point would put the older
 		// bytes where a reader may already have consumed the committed ones.
 		committedBeforeTeardown = true
+
+		// A target this write created gets the mode a new file would have had; a target that was
+		// already there keeps the mode _copyTargetMode copied, and a target whose mode could
+		// not be read keeps the staged mode rather than guessing at one.
+		if (targetModeState === "absent") {
+			await _applySharedModeToNewlyPublished(resolvedTargetPath)
+		}
+
 		options?.trace?.({ stage: "write-complete" })
+
+		// The identity this write landed is recorded after the last thing this write itself does to
+		// the published inode - the commit rename, and the mode it applies to a file it created
+		// - and before anything is decided about it. The escape-undo runs later still, when the
+		// name has moved and anything could have happened to it, and it needs more than the
+		// content to prove that the file in front of it is the one this write published.
+		if (confinementRoot !== undefined) {
+			publishedIdentity = await _recordPublishedIdentity(resolvedTargetPath)
+		}
 
 		// Fail-closed confinement re-check. The check above decides the target as it
 		// resolves at check time; publication takes a path and re-resolves the tree
@@ -521,8 +597,8 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				}
 			} catch (escapeError) {
 				// Undo only the file this write published, never a same-named file a peer
-				// placed there after the commit.
-				await undoEscapedPublish(publishedPath, stagedBytes)
+				// placed there after the commit, nor a peer's rewrite of that name.
+				await undoEscapedPublish(publishedPath, stagedBytes, publishedIdentity)
 				throw escapeError
 			}
 		}
@@ -559,8 +635,17 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 				_assertWithinScope(absoluteFilePath, publishedPath, (await _resolveScopeRoot(confinementRoot)).root)
 			} catch (checkError: unknown) {
 				if (checkError instanceof ConfinedPathEscapeError && publishedPath !== undefined) {
-					await undoEscapedPublish(publishedPath, stagedBytes)
-					throw checkError
+					// This undo is an undo of a publish. When the failure landed before the commit
+					// rename, nothing was published at the escaped name, and a byte-identical file
+					// that was already sitting there is somebody else's file: removing it would
+					// delete a file this write never wrote.
+					if (committedBeforeTeardown) {
+						await undoEscapedPublish(publishedPath, stagedBytes, publishedIdentity)
+					}
+					// The escape is the error the caller learns, but it must not be reported with
+					// this write's own leftovers still on disk. The rollback and the staged-file
+					// cleanup further down run first, and the escape is rethrown after them.
+					escapeToReport = checkError
 				}
 				// A probe that could not complete is not an escape verdict: it must neither skip
 				// the teardown below nor replace the error the caller already earned.
@@ -615,6 +700,11 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 
 		// A failed rollback leaves the backup as the only committed copy.
 		// Preserve it for recovery by a later writer.
+		if (escapeToReport !== undefined) {
+			// The teardown ran; the escape is still what the caller needs, and it outranks
+			// the failure the teardown was cleaning up after.
+			throw escapeToReport
+		}
 		throw originalError // This MUST be the error that rejects the promise.
 	} finally {
 		// Release the lock in the main finally block.
@@ -662,28 +752,61 @@ async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint 
 
 /**
  * Copies the existing target's permission mode onto the staged file so the publish
- * does not silently widen it. A missing target has no mode to copy; a stat or chmod
- * that fails for another reason is logged and the write proceeds with the staged
- * file's own mode - 0o600 as staged, so a failed copy can leave the published file
- * narrower than the target had it, never wider - because the replacement protocol,
- * not the mode, is what makes the publish atomic.
+ * does not silently widen it, and reports which of the three states it found: a target
+ * whose mode was copied, a target that is not there yet, and a target whose mode could
+ * not be read. A missing target is a fact the caller acts on - see
+ * _applySharedModeToNewlyPublished - while the other two leave the write with the staged
+ * file's own mode: 0o600 as staged, so a failed copy can leave the published file
+ * narrower than the target had it, never wider, because the replacement protocol, not
+ * the mode, is what makes the publish atomic.
  */
-async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<void> {
+async function _copyTargetMode(targetPath: string, stagedPath: string): Promise<"copied" | "absent" | "unreadable"> {
 	let mode: number
 	try {
 		const stats = await fs.stat(targetPath)
 		mode = stats.mode & 0o777
 	} catch (statError: unknown) {
 		const code = getErrorCode(statError)
-		if (code && code !== "ENOENT" && code !== "ENOTDIR") {
+		if (code === "ENOENT" || code === "ENOTDIR") {
+			// Nothing is published yet and there is no mode to inherit: the staged 0o600 is
+			// the right floor while the bytes are only ours.
+			return "absent"
+		}
+		if (code) {
 			console.error(`Could not read the mode of ${targetPath} before publishing onto it:`, statError)
 		}
-		return
+		return "unreadable"
 	}
 	try {
 		await fs.chmod(stagedPath, mode)
 	} catch (chmodError: unknown) {
 		console.error(`Failed to copy mode ${mode.toString(8)} from ${targetPath} onto ${stagedPath}:`, chmodError)
+	}
+	return "copied"
+}
+
+/**
+ * Gives a file this write created the mode the same write would have given it before the
+ * staged-file rewrite: the creation mask's answer, which the stream's private 0o600 is
+ * not. The staged file stays 0o600 - until the commit its bytes are only ours - so the
+ * widening happens on the published name, after the commit, and only when this write is
+ * the write that created the file. Best effort, like every other permission step here:
+ * the content is published and durable, and a mode this write could not widen is
+ * reported, never claimed as a failure of the write.
+ */
+async function _applySharedModeToNewlyPublished(publishedPath: string): Promise<void> {
+	// On POSIX that is 0o666 subject to the process umask, exactly what an ordinary
+	// open(path, "w") of a new file produced. On win32 the mode bits carry only the
+	// read-only attribute, and a file this write just created is already writable, so the
+	// same outcome is stated there without pretending the umask means anything.
+	const sharedMode = process.platform === "win32" ? 0o666 : 0o666 & ~process.umask()
+	try {
+		await fs.chmod(publishedPath, sharedMode)
+	} catch (modeError: unknown) {
+		console.error(
+			`Published ${publishedPath}, but could not apply the mode a new file would have had (${sharedMode.toString(8)}):`,
+			modeError,
+		)
 	}
 }
 

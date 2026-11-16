@@ -956,6 +956,33 @@ describe("safeWriteText", () => {
 			// Nothing exists to preserve: the default creation mode is the intended one.
 			expect(fsSync.fchmodSync).not.toHaveBeenCalled()
 		})
+		// Minimal lstat stand-in carrying an identity, for the checks that compare the staging name
+		// across awaits. Built on the Stats prototype so the value still satisfies fsSync.Stats.
+		function _identityStats(dev: number, ino: number): fsSync.Stats {
+			const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+			s.isSymbolicLink = () => false
+			s.isFile = () => true
+			Object.assign(s, { dev, ino })
+			return s
+		}
+
+		it("rejects a caller-supplied staging name that became a link before the mode pass", async () => {
+			const targetPath = "/tmp/test-dir/target.txt"
+			vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+			// Validation sees a regular file at the supplied name. By the time the mode pass opens
+			// it, the name is a symlink: chmod would touch somebody else's inode and the rename
+			// would publish somebody else's bytes.
+			vi.mocked(fs.lstat).mockResolvedValueOnce(_identityStats(1, 100)).mockResolvedValueOnce(_fileStats(true))
+			vi.mocked(fsSync.openSync).mockReturnValue(1)
+
+			await expect(
+				safeWriteText(targetPath, "data", { tempPath: "/tmp/test-dir/caller.tmp", platform: "linux" }),
+			).rejects.toThrow(StagingPathError)
+
+			expect(fsSync.openSync).not.toHaveBeenCalled()
+			expect(fs.chmod).not.toHaveBeenCalled()
+			expect(fs.rename).not.toHaveBeenCalled()
+		})
 	})
 
 	// ── Test 7: symlink handling (Finding 4 regression test) ─────────────────
@@ -1648,6 +1675,37 @@ describe("backup removal on the failure path", () => {
 		expect((error as Error).message).not.toContain("safeWriteText.bak_")
 		expect(backupUnlinks).toHaveLength(1)
 		expect(backupUnlinks[0]).toContain("safeWriteText.bak_")
+	})
+
+	it("names the leftover backup copy when the failure-path removal fails", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		// The backup copy is seeded, the commit rename then fails outright - before anything
+		// was published - and the teardown's removal of the copy fails too, so the copy stays
+		// on disk beside the target.
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+		const commitError = Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		vi.mocked(fs.rename).mockRejectedValue(commitError)
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes(".bak_")) {
+				throw Object.assign(new Error("EPERM: backup removal failed"), { code: "EPERM" })
+			}
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toBe(commitError)
+
+		const backupUnlinks = vi
+			.mocked(fs.unlink)
+			.mock.calls.filter((call: unknown[]) => String(call[0]).includes(".bak_"))
+		expect(backupUnlinks.length).toBe(1)
+		// The commit error stays the error the caller sees; what changes is that the copy this
+		// call left on disk is named where a person can go and remove it.
+		expect(consoleErrorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("safeWriteText.bak_"),
+			"EPERM: backup removal failed",
+		)
+		consoleErrorSpy.mockRestore()
 	})
 })
 

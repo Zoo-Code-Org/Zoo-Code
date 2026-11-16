@@ -424,6 +424,34 @@ export async function resolveLockKey(absoluteFilePath: string): Promise<string> 
 	}
 }
 
+/** The identity of a staging name at the moment it passed validation. */
+type StagingIdentity = { dev: number; ino: number }
+
+/**
+ * Re-checks the staging name against the identity recorded when it passed validation. A
+ * name a caller handed us is a name that caller - or anybody else - can replace
+ * afterwards, and both the permission pass and the commit below act on whatever the name
+ * denotes at their own moment. A link, a different inode, or a vanished name all fail the
+ * same way: the staging path is refused and nothing is published.
+ */
+async function _assertStagingUnchanged(supplied: string, identity: StagingIdentity, stage: string): Promise<void> {
+	const now = await fs.lstat(supplied).catch((error: unknown) => {
+		if (getErrorCode(error) === "ENOENT") {
+			throw new StagingPathError(
+				`Staging file disappeared before ${stage}: ${supplied} is no longer there`,
+				supplied,
+			)
+		}
+		throw error
+	})
+	if (now.isSymbolicLink() || !now.isFile() || now.dev !== identity.dev || now.ino !== identity.ino) {
+		throw new StagingPathError(
+			`Staging file changed before ${stage}: ${supplied} is no longer the regular file that was validated`,
+			supplied,
+		)
+	}
+}
+
 export async function safeWriteText(
 	filePath: string,
 	content: string | Uint8Array,
@@ -452,6 +480,7 @@ export async function safeWriteText(
 	// write created so its cleanup removes its own directory, not a shared one.
 	let stagingDir: string | null = null
 	let tempPath: string
+	let stagingIdentity: StagingIdentity | undefined
 	// Whether the commit rename has consumed the staging file. Cleanup is allowed to unlink
 	// the staging path only while this write still owns it: after the rename the name belongs to
 	// whatever is filed under it next, and a caller-supplied staging name is reused by the next
@@ -490,7 +519,13 @@ export async function safeWriteText(
 				supplied,
 			)
 		}
-		// The caller's own path is used as given; only the check is canonical.
+		// The caller's own path is used as given; only the check is canonical. The identity of
+		// the name that passed the checks above is recorded with it: what those checks saw was the
+		// name at their own moment, and between here and the commit another process can replace
+		// that name with a link, with a different file, or with nothing at all. The two
+		// re-checks below - before the permission pass and immediately before the commit -
+		// compare against this record, so neither step can act on an inode nobody authorized.
+		stagingIdentity = { dev: stagingStat.dev, ino: stagingStat.ino }
 		tempPath = options.tempPath
 	} else {
 		stagingDir = _stagingDir(dirPath)
@@ -565,6 +600,12 @@ export async function safeWriteText(
 			} catch (error: unknown) {
 				if (getErrorCode(error) !== "ENOENT") throw error
 				// target does not exist yet - keep the temp's default mode
+			}
+			// The name is re-checked before anything is done to it here: fchmodSync below moves
+			// the mode of whatever this name denotes at open time, and the rename publishes
+			// whatever it denotes at commit time.
+			if (stagingIdentity !== undefined) {
+				await _assertStagingUnchanged(tempPath, stagingIdentity, "the mode and fsync pass")
 			}
 			const fd = fsSync.openSync(tempPath, "r+")
 			try {
@@ -713,6 +754,14 @@ export async function safeWriteText(
 				}
 			}
 
+			// The last look at a caller-supplied staging name, taken immediately before it is
+			// published. A name this write created itself sits inside a directory this write
+			// created with 0o700 and needs no such look, which is why the check is tied to the
+			// identity record rather than run on every commit.
+			if (stagingIdentity !== undefined) {
+				await _assertStagingUnchanged(tempPath, stagingIdentity, "the commit")
+			}
+
 			// -- Step 4: atomic commit temp -> target ---------------------
 			if (options?.failIfExist) {
 				// No-replace commit: link(2) fails EEXIST when the name already exists,
@@ -838,7 +887,17 @@ export async function safeWriteText(
 			// the commit left there - before the commit that is the pre-write content, and
 			// after it the published content. Either way the copy has served its purpose
 			// and must not be left beside the target where no caller can find it.
-			await fs.unlink(backupPath).catch(() => {})
+			const leftoverBackupPath = backupPath
+			await fs.unlink(leftoverBackupPath).catch((cleanupError: unknown) => {
+				// The copy is on disk and this call was the only thing that knew its name, so a
+				// failed removal is not swallowed whole: the path is named, with the reason. The
+				// error the caller receives stays the error this write earned - a cleanup failure
+				// must not replace it - and the copy it left behind is now findable.
+				console.error(
+					`safeWriteText left the superseded backup copy at ${leftoverBackupPath} after the write failed; removing it failed:`,
+					cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+				)
+			})
 			backupPath = null
 		}
 		if (!stagingCommitted) {
