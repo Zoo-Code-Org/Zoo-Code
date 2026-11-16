@@ -76,6 +76,7 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
+	GLOBAL_STATE_KEYS,
 	isSecretStateKey,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -177,6 +178,16 @@ type PersistedViewStateValues = Pick<ViewLocalStateValues, "mode" | "currentApiC
  * https://github.com/microsoft/vscode-webview-ui-toolkit-samples/blob/main/default/weather-webview/src/providers/WeatherViewProvider.ts
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
+
+/** A key whose durable write ContextProxy counts a generation for. */
+/** A key whose durable write ContextProxy counts a generation for. */
+type SharedStateWriteKey = Parameters<ContextProxy["getStateWriteGeneration"]>[0]
+/** Provider-setting keys among them: the secret ones go through the secret store, which carries no write generation. */
+type GenerationTrackedProviderSettingsKey = Extract<keyof ProviderSettings, SharedStateWriteKey>
+const globalStateKeys = new Set<string>(GLOBAL_STATE_KEYS)
+const isGenerationTrackedProviderSettingsKey = (
+	key: keyof ProviderSettings,
+): key is GenerationTrackedProviderSettingsKey => !isSecretStateKey(key) && globalStateKeys.has(key)
 
 type DelegatedChildContext = TaskExecutionContext
 
@@ -2805,6 +2816,82 @@ export class ClineProvider
 	}
 
 	/**
+	 * Ownership signals for the provider-settings store, one per key rather than one per store:
+	 * an activation group writes every key the activated profile carries, so a key another view
+	 * touched since is no longer this activation's to undo while the untouched keys still are.
+	 * The readings are taken before the group and compared with what the group itself wrote.
+	 * Secret keys are absent here - they go through the secret store, which carries no write
+	 * generation - and are therefore restored with the store, as before.
+	 */
+	private captureProviderSettingsBaseGenerations(): Map<GenerationTrackedProviderSettingsKey, number> {
+		return new Map(
+			PROVIDER_SETTINGS_KEYS.filter(isGenerationTrackedProviderSettingsKey).map(
+				(key) => [key, this.contextProxy.getStateWriteGeneration(key)] as const,
+			),
+		)
+	}
+
+	/**
+	 * Merge the provider settings this activation still owns over the keys another view wrote
+	 * since the group, or undefined when the store is not this activation's to undo. A key counts
+	 * as ours when no write advanced it past the one this group made - or when it never advanced
+	 * at all, which is a no-op either way - and a key this group did not write but that held a
+	 * value is a key the group cleared, which is ours to put back. The bundle belongs to the
+	 * profile identity it was activated under, so a foreign write to apiProvider skips the restore
+	 * whole: that is the signal this view still owns the store. Keys this activation does not own
+	 * keep the value that stands now, so the undo cannot clobber another view's write.
+	 */
+	private composeProviderSettingsRestore(
+		previous: ProviderSettings,
+		written: ProviderSettings,
+		baseGenerations: ReadonlyMap<GenerationTrackedProviderSettingsKey, number>,
+		skippedKeys: GenerationTrackedProviderSettingsKey[],
+	): ProviderSettings | undefined {
+		const current = this.contextProxy.getProviderSettings()
+		const ownsKey = (key: GenerationTrackedProviderSettingsKey): boolean => {
+			const base = baseGenerations.get(key)
+
+			if (base === undefined) {
+				return false
+			}
+
+			// One write since the reading is this group's own when the group wrote the key, or cleared
+			// it because the key held a value; anything further belongs to another view.
+			const ownWrites = key in written || previous[key] !== undefined ? 1 : 0
+
+			return (
+				this.contextProxy.getStateWriteGeneration(key) === base + ownWrites ||
+				this.contextProxy.getStateWriteGeneration(key) === base
+			)
+		}
+
+		if (!ownsKey("apiProvider")) {
+			return undefined
+		}
+
+		let undone = 0
+		const restored = PROVIDER_SETTINGS_KEYS.reduce((acc: ProviderSettings, key) => {
+			if (!isGenerationTrackedProviderSettingsKey(key)) {
+				// Secret keys carry no write generation: they come back with the store, as before.
+				return { ...acc, [key]: previous[key] }
+			}
+
+			if (!ownsKey(key)) {
+				skippedKeys.push(key)
+				return { ...acc, [key]: current[key] }
+			}
+
+			if (baseGenerations.get(key) !== this.contextProxy.getStateWriteGeneration(key)) {
+				undone = undone + 1
+			}
+
+			return { ...acc, [key]: previous[key] }
+		}, {} as ProviderSettings)
+
+		return undone === 0 ? undefined : restored
+	}
+
+	/**
 	 * Applies a model change to the latest stored profile inside the mutation queue,
 	 * so a stale webview snapshot cannot overwrite newer profile settings.
 	 * A `null` patch value clears the key.
@@ -2958,10 +3045,10 @@ export class ClineProvider
 			// profile that save just stored from the metadata.
 			const expectedListGeneration = this.contextProxy.getStateWriteGeneration("listApiConfigMeta") + 1
 			const previousProviderSettings = this.contextProxy.getProviderSettings()
-			// Ownership signal for the provider-settings store, independent of the shared name:
-			// this activation's `setProviderSettings` writes `apiProvider` exactly once, so those
-			// settings are still ours while that key holds the generation the write produced.
-			const expectedApiProviderGeneration = this.contextProxy.getStateWriteGeneration("apiProvider") + 1
+			// Ownership signals for the provider-settings store, independent of the shared name, and per key
+			// rather than per store, read before the group: a key another view wrote since is no longer
+			// ours to undo, while the keys the group wrote or cleared still are.
+			const providerSettingsBaseGenerations = this.captureProviderSettingsBaseGenerations()
 			// Test doubles and older managers may not implement the read: absence means "no previous
 			// binding to restore", not a failed activation.
 
@@ -2998,8 +3085,8 @@ export class ClineProvider
 				// shared name, which leaves the failed activation's values in place.
 				//   * profile list + shared selection: the generation of the shared name,
 				//   * mode binding: the binding still points at this activation's profile id,
-				//   * shared provider settings: the generation of `apiProvider`, which this group
-				//     writes exactly once.
+				//   * shared provider settings: each key's own generation, so a key another view wrote
+				//     since the group keeps that view's value while the untouched keys are undone.
 				const ownsSharedSelection = () =>
 					this.contextProxy.getStateWriteGeneration("currentApiConfigName") === expectedNameGeneration
 
@@ -3066,14 +3153,28 @@ export class ClineProvider
 					}
 				})
 				await restore("shared provider settings", async () => {
-					if (this.contextProxy.getStateWriteGeneration("apiProvider") !== expectedApiProviderGeneration) {
+					const skippedKeys: GenerationTrackedProviderSettingsKey[] = []
+					const restoreValues = this.composeProviderSettingsRestore(
+						previousProviderSettings,
+						providerSettings,
+						providerSettingsBaseGenerations,
+						skippedKeys,
+					)
+
+					if (restoreValues === undefined) {
 						this.log(
 							"[persistProviderProfile] Skipping the shared-settings restore: another view wrote the provider settings",
 						)
 						return
 					}
 
-					await this.contextProxy.setProviderSettings(previousProviderSettings)
+					if (skippedKeys.length > 0) {
+						this.log(
+							`[persistProviderProfile] Restoring the shared provider settings and leaving the keys another view wrote: ${skippedKeys.join(", ")}`,
+						)
+					}
+
+					await this.contextProxy.setProviderSettings(restoreValues)
 				})
 				// Recheck immediately before the write: the restores above await storage, so
 				// another view may have written the shared selection since the group failed.
@@ -3260,7 +3361,8 @@ export class ClineProvider
 				name: this.contextProxy.getValue("currentApiConfigName"),
 				nameGeneration: this.contextProxy.getStateWriteGeneration("currentApiConfigName") + 1,
 				settings: this.contextProxy.getProviderSettings(),
-				apiProviderGeneration: this.contextProxy.getStateWriteGeneration("apiProvider") + 1,
+				writtenSettings: providerSettings,
+				baseGenerations: this.captureProviderSettingsBaseGenerations(),
 			}
 			await Promise.all([
 				this.contextProxy.setValue("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
@@ -3299,12 +3401,23 @@ export class ClineProvider
 							),
 						)
 				}
-				if (
-					this.contextProxy.getStateWriteGeneration("apiProvider") ===
-					sharedValuesBeforeActivation.apiProviderGeneration
-				) {
+				const settingsRestoreSkipped: GenerationTrackedProviderSettingsKey[] = []
+				const restoreSettings = this.composeProviderSettingsRestore(
+					sharedValuesBeforeActivation.settings,
+					sharedValuesBeforeActivation.writtenSettings,
+					sharedValuesBeforeActivation.baseGenerations,
+					settingsRestoreSkipped,
+				)
+
+				if (restoreSettings) {
+					if (settingsRestoreSkipped.length > 0) {
+						this.log(
+							`[activateProviderProfile] Restoring the shared provider settings and leaving the keys another view wrote: ${settingsRestoreSkipped.join(", ")}`,
+						)
+					}
+
 					await this.contextProxy
-						.setProviderSettings(sharedValuesBeforeActivation.settings)
+						.setProviderSettings(restoreSettings)
 						.catch((restoreError: unknown) =>
 							this.log(
 								`[activateProviderProfile] Failed to restore the shared provider settings after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,

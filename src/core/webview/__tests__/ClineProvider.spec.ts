@@ -7389,6 +7389,151 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		// Restoring the whole store undid a key another view had written while this activation was
+		// in flight; the rollback owns the keys this activation wrote, not the whole provider store.
+		it("restores only the provider-settings keys this activation still owns", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.openrouter }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "prior-model",
+			})
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("next-id")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getState").mockResolvedValue({ mode: "code" } as never)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const contextProxy = provider.contextProxy
+			const updateGlobalState = contextProxy.updateGlobalState.bind(contextProxy)
+			const setProviderSettings = contextProxy.setProviderSettings.bind(contextProxy)
+			let otherViewWrote = false
+			// A second view writes a key of its own once this activation's group write has landed.
+			vi.spyOn(contextProxy, "setProviderSettings").mockImplementation(async (values) => {
+				await setProviderSettings(values)
+				// Once only: the rollback restores the store through this same seam, and a repeat
+				// write here would hide a clobber behind a fresh value.
+				if (!otherViewWrote) {
+					otherViewWrote = true
+					await updateGlobalState("openRouterModelId", "other-view-model")
+				}
+			})
+			// Only this view's durable mirror write fails; every shared store lands.
+			vi.spyOn(contextProxy, "updateGlobalState").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return updateGlobalState(key, value)
+			})
+			const setValue = contextProxy.setValue.bind(contextProxy)
+			vi.spyOn(contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return setValue(key, value)
+			})
+
+			await expect(
+				provider["persistProviderProfile"](
+					"next-profile",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("viewStates write failed")
+
+			// The key this activation wrote from the activated profile is back on the prior provider...
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.openrouter)
+			// ...while the key the other view wrote keeps the value that view gave it.
+			expect(provider.contextProxy.getValue("openRouterModelId")).toBe("other-view-model")
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("leaving the keys another view wrote: openRouterModelId"),
+			)
+			await provider.dispose()
+		})
+
+		// The other activation path compensates for a rejected view mirror; it owns the same keys.
+		it("leaves the keys another view wrote alone when a rejected view mirror restores the settings", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const priorEntry = { name: "prior-profile", id: "prior-id", apiProvider: providerIdentifiers.anthropic }
+			const nextEntry = { name: "next-profile", id: "next-id", apiProvider: providerIdentifiers.anthropic }
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorEntry, nextEntry])
+			await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "prior-model",
+			})
+			provider["viewLocalState"].currentApiConfigName = "prior-profile"
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				...nextEntry,
+				apiKey: "next-key",
+			} as never)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorEntry, nextEntry])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const contextProxy = provider.contextProxy
+			const updateGlobalState = contextProxy.updateGlobalState.bind(contextProxy)
+			const setProviderSettings = contextProxy.setProviderSettings.bind(contextProxy)
+			let otherViewWrote = false
+			vi.spyOn(contextProxy, "setProviderSettings").mockImplementation(async (values) => {
+				await setProviderSettings(values)
+				// Once only: the rollback restores the store through this same seam, and a repeat
+				// write here would hide a clobber behind a fresh value.
+				if (!otherViewWrote) {
+					otherViewWrote = true
+					await updateGlobalState("openRouterModelId", "other-view-model")
+				}
+			})
+			vi.spyOn(contextProxy, "updateGlobalState").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return updateGlobalState(key, value)
+			})
+			const setValue = contextProxy.setValue.bind(contextProxy)
+			vi.spyOn(contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					throw new Error("viewStates write failed")
+				}
+				return setValue(key, value)
+			})
+
+			await expect(provider.activateProviderProfile({ name: "next-profile" })).rejects.toThrow(
+				"viewStates write failed",
+			)
+
+			// The selection and this activation's own settings are back...
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("prior-profile")
+			expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.openrouter)
+			// ...and the other view's key still holds what that view wrote.
+			expect(provider.contextProxy.getValue("openRouterModelId")).toBe("other-view-model")
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("leaving the keys another view wrote: openRouterModelId"),
+			)
+			await provider.dispose()
+		})
+
 		it("restores the shared writes when the per-view mirror rejects", async () => {
 			const provider = new ClineProvider(
 				mockContext,
