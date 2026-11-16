@@ -14,19 +14,31 @@ export class WorkspacePaths {
 	readonly matcherVolume: string
 	readonly canResolveRelativePaths: boolean
 
-	private readonly root: string | undefined
-	private readonly canonicalRoot: string | undefined
+	private readonly workspaceRoot: string | undefined
+	private readonly canonicalWorkspaceRoot: string | undefined
 
 	constructor({ cwd, canonicalCwd, isWindows }: { cwd?: string; canonicalCwd?: string; isWindows: boolean }) {
 		this.isWindows = isWindows
 		this.workspacePath = this.normalizeSeparators(cwd ?? "")
-		const unc = isWindows ? WINDOWS_UNC_PREFIX.exec(this.workspacePath) : null
-		const drive = isWindows ? WINDOWS_DRIVE_PREFIX.exec(this.workspacePath) : null
-		this.workspaceVolume = unc ? `/UNC/${unc[1]}/${unc[2]}` : drive ? `/${drive[1]}` : ""
+
+		this.workspaceVolume = this.getWorkspaceVolume()
 		this.matcherVolume = this.toMatcherAbsolutePath("/", this.workspaceVolume).replace(/\/$/, "")
+
 		this.canResolveRelativePaths = !!cwd && !this.isDriveRelativePath(this.workspacePath)
-		this.root = this.normalizeAbsoluteRoot(cwd)
-		this.canonicalRoot = this.normalizeAbsoluteRoot(canonicalCwd)
+		this.workspaceRoot = this.normalizeAbsoluteRoot(cwd)
+		this.canonicalWorkspaceRoot = this.normalizeAbsoluteRoot(canonicalCwd)
+	}
+
+	private getWorkspaceVolume(): string {
+		if (!this.isWindows) return ""
+
+		const uncRoot = WINDOWS_UNC_PREFIX.exec(this.workspacePath)
+		if (uncRoot) return `/UNC/${uncRoot[1]}/${uncRoot[2]}`
+
+		const driveRoot = WINDOWS_DRIVE_PREFIX.exec(this.workspacePath)
+		if (driveRoot) return `/${driveRoot[1]}`
+
+		return ""
 	}
 
 	/** Off Windows, backslashes remain literal filename characters. */
@@ -58,37 +70,33 @@ export class WorkspacePaths {
 		if (unc) return `/UNC/${unc[1]}/${unc[2]}${absolutePath.slice(unc[0].length)}`
 
 		const drive = WINDOWS_DRIVE_PREFIX.exec(absolutePath)
+		if (drive) return `/${drive[1]}${absolutePath.slice(drive[0].length)}`
+
 		// Rooted paths belong to the workspace drive/share. Without a known volume,
 		// keep them separate so /UNC/... cannot impersonate a share.
-		return drive
-			? `/${drive[1]}${absolutePath.slice(drive[0].length)}`
-			: `${workspaceVolume || "/ROOT"}${absolutePath.replace(/^\/+/, "/")}`
+		return `${workspaceVolume || "/ROOT"}${absolutePath.replace(/^\/+/, "/")}`
 	}
 
 	/** Keep both verified root spellings, never resolve an individual file alias. */
 	equivalentPaths(value: string): string[] {
-		if (this.root === undefined || this.canonicalRoot === undefined) return [value]
+		const hasVerifiedWorkspaceRoots = this.workspaceRoot !== undefined && this.canonicalWorkspaceRoot !== undefined
+		if (!hasVerifiedWorkspaceRoots) return [value]
 
-		const canonical = this.replaceWorkspaceRootPrefix(value, this.root, this.canonicalRoot)
-		const equivalent =
-			canonical !== value ? canonical : this.replaceWorkspaceRootPrefix(value, this.canonicalRoot, this.root)
-		return equivalent === value ? [value] : [value, equivalent]
+		const canonicalPath = this.replaceWorkspaceRootPrefix(value, this.workspaceRoot, this.canonicalWorkspaceRoot)
+		if (canonicalPath !== value) return [value, canonicalPath]
+
+		const workspacePath = this.replaceWorkspaceRootPrefix(value, this.canonicalWorkspaceRoot, this.workspaceRoot)
+		if (workspacePath !== value) return [value, workspacePath]
+
+		return [value]
 	}
 
-	private normalizeAbsoluteRoot(root: string | undefined): string | undefined {
-		if (!this.isWindows) {
-			if (!root?.startsWith("/")) return undefined
-			return path.posix.resolve(this.toMatcherAbsolutePath(root)).replace(/\/$/, "")
-		}
+	private replaceWorkspaceRootPrefix(value: string, root: string, replacementRoot: string): string {
+		const hasRootBoundary = value.length === root.length || value[root.length] === "/"
+		const isWithinRoot = hasRootBoundary && this.pathsEqual(value.slice(0, root.length), root)
+		if (!isWithinRoot) return value
 
-		const normalized = this.normalizeSeparators(root ?? "")
-		const drive = WINDOWS_DRIVE_PREFIX.exec(normalized)
-		if (!normalized.startsWith("/") && !drive) return undefined
-
-		// Resolve parents while drives and UNC shares are still filesystem roots.
-		// The root's own namespace must not inherit the workspace volume.
-		const absolutePath = this.normalizeSeparators(path.win32.normalize(normalized))
-		return this.toMatcherAbsolutePath(absolutePath, "").replace(/\/$/, "")
+		return `${replacementRoot}${value.slice(root.length)}`
 	}
 
 	private pathsEqual(left: string, right: string): boolean {
@@ -96,14 +104,26 @@ export class WorkspacePaths {
 
 		// Match ignore's case rules without expanding Unicode or corrupting prefix offsets.
 		if (left.length !== right.length) return false
+
 		const literalRight = right.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 		return new RegExp(`^${literalRight}$`, "i").test(left)
 	}
 
-	private replaceWorkspaceRootPrefix(value: string, root: string, canonicalRoot: string): string {
-		const hasRootBoundary = value.length === root.length || value[root.length] === "/"
-		return hasRootBoundary && this.pathsEqual(value.slice(0, root.length), root)
-			? `${canonicalRoot}${value.slice(root.length)}`
-			: value
+	private normalizeAbsoluteRoot(root: string | undefined): string | undefined {
+		if (!this.isWindows) {
+			if (!root?.startsWith("/")) return undefined
+
+			return path.posix.resolve(this.toMatcherAbsolutePath(root)).replace(/\/$/, "")
+		}
+
+		const normalized = this.normalizeSeparators(root ?? "")
+		const drive = WINDOWS_DRIVE_PREFIX.exec(normalized)
+		const isAbsoluteRoot = normalized.startsWith("/") || drive !== null
+		if (!isAbsoluteRoot) return undefined
+
+		// Resolve parents while drives and UNC shares are still filesystem roots.
+		// The root's own namespace must not inherit the workspace volume.
+		const absolutePath = this.normalizeSeparators(path.win32.normalize(normalized))
+		return this.toMatcherAbsolutePath(absolutePath, "").replace(/\/$/, "")
 	}
 }

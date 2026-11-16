@@ -109,12 +109,17 @@ function hasConflictingReadPaths(tool: ClineSayTool, cwd: string | undefined): b
 	// display formatting can change literal backslashes into directory separators.
 	// Keep baseline lexical matching when those spellings disagree; do not expand
 	// permissions through a canonical root using a lossy display path.
-	return [tool, ...(tool.batchFiles ?? [])].some(
-		({ path: displayPath, content }) =>
-			typeof displayPath === "string" &&
-			typeof content === "string" &&
-			path.resolve(cwd ?? "", displayPath) !== path.resolve(cwd ?? "", content),
-	)
+	const files = [tool, ...(tool.batchFiles ?? [])]
+	const hasConflictingPaths = files.some(({ path: displayPath, content }) => {
+		if (typeof displayPath !== "string" || typeof content !== "string") return false
+
+		const resolvedDisplayPath = path.resolve(cwd ?? "", displayPath)
+		const resolvedNativePath = path.resolve(cwd ?? "", content)
+
+		return resolvedDisplayPath !== resolvedNativePath
+	})
+
+	return hasConflictingPaths
 }
 
 /**

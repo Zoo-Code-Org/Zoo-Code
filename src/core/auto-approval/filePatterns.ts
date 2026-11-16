@@ -361,6 +361,11 @@ function toMatcherPath(filePath: string, paths: WorkspacePaths): string | undefi
 	return toRootRelativePath(resolveMatcherPath(workspaceRoot, normalized, paths.matcherVolume))
 }
 
+interface PatternAlternative {
+	pattern: string
+	candidates: string[]
+}
+
 /**
  * Check whether a file path is covered by any of the configured patterns.
  *
@@ -408,63 +413,84 @@ export function isFileMatchedByPatterns({
 	) {
 		return false
 	}
-	const candidate = toMatcherPath(filePath, paths)
 
+	const candidate = toMatcherPath(filePath, paths)
 	if (!candidate) {
 		return false
 	}
 
 	const candidates = paths.equivalentPaths(`/${candidate}`).map(toRootRelativePath)
-	// Before UNC/unknown-root namespaces were introduced, rooted exclusions in
-	// a workspace without a drive also matched drive paths (e.g. !/**/.env).
-	// Preserve that restriction only for drives, never for the internal UNC/ROOT
-	// prefixes, which must not be addressable by a user's rooted path.
-	const driveCandidates =
-		paths.isWindows && !WINDOWS_DRIVE_PREFIX.test(paths.workspacePath)
-			? candidates.filter((value) => /^[a-zA-Z]\//.test(value))
-			: []
+	const driveCandidates = getDriveExclusionCandidates(paths, candidates)
 
 	try {
 		// A namespace marker must never become a UNC server glob. Reject the whole
 		// list, including unsupported exclusions, so skipping one cannot widen a grant.
-		if (patterns.some((pattern) => patternUsesWindowsNamespace(pattern, paths, homeDir))) {
+		const hasUnsupportedNamespacePattern = patterns.some((pattern) =>
+			patternUsesWindowsNamespace(pattern, paths, homeDir),
+		)
+		if (hasUnsupportedNamespacePattern) {
 			return false
 		}
-		let matched = false
+
+		let isFileAllowedByPatterns = false
 		for (const rawPattern of patterns) {
 			const pattern = toMatcherPatternWithPaths(rawPattern, paths, homeDir)
 			if (!pattern) continue
 
-			const negated = pattern.startsWith("!")
-			const alternatives = [{ pattern: negated ? pattern.slice(1) : pattern, candidates }]
-			if (negated && driveCandidates.length) {
-				const rootedExclusion = paths.normalizeSeparators(rawPattern.slice(1))
-				if (rootedExclusion.startsWith("/") && !WINDOWS_UNC_PREFIX.test(rootedExclusion)) {
-					alternatives.push({
-						pattern: rootedExclusion.replace(/^\/+/, "/"),
-						candidates: driveCandidates,
-					})
-				}
-			}
+			const alternatives = getPatternAlternatives(rawPattern, pattern, paths, candidates, driveCandidates)
+
 			// Apply each rule to both spellings BEFORE advancing to the next rule.
 			// OR-ing two complete matchers would let one spelling bypass an exclusion.
-			if (
-				alternatives.some(({ pattern, candidates }) => {
-					const matcher = ignore({ ignoreCase: paths.isWindows }).add([
-						pattern,
-						MATCH_DIRECTORIES_ONLY_PATTERN,
-					])
-					return candidates.some((value) => matcher.ignores(value))
-				})
-			) {
-				matched = !negated
+			const matchesAnyAlternative = alternatives.some((alternative) =>
+				matchesPatternAlternative(alternative, paths.isWindows),
+			)
+			if (matchesAnyAlternative) {
+				isFileAllowedByPatterns = !pattern.startsWith("!")
 			}
 		}
-		return matched
+
+		return isFileAllowedByPatterns
 	} catch (error) {
 		// A path the matcher rejects cannot be confirmed as matching, so treat it
 		// as unmatched.
 		console.error(`[auto-approval] Failed to match path ${filePath}:`, error)
 		return false
 	}
+}
+
+function getDriveExclusionCandidates(paths: WorkspacePaths, candidates: string[]): string[] {
+	// Preserve rooted exclusions for drives in a workspace without a drive,
+	// but never expose the internal UNC/ROOT prefixes to user-authored globs.
+	const supportsDriveExclusions = paths.isWindows && !WINDOWS_DRIVE_PREFIX.test(paths.workspacePath)
+	if (!supportsDriveExclusions) return []
+
+	return candidates.filter((value) => /^[a-zA-Z]\//.test(value))
+}
+
+function getPatternAlternatives(
+	rawPattern: string,
+	pattern: string,
+	paths: WorkspacePaths,
+	candidates: string[],
+	driveCandidates: string[],
+): PatternAlternative[] {
+	const negated = pattern.startsWith("!")
+	const alternatives = [{ pattern: negated ? pattern.slice(1) : pattern, candidates }]
+	if (!negated || !driveCandidates.length) return alternatives
+
+	const rootedExclusion = paths.normalizeSeparators(rawPattern.slice(1))
+	const isRootedNonUncExclusion = rootedExclusion.startsWith("/") && !WINDOWS_UNC_PREFIX.test(rootedExclusion)
+	if (!isRootedNonUncExclusion) return alternatives
+
+	alternatives.push({
+		pattern: rootedExclusion.replace(/^\/+/, "/"),
+		candidates: driveCandidates,
+	})
+
+	return alternatives
+}
+
+function matchesPatternAlternative({ pattern, candidates }: PatternAlternative, isWindows: boolean): boolean {
+	const matcher = ignore({ ignoreCase: isWindows }).add([pattern, MATCH_DIRECTORIES_ONLY_PATTERN])
+	return candidates.some((candidate) => matcher.ignores(candidate))
 }
