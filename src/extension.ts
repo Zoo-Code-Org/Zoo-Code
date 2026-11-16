@@ -134,8 +134,10 @@ export async function activate(context: vscode.ExtensionContext) {
 
 	// Initialize network proxy configuration early, before any network requests.
 	// When proxyUrl is configured, all HTTP/HTTPS traffic will be routed through it.
-	// Only applied in debug mode (F5).
-	await initializeNetworkProxy(context, outputChannel)
+	// Only applied in debug mode (F5). The returned disposable releases the
+	// debug-proxy resources, so it is retained for deactivation.
+	const proxyResources = await initializeNetworkProxy(context, outputChannel)
+	context.subscriptions.push(proxyResources)
 
 	// Set extension path for custom tool registry to find bundled esbuild
 	customToolRegistry.setExtensionPath(context.extensionPath)
@@ -170,7 +172,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	kimiCodeOAuthManager.initialize(context)
 
 	// Initialize Zoo Code auth service for extension session token management.
-	await initZooCodeAuth(context)
+	// The returned disposable unregisters the secret-storage listener the
+	// initializer acquires, so it is retained for deactivation.
+	const authSecretsListener = await initZooCodeAuth(context)
+	context.subscriptions.push(authSecretsListener)
 
 	// Get default commands from configuration.
 	const defaultCommands = vscode.workspace.getConfiguration(Package.name).get<string[]>("allowedCommands") || []
