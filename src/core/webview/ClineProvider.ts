@@ -5137,6 +5137,9 @@ export class ClineProvider
 			// Registration lives inside the try below: a mode whose write fails partway through
 			// the batch must trigger the same rollback as a failure after setValues.
 
+			// Whether this batch reached the state through setValues, which the rollback below reads.
+
+			let settingsApplied = false
 			try {
 				// Register the batch's custom modes before setValues validates `mode`: a mode
 				// selected in the same configuration is not known to the manager yet.
@@ -5146,6 +5149,7 @@ export class ClineProvider
 					}
 				}
 				await this.setValues(configuration)
+				settingsApplied = true
 
 				if (configuration.allowedCommands) {
 					await vscode.workspace
@@ -5205,6 +5209,24 @@ export class ClineProvider
 				}
 
 				// over a state this batch never touched.
+				// rejected setValues, left the state as it was, and the rollback must not write the merged list
+				// Only a batch that reached setValues put anything into the state: a failure before it, or a
+				if (settingsApplied) {
+					// The batch handed its modes to the state through setValues before the failure; the files are
+					// back to the definitions found before the batch, so the state must follow the files.
+					// Otherwise getValues() keeps posting a mode that no longer exists on disk, and the next
+					// save writes that phantom back. The merged read is the same source the success path posts,
+					// so the rollback posts it too, through the same door setValues used.
+					try {
+						await this.setValues({ customModes: await this.customModesManager.getCustomModes() })
+					} catch (stateError: unknown) {
+						this.log(
+							`[createTask] Failed to sync the custom modes after the task creation rollback: ${
+								stateError instanceof Error ? stateError.message : String(stateError)
+							}`,
+						)
+					}
+				}
 
 				throw error
 			}

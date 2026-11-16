@@ -7394,6 +7394,58 @@ describe("ClineProvider", () => {
 
 		await provider.dispose()
 	})
+
+	it("posts the pre-batch custom modes back into the state after a failed task creation", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const savedMode = {
+			slug: "existing-mode",
+			name: "Existing",
+			roleDefinition: "r",
+			groups: ["read" as const],
+		}
+		// A different definition for the slug that already exists: the state takes this one from the
+		// batch, and the rollback must put the earlier one back.
+		const existingMode = { ...savedMode, name: "Overridden", roleDefinition: "changed" }
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			// The merged read is what the files hold once the rollback finishes, and it is what a
+			// successful batch would have left posted in the state.
+			getCustomModes: vi.fn().mockResolvedValue([savedMode]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [savedMode], failures: [] }),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		// The real setValues is left in place so the batch really reaches the state; the failure comes
+		// later, from the profile switch the same configuration asks for.
+		const setValuesSpy = vi.spyOn(provider, "setValues")
+		Object.assign(provider, {
+			setProviderProfile: vi.fn().mockRejectedValue(new Error("profile switch failed")),
+		})
+
+		await expect(
+			provider.createTask(
+				"text",
+				undefined,
+				undefined,
+				{},
+				{ customModes: [existingMode], currentApiConfigName: "cfg-x" },
+			),
+		).rejects.toThrow("profile switch failed")
+
+		expect(setValuesSpy).toHaveBeenCalledWith(expect.objectContaining({ customModes: [existingMode] }))
+		expect(manager.updateCustomMode).toHaveBeenCalledWith("existing-mode", savedMode)
+		// The files hold the pre-batch definition, so the state the webview reads cannot keep the
+		// batch's copy of it.
+		expect(provider.contextProxy.getValues().customModes).toEqual([savedMode])
+
+		await provider.dispose()
+	})
 	it("should roll back the modes a registration left half-installed", async () => {
 		const provider = new ClineProvider(
 			mockContext,
@@ -10110,4 +10162,3 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 		})
 	})
 })
-
