@@ -113,6 +113,33 @@ describe("workspace path guards", () => {
 	})
 
 	it.each([
+		{ value: "\\\\?\\C:\\repo\\file.md", namespace: true },
+		{ value: "\\\\.\\C:\\repo\\file.md", namespace: true },
+		{ value: "//?/UNC/server/share/file.md", namespace: true },
+		{ value: "//./UNC/server/share/file.md", namespace: true },
+		{ value: "/\\?/UNC/server/share/file.md", namespace: true },
+		{ value: "\\/./UNC/server/share/file.md", namespace: true },
+		{ value: "//?//UNC/server/share/file.md", namespace: true },
+		{ value: "//./../server/share/file.md", namespace: true },
+		{ value: "//?/", namespace: true },
+		{ value: "//./", namespace: true },
+		{ value: undefined, namespace: false },
+		{ value: "", namespace: false },
+		{ value: "C:\\repo\\file.md", namespace: false },
+		{ value: "\\\\server\\share\\file.md", namespace: false },
+		{ value: "//server/share/file.md", namespace: false },
+		{ value: "///?/UNC/server/share/file.md", namespace: false },
+		{ value: "///./UNC/server/share/file.md", namespace: false },
+		{ value: "./?/file.md", namespace: false },
+		{ value: "/./?/file.md", namespace: false },
+		{ value: "//?", namespace: false },
+		{ value: "//.", namespace: false },
+	])("recognizes a Windows namespace only on Windows: $value", ({ value, namespace }) => {
+		expect(new WorkspacePaths({ isWindows: true }).isWindowsNamespacePath(value)).toBe(namespace)
+		expect(new WorkspacePaths({ isWindows: false }).isWindowsNamespacePath(value)).toBe(false)
+	})
+
+	it.each([
 		{
 			isWindows: false,
 			cwd: "/repo",

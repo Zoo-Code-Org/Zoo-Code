@@ -34,6 +34,11 @@ export class WorkspacePaths {
 		return this.isWindows ? value.replace(/\\/g, "/") : value
 	}
 
+	/** Device/extended namespaces need different path semantics than ordinary drives and UNC shares. */
+	isWindowsNamespacePath(value: string | undefined): boolean {
+		return this.isWindows && /^\/\/[?.]\//.test(this.normalizeSeparators(value ?? ""))
+	}
+
 	/** Classify a path after normalizeSeparators has applied the platform's separator rules. */
 	isAbsolutePath(value: string): boolean {
 		return value.startsWith("/") || (this.isWindows && WINDOWS_DRIVE_PREFIX.test(value))

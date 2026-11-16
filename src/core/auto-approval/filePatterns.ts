@@ -230,8 +230,8 @@ function toRootRelativePath(posixAbsolutePath: string): string {
  * @param isWindows - Whether to read paths by Windows' rules, including backslash separators.
  * @param homeDir - Directory `~` expands to. Defaults to the real one; tests pass
  * a Windows-shaped path to exercise that platform's rules.
- * @returns The rewritten pattern, or `undefined` when the pattern can never
- * match a file (empty, a directory, or escaping an unknown workspace root).
+ * @returns The rewritten pattern, or `undefined` for an unsupported pattern
+ * (empty, a directory, escaping an unknown workspace root, or a Windows namespace path).
  */
 export function toMatcherPattern(
 	pattern: string,
@@ -239,7 +239,20 @@ export function toMatcherPattern(
 	isWindows = runningOnWindows(),
 	homeDir = os.homedir(),
 ): string | undefined {
-	return toMatcherPatternWithPaths(pattern, new WorkspacePaths({ cwd, isWindows }), homeDir)
+	const paths = new WorkspacePaths({ cwd, isWindows })
+	if (paths.isWindowsNamespacePath(cwd) || patternUsesWindowsNamespace(pattern, paths, homeDir)) {
+		return undefined
+	}
+	return toMatcherPatternWithPaths(pattern, paths, homeDir)
+}
+
+function patternUsesWindowsNamespace(pattern: string, paths: WorkspacePaths, homeDir: string): boolean {
+	const normalized = paths.normalizeSeparators(pattern.startsWith("!") ? pattern.slice(1) : pattern)
+	// Check before tilde expansion: posix.join collapses the namespace's leading separators.
+	return (
+		paths.isWindowsNamespacePath(normalized) ||
+		(normalized.startsWith("~/") && paths.isWindowsNamespacePath(homeDir))
+	)
 }
 
 function toMatcherPatternWithPaths(pattern: string, paths: WorkspacePaths, homeDir: string): string | undefined {
@@ -346,6 +359,8 @@ function toMatcherPath(filePath: string, paths: WorkspacePaths): string | undefi
  * a `!` pattern excludes files matched by the patterns before it. A pattern only
  * ever decides the file it names: matching one of its parent directories grants
  * nothing, see "Why a match on a directory must not decide a file's verdict".
+ * Windows device/extended namespace paths cannot grant approval through this matcher; an unsupported
+ * pattern invalidates its entire list so an exclusion cannot silently disappear.
  *
  * @param filePath - Path of the file, either absolute or relative to `cwd`.
  * @param cwd - Workspace root.
@@ -376,6 +391,14 @@ export function isFileMatchedByPatterns({
 	}
 
 	const paths = new WorkspacePaths({ cwd, canonicalCwd, isWindows })
+	// Device/extended paths are outside the ordinary drive/UNC matcher semantics.
+	if (
+		paths.isWindowsNamespacePath(filePath) ||
+		paths.isWindowsNamespacePath(cwd) ||
+		paths.isWindowsNamespacePath(canonicalCwd)
+	) {
+		return false
+	}
 	const candidate = toMatcherPath(filePath, paths)
 
 	if (!candidate) {
@@ -393,6 +416,11 @@ export function isFileMatchedByPatterns({
 			: []
 
 	try {
+		// A namespace marker must never become a UNC server glob. Reject the whole
+		// list, including unsupported exclusions, so skipping one cannot widen a grant.
+		if (patterns.some((pattern) => patternUsesWindowsNamespace(pattern, paths, homeDir))) {
+			return false
+		}
 		let matched = false
 		for (const rawPattern of patterns) {
 			const pattern = toMatcherPatternWithPaths(rawPattern, paths, homeDir)
