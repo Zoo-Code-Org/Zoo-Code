@@ -519,6 +519,41 @@ describe("ExtensionHost", () => {
 	})
 
 	describe("runTask", () => {
+		it.each([
+			{ nonInteractive: false, autoApprovalEnabled: true, expected: false },
+			{ nonInteractive: false, autoApprovalEnabled: false, expected: false },
+			{ nonInteractive: undefined, autoApprovalEnabled: true, expected: false },
+			{ nonInteractive: true, autoApprovalEnabled: true, expected: true },
+			{ nonInteractive: true, autoApprovalEnabled: false, expected: false },
+		])("enforces host approval policy for %j", async ({ nonInteractive, autoApprovalEnabled, expected }) => {
+			const host = createTestHost({ nonInteractive })
+			host.markWebviewReady()
+			const emitSpy = vi.spyOn(host, "emit")
+			const configuration = { autoApprovalEnabled, alwaysAllowExecute: true, allowedCommands: ["*"], mode: "code" }
+
+			const taskPromise = host.runTask("test prompt", "task-123", configuration)
+			host["client"].getEmitter().emit("taskCompleted", {
+				success: true,
+				stateInfo: {
+					state: AgentLoopState.IDLE,
+					isWaitingForInput: false,
+					isRunning: false,
+					isStreaming: false,
+					requiredAction: "start_task",
+					description: "Task completed",
+				},
+			})
+			await taskPromise
+
+			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", {
+				type: "newTask",
+				text: "test prompt",
+				taskId: "task-123",
+				taskConfiguration: { ...configuration, autoApprovalEnabled: expected },
+			})
+			expect(configuration.autoApprovalEnabled).toBe(autoApprovalEnabled)
+		})
+
 		it("should send newTask message when called", async () => {
 			const host = createTestHost()
 			host.markWebviewReady()
