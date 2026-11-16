@@ -46,7 +46,9 @@ type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
 	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
-	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
+	initiateTaskLoop: (
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
@@ -3587,6 +3589,34 @@ describe("Cline", () => {
 				await task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
 
 				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+
+			it("does not switch the mode when a TaskStarted listener cancels while the content loads", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				let release: () => void = () => {}
+				const gate = new Promise<void>((resolve) => (release = resolve))
+				vi.mocked(parseMentions).mockImplementationOnce(async () => {
+					await gate
+					return { text: "run /commit", contentBlocks: [], mode: "code" }
+				})
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				task.on(RooCodeEventName.TaskStarted, () => void task.abortTask())
+
+				// startTask starts the content first, then the loop emits TaskStarted.
+				const pending = task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
+				await getTaskTestAccess(task)
+					.initiateTaskLoop(pending)
+					.catch(() => {})
+				release()
+				await pending
+
+				expect(task.abort).toBe(true)
+				expect(handleModeSwitchSpy).not.toHaveBeenCalled()
 			})
 
 			it.each([

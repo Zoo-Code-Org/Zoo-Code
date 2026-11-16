@@ -6,7 +6,8 @@
 \* Invariants: NoSwitchAfterCancel and NoSpinnerGap.
 \* Expected before the run: Guard On and RowFirst hold. Guard Off fails in 4 states. WaitFirst fails in 2.
 \* Result: the fixed config holds in 12 states. NoGuard fails in 3 states. WaitFirst fails in 2 states.
-\* Replay: the unit test cancels the task, then calls userInputContent with a mode. It fails without the guard.
+\* Replay: Task.spec.ts "slash command mode switch". One test cancels from a TaskStarted listener while parseMentions waits.
+\* The other tests cancel first. All of them fail without the guard.
 \* The guard and the handleModeSwitch call run in one turn, so a cancel cannot fall between them.
 \* Out of scope: a cancel inside handleModeSwitch itself, and the saved history.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
