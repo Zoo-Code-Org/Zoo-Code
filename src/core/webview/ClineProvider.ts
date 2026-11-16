@@ -183,6 +183,9 @@ type PersistedViewStateValues = Pick<ViewLocalStateValues, "mode" | "currentApiC
  * https://github.com/KumarVariable/vscode-extension-sidebar-html/blob/master/src/customSidebarViewProvider.ts
  */
 
+/** Fields of the view-local buffer that a mutation write can touch. */
+type ViewLocalMutationField = keyof PersistedViewStateValues
+
 type DelegatedChildContext = TaskExecutionContext
 
 function runDelegationTransition<T>(
@@ -460,6 +463,13 @@ export class ClineProvider
 	 * when running in parallel (multi-tab) mode.
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
+
+	/**
+	 * Mutation revisions per view-local field. Only mutation writes bump them, so a
+	 * lookup can tell which fields were edited during its awaits even when an edit
+	 * lands back on the value it started from.
+	 */
+	private viewLocalFieldRevisions = new Map<ViewLocalMutationField, number>()
 
 	/**
 	 * This view's pinned profile name from the view-local buffer. Exposed for
@@ -1047,9 +1057,14 @@ export class ClineProvider
 			const persisted = this.getPersistedViewStates()[loadedForViewId]
 			const loadedState: Partial<ExtensionState> = {}
 
-			// The mutation paths update viewLocalState in place; a shallow snapshot makes
-			// in-flight edits observable below.
-			const preLoadBuffer = { ...this.viewLocalState }
+			// The mutation paths update viewLocalState in place; the per-field revisions taken
+			// below make in-flight edits observable, including an edit that lands back on the
+			// value it started from.
+			const preLoadRevisions: Record<ViewLocalMutationField, number> = {
+				mode: this.viewLocalFieldRevisions.get("mode") ?? 0,
+				currentApiConfigName: this.viewLocalFieldRevisions.get("currentApiConfigName") ?? 0,
+				apiConfiguration: this.viewLocalFieldRevisions.get("apiConfiguration") ?? 0,
+			}
 
 			if (persisted?.mode) {
 				// A stale custom-mode slug must not shadow the shared mode from getState().
@@ -1081,12 +1096,15 @@ export class ClineProvider
 				return
 			}
 
-			// Diff each field so in-flight edits win over the loaded values (including clears)
+			// Apply a persisted field only when no mutation touched that field during the
+			// awaits above: the revision decides, not the value, so an edit that reverts to			// the value it started from still wins over the loaded one (including clears)
 			// while untouched fields keep the persisted values authoritative.
 			const postLoadBuffer = this.viewLocalState
+			const mutatedDuringLookup = (field: ViewLocalMutationField): boolean =>
+				(this.viewLocalFieldRevisions.get(field) ?? 0) !== preLoadRevisions[field]
 			const mergedState: Partial<ExtensionState> = { ...loadedState }
 
-			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
+			if (mutatedDuringLookup("mode")) {
 				if (postLoadBuffer.mode === undefined) {
 					delete mergedState.mode
 				} else {
@@ -1094,7 +1112,7 @@ export class ClineProvider
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
+			if (mutatedDuringLookup("currentApiConfigName")) {
 				if (postLoadBuffer.currentApiConfigName === undefined) {
 					delete mergedState.currentApiConfigName
 				} else {
@@ -1102,7 +1120,7 @@ export class ClineProvider
 				}
 			}
 
-			if (!Object.is(preLoadBuffer.apiConfiguration, postLoadBuffer.apiConfiguration)) {
+			if (mutatedDuringLookup("apiConfiguration")) {
 				if (postLoadBuffer.apiConfiguration === undefined) {
 					delete mergedState.apiConfiguration
 				} else {
@@ -6122,8 +6140,16 @@ export class ClineProvider
 	 * profile upsert/activation/deletion, or resetState. This ensures the local cache stays in
 	 * sync with global state changes that would otherwise be invisible behind mergedStateValues.
 	 */
+	/** Bump the mutation revision of every field a write touches. */
+	private bumpViewLocalFieldRevision(...fields: ViewLocalMutationField[]): void {
+		for (const field of fields) {
+			this.viewLocalFieldRevisions.set(field, (this.viewLocalFieldRevisions.get(field) ?? 0) + 1)
+		}
+	}
+
 	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
 		if ("mode" in values) {
+			this.bumpViewLocalFieldRevision("mode")
 			const val = values.mode
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.mode
@@ -6133,6 +6159,7 @@ export class ClineProvider
 		}
 
 		if ("currentApiConfigName" in values) {
+			this.bumpViewLocalFieldRevision("currentApiConfigName")
 			const val = values.currentApiConfigName
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.currentApiConfigName
@@ -6142,6 +6169,7 @@ export class ClineProvider
 		}
 
 		if ("apiConfiguration" in values) {
+			this.bumpViewLocalFieldRevision("apiConfiguration")
 			const val = values.apiConfiguration
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.apiConfiguration
@@ -6149,6 +6177,7 @@ export class ClineProvider
 				this.viewLocalState.apiConfiguration = val
 			}
 		} else if (PROVIDER_SETTINGS_KEYS.some((key) => key in values)) {
+			this.bumpViewLocalFieldRevision("apiConfiguration")
 			const providerSettingsUpdate = PROVIDER_SETTINGS_KEYS.reduce((acc, key) => {
 				if (key in values) {
 					return { ...acc, [key]: values[key as keyof RooCodeSettings] }

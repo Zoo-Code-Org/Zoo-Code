@@ -6496,6 +6496,57 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps a reverting buffer edit ahead of the profile resolved during the lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			// No custom modes exist, so the persisted builtin slug resolves without a lookup.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// The selections this view pins are already durable under the stable id, bound by
+			// this webview's claim; the profile behind them resolves to a different provider
+			// configuration.
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "cfg-a",
+					updatedAt: 1,
+					claimToken: "seeded-claim",
+				},
+			})
+			const pinnedApiConfiguration = { apiProvider: providerIdentifiers.openrouter }
+			await provider.saveViewState("apiConfiguration", pinnedApiConfiguration)
+			const load = provider["setViewStateId"]("stable-sidebar-view", "seeded-claim")
+			// Let the stalled lookup begin so the edits below land inside it.
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// The user switches provider and switches it back while the lookup is in flight:
+			// the buffer ends on the value it started from, but the edit happened.
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "typed-then-erased",
+			})
+			await provider.saveViewState("apiConfiguration", pinnedApiConfiguration)
+			resolveProfile({
+				name: "cfg-a",
+				id: "cfg-a-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await load
+			// The reverting edit is still the user's own, so the resolved profile must not
+			// overwrite it; the fields nobody touched keep the persisted selections.
+			expect(provider["viewLocalState"].apiConfiguration).toBe(pinnedApiConfiguration)
+			expect(provider["viewLocalState"]).toMatchObject({
+				mode: "code",
+				currentApiConfigName: "cfg-a",
+			})
+			await provider.dispose()
+		})
+
 		it("gives each instance its own session-local view id and tracks it as active", async () => {
 			const first = new ClineProvider(
 				mockContext,
