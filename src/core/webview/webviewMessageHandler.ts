@@ -1048,11 +1048,14 @@ export const webviewMessageHandler = async (
 								// distinguishes `[]` from absent, and the activation seed
 								// treats `[]` as an override, so writing `[]` where no
 								// value existed would suppress the default lists after a
-								// rolled-back save. What the rollback must respect is
-								// whether a layer exists now — one that came into
-								// existence mid-save is as much another writer's
-								// decision as one that predates the save, and its
-								// explicit `[]` override must survive this undo.
+								// rolled-back save. What the rollback must respect is whose
+								// presence the layer holds: a layer the re-read finds holding
+								// something other than this save's own write came about
+								// through another writer's decision (or predates the save),
+								// and its explicit `[]` override must survive this undo; a
+								// layer still holding exactly this save's write over an
+								// absent start is the half-applied save itself, so its
+								// absence is what the rollback restores.
 								let freshGlobalValue: string[] | undefined
 								try {
 									freshGlobalValue = config.inspect<string[]>(key)?.globalValue
@@ -1070,11 +1073,23 @@ export const webviewMessageHandler = async (
 									]),
 								]
 								const globalLayerExistsNow = freshGlobalValue !== undefined
+								// A layer that started absent only carries another writer's
+								// decision when it now holds something beyond this save's
+								// own write: a re-read with the same entries (order aside)
+								// is the half-applied save itself, so the rollback restores
+								// absence instead of keeping an empty layer no user created.
+								const ownWriteIntact =
+									globalLayerAtSaveStart === undefined &&
+									freshGlobalValue !== undefined &&
+									freshGlobalValue.length === globalWrite.length &&
+									freshGlobalValue.every((entry) => globalWrite.includes(entry))
 								try {
-									if (globalUndo.length === 0 && !globalLayerExistsNow) {
+									if (globalUndo.length === 0 && (!globalLayerExistsNow || ownWriteIntact)) {
 										// The re-read found no layer at all (absent from the
-										// start, or cleared mid-save) and nothing to restore:
-										// clear the key rather than materialize an empty layer.
+										// start, or cleared mid-save), or found only this
+										// save's own write over an absent start, and nothing
+										// to restore: clear the key rather than materialize an
+										// empty layer.
 										await config.update(key, undefined, vscode.ConfigurationTarget.Global)
 									} else {
 										await config.update(key, globalUndo, vscode.ConfigurationTarget.Global)

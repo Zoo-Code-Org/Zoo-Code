@@ -2539,10 +2539,10 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 
 		// The undo was attempted at the Global target even though it failed;
 		// this save deleted no global entry and added only "aws", so the undo
-		// computes an empty list - and because the re-read finds a layer (this
-		// save's own write still standing), the rollback preserves that
-		// existence rather than clearing the key.
-		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// computes an empty list - and because the layer was absent when the
+		// save started and the re-read still holds only this save's own write,
+		// the rollback restores absence by clearing the key.
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
 		expect(update).toHaveBeenCalledTimes(3)
 		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
@@ -2976,6 +2976,64 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(clearedMidSave).toHaveBeenCalledTimes(3)
 	})
 
+	it("clears the key when the undo's re-read finds only this save's own write", async () => {
+		// The global layer was absent when the save started, and the re-read
+		// during the compensation finds it holding exactly the list this save
+		// wrote — the half-applied save itself, not another writer's decision.
+		// An undo that wrote `[]` back would materialize an explicit empty
+		// override that the activation seed honors over the default lists, so
+		// the rollback clears the key and restores the absence the save
+		// started from. Both legs are that signature: the second when the
+		// save's own global write was itself empty.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ workspaceValue: ["docker"] }, undefined, { globalValue: ["aws"] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker", "aws"] },
+		})
+
+		expect(update).toHaveBeenNthCalledWith(1, "deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(2, "deniedCommands", ["docker"], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		// Writing `[]` here instead would read back, after the rolled-back save,
+		// as the user's explicit empty override of the default command lists.
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenCalledTimes(3)
+
+		// The second leg: the save's own global write was itself empty (every
+		// submitted entry stayed workspace-scoped), and the re-read finds that
+		// same empty layer — still the save's own write over an absent start,
+		// so the undo clears rather than writing `[]` back.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+		const { update: emptyWrite } = mockCommandConfiguration(
+			{},
+			[undefined, Promise.reject(new Error("workspace locked")), undefined],
+			[{ workspaceValue: ["docker"] }, undefined, { globalValue: [] }],
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["docker"] },
+		})
+
+		expect(emptyWrite).toHaveBeenNthCalledWith(1, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(emptyWrite).toHaveBeenNthCalledWith(
+			2,
+			"deniedCommands",
+			["docker"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(emptyWrite).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(emptyWrite).toHaveBeenCalledTimes(3)
+	})
+
 	it("preserves an empty global layer another writer created during the save", async () => {
 		// The global layer was absent when the save started; by undo time a
 		// third party had created it holding the explicit `[]` list. An explicit
@@ -3048,8 +3106,8 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	it("reports a failed save through the result when the compensating restore also fails", async () => {
 		// The undo-failure leg reports both failures to the user but throws
 		// nothing, so only its flag can tell the dialog the save was lost.
-		// The re-read finds this save's write still in the global layer, so the
-		// undo writes its empty list back rather than clearing the key.
+		// The global layer was absent at save start and the re-read finds only
+		// this save's own write, so the undo clears the key to restore absence.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
 		const { update } = mockCommandConfiguration(
 			{},
@@ -3068,7 +3126,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			updatedSettings: { deniedCommands: ["docker", "aws"] },
 		})
 
-		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
 		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
 	})
 
