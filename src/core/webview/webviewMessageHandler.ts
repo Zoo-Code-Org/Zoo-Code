@@ -914,7 +914,11 @@ export const webviewMessageHandler = async (
 						// still apply). Hidden entries never appear in that baseline, yet
 						// the workspace-layer re-add below preserves them, so classifying
 						// them as external additions would repeat a false "settings file
-						// changed" warning on every save. A sender that shows no lists
+						// changed" warning on every save. That exclusion only speaks for
+						// entries whose save-start provenance is the hidden workspace
+						// layer: an entry the configuration's own global layer holds is
+						// displayed global knowledge, and excluding it would delete the
+						// user's file addition. A sender that shows no lists
 						// sends no baseline, and its submitted list is written
 						// unclassified. The union covers every layer that can hold an
 						// entry at save start: the extension-state global copy is not
@@ -934,7 +938,8 @@ export const webviewMessageHandler = async (
 									(entry) =>
 										!baseline.includes(entry) &&
 										!incoming.includes(entry) &&
-										!hiddenWorkspaceEntries.includes(entry),
+										(!hiddenWorkspaceEntries.includes(entry) ||
+											configGlobalAtSaveStart.includes(entry)),
 								)
 							: []
 						// An entry the settings file lost while the dialog was open is
@@ -947,19 +952,24 @@ export const webviewMessageHandler = async (
 						// removed in the file, and external removal wins over the stale
 						// dialog buffer, mirroring how the external-addition re-admit
 						// above lets the file win over a stale deletion. "No layer"
-						// covers the same layers as that re-admit union, including the
-						// configuration's own global layer: the extension-state copy is
-						// not refreshed when the settings file is edited directly, so a
-						// retained entry only that layer still holds has not been
-						// removed. Entries absent from the baseline keep their promotion
-						// path untouched.
+						// means the configuration layers the writes target: they alone
+						// can disprove a removal, because the extension-state copy is
+						// never refreshed when the settings file is edited directly and
+						// so can hold an entry the file has deleted just as it can miss
+						// one the file has gained. The state copy is still retention
+						// evidence where the configuration has no global layer at all:
+						// an absent layer is no file that could have deleted anything,
+						// and the entries the copy holds from the activation seed (the
+						// built-in defaults, before this list was ever saved) would
+						// otherwise vanish from every layer on the first save. Entries
+						// absent from the baseline keep their promotion path untouched.
 						const splitSourceEntries = Array.isArray(baseline)
 							? [...incoming, ...externallyAdded].filter(
 									(entry) =>
 										!baseline.includes(entry) ||
 										currentScopes.workspace.includes(entry) ||
-										currentScopes.global.includes(entry) ||
-										configGlobalAtSaveStart.includes(entry),
+										configGlobalAtSaveStart.includes(entry) ||
+										(currentScopes.global.includes(entry) && globalLayerAtSaveStart === undefined),
 								)
 							: [...incoming, ...externallyAdded]
 						// The baseline also carries the gate as the dialog last displayed
@@ -988,11 +998,12 @@ export const webviewMessageHandler = async (
 							// the hidden entries this reduced layer drops.
 							currentScopes.workspace.filter((entry) => !promotionHiddenEntries.includes(entry)),
 							// The global origin set decides which kept entries the Global
-							// write preserves, so it must cover the same layers as the
-							// retained-entry filter above: an entry only the
-							// configuration's own global layer holds is existing global
-							// knowledge even when the extension-state copy lags behind.
-							[...new Set([...currentScopes.global, ...configGlobalAtSaveStart])],
+							// write preserves, so it covers the same configuration layer
+							// as the retained-entry filter above: only the
+							// configuration's own global layer is evidence of existing
+							// global knowledge, because the extension-state copy is not
+							// refreshed when the settings file is edited directly.
+							configGlobalAtSaveStart,
 						)
 
 						// The hidden set holds entries the dialog could not display,

@@ -2634,6 +2634,44 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
 	})
 
+	it("keeps a configuration-global deny addition past the hidden-entry exclusion when the workspace copy is shadowed", async () => {
+		// The global allow "git" shadows the workspace deny "git push", so the
+		// displayed deny list stays empty; while the dialog was open the user
+		// added the same "git push" to the user-level deny list in settings.json.
+		// The hidden-entry exclusion classifies by bare membership, so without a
+		// provenance proviso the configuration-global addition is excluded from
+		// the external-addition re-admit, the split source is empty, and the
+		// Global write deletes the user's file addition instead of keeping it.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git"] : undefined,
+		)
+		const { update } = mockCommandConfiguration(
+			(key) => (key === "deniedCommands" ? { workspaceValue: ["git push"], globalValue: ["git push"] } : {}),
+			undefined,
+			undefined,
+			true,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			// The dialog displayed nothing deletable: the workspace deny was
+			// shadowed and the global addition arrived after the display.
+			updatedSettings: { deniedCommands: [] },
+			commandListBaseline: { deniedCommands: [], workspaceCommandListsEnabled: true },
+		})
+
+		// The user's new global denial survives the save in the layer it was
+		// added to, instead of being written away as [].
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		// The shadowed workspace copy is preserved by the hidden-entry re-add.
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["git push"], vscode.ConfigurationTarget.Workspace)
+		// The genuine file addition is disclosed by the changed-settings warning.
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1)
+		expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("git push"))
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["git push"])
+	})
+
 	it("promotes a gate-hidden workspace entry the dialog re-adds to the global write", async () => {
 		// With the gate off the dialog shows only the global layer, so a
 		// submitted entry the workspace layer already holds hidden is one the
@@ -3729,6 +3767,91 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		// change to disclose.
 		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["curl"])
+	})
+
+	it("drops a baseline entry the user deleted from the configuration global layer while the state copy still holds it", async () => {
+		// The dialog displayed the global deny "curl" and the submitted list
+		// still holds it, but the user deleted it from the user-level deny list
+		// in settings.json while the dialog was open. The extension-state copy
+		// is never refreshed by a direct file edit, so it still holds "curl" -
+		// treating that stale copy as proof the entry remains would restore the
+		// deleted entry over the file. Only the configuration layers can disprove
+		// a removal, so the retained-entry filter must not consult the state
+		// copy: external removal wins over the stale buffer, mirroring the
+		// external-addition re-admit letting the file win over a stale deletion.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "deniedCommands" ? ["curl"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: [] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["curl"] },
+			commandListBaseline: { deniedCommands: ["curl"], workspaceCommandListsEnabled: true },
+		})
+
+		// The deletion sticks: the Global write clears the layer the file now
+		// shows empty, instead of re-adding "curl" from the stale state copy.
+		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["curl"], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// An external removal is not a file-side addition to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", [])
+	})
+
+	it("preserves activation-seeded default entries whose configuration global layer is absent", async () => {
+		// A default install holds nothing in the user-level settings:
+		// activation seeded the built-in defaults into extension state while
+		// no global configuration layer exists, so the state copy is the only
+		// evidence the displayed entries have a home. A retained-entry filter
+		// that ignores the state copy entirely treats those entries as
+		// externally removed: the split drops them, the Global write clears
+		// the layer to [], and the emptied state stops activation from ever
+		// seeding the defaults again. With no configuration layer that could
+		// contradict the state copy, the retention stands and the defaults
+		// are written back.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git log", "git diff", "git show"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({}, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git log", "git diff", "git show"] },
+			commandListBaseline: {
+				allowedCommands: ["git log", "git diff", "git show"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// The retained entries survive the split and the Global write
+		// rewrites them, instead of clearing the never-created layer.
+		expect(update).toHaveBeenCalledWith(
+			"allowedCommands",
+			["git log", "git diff", "git show"],
+			vscode.ConfigurationTarget.Global,
+		)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", [], vscode.ConfigurationTarget.Global)
+		// The snapshot found no workspace layer, so the save never creates one.
+		expect(update).not.toHaveBeenCalledWith(
+			"allowedCommands",
+			expect.anything(),
+			vscode.ConfigurationTarget.Workspace,
+		)
+		// Entries the dialog displayed and the user kept are retention, not a
+		// file-side change to disclose.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", [
+			"git log",
+			"git diff",
+			"git show",
+		])
 	})
 
 	it("preserves a configuration-global entry the dialog displayed at the workspace scope", async () => {
