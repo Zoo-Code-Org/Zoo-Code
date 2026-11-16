@@ -6618,6 +6618,8 @@ describe("ClineProvider", () => {
 			expect(first["viewStateId"]).toBe(first.viewId)
 			expect(second["viewStateId"]).toBe(second.viewId)
 			expect(ClineProvider.getAllInstances()).toEqual(expect.arrayContaining([first, second]))
+			// Ids increase within one host, so a later instance never lands on an earlier one's number.
+			expect(Number(second.viewId.split("-")[1])).toBeGreaterThan(Number(first.viewId.split("-")[1]))
 			await first.dispose()
 			await second.dispose()
 		})
@@ -7177,6 +7179,143 @@ describe("ClineProvider", () => {
 			await provider1.dispose()
 			await provider2.dispose()
 		})
+	})
+
+	it("reapplies the durable profile selection when its revision was raised before the lookup", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Shared storage is snapshotted so this fixture leaves nothing behind for the tests
+		// that run after it.
+		const priorViewStates = provider["getPersistedViewStates"]({ fresh: true })
+		const { getProfile, resolveProfile } = stallProviderSettingsProfile(provider)
+		// No custom modes exist, so the persisted builtin slug resolves without a lookup.
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+		await provider.contextProxy.setValue("viewStates", {
+			"u7-167-reapply-view": {
+				mode: "code",
+				currentApiConfigName: "cfg-a",
+				updatedAt: 1,
+				claimToken: "seeded-claim",
+			},
+		})
+		// A buffer write earlier in this session already raised this field's revision, so the load
+		// must compare the field against the revision it started from rather than against zero:
+		// otherwise that earlier write reads as an edit made during the lookup and the durable
+		// profile name is dropped although nobody touched the field.
+		provider["_updateViewLocalStateFromMutation"]({ currentApiConfigName: "prior-buffer-profile" })
+		const load = provider["setViewStateId"]("u7-167-reapply-view", "seeded-claim")
+		await vi.waitFor(() => {
+			expect(getProfile).toHaveBeenCalledTimes(1)
+		})
+		// Only another field moves while the profile is still resolving.
+		await provider.saveViewState("mode", "plan")
+		resolveProfile({
+			name: "cfg-a",
+			id: "cfg-a-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		await load
+		expect(provider["viewLocalState"].currentApiConfigName).toBe("cfg-a")
+		expect(provider["viewLocalState"].mode).toBe("plan")
+		expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		await provider.dispose()
+		await provider.contextProxy.setValue("viewStates", priorViewStates)
+	})
+
+	it("keeps a provider-settings edit made during the lookup out of the resolved profile", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Shared storage is snapshotted so this fixture leaves nothing behind for the tests
+		// that run after it.
+		const priorViewStates = provider["getPersistedViewStates"]({ fresh: true })
+		const { getProfile, resolveProfile } = stallProviderSettingsProfile(provider)
+		// No custom modes exist, so the persisted builtin slug resolves without a lookup.
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+		await provider.contextProxy.setValue("viewStates", {
+			"u7-167-provider-key-view": {
+				mode: "code",
+				currentApiConfigName: "cfg-a",
+				updatedAt: 1,
+				claimToken: "seeded-claim",
+			},
+		})
+		const load = provider["setViewStateId"]("u7-167-provider-key-view", "seeded-claim")
+		await vi.waitFor(() => {
+			expect(getProfile).toHaveBeenCalledTimes(1)
+		})
+		// A bare provider-settings key arrives while the profile lookup is in flight. It names no
+		// apiConfiguration field, so only the provider-settings branch can notice it; if that branch
+		// fails to raise the apiConfiguration revision the late profile overwrites the key.
+		provider["_updateViewLocalStateFromMutation"]({ apiKey: "written-during-lookup" })
+		resolveProfile({
+			name: "cfg-a",
+			id: "cfg-a-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-x",
+		})
+		await load
+		expect(provider["viewLocalState"].apiConfiguration).toMatchObject({ apiKey: "written-during-lookup" })
+		expect(provider["viewLocalState"].apiConfiguration).not.toHaveProperty("openRouterModelId")
+		await provider.dispose()
+		await provider.contextProxy.setValue("viewStates", priorViewStates)
+	})
+
+	it("raises one field's mutation revision by exactly one per write", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// The guard detects a mutation by inequality, so the counter has to move by exactly one:
+		// a write that decrements or that lands on another field leaves the guard blind.
+		expect(provider["viewLocalFieldRevisions"].get("mode")).toBeUndefined()
+		provider["_updateViewLocalStateFromMutation"]({ mode: "plan" })
+		expect(provider["viewLocalFieldRevisions"].get("mode")).toBe(1)
+		provider["_updateViewLocalStateFromMutation"]({ mode: "code" })
+		expect(provider["viewLocalFieldRevisions"].get("mode")).toBe(2)
+		expect(provider["viewLocalFieldRevisions"].has("currentApiConfigName")).toBe(false)
+		await provider.dispose()
+	})
+
+	it("claims a leftover temporary entry instead of adopting its fields", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Shared storage is snapshotted so this fixture leaves nothing behind for the tests
+		// that run after it.
+		const priorViewStates = provider["getPersistedViewStates"]({ fresh: true })
+		// An earlier session left this entry under the name this instance just minted; this
+		// instance never authored it, so its first write claims the slot instead of merging into
+		// fields it never wrote.
+		await provider.contextProxy.setValue("viewStates", {
+			[provider.viewId]: { mode: "leftover-mode", currentApiConfigName: "leftover-profile", updatedAt: 1 },
+		})
+		await provider.saveViewState("mode", "fresh-mode")
+		const entry = provider["getPersistedViewStates"]({ fresh: true })[provider.viewId]
+		expect(entry).toMatchObject({ mode: "fresh-mode" })
+		expect(entry).not.toHaveProperty("currentApiConfigName")
+		await provider.dispose()
+		await provider.contextProxy.setValue("viewStates", priorViewStates)
 	})
 
 	describe("loadViewState", () => {
