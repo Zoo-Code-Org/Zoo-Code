@@ -672,7 +672,12 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.contextProxy.setValue("mode", "code")
 			expect(provider["viewLocalState"].mode).toBeUndefined()
 			// The switch only reaches the mode's saved-config lookup after both mode writes settled,
-			// so this rejection arrives with the pin already in place.
+			// so this rejection arrives with the pin already in place. That lookup now consults the
+			// mode map of this provider first, so seed the mapping through the public seam of the
+			// manager and re-take the snapshot the lookup awaits: the id named here is not among the
+			// profiles, which is what sends the read on to the per-mode lookup being failed here.
+			await provider.providerSettingsManager.setModeConfig("ask", "pin-landed-config")
+			provider["captureInitialModeConfigIds"]()
 			const getModeConfigId = vi
 				.spyOn(provider.providerSettingsManager, "getModeConfigId")
 				.mockRejectedValue(new Error("mode config read failed"))

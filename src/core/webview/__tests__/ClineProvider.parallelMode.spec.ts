@@ -513,6 +513,9 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 			})),
 			setModeConfig: vi.fn().mockResolvedValue(undefined),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			// Interface parity: the constructor snapshots the shared mode map through
+			// getModeConfigIds(), so the double has to answer that read as well.
+			getModeConfigIds: vi.fn().mockResolvedValue({}),
 			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
 		}
