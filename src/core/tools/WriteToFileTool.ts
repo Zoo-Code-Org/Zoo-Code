@@ -102,9 +102,7 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 	}
 
 	private hasPathStabilizedForTask(state: TaskPartialStreamState, partialPath: string | undefined): boolean {
-		// Stryker disable next-line ConditionalExpression: the `!== undefined` clause is redundant: when
-		// lastSeenPartialPath is undefined, the second clause only matches an undefined partialPath, which
-		// the `!!partialPath` in the return value rejects either way -- no test can distinguish the two.
+		// Stryker disable next-line ConditionalExpression: equivalent mutant: when state.lastSeenPartialPath is undefined the second clause matches only an undefined partialPath and the return's `!!partialPath` rejects it, so both branches return false
 		const pathHasStabilized = state.lastSeenPartialPath !== undefined && state.lastSeenPartialPath === partialPath
 		state.lastSeenPartialPath = partialPath
 		return pathHasStabilized && !!partialPath
