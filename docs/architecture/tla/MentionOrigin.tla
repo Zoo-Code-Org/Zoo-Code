@@ -5,15 +5,15 @@
 \* Invariant: NoGeneratedTagged. A letter tagged user is a letter the user typed.
 \* It replaces a count check (user tags <= typed letters). This form implies the count check.
 \* Expected before the run: the edits hold. A change of two ranges would fail with generated text between them.
-\* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 2,795 states.
-\* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 89,355 states and takes 30 seconds.
+\* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 2,193 states.
+\* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 71,225 states and takes 30 seconds.
 \* Not modeled: a change of two ranges in one event. It fails with either retagger. A textarea cannot send it.
 \* Replay: paste "@/x" before generated "@/x", then replace the first typed "@". The generated copy turns user.
 \* The finding is real in applyEdit. The fix runs the diff from both ends and keeps "u" only where both agree.
 \* Property test: mentionSegments.spec.ts, "never tags a generated letter user". It fails on the old code.
 \* Actions: Change (typing), Load (ArrowUp loads a stored prompt), HistoryRestoreAct (ArrowDown), UndoAct.
 \* Load can have the draft's letters, and HistoryRestoreAct has no guard on them. Every order of the four runs.
-\* nav is the history navigation state. Load saves the draft only when nav is false. Typing and restore end nav.
+\* nav is the history navigation state. Load saves the draft only when nav is false. Typing, undo and restore end nav.
 \* UndoAct restores any other text, so it covers consecutive undos and redos through the whole undo stack.
 \* HistoryRestore "AsEdit" (restore through applyEdit) fails in 3 states. "Saved" holds. The history hook does this.
 \* UndoRestore "AsEdit" fails in 2 states. "Retained" (keep the old tags, tag the new text generated) fails in 3.
@@ -118,13 +118,15 @@ HistoryRestoreAct ==
 
 \* Native undo or redo restores any other text. This covers every older state in the undo stack.
 \* The browser sends no event with the old origins, so each letter can have either origin.
+\* The input event ends history navigation (ChatTextArea calls resetOnInputChange).
 UndoAct == \E t \in Seqs(Cell, MaxLen) :
     /\ Letters(t) # Letters(text)
     /\ text' = t
     /\ tags' = CASE UndoRestore = "AllGenerated" -> [p \in 1..Len(t) |-> "g"]
              [] UndoRestore = "Retained"    -> Retag(Letters(text), tags, Letters(t), "g")
              [] OTHER                       -> Retag(Letters(text), tags, Letters(t), "u")
-    /\ UNCHANGED <<snap, nav>>
+    /\ nav' = FALSE
+    /\ UNCHANGED snap
 
 Next == Change \/ Load \/ HistoryRestoreAct \/ UndoAct
 
