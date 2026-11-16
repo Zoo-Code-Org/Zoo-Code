@@ -124,6 +124,12 @@ export function transformMessagesForCondensing<
  * @param messages - The messages to filter
  * @returns The messages without reasoning blocks
  */
+const REASONING_BLOCK_TYPES = new Set(["reasoning", "thinking", "redacted_thinking"])
+
+function isReasoningBlock(block: unknown): boolean {
+	return REASONING_BLOCK_TYPES.has((block as { type?: string }).type ?? "")
+}
+
 export function stripReasoningForCondensing(messages: ApiMessage[]): ApiMessage[] {
 	const result: ApiMessage[] = []
 	for (const message of messages) {
@@ -135,11 +141,11 @@ export function stripReasoningForCondensing(messages: ApiMessage[]): ApiMessage[
 			result.push(message)
 			continue
 		}
-		if (!message.content.some((block) => (block as { type?: string }).type === "reasoning")) {
+		if (!message.content.some(isReasoningBlock)) {
 			result.push(message)
 			continue
 		}
-		const remaining = message.content.filter((block) => (block as { type?: string }).type !== "reasoning")
+		const remaining = message.content.filter((block) => !isReasoningBlock(block))
 		const content = (
 			remaining.length > 0 ? remaining : [{ type: "text", text: "[Reasoning omitted]" }]
 		) as ApiMessage["content"]

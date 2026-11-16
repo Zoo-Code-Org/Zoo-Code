@@ -53,6 +53,32 @@ describe("stripReasoningForCondensing", () => {
 		expect(result[1].content).toEqual([{ type: "text", text: "[Reasoning omitted]" }])
 	})
 
+	it("removes Anthropic-style thinking and redacted_thinking blocks", () => {
+		const messages = [
+			{ role: "user", content: "question", ts: 1 },
+			{
+				role: "assistant",
+				ts: 2,
+				content: [
+					{ type: "thinking", thinking: "thoughts", signature: "sig" },
+					{ type: "redacted_thinking", data: "opaque" },
+					{ type: "text", text: "answer" },
+				],
+			},
+			{
+				role: "assistant",
+				ts: 3,
+				content: [{ type: "redacted_thinking", data: "opaque-only" }],
+			},
+		] as unknown as ApiMessage[]
+
+		const result = stripReasoningForCondensing(messages)
+
+		expect(result).toHaveLength(3)
+		expect(result[1].content).toEqual([{ type: "text", text: "answer" }])
+		expect(result[2].content).toEqual([{ type: "text", text: "[Reasoning omitted]" }])
+	})
+
 	it("drops standalone reasoning items", () => {
 		const messages = [
 			{ role: "user", content: "question", ts: 1 },
@@ -110,6 +136,8 @@ describe("summarizeConversation reasoning handling", () => {
 			{ role: "user", ts: 5, content: "Now summarize" },
 		] as unknown as ApiMessage[]
 
+		const inputSnapshot = structuredClone(messages)
+
 		const result = await summarizeConversation({
 			messages,
 			apiHandler,
@@ -118,6 +146,10 @@ describe("summarizeConversation reasoning handling", () => {
 		})
 
 		expect(result.error).toBeUndefined()
+		// The stored history keeps its reasoning; only the request copy is filtered.
+		expect(JSON.stringify(result.messages)).toContain("private chain of thought that must not be sent")
+		// The caller's input is not mutated.
+		expect(messages).toEqual(inputSnapshot)
 		expect(createMessage).toHaveBeenCalledTimes(1)
 		const requestMessages = createMessage.mock.calls[0][1] as Array<{ role: string; content: unknown }>
 		const serialized = JSON.stringify(requestMessages)
