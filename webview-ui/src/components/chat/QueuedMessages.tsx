@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { QueuedMessage } from "@roo-code/types"
 
@@ -16,7 +16,7 @@ interface QueuedMessagesProps {
 }
 
 export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProps) => {
-	const { t } = useTranslation("chat")
+	const { t } = useAppTranslation()
 	const [editingStates, setEditingStates] = useState<Record<string, { isEditing: boolean; value: string }>>({})
 
 	if (queue.length === 0) {
@@ -41,7 +41,7 @@ export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProp
 
 	return (
 		<div className="px-[15px] py-[10px] pr-[6px]" data-testid="queued-messages">
-			<div className="text-vscode-descriptionForeground text-md mb-2">{t("queuedMessages.title")}</div>
+			<div className="text-vscode-descriptionForeground text-md mb-2">{t("chat:queuedMessages.title")}</div>
 			<div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2">
 				{queue.map((message, index) => {
 					const editState = getEditState(message.id, message.text)

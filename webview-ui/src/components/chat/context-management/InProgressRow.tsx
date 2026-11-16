@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { ProgressIndicator } from "../ProgressIndicator"
 
@@ -11,7 +11,7 @@ interface InProgressRowProps {
  * Shows a spinner with operation-specific text based on the event type.
  */
 export function InProgressRow({ eventType }: InProgressRowProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	const progressText =
 		eventType === "condense_context"

@@ -10,7 +10,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Tem certeza de que deseja redefinir todo o estado e armazenamento secreto na extensão? Isso não pode ser desfeito.",
-		"delete_config_profile": "Tem certeza de que deseja excluir este perfil de configuração?"
+		"delete_config_profile": "Tem certeza de que deseja excluir este perfil de configuração?",
+		"requesty_deep_link": "Ativar credenciais do Requesty a partir de um link externo?",
+		"requesty_deep_link_detail": "Isso substituirá o provedor ativo. Solicitações subsequentes podem enviar o conteúdo da sua conversa e do workspace para:\n{{url}}\n\nContinue apenas se você solicitou essas credenciais e confia neste destino."
 	},
 	"errors": {
 		"invalid_data_uri": "Formato de URI de dados inválido",
@@ -131,6 +133,7 @@
 		"rooHistoryImport": {
 			"nothingFound": "Nenhum histórico de tarefas do Roo Code encontrado para importar de {{domain}}.",
 			"alreadyImported_one": "O histórico de {{count}} tarefa do Roo Code já foi importado para o Zoo Code.",
+			"alreadyImported_many": "Todos os {{count}} históricos de tarefas do Roo Code já foram importados para o Zoo Code.",
 			"alreadyImported_other": "Todos os {{count}} históricos de tarefas do Roo Code já foram importados para o Zoo Code."
 		}
 	},
@@ -149,11 +152,13 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "{{count}} histórico de tarefa do Roo Code importado para o Zoo Code.",
+			"success_many": "{{count}} históricos de tarefas do Roo Code importados para o Zoo Code.",
 			"success_other": "{{count}} históricos de tarefas do Roo Code importados para o Zoo Code."
 		}
 	},
 	"answers": {
-		"yes": "Sim"
+		"yes": "Sim",
+		"activate_requesty": "Ativar Requesty"
 	},
 	"buttons": {
 		"learn_more": "Saiba Mais"

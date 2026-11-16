@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Filteren op tags:",
 			"clear": "Tags wissen",
+			"removeFromFilter": "Klik om '{{tag}}' uit de filters te verwijderen",
 			"placeholder": "Type om tags te zoeken en selecteren...",
 			"noResults": "Geen overeenkomende tags gevonden",
 			"selected": "Items tonen met een van de geselecteerde tags",

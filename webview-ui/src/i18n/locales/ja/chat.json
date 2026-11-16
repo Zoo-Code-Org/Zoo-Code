@@ -20,7 +20,7 @@
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
 	"fileChangesInConversation": {
-		"header": "この会話で {{count}} 個のファイルが変更されました"
+		"header_other": "この会話で {{count}} 個のファイルが変更されました"
 	},
 	"tokenProgress": {
 		"availableSpace": "利用可能な空き容量: {{amount}} トークン",
@@ -287,7 +287,6 @@
 		"triggerLabelOff": "自動承認オフ",
 		"triggerLabelOffShort": "オフ",
 		"triggerLabel_zero": "0個の自動承認",
-		"triggerLabel_one": "1個の自動承認済み",
 		"triggerLabel_other": "{{count}}個の自動承認済み",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +304,6 @@
 		"truncation": {
 			"title": "コンテキスト切り詰め",
 			"inProgress": "コンテキストを切り詰め中...",
-			"messagesRemoved": "{{count}}件のメッセージを削除",
 			"messagesRemoved_other": "{{count}}件のメッセージを削除",
 			"description": "コンテキストウィンドウの制限内に収めるため、古いメッセージが会話から削除されました。これは圧縮と比較して高速ですが、コンテキストの保持性が低いアプローチです。"
 		}
@@ -322,10 +320,12 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.96.0 の新機能",
-			"highlight1": "✨ チャット設定と診断の新機能: 設定可能な時刻・日付形式でメッセージのタイムスタンプを表示し、Anthropic プロファイルの prompt-cache TTL を調整し、プライバシーに配慮した診断レポートを生成できます。",
-			"highlight2": "💸 より正確なプロバイダーコストとキャッシュ: Anthropic のツール結果を壊さずそのまま維持し、Anthropic と MiniMax のコストに累積 output token を採用し、DeepSeek の prompt-cache カウンターを読み取り、xAI Responses のキャッシュをターゲットにし、Mistral のキャッシュ読み取りを 0.1 倍で計上します。",
-			"highlight3": "🧭 より信頼性が高く高速なチャット: 再起動後に完了済みタスクを再開し、保存された commit がない場合でも checkpoint を復元し、応答しなくなった webview レンダラーを自動リロードし、ストリーミング更新を間引き、ロケールを必要なときに読み込みます。"
+			"heading": "Zoo Code v3.98.0 の新機能",
+			"highlight0": "🎟️ 近日登場予定の Zoo Pass サブスクリプションをプレビュー。2 週間無料でアクセス可能。限定枠",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ 自動タスクタイトルと細かなモデル制御: 新しいルートタスクのタイトルを自動生成し、動的な思考量の試験的設定を試せます。",
+			"highlight2": "🔌 モデルとプロバイダーのサポートを拡大: GPT-6.1 Terra を利用し、Friendli の最新モデル一覧を取得できます。",
+			"highlight3": "🛡️ より安全で応答性の高いチャットと編集: OpenAI Native と Requesty のリクエストを正常にキャンセルし、ワークスペース外の diff が誤って自動承認されるのを防ぎ、UI 言語を一貫して切り替え、曖昧な JSON バックアップ復旧を回避します。"
 		}
 	},
 	"costs": {
@@ -349,7 +349,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "自動承認リクエスト制限に達しました",
-			"description": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
+			"description_other": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
 			"button": "リセットして続行"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +361,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zooはコードベースで <code>{{query}}</code> を検索したい",
 		"wantsToSearchWithPath": "Zooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
-		"didSearch_one": "1件の結果が見つかりました",
 		"didSearch_other": "{{count}}件の結果が見つかりました",
 		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
 	},
@@ -432,9 +431,7 @@
 	},
 	"tooManyTools": {
 		"title": "有効になっているツールが多すぎます",
-		"toolsPart_one": "{{count}} ツール",
 		"toolsPart_other": "{{count}} ツール",
-		"serversPart_one": "{{count}} MCP サーバー",
 		"serversPart_other": "{{count}} MCP サーバー",
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"
