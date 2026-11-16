@@ -43,6 +43,20 @@ interface ImportResult {
 	slug?: string
 	error?: string
 }
+// A single read of a single mode file. Absent and unreadable both yield no modes, but only one of
+// them means there was nothing to lose, so a caller that has to restore definitions cannot merge
+// them together. Invalid means the file parsed and the definitions in it are not trustworthy.
+type ModeFileRead =
+	| { status: "ok"; modes: ModeConfig[] }
+	| { status: "absent" }
+	| { status: "unreadable"; reason: string }
+	| { status: "invalid"; reason: string }
+
+/** The definitions a rollback would restore, plus the sources it could not be taken from. */
+export type CustomModesSnapshot = {
+	definitions: ModeConfig[]
+	failures: Array<{ path: string; reason: "unreadable" | "invalid" }>
+}
 
 export class CustomModesManager {
 	private static readonly cacheTTL = 10_000
@@ -180,47 +194,89 @@ export class CustomModesManager {
 		}
 	}
 
-	private async loadModesFromFile(filePath: string): Promise<ModeConfig[]> {
+	/**
+	 * Whether parseYamlSafely actually parsed this content. It swallows a parse failure and returns
+	 * an empty object, which is indistinguishable from a file that parses fine and simply has no
+	 * customModes key. The .roomodes JSON fallback parseYamlSafely relies on is honoured here too, so
+	 * a .roomodes that is valid JSON but not valid YAML is still a readable file.
+	 */
+	private parsedAtAll(content: string, filePath: string): boolean {
+		const cleaned = this.cleanInvisibleCharacters(stripBom(content))
 		try {
-			const content = await fs.readFile(filePath, "utf-8")
-			const settings = this.parseYamlSafely(content, filePath)
-
-			// Ensure settings has customModes property
-			if (!settings || typeof settings !== "object" || !settings.customModes) {
-				return []
-			}
-
-			const result = customModesSettingsSchema.safeParse(settings)
-
-			if (!result.success) {
-				console.error(`[CustomModesManager] Schema validation failed for ${filePath}:`, result.error)
-
-				// Show user-friendly error for .roomodes files
-				if (filePath.endsWith(ROOMODES_FILENAME)) {
-					const issues = result.error.issues
-						.map((issue) => `• ${issue.path.join(".")}: ${issue.message}`)
-						.join("\n")
-
-					vscode.window.showErrorMessage(t("common:customModes.errors.schemaValidationError", { issues }))
+			yaml.parse(cleaned)
+			return true
+		} catch {
+			if (filePath.endsWith(ROOMODES_FILENAME)) {
+				try {
+					JSON.parse(content)
+					return true
+				} catch {
+					// Neither YAML nor the JSON fallback worked: this file has no readable definitions.
 				}
-
-				return []
 			}
-
-			// Determine source based on file path
-			const isRoomodes = filePath.endsWith(ROOMODES_FILENAME)
-			const source = isRoomodes ? ("project" as const) : ("global" as const)
-
-			// Add source to each mode
-			return result.data.customModes.map((mode) => ({ ...mode, source }))
-		} catch (error) {
-			// Only log if the error wasn't already handled in parseYamlSafely
-			if (!(error as any).alreadyHandled) {
-				const errorMsg = `Failed to load modes from ${filePath}: ${error instanceof Error ? error.message : String(error)}`
-				console.error(`[CustomModesManager] ${errorMsg}`)
-			}
-			return []
+			return false
 		}
+	}
+
+	/**
+	 * One read of one mode file, with the outcome kept distinguishable. An absent file is an empty
+	 * definition list; a file that cannot be parsed has no definition list at all; a file that parses
+	 * but fails the schema holds definitions nobody should act on.
+	 */
+	private async readModeFile(filePath: string): Promise<ModeFileRead> {
+		let content: string
+		try {
+			content = await fs.readFile(filePath, "utf-8")
+		} catch (error) {
+			if (error instanceof Error && (error as NodeJS.ErrnoException).code === "ENOENT") {
+				// Not there is not the same as unreadable: an absent file has no definition to lose.
+				return { status: "absent" }
+			}
+			const errorMsg = error instanceof Error ? error.message : String(error)
+			console.error(`[CustomModesManager] Failed to load modes from ${filePath}: ${errorMsg}`)
+			return { status: "unreadable", reason: errorMsg }
+		}
+
+		const settings = this.parseYamlSafely(content, filePath)
+
+		if (!this.parsedAtAll(content, filePath)) {
+			return { status: "unreadable", reason: "the file is not valid YAML" }
+		}
+
+		// Ensure settings has customModes property
+		if (!settings || typeof settings !== "object" || !settings.customModes) {
+			return { status: "ok", modes: [] }
+		}
+
+		const result = customModesSettingsSchema.safeParse(settings)
+
+		if (!result.success) {
+			console.error(`[CustomModesManager] Schema validation failed for ${filePath}:`, result.error)
+
+			// Show user-friendly error for .roomodes files
+			if (filePath.endsWith(ROOMODES_FILENAME)) {
+				const issues = result.error.issues
+					.map((issue) => `• ${issue.path.join(".")}: ${issue.message}`)
+					.join("\n")
+
+				vscode.window.showErrorMessage(t("common:customModes.errors.schemaValidationError", { issues }))
+			}
+
+			const reason = result.error.issues.map((issue) => `${issue.path.join(".")}: ${issue.message}`).join("; ")
+			return { status: "invalid", reason }
+		}
+
+		// Determine source based on file path
+		const isRoomodes = filePath.endsWith(ROOMODES_FILENAME)
+		const source = isRoomodes ? ("project" as const) : ("global" as const)
+
+		// Add source to each mode
+		return { status: "ok", modes: result.data.customModes.map((mode) => ({ ...mode, source })) }
+	}
+
+	private async loadModesFromFile(filePath: string): Promise<ModeConfig[]> {
+		const read = await this.readModeFile(filePath)
+		return read.status === "ok" ? read.modes : []
 	}
 
 	private async mergeCustomModes(projectModes: ModeConfig[], globalModes: ModeConfig[]): Promise<ModeConfig[]> {
@@ -353,6 +409,48 @@ export class CustomModesManager {
 		}
 	}
 
+	/**
+	 * Every definition of a mode, per source file, without the project-over-global hiding that
+	 * `getCustomModes` applies. A rollback has to restore both: a batch that overwrites a global
+	 * definition through a slug that also exists as a project mode would otherwise leave the global
+	 * copy permanently replaced by the batch's version.
+	 *
+	 * A source that could not be read is reported in failures rather than folded into an empty
+	 * definition list. An absent file genuinely has nothing to restore; an unreadable or invalid one
+	 * has definitions the caller cannot know about, and only the second case should stop a rollback.
+	 */
+	public async getCustomModeDefinitions(slugs: readonly string[]): Promise<CustomModesSnapshot> {
+		const wanted = new Set(slugs)
+		const settingsPath = await this.getCustomModesFilePath()
+		const roomodesPath = await this.getWorkspaceRoomodes()
+
+		const reads: Array<{ path: string; source: "project" | "global"; read: ModeFileRead }> = []
+		if (roomodesPath) {
+			reads.push({
+				path: roomodesPath,
+				source: "project",
+				read: await this.readModeFile(roomodesPath),
+			})
+		}
+		reads.push({ path: settingsPath, source: "global", read: await this.readModeFile(settingsPath) })
+
+		const definitions: ModeConfig[] = []
+		const failures: CustomModesSnapshot["failures"] = []
+		for (const entry of reads) {
+			const read = entry.read
+			if (read.status === "ok") {
+				for (const mode of read.modes) {
+					if (wanted.has(mode.slug)) {
+						definitions.push({ ...mode, source: entry.source })
+					}
+				}
+			} else if (read.status !== "absent") {
+				failures.push({ path: entry.path, reason: read.status })
+			}
+		}
+
+		return { definitions, failures }
+	}
 	public async getCustomModes(): Promise<ModeConfig[]> {
 		// Check if we have a valid cached result.
 		const now = Date.now()
@@ -551,6 +649,44 @@ export class CustomModesManager {
 			const errorMessage = error instanceof Error ? error.message : String(error)
 			vscode.window.showErrorMessage(t("common:customModes.errors.deleteFailed", { error: errorMessage }))
 		}
+	}
+
+	/**
+	 * Removes a mode's entry from the mode files and refreshes the merged state, without
+	 * touching its rules folder. Rollback paths need this variant: `deleteCustomMode` also
+	 * deletes `.roo/rules-<slug>` (or `~/.roo/rules-<slug>`), and a rollback cannot know
+	 * whether that folder predates the batch whose registration it is undoing - deleting it
+	 * would discard rules the user wrote earlier.
+	 *
+	 * Returns whether an entry was actually removed so a caller can report a miss instead of
+	 * assuming cleanup happened. Errors propagate; rollback callers decide how loud to be.
+	 */
+	public async removeCustomModeEntry(slug: string): Promise<boolean> {
+		const settingsPath = await this.getCustomModesFilePath()
+		const roomodesPath = await this.getWorkspaceRoomodes()
+		const projectModes = roomodesPath ? await this.loadModesFromFile(roomodesPath) : []
+		const settingsModes = await this.loadModesFromFile(settingsPath)
+		const inProjectFile = projectModes.some((mode) => mode.slug === slug)
+		const inSettingsFile = settingsModes.some((mode) => mode.slug === slug)
+
+		if (!inProjectFile && !inSettingsFile) {
+			return false
+		}
+
+		await this.queueWrite(async () => {
+			if (roomodesPath && inProjectFile) {
+				await this.updateModesInFile(roomodesPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			if (inSettingsFile) {
+				await this.updateModesInFile(settingsPath, (modes) => modes.filter((m) => m.slug !== slug))
+			}
+
+			this.clearCache()
+			await this.refreshMergedState()
+		})
+
+		return true
 	}
 
 	/**
