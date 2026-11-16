@@ -3258,6 +3258,52 @@ export class ClineProvider
 				this.contextProxy.setValue("currentApiConfigName", name),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
+
+			// Mirror the activation into this view's buffer and durable pin: the shared writes above
+			// bypass the per-view mutation path, so getValues() would keep overlaying the previous
+			// profile's name and settings - getConfiguration() then reports the previous profile
+			// while the shared selection already holds the new one.
+			try {
+				await this._saveViewLocalStateFromMutation({
+					currentApiConfigName: name,
+					apiConfiguration: providerSettings,
+				})
+			} catch (mirrorError) {
+				// The shared writes already landed. Put them back while this activation still owns them,
+				// so the shared selection cannot name a profile the view buffer does not follow.
+				if (
+					this.contextProxy.getStateWriteGeneration("currentApiConfigName") ===
+					sharedValuesBeforeActivation.nameGeneration
+				) {
+					await this.contextProxy
+						.setValue("currentApiConfigName", sharedValuesBeforeActivation.name)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the shared selection after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+					await this.contextProxy
+						.setValue("listApiConfigMeta", sharedValuesBeforeActivation.list)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the profile list after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+				}
+				if (
+					this.contextProxy.getStateWriteGeneration("apiProvider") ===
+					sharedValuesBeforeActivation.apiProviderGeneration
+				) {
+					await this.contextProxy
+						.setProviderSettings(sharedValuesBeforeActivation.settings)
+						.catch((restoreError: unknown) =>
+							this.log(
+								`[activateProviderProfile] Failed to restore the shared provider settings after a rejected view mirror: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+							),
+						)
+				}
+				throw mirrorError
+			}
 		}
 
 		const { mode } = await this.getState()
@@ -4507,15 +4553,79 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
+		// This write produces the next generation for the key: only restore while it is still newest.
+		const writeGeneration = this.contextProxy.getStateWriteGeneration(key as never) + 1
 		await this.contextProxy.setValue(key, value)
+		try {
+			await this._saveViewLocalStateFromMutation({ [key]: value })
+		} catch (error) {
+			// The per-view record did not land: restore the prior shared value so the two
+			// persistence layers cannot diverge, then surface the original failure.
+			await this._restoreSharedValuesAfterFailedViewWrite(
+				previousSharedValues,
+				{ [key]: value } as RooCodeSettings,
+				{ [key]: writeGeneration } as Record<string, number>,
+			)
+			throw error
+		}
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
 		return this.contextProxy.getValue(key)
 	}
 
-	public getValues() {
-		return this.contextProxy.getValues()
+	/**
+	 * This view's own values over the shared store.
+	 *
+	 * The buffered profile name and the settings that were loaded for it are overlaid as one
+	 * unit. Overlaying the name on its own would hand a consumer this view's profile name
+	 * carrying whichever profile the shared store currently holds. `loadViewState` records the
+	 * name before it resolves the profile and keeps it when the lookup fails, so a buffered name
+	 * with no settings behind it is overlaid only when the shared selection is that same profile -
+	 * the case where the shared settings genuinely belong to it. Otherwise this view reads the
+	 * shared name and settings pair until its profile resolves; it never gets one half of a pair.
+	 */
+	public getValues(): RooCodeSettings {
+		return { ...this.contextProxy.getValues(), ...this._viewLocalValuesOverlay() }
+	}
+
+	/** The view buffer flattened onto the shared key set, ready to overlay `getValues()`. */
+	private _viewLocalValuesOverlay(): RooCodeSettings {
+		const { mode, currentApiConfigName, apiConfiguration } = this.viewLocalState
+		const overlay: RooCodeSettings = {}
+
+		if (mode !== undefined) {
+			overlay.mode = mode
+		}
+
+		if (currentApiConfigName === undefined) {
+			return overlay
+		}
+
+		if (apiConfiguration === undefined) {
+			if (currentApiConfigName === this.contextProxy.getValue("currentApiConfigName")) {
+				overlay.currentApiConfigName = currentApiConfigName
+			}
+
+			return overlay
+		}
+
+		overlay.currentApiConfigName = currentApiConfigName
+
+		// Flattened with the same key set as `ContextProxy.getProviderSettings()`, and with the
+		// same exclusion: secrets live in the shared secret state, not in a per-view overlay.
+		// Every other provider key - including the ones this profile does not carry - comes from
+		// this view's profile, so the name above never travels with another profile's settings.
+		for (const key of PROVIDER_SETTINGS_KEYS) {
+			if (isSecretStateKey(key)) {
+				continue
+			}
+
+			;(overlay as Record<string, unknown>)[key] = apiConfiguration[key]
+		}
+
+		return overlay
 	}
 
 	public async setValues(values: RooCodeSettings) {
@@ -4555,6 +4665,10 @@ export class ClineProvider
 			return this.savePersistedViewState(persistedValues)
 		}
 
+		return true
+	}
+
+	/** Clear the buffer so getState() falls back to the shared values. */
 	async resetState() {
 		const answer = await vscode.window.showInformationMessage(
 			t("common:confirmation.reset_state"),
@@ -4578,7 +4692,21 @@ export class ClineProvider
 			}
 		}
 
+		// A view-state write queued before the reset would otherwise read the cleared map and store
+		// its pre-reset entry after resetAllState(): drain the queue first, then bump the
+		// generation so a write that started before this point is rejected inside the queue.
+		await ClineProvider.persistedViewStateWriteQueue.catch(() => undefined)
+		ClineProvider.viewStatesResetGeneration += 1
 		await this.contextProxy.resetAllState()
+
+		// The reset cleared the shared store: drop EVERY live view's buffered selections too. Each view
+		// keeps its own buffer and getValues()/getConfiguration() read it before the shared store, so a
+		// sibling would otherwise keep serving its pre-reset mode and settings.
+		for (const instance of ClineProvider.getAllInstances()) {
+			instance.viewLocalState = {}
+		}
+		this.viewLocalState = {}
+
 		await this.providerSettingsManager.resetAllConfigs()
 		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
 		this.localModeConfigIds.clear()
