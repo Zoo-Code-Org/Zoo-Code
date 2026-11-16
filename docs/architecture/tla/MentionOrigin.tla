@@ -5,24 +5,26 @@
 \* Invariant: NoGeneratedTagged. A letter tagged user is a letter the user typed.
 \* It replaces a count check (user tags <= typed letters). This form implies the count check.
 \* Expected before the run: the edits hold. A change of two ranges would fail with generated text between them.
-\* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 32,313 states.
-\* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 2,210,265 states and takes 7 minutes.
+\* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 2,795 states.
+\* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 89,355 states and takes 30 seconds.
 \* Not modeled: a change of two ranges in one event. It fails with either retagger. A textarea cannot send it.
 \* Replay: paste "@/x" before generated "@/x", then replace the first typed "@". The generated copy turns user.
 \* The finding is real in applyEdit. The fix runs the diff from both ends and keeps "u" only where both agree.
 \* Property test: mentionSegments.spec.ts, "never tags a generated letter user". It fails on the old code.
 \* Actions: Change (typing), Load (ArrowUp loads a stored prompt), HistoryRestoreAct (ArrowDown), UndoAct.
 \* Load can have the draft's letters, and HistoryRestoreAct has no guard on them. Every order of the four runs.
+\* nav is the history navigation state. Load saves the draft only when nav is false. Typing and restore end nav.
+\* UndoAct restores any other text, so it covers consecutive undos and redos through the whole undo stack.
 \* HistoryRestore "AsEdit" (restore through applyEdit) fails in 3 states. "Saved" holds. The history hook does this.
-\* UndoRestore "AsEdit" fails in 3 states. "Retained" (keep the old tags, tag the new text generated) fails in 5.
+\* UndoRestore "AsEdit" fails in 2 states. "Retained" (keep the old tags, tag the new text generated) fails in 3.
 \* "AllGenerated" (the whole draft turns generated) holds. ChatTextArea does this for historyUndo and historyRedo.
 \* Tests: ChatTextArea.spec.tsx (history input types) and ChatView.clear-approval-buttons.spec.tsx (delete, undo, send).
 \* Cost of AllGenerated: after an undo or redo the user must retype a mention that was in the draft.
 \* Not modeled: normalizeSegments (the text match check), merge, trim and the host expansion.
 \* Configs: MentionOrigin.cfg must pass. Must fail: .Code, .History, .Undo, .Retained.
 \* Cost: each run takes under 10 seconds at MaxLen 2. Agent time is not measured.
-\* Review: 0 covered, 5 added (history restore, per-position form, native undo, one run for both restores,
-\* no guard on the restore letters; PR 2421), 0 gap.
+\* Review: 0 covered, 7 added (history restore, per-position form, native undo, one run for both restores,
+\* no guard on the restore letters, navigation state, any undo target; PR 2421), 0 gap.
 \* The first version came after the code and the reviews. It is not an independent first pass.
 \* No review thread named the equal-letter failure. TLC found it.
 
@@ -32,9 +34,9 @@ CONSTANTS Alphabet, MaxLen, MaxInit, Retagger, HistoryRestore, UndoRestore
 \* Retagger: "Code" or "Both". HistoryRestore: "Saved" or "AsEdit".
 \* UndoRestore: "AllGenerated", "Retained" or "AsEdit".
 
-VARIABLES text, tags, snap, prev   \* text: letters with true origin. tags: the "u" or "g" flag per letter.
+VARIABLES text, tags, snap, nav   \* text: letters with true origin. tags: the "u" or "g" flag per letter.
 
-vars == <<text, tags, snap, prev>>
+vars == <<text, tags, snap, nav>>
 
 Origins == {"u", "g"}
 Cell == [c : Alphabet, o : Origins]
@@ -85,51 +87,51 @@ Init == \E g \in Seqs(Alphabet, MaxInit) :
     /\ text = [p \in 1..Len(g) |-> [c |-> g[p], o |-> "g"]]
     /\ tags = [p \in 1..Len(g) |-> "g"]
     /\ snap = <<>>
-    /\ prev = <<>>
+    /\ nav = FALSE
 
 Now == [t |-> text, g |-> tags]
 
-\* The user types. Every action keeps the state before it in prev. Undo uses it.
+\* The user types. Typing ends history navigation (resetOnInputChange).
 Change == \E t \in Edits(text) :
     /\ text' = t
     /\ tags' = Retag(Letters(text), tags, Letters(t), "u")
-    /\ prev' = Now
+    /\ nav' = FALSE
     /\ UNCHANGED snap
 
-\* ArrowUp saves the draft and loads a stored prompt as generated text. It can have the draft's letters.
+\* ArrowUp loads a stored prompt as generated text. It can have the draft's letters.
+\* It saves the draft only when navigation starts. Later loads keep the first snapshot.
 Load == \E g \in Seqs(Alphabet, MaxLen) :
     /\ text' = [p \in 1..Len(g) |-> [c |-> g[p], o |-> "g"]]
     /\ tags' = [p \in 1..Len(g) |-> "g"]
-    /\ snap' = Now
-    /\ prev' = Now
+    /\ snap' = IF nav THEN snap ELSE Now
+    /\ nav' = TRUE
 
-\* ArrowDown restores the saved draft. "AsEdit" sends the restore through applyEdit.
+\* ArrowDown restores the saved draft and ends navigation. "AsEdit" sends the restore through applyEdit.
 \* The letters can match the stored prompt, so there is no guard on them.
 HistoryRestoreAct ==
-    /\ snap # <<>>
+    /\ nav
     /\ text' = snap.t
     /\ tags' = IF HistoryRestore = "Saved" THEN snap.g
                ELSE Retag(Letters(text), tags, Letters(snap.t), "u")
-    /\ prev' = Now
+    /\ nav' = FALSE
     /\ UNCHANGED snap
 
-\* Native undo or redo swaps with the state before. The browser sends no event when the letters match.
-UndoAct ==
-    /\ prev # <<>>
-    /\ Letters(prev.t) # Letters(text)
-    /\ text' = prev.t
-    /\ tags' = CASE UndoRestore = "AllGenerated" -> [p \in 1..Len(prev.t) |-> "g"]
-             [] UndoRestore = "Retained"    -> Retag(Letters(text), tags, Letters(prev.t), "g")
-             [] OTHER                       -> Retag(Letters(text), tags, Letters(prev.t), "u")
-    /\ prev' = Now
-    /\ UNCHANGED snap
+\* Native undo or redo restores any other text. This covers every older state in the undo stack.
+\* The browser sends no event with the old origins, so each letter can have either origin.
+UndoAct == \E t \in Seqs(Cell, MaxLen) :
+    /\ Letters(t) # Letters(text)
+    /\ text' = t
+    /\ tags' = CASE UndoRestore = "AllGenerated" -> [p \in 1..Len(t) |-> "g"]
+             [] UndoRestore = "Retained"    -> Retag(Letters(text), tags, Letters(t), "g")
+             [] OTHER                       -> Retag(Letters(text), tags, Letters(t), "u")
+    /\ UNCHANGED <<snap, nav>>
 
 Next == Change \/ Load \/ HistoryRestoreAct \/ UndoAct
 
 Spec == Init /\ [][Next]_vars
 
 Saved == {<<>>} \cup [t : Seqs(Cell, MaxLen), g : Seqs(Origins, MaxLen)]
-TypeOK == snap \in Saved /\ prev \in Saved /\ text \in Seqs(Cell, MaxLen) /\ tags \in Seqs(Origins, MaxLen) /\ Len(tags) = Len(text)
+TypeOK == snap \in Saved /\ nav \in BOOLEAN /\ text \in Seqs(Cell, MaxLen) /\ tags \in Seqs(Origins, MaxLen) /\ Len(tags) = Len(text)
 
 \* Safety: a generated letter is never tagged user. The bot thread on PR 2421 asked for this per-position form.
 NoGeneratedTagged == \A p \in 1..Len(tags) : tags[p] = "u" => text[p].o = "u"
