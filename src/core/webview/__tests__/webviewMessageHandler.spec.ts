@@ -3297,6 +3297,30 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
 	})
 
+	it("reports a failed save through the result when the extension-state write is rejected", async () => {
+		// The same rejection seen by a sender that awaits an answer: the toast
+		// names the failed leg, so the answer must agree with it — an ack of
+		// success would let the dialog discard edits its stored copy never
+		// received, while a retry would converge.
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValueOnce(new Error("state store unavailable"))
+		const { update } = mockCommandConfiguration({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			requestId: "save-1",
+			updatedSettings: { deniedCommands: ["aws"], alwaysDenyUnapprovedCommands: true },
+		})
+
+		expect(deniedSaveResults()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+		// The configuration leg did persist, and the user still hears which leg failed...
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+			"Failed to save deniedCommands: state store unavailable. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.",
+		)
+		// ...and the save continued to the next key.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("alwaysDenyUnapprovedCommands", true)
+	})
+
 	it("still propagates a rejected state write for non-command-list keys", async () => {
 		// The partial-failure report is scoped to the command-list keys, whose
 		// configuration legs succeeded first; other keys have no half-completed

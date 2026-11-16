@@ -1234,6 +1234,10 @@ export const webviewMessageHandler = async (
 							vscode.window.showErrorMessage(
 								`Failed to save ${key}: ${failure}. The configuration was updated, but the extension's stored copy of the list was not, so the two disagree until a later save succeeds.`,
 							)
+							// The ack has to agree with the toast the user just saw: treating a
+							// save whose stored copy diverged as successful would let the
+							// dialog discard edits that a retry could still converge.
+							commandListSaveFailed = true
 							continue
 						}
 					} else {
