@@ -498,8 +498,26 @@ export class ClineProvider
 			(message) => this.log(message),
 		)
 
-		// Derive the per-instance view id and bind the persisted view-state key to it.
-		this.viewId = `${renderContext}-${ClineProvider.nextViewId++}`
+		const takenViewId = (candidateId: string): boolean => {
+			for (const instance of ClineProvider.activeInstances) {
+				if (instance.viewId === candidateId || instance.viewStateId === candidateId) {
+					return true
+				}
+			}
+
+			return false
+		}
+
+		// Derive the per-instance view id and bind the persisted view-state key to it. The counter runs
+		// for the host's lifetime while a disposed instance releases its name, so the next allocation
+		// can land on an id a live instance still answers to - either the temporary id it was
+		// constructed with or the durable registration it re-keyed itself to. Take the first name no
+		// live instance is registered under.
+		let candidateId = `${renderContext}-${ClineProvider.nextViewId++}`
+		while (takenViewId(candidateId)) {
+			candidateId = `${renderContext}-${ClineProvider.nextViewId++}`
+		}
+		this.viewId = candidateId
 		this.viewStateId = this.viewId
 		ClineProvider.activeInstances.add(this)
 		this.diagnosticsRecorder.record({ boundary: "provider", phase: "success", type: "created" })
@@ -5185,6 +5203,9 @@ export class ClineProvider
 						)
 					})
 				}
+
+				// over a state this batch never touched.
+
 				throw error
 			}
 		}

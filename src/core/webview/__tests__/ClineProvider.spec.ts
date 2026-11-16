@@ -6610,6 +6610,39 @@ describe("ClineProvider", () => {
 			})
 			await provider.dispose()
 		})
+
+		it("does not hand a new instance an id a live instance still answers to", async () => {
+			const first = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Re-keying moves the durable entry; the instance still answers to the id it was constructed
+			// with, and that is the id a counter wound back to its number would hand to the next view.
+			await first["setViewStateId"]("stable-sidebar-view")
+			const takenNumber = Number(first.viewId.split("-")[1])
+			const counterBefore = ClineProvider["nextViewId"]
+			ClineProvider["nextViewId"] = takenNumber
+
+			const second = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			expect(second.viewId).not.toBe(first.viewId)
+			expect(second["viewStateId"]).toBe(second.viewId)
+			expect(ClineProvider["nextViewId"]).toBeGreaterThan(takenNumber)
+			// Leave the host counter where this test found it.
+			ClineProvider["nextViewId"] = counterBefore
+
+			await first.dispose()
+			await second.dispose()
+		})
 	})
 
 	describe("saveViewState", () => {
@@ -10077,3 +10110,4 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 		})
 	})
 })
+
