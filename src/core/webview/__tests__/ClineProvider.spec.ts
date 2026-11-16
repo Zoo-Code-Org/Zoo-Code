@@ -8390,6 +8390,8 @@ describe("ClineProvider", () => {
 
 		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
 		;(provider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion the write now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			activateProfile: vi.fn().mockResolvedValue(profile),
@@ -8642,6 +8644,8 @@ describe("ClineProvider", () => {
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 		;(provider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion the write now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			listConfig: vi
 				.fn()
@@ -8671,6 +8675,8 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion the write now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -8698,6 +8704,8 @@ describe("ClineProvider", () => {
 		}
 
 		;(provider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion the write now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			activateProfile: vi.fn().mockResolvedValue(profile),
 			listConfig: vi.fn().mockResolvedValue([profile]),
 			setModeConfig: vi.fn(),
@@ -8875,6 +8883,8 @@ describe("ClineProvider", () => {
 
 		const savedForReadBack1: Record<string, Record<string, unknown>> = {}
 		;(provider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion the write now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			listConfig: vi
 				.fn()
 				.mockResolvedValue([
@@ -9234,6 +9244,8 @@ describe("ClineProvider", () => {
 
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
 				activateProfile: vi.fn().mockResolvedValue(profile),
@@ -9258,6 +9270,8 @@ describe("ClineProvider", () => {
 
 		test("keeps the current config locally when switching to a mode without a config", async () => {
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
 					.fn()
@@ -9320,6 +9334,8 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -9387,6 +9403,8 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -9452,6 +9470,8 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -9484,6 +9504,8 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi.fn().mockResolvedValue([]),
 			}
@@ -9529,6 +9551,8 @@ describe("ClineProvider", () => {
 
 			// Mock provider settings manager to throw error
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				getModeConfigId: vi.fn().mockResolvedValue("config-id"),
 				listConfig: vi
 					.fn()
@@ -9631,6 +9655,8 @@ describe("ClineProvider", () => {
 			const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				setModeConfig: vi.fn().mockRejectedValue(new Error("Failed to update mode config")),
 				listConfig: vi
 					.fn()
@@ -9665,6 +9691,8 @@ describe("ClineProvider", () => {
 
 			const savedForReadBack2: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
 					savedForReadBack2[name] = settings
@@ -9719,6 +9747,8 @@ describe("ClineProvider", () => {
 			})
 			const savedForReadBack3: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
 					savedForReadBack3[name] = settings
@@ -9771,6 +9801,8 @@ describe("ClineProvider", () => {
 
 			const savedForReadBack4: Record<string, Record<string, unknown>> = {}
 			;(provider as any).providerSettingsManager = {
+				// Pass-through double for the cross-instance exclusion the write now takes.
+				runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 				setModeConfig: vi.fn(),
 				saveConfig: vi.fn(async (name: string, settings: Record<string, unknown>) => {
 					savedForReadBack4[name] = settings
@@ -12233,6 +12265,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -12264,6 +12298,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const saveConfig = vi.fn().mockResolvedValue(undefined)
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi.fn().mockResolvedValue([
 						{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 						{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -12308,6 +12344,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				vi.spyOn(provider, "getState").mockRejectedValue(new Error("state unavailable"))
 				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi.fn().mockResolvedValue([]),
 				}
 
@@ -12326,6 +12364,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi.fn(),
 				}
 
@@ -12341,6 +12381,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const postMessageSpy = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -12362,6 +12404,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),
@@ -12382,6 +12426,8 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				const handleSpy = vi.spyOn(provider, "handleZooCodeCallback").mockResolvedValue(undefined)
 
 				;(provider as any).providerSettingsManager = {
+					// Pass-through double for the cross-instance exclusion the write now takes.
+					runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 					listConfig: vi
 						.fn()
 						.mockResolvedValue([{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway }]),

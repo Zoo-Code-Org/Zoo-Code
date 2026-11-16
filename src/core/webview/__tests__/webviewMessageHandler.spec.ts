@@ -2818,6 +2818,8 @@ describe("zooCodeSignOut", () => {
 			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
 		}
 		;(mockClineProvider as any).providerSettingsManager = {
+			// Pass-through double for the cross-instance exclusion this writer now takes.
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
 			listConfig: vi.fn().mockResolvedValue([
 				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
@@ -3956,5 +3958,121 @@ describe("updateSettings with the display settings", () => {
 
 		expect(mockClineProvider.log).not.toHaveBeenCalled()
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("constructor", "x")
+	})
+})
+
+describe("webviewMessageHandler - ordinary profile writes and the rename transaction", () => {
+	// Double assertion: the spec-wide provider double only declares the members
+	// most tests drive; this structural widening keeps these tests free of any.
+	const provider = mockClineProvider as unknown as {
+		providerSettingsManager: {
+			hasConfig: ReturnType<typeof vi.fn>
+			getProfile: ReturnType<typeof vi.fn>
+			saveConfig: ReturnType<typeof vi.fn>
+			listConfig: ReturnType<typeof vi.fn>
+			deleteConfig: ReturnType<typeof vi.fn>
+			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => Promise<unknown>
+		}
+		repointViewLocalStateAfterProfileRename: ReturnType<typeof vi.fn>
+		activateProviderProfile: ReturnType<typeof vi.fn>
+		upsertProviderProfile: ReturnType<typeof vi.fn>
+	}
+	const originalMembers = {
+		providerSettingsManager: provider.providerSettingsManager,
+		repointViewLocalStateAfterProfileRename: provider.repointViewLocalStateAfterProfileRename,
+		activateProviderProfile: provider.activateProviderProfile,
+		upsertProviderProfile: provider.upsertProviderProfile,
+	}
+	afterEach(() => {
+		Object.assign(mockClineProvider, originalMembers)
+	})
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("keeps an ordinary profile write out of the rename's shared critical section", async () => {
+		const events: string[] = []
+		// Manual deferred, stated rather than hidden: the race needs the rename to
+		// still be inside its critical section when the second writer starts, and
+		// no production timing gives that window reliably, so this test holds the
+		// transaction open on a promise it controls.
+		let holdOpen!: () => void
+		const heldOpen = new Promise<void>((resolve) => {
+			holdOpen = resolve
+		})
+		let releaseHold!: () => void
+		const holdReleased = new Promise<void>((resolve) => {
+			releaseHold = resolve
+		})
+		// Shared queue double: mirrors ProviderSettingsManager.runExclusiveAcrossInstances,
+		// which chains each critical section onto the previous one for a secrets key,
+		// so a writer that does not take the section runs in the middle of a rename.
+		let tail: Promise<unknown> = Promise.resolve()
+		const runExclusiveAcrossInstances = (cb: () => Promise<unknown>) => {
+			const run = tail.then(cb)
+			tail = run.then(
+				() => {},
+				() => {},
+			)
+			return run
+		}
+		const configs: Record<string, Record<string, unknown>> = {
+			"old-profile": { id: "old-id", apiProvider: providerIdentifiers.anthropic },
+		}
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			hasConfig: vi.fn(async () => {
+				events.push("renameHasConfig")
+				holdOpen()
+				await holdReleased
+				return false
+			}),
+			getProfile: vi.fn(async ({ name }: { name: string }) => configs[name] ?? { id: "unknown" }),
+			saveConfig: vi.fn(async (name: string, config: Record<string, unknown>) => {
+				if (name === "old-profile") {
+					events.push("ordinaryWrite")
+				} else {
+					events.push("renameSave")
+				}
+				configs[name] = config
+				return config.id as string
+			}),
+			listConfig: vi.fn(async () => Object.keys(configs).map((name) => ({ name, id: String(configs[name].id) }))),
+			deleteConfig: vi.fn(async (name: string) => {
+				events.push("renameDelete")
+				delete configs[name]
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn(async () => {
+			events.push("renameRepoint")
+		})
+		provider.activateProviderProfile = vi.fn(async () => {})
+		provider.upsertProviderProfile = vi.fn(async () => {})
+
+		const rename = webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+		// Both message handlers run concurrently: the rename enters the shared
+		// section first, and the ordinary write starts while that section is held
+		// open on the deferred above. With the exclusion the writer takes now, its
+		// save chains onto the queue behind the rename; without it the save runs
+		// inside the rename's transaction.
+		const ordinary = (async () => {
+			await heldOpen
+			return webviewMessageHandler(mockClineProvider, {
+				type: "saveApiConfiguration",
+				text: "old-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openaiCom },
+			})
+		})()
+		releaseHold()
+
+		await Promise.all([rename, ordinary])
+
+		expect(events).toEqual(["renameHasConfig", "renameSave", "renameRepoint", "renameDelete", "ordinaryWrite"])
+		expect(Object.keys(configs).sort()).toEqual(["new-profile", "old-profile"])
+		expect(configs["old-profile"]).toEqual({ apiProvider: providerIdentifiers.openaiCom })
 	})
 })

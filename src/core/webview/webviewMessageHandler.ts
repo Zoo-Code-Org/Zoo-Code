@@ -2556,10 +2556,20 @@ export const webviewMessageHandler = async (
 		}
 		case "saveApiConfiguration":
 			if (message.text && message.apiConfiguration) {
+				const profileName = message.text
+				const profileSettings = message.apiConfiguration
 				try {
-					await provider.providerSettingsManager.saveConfig(message.text, message.apiConfiguration)
-					const listApiConfig = await provider.providerSettingsManager.listConfig()
-					await updateGlobalState("listApiConfigMeta", listApiConfig)
+					// Ask quoted from the review thread at this file's line 2613: ordinary
+					// profile writes must participate in the same cross-instance exclusion
+					// the rename takes, without that exclusion being reacquired inside the
+					// rename transaction. This arm is a separate entry point, outside the
+					// rename's critical section, so it acquires the section here rather than
+					// wrapping the rename body a second time.
+					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+						await provider.providerSettingsManager.saveConfig(profileName, profileSettings)
+						const listApiConfig = await provider.providerSettingsManager.listConfig()
+						await updateGlobalState("listApiConfigMeta", listApiConfig)
+					})
 				} catch (error) {
 					provider.log(
 						`Error save api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -3382,7 +3392,12 @@ export const webviewMessageHandler = async (
 									`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile and updated in-memory handler`,
 								)
 							} else if (profile.zooSessionToken) {
-								await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								// Same exclusion as the rename, taken at the point this write enters:
+								// a persisted-only profile rewrite is an ordinary profile write, and a
+								// rename in flight on another view must not interleave with it.
+								await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
+									await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+								})
 								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
 							}
 						} catch (profileError) {
