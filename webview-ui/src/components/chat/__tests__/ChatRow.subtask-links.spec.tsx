@@ -10,8 +10,8 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const map: Record<string, string> = {
 				"chat:subtasks.wantsToCreate": "Roo wants to create a new subtask",
@@ -20,10 +20,11 @@ vi.mock("react-i18next", () => ({
 			}
 			return map[key] ?? key
 		},
-		i18n: { exists: () => true },
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 let mockCurrentTaskItem: Partial<HistoryItem> | undefined = undefined
