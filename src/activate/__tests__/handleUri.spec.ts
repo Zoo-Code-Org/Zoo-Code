@@ -139,17 +139,15 @@ describe("handleUri", () => {
 		},
 	)
 
-	it("shows the real host first when the baseUrl has user info", async () => {
+	it.each([
+		["https://router.requesty.ai@evil.example/v1", ["router.requesty.ai"]],
+		["https://u:p%40ss@evil.example/v1", ["u:", "p%40ss", "p@ss"]],
+	])("shows only the real host when the baseUrl %s has user info", async (baseUrl, hidden) => {
 		mockShowWarningMessage.mockImplementation(async () => undefined)
-		await handleUri(
-			makeUri({
-				path: "/requesty",
-				query: "code=k&baseUrl=https%3A%2F%2Frouter.requesty.ai%40evil.example%2Fv1",
-			}),
-		)
+		await handleUri(makeUri({ path: "/requesty", query: `code=k&baseUrl=${encodeURIComponent(baseUrl)}` }))
 		const options = mockShowWarningMessage.mock.calls[0][1]
 		expect(options.detail).toContain('"https://evil.example/v1"')
-		expect(options.detail).not.toContain("router.requesty.ai")
+		for (const text of hidden) expect(options.detail).not.toContain(text)
 	})
 
 	it.each([undefined, "Cancel"])(
@@ -179,10 +177,17 @@ describe("handleUri", () => {
 					approve = resolve
 				}),
 		)
-		const callback = handleUri(makeUri({ path: "/requesty", query: "code=test-code" }))
+		let settled = false
+		const callback = handleUri(makeUri({ path: "/requesty", query: "code=test-code" })).then(() => {
+			settled = true
+		})
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		// handleUri must wait for the dialog. It must not return early.
+		expect(settled).toBe(false)
 		expect(mockVisibleProvider.handleRequestyCallback).not.toHaveBeenCalled()
 		approve("Activate Requesty")
 		await callback
+		expect(settled).toBe(true)
 		expect(mockVisibleProvider.handleRequestyCallback).toHaveBeenCalledWith("test-code", null)
 	})
 

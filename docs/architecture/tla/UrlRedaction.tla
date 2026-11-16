@@ -1,12 +1,14 @@
 ---- MODULE UrlRedaction ----
-\* Models the warning log in toRequestyServiceUrl (src/shared/utils/requesty.ts, lines 49-57).
+\* Models the warning log in toRequestyServiceUrl (src/shared/utils/requesty.ts, catch branch).
+\* The code logs a fixed message now. The Regex variant models the removed redaction regex.
+\* The Regex variant is a sabotage check only. The Fixed variant is true by construction.
 \* Failure: an untrusted baseUrl puts credential text in the warning log.
 \* Invariant: NoSecretInLog. The oracle `parses` is unconstrained. The log runs when it is FALSE.
 \* Result, MaxLen 8: Regex fails with x:S@. Fixed holds in 20,624 states.
 \* Replay: https:secret@h:bad leaks in real code. The bot comment on PR 2408 does not name this form.
 \* Replay: https://secret/@h:bad parses in real code. It is a false alarm from the oracle.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review: 0 covered, 1 added (bot thread on requesty.ts line 54, PR 2408), 0 gap.
+\* Review: 0 covered, 1 added (bot thread on the redaction regex, PR 2408), 0 gap.
 \* The first version was written after the bot thread. It is not an independent first pass.
 
 EXTENDS Naturals, Sequences

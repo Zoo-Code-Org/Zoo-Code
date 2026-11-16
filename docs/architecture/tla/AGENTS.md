@@ -5,9 +5,9 @@ It tells an agent how to write and check a TLA+ spec for a change in this repo.
 
 ## Policy
 
-1. Write a spec for each change you implement. This rule stays until the user ends it.
+1. This policy is a trial. A maintainer decides when it ends. While it runs, write a spec for each change you implement.
 2. The goal is a knowledge base of how the repo works. Cost is not a reason to skip a spec.
-3. Record the cost and the findings in the spec header. The user uses them to cut scope later.
+3. Record the cost and the findings in the spec header. A maintainer uses them to cut scope later.
 4. This policy is a choice. It is not a claim that specs find more bugs than tests or reviews.
 
 ## Stance
@@ -17,15 +17,6 @@ It tells an agent how to write and check a TLA+ spec for a change in this repo.
 3. Report a null result. A spec that finds nothing new is data, not a failure.
 4. Do not tune a spec until it finds a bug you already know.
 5. A spec checks the model, not the code. Do not say a spec proves the code correct.
-
-## Evidence so far
-
-The sample is small. Do not use it as proof.
-
-- `RequestyConsent.tla` holds in 25 states. It found no defect in the PR 2408 code.
-- `UrlRedaction.tla` found a leak form that the bot comment did not name. One counterexample was a false alarm.
-- In 8 PRs, 4 of 105 late bot threads sit on code that existed in round 1. About 10 percent look protocol-level by title.
-- No comparison between a spec, a property test and a plain review has run.
 
 ## What to model
 
@@ -47,14 +38,14 @@ Write the unit tests and do the review as usual. The spec does not replace them.
 | replay         | Run a counterexample on the real code. It shows if the counterexample is real.        |
 | sabotage check | Remove a guard on purpose. The invariant must fail. If not, the invariant is vacuous. |
 | vacuous        | True in all states because of the model, not because of the code.                     |
-| gate           | The check an agent runs on each commit before the push.                               |
+| gate           | The check an agent runs by hand on each commit. No script or CI step runs it yet.     |
 
 ## Procedure
 
 1. Search this folder for a spec of the same subsystem. If one exists, extend it.
 2. Write each failure that the change must prevent as one sentence.
 3. Write each invariant as the opposite of one failure.
-4. Mark the source and the sink in the code. Name the line numbers.
+4. Mark the source and the sink in the code. Name the functions and events. Do not use line numbers. They go stale.
 5. Model only the source and the sink. Make every other part an oracle. Do not copy a parser.
 6. Limit the input domain to values that look real. If TLC finds an input that no user can send, add a rule to remove it.
 7. Run TLC on the unfixed code. If the code has no known bug, run the sabotage check. The invariant must fail.
@@ -62,7 +53,7 @@ Write the unit tests and do the review as usual. The spec does not replace them.
 9. Run TLC on the fixed code. The invariant must hold.
 10. Write a property test from the same invariant sentence. Run it on the real code.
 11. Simplify the spec. Use the questions below.
-12. Put the spec check and the property test in the gate. Run the gate on each fix commit.
+12. Run each TLC config and the property test by hand on each fix commit. Write the result in the spec header.
 
 ## Review ratchet
 
@@ -72,9 +63,9 @@ A review finding is a failure that someone saw in this repo. Use each finding to
 2. If the spec can express the failure, add an invariant or an input rule. Cite the PR and the thread in a comment.
 3. If the first version of the spec already covered the finding, write "covered" in the header.
 4. If the spec cannot express the finding, write "gap" in the header and say why.
-5. Run the gate on the next fix commit.
+5. Run each TLC config on the next fix commit.
 
-Count the "covered", "added" and "gap" results in the header. The user uses the counts to decide scope.
+Count the "covered", "added" and "gap" results in the header. Count the findings about the spec files too. A maintainer uses the counts to decide scope.
 
 ## Simplify questions
 
@@ -92,7 +83,7 @@ Count the "covered", "added" and "gap" results in the header. The user uses the 
 5. Use `EXTENDS` to split one spec. Use `INSTANCE` for a module that other specs reuse.
 6. Put model-checking settings in an `MC` module. Keep the spec free of them.
 7. Keep each spec under 300 lines. If a spec is longer, split it by subsystem.
-8. Start each spec with a comment. Name the code lines, the failure, the invariant, the cost and the findings.
+8. Start each spec with a comment. Name the functions, the failure, the invariant, the cost and the findings.
 
 Sources: [module structure](https://learning.tlapl.us/intro/module-structure/) and [MC file advice](https://discuss.tlapl.us/msg06726.html).
 
