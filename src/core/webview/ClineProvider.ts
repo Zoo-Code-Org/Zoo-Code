@@ -3993,6 +3993,18 @@ export class ClineProvider
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
+					// The lookup is async: the sibling can activate another profile while it is in
+					// flight, and pinName is the key this snapshot was taken for. Installing these
+					// settings under the name the sibling moved to would pair the newer pin with the
+					// older profile's configuration, and the initiating activation never repairs that
+					// because its later refresh targets the profile that activation wrote. Discard
+					// the stale snapshot; the sibling own activation snapshots the pin it now names.
+					if (instance.pinnedProfileName !== pinName) {
+						this.log(
+							`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Discarding the snapshot of profile '${pinName}': the sibling re-pinned during the lookup`,
+						)
+						return
+					}
 					// Direct private access: compile-time safe across sibling instances.
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 					await instance.postStateToWebview()

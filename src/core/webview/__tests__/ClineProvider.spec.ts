@@ -6085,6 +6085,62 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("discards a sibling overlay snapshot when the sibling re-pins during the profile lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// The sibling pins a profile and has no overlay of its own, which is the case
+				// this snapshot helper exists for: such a view serves the pinned profile's
+				// settings from the shared store, and the helper pins them into the view before
+				// the caller replaces that store.
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				let releaseLookup: () => void = () => {}
+				const lookupGate = new Promise<void>((resolve) => {
+					releaseLookup = resolve
+				})
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+					const name = "name" in args ? args.name : ""
+					// The sibling activates another profile while this lookup is in flight.
+					sibling["viewLocalState"].currentApiConfigName = "newer-profile"
+					await lookupGate
+					return {
+						name,
+						id: name + "-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterApiKey: "sibling-secret",
+					}
+				})
+				const snapshot = provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]("written-profile", {
+					requireResolvablePins: true,
+				})
+				releaseLookup()
+				await snapshot
+				// The snapshot was taken for a pin the sibling no longer holds, so it must not be
+				// installed under the newer name: that would pair the newer pin with the older
+				// profile's settings, and the initiating activation never repairs it because its
+				// later refresh targets the profile that activation wrote.
+				expect(sibling.pinnedProfileName).toBe("newer-profile")
+				expect(sibling["viewLocalState"].apiConfiguration).toBeUndefined()
+				expect(sibling.postStateToWebview).not.toHaveBeenCalled()
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
 		it("clears the view-local overlay of every live webview on reset", async () => {
 			const provider = new ClineProvider(
 				mockContext,
