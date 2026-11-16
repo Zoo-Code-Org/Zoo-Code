@@ -8622,16 +8622,24 @@ describe("view state claims driven at the method boundary (PR 2414 asks)", () =>
 
 	it("drops an entry that is not an object when the real read rebuilds the map", async () => {
 		const { provider, storage, persisted } = makeViewHost()
+		// A second valid entry under a key this save never writes: the written key on its own cannot
+		// tell a read that dropped only the corrupt member from a read that dropped every member,
+		// because the write re-creates that one key either way.
+		const untouched = { mode: "mcp", claimToken: "unrelated-token", updatedAt: 2 }
 		storage["viewStates"] = {
 			"sidebar-host-0": { mode: "code", claimToken: "token-a", updatedAt: 1 },
+			"other-host-7": { ...untouched },
 			toString: "a hand-edited record that is not an entry",
 		}
 
 		await drive<{ persisted: boolean; claim: string }>("savePersistedViewState", provider, { mode: "code" })
 
 		// The read is production's, so the corrupt member is gone before the write is composed:
-		// a double that copied the read here would carry it through to storage unchanged.
-		expect(Object.keys(persisted()).sort()).toEqual(["sidebar-host-0"])
+		// a double that copied the read here would carry it through to storage unchanged. The
+		// untouched entry is what separates the two readings: were the read to discard every
+		// stored member, this key would be absent, because only the written key comes back.
+		expect(Object.keys(persisted()).sort()).toEqual(["other-host-7", "sidebar-host-0"])
+		expect(persisted()["other-host-7"]).toEqual(untouched)
 		expect(persisted()["sidebar-host-0"]?.claimToken).not.toBe("token-a")
 	})
 	it("rolls back a persisted claim whose view died while it still carries its own binding", async () => {
