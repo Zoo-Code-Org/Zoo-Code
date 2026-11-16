@@ -5886,7 +5886,8 @@ export class ClineProvider
 			includeDiagnosticMessages: mergedStateValues.includeDiagnosticMessages ?? true,
 			maxDiagnosticMessages: mergedStateValues.maxDiagnosticMessages ?? 50,
 			includeTaskHistoryInEnhance: mergedStateValues.includeTaskHistoryInEnhance ?? true,
-			taskTitleGenerationEnabled: mergedStateValues.taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+			taskTitleGenerationEnabled:
+				mergedStateValues.taskTitleGenerationEnabled ?? DEFAULT_TASK_TITLE_GENERATION_ENABLED,
 			taskTitleApiConfigId: mergedStateValues.taskTitleApiConfigId,
 			includeCurrentTime: mergedStateValues.includeCurrentTime ?? true,
 			includeCurrentCost: mergedStateValues.includeCurrentCost ?? true,
