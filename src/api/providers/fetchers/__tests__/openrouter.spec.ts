@@ -1,5 +1,8 @@
 // npx vitest run api/providers/fetchers/__tests__/openrouter.spec.ts
 
+import http from "http"
+import nock from "nock"
+import type { AddressInfo } from "net"
 import * as path from "path"
 
 import { back as nockBack } from "nock"
@@ -332,8 +335,122 @@ describe("OpenRouter API", () => {
 				"https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-4/endpoints",
 				{
 					timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+					signal: expect.any(AbortSignal),
+					maxContentLength: 1024 * 1024,
 				},
 			)
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for an image-output model", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: {
+					data: {
+						id: "vendor/image-model",
+						name: "Image Model",
+						architecture: { output_modalities: ["image"] },
+						endpoints: [{ provider_name: "P", context_length: 1000 }],
+					},
+				},
+			})
+
+			await expect(getOpenRouterModelEndpoints("vendor/image-model")).resolves.toEqual({})
+
+			getSpy.mockRestore()
+		})
+
+		it.each([
+			["a non-numeric", "bad", false],
+			["a numeric", 4096, true],
+		])("with untrustedBaseUrl handles %s context_length", async (_name, contextLength, accepted) => {
+			const axios = await import("axios")
+			const endpoint = { name: "P", provider_name: "P", context_length: contextLength }
+			const body = { data: { id: "m", name: "M", endpoints: [endpoint] } }
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: body })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const result = await getOpenRouterModelEndpoints("m", undefined, { untrustedBaseUrl: true })
+
+			if (accepted) {
+				expect(Object.keys(result)).toEqual(["P"])
+				expect(result["P"]).toMatchObject({ contextWindow: 4096 })
+			} else {
+				expect(result).toEqual({})
+				// Trusted callers keep the lenient fallback.
+				await expect(getOpenRouterModelEndpoints("m")).resolves.toHaveProperty("P")
+			}
+
+			getSpy.mockRestore()
+		})
+
+		it("bounds the total time of a body that streams slowly after the headers arrive", async () => {
+			const server = http.createServer((_req, res) => {
+				res.writeHead(200, { "Content-Type": "application/json" })
+				// One byte at a time keeps the socket active, so only a total deadline can stop it.
+				const timer = setInterval(() => res.write(" "), 50)
+				res.on("close", () => clearInterval(timer))
+			})
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+			const { port } = server.address() as AddressInfo
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			nock.enableNetConnect("127.0.0.1")
+
+			try {
+				const start = Date.now()
+				const result = await getOpenRouterModelEndpoints(
+					"m",
+					{ openRouterBaseUrl: `http://127.0.0.1:${port}` },
+					{ untrustedBaseUrl: true, timeoutMs: 300 },
+				)
+
+				expect(result).toEqual({})
+				expect(Date.now() - start).toBeLessThan(2000)
+			} finally {
+				nock.disableNetConnect()
+				server.closeAllConnections()
+				await new Promise((resolve) => server.close(resolve))
+			}
+		})
+
+		it("uses the caller timeout when given", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "m", name: "M", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("m", undefined, { timeoutMs: 10_000 })
+
+			expect(getSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeout: 10_000 }))
+
+			getSpy.mockRestore()
+		})
+
+		it("with untrustedBaseUrl logs no host name when the request fails", async () => {
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockRejectedValue(new Error("getaddrinfo ENOTFOUND secret.example.com"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await getOpenRouterModelEndpoints(
+				"m",
+				{ openRouterBaseUrl: "https://secret.example.com" },
+				{ untrustedBaseUrl: true },
+			)
+
+			expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.example.com")
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for a body without an endpoints list", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: { id: "m" } } })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getOpenRouterModelEndpoints("m")).resolves.toEqual({})
 
 			getSpy.mockRestore()
 		})

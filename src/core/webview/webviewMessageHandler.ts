@@ -31,6 +31,7 @@ import {
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
+import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -1160,6 +1161,9 @@ export const webviewMessageHandler = async (
 			break
 		case "resetState":
 			await provider.resetState()
+			break
+		case "requestProviderInfo":
+			await handleRequestProviderInfo(provider, message)
 			break
 		case RouterModelsMessageType.flushRouterModels: {
 			const { apiConfiguration } = await provider.getState()

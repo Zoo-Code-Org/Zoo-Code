@@ -197,6 +197,52 @@ describe("SkillsManager", () => {
 		await skillsManager.dispose()
 	})
 
+	it.each(["javascript", "js", "JS"])("blocks executable %s metadata in skill operations", async (language) => {
+		const skillDir = p(projectSkillsDir, "example")
+		mockDirectoryExists.mockImplementation(async (dir: string) => dir === projectSkillsDir)
+		mockRealpath.mockImplementation(async (value: string) => value)
+		mockReaddir.mockImplementation(async (dir: string) => (dir === projectSkillsDir ? ["example"] : []))
+		mockStat.mockResolvedValue({ isDirectory: () => true })
+		mockFileExists.mockResolvedValue(true)
+		const instructions = `---${language}\n(globalThis.frontmatterExecuted(), {})\n---\nInstructions`
+		const valid = `---\nname: example\ndescription: Example skill\n---\n${instructions}`
+		mockReadFile.mockResolvedValue(valid)
+		await skillsManager.discoverSkills()
+		expect((await skillsManager.getSkillContent("example"))?.instructions).toBe(instructions)
+
+		const executed = vi.fn()
+		vi.stubGlobal("frontmatterExecuted", executed)
+		try {
+			await skillsManager.updateSkillModes("example", "project", ["code"])
+			// The publish is atomic: the payload is staged as .SKILL.md.<time>.<rand>.tmp in the
+			// skill's own directory and renamed over SKILL.md, so the write assertion names the
+			// staged file and the rename names the target. main's landed row asserted the direct
+			// fs.writeFile(skill.path, content, "utf-8") that this branch replaced.
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			const staged = String(mockWriteFile.mock.calls[0][0])
+			expect(staged).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockRename).toHaveBeenCalledWith(staged, p(skillDir, "SKILL.md"))
+			expect(mockWriteFile.mock.calls[0][2]).toMatchObject({ encoding: "utf-8", flag: "wx" })
+			expect(String(mockWriteFile.mock.calls[0][1])).toContain(instructions)
+			mockWriteFile.mockClear()
+			mockReadFile.mockResolvedValue(
+				`---${language}\n(globalThis.frontmatterExecuted(), {name: "example", description: "Example"})\n---\nBody`,
+			)
+			await expect(skillsManager.getSkillContent("example")).rejects.toThrow("Unsupported frontmatter language")
+			await expect(skillsManager.updateSkillModes("example", "project", ["code"])).rejects.toThrow(
+				"Unsupported frontmatter language",
+			)
+			expect(mockWriteFile).not.toHaveBeenCalled()
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata().some((skill) => skill.path === p(skillDir, "SKILL.md"))).toBe(
+				false,
+			)
+			expect(executed).not.toHaveBeenCalled()
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	describe("discoverSkills", () => {
 		it("should discover skills from global directory", async () => {
 			const pdfSkillDir = p(globalSkillsDir, "pdf-processing")
@@ -4503,3 +4549,5 @@ Instructions`)
 		expect(skillsManager["activeTempFiles"].size).toBe(0)
 	})
 })
+
+

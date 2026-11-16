@@ -2,6 +2,7 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import * as vscode from "vscode"
 import matter from "gray-matter"
+import { parseFrontmatter } from "../../utils/safeFrontmatter"
 
 import type { ClineProvider } from "../../core/webview/ClineProvider"
 import { getGlobalRooDirectory, getGlobalAgentsDirectory, getProjectAgentsDirectoryForCwd } from "../roo-config"
@@ -438,15 +439,16 @@ export class SkillsManager {
 			// the description) report the actual cause instead of a misleading
 			// "missing required field" message (see issue #859).
 			//
-			// The `{}` options argument is deliberate: gray-matter keeps a global
-			// content-keyed cache and populates it *before* parsing, so a
-			// frontmatter that throws on first parse is cached with an empty data
-			// object and every later parse of the same content silently returns
-			// that empty object instead of re-throwing. Passing options disables
-			// the cache for this call, keeping the parse deterministic.
-			let parsed: ReturnType<typeof matter>
+			// The parse goes through parseFrontmatter, the helper main added with the
+			// frontmatter security fix: it pins the yaml engine, rejects a document-
+			// selected executable engine, and passes options, which bypasses gray-matter's
+			// shared, input-only parse cache. That last part is what keeps this call
+			// deterministic: a frontmatter that throws on first parse is not cached with
+			// an empty data object, so every later parse of the same content re-throws
+			// instead of silently returning that empty object.
+			let parsed: ReturnType<typeof parseFrontmatter>
 			try {
-				parsed = matter(fileContent, {})
+				parsed = parseFrontmatter(fileContent)
 			} catch (error) {
 				this.recordDiagnostic(skillMdPath, source, error, pass.diagnostics)
 				console.error(`Failed to parse skill at ${skillDir}:`, error)
@@ -667,7 +669,7 @@ export class SkillsManager {
 
 		// Read skill content from disk
 		const fileContent = await fs.readFile(skill.path, "utf-8")
-		const { content: body } = matter(fileContent)
+		const { content: body } = parseFrontmatter(fileContent)
 
 		return {
 			...skill,
@@ -1273,7 +1275,7 @@ Add your skill instructions here.
 			targetPath,
 			async () => {
 				const fileContent = await fs.readFile(targetPath, "utf-8")
-				const { data: frontmatter, content: body } = matter(fileContent)
+				const { data: frontmatter, content: body } = parseFrontmatter(fileContent)
 
 				// Update the frontmatter with new modeSlugs
 				if (newModeSlugs && newModeSlugs.length > 0) {
@@ -1289,7 +1291,7 @@ Add your skill instructions here.
 				// Serialize back to SKILL.md format. lineWidth: -1 prevents long
 				// values from being reflowed into folded block scalars, keeping the
 				// file stable (see issue #859).
-				return matter.stringify(body, frontmatter, SKILL_YAML_DUMP_OPTIONS)
+				return matter.stringify({ content: body }, frontmatter, SKILL_YAML_DUMP_OPTIONS)
 			},
 			async (target) => {
 				// Fail closed: a resolution failure must propagate so the staged temp write is removed
@@ -1506,3 +1508,6 @@ Add your skill instructions here.
 		this.rootRealPaths.clear()
 	}
 }
+
+
+
