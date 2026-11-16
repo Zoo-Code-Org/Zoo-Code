@@ -6547,6 +6547,56 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("applies the resolved profile only to the fields no edit touched during the lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// Durable selections from an earlier session, bound by this webview's claim, naming a
+			// profile whose settings differ from the ones this view has pinned.
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "cfg-a",
+					updatedAt: 1,
+					claimToken: "seeded-claim",
+				},
+			})
+			const pinnedApiConfiguration = { apiProvider: providerIdentifiers.openrouter }
+			// A write of its own raises the field's revision before the lookup begins, so the
+			// readings the lookup compares against are real numbers rather than map misses.
+			await provider.saveViewState("apiConfiguration", pinnedApiConfiguration)
+			const load = provider["setViewStateId"]("stable-sidebar-view", "seeded-claim")
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// Two fields edited while the profile is still resolving: the buffer keeps them.
+			await provider.saveViewState("mode", "plan")
+			await provider.saveViewState("currentApiConfigName", "buffer-selection")
+			resolveProfile({
+				name: "cfg-a",
+				id: "cfg-a-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			await load
+			// The profile the durable selection names fills the field nobody edited, and the
+			// fields the user moved during the lookup keep the buffer's values.
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-x",
+			})
+			expect(provider["viewLocalState"].apiConfiguration).not.toBe(pinnedApiConfiguration)
+			expect(provider["viewLocalState"]).toMatchObject({
+				mode: "plan",
+				currentApiConfigName: "buffer-selection",
+			})
+			await provider.dispose()
+		})
+
 		it("gives each instance its own session-local view id and tracks it as active", async () => {
 			const first = new ClineProvider(
 				mockContext,
