@@ -1559,6 +1559,9 @@ describe("safeWriteJson", () => {
 			expect(escape.requestedPath).toBe(target)
 			expect(escape.resolvedPath).toBe(movedTarget)
 			expect(escape.confineTo).toBe(projectDir)
+			// The name is what a caller logs and what a remote error reader shows; instanceof alone never
+			// checks it, so a class that renamed itself would still pass every assertion above.
+			expect(escape.name).toBe("ConfinedPathEscapeError")
 			expect(escape.message).toContain(movedTarget)
 			expect(escape.message).toContain(target)
 			// The refusal came from the authorization asked again after the heal, not from the pre-lock

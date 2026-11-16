@@ -232,7 +232,6 @@ export class AncestorReplacedError extends Error {
  */
 const MAX_SYMLINK_HOPS = 40
 
-
 export async function resolvePublishTarget(absoluteFilePath: string): Promise<string> {
 	return fs.realpath(absoluteFilePath).catch(async (error: unknown) => {
 		if (errorCode(error) !== "ENOENT") throw error
