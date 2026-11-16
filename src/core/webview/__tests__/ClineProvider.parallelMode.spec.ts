@@ -2700,6 +2700,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new WebviewFocusTracker(),
 			)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the profile the switch is meant to activate.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "profile-id" })
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
 				name: "mode-profile",
@@ -2710,11 +2715,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "mode-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
+			// A cached id is checked against the config list inside getModeConfigId
+			// (ClineProvider.ts:3347), so this read happens before the one in the switch
+			// itself: a once-mock would be spent by the check and the switch would then
+			// see the real store. Pin the same list for every read.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue(profileSettings)
 			const activateProfileSpy = vi
 				.spyOn(provider.providerSettingsManager, "activateProfile")
-				.mockResolvedValueOnce(profileSettings)
+				.mockResolvedValue(profileSettings)
 
 			await provider.handleModeSwitch("architect")
 

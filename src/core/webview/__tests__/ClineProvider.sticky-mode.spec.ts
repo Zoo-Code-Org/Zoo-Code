@@ -724,6 +724,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
 				new Error("activation read failed"),
 			)
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the read that rejects is the manager read, and the list below is pinned
+			// empty so the check inside getModeConfigId does not answer from the cache first.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			await provider.addClineToStack(mockTask)
 
 			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
@@ -908,6 +915,13 @@ describe("ClineProvider - Sticky Mode", () => {
 				controller.abort()
 				throw new Error("late activation read failure")
 			})
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the read that rejects is the manager read, and the list below is pinned
+			// empty so the check inside getModeConfigId does not answer from the cache first.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			await provider.addClineToStack(mockTask)
 
 			await expect(
@@ -960,6 +974,13 @@ describe("ClineProvider - Sticky Mode", () => {
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
 				new Error("activation read failed"),
 			)
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the read that rejects is the manager read, and the list below is pinned
+			// empty so the check inside getModeConfigId does not answer from the cache first.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			await provider.addClineToStack(mockTask)
 
 			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
@@ -1060,6 +1081,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			await provider.setValue("currentApiConfigName", "profile-x")
 			await provider.contextProxy.setValue("currentApiConfigName", "profile-y")
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			// Start from an unmapped snapshot so the branch below is the one under test:
+			// an unmapped mode returns undefined before the manager is consulted
+			// (ClineProvider.ts:3344-3346), which is what makes the switch record the
+			// default from this view's pin rather than from the shared slot.
+			provider["initialModeConfigIds"] = Promise.resolve({})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.openrouter },
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.anthropic },
@@ -1072,7 +1098,13 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
 
-			expect(setModeConfig).toHaveBeenCalledWith("architect", "x-id")
+			// The switch records the default in this view's own map instead of writing a
+			// shared mode default another window may already own (ClineProvider.ts:3249-3263,
+			// upstream's own branch at 2183-2193): the pinned profile becomes this mode's
+			// default here and the shared slot stays on the sibling view's choice.
+			expect(provider["localModeConfigIds"].get("architect")).toBe("x-id")
+			expect(setModeConfig).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-y")
 		})
 
 		it("reconciles the switch when the mode-linked profile lookup fails", async () => {
@@ -1172,6 +1204,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// fails: the activated profile is already in place, so the switch must
 			// be kept rather than reconciled.
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the lookup has to resolve to the mode profile.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
 			])
@@ -1185,14 +1222,16 @@ describe("ClineProvider - Sticky Mode", () => {
 				name: "architect-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			})
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
-				new Error("set-mode-config failed"),
-			)
+			// The activation commits the profile through a shared provider-settings write
+			// (ClineProvider.ts:4213-4219), not through setModeConfig: the mode switch calls
+			// activateProviderProfileUnlocked with persistModeConfig false, exactly as upstream
+			// does at 2174, so the shared write is the later failure this case is about.
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValue(new Error("shared write failed"))
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.addClineToStack(mockTask)
 
 			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
-				"set-mode-config failed",
+				"shared write failed",
 			)
 
 			expect(provider.getValue("mode")).toBe("architect")

@@ -1039,6 +1039,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			await provider.addClineToStack(mockTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the activation below must resolve the mode profile.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
 				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
@@ -1117,6 +1122,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			await provider.addClineToStack(mockTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the same-provider, same-model case needs the map too.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
 				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
@@ -1176,6 +1186,11 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			await provider.addClineToStack(mockTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			// The mode map is read from this provider's snapshot first, and a mode the snapshot
+			// leaves unmapped never reaches the manager read (ClineProvider.ts:3344-3346, the
+			// short circuit upstream itself ships at 2211-2213). Seed the mapping this scenario
+			// is about: the pin-write failure sits inside this activation.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
 				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
