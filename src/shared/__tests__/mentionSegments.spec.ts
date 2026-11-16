@@ -81,6 +81,52 @@ describe("mentionSegments", () => {
 			expect(joinSegments(result)).toBe(newValue)
 		})
 
+		it("keeps generated text generated after a repeated edit next to an equal letter", () => {
+			const once = applyEdit([gen("@/x")], "@/x", "@/x@/x")
+			const twice = applyEdit(once, "@/x@/x", "x/x@/x")
+			expect(twice.filter((s) => s.source === "user").map((s) => s.text)).toEqual(["x"])
+		})
+
+		// Mirrors docs/architecture/tla/MentionOrigin.tla: user-tagged letters never exceed typed letters.
+		it("never tags more letters user than the user typed, for every single edit of up to two steps", () => {
+			type Cell = { c: string; o: "user" | "generated" }
+			const letters = ["a", "b"]
+			const words = (n: number): string[] =>
+				n === 0
+					? [""]
+					: words(n - 1)
+							.flatMap((w) => [w, ...letters.map((l) => w + l)])
+							.filter((w, i, all) => all.indexOf(w) === i)
+			const small = words(2)
+			const edits = (cells: Cell[]) =>
+				Array.from({ length: cells.length + 1 }, (_, i) => i).flatMap((i) =>
+					Array.from({ length: cells.length - i + 1 }, (_, k) => i + k).flatMap((j) =>
+						small.map((r) => [
+							...cells.slice(0, i),
+							...Array.from(r, (c): Cell => ({ c, o: "user" })),
+							...cells.slice(j),
+						]),
+					),
+				)
+			const toText = (cells: Cell[]) => cells.map((x) => x.c).join("")
+			const check = (cells: Cell[], segments: MentionSegment[], depth: number) => {
+				const typed = cells.filter((x) => x.o === "user").length
+				const tagged = joinSegments(segments.filter((s) => s.source === "user")).length
+				expect(tagged).toBeLessThanOrEqual(typed)
+				if (depth === 0) return
+				for (const next of edits(cells).filter((c) => c.length <= 5)) {
+					check(next, applyEdit(segments, toText(cells), toText(next)), depth - 1)
+				}
+			}
+			for (const start of words(3)) {
+				check(
+					Array.from(start, (c): Cell => ({ c, o: "generated" })),
+					generatedSegments(start),
+					2,
+				)
+			}
+		})
+
 		it("does not authorize a generated mention after an unrelated edit", () => {
 			const result = applyEdit([gen("see @/secret")], "see @/secret", "see @/secret now")
 			expect(userText(result)).toBe(" now")

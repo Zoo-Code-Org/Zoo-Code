@@ -68,26 +68,46 @@ const slice = (segments: MentionSegment[], start: number, end: number): MentionS
 	return result
 }
 
+const sourcesOf = (segments: MentionSegment[]): MentionSegment["source"][] =>
+	segments.flatMap((s) => Array.from({ length: s.text.length }, () => s.source))
+
 /**
  * Records a manual edit. The changed range is the part between the common
  * prefix and the common suffix. The new text there is `user`. The rest keeps
- * its source. If the segments do not match `oldValue`, the result is all
- * generated.
+ * its source. An equal letter next to the edit makes the range ambiguous, so
+ * the diff runs from both ends and a letter stays `user` only if both agree.
+ * If the segments do not match `oldValue`, the result is all generated.
  */
 export const applyEdit = (segments: MentionSegment[], oldValue: string, newValue: string): MentionSegment[] => {
 	if (joinSegments(segments) !== oldValue) return generatedSegments(newValue)
 
 	const max = Math.min(oldValue.length, newValue.length)
-	let prefix = 0
-	while (prefix < max && oldValue[prefix] === newValue[prefix]) prefix++
-	let suffix = 0
-	while (suffix < max - prefix && oldValue[oldValue.length - 1 - suffix] === newValue[newValue.length - 1 - suffix]) {
-		suffix++
+	const prefixOf = (limit: number) => {
+		let n = 0
+		while (n < limit && oldValue[n] === newValue[n]) n++
+		return n
 	}
+	const suffixOf = (limit: number) => {
+		let n = 0
+		while (n < limit && oldValue[oldValue.length - 1 - n] === newValue[newValue.length - 1 - n]) n++
+		return n
+	}
+	const retag = (prefix: number, suffix: number) =>
+		sourcesOf([
+			...slice(segments, 0, prefix),
+			...userSegments(newValue.slice(prefix, newValue.length - suffix)),
+			...slice(segments, oldValue.length - suffix, oldValue.length),
+		])
 
-	return merge([
-		...slice(segments, 0, prefix),
-		...userSegments(newValue.slice(prefix, newValue.length - suffix)),
-		...slice(segments, oldValue.length - suffix, oldValue.length),
-	])
+	const prefixFirst = prefixOf(max)
+	const a = retag(prefixFirst, suffixOf(max - prefixFirst))
+	const suffixFirst = suffixOf(max)
+	const b = retag(prefixOf(max - suffixFirst), suffixFirst)
+
+	return merge(
+		Array.from({ length: newValue.length }, (_, i) => ({
+			text: newValue[i]!,
+			source: a[i] === "user" && b[i] === "user" ? "user" : "generated",
+		})),
+	)
 }

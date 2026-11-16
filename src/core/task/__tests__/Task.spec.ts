@@ -3588,6 +3588,38 @@ describe("Cline", () => {
 
 				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
 			})
+
+			it.each([
+				{
+					label: "aborted",
+					cancel: (t: Task) => t.abortTask(),
+				},
+				{
+					label: "abandoned",
+					cancel: async (t: Task) => {
+						t.abandoned = true
+					},
+				},
+			])("does not switch the mode after the task is cancelled ($label)", async ({ cancel }) => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.mocked(parseMentions).mockResolvedValueOnce({
+					text: "run /commit",
+					contentBlocks: [],
+					mode: "code",
+				})
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				await cancel(task)
+
+				const content = await task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
+
+				expect(handleModeSwitchSpy).not.toHaveBeenCalled()
+				expect(content).toEqual([{ type: "text", text: "<user_message>\nrun /commit\n</user_message>" }])
+			})
 		})
 
 		describe("Subtask Rate Limiting", () => {

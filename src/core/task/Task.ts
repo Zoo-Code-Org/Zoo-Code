@@ -3962,6 +3962,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			currentMode: await this.getTaskMode(),
 		})
 
+		// A cancelled task must not switch the mode. A listener can cancel while the content loads.
+		if (this.abort || this.abandoned) return content
+
 		// Switch mode if specified in a slash command's frontmatter
 		if (mode && provider && getModeBySlug(mode, state?.customModes)) {
 			await provider.handleModeSwitch(mode, null)
