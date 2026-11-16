@@ -2117,7 +2117,8 @@ describe("ClineProvider", () => {
 
 		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			const generate = vi.spyOn(provider, "getState").mockRejectedValue(new Error("cannot generate"))
+			const generate = vi.fn().mockRejectedValue(new Error("cannot generate"))
+			provider["getWebviewHtml"] = generate
 			const assignHtml = trackHtmlAssignments()
 
 			await vi.advanceTimersByTimeAsync(600_000)
@@ -2144,7 +2145,8 @@ describe("ClineProvider", () => {
 		test("gives a user-opened replacement a fresh budget after unavailable host recovery", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
-			const generateHtml = vi.spyOn(provider, "getState")
+			const generateHtml = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = generateHtml
 
 			await vi.advanceTimersByTimeAsync(130_000)
 			expect(generateHtml).toHaveBeenCalledTimes(1)
@@ -2269,18 +2271,18 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			expect(vi.getTimerCount()).toBe(timersAfterFirstResolve)
 
-			// getHtmlContent regenerates the HTML via one getState() call per reload,
-			// so getState invocations after this point count watchdog reloads.
-			const getStateSpy = vi.spyOn(provider, "getState")
+			// Each watchdog reload regenerates the HTML once, so calls after this point count reloads.
+			const regenerate = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = regenerate
 
 			await vi.advanceTimersByTimeAsync(120_000)
 
-			expect(getStateSpy).toHaveBeenCalledTimes(1)
+			expect(regenerate).toHaveBeenCalledTimes(1)
 		})
 
 		test("logs when regenerating the reload HTML fails", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			vi.spyOn(provider, "getState").mockRejectedValue(new Error("regen boom"))
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("regen boom"))
 			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
 
 			await vi.advanceTimersByTimeAsync(120_000)
@@ -3059,6 +3061,39 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	// Provider lookups run in the extension host, so configured endpoints must never reach the CSP.
+	test.each(["getHtmlContent", "getHMRHtmlContent"] as const)(
+		"%s keeps configured provider endpoints out of the CSP",
+		async (build) => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: {
+					...state.apiConfiguration,
+					openRouterBaseUrl: "https://evil.example;script-src 'unsafe-inline'\"><script>attack()</script>",
+					requestyBaseUrl: "https://requesty.example",
+				},
+			})
+			vi.mocked(axios.get).mockResolvedValue({ data: "" })
+
+			const html = await provider[build](mockWebviewView.webview)
+			const csp = html.match(
+				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
+			)?.[1]
+
+			expect(csp).toBeDefined()
+			expect(csp).toContain("connect-src vscode-webview://test-csp-source ")
+			if (build === "getHtmlContent") {
+				expect(csp).toContain("connect-src vscode-webview://test-csp-source https://us.i.posthog.com;")
+			}
+			expect(csp).not.toContain("evil.example")
+			expect(csp).not.toContain("requesty")
+			expect(csp).not.toContain("openrouter")
+			expect(csp?.match(/script-src /g)).toHaveLength(1)
+			expect(html).not.toContain("attack()")
+		},
+	)
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
@@ -3082,7 +3117,7 @@ describe("ClineProvider", () => {
 
 		// Verify Content Security Policy contains the necessary PostHog domains
 		expect(mockWebviewView.webview.html).toContain(
-			"connect-src vscode-webview://test-csp-source https://openrouter.ai https://api.requesty.ai https://us.i.posthog.com",
+			"connect-src vscode-webview://test-csp-source https://us.i.posthog.com",
 		)
 
 		// Extract the script-src directive section and verify required security elements
