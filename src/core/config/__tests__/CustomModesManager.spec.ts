@@ -764,6 +764,125 @@ describe("CustomModesManager", () => {
 		})
 	})
 
+	describe("removeCustomModeEntry", () => {
+		const wireSettingsFile = (initialModes: ModeConfig[]) => {
+			let settingsContent = { customModes: initialModes }
+
+			;(fs.readFile as Mock).mockImplementation(async (path: string) => {
+				if (path === mockSettingsPath) {
+					return yaml.stringify(settingsContent)
+				}
+				throw new Error("File not found")
+			})
+			;(fs.writeFile as Mock).mockImplementation(async (path: string, content: string) => {
+				if (path === mockSettingsPath) {
+					settingsContent = yaml.parse(content)
+				}
+				return Promise.resolve()
+			})
+			;(mockContext.globalState.update as Mock).mockImplementation((key: string, value: ModeConfig[]) => {
+				if (key === "customModes") {
+					settingsContent.customModes = value
+				}
+				return Promise.resolve()
+			})
+
+			return () => settingsContent.customModes
+		}
+
+		it("removes the mode entry without deleting the mode's rules folder", async () => {
+			// The mode already had a rules folder on disk before this batch registered it - exactly
+			// the case a rollback has to survive.
+			;(fileExistsAtPath as Mock).mockImplementation(
+				async (p: string) => p === mockSettingsPath || p === mockRoomodes || p.includes("rules-batch-mode"),
+			)
+			const batchMode = {
+				slug: "batch-mode",
+				name: "Batch Mode",
+				roleDefinition: "Test role",
+				groups: ["read" as const],
+				source: "global" as const,
+			}
+			const readModes = wireSettingsFile([batchMode])
+
+			const removed = await manager.removeCustomModeEntry("batch-mode")
+
+			expect(removed).toBe(true)
+			expect(readModes()).toHaveLength(0)
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("customModes", [])
+
+			// The discriminating assertion: `deleteCustomMode` reaches `fs.rm` for the rules folder.
+			// A rollback of a registration this process made must not delete rules the user wrote
+			// before it, so this path never touches them.
+			expect(fs.rm).not.toHaveBeenCalled()
+		})
+
+		it("reports a miss when no mode file holds the slug", async () => {
+			const readModes = wireSettingsFile([
+				{ slug: "keep-me", name: "Keep", roleDefinition: "r", groups: ["read" as const] },
+			])
+
+			expect(await manager.removeCustomModeEntry("absent-mode")).toBe(false)
+			expect(fs.writeFile).not.toHaveBeenCalled()
+			expect(readModes()).toHaveLength(1)
+		})
+	})
+
+	describe("getCustomModeDefinitions (the rollback snapshot)", () => {
+		const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+
+		it("reports an absent definition file as an empty snapshot with no failure", async () => {
+			;(fs.readFile as Mock).mockRejectedValue(enoent())
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			// A file that is not there really is a definition list of length zero, so a rollback that
+			// restores nothing against it is correct rather than a lost snapshot.
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([])
+		})
+
+		it("reports a corrupt definition file as unreadable instead of an empty snapshot", async () => {
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockSettingsPath) {
+					return "customModes: [invalid yaml content"
+				}
+				throw enoent()
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			// Same empty definition list as an absent file, but the rollback has to be able to tell them
+			// apart: registering against this snapshot would overwrite a definition nobody could read.
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "unreadable" }])
+		})
+
+		it("reports a schema-invalid definition file as invalid and keeps the source that read cleanly", async () => {
+			const projectMode = {
+				slug: "project-only",
+				name: "Project",
+				roleDefinition: "r",
+				groups: ["read"] as const,
+			}
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockRoomodes) {
+					return yaml.stringify({ customModes: [projectMode] })
+				}
+				// No roleDefinition: the file parses, so this is not a read failure, it is a definition
+				// the schema rejects.
+				return yaml.stringify({ customModes: [{ slug: "broken", name: "Broken", groups: ["read"] }] })
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(true)
+
+			const snapshot = await manager.getCustomModeDefinitions(["project-only", "broken"])
+
+			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "invalid" }])
+			expect(snapshot.definitions.map((mode) => mode.slug)).toEqual(["project-only"])
+		})
+	})
 	describe("updateModesInFile", () => {
 		it("handles corrupted YAML content gracefully", async () => {
 			const corruptedYaml = "customModes: [invalid yaml content"
