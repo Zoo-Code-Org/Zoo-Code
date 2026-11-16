@@ -516,7 +516,7 @@ Deploy the app.`
 	})
 })
 
-// Invariant NoExecutableEngine (docs/architecture/tla/CommandFrontmatter.tla): no header runs code.
+// Invariant NoExecutableEngine (docs/architecture/tla/Frontmatter.tla): no header runs code.
 // Exercise the real parser through both public loading paths.
 describe.each(["discovery", "individual"])("%s frontmatter security", (entryPoint) => {
 	async function load(content: string) {
