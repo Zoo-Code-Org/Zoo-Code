@@ -88,6 +88,13 @@
 			"includeTaskHistory": "將任務歷史紀錄納入內容",
 			"includeTaskHistoryDescription": "啟用後，目前對話的最後 10 則訊息將在強化提示時被納入為前後文，有助於產生更相關且具備情境感知能力的建議。"
 		},
+		"taskTitle": {
+			"enabled": "自動產生工作標題",
+			"enabledDescription": "在背景將每個新工作的第一個提示摘要為簡短標題。標題請求不會計入工作費用。GitHub Copilot 與 VS Code LM 設定檔會消耗您的配額。",
+			"apiConfiguration": "API 設定",
+			"useTaskConfig": "使用工作的 API 設定",
+			"apiConfigDescription": "建議使用輕量的非推理設定檔。若選擇其他設定檔，提示的開頭部分會傳送給該供應商。"
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "強化提示詞",
@@ -128,6 +135,10 @@
 			"NEW_TASK": {
 				"label": "開始新工作",
 				"description": "根據使用者輸入開始一個新的任務。可在命令選擇區使用。"
+			},
+			"TASK_TITLE": {
+				"label": "工作標題",
+				"description": "在背景為新工作產生簡短標題，顯示於歷史記錄與工作標頭。可於下方設定。"
 			}
 		}
 	},

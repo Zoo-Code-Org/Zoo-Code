@@ -1,4 +1,4 @@
-import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
+import type { ProviderName, ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 import {
 	providerIdentifiers,
 	anthropicDefaultModelId,
@@ -183,7 +183,18 @@ export const getStaticModelsForProvider = (
 	provider: ProviderName,
 	customArnLabel?: string,
 	apiConfiguration?: ProviderSettings,
+	routerModels?: RouterModels,
 ): Record<string, ModelInfo> => {
+	// Friendli's static list is only a fallback for its fetched /v1/models list.
+	const friendliRouterModels = routerModels?.friendli
+	if (
+		provider === providerIdentifiers.friendli &&
+		friendliRouterModels &&
+		Object.keys(friendliRouterModels).length > 0
+	) {
+		return friendliRouterModels
+	}
+
 	if (provider === providerIdentifiers.zai) {
 		return getZAiModels(apiConfiguration?.zaiApiLine)
 	}
