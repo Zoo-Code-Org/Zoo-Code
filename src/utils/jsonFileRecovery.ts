@@ -100,6 +100,36 @@ export async function deleteJsonFile(filePath: string): Promise<void> {
 }
 
 /**
+ * Two leftover backups whose mtimes are exactly equal carry no evidence about which
+ * one is the newer committed state - mtime is the only recency signal recovery has -
+ * so choosing between them would be the order readdir happened to list them in, and
+ * the loser of that order is garbage-collected below. Recovery refuses instead, the
+ * same fail-closed decision it already makes for a backup it cannot stat: nothing is
+ * restored and nothing is deleted, so both copies stay on disk for a human to read.
+ */
+class AmbiguousBackupRecencyError extends Error {
+	readonly code = "AMBIGUOUS_BACKUP_RECENCY"
+	readonly targetPath: string
+	readonly mtimeMs: number
+	readonly firstBackupPath: string
+	readonly secondBackupPath: string
+	constructor(targetPath: string, mtimeMs: number, firstBackupPath: string, secondBackupPath: string) {
+		super(
+			// Basenames, not absolute paths: this error travels to callers that report it, and error
+			// telemetry captures message and stack, so a workspace path here would carry the local
+			// username into that capture. The full paths stay on the properties for whoever has to
+			// decide between the two tied copies.
+			`Cannot tell which backup of ${path.basename(targetPath)} is the newest committed state: ${path.basename(firstBackupPath)} and ${path.basename(secondBackupPath)} share mtime ${mtimeMs}. Nothing was restored or deleted.`,
+		)
+		this.name = "AmbiguousBackupRecencyError"
+		this.targetPath = targetPath
+		this.mtimeMs = mtimeMs
+		this.firstBackupPath = firstBackupPath
+		this.secondBackupPath = secondBackupPath
+	}
+}
+
+/**
  * Heals the canonical path after an interrupted previous write. Must run
  * under the advisory lock and before any data is read or written: temp and
  * backup files are only ever created while that lock is held, so anything
@@ -112,8 +142,9 @@ export async function deleteJsonFile(filePath: string): Promise<void> {
  * renamed to its backup but before the replacement landed. A process exit
  * at that point leaves the canonical path absent, which readers see as a
  * permanent ENOENT that no retry can repair, so the newest backup is
- * restored first. Leftover replacement and backup files are garbage
- * collected afterwards.
+ * restored first, chosen by mtime. Two backups that share an exact mtime are
+ * refused rather than split by directory order; see AmbiguousBackupRecencyError.
+ * Leftover replacement and backup files are garbage collected afterwards.
  *
  * @returns Whether leftover files were found, and the backup path that was
  * restored, if any.
@@ -181,6 +212,18 @@ export async function recoverInterruptedReplacement(
 		).filter((entry): entry is { backupPath: string; mtimeMs: number } => entry !== null)
 		if (backupStats.length > 0) {
 			backupStats.sort((a, b) => b.mtimeMs - a.mtimeMs)
+			if (backupStats.length > 1 && backupStats[1].mtimeMs === backupStats[0].mtimeMs) {
+				// mtime is the only recency signal here, and an exact tie carries none: the
+				// winner would be the order readdir happened to list the two in, and the
+				// loser is unlinked below. Refuse, as recovery already refuses a backup it
+				// cannot stat.
+				throw new AmbiguousBackupRecencyError(
+					absoluteFilePath,
+					backupStats[0].mtimeMs,
+					backupStats[0].backupPath,
+					backupStats[1].backupPath,
+				)
+			}
 			const newestBackupPath = backupStats[0].backupPath
 			try {
 				await fs.rename(newestBackupPath, absoluteFilePath)

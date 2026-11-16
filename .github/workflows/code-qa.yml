@@ -74,8 +74,12 @@ jobs:
               uses: ./.github/actions/setup-node-pnpm
               with:
                   install-args: "--frozen-lockfile"
+            - name: Test translation check scripts
+              run: pnpm test:translations-check
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
+            - name: Verify plural forms follow CLDR
+              run: node scripts/validate-plural-forms.js
             - name: Verify t() calls pass every interpolation variable
               run: node scripts/check-i18n-interpolation.js
 
@@ -247,6 +251,11 @@ jobs:
             - name: Verify coverage cache inputs
               if: matrix.collect-coverage
               run: pnpm --dir src run verify:coverage-cache-inputs
+            # Validate build/static cache inputs (issue #2290 contract) so a
+            # stale webview or extension bundle is never restored as a hit.
+            - name: Verify build cache inputs
+              if: matrix.collect-coverage
+              run: pnpm --dir src run verify:build-cache-inputs
             - name: Save Turbo cache
               if: steps.turbo-cache.outputs.cache-hit != 'true'
               uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

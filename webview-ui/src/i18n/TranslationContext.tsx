@@ -1,15 +1,27 @@
-import React, { createContext, useContext, ReactNode, useEffect, useCallback } from "react"
+import React, {
+	createContext,
+	useContext,
+	ReactNode,
+	useEffect,
+	useCallback,
+	useMemo,
+	useSyncExternalStore,
+} from "react"
 import { useTranslation } from "react-i18next"
-import i18next, { FALLBACK_LANGUAGE, loadLanguage } from "./setup"
+import type { TFunction } from "i18next"
+import { FALLBACK_LANGUAGE, loadLanguage } from "./setup"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
-// Create context for translations
-export const TranslationContext = createContext<{
-	t: (key: string, options?: Record<string, any>) => string
-	i18n: typeof i18next
-}>({
-	t: (key: string) => key,
-	i18n: i18next,
+export type TranslationContextValue = {
+	t: TFunction
+	/** The language i18next is rendering, which trails the requested one until its bundles load. */
+	language: string
+}
+
+// Create context for translations. Without a provider (isolated component tests) keys render as-is.
+export const TranslationContext = createContext<TranslationContextValue>({
+	t: ((key: string) => key) as TFunction,
+	language: FALLBACK_LANGUAGE,
 })
 
 // Translation provider component
@@ -18,47 +30,45 @@ const TranslationProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 	const { i18n } = useTranslation()
 	// Get the extension state directly - it already contains all state properties
 	const extensionState = useExtensionState()
-	const language = extensionState.language || FALLBACK_LANGUAGE
+	const requestedLanguage = extensionState.language || FALLBACK_LANGUAGE
 
 	// Only the fallback locale ships in the entry chunk, so any other language
 	// has to fetch its bundles before i18next can resolve a key. Switching after
-	// the fetch is deliberate: `changeLanguage` is what emits `languageChanged`,
-	// the event `useTranslation` subscribes to for re-renders. Until it fires the
-	// subtree keeps resolving keys through whichever language is still active:
-	// `fallbackLng` on a cold start, the previous language on a warm switch
-	// between two non-English locales. The swap-then-render shape is the same one
-	// this provider had when every locale was bundled.
+	// the fetch is deliberate: until `changeLanguage` runs, the subtree keeps
+	// rendering whichever language is still active (`fallbackLng` on a cold
+	// start, the previous language on a warm switch) instead of English keys
+	// under the new language. A newer request cancels a fetch still in flight.
 	useEffect(() => {
 		let cancelled = false
 
-		void loadLanguage(language).then(() => {
+		void loadLanguage(requestedLanguage).then(() => {
 			if (!cancelled) {
-				void i18n.changeLanguage(language)
+				void i18n.changeLanguage(requestedLanguage)
 			}
 		})
 
 		return () => {
 			cancelled = true
 		}
-	}, [i18n, language])
+	}, [i18n, requestedLanguage])
 
-	// Memoize the translation function to prevent unnecessary re-renders
-	const translate = useCallback(
-		(key: string, options?: Record<string, any>) => {
-			return i18n.t(key, options)
+	const subscribe = useCallback(
+		(onLanguageChanged: () => void) => {
+			i18n.on("languageChanged", onLanguageChanged)
+
+			return () => i18n.off("languageChanged", onLanguageChanged)
 		},
 		[i18n],
 	)
 
-	return (
-		<TranslationContext.Provider
-			value={{
-				t: translate,
-				i18n,
-			}}>
-			{children}
-		</TranslationContext.Provider>
-	)
+	const language = useSyncExternalStore(subscribe, () => i18n.language)
+
+	// `t` is bound to the active language, so its identity changes exactly when the language does.
+	// Memoized consumers (and React Compiler caches) depend on `t`, so they re-render on a switch
+	// instead of serving output translated in the previous language.
+	const value = useMemo(() => ({ t: i18n.getFixedT(language), language }), [i18n, language])
+
+	return <TranslationContext.Provider value={value}>{children}</TranslationContext.Provider>
 }
 
 // Custom hook for easy translations

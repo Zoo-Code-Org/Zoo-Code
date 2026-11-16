@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Bao gồm lịch sử tác vụ làm ngữ cảnh",
 			"includeTaskHistoryDescription": "Khi được bật, 10 tin nhắn cuối cùng từ cuộc trò chuyện hiện tại sẽ được bao gồm làm ngữ cảnh khi nâng cao lời nhắc, giúp tạo ra các gợi ý phù hợp và nhận thức ngữ cảnh hơn."
 		},
+		"taskTitle": {
+			"enabled": "Tự động tạo tiêu đề tác vụ",
+			"enabledDescription": "Tóm tắt lời nhắc đầu tiên của mỗi tác vụ mới thành tiêu đề ngắn ở chế độ nền. Yêu cầu tạo tiêu đề không được tính vào chi phí tác vụ. Hồ sơ GitHub Copilot và VS Code LM sẽ tiêu tốn hạn mức của bạn.",
+			"apiConfiguration": "Cấu hình API",
+			"useTaskConfig": "Dùng cấu hình API của tác vụ",
+			"apiConfigDescription": "Nên dùng hồ sơ nhẹ, không suy luận. Nếu chọn hồ sơ khác, phần đầu lời nhắc của bạn sẽ được gửi đến nhà cung cấp đó."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Nâng cao lời nhắc",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Bắt đầu tác vụ mới",
 				"description": "Bắt đầu tác vụ mới với nội dung đã nhập. Có sẵn trong bảng lệnh."
+			},
+			"TASK_TITLE": {
+				"label": "Tiêu đề tác vụ",
+				"description": "Tạo tiêu đề ngắn cho tác vụ mới ở chế độ nền. Hiển thị trong lịch sử và phần đầu tác vụ. Cấu hình bên dưới."
 			}
 		}
 	},

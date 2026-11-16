@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import type { HistoryItem } from "@roo-code/types"
 
@@ -27,7 +27,7 @@ interface TaskActionsProps {
 
 export const TaskActions = ({ item, buttonsDisabled, onRename }: TaskActionsProps) => {
 	const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null)
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const { copyWithFeedback, showCopyFeedback } = useCopyToClipboard()
 	const { debug } = useExtensionState()
 

@@ -1,6 +1,20 @@
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import { getCapturedVscodeMessages } from "../../../../playwright/vscode-messages"
 
+test("renders emoji-led announcement highlights without list markers", async ({ mount, page }) => {
+	await page.setViewportSize({ width: 640, height: 720 })
+	await mount("announcement-links")
+
+	const dialog = page.getByRole("dialog")
+	await expect(dialog).toBeVisible()
+	await dialog.evaluate(async () => {
+		await document.fonts.ready
+		await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()))
+	})
+
+	await expect(dialog).toHaveScreenshot("announcement-emoji-highlights-dark.png")
+})
+
 test("announcement links open exactly once through the extension host", async ({ mount, page }) => {
 	await mount("announcement-links")
 
@@ -27,6 +41,7 @@ test("announcement links open exactly once through the extension host", async ({
 	})
 
 	// The dialog portals outside the mount wrapper, so scope to the page.
+	await page.getByRole("link", { name: "https://www.zoocode.dev/pass" }).click()
 	await page.getByRole("link", { name: "GitHub" }).click()
 	await page.getByRole("link", { name: "X", exact: true }).click()
 	await page.getByRole("link", { name: "Discord" }).click()
@@ -40,6 +55,7 @@ test("announcement links open exactly once through the extension host", async ({
 	// Exactly one host message per link, in render order.
 	const hostMessages = (await getCapturedVscodeMessages(page)).filter((message) => message.type === "openExternal")
 	expect(hostMessages).toEqual([
+		{ type: "openExternal", url: "https://www.zoocode.dev/pass" },
 		{ type: "openExternal", url: "https://github.com/Zoo-Code-Org/Zoo-Code" },
 		{ type: "openExternal", url: "https://x.com/ZooCodeDev" },
 		{ type: "openExternal", url: "https://discord.gg/VxfP4Vx3gX" },

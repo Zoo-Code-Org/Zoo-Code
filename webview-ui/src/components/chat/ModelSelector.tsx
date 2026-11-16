@@ -52,9 +52,12 @@ function useModelListForProvider(provider: ProviderName | undefined, apiConfigur
 	const field = provider ? getModelIdField(provider) : undefined
 	const isUnsupported = !provider || !field || UNSUPPORTED_QUICK_PICK_PROVIDERS.includes(provider)
 	const isRouterProvider = !isStatic && !isUnsupported
+	// Friendli keeps a static list in MODELS_BY_PROVIDER, but it is only the fallback for the fetched catalog.
+	const fetchesStaticFallbackCatalog = provider === providerIdentifiers.friendli && !isUnsupported
 
-	const routerModels = useRouterModels({ provider, enabled: isRouterProvider })
-	const routerModelsData = routerModels.data as Record<string, Record<string, ModelInfo>> | undefined
+	const routerModels = useRouterModels({ provider, enabled: isRouterProvider || fetchesStaticFallbackCatalog })
+	const allRouterModels = routerModels.data
+	const routerModelsData = allRouterModels as Record<string, Record<string, ModelInfo>> | undefined
 	const isLoading = isRouterProvider && routerModels.isLoading
 
 	return React.useMemo(() => {
@@ -63,11 +66,11 @@ function useModelListForProvider(provider: ProviderName | undefined, apiConfigur
 		}
 
 		const models = isStatic
-			? getStaticModelsForProvider(provider, undefined, apiConfiguration)
+			? getStaticModelsForProvider(provider, undefined, apiConfiguration, allRouterModels)
 			: (routerModelsData?.[provider] ?? null)
 
 		return { isUnsupported: false as const, field, models, isLoading }
-	}, [provider, field, isUnsupported, isStatic, apiConfiguration, routerModelsData, isLoading])
+	}, [provider, field, isUnsupported, isStatic, apiConfiguration, allRouterModels, routerModelsData, isLoading])
 }
 
 interface ModelSelectorProps {

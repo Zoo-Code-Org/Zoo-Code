@@ -1,6 +1,6 @@
 import { render, screen, fireEvent } from "@/utils/test-utils"
 
-import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import { friendliModels, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { ModelSelector } from "../ModelSelector"
 
@@ -370,6 +370,66 @@ describe("ModelSelector", () => {
 				true,
 			)
 			expect(screen.getByTestId("model-selector-unsupported-trigger")).toBeInTheDocument()
+		})
+	})
+
+	describe("Friendli (fetched catalog with a static fallback)", () => {
+		const friendliConfig: ProviderSettings = {
+			apiProvider: providerIdentifiers.friendli,
+			apiModelId: "zai-org/GLM-5.2",
+		}
+		const staticIds = Object.keys(friendliModels).sort((a, b) => a.localeCompare(b))
+
+		const openPicker = () => {
+			render(<ModelSelector apiConfiguration={friendliConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			return screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+		}
+
+		test("requests the Friendli catalog", () => {
+			openPicker()
+
+			// useSelectedModel also calls useRouterModels, so require every Friendli call (incl. the picker's) to be enabled.
+			const friendliCalls = routerModelsResult.calls.filter(
+				(opts) => (opts as { provider?: string }).provider === providerIdentifiers.friendli,
+			)
+			expect(friendliCalls.length).toBeGreaterThan(0)
+			expect(friendliCalls.every((opts) => (opts as { enabled: boolean }).enabled)).toBe(true)
+		})
+
+		test("lists the fetched catalog, including models missing from the static list", () => {
+			routerModelsResult.value = {
+				isLoading: false,
+				data: { friendli: { "zai-org/GLM-5.2": base, "zai-org/GLM-5.3": base } },
+			}
+
+			expect(openPicker()).toEqual(["zai-org/GLM-5.2", "zai-org/GLM-5.3"])
+		})
+
+		test.each([
+			["while loading", { data: undefined, isLoading: true }],
+			["after a failed request", { data: undefined, isLoading: false }],
+			["when the catalog is empty", { data: { friendli: {} }, isLoading: false }],
+		])("falls back to the static list %s", (_label, result) => {
+			routerModelsResult.value = result
+
+			expect(openPicker()).toEqual(staticIds)
+			expect(screen.queryByText("chat:modelSelector.loading")).not.toBeInTheDocument()
+		})
+
+		test("replaces the static list with the fetched catalog in the same mounted picker", () => {
+			const listed = () => screen.getAllByTestId("model-selector-item").map((el) => el.textContent)
+			const { rerender } = render(<ModelSelector apiConfiguration={friendliConfig} title="Select model" />)
+			fireEvent.click(screen.getByTestId("model-selector-trigger"))
+			expect(listed()).toEqual(staticIds)
+
+			routerModelsResult.value = {
+				isLoading: false,
+				data: { friendli: { "zai-org/GLM-5.3": base, "vendor/fetched-only": base } },
+			}
+			rerender(<ModelSelector apiConfiguration={friendliConfig} title="Select model" />)
+
+			expect(listed()).toEqual(["vendor/fetched-only", "zai-org/GLM-5.3"])
 		})
 	})
 

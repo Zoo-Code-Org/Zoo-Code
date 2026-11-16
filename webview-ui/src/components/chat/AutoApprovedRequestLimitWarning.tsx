@@ -1,5 +1,6 @@
 import React, { memo, useState } from "react"
 import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import type { ClineMessage } from "@roo-code/types"
 
@@ -11,6 +12,7 @@ type AutoApprovedRequestLimitWarningProps = {
 }
 
 export const AutoApprovedRequestLimitWarning = memo(({ message }: AutoApprovedRequestLimitWarningProps) => {
+	const { t } = useAppTranslation()
 	const [buttonClicked, setButtonClicked] = useState(false)
 	const { count, type = "requests" } = JSON.parse(message.text ?? "{}")
 
@@ -34,7 +36,7 @@ export const AutoApprovedRequestLimitWarning = memo(({ message }: AutoApprovedRe
 			<div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--vscode-foreground)" }}>
 				<span className="codicon codicon-warning" />
 				<span style={{ fontWeight: "bold" }}>
-					<Trans i18nKey={titleKey} ns="chat" />
+					<Trans t={t} i18nKey={titleKey} ns="chat" />
 				</span>
 			</div>
 
@@ -48,7 +50,7 @@ export const AutoApprovedRequestLimitWarning = memo(({ message }: AutoApprovedRe
 					justifyContent: "center",
 				}}>
 				<div className="flex justify-between items-center">
-					<Trans i18nKey={descriptionKey} ns="chat" values={{ count }} />
+					<Trans t={t} i18nKey={descriptionKey} ns="chat" values={{ count }} />
 				</div>
 				<Button
 					style={{ width: "100%", padding: "6px", borderRadius: "4px" }}
@@ -57,7 +59,7 @@ export const AutoApprovedRequestLimitWarning = memo(({ message }: AutoApprovedRe
 						setButtonClicked(true)
 						vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
 					}}>
-					<Trans i18nKey={buttonKey} ns="chat" />
+					<Trans t={t} i18nKey={buttonKey} ns="chat" />
 				</Button>
 			</div>
 		</>

@@ -1,5 +1,5 @@
 import React from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 import { StandardTooltip } from "@/components/ui"
 
@@ -13,7 +13,7 @@ interface CodebaseSearchResultProps {
 }
 
 const CodebaseSearchResult: React.FC<CodebaseSearchResultProps> = ({ filePath, score, startLine, endLine }) => {
-	const { t } = useTranslation("chat")
+	const { t } = useAppTranslation()
 
 	const handleClick = () => {
 		console.log(filePath)
@@ -27,7 +27,7 @@ const CodebaseSearchResult: React.FC<CodebaseSearchResultProps> = ({ filePath, s
 	}
 
 	return (
-		<StandardTooltip content={t("codebaseSearch.resultTooltip", { score: score.toFixed(3) })}>
+		<StandardTooltip content={t("chat:codebaseSearch.resultTooltip", { score: score.toFixed(3) })}>
 			<div
 				onClick={handleClick}
 				className="group p-2 border border-vscode-editorGroup-border cursor-pointer hover:bg-vscode-list-hoverBackground">

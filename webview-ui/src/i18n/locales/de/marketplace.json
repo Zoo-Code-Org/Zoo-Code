@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Nach Tags filtern:",
 			"clear": "Tags löschen",
+			"removeFromFilter": "Klicke, um '{{tag}}' aus den Filtern zu entfernen",
 			"placeholder": "Zum Suchen und Auswählen von Tags eingeben...",
 			"noResults": "Keine passenden Tags gefunden",
 			"selected": "Zeige Elemente mit einem der ausgewählten Tags",

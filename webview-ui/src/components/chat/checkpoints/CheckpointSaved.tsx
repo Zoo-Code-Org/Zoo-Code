@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { cn } from "@/lib/utils"
 
 import { CheckpointMenu } from "./CheckpointMenu"
@@ -20,7 +20,7 @@ export const CheckpointSaved = ({
 	onJumpToPreviousCheckpoint,
 	...props
 }: CheckpointSavedProps) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const isCurrent = currentHash === props.commitHash
 	const [isPopoverOpen, setIsPopoverOpen] = useState(false)
 	const [isClosing, setIsClosing] = useState(false)

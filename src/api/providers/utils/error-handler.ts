@@ -34,6 +34,41 @@ import i18n from "../../../i18n/setup"
  *   throw handleProviderError(error, "Anthropic", { messagePrefix: "streaming" })
  * }
  */
+/**
+ * Whether the error carries a numeric HTTP status (SDK APIs expose it as
+ * `status` or, for the AI SDK, `statusCode`).
+ *
+ * Use before classifying a failure purely by cancellation state: a terminal
+ * API failure (401/429/5xx) can land in the same tick as an abort, and it must
+ * keep its own identity so retry, backoff and the UI still see the provider
+ * error instead of a cancellation.
+ */
+export function hasNumericHttpStatus(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	for (const status of [candidate.status, candidate.statusCode]) {
+		// Number.isFinite does not coerce, so it already rejects every non-number;
+		// a separate typeof check would be dead weight (and an equivalent mutant).
+		if (Number.isFinite(status)) return true
+	}
+	return false
+}
+
+/**
+ * The numeric HTTP status carried by an error, or `undefined` when it carries none.
+ * Same field order as hasNumericHttpStatus — `status` (most SDKs expose it that way)
+ * before `statusCode` (the AI SDK's APICallError shape) — and only finite numbers,
+ * so a null or stringy status never becomes a retry header or a telemetry property.
+ */
+export function getNumericHttpStatus(error: unknown): number | undefined {
+	if (!error || typeof error !== "object") return undefined
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	// Number.isFinite does not coerce, so the value it accepted has to be handed back
+	// with a cast: there is no narrower form for an already-validated unknown number.
+	if (Number.isFinite(candidate.status)) return candidate.status as number
+	return Number.isFinite(candidate.statusCode) ? (candidate.statusCode as number) : undefined
+}
+
 export function handleProviderError(
 	error: unknown,
 	providerName: string,

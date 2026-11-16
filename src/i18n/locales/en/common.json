@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Are you sure you want to reset all state and secret storage in the extension? This cannot be undone.",
-		"delete_config_profile": "Are you sure you want to delete this configuration profile?"
+		"delete_config_profile": "Are you sure you want to delete this configuration profile?",
+		"requesty_deep_link": "Activate Requesty credentials from an external link?",
+		"requesty_deep_link_detail": "This will replace the active provider. Subsequent requests can send your conversation and workspace content to:\n{{url}}\n\nContinue only if you requested these credentials and trust this destination."
 	},
 	"errors": {
 		"invalid_data_uri": "Invalid data URI format",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Yes"
+		"yes": "Yes",
+		"activate_requesty": "Activate Requesty"
 	},
 	"buttons": {
 		"learn_more": "Learn More"

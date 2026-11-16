@@ -3,6 +3,7 @@ import type { ClineMessage } from "@roo-code/types"
 import { checkAutoApproval } from "../../auto-approval"
 import { MessageQueueService } from "../../message-queue/MessageQueueService"
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 vi.mock("../../auto-approval", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../auto-approval")>()
@@ -11,7 +12,7 @@ vi.mock("../../auto-approval", async (importOriginal) => {
 
 function buildTask(getState: () => Promise<Record<string, unknown>>) {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	setAbortLatch(task, false)
 	task["clineMessages"] = []
 	task["lastMessageTs"] = undefined
 	task["addToClineMessages"] = vi.fn(async () => {})
@@ -44,10 +45,13 @@ describe("Task.ask abort during the auto-approval await", () => {
 		})
 
 		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), partial)
-		task["abort"] = true
+		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task["lastMessageTs"]).toBeUndefined()
 	})
@@ -62,10 +66,13 @@ describe("Task.ask abort during the auto-approval await", () => {
 
 		const askPromise = task.ask("tool", JSON.stringify({ tool: "readFile" }), false)
 		await vi.waitFor(() => expect(checkAutoApproval).toHaveBeenCalled())
-		task["abort"] = true
+		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task["lastMessageTs"]).toBeUndefined()
 	})
@@ -83,10 +90,13 @@ describe("Task.ask abort during the auto-approval await", () => {
 		task["clineMessages"] = [{ ...original }]
 
 		const askPromise = task.ask("followup", "new", partial)
-		task["abort"] = true
+		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["clineMessages"]).toEqual([original])
 		expect(task["saveClineMessages"]).not.toHaveBeenCalled()
 		expect(task["updateClineMessage"]).not.toHaveBeenCalled()
@@ -102,10 +112,13 @@ describe("Task.ask abort during the auto-approval await", () => {
 		task.messageQueueService.addMessage("queued feedback")
 
 		const askPromise = task.ask("followup", "Q?", false)
-		task["abort"] = true
+		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("queued feedback")
 	})

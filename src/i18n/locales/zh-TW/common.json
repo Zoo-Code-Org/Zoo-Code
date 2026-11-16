@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "您確定要重設擴充套件中的所有狀態和金鑰儲存嗎？此操作無法復原。",
-		"delete_config_profile": "您確定要刪除此設定檔案嗎？"
+		"delete_config_profile": "您確定要刪除此設定檔案嗎？",
+		"requesty_deep_link": "要從外部連結啟用 Requesty 憑證嗎？",
+		"requesty_deep_link_detail": "這將替換目前啟用的提供者。後續請求可能會將您的對話和工作區內容傳送到：\n{{url}}\n\n僅當您主動要求了這些憑證並且信任此目標時才繼續。"
 	},
 	"errors": {
 		"invalid_data_uri": "資料 URI 格式無效",
@@ -125,7 +127,6 @@
 		"auto_import_failed": "自動匯入 ZooCode 設定失敗：{{error}}",
 		"rooHistoryImport": {
 			"nothingFound": "未找到可從 {{domain}} 匯入的 Roo Code 工作歷史記錄。",
-			"alreadyImported_one": "全部 {{count}} 筆 Roo Code 工作歷史記錄已匯入 Zoo Code。",
 			"alreadyImported_other": "全部 {{count}} 筆 Roo Code 工作歷史記錄已匯入 Zoo Code。"
 		}
 	},
@@ -143,12 +144,12 @@
 			"signInUnavailable": "Roo Code Cloud 登入目前無法使用。請設定其他提供者以繼續。"
 		},
 		"rooHistoryImport": {
-			"success_one": "已將 {{count}} 筆 Roo Code 工作歷史記錄匯入 Zoo Code。",
 			"success_other": "已將 {{count}} 筆 Roo Code 工作歷史記錄匯入 Zoo Code。"
 		}
 	},
 	"answers": {
-		"yes": "是"
+		"yes": "是",
+		"activate_requesty": "啟用 Requesty"
 	},
 	"buttons": {
 		"learn_more": "了解更多"

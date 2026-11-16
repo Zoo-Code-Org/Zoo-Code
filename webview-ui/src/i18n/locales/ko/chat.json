@@ -20,7 +20,7 @@
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",
 	"fileChangesInConversation": {
-		"header": "이 대화에서 {{count}}개 파일이 변경됨"
+		"header_other": "이 대화에서 {{count}}개 파일이 변경됨"
 	},
 	"tokenProgress": {
 		"availableSpace": "사용 가능한 공간: {{amount}} 토큰",
@@ -287,7 +287,6 @@
 		"triggerLabelOff": "자동 승인 꺼짐",
 		"triggerLabelOffShort": "꺼짐",
 		"triggerLabel_zero": "0개 자동 승인됨",
-		"triggerLabel_one": "1개 자동 승인됨",
 		"triggerLabel_other": "{{count}}개 자동 승인됨",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +304,6 @@
 		"truncation": {
 			"title": "컨텍스트 잘림",
 			"inProgress": "컨텍스트 자르는 중...",
-			"messagesRemoved": "{{count}}개 메시지 제거됨",
 			"messagesRemoved_other": "{{count}}개 메시지 제거됨",
 			"description": "컨텍스트 윈도우 제한 내에 유지하기 위해 대화에서 오래된 메시지가 제거되었습니다. 이것은 압축에 비해 빠르지만 컨텍스트 보존 능력이 낮은 접근 방식입니다."
 		}
@@ -322,10 +320,12 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "Zoo Code v3.96.0의 새로운 기능",
-			"highlight1": "✨ 새로운 채팅 설정 및 진단: 구성 가능한 시간·날짜 형식으로 메시지 타임스탬프를 표시하고, Anthropic 프로필의 prompt-cache TTL을 조정하고, 개인정보를 보호하는 진단 리포트를 생성합니다.",
-			"highlight2": "💸 더 정확한 프로바이더 비용과 캐싱: Anthropic 도구 결과를 그대로 유지하고, Anthropic·MiniMax 비용에 누적 output token을 반영하고, DeepSeek의 prompt-cache 카운터를 읽고, xAI Responses 캐시를 타깃으로 지정하고, Mistral 캐시 읽기를 0.1x로 청구합니다.",
-			"highlight3": "🧭 더 안정적이고 빠른 채팅: 재시작 후 완료된 작업을 재개하고, 저장된 commit이 없을 때에도 checkpoint를 복원하고, 응답하지 않는 webview 렌더러를 자동으로 다시 로드하고, 스트리밍 업데이트를 조절하고, 로케일을 필요할 때 로드합니다."
+			"heading": "Zoo Code v3.98.0의 새로운 기능",
+			"highlight0": "🎟️ 곧 출시될 Zoo Pass 구독을 미리 체험해 보세요. 2주 묣료 이용; 한정된 자리",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ 자동 작업 제목과 세밀한 모델 제어: 새 루트 작업의 제목을 자동으로 생성하고 실험적인 동적 사고 노력 설정을 사용해 보세요.",
+			"highlight2": "🔌 확장된 모델 및 프로바이더 지원: GPT-6.1 Terra를 사용하고 Friendli의 최신 모델 목록을 가져오세요.",
+			"highlight3": "🛡️ 더 안전하고 반응이 빠른 채팅과 편집: OpenAI Native 및 Requesty 요청을 깔끔하게 취소하고 작업 공간 밖 diff의 실수 자동 승인을 방지하며 UI 언어를 일관되게 전환하고 모호한 JSON 백업 복구를 피하세요."
 		}
 	},
 	"costs": {
@@ -349,7 +349,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "자동 승인 요청 한도 도달",
-			"description": "Zoo가 {{count}}개의 API 요청(들)에 대한 자동 승인 한도에 도달했습니다. 카운트를 재설정하고 작업을 계속하시겠습니까?",
+			"description_other": "Zoo가 {{count}}개의 API 요청에 대한 자동 승인 한도에 도달했습니다. 카운트를 재설정하고 작업을 계속하시겠습니까?",
 			"button": "재설정 후 계속"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +361,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo가 코드베이스에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"wantsToSearchWithPath": "Zoo가 <code>{{path}}</code>에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
-		"didSearch_one": "1개의 결과를 찾았습니다",
 		"didSearch_other": "{{count}}개의 결과를 찾았습니다",
 		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)"
 	},
@@ -432,9 +431,7 @@
 	},
 	"tooManyTools": {
 		"title": "활성화된 도구가 너무 많습니다",
-		"toolsPart_one": "{{count}}개 도구",
 		"toolsPart_other": "{{count}}개 도구",
-		"serversPart_one": "{{count}}개 MCP 서버",
 		"serversPart_other": "{{count}}개 MCP 서버",
 		"messageTemplate": "{{servers}}를 통해 {{tools}}가 활성화되어 있습니다. 이렇게 많은 수의 도구는 모델을 혼동시키고 오류를 유발할 수 있습니다. {{threshold}} 이하로 유지하도록 노력하세요.",
 		"openMcpSettings": "MCP 설정 열기"

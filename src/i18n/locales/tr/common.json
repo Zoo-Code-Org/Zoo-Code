@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Uzantıdaki tüm durumları ve gizli depolamayı sıfırlamak istediğinizden emin misiniz? Bu işlem geri alınamaz.",
-		"delete_config_profile": "Bu yapılandırma profilini silmek istediğinizden emin misiniz?"
+		"delete_config_profile": "Bu yapılandırma profilini silmek istediğinizden emin misiniz?",
+		"requesty_deep_link": "Harici bir bağlantıdan Requesty kimlik bilgileri etkinleştirilsin mi?",
+		"requesty_deep_link_detail": "Bu işlem etkin sağlayıcıyı değiştirir. Sonraki istekler sohbet ve çalışma alanı içeriğinizi şuraya gönderebilir:\n{{url}}\n\nYalnızca bu kimlik bilgilerini siz istediyseniz ve bu hedefe güveniyorsanız devam edin."
 	},
 	"errors": {
 		"invalid_data_uri": "Geçersiz veri URI formatı",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Evet"
+		"yes": "Evet",
+		"activate_requesty": "Requesty'i etkinleştir"
 	},
 	"buttons": {
 		"learn_more": "Daha Fazla Bilgi"

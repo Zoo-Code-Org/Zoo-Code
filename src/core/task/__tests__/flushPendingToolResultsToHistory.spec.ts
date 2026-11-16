@@ -12,6 +12,7 @@ import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // Mock delay before any imports that might use it
 vi.mock("delay", () => ({
@@ -458,7 +459,7 @@ describe("flushPendingToolResultsToHistory", () => {
 
 		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
 
-		task.abort = true
+		setAbortLatch(task, true)
 
 		await task.flushPendingToolResultsToHistory()
 

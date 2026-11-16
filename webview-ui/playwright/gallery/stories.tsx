@@ -146,6 +146,32 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"api-provider-dropdown": async () => {
+		const [{ AppProviders }, { default: ApiOptions }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ApiOptions"),
+			import("@roo-code/types"),
+		])
+		const apiConfiguration: import("@roo-code/types").ProviderSettings = {
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "sk-ant-example-key",
+		}
+		return (
+			<AppProviders initialState={{ apiConfiguration }}>
+				<div
+					className="w-[480px] p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="api-provider-dropdown-story">
+					<ApiOptions
+						uriScheme="vscode"
+						apiConfiguration={apiConfiguration}
+						setApiConfigurationField={() => undefined}
+						errorMessage={undefined}
+						setErrorMessage={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"auto-approve-settings": async () => {
 		const { AutoApproveSettingsStory } =
 			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
@@ -467,6 +493,15 @@ export const stories: Record<string, Story> = {
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
+	},
+	"prompts-settings": async () => {
+		const { PromptsSettingsStory } = await import("@/components/settings/__tests__/PromptsSettings.visual.fixture")
+		return <PromptsSettingsStory />
+	},
+	"experimental-settings": async () => {
+		const { ExperimentalSettingsStory } =
+			await import("@/components/settings/__tests__/ExperimentalSettings.visual.fixture")
+		return <ExperimentalSettingsStory />
 	},
 	"ui-settings-long-locale": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")

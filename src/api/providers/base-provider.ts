@@ -5,6 +5,7 @@ import { DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS, type ModelInfo } from "@roo-code/t
 import type { ApiHandler, ApiHandlerCreateMessageMetadata, ModelCacheScope } from "../index"
 import { ApiStream } from "../transform/stream"
 import { sanitizeSurrogates, sanitizeSurrogatesDeep } from "../transform/sanitize-surrogates"
+import { stripUnsupportedStrictKeywords } from "../transform/strict-tool-schema"
 import { countTokens } from "../../utils/countTokens"
 import { isMcpTool } from "../../utils/mcp-name"
 import { detachOnAbort } from "./utils/abort-signal"
@@ -69,7 +70,7 @@ export abstract class BaseProvider implements ApiHandler {
 					strict: useStrict,
 					parameters: sanitizeSurrogatesDeep(
 						useStrict
-							? this.convertToolSchemaForOpenAI(tool.function.parameters)
+							? stripUnsupportedStrictKeywords(this.convertToolSchemaForOpenAI(tool.function.parameters))
 							: tool.function.parameters,
 					),
 				},

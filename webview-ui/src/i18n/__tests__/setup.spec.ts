@@ -19,6 +19,7 @@ describe("i18n setup locale loading", () => {
 
 		expect(i18next.hasResourceBundle("ko", "common")).toBe(true)
 		expect(i18next.hasResourceBundle("ko", "settings")).toBe(true)
+		// eslint-disable-next-line no-restricted-syntax -- checks loaded resources outside React; nothing is memoized
 		expect(i18next.t("common:errorBoundary.title", { lng: "ko" })).toBe("문제가 발생했습니다")
 	})
 
@@ -36,11 +37,13 @@ describe("i18n setup locale loading", () => {
 		expect(results).toHaveLength(3)
 		// 9 namespaces registered once each, not 27.
 		expect(addResourceBundle).toHaveBeenCalledTimes(9)
+		// eslint-disable-next-line no-restricted-syntax -- checks loaded resources outside React; nothing is memoized
 		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("問題が発生しました")
 	})
 
 	it("resolves without throwing for a locale that has no bundles", async () => {
 		await expect(loadLanguage("xx-unsupported")).resolves.toBeUndefined()
+		// eslint-disable-next-line no-restricted-syntax -- checks loaded resources outside React; nothing is memoized
 		expect(i18next.t("common:errorBoundary.title", { lng: "xx-unsupported" })).toBe("Something went wrong")
 	})
 })

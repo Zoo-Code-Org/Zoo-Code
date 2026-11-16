@@ -89,6 +89,13 @@
 			"includeTaskHistory": "작업 기록을 컨텍스트로 포함",
 			"includeTaskHistoryDescription": "활성화하면 현재 대화의 마지막 10개 메시지가 프롬프트 향상 시 컨텍스트로 포함되어 더 관련성 높고 컨텍스트를 인식하는 제안을 생성하는 데 도움이 됩니다."
 		},
+		"taskTitle": {
+			"enabled": "작업 제목 자동 생성",
+			"enabledDescription": "새 작업의 첫 프롬프트를 백그라운드에서 짧은 제목으로 요약합니다. 제목 생성 요청은 작업 비용에 포함되지 않습니다. GitHub Copilot과 VS Code LM 프로필은 할당량을 소모합니다.",
+			"apiConfiguration": "API 구성",
+			"useTaskConfig": "작업에서 사용하는 API 구성 사용",
+			"apiConfigDescription": "가벼운 비추론(non-reasoning) 프로필을 권장합니다. 다른 프로필을 선택하면 프롬프트의 앞부분이 해당 제공자로 전송됩니다."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "프롬프트 향상",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "새 작업 시작",
 				"description": "입력한 내용으로 새 작업을 시작할 수 있습니다. 명령 팔레트에서 이용 가능합니다."
+			},
+			"TASK_TITLE": {
+				"label": "작업 제목",
+				"description": "새 작업의 짧은 제목을 백그라운드에서 생성합니다. 기록과 작업 헤더에 표시됩니다. 아래에서 설정하세요."
 			}
 		}
 	},

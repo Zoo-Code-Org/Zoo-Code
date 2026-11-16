@@ -338,6 +338,227 @@ describe("BaseProvider", () => {
 			expect(result?.[0].function.parameters.required).toEqual(["path"])
 		})
 
+		it("removes unsupported constraints from the reported follow-up schema", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "ask_followup_question",
+						description: "Ask a question",
+						parameters: {
+							type: "object",
+							properties: {
+								follow_up: {
+									type: "array",
+									description: "Required list of 2-4 suggested responses",
+									items: { type: "object", properties: { text: { type: "string" } } },
+									minItems: 1,
+									maxItems: 4,
+								},
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const followUp = result?.[0].function.parameters.properties.follow_up
+
+			expect(result?.[0].function.strict).toBe(true)
+			expect(followUp.minItems).toBe(1)
+			expect(followUp.maxItems).toBeUndefined()
+			expect(followUp.description).toBe('Required list of 2-4 suggested responses\n\nConstraints: {"maxItems":4}')
+		})
+
+		it("removes unsupported constraints recursively while keeping supported keywords", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "constraint_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								count: { type: "number", minimum: 1, maximum: 9, multipleOf: 1 },
+								name: {
+									type: "string",
+									minLength: 1,
+									maxLength: 5,
+									pattern: "^a",
+									format: "email",
+								},
+								unsupportedFormat: { type: "string", format: "phone" },
+								list: {
+									type: "array",
+									items: { type: "integer", exclusiveMinimum: 0 },
+									minItems: 2,
+									uniqueItems: true,
+									contains: { type: "integer", minimum: 1 },
+								},
+								choice: { anyOf: [{ type: "string", maxLength: 3 }, { type: "null" }] },
+							},
+							$defs: { bounded: { type: "integer", maximum: 3 } },
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			expect(parameters.properties.count).toEqual({
+				type: "number",
+				description: 'Constraints: {"minimum":1,"maximum":9,"multipleOf":1}',
+			})
+			expect(parameters.properties.name).toMatchObject({ type: "string", pattern: "^a", format: "email" })
+			expect(parameters.properties.unsupportedFormat.format).toBeUndefined()
+			expect(parameters.properties.list.minItems).toBeUndefined()
+			expect(parameters.properties.list.uniqueItems).toBeUndefined()
+			expect(parameters.properties.list.contains).toBeUndefined()
+			expect(parameters.properties.list.items.exclusiveMinimum).toBeUndefined()
+			expect(parameters.properties.choice.anyOf[0].maxLength).toBeUndefined()
+			expect(parameters.$defs.bounded.maximum).toBeUndefined()
+		})
+
+		it.each([0, 1])("keeps supported minItems value %s", (minItems) => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "list_tool",
+						parameters: {
+							type: "object",
+							properties: { values: { type: "array", items: { type: "string" }, minItems } },
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.parameters.properties.values.minItems).toBe(minItems)
+		})
+
+		it("processes tuple items and nested schema keywords", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "nested_schema_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								values: {
+									type: "array",
+									items: [
+										{ type: "string", maxLength: 2 },
+										{ type: "integer", minimum: 0 },
+									],
+								},
+							},
+							additionalProperties: { type: "string", minLength: 1 },
+							not: { type: "number", maximum: 10 },
+							if: { type: "number", minimum: 1 },
+							then: { type: "string", maxLength: 5 },
+							else: { type: "string", minLength: 2 },
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			expect(parameters.properties.values.items[0].maxLength).toBeUndefined()
+			expect(parameters.properties.values.items[1].minimum).toBeUndefined()
+			expect(parameters.additionalProperties).toBe(false)
+			expect(parameters.not.maximum).toBeUndefined()
+			expect(parameters.if.minimum).toBeUndefined()
+			expect(parameters.then.maxLength).toBeUndefined()
+			expect(parameters.else.minLength).toBeUndefined()
+		})
+
+		it("replaces additionalProperties values other than false in nested schemas", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "composed_object_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								options: {
+									anyOf: [
+										{ type: "object", properties: {}, additionalProperties: true },
+										{ type: "object", properties: {}, additionalProperties: { type: "string" } },
+									],
+								},
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const variants = result?.[0].function.parameters.properties.options.anyOf
+
+			expect(variants[0].additionalProperties).toBe(false)
+			expect(variants[1].additionalProperties).toBe(false)
+			expect(variants[0].description).toBe('Constraints: {"additionalProperties":true}')
+			expect(variants[1].description).toBe('Constraints: {"additionalProperties":{"type":"string"}}')
+		})
+
+		it("keeps properties whose names match unsupported keywords", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "keyword_property_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								maxItems: { type: "integer" },
+								minimum: { type: "number" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+
+			expect(result?.[0].function.parameters.properties).toHaveProperty("maxItems")
+			expect(result?.[0].function.parameters.properties).toHaveProperty("minimum")
+		})
+
+		it("normalizes nullable object properties before stripping constraints", () => {
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "nullable_object_tool",
+						parameters: {
+							type: "object",
+							properties: {
+								options: {
+									type: ["object", "null"],
+									properties: { limit: { type: "integer", minimum: 1 } },
+								},
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const options = result?.[0].function.parameters.properties.options
+
+			expect(options.type).toBe("object")
+			expect(options.required).toEqual(["limit"])
+			expect(options.additionalProperties).toBe(false)
+			expect(options.properties.limit.minimum).toBeUndefined()
+		})
+
 		it("should not apply schema conversion to MCP tools in base-provider", () => {
 			// Note: In base-provider, MCP tools are passed through unchanged
 			// The openai-native provider has its own handling for MCP tools
@@ -350,8 +571,9 @@ describe("BaseProvider", () => {
 						parameters: {
 							type: "object",
 							properties: {
-								token: { type: "string" },
+								token: { type: "string", maxLength: 20 },
 							},
+							maxItems: 4,
 							required: ["token"],
 						},
 					},
@@ -362,6 +584,8 @@ describe("BaseProvider", () => {
 
 			// MCP tools pass through original parameters in base-provider
 			expect(result?.[0].function.parameters.additionalProperties).toBeUndefined()
+			expect(result?.[0].function.parameters.maxItems).toBe(4)
+			expect(result?.[0].function.parameters.properties.token.maxLength).toBe(20)
 		})
 
 		it("should sanitize lone UTF-16 surrogates in name, description, and parameters (#461)", () => {
@@ -453,9 +677,10 @@ describe("BaseProvider", () => {
 							type: "object",
 							properties: {
 								path: { type: "string" },
-								offset: { type: "integer" },
+								offset: { type: "integer", minimum: 1 },
 							},
 							required: ["path"],
+							maxItems: 4,
 						},
 					},
 				},
@@ -478,7 +703,7 @@ describe("BaseProvider", () => {
 						parameters: {
 							type: "object",
 							properties: {
-								path: { type: ["string", "null"] },
+								path: { type: ["string", "null"], maxLength: 20 },
 							},
 							required: ["path"],
 						},
@@ -488,10 +713,12 @@ describe("BaseProvider", () => {
 
 			const strictResult = provider.testConvertToolsForOpenAI(tools, true)
 			expect(strictResult?.[0].function.parameters.properties.path.type).toBe("string")
+			expect(strictResult?.[0].function.parameters.properties.path.maxLength).toBeUndefined()
 
 			// Caller-owned schema is untouched, so a later non-strict request
 			// can still send the original nullable type.
 			expect(tools[0].function.parameters.properties.path.type).toEqual(["string", "null"])
+			expect(tools[0].function.parameters.properties.path.maxLength).toBe(20)
 
 			const nonStrictResult = provider.testConvertToolsForOpenAI(tools, false)
 			expect(nonStrictResult?.[0].function.parameters).toEqual(tools[0].function.parameters)

@@ -11,6 +11,8 @@ import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
 import { ProfileValidator } from "../../../shared/ProfileValidator"
 import { ClineProvider } from "../ClineProvider"
+import { safeWriteJson } from "../../../utils/safeWriteJson"
+import { ShadowCheckpointService } from "../../../services/checkpoints/ShadowCheckpointService"
 
 // Mock setup
 vi.mock("p-wait-for", () => ({
@@ -596,6 +598,79 @@ describe("ClineProvider Task History Synchronization", () => {
 		})
 	})
 
+	describe("autoTitle", () => {
+		const getStored = (id: string) => provider.taskHistoryStore.get(id)
+
+		beforeEach(() => {
+			// fs is mocked in this suite, so serve the persisted record from the store cache.
+			vi.mocked(safeWriteJson).mockImplementation(async (_path, data, options) => {
+				// Apply the merge callback against the cached record, as the real writer does against disk.
+				const existing = provider.taskHistoryStore.get((data as HistoryItem).id) ?? null
+				options?.merge?.(existing, data)
+			})
+			Reflect.set(provider.taskHistoryStore, "readTaskFileForAutoTitle", async (id: string) => {
+				const cached = provider.taskHistoryStore.get(id)
+				return cached ? { kind: "found", item: structuredClone(cached) } : { kind: "missing" }
+			})
+		})
+
+		afterEach(() => {
+			vi.mocked(safeWriteJson).mockResolvedValue(undefined)
+		})
+
+		it("does not let a stale snapshot overwrite or clear a stored autoTitle", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto", task: "Long prompt" }), {
+				broadcast: false,
+			})
+			await provider.setAutoTitle("task-auto", "Generated title")
+
+			await provider.updateTaskHistory(
+				{ ...createHistoryItem({ id: "task-auto", task: "Long prompt" }), autoTitle: "Stale", tokensIn: 5 },
+				{ broadcast: false },
+			)
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-auto", task: "Long prompt" }), {
+				broadcast: false,
+			})
+
+			expect(getStored("task-auto")).toMatchObject({ autoTitle: "Generated title" })
+		})
+
+		it("does not let updateTaskHistory write an autoTitle", async () => {
+			await provider.updateTaskHistory(
+				{ ...createHistoryItem({ id: "task-new", task: "New task" }), autoTitle: "Sneaky" },
+				{
+					broadcast: false,
+				},
+			)
+
+			expect(getStored("task-new")?.autoTitle).toBeUndefined()
+		})
+
+		it("setAutoTitle broadcasts the updated item", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			provider.isViewLaunched = true
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-bc", task: "Long prompt" }))
+			mockPostMessage.mockClear()
+
+			await provider.setAutoTitle("task-bc", "Generated")
+
+			const updates = findCallsByType(mockPostMessage.mock.calls, "taskHistoryItemUpdated")
+			expect(updates.at(-1)?.[0].taskHistoryItem).toMatchObject({ id: "task-bc", autoTitle: "Generated" })
+		})
+
+		it("setAutoTitle keeps the first title and ignores unknown tasks", async () => {
+			await provider.updateTaskHistory(createHistoryItem({ id: "task-once", task: "Long prompt" }), {
+				broadcast: false,
+			})
+			await provider.setAutoTitle("task-once", "First")
+			await provider.setAutoTitle("task-once", "Second")
+			await provider.setAutoTitle("missing-task", "Nope")
+
+			expect(getStored("task-once")?.autoTitle).toBe("First")
+			expect(getStored("missing-task")).toBeUndefined()
+		})
+	})
+
 	describe("renameTaskWithId", () => {
 		const getStored = (id: string) => provider.taskHistoryStore.get(id)
 
@@ -1114,5 +1189,135 @@ describe("ClineProvider Task History Synchronization", () => {
 			expect(listener).toHaveBeenCalledTimes(1)
 			expect(listener).toHaveBeenCalledWith("child-task", {}, {})
 		})
+	})
+
+	describe("taskCreationCallback — task title wiring", () => {
+		function makeTitleTask(taskId: string, abortReason?: string) {
+			const listeners = new Map<string, Array<(...args: unknown[]) => unknown>>()
+			return {
+				taskId,
+				abortReason,
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+				on: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners.set(event, [...(listeners.get(event) ?? []), fn])
+				},
+				off: (event: string, fn: (...args: unknown[]) => unknown) => {
+					listeners.set(
+						event,
+						(listeners.get(event) ?? []).filter((listener) => listener !== fn),
+					)
+				},
+				emit: async (event: string, ...args: unknown[]) => {
+					await Promise.all((listeners.get(event) ?? []).map((fn) => Promise.resolve(fn(...args))))
+				},
+			}
+		}
+
+		function register(fakeTask: ReturnType<typeof makeTitleTask>) {
+			// Double cast: taskCreationCallback reads only on/off/taskId/abortReason/apiConfiguration from the fake.
+			const task = fakeTask as unknown as Task
+			provider["taskCreationCallback"](task)
+			return task
+		}
+
+		it("registers a new task as a title candidate", () => {
+			const onTaskCreated = vi.spyOn(provider["taskTitleService"], "onTaskCreated")
+			const fakeTask = makeTitleTask("title-created")
+
+			register(fakeTask)
+
+			expect(onTaskCreated).toHaveBeenCalledExactlyOnceWith(fakeTask)
+		})
+
+		it.each([
+			{ totalTokensIn: 0, scheduled: false },
+			{ totalTokensIn: 12, scheduled: true },
+		])(
+			"schedules a title only after real input usage ($totalTokensIn tokens in)",
+			async ({ totalTokensIn, scheduled }) => {
+				const schedule = vi.spyOn(provider["taskTitleService"], "schedule").mockImplementation(() => {})
+				const fakeTask = makeTitleTask("title-usage")
+				register(fakeTask)
+
+				await fakeTask.emit(RooCodeEventName.TaskTokenUsageUpdated, "title-usage", { totalTokensIn }, {})
+
+				if (scheduled) {
+					expect(schedule).toHaveBeenCalledExactlyOnceWith("title-usage")
+				} else {
+					expect(schedule).not.toHaveBeenCalled()
+				}
+			},
+		)
+
+		it.each([
+			{ abortReason: "user_cancelled", cancelled: true },
+			{ abortReason: "streaming_failed", cancelled: false },
+			{ abortReason: undefined, cancelled: false },
+		])(
+			"cancels the title request on abort only for a user cancel ($abortReason)",
+			async ({ abortReason, cancelled }) => {
+				const cancel = vi.spyOn(provider["taskTitleService"], "cancel")
+				const forget = vi.spyOn(provider["taskTitleService"], "forget")
+				const fakeTask = makeTitleTask("title-abort", abortReason)
+				register(fakeTask)
+
+				await fakeTask.emit(RooCodeEventName.TaskAborted)
+
+				if (cancelled) {
+					expect(cancel).toHaveBeenCalledExactlyOnceWith("title-abort", "user")
+				} else {
+					expect(cancel).not.toHaveBeenCalled()
+				}
+				expect(forget).not.toHaveBeenCalled()
+			},
+		)
+
+		it("forgets an unscheduled candidate when the task's listeners are removed", () => {
+			const forget = vi.spyOn(provider["taskTitleService"], "forget")
+			const task = register(makeTitleTask("title-evicted"))
+
+			for (const cleanup of provider["taskEventListeners"].get(task) ?? []) cleanup()
+
+			expect(forget).toHaveBeenCalledExactlyOnceWith("title-evicted")
+			expect(provider["taskTitleService"]["candidates"].has("title-evicted")).toBe(false)
+		})
+
+		it.each([
+			{
+				name: "deleteTaskWithId",
+				remove: () => provider.deleteTaskWithId("title-parent"),
+				storeMethod: "deleteMany" as const,
+				cancelledIds: ["title-parent", "title-child"],
+			},
+			{
+				name: "deleteTaskFromState",
+				remove: () => provider.deleteTaskFromState("title-parent"),
+				storeMethod: "delete" as const,
+				cancelledIds: ["title-parent"],
+			},
+		])(
+			"cancels title requests as deleted before $name removes the history",
+			async ({ remove, storeMethod, cancelledIds }) => {
+				await provider.updateTaskHistory(
+					createHistoryItem({ id: "title-parent", task: "Parent", childIds: ["title-child"] }),
+					{ broadcast: false },
+				)
+				await provider.updateTaskHistory(
+					createHistoryItem({ id: "title-child", task: "Child", parentTaskId: "title-parent" }),
+					{ broadcast: false },
+				)
+				vi.spyOn(ShadowCheckpointService, "deleteTask").mockResolvedValue(undefined)
+				const cancel = vi.spyOn(provider["taskTitleService"], "cancel")
+				const removeHistory = vi.spyOn(provider.taskHistoryStore, storeMethod)
+
+				await remove()
+
+				expect(cancel.mock.calls).toEqual(cancelledIds.map((id) => [id, "deleted"]))
+				expect(removeHistory).toHaveBeenCalledOnce()
+				for (const order of cancel.mock.invocationCallOrder) {
+					expect(order).toBeLessThan(removeHistory.mock.invocationCallOrder[0]!)
+				}
+			},
+		)
 	})
 })

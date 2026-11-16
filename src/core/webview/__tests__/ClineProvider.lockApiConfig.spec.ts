@@ -331,6 +331,8 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock getMcpHub method
 		provider.getMcpHub = vi.fn().mockReturnValue({
@@ -372,6 +374,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 		})
 
 		it("keeps normal mode-specific lookup/load behavior when lockApiConfigAcrossModes is false", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			await mockContext.workspaceState.update("lockApiConfigAcrossModes", false)
 
 			const getModeConfigIdSpy = vi
@@ -392,7 +395,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 
 			await provider.handleModeSwitch("architect")
 
-			expect(getModeConfigIdSpy).toHaveBeenCalledWith("architect")
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
 		})
 	})

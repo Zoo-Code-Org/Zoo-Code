@@ -57,19 +57,19 @@
 	},
 	"time_ago": {
 		"just_now": "刚刚",
-		"seconds_ago": "{{count}}秒前",
+		"seconds_ago_other": "{{count}}秒前",
 		"minute_ago": "1分钟前",
-		"minutes_ago": "{{count}}分钟前",
+		"minutes_ago_other": "{{count}}分钟前",
 		"hour_ago": "1小时前",
-		"hours_ago": "{{count}}小时前",
+		"hours_ago_other": "{{count}}小时前",
 		"day_ago": "1天前",
-		"days_ago": "{{count}}天前",
+		"days_ago_other": "{{count}}天前",
 		"week_ago": "1周前",
-		"weeks_ago": "{{count}}周前",
+		"weeks_ago_other": "{{count}}周前",
 		"month_ago": "1个月前",
-		"months_ago": "{{count}}个月前",
+		"months_ago_other": "{{count}}个月前",
 		"year_ago": "1年前",
-		"years_ago": "{{count}}年前"
+		"years_ago_other": "{{count}}年前"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "初始化存档点已等待 {{timeout}} 秒。如果你不需要存档点功能，请在<settingsLink>存档点设置</settingsLink>中关闭。",

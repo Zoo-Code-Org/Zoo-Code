@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { FormattedTextField, unlimitedIntegerFormatter } from "../common/FormattedTextField"
 
@@ -8,7 +8,7 @@ interface MaxRequestsInputProps {
 }
 
 export function MaxRequestsInput({ allowedMaxRequests, onValueChange }: MaxRequestsInputProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	return (
 		<>

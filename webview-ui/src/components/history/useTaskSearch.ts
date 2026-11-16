@@ -35,7 +35,7 @@ export const useTaskSearch = () => {
 
 	const fzf = useMemo(() => {
 		return new Fzf(presentableTasks, {
-			selector: getTaskDisplayTitle,
+			selector: (item) => `${getTaskDisplayTitle(item)} ${item.task}`,
 		})
 	}, [presentableTasks])
 

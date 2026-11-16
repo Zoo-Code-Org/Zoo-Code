@@ -49,7 +49,8 @@ export const toRequestyServiceUrl = (baseUrl?: string | null, service: URLType =
 	} catch {
 		// If the provided baseUrl is invalid, fall back to the default
 		if (baseUrl && baseUrl !== REQUESTY_BASE_URL) {
-			console.warn(`Invalid base URL "${baseUrl}", falling back to default`)
+			// Do not log the value. An untrusted deep-link URL can embed credentials.
+			console.warn("Invalid base URL provided, falling back to default")
 		}
 		return replaceCname(REQUESTY_BASE_URL, service)
 	}

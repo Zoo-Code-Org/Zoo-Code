@@ -12,8 +12,8 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const map: Record<string, string> = {
 				"chat:fileOperations.wantsToEdit": "Roo wants to edit this file",
@@ -24,8 +24,10 @@ vi.mock("react-i18next", () => ({
 			return map[key] || key
 		},
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 // Mock CodeBlock (avoid ESM/highlighter costs)

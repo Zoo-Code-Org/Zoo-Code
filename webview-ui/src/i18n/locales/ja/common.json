@@ -57,19 +57,19 @@
 	},
 	"time_ago": {
 		"just_now": "たった今",
-		"seconds_ago": "{{count}}秒前",
+		"seconds_ago_other": "{{count}}秒前",
 		"minute_ago": "1分前",
-		"minutes_ago": "{{count}}分前",
+		"minutes_ago_other": "{{count}}分前",
 		"hour_ago": "1時間前",
-		"hours_ago": "{{count}}時間前",
+		"hours_ago_other": "{{count}}時間前",
 		"day_ago": "1日前",
-		"days_ago": "{{count}}日前",
+		"days_ago_other": "{{count}}日前",
 		"week_ago": "1週間前",
-		"weeks_ago": "{{count}}週間前",
+		"weeks_ago_other": "{{count}}週間前",
 		"month_ago": "1ヶ月前",
-		"months_ago": "{{count}}ヶ月前",
+		"months_ago_other": "{{count}}ヶ月前",
 		"year_ago": "1年前",
-		"years_ago": "{{count}}年前"
+		"years_ago_other": "{{count}}年前"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "{{timeout}} 秒間チェックポイントの初期化を待機しました。チェックポイント機能が不要な場合は、<settingsLink>チェックポイント設定</settingsLink>でオフにしてください。",

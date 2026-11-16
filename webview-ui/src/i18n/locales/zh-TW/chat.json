@@ -20,7 +20,7 @@
 	"unpin": "取消釘選",
 	"pin": "釘選",
 	"fileChangesInConversation": {
-		"header": "此對話中已變更 {{count}} 個檔案"
+		"header_other": "此對話中已變更 {{count}} 個檔案"
 	},
 	"retry": {
 		"title": "重試",
@@ -217,7 +217,6 @@
 		"truncation": {
 			"title": "上下文已截斷",
 			"inProgress": "正在截斷上下文...",
-			"messagesRemoved": "已移除 {{count}} 則訊息",
 			"messagesRemoved_other": "已移除 {{count}} 則訊息",
 			"description": "為保持在上下文視窗限制內，已從對話中移除較舊的訊息。與壓縮相比，這是一種快速但上下文保留較少的方法。"
 		}
@@ -263,7 +262,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
-		"didSearch_one": "找到 1 個結果",
 		"didSearch_other": "找到 {{count}} 個結果",
 		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
 	},
@@ -336,7 +334,6 @@
 		"triggerLabelOff": "自動核准已關閉",
 		"triggerLabelOffShort": "關閉",
 		"triggerLabel_zero": "0 個自動核准",
-		"triggerLabel_one": "1 個自動核准",
 		"triggerLabel_other": "{{count}} 個自動核准",
 		"triggerLabelAll": "BRRR"
 	},
@@ -344,10 +341,12 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.96.0 新功能",
-			"highlight1": "✨ 全新聊天設定與診斷: 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。",
-			"highlight2": "💸 更精準的供應商計費與快取: 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。",
-			"highlight3": "🧭 更可靠、更快速的對話: 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。"
+			"heading": "Zoo Code v3.98.0 新功能",
+			"highlight0": "🎟️ 預覽即將推出的 Zoo Pass 訂閱。2 週免費使用；名額有限",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ 自動任務標題與更精細的模型控制: 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。",
+			"highlight2": "🔌 擴充的模型與供應商支援: 使用 GPT-6.1 Terra 並取得最新的 Friendli 模型清單。",
+			"highlight3": "🛡️ 更安全、回應更迅速的對話與編輯: 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。"
 		}
 	},
 	"reasoning": {
@@ -379,7 +378,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已達自動核准請求上限",
-			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"description_other": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
 			"button": "重設並繼續"
 		},
 		"autoApprovedCostLimitReached": {
@@ -423,9 +422,7 @@
 	},
 	"tooManyTools": {
 		"title": "啟用的工具過多",
-		"toolsPart_one": "{{count}} 個工具",
 		"toolsPart_other": "{{count}} 個工具",
-		"serversPart_one": "{{count}} 個 MCP 伺服器",
 		"serversPart_other": "{{count}} 個 MCP 伺服器",
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"

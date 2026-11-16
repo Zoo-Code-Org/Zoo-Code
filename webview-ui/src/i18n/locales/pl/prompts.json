@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Uwzględnij historię zadań jako kontekst",
 			"includeTaskHistoryDescription": "Gdy włączone, ostatnie 10 wiadomości z bieżącej rozmowy zostanie uwzględnione jako kontekst podczas ulepszania podpowiedzi, pomagając generować bardziej trafne i świadome kontekstu sugestie."
 		},
+		"taskTitle": {
+			"enabled": "Automatycznie generuj tytuły zadań",
+			"enabledDescription": "W tle streszcza pierwszy monit każdego nowego zadania do krótkiego tytułu. Żądania tytułów nie są wliczane do kosztu zadania. Profile GitHub Copilot i VS Code LM zużywają Twój limit.",
+			"apiConfiguration": "Konfiguracja API",
+			"useTaskConfig": "Użyj konfiguracji API zadania",
+			"apiConfigDescription": "Zalecany jest lekki profil bez rozumowania. Jeśli wybierzesz inny profil, początek monitu zostanie wysłany do tego dostawcy."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Ulepsz podpowiedź",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Rozpocznij nowe zadanie",
 				"description": "Rozpocznij nowe zadanie z wprowadzonymi danymi. Dostępne w palecie poleceń."
+			},
+			"TASK_TITLE": {
+				"label": "Tytuł zadania",
+				"description": "Generuje w tle krótki tytuł nowych zadań. Jest widoczny w historii i w nagłówku zadania. Skonfiguruj poniżej."
 			}
 		}
 	},

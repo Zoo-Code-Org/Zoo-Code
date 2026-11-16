@@ -57,19 +57,19 @@
 	},
 	"time_ago": {
 		"just_now": "baru saja",
-		"seconds_ago": "{{count}} detik yang lalu",
+		"seconds_ago_other": "{{count}} detik yang lalu",
 		"minute_ago": "satu menit yang lalu",
-		"minutes_ago": "{{count}} menit yang lalu",
+		"minutes_ago_other": "{{count}} menit yang lalu",
 		"hour_ago": "satu jam yang lalu",
-		"hours_ago": "{{count}} jam yang lalu",
+		"hours_ago_other": "{{count}} jam yang lalu",
 		"day_ago": "satu hari yang lalu",
-		"days_ago": "{{count}} hari yang lalu",
+		"days_ago_other": "{{count}} hari yang lalu",
 		"week_ago": "satu minggu yang lalu",
-		"weeks_ago": "{{count}} minggu yang lalu",
+		"weeks_ago_other": "{{count}} minggu yang lalu",
 		"month_ago": "satu bulan yang lalu",
-		"months_ago": "{{count}} bulan yang lalu",
+		"months_ago_other": "{{count}} bulan yang lalu",
 		"year_ago": "satu tahun yang lalu",
-		"years_ago": "{{count}} tahun yang lalu"
+		"years_ago_other": "{{count}} tahun yang lalu"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "Kamu sudah menunggu {{timeout}} detik untuk inisialisasi checkpoint. Kalau tidak butuh fitur ini, matikan saja di <settingsLink>pengaturan checkpoint</settingsLink>.",

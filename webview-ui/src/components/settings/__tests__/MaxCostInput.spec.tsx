@@ -6,8 +6,8 @@ vi.mock("@/utils/vscode", () => ({
 	vscode: { postMessage: vi.fn() },
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => {
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => {
 		const translations: Record<string, string> = {
 			"settings:autoApprove.apiCostLimit.title": "Max API Cost",
 			"settings:autoApprove.apiCostLimit.unlimited": "Unlimited",

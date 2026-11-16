@@ -5,8 +5,8 @@ import type { ClineMessage } from "@roo-code/types"
 
 import { ChatRowContent } from "../ChatRow"
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string, options?: Record<string, unknown>) => {
 			const map: Record<string, string> = {
 				"chat:ignoredDisabledTools.title": "Disabled tool ignored",
@@ -17,12 +17,11 @@ vi.mock("react-i18next", () => ({
 			if (!options) return template
 			return template.replace("{{tools}}", String(options.tools))
 		},
-		i18n: {
-			exists: () => false,
-		},
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 function renderChatRow(message: ClineMessage) {

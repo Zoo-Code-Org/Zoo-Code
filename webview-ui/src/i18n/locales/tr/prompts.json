@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Görev geçmişini bağlam olarak dahil et",
 			"includeTaskHistoryDescription": "Etkinleştirildiğinde, mevcut konuşmanın son 10 mesajı promptları geliştirirken bağlam olarak dahil edilecek ve daha alakalı ve bağlam farkında öneriler üretmeye yardımcı olacaktır."
 		},
+		"taskTitle": {
+			"enabled": "Görev başlıklarını otomatik oluştur",
+			"enabledDescription": "Her yeni görevin ilk istemini arka planda kısa bir başlık olarak özetler. Başlık istekleri görev maliyetine dahil edilmez. GitHub Copilot ve VS Code LM profilleri kotanızı tüketir.",
+			"apiConfiguration": "API Yapılandırması",
+			"useTaskConfig": "Görevin API yapılandırmasını kullan",
+			"apiConfigDescription": "Hafif, akıl yürütmesiz bir profil önerilir. Farklı bir profil seçerseniz istemin baş kısmı o sağlayıcıya gönderilir."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Promptu Geliştir",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Yeni Görev Başlat",
 				"description": "Girdiyle yeni bir görev başlat. Komut paletinde kullanılabilir."
+			},
+			"TASK_TITLE": {
+				"label": "Görev Başlığı",
+				"description": "Yeni görevler için arka planda kısa bir başlık oluşturur. Geçmişte ve görev başlığında gösterilir. Aşağıdan yapılandırın."
 			}
 		}
 	},

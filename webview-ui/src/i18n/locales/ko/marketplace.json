@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "태그별 필터:",
 			"clear": "태그 지우기",
+			"removeFromFilter": "클릭하여 필터에서 '{{tag}}' 제거",
 			"placeholder": "태그를 검색하고 선택하려면 입력하세요...",
 			"noResults": "일치하는 태그가 없습니다",
 			"selected": "선택된 태그 중 하나를 가진 아이템 표시",

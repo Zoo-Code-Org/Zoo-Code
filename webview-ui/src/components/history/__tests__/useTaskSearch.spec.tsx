@@ -172,6 +172,57 @@ describe("useTaskSearch", () => {
 		])
 	})
 
+	it("searches the generated title and the original prompt of an auto-titled task", () => {
+		mockUseExtensionState.mockReturnValue({
+			taskHistory: [{ ...mockTaskHistory[1], autoTitle: "Coverage sprint" }],
+			cwd: "/workspace/project1",
+		})
+		const { result } = renderHook(() => useTaskSearch())
+
+		act(() => {
+			result.current.setSearchQuery("Coverage")
+		})
+		expect(result.current.tasks).toEqual([
+			expect.objectContaining({ id: "task-2", highlight: "<mark>Coverage sprint</mark>" }),
+		])
+
+		act(() => {
+			result.current.setSearchQuery("unit tests")
+		})
+		expect(result.current.tasks).toEqual([expect.objectContaining({ id: "task-2" })])
+	})
+
+	describe("with the real highlighter", () => {
+		beforeEach(async () => {
+			const actual = await vi.importActual<typeof import("@/utils/highlight")>("@/utils/highlight")
+			mockHighlightFzfMatch.mockImplementation(actual.highlightFzfMatch)
+		})
+
+		afterEach(() => {
+			mockHighlightFzfMatch.mockImplementation((text: string) => `<mark>${text}</mark>`)
+		})
+
+		it.each([
+			{ name: "only the original prompt", query: "unit tests" },
+			{ name: "the title", query: "Docs" },
+		])("escapes an HTML-bearing title when the search matches $name", ({ query }) => {
+			mockUseExtensionState.mockReturnValue({
+				taskHistory: [{ ...mockTaskHistory[1], autoTitle: '<a href="x">Docs</a>' }],
+				cwd: "/workspace/project1",
+			})
+			const { result } = renderHook(() => useTaskSearch())
+
+			act(() => {
+				result.current.setSearchQuery(query)
+			})
+
+			expect(result.current.tasks).toEqual([expect.objectContaining({ id: "task-2" })])
+			const highlight = (result.current.tasks[0] as { highlight?: string }).highlight
+			expect(highlight).toContain("&lt;a href=&quot;x&quot;&gt;")
+			expect(highlight).not.toContain("<a ")
+		})
+	})
+
 	it("keeps match positions from a custom title that is longer than the task", () => {
 		// "Write unit tests" (16 chars) vs "Coverage sprint with deep tests" (31 chars):
 		// with the old task.length bound, every position of "deep" (21-24) would be filtered out.

@@ -3,9 +3,9 @@ import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS, looksLikeFilePath } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -80,6 +80,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 					role="status"
 					className="text-sm text-vscode-errorForeground">
 					<Trans
+						t={t}
 						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
 						components={{
 							strong: <strong />,

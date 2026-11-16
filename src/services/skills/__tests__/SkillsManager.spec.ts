@@ -177,6 +177,47 @@ describe("SkillsManager", () => {
 		await skillsManager.dispose()
 	})
 
+	it.each(["javascript", "js", "JS"])("blocks executable %s metadata in skill operations", async (language) => {
+		const skillDir = p(projectSkillsDir, "example")
+		mockDirectoryExists.mockImplementation(async (dir: string) => dir === projectSkillsDir)
+		mockRealpath.mockImplementation(async (value: string) => value)
+		mockReaddir.mockImplementation(async (dir: string) => (dir === projectSkillsDir ? ["example"] : []))
+		mockStat.mockResolvedValue({ isDirectory: () => true })
+		mockFileExists.mockResolvedValue(true)
+		const instructions = `---${language}\n(globalThis.frontmatterExecuted(), {})\n---\nInstructions`
+		const valid = `---\nname: example\ndescription: Example skill\n---\n${instructions}`
+		mockReadFile.mockResolvedValue(valid)
+		await skillsManager.discoverSkills()
+		expect((await skillsManager.getSkillContent("example"))?.instructions).toBe(instructions)
+
+		const executed = vi.fn()
+		vi.stubGlobal("frontmatterExecuted", executed)
+		try {
+			await skillsManager.updateSkillModes("example", "project", ["code"])
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				p(skillDir, "SKILL.md"),
+				expect.stringContaining(instructions),
+				"utf-8",
+			)
+			mockWriteFile.mockClear()
+			mockReadFile.mockResolvedValue(
+				`---${language}\n(globalThis.frontmatterExecuted(), {name: "example", description: "Example"})\n---\nBody`,
+			)
+			await expect(skillsManager.getSkillContent("example")).rejects.toThrow("Unsupported frontmatter language")
+			await expect(skillsManager.updateSkillModes("example", "project", ["code"])).rejects.toThrow(
+				"Unsupported frontmatter language",
+			)
+			expect(mockWriteFile).not.toHaveBeenCalled()
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata().some((skill) => skill.path === p(skillDir, "SKILL.md"))).toBe(
+				false,
+			)
+			expect(executed).not.toHaveBeenCalled()
+		} finally {
+			vi.unstubAllGlobals()
+		}
+	})
+
 	describe("discoverSkills", () => {
 		it("should discover skills from global directory", async () => {
 			const pdfSkillDir = p(globalSkillsDir, "pdf-processing")

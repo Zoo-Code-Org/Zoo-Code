@@ -25,7 +25,7 @@
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
 		"@roo-code/types": "workspace:^",
-		"@copilotkit/aimock": "1.35.0",
+		"@copilotkit/aimock": "1.47.0",
 		"@types/mocha": "10.0.10",
 		"@types/node": "catalog:",
 		"@types/vscode": "1.100.0",
