@@ -361,7 +361,15 @@ export class AskDispatcher {
 	 */
 	private async handleCommandApproval(ts: number, text: string): Promise<AskHandleResult> {
 		this.outputManager.output("\n[command request]")
-		this.outputManager.output(`  Command: ${text || "(no command specified)"}`)
+		// JSON escapes C0 controls and backslashes; also expose C1 and invisible
+		// formatting characters so command text cannot control the approval display.
+		const displayCommand = JSON.stringify(text).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, (character) =>
+			character
+				.split("")
+				.map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
+				.join(""),
+		)
+		this.outputManager.output(`  Command: ${text ? displayCommand : "(no command specified)"}`)
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.nonInteractive) {
