@@ -6,7 +6,7 @@ export function parseFrontmatter(content: string) {
 	const normalized = content.replace(/^\uFEFF/, "")
 	if (normalized.startsWith("---") && normalized[3] !== "-") {
 		const { name } = matter.language(normalized)
-		if (name && !["yaml", "yml", "json"].includes(name)) {
+		if (name && !["yaml", "yml", "json"].includes(name.toLowerCase())) {
 			throw new Error(`Unsupported frontmatter language: ${name}`)
 		}
 	}

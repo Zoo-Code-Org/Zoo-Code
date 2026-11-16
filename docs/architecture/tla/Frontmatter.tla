@@ -9,7 +9,8 @@
 \* Replay: gray-matter runs a js header in the real library. The guard in the code stops it.
 \* Not modeled: the YAML and JSON parsers. The file body.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review: 1 covered (bot thread on double BOM, PR 2455), 0 added, 0 gap.
+\* Review: 1 covered (bot thread on double BOM, PR 2455), 0 added, 1 gap.
+\* Gap: PR 2456 bot thread on uppercase YAML. The spec models safety only, not false rejects. A test covers it.
 \* Replay: two BOMs do not run code in gray-matter. It is a false alarm. A test case stays.
 \* Skills: the skill caller is the same input domain. The skill path was unguarded before this change.
 \* Property test: src/utils/__tests__/safeFrontmatter.spec.ts. Caller tests: SkillsManager.spec.ts, frontmatter-commands.spec.ts.

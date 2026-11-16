@@ -1,8 +1,8 @@
 import { parseFrontmatter } from "../safeFrontmatter"
 
 describe("parseFrontmatter", () => {
-	it.each(["", "yaml", "yml", "json"])("accepts data-only %s metadata", (language) => {
-		const metadata = language === "json" ? '{"name":"example"}' : "name: example"
+	it.each(["", "yaml", "yml", "json", "YAML", "YML"])("accepts data-only %s metadata", (language) => {
+		const metadata = language.toLowerCase() === "json" ? '{"name":"example"}' : "name: example"
 		expect(parseFrontmatter(`---${language}\n${metadata}\n---\nBody`)).toMatchObject({
 			data: { name: "example" },
 			content: "Body",
@@ -38,6 +38,13 @@ describe("parseFrontmatter", () => {
 		} finally {
 			vi.unstubAllGlobals()
 		}
+	})
+
+	it("accepts data-only metadata after a BOM", () => {
+		expect(parseFrontmatter("\uFEFF---yaml\nname: example\n---\nBody")).toMatchObject({
+			data: { name: "example" },
+			content: "Body",
+		})
 	})
 
 	it("preserves Markdown without metadata", () => {
