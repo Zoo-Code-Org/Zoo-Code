@@ -7380,6 +7380,52 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	describe("getState view-local overlay", () => {
+		it("returns this view buffered mode, profile name and configuration from getState", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const bufferedConfig = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-under-review",
+			}
+			await provider["setViewStateId"]("overlay-sidebar-view")
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "my-profile")
+			await provider.saveViewState("apiConfiguration", bufferedConfig)
+			const state = await provider.getState()
+			// The buffer is written by every mutation path, so the read path has to serve it.
+			expect(state.mode).toBe("architect")
+			expect(state.currentApiConfigName).toBe("my-profile")
+			expect(state.apiConfiguration).toMatchObject(bufferedConfig)
+			await provider.dispose()
+		})
+		it("falls back per field to the shared values for fields the buffer does not set", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A raw ContextProxy write does not touch the buffer, so this is the shared side of the pair.
+			await provider.contextProxy.setValue("currentApiConfigName", "shared-profile")
+			await provider["setViewStateId"]("fallback-sidebar-view")
+			await provider.saveViewState("mode", "architect")
+			await provider.contextProxy.setValue("openRouterModelId", "shared-model")
+			const state = await provider.getState()
+			expect(state.mode).toBe("architect")
+			expect(state.currentApiConfigName).toBe("shared-profile")
+			expect(state.apiConfiguration.openRouterModelId).toBe("shared-model")
+			await provider.dispose()
+			await provider.dispose()
+		})
+	})
+
 	describe("loadViewState", () => {
 		it("should keep viewLocalState empty when no stable per-view values exist", async () => {
 			const provider = new ClineProvider(
