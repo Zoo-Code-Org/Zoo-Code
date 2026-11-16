@@ -243,6 +243,28 @@ describe("VSCodeAPIWrapper", () => {
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
 	})
 
+	it("falls back to a timestamp-random id when crypto.randomUUID is inherited but not callable", () => {
+		// "randomUUID" in crypto is also true for an inherited property, so a presence check alone
+		// would call a value that is not a function and throw before any id is minted.
+		Object.defineProperty(globalThis, "crypto", {
+			configurable: true,
+			value: Object.create({ randomUUID: "not-a-function" }),
+		})
+		vi.spyOn(Date, "now").mockReturnValue(1700000000000)
+		vi.spyOn(Math, "random").mockReturnValue(0.987654321)
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		// Same deterministic fallback id as the sibling cases: 1700000000000.toString(36) ===
+		// "loyw3v28" and (0.987654321).toString(36) drops its "0." prefix.
+		expect(wrapper.getViewStateId()).toBe("loyw3v28-zk00000ytu")
+		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "loyw3v28-zk00000ytu" })
+	})
+
 	it("creates a new viewStateId when the stored state parses to JSON null", () => {
 		Object.defineProperty(globalThis, "crypto", {
 			configurable: true,

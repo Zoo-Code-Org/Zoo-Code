@@ -33,7 +33,7 @@ export class VSCodeAPIWrapper {
 	 * @remarks Used only when no persisted identifier exists yet.
 	 */
 	private createViewStateId(): string {
-		if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+		if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
 			return crypto.randomUUID()
 		}
 
