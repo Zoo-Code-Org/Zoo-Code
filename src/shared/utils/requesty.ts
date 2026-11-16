@@ -49,10 +49,8 @@ export const toRequestyServiceUrl = (baseUrl?: string | null, service: URLType =
 	} catch {
 		// If the provided baseUrl is invalid, fall back to the default
 		if (baseUrl && baseUrl !== REQUESTY_BASE_URL) {
-			// Strip user info before logging. An untrusted deep-link URL can embed credentials,
-			// and URL parsing cannot redact them here because parsing already failed.
-			const redacted = baseUrl.replace(/\/\/[^/?#]*@/, "//")
-			console.warn(`Invalid base URL "${redacted}", falling back to default`)
+			// Do not log the value. An untrusted deep-link URL can embed credentials.
+			console.warn("Invalid base URL provided, falling back to default")
 		}
 		return replaceCname(REQUESTY_BASE_URL, service)
 	}

@@ -139,6 +139,19 @@ describe("handleUri", () => {
 		},
 	)
 
+	it("shows the real host first when the baseUrl has user info", async () => {
+		mockShowWarningMessage.mockImplementation(async () => undefined)
+		await handleUri(
+			makeUri({
+				path: "/requesty",
+				query: "code=k&baseUrl=https%3A%2F%2Frouter.requesty.ai%40evil.example%2Fv1",
+			}),
+		)
+		const options = mockShowWarningMessage.mock.calls[0][1]
+		expect(options.detail).toContain('"https://evil.example/v1"')
+		expect(options.detail).not.toContain("router.requesty.ai")
+	})
+
 	it.each([undefined, "Cancel"])(
 		"does not apply an unsolicited Requesty callback when dismissed with %s",
 		async (choice) => {

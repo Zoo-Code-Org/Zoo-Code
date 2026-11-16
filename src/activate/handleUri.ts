@@ -56,7 +56,10 @@ export const handleUri = async (uri: vscode.Uri) => {
 			if (code) {
 				// Deep links are untrusted. Require consent before installing credentials
 				// or redirecting an existing task's conversation to this destination.
-				const destination = toRequestyServiceUrl(baseUrl)
+				// Remove user info. "router.requesty.ai@evil.example" has the host evil.example.
+				const destination = new URL(toRequestyServiceUrl(baseUrl))
+				destination.username = ""
+				destination.password = ""
 				const approve = t("common:answers.activate_requesty")
 				// JSON.stringify quotes and escapes the URL. This stops control characters
 				// in the untrusted baseUrl from faking dialog text.
@@ -65,7 +68,7 @@ export const handleUri = async (uri: vscode.Uri) => {
 					{
 						modal: true,
 						detail: t("common:confirmation.requesty_deep_link_detail", {
-							url: JSON.stringify(destination),
+							url: JSON.stringify(destination.toString()),
 						}),
 					},
 					approve,

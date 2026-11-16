@@ -83,7 +83,7 @@ describe("toRequestyServiceUrl", () => {
 		it("should fall back to default URL for invalid baseUrl", () => {
 			const result = toRequestyServiceUrl("not-a-valid-url")
 			expect(result).toBe("https://router.requesty.ai/v1")
-			expect(console.warn).toHaveBeenCalledWith('Invalid base URL "not-a-valid-url", falling back to default')
+			expect(console.warn).toHaveBeenCalledWith("Invalid base URL provided, falling back to default")
 		})
 
 		it("should fall back to default URL for malformed URL", () => {
@@ -92,21 +92,17 @@ describe("toRequestyServiceUrl", () => {
 			expect(console.warn).toHaveBeenCalled()
 		})
 
-		it("should redact embedded credentials from invalid-URL warnings", () => {
-			// Regression: the warning logged the raw URL, so a malformed deep-link
-			// baseUrl such as https://user:secret@host:invalid/v1 leaked the password
-			// to the extension-host log before the consent dialog appeared.
-			toRequestyServiceUrl("https://user:secret@host:invalid/v1")
-			expect(console.warn).toHaveBeenCalledWith(
-				'Invalid base URL "https://host:invalid/v1", falling back to default',
-			)
-		})
-
-		it("should leave plain invalid URLs unchanged in warnings", () => {
-			toRequestyServiceUrl("https://attacker.example:bad-port/v1")
-			expect(console.warn).toHaveBeenCalledWith(
-				'Invalid base URL "https://attacker.example:bad-port/v1", falling back to default',
-			)
+		// Regression: the warning logged the raw URL or a regex-redacted copy. A malformed
+		// deep-link baseUrl leaked its credential text to the log before the consent dialog.
+		it.each([
+			"https://user:secret@host:invalid/v1",
+			"https://user:sec/ret@host:invalid/v1",
+			"https:/user:secret@host:invalid/v1",
+			"https:secret@h:bad",
+		])("should not log credential text from the invalid URL %s", (baseUrl) => {
+			expect(toRequestyServiceUrl(baseUrl)).toBe("https://router.requesty.ai/v1")
+			expect(console.warn).toHaveBeenCalledTimes(1)
+			expect(String(vi.mocked(console.warn).mock.calls[0])).not.toMatch(/user|secret|sec\/ret/)
 		})
 
 		it("should fall back to default app URL for invalid baseUrl with app service", () => {
