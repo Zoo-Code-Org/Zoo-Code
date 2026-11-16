@@ -516,6 +516,7 @@ Deploy the app.`
 	})
 })
 
+// Invariant NoExecutableEngine (docs/architecture/tla/CommandFrontmatter.tla): no header runs code.
 // Exercise the real parser through both public loading paths.
 describe.each(["discovery", "individual"])("%s frontmatter security", (entryPoint) => {
 	async function load(content: string) {
@@ -527,7 +528,7 @@ describe.each(["discovery", "individual"])("%s frontmatter security", (entryPoin
 			: await getCommand("/test/cwd", "security-probe")
 	}
 
-	it.each(["javascript", "js", "JS", "JavaScript", " javascript ", "\uFEFF---js"])(
+	it.each(["javascript", "js", "JS", "JavaScript", " javascript ", "\uFEFF---js", "\uFEFF\uFEFF---javascript"])(
 		"does not execute %s frontmatter",
 		async (header) => {
 			const execute = vi.fn(() => ({ description: "Executed" }))
