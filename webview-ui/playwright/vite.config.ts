@@ -48,10 +48,6 @@ export default defineConfig({
 				find: "@src/context/ExtensionStateContext",
 				replacement: path.resolve(dirname, "ExtensionStateContext.tsx"),
 			},
-			{
-				find: "@src/i18n/TranslationContext",
-				replacement: path.resolve(dirname, "TranslationContext.ts"),
-			},
 			{ find: "@", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@src", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@roo", replacement: path.resolve(webviewRoot, "../src/shared") },

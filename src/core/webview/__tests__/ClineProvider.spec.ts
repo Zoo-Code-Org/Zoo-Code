@@ -1,6 +1,7 @@
 // pnpm --filter roo-cline test core/webview/__tests__/ClineProvider.spec.ts
 
 import fs from "fs"
+import fsPromises from "fs/promises"
 import * as path from "path"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
@@ -32,7 +33,8 @@ import { experimentDefault } from "../../../shared/experiments"
 import { EMBEDDING_MODEL_PROFILES } from "../../../shared/embeddingModels"
 import { setTtsEnabled } from "../../../utils/tts"
 import { ContextProxy } from "../../config/ContextProxy"
-import { ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
+import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
+import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
 import { Task, TaskOptions } from "../../task/Task"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -610,6 +612,8 @@ describe("ClineProvider", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		defaultTaskOptions = {
 			provider,
@@ -1290,7 +1294,7 @@ describe("ClineProvider", () => {
 		test("does not log when the active task is aborted", async () => {
 			const task = new Task(defaultTaskOptions)
 			Object.defineProperty(task, "taskId", { value: "aborted-task", writable: true })
-			task.abort = true
+			Object.assign(task, { abort: true })
 			await provider.addClineToStack(task)
 			Object.defineProperty(mockWebviewView, "visible", { value: false, configurable: true })
 			visibilityCallback()
@@ -1484,7 +1488,7 @@ describe("ClineProvider", () => {
 			async (interrupted) => {
 				await provider.resolveWebviewView(mockWebviewView)
 				const task = new Task(defaultTaskOptions)
-				task.abort = interrupted
+				Object.assign(task, { abort: interrupted })
 				provider["taskRegistry"].push(task)
 				const evict = vi.spyOn(provider, "evictCurrentTask")
 				const remove = vi.spyOn(provider, "removeClineFromStack")
@@ -1550,7 +1554,7 @@ describe("ClineProvider", () => {
 				async (reopened) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					let choose: (value: string) => void = () => {
@@ -1649,7 +1653,7 @@ describe("ClineProvider", () => {
 				async (delay) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					removeSidebarOnCommand()
@@ -1679,7 +1683,7 @@ describe("ClineProvider", () => {
 				async (stage) => {
 					await provider.resolveWebviewView(mockWebviewView)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
@@ -1788,7 +1792,7 @@ describe("ClineProvider", () => {
 			test("retains recovery intent and remaining attempts while replacement HTML generation outlasts the wait", async () => {
 				await provider.resolveWebviewView(mockWebviewView)
 				const task = new Task(defaultTaskOptions)
-				task.abort = true
+				Object.assign(task, { abort: true })
 				provider["taskRegistry"].push(task)
 				const remove = vi.spyOn(provider, "removeClineFromStack")
 				removeSidebarOnCommand()
@@ -1922,7 +1926,7 @@ describe("ClineProvider", () => {
 		test("clears a failed focus incident before a manual sidebar open", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const task = new Task(defaultTaskOptions)
-			task.abort = true
+			Object.assign(task, { abort: true })
 			provider["taskRegistry"].push(task)
 			const remove = vi.spyOn(provider, "removeClineFromStack")
 			vi.mocked(vscode.commands.executeCommand).mockImplementation(async (command) => {
@@ -2278,7 +2282,8 @@ describe("ClineProvider", () => {
 
 		test("bounds failed HTML generation and reports the exhausted budget once", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			const generate = vi.spyOn(provider, "getState").mockRejectedValue(new Error("cannot generate"))
+			const generate = vi.fn().mockRejectedValue(new Error("cannot generate"))
+			provider["getWebviewHtml"] = generate
 			const assignHtml = trackHtmlAssignments()
 
 			await vi.advanceTimersByTimeAsync(600_000)
@@ -2305,7 +2310,8 @@ describe("ClineProvider", () => {
 		test("gives a user-opened replacement a fresh budget after unavailable host recovery", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			vi.mocked(vscode.commands.getCommands).mockResolvedValue([])
-			const generateHtml = vi.spyOn(provider, "getState")
+			const generateHtml = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = generateHtml
 
 			await vi.advanceTimersByTimeAsync(130_000)
 			expect(generateHtml).toHaveBeenCalledTimes(1)
@@ -2430,18 +2436,18 @@ describe("ClineProvider", () => {
 			await provider.resolveWebviewView(mockWebviewView)
 			expect(vi.getTimerCount()).toBe(timersAfterFirstResolve)
 
-			// getHtmlContent regenerates the HTML via one getState() call per reload,
-			// so getState invocations after this point count watchdog reloads.
-			const getStateSpy = vi.spyOn(provider, "getState")
+			// Each watchdog reload regenerates the HTML once, so calls after this point count reloads.
+			const regenerate = vi.fn(provider["getWebviewHtml"].bind(provider))
+			provider["getWebviewHtml"] = regenerate
 
 			await vi.advanceTimersByTimeAsync(120_000)
 
-			expect(getStateSpy).toHaveBeenCalledTimes(1)
+			expect(regenerate).toHaveBeenCalledTimes(1)
 		})
 
 		test("logs when regenerating the reload HTML fails", async () => {
 			await provider.resolveWebviewView(mockWebviewView)
-			vi.spyOn(provider, "getState").mockRejectedValue(new Error("regen boom"))
+			provider["getWebviewHtml"] = vi.fn().mockRejectedValue(new Error("regen boom"))
 			;(mockOutputChannel.appendLine as ReturnType<typeof vi.fn>).mockClear()
 
 			await vi.advanceTimersByTimeAsync(120_000)
@@ -2981,7 +2987,7 @@ describe("ClineProvider", () => {
 					mockWebviewPanel.title = "Zoo Code task"
 					await provider.resolveWebviewView(mockWebviewPanel)
 					const task = new Task(defaultTaskOptions)
-					task.abort = interrupted
+					Object.assign(task, { abort: interrupted })
 					provider["taskRegistry"].push(task)
 					const evict = vi.spyOn(provider, "evictCurrentTask")
 					const remove = vi.spyOn(provider, "removeClineFromStack")
@@ -3014,7 +3020,7 @@ describe("ClineProvider", () => {
 			test("explicit retry replaces an exhausted tab without evicting its interrupted task", async () => {
 				await provider.resolveWebviewView(mockWebviewPanel)
 				const task = new Task(defaultTaskOptions)
-				task.abort = true
+				Object.assign(task, { abort: true })
 				provider["taskRegistry"].push(task)
 				const remove = vi.spyOn(provider, "removeClineFromStack")
 				provider["reportWebviewRecoveryFailure"]("Exhausted incident")
@@ -3066,7 +3072,7 @@ describe("ClineProvider", () => {
 				async (stage) => {
 					await provider.resolveWebviewView(mockWebviewPanel)
 					const task = new Task(defaultTaskOptions)
-					task.abort = true
+					Object.assign(task, { abort: true })
 					provider["taskRegistry"].push(task)
 					const remove = vi.spyOn(provider, "removeClineFromStack")
 					provider["getWebviewHtml"] = vi.fn().mockResolvedValue("recovered-html")
@@ -3220,6 +3226,39 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	// Provider lookups run in the extension host, so configured endpoints must never reach the CSP.
+	test.each(["getHtmlContent", "getHMRHtmlContent"] as const)(
+		"%s keeps configured provider endpoints out of the CSP",
+		async (build) => {
+			const state = await provider.getState()
+			vi.spyOn(provider, "getState").mockResolvedValue({
+				...state,
+				apiConfiguration: {
+					...state.apiConfiguration,
+					openRouterBaseUrl: "https://evil.example;script-src 'unsafe-inline'\"><script>attack()</script>",
+					requestyBaseUrl: "https://requesty.example",
+				},
+			})
+			vi.mocked(axios.get).mockResolvedValue({ data: "" })
+
+			const html = await provider[build](mockWebviewView.webview)
+			const csp = html.match(
+				/http-equiv="Content-Security-Policy" content="([\s\S]*?)">\s*<link rel="stylesheet"/,
+			)?.[1]
+
+			expect(csp).toBeDefined()
+			expect(csp).toContain("connect-src vscode-webview://test-csp-source ")
+			if (build === "getHtmlContent") {
+				expect(csp).toContain("connect-src vscode-webview://test-csp-source https://us.i.posthog.com;")
+			}
+			expect(csp).not.toContain("evil.example")
+			expect(csp).not.toContain("requesty")
+			expect(csp).not.toContain("openrouter")
+			expect(csp?.match(/script-src /g)).toHaveLength(1)
+			expect(html).not.toContain("attack()")
+		},
+	)
+
 	test("resolveWebviewView sets up webview correctly in development mode even if local server is not running", async () => {
 		const developmentContext = { ...mockContext, extensionMode: vscode.ExtensionMode.Development }
 		provider = new ClineProvider(
@@ -3243,7 +3282,7 @@ describe("ClineProvider", () => {
 
 		// Verify Content Security Policy contains the necessary PostHog domains
 		expect(mockWebviewView.webview.html).toContain(
-			"connect-src vscode-webview://test-csp-source https://openrouter.ai https://api.requesty.ai https://us.i.posthog.com",
+			"connect-src vscode-webview://test-csp-source https://us.i.posthog.com",
 		)
 
 		// Extract the script-src directive section and verify required security elements
@@ -10990,6 +11029,29 @@ describe("ClineProvider", () => {
 		})
 	})
 
+	test.each([
+		["true", true, true],
+		["false", false, false],
+		["unset", undefined, true],
+	])(
+		"task title generation setting %s round-trips through getState and the webview state",
+		async (_label, saved, expected) => {
+			await provider.contextProxy.setValue("taskTitleGenerationEnabled", saved)
+			await provider.contextProxy.setValue(
+				"taskTitleApiConfigId",
+				saved === undefined ? undefined : "title-profile",
+			)
+
+			const state = await provider.getState()
+			const webviewState = await provider.getStateToPostToWebview({ includeTaskHistory: false })
+
+			expect(state.taskTitleGenerationEnabled).toBe(expected)
+			expect(webviewState.taskTitleGenerationEnabled).toBe(expected)
+			expect(state.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+			expect(webviewState.taskTitleApiConfigId).toBe(saved === undefined ? undefined : "title-profile")
+		},
+	)
+
 	test("getState returns the saved destructive command guard setting", async () => {
 		await provider.contextProxy.setValue("destructiveCommandGuardEnabled", true)
 
@@ -11223,6 +11285,47 @@ describe("ClineProvider", () => {
 		const state = await provider.getStateToPostToWebview()
 
 		expect(state.destructiveCommandGuardEnabled).toBe(false)
+	})
+
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when enabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			dynamicThinkingEffort: true,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: true })
+	})
+
+	test("getStateToPostToWebview returns the saved dynamicThinkingEffort experiment when explicitly disabled", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		// A second experiment is enabled on purpose: a projection that fell back to
+		// experimentDefault whenever the flag was false would still satisfy a
+		// fixture-equals-default assertion, and it would discard this enabled
+		// experiment on the way.
+		await provider.contextProxy.setValue("experiments", {
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({
+			...experimentDefault,
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: false,
+		})
+	})
+
+	test("getStateToPostToWebview defaults dynamicThinkingEffort to false when experiments are unset", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const state = await provider.getStateToPostToWebview()
+
+		expect(state.experiments).toEqual({ ...experimentDefault, dynamicThinkingEffort: false })
 	})
 
 	test("getStateToPostToWebview returns the saved blanket auto-deny setting", async () => {
@@ -11487,6 +11590,7 @@ describe("ClineProvider", () => {
 			apiProvider: providerIdentifiers.anthropic,
 		}
 
+		provider["initialModeConfigIds"] = Promise.resolve({ architect: "test-id" })
 		;(provider as any).providerSettingsManager = {
 			getModeConfigId: vi.fn().mockResolvedValue("test-id"),
 			listConfig: vi.fn().mockResolvedValue([profile]),
@@ -11499,12 +11603,243 @@ describe("ClineProvider", () => {
 		await messageHandler({ type: "mode", text: "architect" })
 
 		// Should load the saved config for architect mode
-		expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+		expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "test-config" })
 		expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "test-config")
 	})
 
-	it("saves current config when switching to mode without config", async () => {
+	it("prefers this window's mode profile over one another window saved in shared storage", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+
+		const manager = provider.providerSettingsManager
+		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
+		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+
+		vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "local", id: "this-window-id" }])
+
+		await provider["setModeConfig"]("code", "this-window-id")
+
+		expect(manager.setModeConfig).toHaveBeenCalledWith("code", "this-window-id")
+		await expect(provider["getModeConfigId"]("code")).resolves.toBe("this-window-id")
+		// An unmapped mode keeps this provider's current profile.
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
+	})
+
+	describe("mode profile initialization and imports", () => {
+		const profiles = {
+			currentApiConfigName: "first",
+			apiConfigs: { first: { id: "id1" }, second: { id: "id2" }, imported: { id: "id3" } },
+			modeApiConfigs: { code: "id1", architect: "id1" },
+		}
+		let createdProviders: ClineProvider[]
+
+		const newProvider = () => {
+			const created = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			createdProviders.push(created)
+			return created
+		}
+
+		beforeEach(async () => {
+			createdProviders = []
+			await provider.providerSettingsManager.import(profiles)
+		})
+
+		afterEach(async () => {
+			for (const created of createdProviders) {
+				await created.dispose()
+			}
+			vi.restoreAllMocks()
+		})
+
+		it("captures the opening snapshot during construction and waits for it on lookup", async () => {
+			let resolveSnapshot!: (value: Record<string, string>) => void
+			const snapshot = new Promise<Record<string, string>>((resolve) => {
+				resolveSnapshot = resolve
+			})
+			const getSnapshot = vi
+				.spyOn(ProviderSettingsManager.prototype, "getModeConfigIds")
+				.mockReturnValue(snapshot)
+			const created = newProvider()
+			expect(getSnapshot).toHaveBeenCalledOnce()
+
+			let settled = false
+			const lookup = created["getModeConfigId"]("code").then((id) => {
+				settled = true
+				return id
+			})
+			// Flush the real manager's initialization while the opening snapshot is pending.
+			await created.providerSettingsManager.listConfig()
+			expect(settled).toBe(false)
+
+			resolveSnapshot({ code: "id2" })
+			await expect(lookup).resolves.toBe("id2")
+			expect(getSnapshot).toHaveBeenCalledOnce()
+		})
+
+		it("isolates two providers using the same shared profile store", async () => {
+			const first = newProvider()
+			const second = newProvider()
+			await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+
+			await first.setModeConfig("code", "id2")
+
+			await expect(second.providerSettingsManager.getModeConfigId("code")).resolves.toBe("id2")
+			await expect(first["getModeConfigId"]("code")).resolves.toBe("id2")
+			await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+		})
+
+		it("keeps an unmapped mode local when another provider saves a mapping later", async () => {
+			await provider.providerSettingsManager.saveConfig("first", {
+				id: "id1",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			const first = newProvider()
+			const second = newProvider()
+			await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+
+			await second.setModeConfig("new-mode", "id2")
+
+			await expect(first.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")
+			await expect(first["getModeConfigId"]("new-mode")).resolves.toBeUndefined()
+			await expect(second["getModeConfigId"]("new-mode")).resolves.toBe("id2")
+			await first.contextProxy.setValue("currentApiConfigName", "first")
+			await first.handleModeSwitch("new-mode")
+			await first.handleModeSwitch("code")
+			await first.handleModeSwitch("new-mode")
+			await expect(first["getModeConfigId"]("new-mode")).resolves.toBe("id1")
+			await expect(second.providerSettingsManager.getModeConfigId("new-mode")).resolves.toBe("id2")
+			await expect(newProvider()["getModeConfigId"]("new-mode")).resolves.toBe("id2")
+		})
+
+		it.each(["success", "profile write fails", "later settings write fails"])(
+			"refreshes imported local and snapshot choices only after profiles persist: %s",
+			async (outcome) => {
+				const first = newProvider()
+				const second = newProvider()
+				await Promise.all([first["initialModeConfigIds"], second["initialModeConfigIds"]])
+				await first.setModeConfig("code", "id2")
+				vi.mocked(fsPromises.readFile).mockResolvedValueOnce(
+					JSON.stringify({
+						providerProfiles: { ...profiles, modeApiConfigs: { code: "id3", architect: "id3" } },
+						globalSettings: {},
+					}),
+				)
+				if (outcome === "profile write fails") {
+					vi.spyOn(mockContext.secrets, "store").mockRejectedValueOnce(new Error("profile write failed"))
+				} else if (outcome === "later settings write fails") {
+					vi.spyOn(first.contextProxy, "setValues").mockRejectedValueOnce(new Error("settings write failed"))
+				}
+
+				const result = await importSettingsFromPath("/test/settings.json", {
+					providerSettingsManager: first.providerSettingsManager,
+					contextProxy: first.contextProxy,
+					customModesManager: first.customModesManager,
+				})
+
+				expect(result.success).toBe(outcome === "success")
+				await expect(first["getModeConfigId"]("code")).resolves.toBe(
+					outcome === "profile write fails" ? "id2" : "id3",
+				)
+				await expect(first["getModeConfigId"]("architect")).resolves.toBe(
+					outcome === "profile write fails" ? "id1" : "id3",
+				)
+				await expect(second["getModeConfigId"]("code")).resolves.toBe("id1")
+				if (outcome !== "profile write fails") {
+					await second.setModeConfig("code", "id2")
+					await second.setModeConfig("architect", "id2")
+					await expect(first["getModeConfigId"]("code")).resolves.toBe("id3")
+					await expect(first["getModeConfigId"]("architect")).resolves.toBe("id3")
+				}
+			},
+		)
+	})
+
+	describe("mode profile snapshot", () => {
+		beforeEach(() => {
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue(
+				["opened-with-id", "chosen-id", "reset-id"].map((id) => ({ name: id, id })),
+			)
+		})
+
+		it("keeps the prior choice when the shared write fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "opened-with-id" })
+			const error = new Error("write failed")
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(error)
+
+			await expect(provider.setModeConfig("code", "failed-id")).rejects.toBe(error)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("opened-with-id")
+		})
+
+		it("returns undefined when no mapping exists", async () => {
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
+		})
+
+		it.each(["local", "snapshot"])("ignores a stale %s ID after another window resets profiles", async (source) => {
+			if (source === "local") {
+				provider["localModeConfigIds"].set("code", "removed-id")
+			} else {
+				provider["initialModeConfigIds"] = Promise.resolve({ code: "removed-id" })
+			}
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("reset-id")
+
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("reset-id")
+		})
+
+		it("keeps the choice this window opened with when another window changes the shared value", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("other-window-id")
+
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("opened-with-id")
+			// A mode created after this window opened keeps this provider's current profile.
+			await expect(provider["getModeConfigId"]("new-custom-mode")).resolves.toBeUndefined()
+		})
+
+		it("prefers an explicit local choice over the snapshot", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+
+			await provider["setModeConfig"]("architect", "chosen-id")
+
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("chosen-id")
+		})
+
+		it("keeps the current profile when the snapshot cannot be read", async () => {
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockRejectedValue(new Error("unreadable"))
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("shared-id")
+
+			provider["captureInitialModeConfigIds"]()
+
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBeUndefined()
+		})
+
+		it("drops local choices and re-reads the mapping when state is reset", async () => {
+			const { t } = await import("../../../i18n")
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "resetAllConfigs").mockResolvedValue(undefined)
+			vi.spyOn(provider.contextProxy, "resetAllState").mockResolvedValue(undefined)
+			// The shared custom-modes mock does not implement reset.
+			Object.assign(provider.customModesManager, { resetCustomModes: vi.fn().mockResolvedValue(undefined) })
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({ code: "reset-id" })
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			await provider["setModeConfig"]("code", "removed-profile-id")
+
+			await provider.resetState()
+
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("reset-id")
+		})
+	})
+
+	it("keeps the current config locally when switching to a mode without a config", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
 
@@ -11523,8 +11858,8 @@ describe("ClineProvider", () => {
 		// Switch to architect mode
 		await messageHandler({ type: "mode", text: "architect" })
 
-		// Should save current config as default for architect mode
-		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+		await expect(provider["getModeConfigId"]("architect")).resolves.toBe("current-id")
+		expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 	})
 
 	it("saves config as default for current mode when loading config", async () => {
@@ -12104,6 +12439,7 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "saved-config-id" })
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue("saved-config-id"),
 				listConfig: vi.fn().mockResolvedValue([profile]),
@@ -12119,7 +12455,7 @@ describe("ClineProvider", () => {
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
 			// Verify saved config was loaded
-			expect(provider.providerSettingsManager.getModeConfigId).toHaveBeenCalledWith("architect")
+			expect(provider.providerSettingsManager.getModeConfigId).not.toHaveBeenCalled()
 			expect(provider.providerSettingsManager.activateProfile).toHaveBeenCalledWith({ name: "saved-config" })
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("currentApiConfigName", "saved-config")
 
@@ -12127,7 +12463,7 @@ describe("ClineProvider", () => {
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 		})
 
-		test("saves current config when switching to mode without config", async () => {
+		test("keeps the current config locally when switching to a mode without a config", async () => {
 			;(provider as any).providerSettingsManager = {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				listConfig: vi
@@ -12152,8 +12488,8 @@ describe("ClineProvider", () => {
 			// Verify mode was updated
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
 
-			// Verify current config was saved as default for new mode
-			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "current-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("current-id")
+			expect(provider.providerSettingsManager.setModeConfig).not.toHaveBeenCalled()
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
@@ -12281,6 +12617,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("preserves mode when it exists in custom modes", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ "custom-mode": "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes that include the saved mode
@@ -12433,6 +12770,7 @@ describe("ClineProvider", () => {
 		})
 
 		test("continues with task restoration even if mode config loading fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 
 			// Mock custom modes
@@ -13806,6 +14144,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -13841,6 +14180,7 @@ describe("ClineProvider - Router Models", () => {
 			.mockResolvedValueOnce(mockModels) // kenari (public endpoint)
 			.mockResolvedValueOnce(mockModels) // io-intelligence (public endpoint)
 			.mockResolvedValueOnce(mockModels) // nanogpt (public endpoint)
+			.mockResolvedValueOnce(mockModels) // friendli (public endpoint)
 
 		await messageHandler({ type: "requestRouterModels" })
 
@@ -13864,6 +14204,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -13970,6 +14311,7 @@ describe("ClineProvider - Router Models", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -14980,6 +15322,82 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 	})
 
 	describe("getTaskWithId", () => {
+		it("retries a transiently missing API history before returning an empty conversation", async () => {
+			const historyItem = {
+				id: "retry-api-history",
+				task: "test task",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			let reads = 0
+			vi.mocked(fsp.readFile).mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				if (++reads === 1) throw Object.assign(new Error("Replacement in progress"), { code: "ENOENT" })
+				return JSON.stringify([{ role: "assistant", content: "committed" }])
+			})
+
+			const result = await provider.getTaskWithId(historyItem.id)
+
+			expect(result.apiConversationHistory).toEqual([{ role: "assistant", content: "committed" }])
+		})
+
+		it.each(["ENOENT", "EACCES"])("returns empty history after %s without removing the task", async (code) => {
+			const item = {
+				id: "failed-api-read",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+			provider.taskHistoryStore["cache"].set(item.id, item)
+			provider["taskHistoryStoreInitialized"] = true
+			const fsp = await import("fs/promises")
+			const read = vi.mocked(fsp.readFile)
+			let reads = 0
+			read.mockImplementation(async (file) => {
+				if (!String(file).endsWith("api_conversation_history.json")) return ""
+				reads++
+				throw Object.assign(new Error("read failed"), { code })
+			})
+			const result = await provider.getTaskWithId(item.id)
+			expect(result.apiConversationHistory).toEqual([])
+			expect(provider.taskHistoryStore.get(item.id)).toEqual(item)
+			expect(reads).toBe(code === "ENOENT" ? 2 : 1)
+		})
+
+		it("aggregates parent and child costs without reading API history", async () => {
+			const parent = {
+				id: "cost-parent",
+				task: "test",
+				ts: 1,
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 2,
+				childIds: ["cost-child"],
+			}
+			provider.taskHistoryStore["cache"].set(parent.id, parent)
+			provider.taskHistoryStore["cache"].set("cost-child", {
+				...parent,
+				id: "cost-child",
+				totalCost: 3,
+				childIds: [],
+			})
+			provider["taskHistoryStoreInitialized"] = true
+			const read = vi.spyOn(provider, "getTaskWithId")
+			const result = await provider.getTaskWithAggregatedCosts(parent.id)
+			expect(result.aggregatedCosts.totalCost).toBe(5)
+			expect(read).not.toHaveBeenCalled()
+		})
+
 		it("does not restore a deleted file-backed task from legacy history", async () => {
 			const historyItem = {
 				id: "deleted-task",

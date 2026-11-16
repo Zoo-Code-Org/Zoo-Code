@@ -4,10 +4,12 @@ import { renderWithExtensionState, screen } from "@/utils/test-utils"
 
 import { ChatRowContent } from "../ChatRow"
 
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({ t: (key: string) => key }),
+}))
+
 vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string) => key }),
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => <>{children || i18nKey}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 vi.mock("../CommandExecution", () => ({

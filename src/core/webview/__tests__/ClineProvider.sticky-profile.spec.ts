@@ -699,6 +699,7 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 		})
 
 		it("restores the mode-based profile without persisting it as a mode default or touching another task", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "mode-config-id" })
 			await provider.resolveWebviewView(mockWebviewView)
 			const historyItem: HistoryItem = {
 				id: "test-task-id",

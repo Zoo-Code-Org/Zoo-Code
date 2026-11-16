@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Aufgabenverlauf als Kontext einbeziehen",
 			"includeTaskHistoryDescription": "Wenn aktiviert, werden die letzten 10 Nachrichten aus der aktuellen Unterhaltung als Kontext beim Verbessern von Prompts einbezogen, um relevantere und kontextbewusste Vorschläge zu generieren."
 		},
+		"taskTitle": {
+			"enabled": "Aufgabentitel automatisch erzeugen",
+			"enabledDescription": "Fasst den ersten Prompt jeder neuen Aufgabe im Hintergrund zu einem kurzen Titel zusammen. Titelanfragen sind nicht in den Aufgabenkosten enthalten. Profile für GitHub Copilot und VS Code LM verbrauchen dein Kontingent.",
+			"apiConfiguration": "API-Konfiguration",
+			"useTaskConfig": "API-Konfiguration der Aufgabe verwenden",
+			"apiConfigDescription": "Ein leichtgewichtiges Profil ohne Reasoning wird empfohlen. Wenn du ein anderes Profil wählst, wird der Anfang deines Prompts an diesen Anbieter gesendet."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Prompt verbessern",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Neue Aufgabe starten",
 				"description": "Starte eine neue Aufgabe mit deiner Eingabe. Verfügbar in der Befehlspalette."
+			},
+			"TASK_TITLE": {
+				"label": "Aufgabentitel",
+				"description": "Erzeugt im Hintergrund einen kurzen Titel für neue Aufgaben. Er wird im Verlauf und in der Aufgabenkopfzeile angezeigt. Unten konfigurieren."
 			}
 		}
 	},

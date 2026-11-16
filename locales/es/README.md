@@ -47,11 +47,13 @@ Zoo Code parte de los cimientos creados por Roo Code y continúa ampliándolos c
 - **Flujos de terminal y edición más fiables** — correcciones para la finalización prematura del terminal, las condiciones de carrera del estado de las tareas, la gestión del contexto, la edición de diff y el uso de herramientas específicas de cada proveedor.
 - **Más control sobre tu espacio de trabajo** — gestión de reglas, restricciones de MCP por modo, controles de rutas multirraíz, opciones de razonamiento de modelos y acciones para revisar los cambios al completar una tarea.
 
-## Novedades de la v3.94.0
+## Novedades de la v3.98.0
 
-- ✨ **Compatibilidad más amplia con modelos y proveedores:** Usa Claude Haiku 5.5 a través de Anthropic, envía imágenes a modelos VS Code LM compatibles, ajusta la temperatura para los modelos OpenCode Go Responses y cancela solicitudes limpiamente en más proveedores.
-- 🔐 **MCP OAuth más flexible:** Configura ajustes estáticos del cliente OAuth, usa rutas de callback personalizadas, descubre detalles de autenticación en `WWW-Authenticate` y ve los errores de callback antes de reintentarlo.
-- 🧭 **Chats y sesiones largas más fluidos:** Renombra tareas en el historial, arrastra archivos al chat sin mantener Shift, reduce la memoria que se conserva durante las sesiones largas y mantén estables los enlaces de subtareas y los webviews reemplazados.
+- 🎟️ Prueba la próxima suscripción a Zoo Pass. 2 semanas de acceso gratuito; plazas limitadas
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Títulos de tareas automáticos y un control de modelos más preciso:** Genera títulos para las nuevas tareas raíz automáticamente y prueba el ajuste experimental de esfuerzo de razonamiento dinámico.
+- 🔌 **Más compatibilidad con modelos y proveedores:** Usa GPT-6.1 Terra y obtén la lista más reciente de modelos de Friendli.
+- 🛡️ **Chats y ediciones más seguros y con mejor respuesta:** Cancela correctamente las solicitudes de OpenAI Native y Requesty, evita la aprobación automática accidental de diffs fuera del espacio de trabajo, cambia el idioma de la interfaz de forma coherente y evita recuperaciones ambiguas de copias de seguridad JSON.
 
 ## ¿Qué puede hacer Zoo Code por TI?
 

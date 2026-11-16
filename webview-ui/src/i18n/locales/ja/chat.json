@@ -20,7 +20,7 @@
 	"unpin": "ピン留めを解除",
 	"pin": "ピン留め",
 	"fileChangesInConversation": {
-		"header": "この会話で {{count}} 個のファイルが変更されました"
+		"header_other": "この会話で {{count}} 個のファイルが変更されました"
 	},
 	"tokenProgress": {
 		"availableSpace": "利用可能な空き容量: {{amount}} トークン",
@@ -287,7 +287,6 @@
 		"triggerLabelOff": "自動承認オフ",
 		"triggerLabelOffShort": "オフ",
 		"triggerLabel_zero": "0個の自動承認",
-		"triggerLabel_one": "1個の自動承認済み",
 		"triggerLabel_other": "{{count}}個の自動承認済み",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +304,6 @@
 		"truncation": {
 			"title": "コンテキスト切り詰め",
 			"inProgress": "コンテキストを切り詰め中...",
-			"messagesRemoved": "{{count}}件のメッセージを削除",
 			"messagesRemoved_other": "{{count}}件のメッセージを削除",
 			"description": "コンテキストウィンドウの制限内に収めるため、古いメッセージが会話から削除されました。これは圧縮と比較して高速ですが、コンテキストの保持性が低いアプローチです。"
 		}
@@ -322,10 +320,12 @@
 		"title": "Zoo Code {{version}} リリース",
 		"support": "<githubLink>GitHub</githubLink>でスターを付けて Zoo Code を応援してください。",
 		"release": {
-			"heading": "Zoo Code v3.94.0 の新機能",
-			"highlight1": "✨ さらに広がるモデルとプロバイダーのサポート: Anthropic 経由で Claude Haiku 5.5 を使用し、対応する VS Code LM モデルに画像を送信し、OpenCode Go Responses モデルの temperature を調整し、より多くのプロバイダーでリクエストをクリーンにキャンセルできます。",
-			"highlight2": "🔐 より柔軟な MCP OAuth: 静的な OAuth クライアント設定を構成し、カスタムコールバックパスを使用し、WWW-Authenticate から認証の詳細を取得し、再試行前にコールバックの失敗を確認できます。",
-			"highlight3": "🧭 よりスムーズなチャットと長時間セッション: 履歴でタスク名を変更し、Shift を押さずにファイルをチャットにドラッグし、長時間セッション中に保持されるメモリを削減し、サブタスクのリンクと置き換えられた webview を安定して維持できます。"
+			"heading": "Zoo Code v3.98.0 の新機能",
+			"highlight0": "🎟️ 近日登場予定の Zoo Pass サブスクリプションをプレビュー。2 週間無料でアクセス可能。限定枠",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ 自動タスクタイトルと細かなモデル制御: 新しいルートタスクのタイトルを自動生成し、動的な思考量の試験的設定を試せます。",
+			"highlight2": "🔌 モデルとプロバイダーのサポートを拡大: GPT-6.1 Terra を利用し、Friendli の最新モデル一覧を取得できます。",
+			"highlight3": "🛡️ より安全で応答性の高いチャットと編集: OpenAI Native と Requesty のリクエストを正常にキャンセルし、ワークスペース外の diff が誤って自動承認されるのを防ぎ、UI 言語を一貫して切り替え、曖昧な JSON バックアップ復旧を回避します。"
 		}
 	},
 	"costs": {
@@ -349,7 +349,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "自動承認リクエスト制限に達しました",
-			"description": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
+			"description_other": "Zooは{{count}}件のAPI自動承認リクエスト制限に達しました。カウントをリセットしてタスクを続行しますか？",
 			"button": "リセットして続行"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +361,6 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zooはコードベースで <code>{{query}}</code> を検索したい",
 		"wantsToSearchWithPath": "Zooは <code>{{path}}</code> 内のコードベースで <code>{{query}}</code> を検索したい",
-		"didSearch_one": "1件の結果が見つかりました",
 		"didSearch_other": "{{count}}件の結果が見つかりました",
 		"resultTooltip": "類似度スコア: {{score}} (クリックしてファイルを開く)"
 	},
@@ -432,9 +431,7 @@
 	},
 	"tooManyTools": {
 		"title": "有効になっているツールが多すぎます",
-		"toolsPart_one": "{{count}} ツール",
 		"toolsPart_other": "{{count}} ツール",
-		"serversPart_one": "{{count}} MCP サーバー",
 		"serversPart_other": "{{count}} MCP サーバー",
 		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
 		"openMcpSettings": "MCP 設定を開く"

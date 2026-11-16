@@ -9,10 +9,13 @@ import type { ProviderSettings } from "@roo-code/types"
 import TaskHeader, { TaskHeaderProps } from "../TaskHeader"
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key, // Simple mock that returns the key
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	// Mock initReactI18next to prevent initialization errors in tests
 	initReactI18next: {
 		type: "3rdParty",
@@ -38,7 +41,7 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string; task?: string; title?: string } | null
+	currentTaskItem: { id: string; task?: string; title?: string; autoTitle?: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
 	timeFormat?: "auto" | "12h" | "24h"
@@ -365,6 +368,17 @@ describe("TaskHeader", () => {
 			renderTaskHeader()
 
 			expect(screen.getByText("My title")).toBeInTheDocument()
+			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
+		})
+
+		it.each([
+			["the custom title over the generated title", "My title", "Generated", "My title"],
+			["the generated title without a custom title", undefined, "Generated", "Generated"],
+		])("shows %s in the collapsed header", (_label, title, autoTitle, expected) => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title, autoTitle }
+			renderTaskHeader()
+
+			expect(screen.getByText(expected)).toBeInTheDocument()
 			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
 		})
 
