@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "拡張機能のすべての状態とシークレットストレージをリセットしてもよろしいですか？この操作は元に戻せません。",
-		"delete_config_profile": "この設定プロファイルを削除してもよろしいですか？"
+		"delete_config_profile": "この設定プロファイルを削除してもよろしいですか？",
+		"requesty_deep_link": "外部リンクからRequestyの資格情報を有効にしますか？",
+		"requesty_deep_link_detail": "これによりアクティブなプロバイダーが置き換えられます。以降のリクエストで会話やワークスペースの内容が次の場所に送信される可能性があります：\n{{url}}\n\nこれらの資格情報を自分で要求した場合、およびこの送信先を信頼できる場合のみ続行してください。"
 	},
 	"errors": {
 		"invalid_data_uri": "データURIフォーマットが無効です",
@@ -146,7 +148,8 @@
 		}
 	},
 	"answers": {
-		"yes": "はい"
+		"yes": "はい",
+		"activate_requesty": "Requestyを有効にする"
 	},
 	"buttons": {
 		"learn_more": "詳細"
