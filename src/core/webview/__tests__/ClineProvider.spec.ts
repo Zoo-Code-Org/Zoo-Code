@@ -6443,6 +6443,84 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("leaves an unowned entry under the temporary id alone and mints a fresh claim", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			type DurableEntry = {
+				mode?: string
+				currentApiConfigName?: string
+				updatedAt?: number
+				claimToken?: string
+			}
+			const temporaryId = provider.viewId
+			// An earlier session left this entry behind under the same temporary name, with its
+			// own profile and claim. This instance never authored it, so it is not this
+			// instance's to re-key and not this instance's to adopt.
+			await provider.contextProxy.setValue("viewStates", {
+				[temporaryId]: {
+					mode: "code",
+					currentApiConfigName: "earlier-profile",
+					updatedAt: 1,
+					claimToken: "legacy-claim",
+				},
+			})
+			await provider["setViewStateId"]("stable-sidebar-view")
+			const afterRegistration = mockContext.globalState.get<Record<string, DurableEntry>>("viewStates") ?? {}
+			// Registration authors nothing this view never wrote: the earlier session keeps
+			// its entry, its profile and its claim, and none of them are loaded here.
+			expect(afterRegistration[temporaryId]).toMatchObject({
+				currentApiConfigName: "earlier-profile",
+				claimToken: "legacy-claim",
+			})
+			expect(afterRegistration["stable-sidebar-view"]).toBeUndefined()
+			expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
+			// The first durable write lands under the stable id and carries a claim this
+			// host minted - never the token the earlier session left behind.
+			await provider.saveViewState("mode", "architect")
+			const states = mockContext.globalState.get<Record<string, DurableEntry>>("viewStates") ?? {}
+			expect(states["stable-sidebar-view"]).toMatchObject({
+				mode: "architect",
+				updatedAt: expect.any(Number),
+				claimToken: expect.any(String),
+			})
+			expect(states["stable-sidebar-view"]?.claimToken).not.toBe("legacy-claim")
+			expect(states[temporaryId]).toMatchObject({
+				currentApiConfigName: "earlier-profile",
+				claimToken: "legacy-claim",
+			})
+			await provider.dispose()
+		})
+
+		it("gives each instance its own session-local view id and tracks it as active", async () => {
+			const first = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const second = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Temporary ids restart from 0 on every host start, but two live instances in one
+			// host must not share one, or they would claim each other's persisted entries.
+			expect(first.viewId).not.toBe(second.viewId)
+			expect(first["viewStateId"]).toBe(first.viewId)
+			expect(second["viewStateId"]).toBe(second.viewId)
+			expect(ClineProvider.getAllInstances()).toEqual(expect.arrayContaining([first, second]))
+			await first.dispose()
+			await second.dispose()
+		})
+
 		it("should keep the stable entry and drop the temporary entry when both exist", async () => {
 			const provider = new ClineProvider(
 				mockContext,
