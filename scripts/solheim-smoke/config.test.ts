@@ -62,4 +62,16 @@ describe("Solheim provider smoke configuration", () => {
 		assert.ok(args.includes("--extensionDevelopmentPath=/extension"))
 		assert.ok(args.includes("--user-data-dir=/data"))
 	})
+	it("adds the extension tests path only when one is supplied", () => {
+		const plain = buildLaunchArgs("/empty-workspace", "/data", "/extensions", "/extension")
+		assert.ok(!plain.some((arg) => arg.startsWith("--extensionTestsPath=")))
+		const withTests = buildLaunchArgs(
+			"/empty-workspace",
+			"/data",
+			"/extensions",
+			"/extension",
+			"/runner/sidebar-runner.cjs",
+		)
+		assert.ok(withTests.includes("--extensionTestsPath=/runner/sidebar-runner.cjs"))
+	})
 })

@@ -46,11 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.94.0 में नया क्या है
+## v3.98.0 में नया क्या है
 
-- ✨ **और ज़्यादा models और providers का support:** Anthropic के ज़रिए Claude Haiku 5.5 इस्तेमाल करें, संगत VS Code LM models को images भेजें, OpenCode Go Responses models के लिए temperature tune करें और ज़्यादा providers पर requests को cleanly cancel करें।
-- 🔐 **ज़्यादा लचीला MCP OAuth:** Static OAuth client settings configure करें, custom callback paths इस्तेमाल करें, `WWW-Authenticate` से authentication details जानें और retry करने से पहले callback failures देखें।
-- 🧭 **बेहतर chats और लंबे sessions:** History में tasks का नाम बदलें, बिना Shift दबाए files को chat में drag करें, लंबे sessions में retain होने वाली memory घटाएं और subtask links तथा replaced webviews को stable रखें।
+- 🎟️ आगामी Zoo Pass सब्सक्रिप्शन का प्रीव्यू देखें। 2 सप्ताह मुफ़्त एक्सेस; सीमित स्थान
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **अपने आप टास्क टाइटल और बेहतर मॉडल नियंत्रण:** नए रूट टास्क के टाइटल अपने आप बनाएँ और डायनामिक थिंकिंग-एफर्ट की प्रायोगिक सेटिंग आज़माएँ।
+- 🔌 **ज़्यादा मॉडल और प्रोवाइडर सपोर्ट:** GPT-6.1 Terra इस्तेमाल करें और Friendli की नवीनतम मॉडल सूची पाएँ।
+- 🛡️ **ज़्यादा सुरक्षित और तेज़ प्रतिक्रिया वाले चैट और एडिट:** OpenAI Native और Requesty रिक्वेस्ट को साफ़ तरीके से रद्द करें, वर्कस्पेस के बाहर के diffs के अनजाने ऑटो-अप्रूवल से बचाएँ, UI भाषा बदलने पर एकरूपता बनाए रखें, और JSON बैकअप रिकवरी में अस्पष्टता से बचें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 
