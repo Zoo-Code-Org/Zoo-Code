@@ -4418,6 +4418,64 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("discards an in-flight load when a reset clears view state during the profile re-resolve", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("reresolve-view")
+			// A previous session pinned cfg-a for this view, so the load reads that entry.
+			await provider.contextProxy.setValue("viewStates", {
+				"reresolve-view": { currentApiConfigName: "cfg-a", updatedAt: 1 },
+			})
+			type ProfileResult = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileFixture = (name: string): ProfileResult =>
+				Object.assign({} as ProfileResult, {
+					name,
+					id: `${name}-id`,
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "model-x",
+				})
+			// Hold every profile lookup open so the test decides when each read settles.
+			const pending: { name: string | undefined; resolve: (profile: ProfileResult) => void }[] = []
+			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(
+				(args) =>
+					new Promise((resolve) => {
+						pending.push({ name: "name" in args ? args.name : undefined, resolve })
+					}),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const loading = provider["loadViewState"]()
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+
+			// The name moves while the first lookup is in flight, so the load re-resolves the
+			// settings for the name the view actually holds. Stall that second lookup too:
+			// a reset can clear the view as a unit inside its await as well.
+			await provider.saveViewState("currentApiConfigName", "cfg-b")
+			pending[0]?.resolve(profileFixture("cfg-a"))
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(2))
+			expect(pending[1]?.name).toBe("cfg-b")
+
+			// A reset/import invalidation clears the buffer mid-re-resolve (the broadcast path
+			// does exactly this). The clear is not a field mutation, so the mutation tracking
+			// cannot see it, and the view id is unchanged: only the generation shows that the
+			// pair this second read resolved is already stale.
+			provider["_clearViewLocalState"]()
+			pending[1]?.resolve(profileFixture("cfg-b"))
+			await loading
+
+			// The reset owns the buffer now: neither the re-resolved settings nor the name the
+			// load carried may be written back over the cleared state.
+			expect(provider["viewLocalState"]).toEqual({})
+			expect(getProfileSpy).toHaveBeenCalledTimes(2)
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Discarding stale state cleared during the profile re-resolve"),
+			)
+			await provider.dispose()
+		})
 
 		it("does not resurrect a field cleared mid-load from the stale persisted value the load read", async () => {
 			const provider = new ClineProvider(

@@ -1356,6 +1356,16 @@ export class ClineProvider
 					this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
 					return true
 				}
+				if (this.viewStateLoadGeneration !== loadedForGeneration) {
+					// A reset or import clears durable and in-memory view state as a unit and leaves the
+					// id alone, so the id check above cannot see it. The pair re-resolved here belongs to
+					// a view that clear already emptied: assigning it would resurrect the selections the
+					// reset removed, which is what the generation check before the first lookup prevents.
+					this.log(
+						`[loadViewState] Discarding stale state cleared during the profile re-resolve for viewId ${loadedForViewId}`,
+					)
+					return true
+				}
 			}
 
 			this.viewLocalState = mergedState
