@@ -46,11 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.86.0 में नया क्या है
+## v3.98.0 में नया क्या है
 
-- ✨ **नए models का समर्थन:** GPT-6.1 Sol इस्तेमाल करें, Claude Opus 5.5 की सही की गई output limit का लाभ लें और OpenCode Go पर DeepSeek V4.1 Flash चुनें।
-- 🧭 **भरोसेमंद task abort और interruption:** पहली abort वजह सुरक्षित रखें, हर request पर stream-abort state रीसेट करें और interrupted tasks को अस्वीकार की गई subtasks दोबारा चलाने से रोकें।
-- 🛠️ **भरोसेमंद tools, prompts और UI streaming:** Stream किए गए tool arguments सही-सलामत रखें, MCP tool policy लागू करें, मनगढ़ंत line numbers रोकें और chat updates को सहज बनाएं।
+- 🎟️ आगामी Zoo Pass सब्सक्रिप्शन का प्रीव्यू देखें। 2 सप्ताह मुफ़्त एक्सेस; सीमित स्थान
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **अपने आप टास्क टाइटल और बेहतर मॉडल नियंत्रण:** नए रूट टास्क के टाइटल अपने आप बनाएँ और डायनामिक थिंकिंग-एफर्ट की प्रायोगिक सेटिंग आज़माएँ।
+- 🔌 **ज़्यादा मॉडल और प्रोवाइडर सपोर्ट:** GPT-6.1 Terra इस्तेमाल करें और Friendli की नवीनतम मॉडल सूची पाएँ।
+- 🛡️ **ज़्यादा सुरक्षित और तेज़ प्रतिक्रिया वाले चैट और एडिट:** OpenAI Native और Requesty रिक्वेस्ट को साफ़ तरीके से रद्द करें, वर्कस्पेस के बाहर के diffs के अनजाने ऑटो-अप्रूवल से बचाएँ, UI भाषा बदलने पर एकरूपता बनाए रखें, और JSON बैकअप रिकवरी में अस्पष्टता से बचें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

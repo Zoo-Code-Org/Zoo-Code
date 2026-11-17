@@ -1,10 +1,14 @@
 import * as vscode from "vscode"
 
 import { Package } from "../shared/package"
-import { ClineProvider } from "../core/webview/ClineProvider"
+import type { WebviewFocusTracker } from "../core/webview/WebviewFocusTracker"
 import { t } from "../i18n"
+import { resolveChatProvider } from "./resolveChatProvider"
 
-export const handleNewTask = async (params: { prompt?: string } | null | undefined) => {
+export const handleNewTask = async (
+	params: { prompt?: string } | null | undefined,
+	webviewFocusTracker: WebviewFocusTracker,
+) => {
 	let prompt = params?.prompt
 
 	if (!prompt) {
@@ -19,5 +23,6 @@ export const handleNewTask = async (params: { prompt?: string } | null | undefin
 		return
 	}
 
-	await ClineProvider.handleCodeAction("newTask", "NEW_TASK", { userInput: prompt })
+	const provider = await resolveChatProvider(webviewFocusTracker)
+	await provider?.handleCodeAction("newTask", "NEW_TASK", { userInput: prompt })
 }

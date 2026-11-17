@@ -3,6 +3,7 @@
 import { convertToR1Format } from "../r1-format"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
+import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
 describe("convertToR1Format", () => {
 	it("should convert basic text messages", () => {
@@ -635,5 +636,165 @@ describe("convertToR1Format", () => {
 				expect(result.filter((m) => m.role === "user")).toHaveLength(1)
 			})
 		})
+	})
+})
+
+describe("convertToR1Format lone surrogate sanitization (#461)", () => {
+	const lone = "bad\uD800end"
+	const sanitized = "bad\uFFFDend"
+
+	it("sanitizes a simple string message (including the system prompt user message)", () => {
+		const result = convertToR1Format([{ role: "user", content: lone }])
+		expect(result[0]).toEqual({ role: "user", content: sanitized })
+	})
+
+	it("sanitizes a simple string assistant message", () => {
+		const result = convertToR1Format([{ role: "assistant", content: lone }])
+		expect(result).toEqual([{ role: "assistant", content: sanitized }])
+	})
+
+	it("sanitizes and merges a string assistant message into the previous assistant message", () => {
+		const result = convertToR1Format([
+			{ role: "assistant", content: "a" },
+			{ role: "assistant", content: lone },
+		])
+		expect(result).toEqual([{ role: "assistant", content: `a\n${sanitized}` }])
+	})
+
+	it("sanitizes and merges a string user message into the previous user message", () => {
+		const result = convertToR1Format([
+			{ role: "user", content: "a" },
+			{ role: "user", content: lone },
+		])
+		expect(result).toEqual([{ role: "user", content: `a\n${sanitized}` }])
+	})
+
+	it("sanitizes user text blocks", () => {
+		const result = convertToR1Format([{ role: "user", content: [{ type: "text", text: lone }] }])
+		expect(result[0]).toEqual({ role: "user", content: sanitized })
+	})
+
+	it("sanitizes string tool_result content", () => {
+		const result = convertToR1Format([
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "tool-1", content: lone }] },
+		])
+		expect(result[0]).toEqual({ role: "tool", tool_call_id: "tool-1", content: sanitized })
+	})
+
+	it("sanitizes tool_result text blocks", () => {
+		const result = convertToR1Format([
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "tool-1", content: [{ type: "text", text: lone }] }],
+			},
+		])
+		expect(result[0]).toEqual({ role: "tool", tool_call_id: "tool-1", content: sanitized })
+	})
+
+	it("sanitizes assistant text blocks and reasoning blocks", () => {
+		const result = convertToR1Format([
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: lone },
+					{ type: "reasoning", text: lone } as unknown as Anthropic.Messages.ContentBlockParam,
+				],
+			},
+		])
+		expect(result[0]).toMatchObject({ role: "assistant", content: sanitized, reasoning_content: sanitized })
+	})
+
+	it("sanitizes top-level reasoning_content", () => {
+		const message = Object.assign({ role: "assistant" as const, content: "ok" }, { reasoning_content: lone })
+		const result = convertToR1Format([message])
+		expect((result[0] as { reasoning_content?: string }).reasoning_content).toBe(sanitized)
+	})
+
+	it("sanitizes strings nested in tool_use input", () => {
+		const result = convertToR1Format([
+			{
+				role: "assistant",
+				content: [
+					{
+						type: "tool_use",
+						id: "tool-1",
+						name: "read_file",
+						input: { path: lone, nested: { list: [lone] } },
+					},
+				],
+			},
+		])
+		const toolCalls = (result[0] as OpenAI.Chat.ChatCompletionAssistantMessageParam)
+			.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		expect(JSON.parse(toolCalls[0].function.arguments)).toEqual({ path: sanitized, nested: { list: [sanitized] } })
+	})
+
+	it("sanitizes tool_use name", () => {
+		const result = convertToR1Format([
+			{ role: "assistant", content: [{ type: "tool_use", id: "tool-1", name: `read${lone}`, input: {} }] },
+		])
+		const toolCalls = (result[0] as OpenAI.Chat.ChatCompletionAssistantMessageParam)
+			.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		expect(toolCalls[0].function.name).toBe(`read${sanitized}`)
+	})
+
+	it("sanitizes tool_use ids injectively and keeps them paired with tool_result ids", () => {
+		const loneIdA = "call-\uD800"
+		const loneIdB = "call-\uD801"
+		const result = convertToR1Format([
+			{
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: loneIdA, name: "read_file", input: {} },
+					{ type: "tool_use", id: loneIdB, name: "read_file", input: {} },
+				],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: loneIdA, content: "ok" },
+					{ type: "tool_result", tool_use_id: loneIdB, content: "ok" },
+				],
+			},
+		])
+		const toolCalls = (result[0] as OpenAI.Chat.ChatCompletionAssistantMessageParam)
+			.tool_calls as OpenAI.Chat.ChatCompletionMessageFunctionToolCall[]
+		const toolMessages = result.slice(1) as OpenAI.Chat.ChatCompletionToolMessageParam[]
+		// Injective: the two ids must not collapse onto the same replacement.
+		expect(toolCalls[0].id).not.toBe(toolCalls[1].id)
+		// Pairing: each tool result addresses its own call after sanitization.
+		expect(toolMessages[0].tool_call_id).toBe(toolCalls[0].id)
+		expect(toolMessages[1].tool_call_id).toBe(toolCalls[1].id)
+	})
+
+	it("composes id sanitization with the normalizeToolCallId option", () => {
+		const result = convertToR1Format(
+			[{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: "ok" }] }],
+			// Lowercase makes the composition order observable: the caller normalizer runs
+			// first, then sanitization. Swapping the order would also lowercase the encoded
+			// hex suffix (producing call-\uFFFdd800), so this assertion would fail.
+			{ normalizeToolCallId: (id) => id.toLowerCase() },
+		)
+		expect((result[0] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("call-\uFFFD" + "D800")
+	})
+
+	it("leaves valid surrogate pairs untouched", () => {
+		const pair = "emoji \uD83D\uDE00 done"
+		const result = convertToR1Format([{ role: "user", content: pair }])
+		expect(result[0]).toEqual({ role: "user", content: pair })
+	})
+
+	it("produces a request body free of lone surrogates", () => {
+		const result = convertToR1Format([
+			{ role: "user", content: lone },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "call-\uD800", name: "read_file", input: { path: lone } }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-\uD800", content: lone }] },
+		])
+		// Inspect the raw values: JSON.stringify escapes lone surrogates as \udXXX text,
+		// so a regex over the serialized body can never fail. See expectNoLoneSurrogates.
+		expectNoLoneSurrogates(result)
 	})
 })

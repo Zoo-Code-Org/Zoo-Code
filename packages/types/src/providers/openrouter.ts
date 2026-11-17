@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // https://openrouter.ai/models?order=newest&supported_parameters=tools
 export const openRouterDefaultModelId = "anthropic/claude-sonnet-4.5"
@@ -49,6 +53,7 @@ export const OPEN_ROUTER_PROMPT_CACHING_MODELS = new Set([
 	"anthropic/claude-fable-5.1",
 	"anthropic/claude-fable-5",
 	"anthropic/claude-haiku-4.5",
+	"anthropic/claude-haiku-5.5",
 	"google/gemini-2.5-flash-preview",
 	"google/gemini-2.5-flash-preview:thinking",
 	"google/gemini-2.5-flash-preview-05-20",
@@ -88,6 +93,7 @@ export const OPEN_ROUTER_REASONING_BUDGET_MODELS = new Set([
 	"anthropic/claude-sonnet-4.6",
 	"anthropic/claude-sonnet-5",
 	"anthropic/claude-haiku-4.5",
+	"anthropic/claude-haiku-5.5",
 	"google/gemini-2.5-pro-preview",
 	"google/gemini-2.5-pro",
 	"google/gemini-2.5-flash-preview-05-20",
@@ -98,3 +104,19 @@ export const OPEN_ROUTER_REASONING_BUDGET_MODELS = new Set([
 	"anthropic/claude-3.7-sonnet:thinking",
 	"google/gemini-2.5-flash-preview-05-20:thinking",
 ])
+
+export const OPEN_ROUTER_MODEL_ID_FIELD = "openRouterModelId"
+
+export const openRouterProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.openrouter,
+	modelIdKey: OPEN_ROUTER_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(OPEN_ROUTER_MODEL_ID_FIELD),
+	getDefaultModelId: () => openRouterDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		openRouterApiKey: z.string().optional(),
+		[OPEN_ROUTER_MODEL_ID_FIELD]: z.string().optional(),
+		openRouterBaseUrl: z.string().optional(),
+		openRouterSpecificProvider: z.string().optional(),
+	},
+})

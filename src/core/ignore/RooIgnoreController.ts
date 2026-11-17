@@ -109,7 +109,7 @@ export class RooIgnoreController {
 
 			// Check if the real path is ignored
 			return !this.ignoreInstance.ignores(relativePath)
-		} catch (error) {
+		} catch {
 			// Allow access to files outside cwd or on errors (backward compatibility)
 			return true
 		}

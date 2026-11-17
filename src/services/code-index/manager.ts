@@ -13,7 +13,6 @@ import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import fs from "fs/promises"
 import ignore from "ignore"
 import path from "path"
-import { t } from "../../i18n"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 
@@ -117,7 +116,7 @@ export class CodeIndexManager {
 		try {
 			this.assertInitialized()
 			return true
-		} catch (error) {
+		} catch {
 			return false
 		}
 	}
@@ -415,14 +414,6 @@ export class CodeIndexManager {
 			ignoreInstance,
 			rooIgnoreController,
 		)
-
-		// Validate embedder configuration before proceeding
-		const validationResult = await this._serviceFactory.validateEmbedder(embedder)
-		if (!validationResult.valid) {
-			const errorMessage = validationResult.error || "Embedder configuration validation failed"
-			this._stateManager.setSystemState("Error", errorMessage)
-			throw new Error(errorMessage)
-		}
 
 		// (Re)Initialize orchestrator
 		this._orchestrator = new CodeIndexOrchestrator(

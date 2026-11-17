@@ -1,10 +1,22 @@
 // npx vitest run api/providers/fetchers/__tests__/openrouter.spec.ts
 
+import http from "http"
+import nock from "nock"
+import type { AddressInfo } from "net"
 import * as path from "path"
 
 import { back as nockBack } from "nock"
 
-import { getOpenRouterModelEndpoints, getOpenRouterModels, parseOpenRouterModel } from "../openrouter"
+import type { ModelInfo } from "@roo-code/types"
+
+import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../modelCache"
+
+import {
+	applyOpenRouterMoonshotK3Profile,
+	getOpenRouterModelEndpoints,
+	getOpenRouterModels,
+	parseOpenRouterModel,
+} from "../openrouter"
 
 nockBack.fixtures = path.join(__dirname, "fixtures")
 nockBack.setMode("lockdown")
@@ -307,6 +319,141 @@ describe("OpenRouter API", () => {
 
 			getSpy.mockRestore()
 		})
+
+		it("bounds the endpoints request with the model-catalog fetch timeout", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("anthropic/claude-sonnet-4")
+
+			// This request bypasses getModels()' single-flight, so it must carry its own
+			// bound: without a timeout a stalled response keeps the caller's shared
+			// catalog load pending and later callers join it instead of retrying.
+			expect(getSpy).toHaveBeenCalledWith(
+				"https://openrouter.ai/api/v1/models/anthropic/claude-sonnet-4/endpoints",
+				{
+					timeout: MODEL_CATALOG_FETCH_TIMEOUT_MS,
+					signal: expect.any(AbortSignal),
+					maxContentLength: 1024 * 1024,
+				},
+			)
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for an image-output model", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: {
+					data: {
+						id: "vendor/image-model",
+						name: "Image Model",
+						architecture: { output_modalities: ["image"] },
+						endpoints: [{ provider_name: "P", context_length: 1000 }],
+					},
+				},
+			})
+
+			await expect(getOpenRouterModelEndpoints("vendor/image-model")).resolves.toEqual({})
+
+			getSpy.mockRestore()
+		})
+
+		it.each([
+			["a non-numeric", "bad", false],
+			["a numeric", 4096, true],
+		])("with untrustedBaseUrl handles %s context_length", async (_name, contextLength, accepted) => {
+			const axios = await import("axios")
+			const endpoint = { name: "P", provider_name: "P", context_length: contextLength }
+			const body = { data: { id: "m", name: "M", endpoints: [endpoint] } }
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: body })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			const result = await getOpenRouterModelEndpoints("m", undefined, { untrustedBaseUrl: true })
+
+			if (accepted) {
+				expect(Object.keys(result)).toEqual(["P"])
+				expect(result["P"]).toMatchObject({ contextWindow: 4096 })
+			} else {
+				expect(result).toEqual({})
+				// Trusted callers keep the lenient fallback.
+				await expect(getOpenRouterModelEndpoints("m")).resolves.toHaveProperty("P")
+			}
+
+			getSpy.mockRestore()
+		})
+
+		it("bounds the total time of a body that streams slowly after the headers arrive", async () => {
+			const server = http.createServer((_req, res) => {
+				res.writeHead(200, { "Content-Type": "application/json" })
+				// One byte at a time keeps the socket active, so only a total deadline can stop it.
+				const timer = setInterval(() => res.write(" "), 50)
+				res.on("close", () => clearInterval(timer))
+			})
+			await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve))
+			const { port } = server.address() as AddressInfo
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			nock.enableNetConnect("127.0.0.1")
+
+			try {
+				const start = Date.now()
+				const result = await getOpenRouterModelEndpoints(
+					"m",
+					{ openRouterBaseUrl: `http://127.0.0.1:${port}` },
+					{ untrustedBaseUrl: true, timeoutMs: 300 },
+				)
+
+				expect(result).toEqual({})
+				expect(Date.now() - start).toBeLessThan(2000)
+			} finally {
+				nock.disableNetConnect()
+				server.closeAllConnections()
+				await new Promise((resolve) => server.close(resolve))
+			}
+		})
+
+		it("uses the caller timeout when given", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({
+				data: { data: { id: "m", name: "M", endpoints: [] } },
+			})
+
+			await getOpenRouterModelEndpoints("m", undefined, { timeoutMs: 10_000 })
+
+			expect(getSpy).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ timeout: 10_000 }))
+
+			getSpy.mockRestore()
+		})
+
+		it("with untrustedBaseUrl logs no host name when the request fails", async () => {
+			const axios = await import("axios")
+			const getSpy = vi
+				.spyOn(axios.default, "get")
+				.mockRejectedValue(new Error("getaddrinfo ENOTFOUND secret.example.com"))
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await getOpenRouterModelEndpoints(
+				"m",
+				{ openRouterBaseUrl: "https://secret.example.com" },
+				{ untrustedBaseUrl: true },
+			)
+
+			expect(JSON.stringify(errorSpy.mock.calls)).not.toContain("secret.example.com")
+
+			getSpy.mockRestore()
+		})
+
+		it("returns no endpoints for a body without an endpoints list", async () => {
+			const axios = await import("axios")
+			const getSpy = vi.spyOn(axios.default, "get").mockResolvedValue({ data: { data: { id: "m" } } })
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(getOpenRouterModelEndpoints("m")).resolves.toEqual({})
+
+			getSpy.mockRestore()
+		})
 	})
 
 	describe("parseOpenRouterModel", () => {
@@ -502,6 +649,34 @@ describe("OpenRouter API", () => {
 			expect(result.supportsReasoningBinary).toBe(true)
 		})
 
+		it("sets claude-haiku-5-5 model to Anthropic max tokens and omits temperature", () => {
+			const mockModel = {
+				name: "Claude Haiku 5.5",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: 64000,
+				pricing: {
+					prompt: "0.0000001",
+					completion: "0.0000005",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "anthropic/claude-haiku-5.5",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: 64000,
+				supportedParameters: ["reasoning", "include_reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+			expect(result.supportsReasoningBudget).toBe(true)
+			expect(result.supportsReasoningBinary).toBe(true)
+		})
+
 		it("sets horizon-alpha model to 32k max tokens", () => {
 			const mockModel = {
 				name: "Horizon Alpha",
@@ -548,6 +723,63 @@ describe("OpenRouter API", () => {
 
 			expect(result.maxTokens).toBe(32768)
 			expect(result.contextWindow).toBe(128000)
+		})
+
+		it("applies the Moonshot K3 profile for moonshotai/kimi-k3", () => {
+			const mockModel = {
+				name: "Kimi K3",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: null,
+				pricing: {
+					prompt: "0.0000006",
+					completion: "0.000003",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "moonshotai/kimi-k3",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: null,
+				supportedParameters: ["reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
+		})
+
+		it("applies the Moonshot K3 profile for ~moonshotai/kimi-latest", () => {
+			const mockModel = {
+				name: "Kimi Latest",
+				description: "Test model",
+				context_length: 1000000,
+				max_completion_tokens: null,
+				pricing: {
+					prompt: "0.0000006",
+					completion: "0.000003",
+				},
+			}
+
+			const result = parseOpenRouterModel({
+				id: "~moonshotai/kimi-latest",
+				model: mockModel,
+				inputModality: ["text", "image"],
+				outputModality: ["text"],
+				maxTokens: null,
+				supportedParameters: ["reasoning"],
+			})
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
 		})
 
 		it("does not override max tokens for other models", () => {
@@ -666,6 +898,61 @@ describe("OpenRouter API", () => {
 			})
 
 			expect(resultWithoutTools.supportedParameters).toContain("max_tokens")
+		})
+	})
+
+	describe("applyOpenRouterMoonshotK3Profile", () => {
+		it("overrides stale cached values for moonshotai/kimi-k3", () => {
+			const stale: ModelInfo = {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 0.6,
+				outputPrice: 3,
+				supportsReasoningEffort: true,
+			}
+
+			const result = applyOpenRouterMoonshotK3Profile("moonshotai/kimi-k3", stale)
+
+			expect(result).toEqual({
+				...stale,
+				maxTokens: 32768,
+				supportsReasoningEffort: ["low", "high", "max"],
+				reasoningEffort: "high",
+				supportsTemperature: true,
+				defaultTemperature: 1,
+			})
+			// The original record (e.g. a shared cache entry) must not be mutated.
+			expect(stale.maxTokens).toBe(209716)
+			expect(stale.supportsReasoningEffort).toBe(true)
+		})
+
+		it("applies the profile to ~moonshotai/kimi-latest", () => {
+			const stale: ModelInfo = {
+				maxTokens: 209716,
+				contextWindow: 1000000,
+				supportsPromptCache: true,
+				supportsReasoningEffort: true,
+			}
+
+			const result = applyOpenRouterMoonshotK3Profile("~moonshotai/kimi-latest", stale)
+
+			expect(result.maxTokens).toBe(32768)
+			expect(result.supportsReasoningEffort).toEqual(["low", "high", "max"])
+			expect(result.reasoningEffort).toBe("high")
+			expect(result.supportsTemperature).toBe(true)
+			expect(result.defaultTemperature).toBe(1)
+		})
+
+		it("returns other models unchanged", () => {
+			const info: ModelInfo = {
+				maxTokens: 8192,
+				contextWindow: 200000,
+				supportsPromptCache: true,
+			}
+
+			expect(applyOpenRouterMoonshotK3Profile("openai/gpt-4o", info)).toBe(info)
 		})
 	})
 })

@@ -21,7 +21,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 	const { t } = useAppTranslation()
 
 	const [openAiNativeBaseUrlSelected, setOpenAiNativeBaseUrlSelected] = useState(
-		!!apiConfiguration?.openAiNativeBaseUrl,
+		!!apiConfiguration.openAiNativeBaseUrl,
 	)
 
 	const handleInputChange = useCallback(
@@ -51,7 +51,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 			{openAiNativeBaseUrlSelected && (
 				<>
 					<VSCodeTextField
-						value={apiConfiguration?.openAiNativeBaseUrl || ""}
+						value={apiConfiguration.openAiNativeBaseUrl || ""}
 						type="url"
 						onInput={handleInputChange("openAiNativeBaseUrl")}
 						placeholder="https://api.openai.com/v1"
@@ -60,7 +60,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 				</>
 			)}
 			<VSCodeTextField
-				value={apiConfiguration?.openAiNativeApiKey || ""}
+				value={apiConfiguration.openAiNativeApiKey || ""}
 				type="password"
 				onInput={handleInputChange("openAiNativeApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -70,7 +70,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.openAiNativeApiKey && (
+			{!apiConfiguration.openAiNativeApiKey && (
 				<VSCodeButtonLink href="https://platform.openai.com/api-keys" appearance="secondary">
 					{t("settings:providers.getOpenAiApiKey")}
 				</VSCodeButtonLink>

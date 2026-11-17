@@ -92,7 +92,7 @@ export class EditTool extends BaseTool<"edit"> {
 				fileContent = await fs.readFile(absolutePath, "utf8")
 				// Normalize line endings to LF for consistent matching
 				fileContent = fileContent.replace(/\r\n/g, "\n")
-			} catch (error) {
+			} catch {
 				task.consecutiveMistakeCount++
 				task.recordToolError("edit")
 				const errorMessage = `Failed to read file '${relPath}'. Please verify file permissions and try again.`
@@ -274,4 +274,3 @@ function escapeRegExp(input: string): string {
 }
 
 export const editTool = new EditTool()
-export const searchAndReplaceTool = editTool // alias for backward compat

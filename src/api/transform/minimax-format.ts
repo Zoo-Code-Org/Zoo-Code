@@ -100,19 +100,3 @@ export function mergeEnvironmentDetailsForMiniMax(
 
 	return result
 }
-
-/**
- * @deprecated Use mergeEnvironmentDetailsForMiniMax instead. This function extracted
- * environment_details to the system prompt, but the new approach merges them into
- * tool_result content like r1-format does with mergeToolResultText.
- */
-export function extractEnvironmentDetailsForMiniMax(messages: Anthropic.Messages.MessageParam[]): {
-	messages: Anthropic.Messages.MessageParam[]
-	extractedSystemContent: string[]
-} {
-	// For backwards compatibility, just return the merged messages with empty extracted content
-	return {
-		messages: mergeEnvironmentDetailsForMiniMax(messages),
-		extractedSystemContent: [],
-	}
-}

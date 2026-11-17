@@ -45,11 +45,13 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.86.0
+## Nowości w v3.98.0
 
-- ✨ **Obsługa nowych modeli:** Korzystaj z GPT-6.1 Sol, poprawionego limitu wyjściowego Claude Opus 5.5 i wybierz DeepSeek V4.1 Flash w OpenCode Go.
-- 🧭 **Niezawodne przerywanie i wstrzymywanie zadań:** Zachowaj pierwszy powód przerwania, resetuj stan przerwania strumienia przy każdym żądaniu i zapobiegaj ponownemu uruchamianiu odrzuconych podzadań przez przerwane zadania.
-- 🛠️ **Niezawodne narzędzia, prompty i strumieniowanie interfejsu:** Zachowaj argumenty narzędzi przesyłane strumieniowo w całości, egzekwuj zasady używania narzędzi MCP, zapobiegaj zmyślonym numerom linii i usprawnij aktualizacje czatu.
+- 🎟️ Wypróbuj nadchodzącą subskrypcję Zoo Pass. 2 tygodnie bezpłatnego dostępu; ograniczona liczba miejsc
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Automatyczne tytuły zadań i dokładniejsza kontrola modeli:** Automatycznie generuj tytuły nowych zadań głównych i wypróbuj eksperymentalne ustawienie dynamicznego nakładu myślenia.
+- 🔌 **Szersza obsługa modeli i dostawców:** Korzystaj z GPT-6.1 Terra i pobieraj najnowszą listę modeli Friendli.
+- 🛡️ **Bezpieczniejsze i bardziej responsywne czaty oraz edycje:** Poprawnie anuluj żądania OpenAI Native i Requesty, chroń diffy poza obszarem roboczym przed przypadkową automatyczną akceptacją, spójnie zmieniaj język interfejsu i unikaj niejednoznacznego przywracania kopii zapasowych JSON.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 

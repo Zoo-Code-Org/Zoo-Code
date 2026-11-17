@@ -66,7 +66,7 @@ export class FileWatcher implements IFileWatcher {
 	 */
 	constructor(
 		private workspacePath: string,
-		private context: vscode.ExtensionContext,
+		_context: vscode.ExtensionContext,
 		private readonly cacheManager: CacheManager,
 		private embedder?: IEmbedder,
 		private vectorStore?: IVectorStore,

@@ -48,7 +48,7 @@ export const VercelAiGateway = ({
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.vercelAiGatewayApiKey || ""}
+				value={apiConfiguration.vercelAiGatewayApiKey || ""}
 				type="password"
 				onInput={handleInputChange("vercelAiGatewayApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -58,7 +58,7 @@ export const VercelAiGateway = ({
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.vercelAiGatewayApiKey && (
+			{!apiConfiguration.vercelAiGatewayApiKey && (
 				<VSCodeButtonLink
 					href="https://vercel.com/d?to=%2F%5Bteam%5D%2F%7E%2Fai%2Fapi-keys&title=AI+Gateway+API+Key"
 					appearance="primary"

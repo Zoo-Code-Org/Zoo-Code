@@ -46,10 +46,7 @@ export function ensureDirectoryExists(dirPath: string): void {
 	}
 }
 
-/**
- * Initialize workspace directories
- */
-export function initializeWorkspace(workspacePath: string): void {
+function initializeWorkspace(workspacePath: string): void {
 	const dirs = [getGlobalStorageDir(), getWorkspaceStorageDir(workspacePath), getLogsDir()]
 
 	for (const dir of dirs) {

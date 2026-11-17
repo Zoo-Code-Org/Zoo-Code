@@ -31,7 +31,7 @@ export function addApplyDiffResultFixtures(mock: InstanceType<typeof LLMock>) {
 		},
 		{
 			toolCallId: "call_apply_diff_error_001",
-			expected: ["No sufficiently similar match found at line: 1", "This content does not exist"],
+			expected: ["No sufficiently similar match found at line: 1", "- Best Match Location: "],
 			result: "The apply_diff operation on `apply-diff-tool-fixture/error-handling.txt` was rejected - the search content did not match any content in the file, so it was not modified.",
 			id: "call_apply_diff_error_002",
 		},

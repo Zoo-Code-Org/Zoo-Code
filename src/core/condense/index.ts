@@ -275,8 +275,9 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	const response: SummarizeResponse = { messages, cost: 0, summary: "" }
 
-	// Get messages to summarize (all messages since the last summary, if any)
-	const messagesToSummarize = getMessagesSinceLastSummary(messages)
+	// Get effective history to summarize (all messages since the last summary, if any)
+	const effectiveHistory = getEffectiveApiHistory(messages)
+	const messagesToSummarize = getMessagesSinceLastSummary(effectiveHistory)
 
 	if (messagesToSummarize.length <= 1) {
 		const error =
@@ -329,7 +330,6 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	let summary = ""
 	let cost = 0
-	let outputTokens = 0
 
 	try {
 		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
@@ -340,7 +340,6 @@ export async function summarizeConversation(options: SummarizeConversationOption
 			} else if (chunk.type === "usage") {
 				// Record final usage chunk only
 				cost = chunk.totalCost ?? 0
-				outputTokens = chunk.outputTokens ?? 0
 			}
 		}
 	} catch (error) {

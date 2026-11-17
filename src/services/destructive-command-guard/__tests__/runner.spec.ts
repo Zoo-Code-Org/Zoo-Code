@@ -138,8 +138,9 @@ describe("runDcg", () => {
 		const result = runDcg("/dcg", "echo test", "/workspace")
 		child.emit("error", new Error("ENOENT"))
 
-		await expect(result).rejects.toThrow("Unable to start DCG: ENOENT")
-		expect(warnSpy).toHaveBeenCalledWith("[DCG]", "Unable to start DCG: ENOENT")
+		const message = "Unable to start DCG executable '/dcg' in working directory '/workspace': ENOENT"
+		await expect(result).rejects.toThrow(message)
+		expect(warnSpy).toHaveBeenCalledWith("[DCG]", message)
 	})
 
 	it("rejects excessive output and kills the process", async () => {

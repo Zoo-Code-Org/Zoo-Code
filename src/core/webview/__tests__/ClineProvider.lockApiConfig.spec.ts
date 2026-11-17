@@ -1,6 +1,8 @@
+import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest run core/webview/__tests__/ClineProvider.lockApiConfig.spec.ts
 
 import * as vscode from "vscode"
+import { makeCompositeDisposable } from "../../../test-utils/vscode"
 import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
@@ -10,6 +12,7 @@ vi.mock("vscode", () => ({
 	ExtensionContext: vi.fn(),
 	OutputChannel: vi.fn(),
 	WebviewView: vi.fn(),
+	Disposable: { from: (...subscriptions: vscode.Disposable[]) => makeCompositeDisposable(...subscriptions) },
 	Uri: {
 		joinPath: vi.fn(),
 		file: vi.fn(),
@@ -313,8 +316,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 				cspSource: "vscode-webview://test-csp-source",
 			},
 			visible: true,
-			onDidDispose: vi.fn().mockImplementation((callback) => {
-				callback()
+			onDidDispose: vi.fn().mockImplementation(() => {
 				return { dispose: vi.fn() }
 			}),
 			onDidChangeVisibility: vi.fn().mockImplementation(() => {
@@ -322,7 +324,15 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			}),
 		} as unknown as vscode.WebviewView
 
-		provider = new ClineProvider(mockContext, mockOutputChannel, "sidebar", new ContextProxy(mockContext))
+		provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock getMcpHub method
 		provider.getMcpHub = vi.fn().mockReturnValue({
@@ -364,6 +374,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 		})
 
 		it("keeps normal mode-specific lookup/load behavior when lockApiConfigAcrossModes is false", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			await mockContext.workspaceState.update("lockApiConfigAcrossModes", false)
 
 			const getModeConfigIdSpy = vi
@@ -384,7 +395,7 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 
 			await provider.handleModeSwitch("architect")
 
-			expect(getModeConfigIdSpy).toHaveBeenCalledWith("architect")
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
 		})
 	})

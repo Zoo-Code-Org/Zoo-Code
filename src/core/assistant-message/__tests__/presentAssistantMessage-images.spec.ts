@@ -1,9 +1,13 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-images.spec.ts
 
-import { describe, it, expect, beforeEach, vi } from "vitest"
-import { Anthropic } from "@anthropic-ai/sdk"
+import { DispatchState } from "../../task/dispatchState"
+import { describe, it, expect, beforeEach, beforeAll, vi } from "vitest"
+import type { Anthropic } from "@anthropic-ai/sdk"
 import { presentAssistantMessage } from "../presentAssistantMessage"
-import { Task } from "../../task/Task"
+import { validateToolUse } from "../../tools/validateToolUse"
+import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
+
+type UserContentBlock = Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam
 
 // Mock dependencies
 vi.mock("../../task/Task")
@@ -24,6 +28,28 @@ vi.mock("@roo-code/telemetry", () => ({
 	},
 }))
 
+// The snapshot the presenter consumes; the getState double below deliberately
+// disagrees with it so any surviving live-read re-entry is caught by assertions.
+const baseSnapshot: RequestPolicySnapshot = {
+	disabledTools: [],
+	customModes: [],
+}
+
+// The real Task.prototype.pushToolResultToUserContent, imported past the
+// module-level automock. Binding the real implementation (rather than a copy of
+// its partition logic) is what makes the #1307 tests non-tautological: deleting
+// the grouping from Task.ts makes these tests fail.
+type RealPushToolResult = (
+	this: { userMessageContent: UserContentBlock[] },
+	toolResult: Anthropic.ToolResultBlockParam,
+) => boolean
+let realPushToolResultToUserContent: RealPushToolResult
+
+beforeAll(async () => {
+	const actual = await vi.importActual<typeof import("../../task/Task")>("../../task/Task")
+	realPushToolResultToUserContent = actual.Task.prototype.pushToolResultToUserContent
+})
+
 describe("presentAssistantMessage - Image Handling in Native Tool Calling", () => {
 	let mockTask: any
 
@@ -33,14 +59,15 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
 			didCompleteReadingStream: false,
 			didRejectTool: false,
 			didAlreadyUseTool: false,
+			activeToolContexts: new Map(),
 			consecutiveMistakeCount: 0,
 			getTaskMode: vi.fn().mockResolvedValue("code"),
 			api: {
@@ -48,13 +75,17 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			},
 			recordToolUsage: vi.fn(),
 			toolRepetitionDetector: {
-				check: vi.fn().mockReturnValue({ allowExecution: true }),
+				check: vi.fn().mockReturnValue({ action: "allow" }),
 			},
 			providerRef: {
 				deref: () => ({
 					getState: vi.fn().mockResolvedValue({
 						mode: "code",
-						customModes: [],
+						// Poisoned: disagrees with baseSnapshot, so a live
+						// read here changes validation behavior and fails tests.
+						customModes: [{ slug: "poison", name: "Poison", roleDefinition: "", groups: [] }],
+						disabledTools: ["ask_followup_question"],
+						experiments: { customTools: true },
 					}),
 				}),
 			},
@@ -62,17 +93,11 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
 		}
 
-		// Add pushToolResultToUserContent method after mockTask is created so it can reference mockTask
-		mockTask.pushToolResultToUserContent = vi.fn().mockImplementation((toolResult: any) => {
-			const existingResult = mockTask.userMessageContent.find(
-				(block: any) => block.type === "tool_result" && block.tool_use_id === toolResult.tool_use_id,
-			)
-			if (existingResult) {
-				return false
-			}
-			mockTask.userMessageContent.push(toolResult)
-			return true
-		})
+		// Bind the REAL Task.prototype method to this structural double: it only
+		// reads and rewrites `userMessageContent`, which the double provides.
+		mockTask.pushToolResultToUserContent = vi.fn((toolResult: Anthropic.ToolResultBlockParam) =>
+			realPushToolResultToUserContent.call(mockTask, toolResult),
+		)
 	})
 
 	it("should preserve images in tool_result for native tool calling", async () => {
@@ -89,15 +114,6 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 		]
 
 		// Create a mock askApproval that includes images in the response
-		const imageBlock: Anthropic.ImageBlockParam = {
-			type: "image",
-			source: {
-				type: "base64",
-				media_type: "image/png",
-				data: "base64ImageData",
-			},
-		}
-
 		mockTask.ask = vi.fn().mockResolvedValue({
 			response: "yesButtonClicked",
 			text: "I see a cat",
@@ -105,7 +121,14 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 		})
 
 		// Execute presentAssistantMessage
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
+
+		// Frozen-snapshot proof: a live read of the poisoned getState double
+		// would have produced { ask_followup_question: false } requirements
+		// and a non-empty customModes list here.
+		const validateCalls = vi.mocked(validateToolUse).mock.calls
+		expect(validateCalls[0][2]).toEqual([])
+		expect(validateCalls[0][3]).toEqual({})
 
 		// Verify that userMessageContent was populated
 		expect(mockTask.userMessageContent.length).toBeGreaterThan(0)
@@ -148,7 +171,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: undefined,
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const toolResult = mockTask.userMessageContent.find(
 			(item: any) => item.type === "tool_result" && item.tool_use_id === toolCallId,
@@ -176,7 +199,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: ["data:image/png;base64,dogImageData"],
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const textBlocks = mockTask.userMessageContent.filter((item: any) => item.type === "text")
 		expect(textBlocks.length).toBeGreaterThan(0)
@@ -205,7 +228,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			images: undefined,
 		})
 
-		await presentAssistantMessage(mockTask)
+		await presentAssistantMessage(mockTask, baseSnapshot)
 
 		const toolResult = mockTask.userMessageContent.find(
 			(item: any) => item.type === "tool_result" && item.tool_use_id === toolCallId,
@@ -242,7 +265,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			// Process the second tool (should be skipped)
 			mockTask.currentStreamingContentIndex = 1
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			// Find the tool_result for the second tool
 			const toolResult = mockTask.userMessageContent.find(
@@ -281,7 +304,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			// Process the second tool (should be skipped)
 			mockTask.currentStreamingContentIndex = 1
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			const textBlocks = mockTask.userMessageContent.filter((item: any) => item.type === "text")
 			expect(textBlocks.some((b: any) => String(b.text).includes("XML tool calls are no longer supported"))).toBe(
@@ -306,7 +329,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 
 			mockTask.didRejectTool = true
 
-			await presentAssistantMessage(mockTask)
+			await presentAssistantMessage(mockTask, baseSnapshot)
 
 			// Find the tool_result
 			const toolResult = mockTask.userMessageContent.find(
@@ -317,6 +340,129 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			expect(toolResult).toBeDefined()
 			expect(toolResult.is_error).toBe(true)
 			expect(toolResult.content).toContain("was interrupted and not executed")
+		})
+	})
+
+	describe("tool_result contiguity (GitHub #1307)", () => {
+		it("groups images after all tool_results when parallel tools return images", async () => {
+			const toolCallId1 = "tool_call_img_1"
+			const toolCallId2 = "tool_call_img_2"
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: toolCallId1,
+					name: "ask_followup_question",
+					params: { question: "Q1?", follow_up: [] },
+					nativeArgs: { question: "Q1?", follow_up: [] },
+				},
+				{
+					type: "tool_use",
+					id: toolCallId2,
+					name: "ask_followup_question",
+					params: { question: "Q2?", follow_up: [] },
+					nativeArgs: { question: "Q2?", follow_up: [] },
+				},
+			]
+
+			// The tool asks the followup question via task.ask("followup", ...);
+			// distinct image data per question so ordering is observable.
+			mockTask.ask = vi.fn().mockImplementation((type: string, message: string) => {
+				if (type !== "followup") {
+					return Promise.resolve({ response: "yesButtonClicked", text: "approved", images: undefined })
+				}
+				const prefix = message.includes("Q1") ? "a" : "b"
+				return Promise.resolve({
+					response: "yesButtonClicked",
+					text: `answer ${prefix}`,
+					images: [`data:image/png;base64,${prefix}-result`],
+				})
+			})
+
+			await presentAssistantMessage(mockTask, baseSnapshot)
+
+			// Anthropic rejects user messages where image blocks sit between
+			// tool_result blocks, so images from both tools must be grouped
+			// after the last tool_result instead of interleaved.
+			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
+				"tool_result",
+				"tool_result",
+				"image",
+				"image",
+			])
+			expect(
+				mockTask.userMessageContent
+					.filter(
+						(block: UserContentBlock): block is Anthropic.ToolResultBlockParam =>
+							block.type === "tool_result",
+					)
+					.map((block: Anthropic.ToolResultBlockParam) => block.tool_use_id),
+			).toEqual([toolCallId1, toolCallId2])
+			expect(
+				mockTask.userMessageContent
+					.filter((block: UserContentBlock): block is Anthropic.ImageBlockParam => block.type === "image")
+					.map(
+						(block: Anthropic.ImageBlockParam) =>
+							(block.source as { type: "base64"; media_type: string; data: string }).data,
+					),
+			).toEqual(["a-result", "b-result"])
+		})
+
+		it("relocates an earlier tool's images after a later tool_result with no images", async () => {
+			const toolCallId1 = "tool_call_img_3"
+			const toolCallId2 = "tool_call_img_4"
+
+			mockTask.assistantMessageContent = [
+				{
+					type: "tool_use",
+					id: toolCallId1,
+					name: "ask_followup_question",
+					params: { question: "Q1?", follow_up: [] },
+					nativeArgs: { question: "Q1?", follow_up: [] },
+				},
+				{
+					type: "tool_use",
+					id: toolCallId2,
+					name: "ask_followup_question",
+					params: { question: "Q2?", follow_up: [] },
+					nativeArgs: { question: "Q2?", follow_up: [] },
+				},
+			]
+
+			mockTask.ask = vi.fn().mockImplementation((type: string, message: string) => {
+				if (type === "followup" && message.includes("Q1")) {
+					return Promise.resolve({
+						response: "yesButtonClicked",
+						text: "answer a",
+						images: ["data:image/png;base64,a-result"],
+					})
+				}
+				return Promise.resolve({ response: "yesButtonClicked", text: "answer b", images: undefined })
+			})
+
+			await presentAssistantMessage(mockTask, baseSnapshot)
+
+			expect(mockTask.userMessageContent.map((block: UserContentBlock) => block.type)).toEqual([
+				"tool_result",
+				"tool_result",
+				"image",
+			])
+			expect(
+				mockTask.userMessageContent
+					.filter(
+						(block: UserContentBlock): block is Anthropic.ToolResultBlockParam =>
+							block.type === "tool_result",
+					)
+					.map((block: Anthropic.ToolResultBlockParam) => block.tool_use_id),
+			).toEqual([toolCallId1, toolCallId2])
+			expect(
+				mockTask.userMessageContent
+					.filter((block: UserContentBlock): block is Anthropic.ImageBlockParam => block.type === "image")
+					.map(
+						(block: Anthropic.ImageBlockParam) =>
+							(block.source as { type: "base64"; media_type: string; data: string }).data,
+					),
+			).toEqual(["a-result"])
 		})
 	})
 })

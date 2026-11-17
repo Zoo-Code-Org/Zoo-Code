@@ -2,7 +2,7 @@ import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
 import * as yaml from "yaml"
-import type { MarketplaceItem, MarketplaceItemType, InstallMarketplaceItemOptions, McpParameter } from "@roo-code/types"
+import type { MarketplaceItem, InstallMarketplaceItemOptions, McpParameter } from "@roo-code/types"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { ensureSettingsDirectoryExists } from "../../utils/globalContext"
 import type { CustomModesManager } from "../../core/config/CustomModesManager"
@@ -78,7 +78,7 @@ export class SimpleInstaller {
 						line = slugLineIndex + 1 // Convert to 1-based line number
 					}
 				}
-			} catch (error) {
+			} catch {
 				// If we can't find the line number, that's okay
 			}
 
@@ -293,7 +293,7 @@ export class SimpleInstaller {
 		}
 	}
 
-	private async removeMode(item: MarketplaceItem, target: "project" | "global"): Promise<void> {
+	private async removeMode(item: MarketplaceItem, _target: "project" | "global"): Promise<void> {
 		if (!this.customModesManager) {
 			throw new Error("CustomModesManager is not available")
 		}
@@ -311,17 +311,13 @@ export class SimpleInstaller {
 		try {
 			const modeData = yaml.parse(content)
 			modeSlug = modeData.slug
-		} catch (error) {
+		} catch {
 			throw new Error("Invalid mode content: unable to parse YAML")
 		}
 
 		if (!modeSlug) {
 			throw new Error("Mode missing slug identifier")
 		}
-
-		// Get the current modes to determine the source
-		const modes = await this.customModesManager.getCustomModes()
-		const mode = modes.find((m) => m.slug === modeSlug)
 
 		// Use CustomModesManager to delete the mode configuration
 		// This also handles rules folder deletion
@@ -336,22 +332,13 @@ export class SimpleInstaller {
 			const existingData = JSON.parse(existing)
 
 			if (existingData?.mcpServers) {
-				// Parse the item content to get server names
-				let content: string
-				if (Array.isArray(item.content)) {
-					// Array of McpInstallationMethod objects - use first method
-					content = item.content[0].content
-				} else {
-					content = item.content
-				}
-
 				const serverName = item.id
 				delete existingData.mcpServers[serverName]
 
 				// Always write back the file, even if empty
 				await fs.writeFile(filePath, JSON.stringify(existingData, null, 2), "utf-8")
 			}
-		} catch (error) {
+		} catch {
 			// File doesn't exist or other error, nothing to remove
 		}
 	}

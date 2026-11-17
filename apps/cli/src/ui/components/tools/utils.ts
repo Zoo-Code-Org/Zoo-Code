@@ -33,16 +33,6 @@ export function sanitizeContent(text: string): string {
 }
 
 /**
- * Format diff stats as a colored string representation
- */
-export function formatDiffStats(stats: { added: number; removed: number }): { added: string; removed: string } {
-	return {
-		added: `+${stats.added}`,
-		removed: `-${stats.removed}`,
-	}
-}
-
-/**
  * Get a friendly display name for a tool
  */
 export function getToolDisplayName(toolName: string): string {
@@ -144,28 +134,6 @@ export function getToolIconName(toolName: string): IconName {
 	}
 
 	return iconNames[toolName] || "gear"
-}
-
-/**
- * Format a file path for display, optionally with workspace indicator
- */
-export function formatPath(path: string, isOutsideWorkspace?: boolean, isProtected?: boolean): string {
-	let result = path
-	const badges: string[] = []
-
-	if (isOutsideWorkspace) {
-		badges.push("outside workspace")
-	}
-
-	if (isProtected) {
-		badges.push("protected")
-	}
-
-	if (badges.length > 0) {
-		result += ` (${badges.join(", ")})`
-	}
-
-	return result
 }
 
 /**

@@ -15,7 +15,6 @@ import {
 	AnthropicReasoningParams,
 	AnthropicProviderReasoningParams,
 	OpenAiReasoningParams,
-	RooReasoningParams,
 	GeminiReasoningParams,
 	GeminiThinkingLevel,
 } from "../reasoning"
@@ -477,7 +476,7 @@ describe("reasoning.ts", () => {
 				reasoningBudget: undefined,
 			})
 
-			expect(result).toEqual({ type: "adaptive" })
+			expect(result).toEqual({ type: "adaptive", display: "summarized" })
 		})
 
 		it("should omit thinking for Claude Opus 4.7 when reasoning is disabled", () => {
@@ -1241,7 +1240,7 @@ describe("reasoning.ts", () => {
 				reasoningBudget: undefined,
 			})
 
-			expect(result).toEqual({ type: "adaptive" })
+			expect(result).toEqual({ type: "adaptive", display: "summarized" })
 		})
 
 		it("should return correct types for OpenAI reasoning params", () => {

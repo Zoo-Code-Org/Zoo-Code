@@ -208,5 +208,4 @@ describe("ConfigLoader", () => {
 			expect(notFound).toBeNull()
 		})
 	})
-
 })

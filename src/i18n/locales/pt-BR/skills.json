@@ -11,6 +11,9 @@
 		"missing_update_modes_fields": "Campos obrigatórios ausentes: skillName ou source",
 		"manager_unavailable": "Gerenciador de habilidades não disponível",
 		"missing_delete_fields": "Campos obrigatórios ausentes: skillName ou source",
-		"skill_not_found": "Habilidade \"{{name}}\" não encontrada"
+		"skill_not_found": "Habilidade \"{{name}}\" não encontrada",
+		"container_skill_read_only": "A habilidade \"{{name}}\" vem de uma pasta de habilidades vinculada por link simbólico ({{path}}) e não pode ser movida nem excluída aqui. Altere-a na pasta de origem.",
+		"symlink_escapes_skill": "Não é possível mover a habilidade: o link simbólico {{link}} aponta para fora da pasta da habilidade e quebraria no novo local.",
+		"move_restore_failed": "Falha ao mover a skill ({{error}}) e a pasta original não pôde ser restaurada em {{path}}. Sua skill está segura em {{backupPath}}; mova-a de volta manualmente."
 	}
 }

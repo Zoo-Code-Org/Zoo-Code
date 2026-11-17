@@ -4,14 +4,21 @@ import { LLM, LLMInfo, LLMInstanceInfo, LMStudioClient } from "@lmstudio/sdk"
 import { type ModelInfo, lMStudioDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 
 import { throwIfAborted } from "../utils/abort-signal"
+import { getLoggableOrigin } from "../utils/endpoint-origin"
 
-import { flushModels, getModels } from "./modelCache"
+import type { ApiHandler } from "../../index"
+
+import { flushModels } from "./modelCache"
 
 const modelsWithLoadedDetails = new Set<string>()
 
 export const hasLoadedFullDetails = (modelId: string): boolean => modelsWithLoadedDetails.has(modelId)
 
-export const forceFullModelDetailsLoad = async (baseUrl: string, modelId: string): Promise<void> => {
+export const forceFullModelDetailsLoad = async (
+	baseUrl: string,
+	modelId: string,
+	handler: ApiHandler,
+): Promise<void> => {
 	try {
 		// Test the connection to LM Studio first
 		// Crrors will be caught further down.
@@ -21,13 +28,13 @@ export const forceFullModelDetailsLoad = async (baseUrl: string, modelId: string
 		const client = new LMStudioClient({ baseUrl: lmsUrl })
 		await client.llm.model(modelId)
 		// Flush and refresh cache to get updated model details
-		await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, true)
+		await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, handler, true)
 
 		// Mark this model as having full details loaded.
 		modelsWithLoadedDetails.add(modelId)
 	} catch (error) {
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error refreshing LMStudio model details: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
@@ -85,7 +92,7 @@ export async function getLMStudioModels(
 				// Use the model path as the key since that's what users select
 				models[model.path] = parseLMStudioModel(model)
 			}
-		} catch (error) {
+		} catch {
 			console.warn("Failed to list downloaded models, falling back to loaded models only")
 		}
 
@@ -129,7 +136,7 @@ export async function getLMStudioModels(
 		throwIfAborted(opts?.signal)
 
 		if (error.code === "ECONNREFUSED") {
-			console.warn(`Error connecting to LMStudio at ${baseUrl}`)
+			console.warn(`Error connecting to LMStudio at ${getLoggableOrigin(baseUrl)}`)
 		} else {
 			console.error(
 				`Error fetching LMStudio models: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,

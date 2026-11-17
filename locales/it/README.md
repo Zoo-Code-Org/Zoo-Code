@@ -47,11 +47,13 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.86.0
+## Novità in v3.98.0
 
-- ✨ **Supporto per nuovi modelli:** Usa GPT-6.1 Sol, approfitta del limite di output corretto di Claude Opus 5.5 e seleziona DeepSeek V4.1 Flash su OpenCode Go.
-- 🧭 **Interruzioni e annullamenti delle attività affidabili:** Conserva il primo motivo dell'annullamento, reimposta lo stato di annullamento dello stream per ogni richiesta e impedisci alle attività interrotte di rieseguire sottoattività rifiutate.
-- 🛠️ **Tool, prompt e streaming dell'interfaccia affidabili:** Mantieni intatti gli argomenti dei tool trasmessi in streaming, applica la policy dei tool MCP, evita numeri di riga inventati e rendi più fluidi gli aggiornamenti della chat.
+- 🎟️ Prova il prossimo abbonamento Zoo Pass. 2 settimane di accesso gratuito; posti limitati
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Titoli delle attività automatici e controllo dei modelli più preciso:** Genera automaticamente titoli per le nuove attività radice e prova l’impostazione sperimentale per lo sforzo di ragionamento dinamico.
+- 🔌 **Supporto ampliato per modelli e provider:** Usa GPT-6.1 Terra e recupera l’elenco più recente dei modelli Friendli.
+- 🛡️ **Chat e modifiche più sicure e reattive:** Annulla correttamente le richieste OpenAI Native e Requesty, evita l’approvazione automatica accidentale dei diff esterni al workspace, cambia lingua all’interfaccia in modo coerente ed evita recuperi ambigui dei backup JSON.
 
 ## Cosa può fare Zoo Code per TE?
 

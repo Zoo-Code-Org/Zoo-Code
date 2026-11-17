@@ -501,3 +501,56 @@ describe("OpenAICompatible Component - includeMaxTokens checkbox", () => {
 		})
 	})
 })
+
+describe("OpenAICompatible Component - openAiStrictToolSchemas checkbox", () => {
+	const mockSetApiConfigurationField = vi.fn()
+	const mockOrganizationAllowList = {
+		allowAll: true,
+		providers: {},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("should default to checked when openAiStrictToolSchemas is undefined", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		expect(checkboxInput).toBeChecked()
+	})
+
+	it("should show checkbox as unchecked when openAiStrictToolSchemas is false", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{ openAiStrictToolSchemas: false } as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		expect(checkboxInput).not.toBeChecked()
+	})
+
+	it("should call setApiConfigurationField when toggled", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{ openAiStrictToolSchemas: true } as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaistricttoolschemas")
+		fireEvent.click(checkboxInput)
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiStrictToolSchemas", false)
+	})
+})

@@ -1,5 +1,4 @@
 import fs from "fs/promises"
-import * as path from "path"
 
 import { getCommand, getCommands } from "../commands"
 

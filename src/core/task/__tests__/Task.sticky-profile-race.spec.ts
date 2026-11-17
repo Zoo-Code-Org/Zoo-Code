@@ -1,7 +1,5 @@
 // npx vitest run core/task/__tests__/Task.sticky-profile-race.spec.ts
 
-import * as vscode from "vscode"
-
 import type { ProviderSettings } from "@roo-code/types"
 import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"

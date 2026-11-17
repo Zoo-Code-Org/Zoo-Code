@@ -3,15 +3,20 @@
 //
 import * as path from "path"
 import * as fs from "fs/promises"
+import type { Stats } from "fs"
 
 import { ExecuteCommandOptions } from "../ExecuteCommandTool"
 import { TerminalRegistry } from "../../../integrations/terminal/TerminalRegistry"
 import { Terminal } from "../../../integrations/terminal/Terminal"
 import { ExecaTerminal } from "../../../integrations/terminal/ExecaTerminal"
 import type { RooTerminalCallbacks } from "../../../integrations/terminal/types"
+const filesystemMocks = vitest.hoisted(() => ({
+	access: vitest.fn(),
+	stat: vitest.fn(),
+}))
 
-// Mock fs to control directory existence checks
-vitest.mock("fs/promises")
+// ExecuteCommandTool uses the default import; this suite configures named imports.
+vitest.mock("fs/promises", () => ({ ...filesystemMocks, default: filesystemMocks }))
 
 // Mock TerminalRegistry to control terminal creation
 vitest.mock("../../../integrations/terminal/TerminalRegistry")
@@ -33,8 +38,9 @@ describe("executeCommand", () => {
 	beforeEach(() => {
 		vitest.clearAllMocks()
 
-		// Mock fs.access to simulate directory existence
-		;(fs.access as any).mockResolvedValue(undefined)
+		// Mock filesystem checks to simulate an accessible directory.
+		vitest.mocked(fs.access).mockResolvedValue(undefined)
+		vitest.mocked(fs.stat).mockResolvedValue({ isDirectory: () => true } as Stats)
 
 		// Create mock provider
 		mockProvider = {
@@ -52,7 +58,7 @@ describe("executeCommand", () => {
 				deref: vitest.fn().mockResolvedValue(mockProvider),
 			},
 			say: vitest.fn().mockResolvedValue(undefined),
-			terminalProcess: undefined,
+			terminalProcesses: new Map(),
 		}
 
 		// Create mock process that resolves immediately
@@ -92,7 +98,7 @@ describe("executeCommand", () => {
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue(currentCwd)
 
 			// Mock the terminal process to complete successfully
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				// Simulate command completion
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
@@ -103,6 +109,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -132,7 +139,7 @@ describe("executeCommand", () => {
 			mockVSCodeTerminal.getCurrentWorkingDirectory = vitest.fn().mockReturnValue("/test/project/changed-dir")
 			mockVSCodeTerminal.runCommand = vitest
 				.fn()
-				.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+				.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 					setTimeout(() => {
 						void callbacks.onCompleted("Command output", mockProcess)
 						callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -143,6 +150,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -164,7 +172,7 @@ describe("executeCommand", () => {
 			mockExecaTerminal.getCurrentWorkingDirectory = vitest.fn().mockReturnValue("/test/project")
 			mockExecaTerminal.runCommand = vitest
 				.fn()
-				.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+				.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 					setTimeout(() => {
 						void callbacks.onCompleted("Command output", mockProcess)
 						callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -175,6 +183,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: true, // Forces ExecaTerminal
 			}
@@ -194,7 +203,7 @@ describe("executeCommand", () => {
 			const customCwd = "/custom/absolute/path"
 
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue(customCwd)
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -204,6 +213,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd,
 				terminalShellIntegrationDisabled: false,
@@ -223,7 +233,7 @@ describe("executeCommand", () => {
 			const resolvedCwd = path.resolve(mockTask.cwd, relativeCwd)
 
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue(resolvedCwd)
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -233,6 +243,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd: relativeCwd,
 				terminalShellIntegrationDisabled: false,
@@ -251,10 +262,13 @@ describe("executeCommand", () => {
 			const nonExistentCwd = "/non/existent/path"
 
 			// Mock fs.access to throw error for non-existent directory
-			;(fs.access as any).mockRejectedValue(new Error("Directory does not exist"))
+			vitest
+				.mocked(fs.access)
+				.mockRejectedValue(Object.assign(new Error("Directory does not exist"), { code: "ENOENT" }))
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				customCwd: nonExistentCwd,
 				terminalShellIntegrationDisabled: false,
@@ -268,12 +282,45 @@ describe("executeCommand", () => {
 			expect(result).toBe(`Working directory '${nonExistentCwd}' does not exist.`)
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
 		})
+
+		it("should return error when custom working directory is an existing file", async () => {
+			const filePath = "/existing/file.txt"
+			vitest.mocked(fs.stat).mockResolvedValueOnce({ isDirectory: () => false } as Stats)
+
+			const [rejected, result] = await executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
+				command: "echo test",
+				customCwd: filePath,
+				terminalShellIntegrationDisabled: false,
+			})
+
+			expect(rejected).toBe(false)
+			expect(result).toBe(`Working directory '${filePath}' is not a directory.`)
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
+
+		it("reports a non-directory ancestor instead of a missing working directory", async () => {
+			vitest
+				.mocked(fs.stat)
+				.mockRejectedValueOnce(Object.assign(new Error("Not a directory"), { code: "ENOTDIR" }))
+
+			const result = await executeCommandInTerminal(mockTask, {
+				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
+				command: "echo test",
+				customCwd: "/existing/file.txt/child",
+			})
+
+			expect(result).toEqual([false, "Working directory '/existing/file.txt/child' is not a directory."])
+			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("Terminal Provider Selection", () => {
 		it("posts fallback status when cmd.exe requires the Execa provider", async () => {
 			vitest.spyOn(Terminal, "isActiveShellCmdExe").mockReturnValue(true)
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -283,6 +330,7 @@ describe("executeCommand", () => {
 
 			await executeCommandInTerminal(mockTask, {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			})
@@ -296,7 +344,7 @@ describe("executeCommand", () => {
 		})
 
 		it("should use vscode provider when shell integration is enabled", async () => {
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -306,6 +354,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -318,7 +367,7 @@ describe("executeCommand", () => {
 		})
 
 		it("should use execa provider when shell integration is disabled", async () => {
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command output", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -328,6 +377,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo test",
 				terminalShellIntegrationDisabled: true,
 			}
@@ -341,6 +391,48 @@ describe("executeCommand", () => {
 	})
 
 	describe("Command Execution States", () => {
+		it("keeps a separate terminal process per tool call id and aborts only the timed-out one", async () => {
+			vitest.useFakeTimers()
+			const makePendingProcess = () =>
+				Object.assign(new Promise<void>(() => {}), { continue: vitest.fn(), abort: vitest.fn() })
+			const processA = makePendingProcess()
+			const processB = makePendingProcess()
+			mockTerminal.runCommand.mockReturnValueOnce(processA).mockReturnValueOnce(processB)
+
+			const executionA = executeCommandInTerminal(mockTask, {
+				executionId: "exec-a",
+				toolCallId: "call-a",
+				command: "sleep 10",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 1_000,
+			})
+			await vitest.advanceTimersByTimeAsync(0)
+			const executionB = executeCommandInTerminal(mockTask, {
+				executionId: "exec-b",
+				toolCallId: "call-b",
+				command: "sleep 20",
+				terminalShellIntegrationDisabled: false,
+				commandExecutionTimeout: 5_000,
+			})
+			await vitest.advanceTimersByTimeAsync(0)
+
+			expect(mockTask.terminalProcesses.get("call-a")).toBe(processA)
+			expect(mockTask.terminalProcesses.get("call-b")).toBe(processB)
+
+			await vitest.advanceTimersByTimeAsync(1_000)
+			await executionA
+
+			expect(processA.abort).toHaveBeenCalled()
+			expect(processB.abort).not.toHaveBeenCalled()
+			expect(mockTask.terminalProcesses.has("call-a")).toBe(false)
+			expect(mockTask.terminalProcesses.get("call-b")).toBe(processB)
+
+			await vitest.advanceTimersByTimeAsync(4_000)
+			await executionB
+
+			expect(mockTask.terminalProcesses.size).toBe(0)
+		})
+
 		it("posts timeout status when command execution exceeds the user limit", async () => {
 			vitest.useFakeTimers()
 			const pendingProcess = Object.assign(new Promise<void>(() => {}), {
@@ -351,6 +443,7 @@ describe("executeCommand", () => {
 
 			const executionPromise = executeCommandInTerminal(mockTask, {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "sleep 10",
 				terminalShellIntegrationDisabled: false,
 				commandExecutionTimeout: 1_000,
@@ -371,7 +464,7 @@ describe("executeCommand", () => {
 
 		it("should handle completed command with exit code 0", async () => {
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue("/test/project")
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command completed successfully", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -381,6 +474,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "echo success",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -396,7 +490,7 @@ describe("executeCommand", () => {
 
 		it("should handle completed command with non-zero exit code", async () => {
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue("/test/project")
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command failed", mockProcess)
 					callbacks.onShellExecutionComplete({ exitCode: 1 }, mockProcess)
@@ -406,6 +500,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "exit 1",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -422,7 +517,7 @@ describe("executeCommand", () => {
 
 		it("should handle command terminated by signal", async () => {
 			mockTerminal.getCurrentWorkingDirectory.mockReturnValue("/test/project")
-			mockTerminal.runCommand.mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 				setTimeout(() => {
 					void callbacks.onCompleted("Command interrupted", mockProcess)
 					callbacks.onShellExecutionComplete(
@@ -439,6 +534,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "long-running-command",
 				terminalShellIntegrationDisabled: false,
 			}
@@ -467,7 +563,7 @@ describe("executeCommand", () => {
 				...mockTerminal,
 				terminal: { show: vitest.fn() },
 				getCurrentWorkingDirectory: vitest.fn().mockReturnValue(updatedCwd),
-				runCommand: vitest.fn().mockImplementation((command: string, callbacks: RooTerminalCallbacks) => {
+				runCommand: vitest.fn().mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
 					setTimeout(() => {
 						void callbacks.onCompleted("Directory changed", mockProcess)
 						callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
@@ -480,6 +576,7 @@ describe("executeCommand", () => {
 
 			const options: ExecuteCommandOptions = {
 				executionId: "test-123",
+				toolCallId: "test-tool-call-id",
 				command: "cd src && pwd",
 				terminalShellIntegrationDisabled: false,
 			}

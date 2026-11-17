@@ -27,7 +27,11 @@ import { initializeNetworkProxy } from "./utils/networkProxy"
 import { Package } from "./shared/package"
 import { formatLanguage } from "./shared/language"
 import { ContextProxy } from "./core/config/ContextProxy"
+import { setPersistenceTraceSink, tracePersistenceEvent } from "./core/task-persistence/persistenceTrace"
 import { ClineProvider } from "./core/webview/ClineProvider"
+import { registerCopilotModelBroadcast } from "./services/language-models/copilotModelBroadcast"
+import { ClineProviderFactory } from "./core/webview/ClineProviderFactory"
+import { WebviewFocusTracker } from "./core/webview/WebviewFocusTracker"
 import { DIFF_VIEW_URI_SCHEME } from "./integrations/editor/DiffViewProvider"
 import { Terminal } from "./integrations/terminal/Terminal"
 import { TerminalRegistry } from "./integrations/terminal/TerminalRegistry"
@@ -49,6 +53,7 @@ import {
 	CodeActionProvider,
 } from "./activate"
 import { initializeI18n } from "./i18n"
+import { buildApiHandler } from "./api"
 import { initializeModelCacheRefresh } from "./api/providers/fetchers/modelCache"
 import { initZooCodeAuth } from "./services/zoo-code-auth"
 
@@ -121,6 +126,10 @@ export async function activate(context: vscode.ExtensionContext) {
 	extensionContext = context
 	outputChannel = vscode.window.createOutputChannel(Package.outputChannel)
 	context.subscriptions.push(outputChannel)
+	// Mirror persistence trace lines (task ID + process ID) into the output
+	// channel and the console, so a restart-persistence investigation can
+	// order UI-message writer activity across extension-host restarts.
+	setPersistenceTraceSink(createDualLogger(createOutputChannelLogger(outputChannel)))
 	outputChannel.appendLine(`${Package.name} extension activated - ${JSON.stringify(Package)}`)
 
 	// Initialize network proxy configuration early, before any network requests.
@@ -196,6 +205,13 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
+	context.subscriptions.push(
+		registerCopilotModelBroadcast({
+			getTargets: () => ClineProvider.getAllInstances(),
+			log: (message) => outputChannel.appendLine(message),
+		}),
+	)
+
 	const codeIndexScope = new CodeIndexScope(context)
 	context.subscriptions.push(codeIndexScope)
 	try {
@@ -225,7 +241,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize the provider *before* the Roo Code Cloud service.
-	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, mdmService)
+	const webviewFocusTracker = new WebviewFocusTracker()
+	context.subscriptions.push(webviewFocusTracker)
+	const provider = new ClineProvider(context, outputChannel, "sidebar", contextProxy, webviewFocusTracker, mdmService)
 
 	// Initialize Roo Code Cloud service.
 	settingsUpdatedHandler = () => {
@@ -314,7 +332,7 @@ export async function activate(context: vscode.ExtensionContext) {
 		}),
 	)
 
-	registerCodeActions(context)
+	registerCodeActions(context, webviewFocusTracker)
 	registerTerminalActions(context)
 
 	// Allows other extensions to activate once Roo is ready.
@@ -377,17 +395,19 @@ export async function activate(context: vscode.ExtensionContext) {
 	}
 
 	// Initialize background model cache refresh
-	void initializeModelCacheRefresh().catch((error) => {
+	void initializeModelCacheRefresh((provider) => buildApiHandler({ apiProvider: provider })).catch((error) => {
 		outputChannel.appendLine(
 			`[ModelCache] Background refresh initialization failed: ${error instanceof Error ? error.message : String(error)}`,
 		)
 	})
 
-	return new API(outputChannel, provider, socketPath, enableLogging)
+	const providerFactory = new ClineProviderFactory(context, outputChannel, webviewFocusTracker)
+	return new API(outputChannel, provider, providerFactory, socketPath, enableLogging)
 }
 
 // This method is called when your extension is deactivated.
 export async function deactivate() {
+	tracePersistenceEvent("shutdown")
 	outputChannel.appendLine(`${Package.name} extension deactivated`)
 
 	if (cloudService && CloudService.hasInstance()) {

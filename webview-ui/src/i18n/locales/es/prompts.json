@@ -1,6 +1,4 @@
 {
-	"title": "Modos",
-	"done": "Listo",
 	"modes": {
 		"title": "Modos",
 		"createNewMode": "Crear nuevo modo",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Exportar modo",
-		"description": "Exporta este modo a un archivo YAML con todas las reglas incluidas para compartir fácilmente con otros.",
-		"export": "Exportar modo",
-		"exporting": "Exportando..."
+		"export": "Exportar modo"
 	},
 	"importMode": {
 		"selectLevel": "Elige dónde importar este modo:",
@@ -81,7 +77,6 @@
 		"title": "Solicitud del sistema (modo {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Solicitudes de soporte",
 		"resetPrompt": "Restablecer la solicitud {{promptType}} a valores predeterminados",
 		"prompt": "Solicitud",
 		"enhance": {
@@ -94,10 +89,12 @@
 			"includeTaskHistory": "Incluir historial de tareas como contexto",
 			"includeTaskHistoryDescription": "Cuando está habilitado, los últimos 10 mensajes de la conversación actual se incluirán como contexto al mejorar solicitudes, ayudando a generar sugerencias más relevantes y conscientes del contexto."
 		},
-		"condense": {
-			"apiConfiguration": "Configuración de API para la condensación de contexto",
-			"apiConfigDescription": "Selecciona qué configuración de API usar para las operaciones de condensación de contexto. Deja sin seleccionar para usar la configuración activa actual.",
-			"useCurrentConfig": "Usar la configuración de API actualmente seleccionada"
+		"taskTitle": {
+			"enabled": "Generar títulos de tareas automáticamente",
+			"enabledDescription": "Resume en segundo plano el primer mensaje de cada tarea nueva en un título corto. Las solicitudes de título no se incluyen en el coste de la tarea. Los perfiles de GitHub Copilot y VS Code LM consumen tu cuota.",
+			"apiConfiguration": "Configuración de API",
+			"useTaskConfig": "Usar la configuración de API de la tarea",
+			"apiConfigDescription": "Se recomienda un perfil ligero sin razonamiento. Si eliges otro perfil, el comienzo de tu mensaje se enviará a ese proveedor."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nueva tarea",
 				"description": "Inicia una nueva tarea con entrada del usuario. Disponible en la Paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título de la tarea",
+				"description": "Genera en segundo plano un título corto para las tareas nuevas. Se muestra en el historial y en el encabezado de la tarea. Configúralo abajo."
 			}
 		}
 	},
@@ -196,7 +197,6 @@
 		"title": "Eliminar modo",
 		"message": "¿Estás seguro de que quieres eliminar el modo \"{{modeName}}\"?",
 		"rulesFolder": "Este modo tiene una carpeta de reglas en {{folderPath}} que también se eliminará.",
-		"descriptionNoRules": "¿Estás seguro de que quieres eliminar este modo personalizado?",
 		"confirm": "Eliminar",
 		"cancel": "Cancelar"
 	}

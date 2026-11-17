@@ -3,6 +3,7 @@ import { ClineProvider } from "./ClineProvider"
 import { saveTaskMessages } from "../task-persistence"
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
+
 import { t } from "../../i18n"
 
 export interface CheckpointRestoreConfig {
@@ -26,6 +27,9 @@ export interface CheckpointRestoreConfig {
 export async function handleCheckpointRestoreOperation(config: CheckpointRestoreConfig): Promise<void> {
 	const { provider, currentCline, messageTs, checkpoint, operation, editData } = config
 
+	let checkpointRestored = false
+	let pendingEditOwner: object | undefined
+
 	try {
 		// For delete operations, ensure the task is properly aborted to handle any pending ask operations
 		// This prevents "Current ask promise was ignored" errors
@@ -44,7 +48,7 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// For edit operations, set up pending edit data before restoration
 		if (operation === "edit" && editData) {
 			const operationId = `task-${currentCline.taskId}`
-			provider.setPendingEditOperation(operationId, {
+			pendingEditOwner = provider.setPendingEditOperation(operationId, {
 				messageTs,
 				editedContent: editData.editedContent,
 				images: editData.images,
@@ -60,6 +64,8 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 			mode: "restore",
 			operation,
 		})
+
+		checkpointRestored = true
 
 		// For delete operations, we need to save messages and reinitialize
 		// For edit operations, the reinitialization happens automatically
@@ -79,26 +85,29 @@ export async function handleCheckpointRestoreOperation(config: CheckpointRestore
 		// For edit operations, the task cancellation in checkpointRestore
 		// will trigger reinitialization, which will process pendingEditAfterRestore
 	} catch (error) {
+		if (operation === "edit" && !checkpointRestored && pendingEditOwner) {
+			provider.clearPendingEditOperation(`task-${currentCline.taskId}`, pendingEditOwner)
+		}
 		console.error(`Error in checkpoint restore (${operation}):`, error)
-		vscode.window.showErrorMessage(
-			`Error during checkpoint restore: ${error instanceof Error ? error.message : String(error)}`,
+		void vscode.window.showErrorMessage(
+			t("common:errors.checkpoint_restore_failed", {
+				error: error instanceof Error ? error.message : String(error),
+			}),
 		)
+		if (operation === "delete" && !checkpointRestored && currentCline.abort) {
+			try {
+				const restart = t("common:checkpoints.restart")
+				const response = await vscode.window.showWarningMessage(
+					t("common:checkpoints.restart_after_restore_failure"),
+					restart,
+				)
+				if (response === restart) {
+					await provider.restartTaskIfCurrent(currentCline)
+				}
+			} catch (restartError) {
+				console.error("Failed to restart task after checkpoint restore failure:", restartError)
+			}
+		}
 		throw error
-	}
-}
-
-/**
- * Common checkpoint restore validation and initialization utility.
- * This can be used by any checkpoint restore flow that needs to wait for initialization.
- */
-export async function waitForClineInitialization(provider: ClineProvider, timeoutMs: number = 3000): Promise<boolean> {
-	try {
-		await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, {
-			timeout: timeoutMs,
-		})
-		return true
-	} catch (error) {
-		vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
-		return false
 	}
 }

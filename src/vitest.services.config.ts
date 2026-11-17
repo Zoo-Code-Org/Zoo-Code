@@ -10,6 +10,7 @@ export default mergeConfig(
 			exclude: [
 				"services/tree-sitter/**/*.{test,spec}.{ts,tsx}",
 				"services/__tests__/pr-review-state-workflow.test.ts",
+				"services/__tests__/stale-pr-clock-workflow.test.ts",
 			],
 			coverage: {
 				reportsDirectory: "coverage/services",

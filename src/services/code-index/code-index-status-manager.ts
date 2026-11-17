@@ -10,6 +10,7 @@ export class CodeIndexStatusManager implements vscode.Disposable {
 	private currentManager?: CodeIndexManager
 	private progressSubscription?: vscode.Disposable
 	private editorSubscription?: vscode.Disposable
+	private workspaceFoldersSubscription?: vscode.Disposable
 
 	public constructor(
 		private readonly getManagerForWorkspace: (workspacePath: string) => CodeIndexManager | undefined,
@@ -17,6 +18,9 @@ export class CodeIndexStatusManager implements vscode.Disposable {
 
 	public init(): void {
 		this.editorSubscription = vscode.window.onDidChangeActiveTextEditor(() => this.updateSubscription())
+		this.workspaceFoldersSubscription = vscode.workspace.onDidChangeWorkspaceFolders(() =>
+			this.updateSubscription(),
+		)
 		this.updateSubscription()
 	}
 
@@ -69,11 +73,14 @@ export class CodeIndexStatusManager implements vscode.Disposable {
 
 	public dispose(): void {
 		const editorSubscription = this.editorSubscription
+		const workspaceFoldersSubscription = this.workspaceFoldersSubscription
 		const progressSubscription = this.progressSubscription
 		this.currentManager = undefined
 		this.editorSubscription = undefined
+		this.workspaceFoldersSubscription = undefined
 		this.progressSubscription = undefined
 		this.disposeSubscription(editorSubscription, "active editor")
+		this.disposeSubscription(workspaceFoldersSubscription, "workspace folders")
 		this.disposeSubscription(progressSubscription, "progress")
 	}
 }

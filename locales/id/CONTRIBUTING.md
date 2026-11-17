@@ -11,98 +11,133 @@
 </sub>
 </div>
 
+<a id="contributing-to-zoo-code"></a>
+
 # Berkontribusi pada Zoo Code
 
-Zoo Code adalah proyek yang digerakkan oleh komunitas, dan kami sangat menghargai setiap kontribusi. Untuk menyederhanakan kolaborasi, kami beroperasi dengan dasar [Pendekatan Masalah-Dulu](#pendekatan-masalah-dulu), yang berarti semua [Pull Request (PR)](#mengajukan-pull-request) harus terlebih dahulu ditautkan ke Masalah GitHub. Harap tinjau panduan ini dengan cermat.
+Zoo Code adalah proyek komunitas. Kami menghargai setiap kontribusi. Kami memakai pendekatan [issue dulu](#issue-first-approach). Artinya, setiap [Pull Request (PR)](#submitting-a-pull-request) harus menautkan issue GitHub. Baca panduan ini dengan teliti.
 
-## Daftar Isi
+<a id="table-of-contents"></a>
 
-- [Sebelum Anda Berkontribusi](#sebelum-anda-berkontribusi)
-- [Menemukan & Merencanakan Kontribusi Anda](#menemukan--merencanakan-kontribusi-anda)
-- [Proses Pengembangan & Pengajuan](#proses-pengembangan--pengajuan)
-- [Ekspektasi Pull Request](#ekspektasi-pull-request)
-- [Kontribusi Berbantuan AI](#kontribusi-berbantuan-ai)
-- [Hukum](#hukum)
+## Daftar isi
 
-## Sebelum Anda Berkontribusi
+- [Sebelum berkontribusi](#before-you-contribute)
+- [Menemukan dan merencanakan kontribusimu](#finding--planning-your-contribution)
+- [Proses pengembangan dan pengajuan](#development--submission-process)
+    - [Harapan untuk Pull Request](#pull-request-expectations)
+    - [Kontribusi dengan bantuan AI](#ai-assisted-contributions)
+    - [Gaya penulisan](#writing-style)
+- [Ketentuan hukum](#legal)
 
-### 1. Kode Etik
+<a id="before-you-contribute"></a>
 
-Semua kontributor harus mematuhi [Kode Etik](./CODE_OF_CONDUCT.md) kami.
+## Sebelum berkontribusi
 
-### 2. Peta Jalan Proyek
+<a id="1-code-of-conduct"></a>
 
-Peta jalan kami memandu arah proyek. Sejajarkan kontribusi Anda dengan tujuan-tujuan utama ini:
+### 1. Kode etik
 
-### Keandalan Utama
+Semua kontributor harus mengikuti [kode etik](./CODE_OF_CONDUCT.md) kami.
 
-- Pastikan pengeditan diff dan eksekusi perintah secara konsisten andal.
-- Kurangi titik gesekan yang menghalangi penggunaan rutin.
-- Jamin kelancaran operasi di semua lokal dan platform.
-- Perluas dukungan yang kuat untuk berbagai penyedia dan model AI.
+<a id="2-project-roadmap"></a>
 
-### Pengalaman Pengguna yang Ditingkatkan
+### 2. Peta jalan proyek
 
-- Sederhanakan UI/UX untuk kejelasan dan intuitivitas.
-- Terus tingkatkan alur kerja untuk memenuhi harapan tinggi yang dimiliki pengembang untuk alat yang digunakan sehari-hari.
+Peta jalan kami menunjukkan arah proyek. Sesuaikan kontribusimu dengan tujuan ini:
 
-### Memimpin dalam Kinerja Agen
+<a id="reliability-first"></a>
 
-- Tetapkan tolok ukur evaluasi (eval) yang komprehensif untuk mengukur produktivitas dunia nyata.
-- Permudah semua orang untuk menjalankan dan menafsirkan eval ini dengan mudah.
-- Kirimkan perbaikan yang menunjukkan peningkatan yang jelas dalam skor eval.
+### Keandalan lebih dulu
 
-Sebutkan keselarasan dengan area-area ini di PR Anda.
+- Buat pengeditan diff dan eksekusi perintah selalu andal.
+- Hapus masalah yang menghalangi orang memakai Zoo Code setiap hari.
+- Buat Zoo Code bekerja dalam semua bahasa dan di semua platform.
+- Tambahkan dukungan untuk lebih banyak penyedia dan model AI.
 
-### 3. Bergabunglah dengan Komunitas Zoo Code
+<a id="enhanced-user-experience"></a>
 
-- **Discord:** Bergabunglah dengan [Discord](https://discord.gg/VxfP4Vx3gX) kami.
-- **Reddit:** Bergabunglah dengan [Reddit](https://www.reddit.com/r/ZooCode/) kami.
+### Pengalaman pengguna yang lebih baik
 
-## Menemukan & Merencanakan Kontribusi Anda
+- Buat UI dan UX jelas dan mudah dipakai.
+- Perbaiki alur kerja. Pengembang mengharapkan standar tinggi dari alat yang mereka pakai setiap hari.
 
-### Jenis Kontribusi
+<a id="leading-on-agent-performance"></a>
 
-- **Perbaikan Bug:** Mengatasi masalah kode.
-- **Fitur Baru:** Menambahkan fungsionalitas.
-- **Dokumentasi:** Meningkatkan panduan dan kejelasan.
+### Unggul dalam kinerja agen
 
-### Pendekatan Masalah-Dulu
+- Buat tolok ukur evaluasi (evals) yang mengukur produktivitas dalam penggunaan nyata.
+- Buat evals mudah dijalankan dan dibaca.
+- Rilis perbaikan yang jelas meningkatkan skor evals.
 
-Semua kontribusi dimulai dengan Masalah GitHub menggunakan template ramping kami.
+Dalam PR-mu, sebutkan bidang mana yang didukung oleh perubahan itu.
 
-- **Periksa masalah yang ada**: Cari di [Masalah GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
-- **Buat masalah** menggunakan:
-    - **Penyempurnaan:** Template "Permintaan Penyempurnaan" (bahasa sederhana yang berfokus pada manfaat pengguna).
-    - **Bug:** Template "Laporan Bug" (repro minimal + yang diharapkan vs aktual + versi).
-- **Ingin mengerjakannya?** Beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/VxfP4Vx3gX) untuk ditugaskan. Penugasan akan dikonfirmasi di utas.
-- **PR harus menautkan ke masalah.** PR yang tidak tertaut dapat ditutup.
+<a id="3-join-the-zoo-code-community"></a>
 
-### Memutuskan Apa yang Akan Dikerjakan
+### 3. Bergabung dengan komunitas Zoo Code
 
-- Periksa [halaman GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) untuk melihat issues.
-- Untuk dokumentasi, kunjungi [Dokumentasi Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
+- **Discord:** Bergabung dengan [Discord](https://discord.gg/VxfP4Vx3gX) kami.
+- **Reddit:** Bergabung dengan [Reddit](https://www.reddit.com/r/ZooCode/) kami.
 
-### Melaporkan Bug
+<a id="finding--planning-your-contribution"></a>
 
-- Periksa laporan yang ada terlebih dahulu.
-- Buat bug baru menggunakan [template "Laporan Bug"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) dengan:
-    - Langkah-langkah reproduksi yang jelas dan bernomor
-    - Hasil yang diharapkan vs aktual
-    - Versi Zoo Code (wajib); penyedia/model API jika relevan
-- **Masalah keamanan**: Laporkan secara pribadi melalui [saran keamanan](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+## Menemukan dan merencanakan kontribusimu
 
-## Proses Pengembangan & Pengajuan
+<a id="types-of-contributions"></a>
 
-### Pengaturan Pengembangan
+### Jenis kontribusi
 
-1. **Fork & Klon:**
+- **Perbaikan bug:** Perbaiki masalah kode.
+- **Fitur baru:** Tambahkan fungsi.
+- **Dokumentasi:** Perbaiki panduan dan buat lebih jelas.
+
+<a id="issue-first-approach"></a>
+
+### Issue dulu
+
+Setiap kontribusi dimulai dengan issue GitHub. Pakai template singkat kami.
+
+- **Periksa issue yang ada**: Cari di [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- **Buat issue** dengan:
+    - **Peningkatan:** Template "Enhancement Request" (bahasa sederhana yang berfokus pada manfaat bagi pengguna).
+    - **Bug:** Template "Bug Report" (reproduksi minimal, hasil yang diharapkan dan hasil sebenarnya, versi).
+- **Tulis issue** dengan [gaya penulisan](#writing-style) di bawah ini.
+- **Ingin mengerjakannya?** Tulis komentar "Claiming" pada issue. Lalu hubungi tim inti di [Discord](https://discord.gg/VxfP4Vx3gX) untuk mendapat penugasan. Tim inti mengonfirmasi penugasan di utas.
+- **PR harus menautkan issue.** Kami bisa menutup PR tanpa tautan itu.
+
+<a id="deciding-what-to-work-on"></a>
+
+### Memilih pekerjaan
+
+- Lihat [halaman GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- Untuk dokumentasi, buka [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
+
+<a id="reporting-bugs"></a>
+
+### Melaporkan bug
+
+- Periksa laporan yang ada lebih dulu.
+- Buat laporan bug baru dengan [template "Bug Report"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) yang memuat:
+    - Langkah reproduksi yang jelas dan bernomor
+    - Hasil yang diharapkan dan hasil sebenarnya
+    - Versi Zoo Code (wajib)
+    - Penyedia API dan model, jika relevan
+- **Masalah keamanan**: Laporkan secara pribadi melalui [security advisories](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+
+<a id="development--submission-process"></a>
+
+## Proses pengembangan dan pengajuan
+
+<a id="development-setup"></a>
+
+### Menyiapkan lingkungan pengembangan
+
+1. **Buat fork dan clone:**
 
 ```
 git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
-2. **Instal Ketergantungan:**
+2. **Instal dependensi:**
 
 ```
 pnpm install
@@ -110,60 +145,117 @@ pnpm install
 
 3. **Debugging:** Buka dengan VS Code (`F5`).
 
-### Pedoman Menulis Kode
+<a id="writing-code-guidelines"></a>
 
-- Satu PR terfokus per fitur atau perbaikan.
+### Panduan menulis kode
+
+- Satu PR terfokus untuk setiap fitur atau perbaikan.
 - Ikuti praktik terbaik ESLint dan TypeScript.
-- Tulis komitmen yang jelas dan deskriptif yang merujuk pada masalah (mis., `Memperbaiki #123`).
-- Sediakan pengujian menyeluruh (`npm test`).
-- Rebase ke cabang `main` terbaru sebelum pengajuan.
+- Tulis commit yang jelas dan deskriptif dengan rujukan ke issue (misalnya, `Fixes #123`). Ikuti [gaya penulisan](#writing-style).
+- Uji perubahanmu secara menyeluruh (`npm test`).
+- Lakukan rebase ke versi terbaru cabang `main` sebelum mengajukan PR.
+
+<a id="submitting-a-pull-request"></a>
 
 ### Mengajukan Pull Request
 
-- Mulailah sebagai **PR Draf** jika mencari umpan balik awal.
-- Jelaskan perubahan Anda dengan jelas mengikuti Templat Pull Request.
-- Tautkan masalah di deskripsi/judul PR (mis., "Memperbaiki #123").
-- Sediakan tangkapan layar/video untuk perubahan UI.
-- Tunjukkan jika pembaruan dokumentasi diperlukan.
+- Mulai dengan **PR draf** jika kamu ingin masukan lebih awal.
+- Jelaskan perubahanmu dengan Pull Request Template. Ikuti [gaya penulisan](#writing-style).
+- Tautkan issue di deskripsi atau judul PR (misalnya, "Fixes #123").
+- Tambahkan tangkapan layar atau video untuk perubahan UI.
+- Sebutkan apakah perubahan itu memerlukan pembaruan dokumentasi.
+
+<a id="pull-request-policy"></a>
 
 ### Kebijakan Pull Request
 
-- Harus merujuk pada Masalah GitHub yang ditugaskan. Untuk ditugaskan: beri komentar "Mengklaim" pada masalah tersebut dan kirim DM ke tim inti di [Discord](https://discord.gg/VxfP4Vx3gX). Penugasan akan dikonfirmasi di utas.
-- PR yang tidak tertaut dapat ditutup.
-- PR harus lulus tes CI, selaras dengan peta jalan, dan memiliki dokumentasi yang jelas.
+- PR harus merujuk ke issue GitHub yang sudah ditugaskan. Untuk mendapat penugasan, tulis komentar "Claiming" pada issue. Lalu hubungi tim inti di [Discord](https://discord.gg/VxfP4Vx3gX). Tim inti mengonfirmasi penugasan di utas.
+- Kami bisa menutup PR tanpa tautan itu.
+- PR harus lulus pengujian CI, mengikuti peta jalan, dan memiliki dokumentasi yang jelas.
 
-### Proses Peninjauan
+<a id="review-process"></a>
 
-- **Triase Harian:** Pemeriksaan cepat oleh pengelola.
-- **Tinjauan Mendalam Mingguan:** Penilaian komprehensif.
-- **Iterasi dengan cepat** berdasarkan umpan balik.
+### Proses peninjauan
 
-### Ekspektasi Pull Request
+PR yang siap ditinjau harus memenuhi syarat ini:
 
-Pull Request harus dapat ditinjau, diuji, dan dapat dipelihara. Sebelum membuka PR, pastikan bahwa:
+- Lulus pemeriksaan CI yang wajib.
+- Menangani masukan peninjauan yang memerlukan tindakan.
+- Mendapat persetujuan baru dari pengelola atau CODEOWNER. Ini terjadi setelah peninjauan otomatis untuk commit terbaru selesai.
 
-- Perubahan dibatasi pada masalah, bug, atau peningkatan tertentu.
-- Anda dapat menjelaskan apa yang dilakukan perubahan dan mengapa hal itu benar.
-- Anda telah menguji perubahan secara lokal jika memungkinkan.
-- Anda bersedia merespons umpan balik ulasan dan melakukan perubahan tindak lanjut yang wajar.
-- PR tidak mengharuskan pengelola untuk menulis ulang, mendesain ulang, atau mengambil alih kepemilikan implementasi secara substansial sebelum dapat digabungkan.
+Peninjauan otomatis bisa menambahkan komentar panduan dan label status yang dikelola alur peninjauan. Ikuti langkah berikutnya dalam komentar. Jangan ubah label sendiri. Commit baru mengatur ulang status peninjauan untuk kode yang berubah.
 
-Pengelola dapat menutup PR yang tidak lengkap, terlalu luas, tidak aktif, tidak selaras dengan arah proyek, atau yang menciptakan beban ulasan atau pemeliharaan yang tidak proporsional. Menutup PR bukan merupakan penilaian terhadap kontributor; itu adalah keputusan pengelola bahwa perubahan tersebut tidak dapat diterima dalam bentuknya saat ini.
+Label `community-approved` menunjukkan persetujuan baru dari komunitas untuk commit terbaru. PR lalu menunggu peninjauan pengelola. Label ini memberi petunjuk prioritas kepada pengelola. Label ini tidak menggantikan peninjauan pengelola atau pemeriksaan wajib. Alur peninjauan mengelola label ini.
 
-### Kontribusi Berbantuan AI
+Peninjauan otomatis membantu pengelola. Ini tidak menggantikan persetujuan manusia. Kontributor luar tidak bisa mengarahkan CodeRabbit lewat komentar. Peninjauan yang memenuhi syarat dimulai ulang sendiri setelah CI wajib lulus. Pengelola menangani mulai ulang dalam kasus khusus. Peringatan bersifat saran, kecuali kebijakan repositori menyatakan sebaliknya. Pemeriksaan wajib bawaan GitHub, aturan CODEOWNER, dan perlindungan peninjauan menentukan apakah PR bisa digabungkan.
 
-Penggunaan alat AI diperbolehkan, tetapi kontributor tetap sepenuhnya bertanggung jawab atas kiriman mereka.
+- **Triase harian:** Pengelola melakukan pemeriksaan singkat.
+- **Peninjauan mendalam mingguan:** Pengelola melakukan penilaian lengkap.
+- **Segera lakukan penyesuaian** saat mendapat masukan.
 
-Jika Anda menggunakan alat AI untuk membantu membuat PR, Anda harus:
+<a id="pull-request-expectations"></a>
 
-- Meninjau dan memahami setiap perubahan yang berarti.
-- Mampu menjelaskan implementasi dan pertukaran dengan kata-kata Anda sendiri.
-- Menguji perubahan sendiri. Jika pengujian tidak praktis di lingkungan Anda, jelaskan alasannya dalam deskripsi PR dan uraikan bagaimana peninjau dapat memverifikasi perubahan tersebut.
-- Memverifikasi bahwa kode yang dihasilkan benar, diperlukan, dan kompatibel dengan lisensi proyek.
-- Pertimbangkan untuk mengungkapkan bantuan AI dalam deskripsi PR ketika hal itu secara material membentuk kode, pengujian, atau desain — ini membantu peninjau memberikan umpan balik yang lebih baik.
+### Harapan untuk Pull Request
 
-Jangan mengirimkan perubahan yang dihasilkan AI yang tidak Anda pahami atau tidak dapat Anda pertahankan melalui ulasan. Pengelola dapat menutup PR yang tampaknya sebagian besar dibantu AI tetapi tidak memiliki verifikasi manusia, alasan yang jelas, atau tindak lanjut ulasan.
+PR harus mudah ditinjau, sudah diuji, dan mudah dipelihara. Sebelum membuka PR, pastikan hal ini:
 
-## Hukum
+- Perubahan menangani satu issue, bug, atau peningkatan tertentu.
+- Kamu bisa menjelaskan apa yang dilakukan perubahan itu dan mengapa perubahan itu benar.
+- Kamu sudah menguji perubahan di komputermu jika memungkinkan.
+- Kamu akan menjawab masukan peninjauan dan membuat perubahan lanjutan yang wajar.
+- Pengelola tidak perlu menulis ulang, merancang ulang, atau mengambil alih perubahan sebelum PR bisa digabungkan.
 
-Dengan berkontribusi, Anda setuju bahwa kontribusi Anda akan dilisensikan di bawah Lisensi Apache 2.0, sesuai dengan lisensi Zoo Code.
+Pengelola bisa menutup PR karena alasan ini:
+
+- PR belum lengkap.
+- Cakupannya terlalu luas.
+- PR tidak aktif.
+- PR tidak mengikuti arah proyek.
+- PR menambah terlalu banyak pekerjaan peninjauan atau pemeliharaan.
+
+Menutup PR bukan penilaian terhadap kontributornya. Itu berarti pengelola tidak bisa menerima perubahan dalam bentuk saat ini.
+
+Bot juga menutup PR secara otomatis:
+
+- **60 hari tanpa aktivitas:** Bot menandai PR sebagai tidak aktif setelah 60 hari tanpa aktivitas. Jika tetap tidak ada aktivitas selama 7 hari berikutnya, bot menutup PR. Komentar, commit, atau peninjauan baru mengatur ulang penghitung waktu.
+- **14 hari tanpa aktivitas penulis:** Saat peninjau meminta perubahan, bot menambahkan label `awaiting-author`. Aktivitas penulis mengatur ulang penghitung waktu tidak aktif. Saat perubahan siap, minta peninjau melakukan peninjauan baru.
+
+Untuk mencegah penutupan otomatis PR, tambahkan label `do-not-close`, `pinned`, atau `work-in-progress`.
+
+<a id="ai-assisted-contributions"></a>
+
+### Kontribusi dengan bantuan AI
+
+Kamu boleh memakai alat AI. Kamu tetap bertanggung jawab penuh atas pengajuanmu.
+
+Jika kamu memakai alat AI untuk membantu membuat PR, kamu harus:
+
+- Meninjau dan memahami setiap perubahan penting.
+- Menjelaskan implementasi dan komprominya dengan kata-katamu sendiri.
+- Menguji perubahan sendiri. Jika kamu tidak bisa menguji di lingkunganmu, jelaskan alasannya dalam deskripsi PR. Jelaskan juga cara peninjau memeriksa perubahan itu.
+- Memastikan kode yang dihasilkan benar, diperlukan, dan sesuai dengan lisensi proyek.
+- Mempertimbangkan untuk menyebut bantuan AI dalam deskripsi PR. Lakukan ini jika bantuan AI banyak mengubah kode, pengujian, atau desain. Ini membantu peninjau memberi masukan yang lebih baik.
+
+Jangan ajukan perubahan buatan AI yang tidak kamu pahami. Jangan ajukan perubahan yang tidak bisa kamu pelihara selama peninjauan. Pengelola bisa menutup PR yang tampak banyak dibantu AI. Mereka bisa melakukannya jika tidak ada verifikasi manusia, alasan yang jelas, atau tindak lanjut dalam peninjauan.
+
+<a id="writing-style"></a>
+
+### Gaya penulisan
+
+Aturan ini berlaku untuk teks bahasa Inggris. Tulis judul issue, isi issue, judul PR, deskripsi PR, dan pesan commit dalam [Simplified Technical English (ASD-STE100)](https://www.asd-ste100.org/). Template issue dan PR memberi pengingat yang sama.
+
+- Pakai kalimat pendek. Pakai 20 kata atau kurang untuk satu instruksi.
+- Pakai kata sederhana. Tulis "use", bukan "utilize". Tulis "start", bukan "commence".
+- Pakai kalimat aktif. Tulis "the parser reads the file", bukan "the file is read by the parser".
+- Tulis satu gagasan dalam setiap kalimat.
+- Jangan pakai bentuk kata yang disingkat, titik koma, atau tanda pisah panjang.
+- Buat judul singkat dan spesifik.
+- Jangan ubah log, pesan kesalahan, pengenal, perintah, atau bukti reproduksi yang persis. Tempelkan apa adanya.
+
+Aturan ini adalah panduan penulisan. Peninjau tidak memeriksa kepatuhan formal terhadap ASD-STE100. Kode, pengenal, dan sintaks perintah tidak termasuk dalam aturan ini.
+
+<a id="legal"></a>
+
+## Ketentuan hukum
+
+Dengan berkontribusi, kamu setuju bahwa kontribusimu memakai Lisensi Apache 2.0. Ini adalah lisensi Zoo Code.

@@ -63,9 +63,7 @@ client.sendCommand({
 client.sendCommand({
 	commandName: "StartNewTask",
 	data: {
-		configuration: {
-			/* RooCode settings */
-		},
+		configuration: {/* RooCode settings */},
 		text: "Hello, world!",
 		images: [],
 		newTab: false,

@@ -1,29 +1,19 @@
 {
 	"readFile": {
-		"linesRange": " (第 {{start}}-{{end}} 行)",
-		"definitionsOnly": " (仅定义)",
-		"maxLines": " (最多 {{max}} 行)",
 		"imageTooLarge": "图片文件过大 ({{size}} MB)。允许的最大大小为 {{max}} MB。",
 		"imageWithSize": "图片文件 ({{size}} KB)"
 	},
 	"toolRepetitionLimitReached": "Zoo 似乎陷入循环，反复尝试同一操作 ({{toolName}})。这可能表明当前策略存在问题。请考虑重新描述任务、提供更具体的指示或引导其尝试不同的方法。",
+	"toolRepetitionSoftBlock": "工具 '{{toolName}}' 已被阻止，因为它刚刚以完全相同的参数被调用。重复完全相同的调用不太可能产生不同的结果。如果你确实需要再次调用它，请先说明为什么需要重复调用，以及这次你期望有什么不同。否则，请尝试不同的方法。",
 	"unknownToolError": "Zoo 尝试使用未知工具：\"{{toolName}}\"。正在重试...",
 	"missingToolParameter": "Zoo 尝试使用 {{toolName}} 但未提供必需参数 '{{paramName}}' 的值。正在重试...",
 	"missingToolParameterWithPath": "Zoo 尝试对 '{{relPath}}' 使用 {{toolName}} 但未提供必需参数 '{{paramName}}' 的值。正在重试...",
-	"codebaseSearch": {
-		"approval": "正在搜索代码库中的 '{{query}}'..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard 已拦截此命令。",
 			"blockedWithReason": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}",
 			"blockedWithRule": "Destructive Command Guard 已拦截此命令。（规则：{{ruleId}}）",
 			"blockedWithReasonAndRule": "Destructive Command Guard 已拦截此命令。来自 DCG 的消息：{{reason}}（规则：{{ruleId}}）"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "由于策略限制，无法创建新任务。"
 		}
 	},
 	"generateImage": {
@@ -33,9 +23,6 @@
 		"noImageGenerated": "响应中未生成图像",
 		"invalidImageData": "响应中的图像数据无效",
 		"invalidImageFormat": "收到的图像格式无效",
-		"unknownError": "发生未知错误",
-		"roo": {
-			"authRequired": "图像生成需要 Zoo Code Cloud 认证。请登录 Zoo Code Cloud。"
-		}
+		"unknownError": "发生未知错误"
 	}
 }

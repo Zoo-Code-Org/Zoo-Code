@@ -1,12 +1,13 @@
-import { memo } from "react"
+import { memo, useState } from "react"
 import { ArrowRight, Folder } from "lucide-react"
-import type { DisplayHistoryItem } from "./types"
+import { getTaskDisplayTitle, type DisplayHistoryItem } from "./types"
 
 import { vscode } from "@/utils/vscode"
 import { cn } from "@/lib/utils"
 import { Checkbox } from "@/components/ui/checkbox"
 
 import TaskItemFooter from "./TaskItemFooter"
+import { TaskTitleEditor } from "./TaskTitleEditor"
 import { StandardTooltip } from "../ui"
 
 interface TaskItemProps {
@@ -32,7 +33,13 @@ const TaskItem = ({
 	onDelete,
 	className,
 }: TaskItemProps) => {
+	const [isRenaming, setIsRenaming] = useState(false)
+
 	const handleClick = () => {
+		if (isRenaming) {
+			return
+		}
+
 		if (isSelectionMode && onToggleSelection) {
 			onToggleSelection(item.id, !isSelected)
 		} else {
@@ -71,7 +78,9 @@ const TaskItem = ({
 
 				<div className="flex-1 min-w-0">
 					<div className="flex items-start gap-1">
-						{item.highlight ? (
+						{isRenaming ? (
+							<TaskTitleEditor item={item} onDone={() => setIsRenaming(false)} />
+						) : item.highlight ? (
 							<div
 								className={cn(
 									"flex-1 min-w-0 overflow-hidden whitespace-pre-wrap font-light text-ellipsis line-clamp-3",
@@ -94,7 +103,7 @@ const TaskItem = ({
 								)}
 								data-testid="task-content">
 								<StandardTooltip content={item.task}>
-									<span>{item.task}</span>
+									<span>{getTaskDisplayTitle(item)}</span>
 								</StandardTooltip>
 							</div>
 						)}
@@ -115,6 +124,7 @@ const TaskItem = ({
 						isSelectionMode={isSelectionMode}
 						isSubtask={item.isSubtask}
 						onDelete={onDelete}
+						onRename={isRenaming ? undefined : () => setIsRenaming(true)}
 					/>
 				</div>
 			</div>

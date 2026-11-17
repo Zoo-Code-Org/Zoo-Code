@@ -1,11 +1,11 @@
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
 	addToClineMessages: () => Promise<void>
 	lastMessageTs?: number
-	abort: boolean
 }
 
 const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestAccess
@@ -15,8 +15,13 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 
 describe("Task.ask queued message drain", () => {
 	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
-		const task = Object.create(Task.prototype) as Task
-		;(task as any).abort = false
+		// Distinct task and instance ids, so an abort assertion can name this task instead of
+		// accepting whatever the fixture left unset.
+		const task = Object.create(Task.prototype, {
+			taskId: { value: "task-ask-drain", enumerable: true },
+			instanceId: { value: "instance-ask-drain", enumerable: true },
+		}) as Task
+		setAbortLatch(task, false)
 		;(task as any).clineMessages = []
 		;(task as any).askResponse = undefined
 		;(task as any).askResponseText = undefined
@@ -120,6 +125,120 @@ describe("Task.ask queued message drain", () => {
 
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("does not auto-approve a protected command ask from a queued message", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowExecute: true }),
+		})
+		task.messageQueueService.addMessage("run it anyway")
+
+		const ask = task.ask("command", "rm -rf build", false, undefined, true)
+
+		// The drain must not resolve the protected ask; only an explicit user
+		// approval may.
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("run it anyway")
+	})
+
+	it("does not auto-approve a protected command ask when a message is queued mid-wait", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowExecute: true }),
+		})
+
+		const ask = task.ask("command", "rm -rf build", false, undefined, true)
+		task.messageQueueService.addMessage("mid-wait message")
+
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("mid-wait message")
+	})
+
+	// The drain guards key on the isProtected flag, so they also cover protected
+	// write-tool asks (WriteToFileTool/EditTool/ApplyDiff/ApplyPatch mark blocked
+	// writes protected via presentAssistantMessage). These mirror the command pair
+	// above: alwaysAllowWrite covers the write, but without alwaysAllowWriteProtected
+	// the protection keeps the ask pending, and a queued message must not stand in
+	// for the explicit approval.
+	it("does not auto-approve a protected write-tool ask from a queued message", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowWrite: true }),
+		})
+		task.messageQueueService.addMessage("write it anyway")
+
+		const ask = task.ask(
+			"tool",
+			JSON.stringify({ tool: "newFileCreated", path: "AGENTS.md" }),
+			false,
+			undefined,
+			true,
+		)
+
+		// The drain must not resolve the protected ask; only an explicit user
+		// approval may.
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("write it anyway")
+	})
+
+	it("does not auto-approve a protected write-tool ask when a message is queued mid-wait", async () => {
+		const task = await createTask({
+			getState: async () => ({ autoApprovalEnabled: true, alwaysAllowWrite: true }),
+		})
+
+		const ask = task.ask(
+			"tool",
+			JSON.stringify({ tool: "newFileCreated", path: "AGENTS.md" }),
+			false,
+			undefined,
+			true,
+		)
+		task.messageQueueService.addMessage("mid-wait message")
+
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// claimNextMessage only returns unclaimed messages: the queued message must
+		// still be present and unclaimed after the protected ask resolved.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("mid-wait message")
 	})
 
 	it("claims lifecycle feedback that arrives while an ask is waiting", async () => {
@@ -232,10 +351,17 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Persist me later")
 		const ask = task.ask("completion_result", "Done", false)
 		await Promise.resolve()
-		access.abort = true
+		setAbortLatch(task, true)
 		finishAddingAsk()
 
-		await expect(ask).rejects.toThrow("aborted")
+		// The abort must name this task and this instance: a regex that accepts any id would also
+		// pass for another task's abort or a different prefix.
+		await expect(ask).rejects.toMatchObject({
+			message: `[ZooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
+		await expect(ask).rejects.toMatchObject({
+			message: "[ZooCode#ask] task task-ask-drain.instance-ask-drain aborted",
+		})
 		expect(task.messageQueueService.messages).toHaveLength(1)
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("Persist me later")
 	})
@@ -284,7 +410,7 @@ describe("Task.ask queued message drain", () => {
 			await vi.advanceTimersByTimeAsync(0)
 			expect(access.saveClineMessages).toHaveBeenCalledTimes(1)
 
-			access.abort = true
+			setAbortLatch(task, true)
 			await vi.advanceTimersByTimeAsync(250)
 
 			await expect(persistence).resolves.toBe(false)

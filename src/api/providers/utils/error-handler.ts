@@ -34,6 +34,41 @@ import i18n from "../../../i18n/setup"
  *   throw handleProviderError(error, "Anthropic", { messagePrefix: "streaming" })
  * }
  */
+/**
+ * Whether the error carries a numeric HTTP status (SDK APIs expose it as
+ * `status` or, for the AI SDK, `statusCode`).
+ *
+ * Use before classifying a failure purely by cancellation state: a terminal
+ * API failure (401/429/5xx) can land in the same tick as an abort, and it must
+ * keep its own identity so retry, backoff and the UI still see the provider
+ * error instead of a cancellation.
+ */
+export function hasNumericHttpStatus(error: unknown): boolean {
+	if (!error || typeof error !== "object") return false
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	for (const status of [candidate.status, candidate.statusCode]) {
+		// Number.isFinite does not coerce, so it already rejects every non-number;
+		// a separate typeof check would be dead weight (and an equivalent mutant).
+		if (Number.isFinite(status)) return true
+	}
+	return false
+}
+
+/**
+ * The numeric HTTP status carried by an error, or `undefined` when it carries none.
+ * Same field order as hasNumericHttpStatus — `status` (most SDKs expose it that way)
+ * before `statusCode` (the AI SDK's APICallError shape) — and only finite numbers,
+ * so a null or stringy status never becomes a retry header or a telemetry property.
+ */
+export function getNumericHttpStatus(error: unknown): number | undefined {
+	if (!error || typeof error !== "object") return undefined
+	const candidate = error as { status?: unknown; statusCode?: unknown }
+	// Number.isFinite does not coerce, so the value it accepted has to be handed back
+	// with a cast: there is no narrower form for an already-validated unknown number.
+	if (Number.isFinite(candidate.status)) return candidate.status as number
+	return Number.isFinite(candidate.statusCode) ? (candidate.statusCode as number) : undefined
+}
+
 export function handleProviderError(
 	error: unknown,
 	providerName: string,
@@ -56,6 +91,7 @@ export function handleProviderError(
 			name: error.name,
 			stack: error.stack,
 			status: anyErr.status,
+			statusCode: anyErr.statusCode,
 		})
 
 		let wrapped: Error
@@ -74,9 +110,17 @@ export function handleProviderError(
 
 		// Preserve HTTP status and structured details for retry/backoff + UI
 		// These fields are used by Task.backoffAndAnnounce() and ChatRow/ErrorRow
-		// to provide status-aware error messages and handling
-		if (anyErr.status !== undefined) {
-			;(wrapped as any).status = anyErr.status
+		// to provide status-aware error messages and handling. AI SDK errors (e.g.,
+		// APICallError) expose the HTTP status as `statusCode` instead of `status`,
+		// so fall back to it: a real 429 must reach Task.backoffAndAnnounce's .status check.
+		// Only a numeric status can drive backoff: a null or nonnumeric status
+		// would be echoed straight into the retry header, so take a numeric status
+		// first and fall back to a numeric statusCode.
+		const numericStatus = typeof anyErr.status === "number" ? anyErr.status : undefined
+		const numericStatusCode = typeof anyErr.statusCode === "number" ? anyErr.statusCode : undefined
+		const preservedStatus = numericStatus !== undefined ? numericStatus : numericStatusCode
+		if (preservedStatus !== undefined) {
+			;(wrapped as any).status = preservedStatus
 		}
 		if (anyErr.errorDetails !== undefined) {
 			;(wrapped as any).errorDetails = anyErr.errorDetails
@@ -96,10 +140,17 @@ export function handleProviderError(
 	console.error(`[${providerName}] Non-Error exception:`, error)
 	const wrapped = new Error(`${providerName} ${messagePrefix} error: ${String(error)}`)
 
-	// Also try to preserve status for non-Error exceptions (e.g., plain objects with status)
+	// Also try to preserve status for non-Error exceptions (e.g., plain objects with
+	// status or statusCode, matching the AI SDK APICallError shape)
 	const anyErr = error as any
-	if (typeof anyErr?.status === "number") {
-		;(wrapped as any).status = anyErr.status
+	const plainStatus =
+		typeof anyErr?.status === "number"
+			? anyErr.status
+			: typeof anyErr?.statusCode === "number"
+				? anyErr.statusCode
+				: undefined
+	if (plainStatus !== undefined) {
+		;(wrapped as any).status = plainStatus
 	}
 
 	return wrapped

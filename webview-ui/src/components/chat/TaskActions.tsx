@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import type { HistoryItem } from "@roo-code/types"
 
@@ -8,22 +8,39 @@ import { useCopyToClipboard } from "@/utils/clipboard"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 
 import { DeleteTaskDialog } from "../history/DeleteTaskDialog"
-import { CopyIcon, CheckIcon, DownloadIcon, Trash2Icon, FileJsonIcon, MessageSquareCodeIcon } from "lucide-react"
+import {
+	CopyIcon,
+	CheckIcon,
+	DownloadIcon,
+	Trash2Icon,
+	FileJsonIcon,
+	MessageSquareCodeIcon,
+	PencilIcon,
+} from "lucide-react"
 import { LucideIconButton } from "./LucideIconButton"
 
 interface TaskActionsProps {
 	item?: HistoryItem
 	buttonsDisabled: boolean
+	onRename?: () => void
 }
 
-export const TaskActions = ({ item, buttonsDisabled }: TaskActionsProps) => {
+export const TaskActions = ({ item, buttonsDisabled, onRename }: TaskActionsProps) => {
 	const [deleteTaskId, setDeleteTaskId] = useState<string | null>(null)
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const { copyWithFeedback, showCopyFeedback } = useCopyToClipboard()
 	const { debug } = useExtensionState()
 
 	return (
 		<div className="flex flex-row items-center -ml-0.5 mt-1 gap-1">
+			{item?.id && onRename && (
+				<LucideIconButton
+					icon={PencilIcon}
+					title={t("history:renameTask")}
+					data-testid="rename-current-task-button"
+					onClick={onRename}
+				/>
+			)}
 			<LucideIconButton
 				icon={DownloadIcon}
 				title={t("chat:task.export")}

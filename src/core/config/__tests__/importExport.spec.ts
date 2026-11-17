@@ -5,7 +5,6 @@ import * as path from "path"
 
 import * as vscode from "vscode"
 
-import type { ProviderName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -349,10 +348,72 @@ describe("importExport", () => {
 				customModesManager: mockCustomModesManager,
 			})
 
-			expect(result).toEqual({ success: false, error: "[providerProfiles.currentApiConfigName]: Required" })
+			expect(result).toEqual({
+				success: false,
+				error: "[providerProfiles.currentApiConfigName]: Invalid input: expected string, received undefined",
+			})
 			expect(fs.readFile).toHaveBeenCalledWith("/mock/path/settings.json", "utf-8")
 			expect(mockProviderSettingsManager.import).not.toHaveBeenCalled()
 			expect(mockContextProxy.setValues).not.toHaveBeenCalled()
+		})
+
+		it("round-trips a prompt cache TTL through export and import", async () => {
+			// The knob rides the provider profile, so the export/import schema is the
+			// only thing that can lose it. Both classes are exercised because a
+			// schema that only accepted "1h" would still pass a one-sided test.
+			const profiles = {
+				currentApiConfigName: "cache",
+				apiConfigs: {
+					cache: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-sonnet-4-5",
+						apiKey: "test-key",
+						id: "cache-id",
+						promptCacheTtl: "1h" as const,
+					},
+					explicit: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiModelId: "claude-sonnet-4-5",
+						apiKey: "test-key",
+						id: "explicit-id",
+						promptCacheTtl: "5m" as const,
+					},
+				},
+			}
+
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({ fsPath: "/mock/path/export.json" })
+			mockProviderSettingsManager.export.mockResolvedValue(profiles)
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			await exportSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+			})
+
+			const exported = (safeWriteJson as Mock).mock.calls.at(-1)?.[1]
+			expect(exported.providerProfiles.apiConfigs.cache.promptCacheTtl).toBe("1h")
+			expect(exported.providerProfiles.apiConfigs.explicit.promptCacheTtl).toBe("5m")
+
+			;(vscode.window.showOpenDialog as Mock).mockResolvedValue([{ fsPath: "/mock/path/export.json" }])
+			;(fs.readFile as Mock).mockResolvedValue(JSON.stringify(exported))
+			mockProviderSettingsManager.export.mockResolvedValue({ currentApiConfigName: "default", apiConfigs: {} })
+			mockProviderSettingsManager.listConfig.mockResolvedValue([])
+
+			const result = await importSettings({
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			expect(result.success).toBe(true)
+			expect(mockProviderSettingsManager.import).toHaveBeenCalledWith(
+				expect.objectContaining({
+					apiConfigs: expect.objectContaining({
+						cache: expect.objectContaining({ promptCacheTtl: "1h" }),
+						explicit: expect.objectContaining({ promptCacheTtl: "5m" }),
+					}),
+				}),
+			)
 		})
 
 		it("should import settings successfully when globalSettings key is missing", async () => {

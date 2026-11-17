@@ -3,7 +3,6 @@ import * as path from "path"
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import { ReadCommandOutputTool } from "../ReadCommandOutputTool"
-import { Task } from "../../task/Task"
 
 // Mock filesystem operations
 vi.mock("fs/promises", () => ({
@@ -190,10 +189,8 @@ describe("ReadCommandOutputTool", () => {
 
 			// Mock first read for offset calculation (returns content before offset)
 			// Mock second read for actual content
-			let readCallCount = 0
 			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
-					readCallCount++
+				(buf: Buffer, _bufOffset: number, _length: number, position: number | null) => {
 					if (position === 0) {
 						// First read: prefix for line number calculation
 						const prefixContent = content.slice(0, offset)
@@ -284,7 +281,7 @@ describe("ReadCommandOutputTool", () => {
 
 			// Mock streaming read - return entire content in one chunk (simulates small file)
 			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
+				(buf: Buffer, _bufOffset: number, length: number, position: number | null) => {
 					const pos = position ?? 0
 					if (pos >= fileSize) {
 						return Promise.resolve({ bytesRead: 0 })
@@ -551,10 +548,8 @@ describe("ReadCommandOutputTool", () => {
 
 			vi.mocked(fs.stat).mockResolvedValue({ size: fileSize } as any)
 
-			let readCallCount = 0
 			mockFileHandle.read.mockImplementation(
-				(buf: Buffer, bufOffset: number, length: number, position: number | null) => {
-					readCallCount++
+				(buf: Buffer, _bufOffset: number, _length: number, position: number | null) => {
 					if (position === 0) {
 						// Read prefix for line counting
 						const prefix = content.slice(0, offset)

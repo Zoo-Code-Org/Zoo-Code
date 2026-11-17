@@ -1,3 +1,4 @@
+import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest run core/task/__tests__/flushPendingToolResultsToHistory.spec.ts
 
 import * as os from "os"
@@ -11,6 +12,7 @@ import { Task } from "../Task"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // Mock delay before any imports that might use it
 vi.mock("delay", () => ({
@@ -95,7 +97,7 @@ vi.mock("vscode", () => {
 				stat: vi.fn().mockResolvedValue({ type: 1 }),
 			},
 			onDidSaveTextDocument: vi.fn(() => mockDisposable),
-			getConfiguration: vi.fn(() => ({ get: (key: string, defaultValue: any) => defaultValue })),
+			getConfiguration: vi.fn(() => ({ get: (_key: string, defaultValue: any) => defaultValue })),
 		},
 		env: {
 			uriScheme: "vscode",
@@ -172,7 +174,7 @@ describe("flushPendingToolResultsToHistory", () => {
 
 		mockExtensionContext = {
 			globalState: {
-				get: vi.fn().mockImplementation((key: keyof GlobalState) => undefined),
+				get: vi.fn().mockImplementation((_key: keyof GlobalState) => undefined),
 				update: vi.fn().mockImplementation((_key, _value) => Promise.resolve()),
 				keys: vi.fn().mockReturnValue([]),
 			},
@@ -211,6 +213,7 @@ describe("flushPendingToolResultsToHistory", () => {
 			mockOutputChannel,
 			"sidebar",
 			new ContextProxy(mockExtensionContext),
+			new WebviewFocusTracker(),
 		) as any
 
 		mockApiConfig = {
@@ -456,7 +459,7 @@ describe("flushPendingToolResultsToHistory", () => {
 
 		const waitForPersistence = vi.spyOn(task, "waitForCurrentAssistantMessagePersistence")
 
-		task.abort = true
+		setAbortLatch(task, true)
 
 		await task.flushPendingToolResultsToHistory()
 

@@ -19,7 +19,8 @@ export class PendingEditOperationStore {
 		private readonly log: (message: string) => void,
 	) {}
 
-	set(operationId: string, editData: PendingEditOperationInput): void {
+	/** Returns an opaque owner token; pass it to `clear` to remove only this entry. */
+	set(operationId: string, editData: PendingEditOperationInput): object {
 		this.clear(operationId)
 
 		const timeoutId = setTimeout(() => {
@@ -27,14 +28,16 @@ export class PendingEditOperationStore {
 			this.log(`[PendingEditOperationStore.set] Automatically cleared stale pending operation: ${operationId}`)
 		}, this.timeoutMs)
 
-		this.operations.set(operationId, {
+		const operation: PendingEditOperation = {
 			...editData,
 			images: editData.images ? [...editData.images] : undefined,
 			timeoutId,
 			createdAt: Date.now(),
-		})
+		}
+		this.operations.set(operationId, operation)
 
 		this.log(`[PendingEditOperationStore.set] Set pending operation: ${operationId}`)
+		return operation
 	}
 
 	get(operationId: string): PendingEditOperationView | undefined {
@@ -52,9 +55,9 @@ export class PendingEditOperationStore {
 		}
 	}
 
-	clear(operationId: string): boolean {
+	clear(operationId: string, owner?: object): boolean {
 		const operation = this.operations.get(operationId)
-		if (!operation) {
+		if (!operation || (owner !== undefined && operation !== owner)) {
 			return false
 		}
 

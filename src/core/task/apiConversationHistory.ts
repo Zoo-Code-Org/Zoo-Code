@@ -82,6 +82,13 @@ function prepareAssistantMessage(
 			type: "reasoning",
 			text: reasoning,
 			summary: [] as any[],
+			// A visible summary must not discard the encrypted state needed for continuation.
+			...(reasoningData?.encrypted_content
+				? {
+						encrypted_content: reasoningData.encrypted_content,
+						...(reasoningData.id ? { id: reasoningData.id } : {}),
+					}
+				: {}),
 		}
 
 		prependContentBlock(messageWithTs, reasoningBlock)

@@ -46,14 +46,12 @@ describe("useMcpToolTool", () => {
 	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
 	let mockHandleError: ReturnType<typeof vi.fn<HandleError>>
 	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
-	let mockRemoveClosingTag: ReturnType<typeof vi.fn>
 	let mockProviderRef: any
 
 	beforeEach(() => {
 		mockAskApproval = vi.fn<AskApproval>()
 		mockHandleError = vi.fn<HandleError>()
 		mockPushToolResult = vi.fn<PushToolResult>()
-		mockRemoveClosingTag = vi.fn((tag: string, value?: string) => value || "")
 
 		mockProviderRef = {
 			deref: vi.fn().mockReturnValue({
@@ -99,6 +97,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -129,6 +128,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -175,6 +175,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -203,6 +204,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.ask).toHaveBeenCalledWith("use_mcp_server", expect.stringContaining("use_mcp_tool"), true)
@@ -245,6 +247,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
@@ -294,6 +297,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
@@ -339,6 +343,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).not.toHaveBeenCalledWith("mcp_server_request_started")
@@ -383,6 +388,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockHandleError).toHaveBeenCalledWith("executing MCP tool", error)
@@ -430,6 +436,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -479,6 +486,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(1)
@@ -532,6 +540,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.consecutiveMistakeCount).toBe(0)
@@ -576,6 +585,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Assert
@@ -621,6 +631,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Assert
@@ -679,6 +690,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Tool should be found and executed
@@ -739,6 +751,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_request_started")
@@ -795,6 +808,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_request_started")
@@ -851,6 +865,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			// Should not double-prefix the data URL
@@ -911,6 +926,7 @@ describe("useMcpToolTool", () => {
 				askApproval: mockAskApproval,
 				handleError: mockHandleError,
 				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
 			})
 
 			expect(mockTask.say).toHaveBeenCalledWith("mcp_server_response", "[2 image(s) received]", [

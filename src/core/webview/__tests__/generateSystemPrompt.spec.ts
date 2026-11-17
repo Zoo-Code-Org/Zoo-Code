@@ -129,19 +129,27 @@ const modelMock = vi.hoisted(() => {
 	const ensureModelFetched = vi.fn(async () => {
 		state.fetched = true
 	})
-	return { state, ensureModelFetched }
+	// Every handler the preview builds, so tests can check each one is released.
+	const handlers: Array<{ dispose: ReturnType<typeof vi.fn> }> = []
+	return { state, ensureModelFetched, handlers }
 })
 
 // Note: the module under test imports `../../api` from src/core/webview, which
 // resolves to src/api — from this spec's directory (one level deeper) that is
 // `../../../api`.
 vi.mock("../../../api", () => ({
-	buildApiHandler: () => ({
-		ensureModelFetched: modelMock.ensureModelFetched,
-		// The handler only knows its full metadata (incl. excludedTools) after
-		// ensureModelFetched() resolves, mirroring router providers.
-		getModel: () => ({ id: "m", info: modelMock.state.fetched ? fullModelInfo : fallbackModelInfo }),
-	}),
+	buildApiHandler: () => {
+		const handler = {
+			ensureModelFetched: modelMock.ensureModelFetched,
+			// The handler only knows its full metadata (incl. excludedTools) after
+			// ensureModelFetched() resolves, mirroring router providers.
+			getModel: () => ({ id: "m", info: modelMock.state.fetched ? fullModelInfo : fallbackModelInfo }),
+			// Handlers such as GitHub Copilot hold a host listener the preview must release.
+			dispose: vi.fn(),
+		}
+		modelMock.handlers.push(handler)
+		return handler
+	},
 }))
 
 // Minimal mock ExtensionContext, mirroring the pattern in system-prompt.spec.ts.
@@ -325,6 +333,57 @@ describe("generateSystemPrompt preview parity", () => {
 			"Error fetching model metadata for system prompt preview:",
 			expect.anything(),
 		)
+	})
+
+	describe("releasing the preview's API handler", () => {
+		beforeEach(() => {
+			modelMock.handlers.length = 0
+		})
+
+		it("disposes the handler once the preview is built", async () => {
+			await generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+
+			expect(modelMock.handlers).toHaveLength(1)
+			expect(modelMock.handlers[0].dispose).toHaveBeenCalledOnce()
+		})
+
+		it("disposes the handler when the metadata fetch fails", async () => {
+			modelMock.ensureModelFetched.mockRejectedValueOnce(new Error("network down"))
+
+			await generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+
+			expect(modelMock.handlers[0].dispose).toHaveBeenCalledOnce()
+		})
+
+		it("disposes the handler when the metadata fetch times out", async () => {
+			vi.useFakeTimers()
+			try {
+				modelMock.ensureModelFetched.mockImplementationOnce(() => new Promise<void>(() => {}))
+				const previewPromise = generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })
+				await vi.advanceTimersByTimeAsync(5_000)
+				await previewPromise
+			} finally {
+				vi.useRealTimers()
+			}
+
+			expect(modelMock.handlers[0].dispose).toHaveBeenCalledOnce()
+		})
+
+		it("still builds the preview when disposing the handler throws", async () => {
+			modelMock.ensureModelFetched.mockImplementationOnce(async () => {
+				modelMock.handlers[0].dispose.mockImplementation(() => {
+					throw new Error("dispose failed")
+				})
+			})
+
+			await expect(generateSystemPrompt(fakeProvider, { type: "mode", mode: "code" })).resolves.toEqual(
+				expect.any(String),
+			)
+			expect(errorSpy).toHaveBeenCalledWith(
+				"Error disposing the system prompt preview's API handler:",
+				expect.any(Error),
+			)
+		})
 	})
 
 	it("degrades to fallback metadata when ensureModelFetched hangs past the preview timeout", async () => {

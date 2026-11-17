@@ -1,4 +1,5 @@
 {
+	"$schema": "http://json-schema.org/draft-07/schema#",
 	"type": "object",
 	"properties": {
 		"customModes": {
@@ -48,8 +49,6 @@
 								},
 								{
 									"type": "array",
-									"minItems": 2,
-									"maxItems": 2,
 									"items": [
 										{
 											"type": "string",
@@ -67,7 +66,10 @@
 											},
 											"additionalProperties": false
 										}
-									]
+									],
+									"additionalItems": false,
+									"minItems": 2,
+									"maxItems": 2
 								}
 							]
 						}
@@ -96,7 +98,6 @@
 	},
 	"required": ["customModes"],
 	"additionalProperties": false,
-	"$schema": "http://json-schema.org/draft-07/schema#",
 	"$id": "https://github.com/RooCodeInc/Roo-Code/blob/main/schemas/roomodes.json",
 	"title": "Roo Code Custom Modes",
 	"description": "Schema for .roomodes configuration files used by Roo Code to define custom modes."

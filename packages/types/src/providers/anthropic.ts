@@ -1,8 +1,20 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.anthropic.com/en/docs/about-claude/models
 // https://platform.claude.com/docs/en/about-claude/pricing
 
+// Every entry here is an Anthropic-hosted Claude model, and 1h cache writes are GA
+// on all active Claude models, so each one advertises both TTL classes. The 5m class
+// is the vendor default and is never emitted explicitly (ADR-0006 I3).
 export type AnthropicModelId = keyof typeof anthropicModels
 export const anthropicDefaultModelId: AnthropicModelId = "claude-sonnet-4-5"
 export const ANTHROPIC_API_PROTOCOL = "anthropic"
@@ -13,9 +25,11 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		supportsReasoningBudget: true,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
@@ -25,6 +39,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -34,9 +49,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
 		cacheWritesPrice: 2.5, // $2.50 per million tokens (introductory pricing through Aug 31, 2026)
+		cacheWritesPrice1h: 4, // $4.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens (introductory pricing through Aug 31, 2026)
 		// Sonnet 5 uses the same adaptive-thinking / binary-toggle convention as
 		// Opus 4.7+ and Fable 5 on the direct Anthropic provider path. Manual
@@ -53,9 +70,11 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		supportsReasoningBudget: true,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
@@ -65,6 +84,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -74,9 +94,11 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		supportsReasoningBudget: true,
 		// Tiered pricing for extended context (requires beta flag 'context-1m-2025-08-07')
@@ -86,6 +108,7 @@ export const anthropicModels = {
 				inputPrice: 6.0, // $6 per million input tokens (>200K context)
 				outputPrice: 22.5, // $22.50 per million output tokens (>200K context)
 				cacheWritesPrice: 7.5, // $7.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 12, // $12.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 0.6, // $0.60 per million tokens (>200K context)
 			},
 		],
@@ -95,9 +118,11 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
 		// Tiered pricing for extended context (requires beta flag)
@@ -107,6 +132,7 @@ export const anthropicModels = {
 				inputPrice: 10.0, // $10 per million input tokens (>200K context)
 				outputPrice: 37.5, // $37.50 per million output tokens (>200K context)
 				cacheWritesPrice: 12.5, // $12.50 per million tokens (>200K context)
+				cacheWritesPrice1h: 20, // $20.00 per million tokens (2x tier input price, 1h cache writes)
 				cacheReadsPrice: 1.0, // $1.00 per million tokens (>200K context)
 			},
 		],
@@ -116,9 +142,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		// Keep the hybrid-reasoning capability so Anthropic token-cap handling and
 		// stored max-token overrides behave the same as before.
@@ -133,9 +161,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required, same as 4.7)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens (regular tier)
 		outputPrice: 25.0, // $25 per million output tokens (regular tier)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		// 4.8 inherits the adaptive-thinking model introduced in 4.7 — no breaking
 		// API changes. supportsReasoningBudget is kept true so the existing token-cap
@@ -151,9 +181,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		// Opus 5 uses the same adaptive-thinking / binary-toggle convention as
 		// Opus 4.7+ and Sonnet 5 on the direct Anthropic provider path. Manual
@@ -169,9 +201,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 4.0, // $4 per million input tokens
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
+		cacheWritesPrice1h: 8, // $8.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.2, // $0.20 per million tokens
 		// Opus 5.5 always uses adaptive thinking and rejects manual budget_tokens.
 		supportsReasoningBinary: true,
@@ -179,14 +213,42 @@ export const anthropicModels = {
 		description:
 			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
 	},
+	"claude-haiku-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
+		// Standard pricing (prompts of 100,000 tokens or fewer) from Anthropic's
+		// pricing page. Prompts over 100,000 tokens bill at tiered rates
+		// ($0.50 in / $2.50 out / $0.625 5m cache write / $0.05 cache read per
+		// million tokens) that this entry does not model.
+		// https://platform.claude.com/docs/en/about-claude/pricing
+		inputPrice: 0.1, // $0.10 per million input tokens
+		outputPrice: 0.5, // $0.50 per million output tokens
+		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheWritesPrice1h: 0.2, // $0.20 per million tokens (2x input price, 1h cache writes)
+		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
+		// Haiku 5.5 uses the same adaptive-thinking / binary-toggle convention as
+		// Sonnet 5 and Opus 5 on the direct Anthropic provider path. Manual
+		// extended thinking (budget_tokens) is not accepted, and sampling
+		// parameters (temperature/top_p/top_k) must be omitted.
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Haiku 5.5 is the fastest, most efficient Claude 5.5 model, built for high-volume, latency-sensitive coding and agent work.",
+	},
 	"claude-fable-5-1": {
 		maxTokens: 128_000, // Overridden to 8k if `enableReasoningEffort` is false.
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 10.0, // $10 per million input tokens
 		outputPrice: 50.0, // $50 per million output tokens
 		cacheWritesPrice: 12.5, // $12.50 per million tokens (5-minute cache)
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.25, // $0.25 per million tokens (2.5% of base input price)
 		// Fable 5.1 only accepts adaptive thinking (or an omitted thinking field).
 		// Manual budget_tokens and non-default sampling parameters return a 400.
@@ -201,9 +263,11 @@ export const anthropicModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 10.0, // $10 per million input tokens
 		outputPrice: 50.0, // $50 per million output tokens
 		cacheWritesPrice: 12.5, // $12.50 per million tokens
+		cacheWritesPrice1h: 20, // $20.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.0, // $1.00 per million tokens
 		// Fable 5 uses the same adaptive-thinking / binary-toggle convention as
 		// Opus 4.7+ on the direct Anthropic provider path.
@@ -218,9 +282,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
+		cacheWritesPrice1h: 10, // $10.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.5, // $0.50 per million tokens
 		supportsReasoningBudget: true,
 	},
@@ -229,9 +295,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0, // $15 per million input tokens
 		outputPrice: 75.0, // $75 per million output tokens
 		cacheWritesPrice: 18.75, // $18.75 per million tokens
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5, // $1.50 per million tokens
 		supportsReasoningBudget: true,
 	},
@@ -240,9 +308,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0, // $15 per million input tokens
 		outputPrice: 75.0, // $75 per million output tokens
 		cacheWritesPrice: 18.75, // $18.75 per million tokens
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5, // $1.50 per million tokens
 		supportsReasoningBudget: true,
 	},
@@ -251,9 +321,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 		supportsReasoningBudget: true,
 		requiredReasoningBudget: true,
@@ -263,9 +335,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 	},
 	"claude-3-5-sonnet-20241022": {
@@ -273,9 +347,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
+		cacheWritesPrice1h: 6, // $6.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.3, // $0.30 per million tokens
 	},
 	"claude-3-5-haiku-20241022": {
@@ -283,9 +359,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: false,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25,
+		cacheWritesPrice1h: 2, // $2.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.1,
 	},
 	"claude-3-opus-20240229": {
@@ -293,9 +371,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
+		cacheWritesPrice1h: 30, // $30.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 1.5,
 	},
 	"claude-3-haiku-20240307": {
@@ -303,9 +383,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 0.25,
 		outputPrice: 1.25,
 		cacheWritesPrice: 0.3,
+		cacheWritesPrice1h: 0.5, // $0.50 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.03,
 	},
 	"claude-haiku-4-5-20251001": {
@@ -313,9 +395,11 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25,
+		cacheWritesPrice1h: 2, // $2.00 per million tokens (2x input price, 1h cache writes)
 		cacheReadsPrice: 0.1,
 		supportsReasoningBudget: true,
 		description:
@@ -324,3 +408,17 @@ export const anthropicModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192
+
+export const anthropicProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.anthropic,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => anthropicDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		apiKey: z.string().optional(),
+		anthropicBaseUrl: z.string().optional(),
+		anthropicUseAuthToken: z.boolean().optional(),
+		anthropicBeta1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+	},
+})

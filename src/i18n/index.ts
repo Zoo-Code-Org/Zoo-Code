@@ -10,15 +10,6 @@ export function initializeI18n(language: string): void {
 }
 
 /**
- * Get the current language
- *
- * @returns The current language code
- */
-export function getCurrentLanguage(): string {
-	return i18next.language
-}
-
-/**
  * Change the current language
  *
  * @param language The language code to change to
@@ -34,7 +25,7 @@ export function changeLanguage(language: string): void {
  * @param options Options for interpolation or pluralization
  * @returns The translated string
  */
-export function t(key: string, options?: Record<string, any>): string {
+export function t(key: string, options?: Record<string, unknown>): string {
 	return i18next.t(key, options)
 }
 

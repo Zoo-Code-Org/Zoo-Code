@@ -151,6 +151,31 @@ describe("getRequestyModels", () => {
 		expect(opus55.supportsTemperature).toBe(false)
 	})
 
+	it("applies Haiku 5.5 overrides when parsing anthropic/claude-haiku-5-5", async () => {
+		const rawHaiku55 = makeRawModel({
+			id: "anthropic/claude-haiku-5-5",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning: true,
+			input_price: "0.0000001",
+			output_price: "0.0000005",
+			caching_price: "0.000000125",
+			cached_price: "0.00000001",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawHaiku55] } })
+
+		const models = await getRequestyModels()
+		const haiku55 = models["anthropic/claude-haiku-5-5"]
+
+		expect(haiku55).toBeDefined()
+		expect(haiku55.supportsReasoningBudget).toBe(true)
+		expect(haiku55.supportsReasoningBinary).toBe(true)
+		expect(haiku55.supportsTemperature).toBe(false)
+	})
+
 	it("does not apply Fable 5 overrides to other models", async () => {
 		const rawSonnet = makeRawModel({
 			id: "anthropic/claude-sonnet-4.6",

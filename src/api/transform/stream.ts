@@ -59,7 +59,18 @@ export interface ApiStreamUsageChunk {
 	type: "usage"
 	inputTokens: number
 	outputTokens: number
+	/** Total cache-write tokens, across every TTL class. */
 	cacheWriteTokens?: number
+	/**
+	 * The 1h-TTL subset of `cacheWriteTokens` (Anthropic `ephemeral_1h_input_tokens`).
+	 * This is a decomposition, not an addition: `cacheWriteTokens` already includes it.
+	 */
+	cacheWrite1hTokens?: number
+	/**
+	 * The 12h-TTL subset of `cacheWriteTokens` (OpenAI `ttl_12h_tokens`).
+	 * This is a decomposition, not an addition: `cacheWriteTokens` already includes it.
+	 */
+	cacheWrite12hTokens?: number
 	cacheReadTokens?: number
 	reasoningTokens?: number
 	totalCost?: number
@@ -87,11 +98,19 @@ export interface ApiStreamToolCallDeltaChunk {
 	type: "tool_call_delta"
 	id: string
 	delta: string
+	/**
+	 * Tool name for compound-key routing. Present when the delta is emitted by the
+	 * raw-chunk path (processRawChunk), where same-ID calls must keep distinct
+	 * accumulators; legacy provider streams may omit it.
+	 */
+	name?: string
 }
 
 export interface ApiStreamToolCallEndChunk {
 	type: "tool_call_end"
 	id: string
+	/** Tool name for compound-key deduplication (present when emitted by finalizeRawChunks) */
+	name?: string
 }
 
 /**

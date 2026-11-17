@@ -11,159 +11,251 @@
 </sub>
 </div>
 
+<a id="contributing-to-zoo-code"></a>
+
 # 为 Zoo Code 做贡献
 
-Zoo Code 是一个由社区驱动的项目，我们非常重视每一份贡献。为了简化协作，我们采用 [“问题优先” 的方法](#问题优先方法)，这意味着所有的 [拉取请求 (PR)](#提交拉取请求) 都必须首先链接到一个 GitHub 问题。请仔细阅读本指南。
+Zoo Code 是一个社区项目。我们重视每一份贡献。我们采用[先建 Issue](#issue-first-approach) 的方式。这意味着每个 [Pull Request（PR）](#submitting-a-pull-request) 都必须链接到一个 GitHub Issue。请仔细阅读这份指南。
+
+<a id="table-of-contents"></a>
 
 ## 目录
 
-- [在您贡献之前](#在您贡献之前)
-- [寻找和规划您的贡献](#寻找和规划您的贡献)
-- [开发和提交流程](#开发和提交流程)
-- [拉取请求的期望](#拉取请求的期望)
-- [AI辅助贡献](#ai辅助贡献)
-- [法律](#法律)
+- [贡献前的准备](#before-you-contribute)
+- [寻找和规划你的贡献](#finding--planning-your-contribution)
+- [开发与提交流程](#development--submission-process)
+    - [Pull Request 要求](#pull-request-expectations)
+    - [AI 辅助贡献](#ai-assisted-contributions)
+    - [写作风格](#writing-style)
+- [法律条款](#legal)
 
-## 在您贡献之前
+<a id="before-you-contribute"></a>
+
+## 贡献前的准备
+
+<a id="1-code-of-conduct"></a>
 
 ### 1. 行为准则
 
-所有贡献者都必须遵守我们的 [行为准则](./CODE_OF_CONDUCT.md)。
+所有贡献者都必须遵守我们的[行为准则](./CODE_OF_CONDUCT.md)。
+
+<a id="2-project-roadmap"></a>
 
 ### 2. 项目路线图
 
-我们的路线图指导着项目的方向。请将您的贡献与这些关键目标保持一致：
+路线图展示了项目的发展方向。请让你的贡献符合这些目标：
 
-### 可靠性第一
+<a id="reliability-first"></a>
 
-- 确保差异编辑和命令执行始终可靠。
-- 减少阻碍常规使用的摩擦点。
-- 保证在所有地区和平台上的流畅操作。
-- 扩大对各种人工智能提供商和模型的强大支持。
+### 可靠性优先
 
-### 增强的用户体验
+- 让差异更新和命令运行每次都可靠。
+- 解决妨碍大家每天使用 Zoo Code 的问题。
+- 让 Zoo Code 支持所有语言区域和平台。
+- 支持更多 AI 提供商和模型。
 
-- 简化用户界面/用户体验，以提高清晰度和直观性。
-- 不断改进工作流程，以满足开发人员对日常使用工具的高期望。
+<a id="enhanced-user-experience"></a>
 
-### 在代理性能上领先
+### 改善用户体验
 
-- 建立全面的评估基准 (evals) 来衡量真实世界的生产力。
-- 让每个人都能轻松运行和解释这些评估。
-- 发布能显示评估分数明显提高的改进。
+- 让 UI 和 UX 清晰、易用。
+- 改善工作流程。开发者对每天使用的工具有很高的要求。
 
-在您的 PR 中提及与这些领域的一致性。
+<a id="leading-on-agent-performance"></a>
+
+### 领先的智能体性能
+
+- 建立能衡量实际生产力的评估基准（evals）。
+- 让 evals 易于运行和阅读。
+- 发布能明显提高 evals 分数的改进。
+
+在 PR 中说明你的改动支持上述哪些方向。
+
+<a id="3-join-the-zoo-code-community"></a>
 
 ### 3. 加入 Zoo Code 社区
 
-- **Discord：**加入我们的 [Discord](https://discord.gg/VxfP4Vx3gX)。
-- **Reddit：**加入我们的 [Reddit](https://www.reddit.com/r/ZooCode/)。
+- **Discord：** 加入我们的 [Discord](https://discord.gg/VxfP4Vx3gX)。
+- **Reddit：** 加入我们的 [Reddit](https://www.reddit.com/r/ZooCode/)。
 
-## 寻找和规划您的贡献
+<a id="finding--planning-your-contribution"></a>
+
+## 寻找和规划你的贡献
+
+<a id="types-of-contributions"></a>
 
 ### 贡献类型
 
-- **错误修复：** 解决代码问题。
+- **修复错误：** 修复代码问题。
 - **新功能：** 添加功能。
-- **文档：** 改进指南和清晰度。
+- **文档：** 改善指南，让内容更清楚。
 
-### 问题优先方法
+<a id="issue-first-approach"></a>
 
-所有贡献都始于使用我们精简模板的 GitHub 问题。
+### 先建 Issue
 
-- **检查现有问题**：在 [GitHub 问题](https://github.com/Zoo-Code-Org/Zoo-Code/issues) 中搜索。
-- **使用以下模板创建问题**：
-    - **增强功能：** “增强请求”模板（侧重于用户利益的简单语言）。
-    - **错误：** “错误报告”模板（最少的复现步骤 + 预期与实际 + 版本）。
-- **想参与其中吗？** 在问题上评论“领取”，并在[Discord](https://discord.gg/VxfP4Vx3gX)上联系核心团队以获得分配。分配将在帖子中确认。
-- **PR 必须链接到问题。** 未链接的 PR 可能会被关闭。
+每份贡献都从一个 GitHub Issue 开始。请使用我们的简短模板。
+
+- **检查已有 Issue：** 搜索 [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues)。
+- **创建 Issue** 时使用：
+    - **改进：** "Enhancement Request" 模板（使用平实的语言，重点说明对用户的好处）。
+    - **错误：** "Bug Report" 模板（最小复现示例、预期和实际结果、版本）。
+- **编写 Issue** 时遵循下方的[写作风格](#writing-style)。
+- **想接手这项工作？** 在 Issue 中评论 "Claiming"。然后在 [Discord](https://discord.gg/VxfP4Vx3gX) 联系核心团队，让他们把 Issue 分配给你。核心团队会在讨论中确认分配。
+- **PR 必须链接到 Issue。** 我们可能关闭没有链接的 PR。
+
+<a id="deciding-what-to-work-on"></a>
 
 ### 决定做什么
 
-- 如需查看 issue，请访问 [GitHub Issues 页面](https://github.com/Zoo-Code-Org/Zoo-Code/issues)。
-- 如需文档，请访问 [Zoo Code 文档](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)。
+- 查看 [GitHub Issues 页面](https://github.com/Zoo-Code-Org/Zoo-Code/issues)。
+- 文档相关工作请前往 [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs)。
+
+<a id="reporting-bugs"></a>
 
 ### 报告错误
 
-- 首先检查现有的报告。
-- 使用 [“错误报告”模板](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) 创建一个新错误，并提供：
+- 先检查已有报告。
+- 使用 ["Bug Report" 模板](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) 创建新的错误报告，并提供：
     - 清晰、编号的复现步骤
-    - 预期与实际结果
-    - Zoo Code 版本（必需）；如果相关，还需提供 API 提供商/模型
-- **安全问题**：通过 [安全公告](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new) 私下报告。
+    - 预期结果和实际结果
+    - Zoo Code 版本（必填）
+    - API 提供商和模型（如与问题相关）
+- **安全问题：** 通过 [security advisories](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new) 私下报告。
 
-## 开发和提交流程
+<a id="development--submission-process"></a>
 
-### 开发设置
+## 开发与提交流程
 
-1. **复刻和克隆：**
+<a id="development-setup"></a>
+
+### 配置开发环境
+
+1. **Fork 并克隆：**
 
 ```
 git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
-2. **安装依赖项：**
+2. **安装依赖：**
 
 ```
 pnpm install
 ```
 
-3. **调试：** 使用 VS Code 打开（`F5`）。
+3. **调试：** 用 VS Code 打开（`F5`）。
 
-### 编码指南
+<a id="writing-code-guidelines"></a>
 
-- 每个功能或修复一个集中的 PR。
+### 编写代码的指南
+
+- 每个功能或修复只提交一个专注于该项工作的 PR。
 - 遵循 ESLint 和 TypeScript 的最佳实践。
-- 编写清晰、描述性的提交，并引用问题（例如，`修复 #123`）。
-- 提供全面的测试（`npm test`）。
-- 在提交前变基到最新的 `main` 分支。
+- 编写清晰、有说明性的 commit 消息，并引用 Issue（例如 `Fixes #123`）。遵循[写作风格](#writing-style)。
+- 完整测试你的改动（`npm test`）。
+- 提交前，rebase 到最新的 `main` 分支。
 
-### 提交拉取请求
+<a id="submitting-a-pull-request"></a>
 
-- 如果希望获得早期反馈，请以 **草稿 PR** 开始。
-- 遵循拉取请求模板，清晰地描述您的更改。
-- 在 PR 描述/标题中链接问题（例如，“修复 #123”）。
-- 为用户界面更改提供屏幕截图/视频。
-- 指明是否需要更新文档。
+### 提交 Pull Request
 
-### 拉取请求政策
+- 如果想尽早获得反馈，先创建 **Draft PR**。
+- 使用 Pull Request Template 描述改动。遵循[写作风格](#writing-style)。
+- 在 PR 描述或标题中链接 Issue（例如 "Fixes #123"）。
+- UI 改动需添加截图或视频。
+- 说明改动是否需要更新文档。
 
-- 必须引用一个已分配的 GitHub 问题。要获得分配：在问题上评论“领取”，并在[Discord](https://discord.gg/VxfP4Vx3gX)上联系核心团队。分配将在帖子中确认。
-- 未链接的 PR 可能会被关闭。
-- PR 必须通过 CI 测试，与路线图保持一致，并有清晰的文档。
+<a id="pull-request-policy"></a>
+
+### Pull Request 政策
+
+- PR 必须引用一个已分配的 GitHub Issue。要获得分配，先在 Issue 中评论 "Claiming"。然后在 [Discord](https://discord.gg/VxfP4Vx3gX) 联系核心团队。核心团队会在讨论中确认分配。
+- 我们可能关闭没有链接的 PR。
+- PR 必须通过 CI 测试、符合路线图，并有清晰的文档。
+
+<a id="review-process"></a>
 
 ### 审查流程
 
-- **每日分类：** 维护人员进行快速检查。
-- **每周深入审查：** 全面评估。
-- **根据反馈及时迭代**。
+准备好接受审查的 PR 必须满足以下条件：
 
-### 拉取请求的期望
+- 通过必需的 CI 检查。
+- 处理需要采取行动的审查反馈。
+- 获得维护者或 CODEOWNER 的最新批准。批准必须发生在最新 commit 的自动审查完成之后。
 
-拉取请求应当可审查、经过测试且可维护。在开启 PR 之前，请确保：
+自动审查可能添加指导评论和受管理的状态标签。按照评论中的下一步操作。不要自行修改标签。新的 commit 会重置已改动代码的审查状态。
 
-- 变更仅限于特定的问题、错误或改进。
-- 您能够解释变更的内容以及为何正确。
-- 您已在可行的情况下在本地测试了变更。
-- 您愿意响应审查反馈并进行合理的后续更改。
-- PR 无需维护人员在合并之前实质性地重写、重新设计或接管实现。
+`community-approved` 标签表示最新 commit 获得了社区的最新批准。随后，PR 等待维护者审查。这个标签为维护者提供优先级参考。它不能替代维护者审查或必需的检查。审查工作流程管理这个标签。
 
-维护人员可以关闭不完整、范围过广、不活跃、与项目方向不符或产生不相称的审查或维护负担的 PR。关闭 PR 不是对贡献者的评判；这是维护人员认为该变更以其现有形式无法被接受的决定。
+自动审查帮助维护者，但不能替代人工批准。外部贡献者不能通过评论指挥 CodeRabbit。符合条件的审查会在必需的 CI 通过后自动重新开始。维护者处理例外情况下的重启。除非仓库政策另有规定，否则警告仅供参考。GitHub 原生的必需检查、CODEOWNER 规则和审查保护决定 PR 能否合并。
 
-### AI辅助贡献
+- **每日初步检查：** 维护者进行快速检查。
+- **每周深入审查：** 维护者进行全面评估。
+- 收到反馈后，**尽快修改**。
 
-允许使用 AI 工具，但贡献者对其提交内容负全部责任。
+<a id="pull-request-expectations"></a>
 
-如果您使用 AI 工具帮助创建 PR，您必须：
+### Pull Request 要求
 
-- 审查并理解每一项有意义的变更。
-- 能够用自己的话解释实现方式和权衡取舍。
-- 自行测试变更。如果在您的环境中测试不可行，请在 PR 描述中说明原因，并描述审查者如何验证该变更。
-- 验证生成的代码是否正确、必要且与项目许可证兼容。
-- 当 AI 对代码、测试或设计有实质性影响时，建议在 PR 描述中披露 AI 辅助情况 — 这有助于审查者提供更好的反馈。
+PR 必须便于审查、经过测试，并且易于维护。打开 PR 前，确认以下几点：
 
-请勿提交您不理解或无法在审查过程中维护的 AI 生成变更。维护人员可能会关闭看似主要由 AI 辅助但缺乏人工验证、明确理由或审查跟进的 PR。
+- 改动只针对一个具体的 Issue、错误或改进。
+- 你能解释改动做了什么，以及为什么正确。
+- 你已尽可能在自己的电脑上测试改动。
+- 你会回应审查反馈，并进行合理的后续修改。
+- 合并前，维护者不需要重写、重新设计或接管改动。
 
-## 法律
+维护者可能因以下原因关闭 PR：
 
-通过贡献，您同意您的贡献将根据 Apache 2.0 许可证进行许可，这与 Zoo Code 的许可一致。
+- 内容不完整。
+- 范围太广。
+- 没有活动。
+- 不符合项目方向。
+- 产生过多的审查或维护工作。
+
+关闭 PR 不是对贡献者的评价。这表示维护者无法接受当前形式的改动。
+
+机器人也会自动关闭 PR：
+
+- **60 天无活动：** PR 连续 60 天没有活动后，机器人会将它标记为过期。如果再过 7 天仍没有活动，机器人会关闭 PR。新的评论、commit 或审查会重置计时器。
+- **作者 14 天无活动：** 审查者请求修改时，机器人会添加 `awaiting-author` 标签。作者的活动会重置无活动计时器。改动准备好后，请向审查者请求再次审查。
+
+要阻止 PR 自动关闭，请添加 `do-not-close`、`pinned` 或 `work-in-progress` 标签。
+
+<a id="ai-assisted-contributions"></a>
+
+### AI 辅助贡献
+
+你可以使用 AI 工具，但仍须对提交内容负全部责任。
+
+如果你使用 AI 工具辅助创建 PR，你必须：
+
+- 审查并理解每项重要改动。
+- 用自己的话解释实现方式和取舍。
+- 自行测试改动。如果无法在你的环境中测试，请在 PR 描述中说明原因。还要说明审查者如何验证改动。
+- 确认生成的代码正确、必要，并与项目许可证兼容。
+- 考虑在 PR 描述中告知审查者 AI 的帮助。如果 AI 大幅改变了代码、测试或设计，就应说明。这有助于审查者给出更好的反馈。
+
+不要提交你不理解的 AI 生成改动。不要提交你无法在审查期间维护的改动。维护者可能关闭看起来大量依赖 AI 的 PR。如果缺少人工验证、明确理由或审查跟进，他们可以这样做。
+
+<a id="writing-style"></a>
+
+### 写作风格
+
+这些规则仅适用于英文文本。Issue 标题和正文、PR 标题和描述，以及 commit 消息应使用 [Simplified Technical English (ASD-STE100)](https://www.asd-ste100.org/)。Issue 和 PR 模板也有同样的提醒。
+
+- 使用短句。每条指令不超过 20 个单词。
+- 使用简单词语。写 "use"，不要写 "utilize"。写 "start"，不要写 "commence"。
+- 使用主动语态。写 "the parser reads the file"，不要写 "the file is read by the parser"。
+- 每句只表达一个意思。
+- 不要使用缩约形式、分号或长破折号。
+- 标题保持简短、具体。
+- 不要改动确切的日志、错误消息、标识符、命令或复现证据。请原样粘贴。
+
+这些规则是写作指导。审查者不会检查是否正式符合 ASD-STE100。代码、标识符和命令语法不在这条规则的范围内。
+
+<a id="legal"></a>
+
+## 法律条款
+
+参与贡献即表示你同意以 Apache 2.0 许可证发布你的贡献。这也是 Zoo Code 使用的许可证。

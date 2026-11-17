@@ -16,8 +16,10 @@
 		"moduleResolution": "bundler",
 		"resolveJsonModule": true,
 		"isolatedModules": true,
+		"incremental": true,
 		"noEmit": true,
 		"jsx": "react-jsx",
+		"tsBuildInfoFile": "node_modules/.cache/tsc/webview-ui.tsbuildinfo",
 		"paths": {
 			"@/*": ["./src/*"],
 			"@src/*": ["./src/*"],

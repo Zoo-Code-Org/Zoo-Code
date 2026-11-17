@@ -1,10 +1,12 @@
 // npx vitest run src/core/tools/__tests__/validateToolUse.spec.ts
 
 import { toolNamesSchema, type ModeConfig } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types"
 
 import { modes } from "../../../shared/modes"
 import { TOOL_GROUPS } from "../../../shared/tools"
 
+import { buildToolRequirements } from "../../prompts/tools/effective-tool-policy"
 import { validateToolUse, isToolAllowedForMode } from "../validateToolUse"
 
 const codeMode = modes.find((m) => m.slug === "code")?.slug || "code"
@@ -280,5 +282,70 @@ describe("mode-validator", () => {
 
 			expect(() => validateToolUse("execute_command", codeMode, [], toolRequirements)).not.toThrow()
 		})
+	})
+})
+
+describe("buildToolRequirements ↔ validator agreement", () => {
+	// The prompt advertises the tool set computed from the same disabledTools/modelInfo
+	// inputs that `buildToolRequirements` turns into the requirements map `validateToolUse`
+	// consumes. Driving real builder output through the real validator pins that agreement
+	// on the path execution actually takes, not just between two maps.
+
+	/** A ModelInfo carrying only the schema-required fields, plus optional profile exclusions. */
+	const model = (excludedTools?: string[]): ModelInfo => ({
+		contextWindow: 100_000,
+		supportsPromptCache: true,
+		...(excludedTools ? { excludedTools } : {}),
+	})
+
+	it("leaves attempt_completion callable when neither list names it", () => {
+		const requirements = buildToolRequirements(undefined, model())
+		expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(true)
+		expect(() => validateToolUse("attempt_completion", codeMode, [], requirements)).not.toThrow()
+	})
+
+	it("keeps attempt_completion callable when only disabledTools names it", () => {
+		// The completion tool has no coherent disabled state, so the builder's
+		// protocol partition must strip this entry out of the requirements map.
+		const requirements = buildToolRequirements(["attempt_completion"], model())
+		expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(true)
+		expect(() => validateToolUse("attempt_completion", codeMode, [], requirements)).not.toThrow()
+	})
+
+	it("rejects attempt_completion when only the model profile excludes it", () => {
+		const requirements = buildToolRequirements(undefined, model(["attempt_completion"]))
+		expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(false)
+		expect(() => validateToolUse("attempt_completion", codeMode, [], requirements)).toThrow(
+			'Tool "attempt_completion" is not allowed in code mode.',
+		)
+	})
+
+	it("rejects attempt_completion when both lists name it", () => {
+		// A model-profile exclusion declares provider capability, a mechanism the
+		// user-disable exemption deliberately does not cover, so its veto stands
+		// even though the identical disabledTools entry is ignored.
+		const requirements = buildToolRequirements(["attempt_completion"], model(["attempt_completion"]))
+		expect(isToolAllowedForMode("attempt_completion", codeMode, [], requirements)).toBe(false)
+		expect(() => validateToolUse("attempt_completion", codeMode, [], requirements)).toThrow(
+			'Tool "attempt_completion" is not allowed in code mode.',
+		)
+	})
+
+	it("still blocks an always-available sibling disabled through the real builder", () => {
+		// The exemption covers the protocol tool only; its always-available siblings
+		// must remain blockable when the disable flows through the real builder.
+		const requirements = buildToolRequirements(["switch_mode"], model())
+		expect(isToolAllowedForMode("switch_mode", codeMode, [], requirements)).toBe(false)
+		expect(() => validateToolUse("switch_mode", codeMode, [], requirements)).toThrow(
+			'Tool "switch_mode" is not allowed in code mode.',
+		)
+	})
+
+	it("still blocks an ordinary tool disabled through the real builder", () => {
+		const requirements = buildToolRequirements(["execute_command"], model())
+		expect(isToolAllowedForMode("execute_command", codeMode, [], requirements)).toBe(false)
+		expect(() => validateToolUse("execute_command", codeMode, [], requirements)).toThrow(
+			'Tool "execute_command" is not allowed in code mode.',
+		)
 	})
 })

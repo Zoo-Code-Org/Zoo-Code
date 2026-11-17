@@ -1,6 +1,7 @@
 import { ZodError } from "zod"
 
 import {
+	type ConsecutiveMistakeReason,
 	type TelemetryClient,
 	type TelemetryPropertiesProvider,
 	TelemetryEventName,
@@ -280,8 +281,18 @@ export class TelemetryService {
 		this.captureEvent(TelemetryEventName.SHELL_INTEGRATION_ERROR, { taskId })
 	}
 
-	public captureConsecutiveMistakeError(taskId: string): void {
-		this.captureEvent(TelemetryEventName.CONSECUTIVE_MISTAKE_ERROR, { taskId })
+	public captureConsecutiveMistakeError(
+		taskId: string,
+		reason: ConsecutiveMistakeReason,
+		consecutiveMistakeCount: number,
+		consecutiveMistakeLimit: number,
+	): void {
+		this.captureEvent(TelemetryEventName.CONSECUTIVE_MISTAKE_ERROR, {
+			taskId,
+			reason,
+			consecutiveMistakeCount,
+			consecutiveMistakeLimit,
+		})
 	}
 
 	/**

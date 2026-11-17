@@ -11,6 +11,13 @@ export interface DisplayHistoryItem extends HistoryItem {
 }
 
 /**
+ * The text shown for a task in history: the user-assigned title, then the generated title, then the original prompt.
+ */
+export function getTaskDisplayTitle(item: Pick<HistoryItem, "task" | "title" | "autoTitle">): string {
+	return item.title || item.autoTitle || item.task
+}
+
+/**
  * A node in the subtask tree, representing a task and its recursively nested children.
  */
 export interface SubtaskTreeNode {

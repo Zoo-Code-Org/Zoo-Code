@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Sí",
-		"no": "No",
-		"cancel": "Cancel·lar",
-		"remove": "Eliminar",
-		"keep": "Mantenir"
+		"cancel": "Cancel·lar"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Copiar",
 			"save": "Desar imatge",
 			"viewCode": "Veure codi",
-			"viewDiagram": "Veure diagrama",
 			"close": "Tancar"
-		},
-		"modal": {
-			"codeTitle": "Codi Mermaid"
 		},
 		"tabs": {
 			"diagram": "Diagrama",
 			"code": "Codi"
-		},
-		"feedback": {
-			"imageCopied": "Imatge copiada al porta-retalls",
-			"copyError": "Error copiant la imatge"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Imatge"
 		},
 		"noData": "Sense dades d'imatge"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Format d'URI de dades no vàlid",
-			"copyingImage": "Error copiant la imatge: {{error}}",
-			"openingImage": "Error obrint la imatge: {{error}}",
-			"pathNotExists": "El camí no existeix: {{path}}",
-			"couldNotOpen": "No s'ha pogut obrir el fitxer: {{error}}",
-			"couldNotOpenGeneric": "No s'ha pogut obrir el fitxer!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI de dades de la imatge copiada al porta-retalls"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Eliminar missatge",
@@ -77,35 +53,42 @@
 		"editOnly": "No, només editar el missatge",
 		"deleteOnly": "No, només eliminar el missatge",
 		"restoreToCheckpoint": "Sí, restaurar el punt de control",
-		"proceed": "Continuar",
-		"dontShowAgain": "No tornis a mostrar això"
+		"proceed": "Continuar"
 	},
 	"time_ago": {
 		"just_now": "ara mateix",
-		"seconds_ago": "fa {{count}} segons",
+		"seconds_ago_one": "fa {{count}} segon",
+		"seconds_ago_many": "fa {{count}} segons",
+		"seconds_ago_other": "fa {{count}} segons",
 		"minute_ago": "fa un minut",
-		"minutes_ago": "fa {{count}} minuts",
+		"minutes_ago_one": "fa {{count}} minut",
+		"minutes_ago_many": "fa {{count}} minuts",
+		"minutes_ago_other": "fa {{count}} minuts",
 		"hour_ago": "fa una hora",
-		"hours_ago": "fa {{count}} hores",
+		"hours_ago_one": "fa {{count}} hora",
+		"hours_ago_many": "fa {{count}} hores",
+		"hours_ago_other": "fa {{count}} hores",
 		"day_ago": "fa un dia",
-		"days_ago": "fa {{count}} dies",
+		"days_ago_one": "fa {{count}} dia",
+		"days_ago_many": "fa {{count}} dies",
+		"days_ago_other": "fa {{count}} dies",
 		"week_ago": "fa una setmana",
-		"weeks_ago": "fa {{count}} setmanes",
+		"weeks_ago_one": "fa {{count}} setmana",
+		"weeks_ago_many": "fa {{count}} setmanes",
+		"weeks_ago_other": "fa {{count}} setmanes",
 		"month_ago": "fa un mes",
-		"months_ago": "fa {{count}} mesos",
+		"months_ago_one": "fa {{count}} mes",
+		"months_ago_many": "fa {{count}} mesos",
+		"months_ago_other": "fa {{count}} mesos",
 		"year_ago": "fa un any",
-		"years_ago": "fa {{count}} anys"
+		"years_ago_one": "fa {{count}} any",
+		"years_ago_many": "fa {{count}} anys",
+		"years_ago_other": "fa {{count}} anys"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "Has esperat {{timeout}} segons per inicialitzar el punt de control. Si no necessites aquesta funció, desactiva-la a <settingsLink>la configuració del punt de control</settingsLink>.",
 		"init_checkpoint_fail_long_time": "La inicialització del punt de control ha trigat més de {{timeout}} segons, per això els punts de control estan desactivats per a aquesta tasca. Pots desactivar els punts de control o augmentar el temps d'espera a <settingsLink>la configuració del punt de control</settingsLink>.",
 		"attempt_completion_tool_failed": "No es pot executar attempt_completion perquè una crida d'eina anterior ha fallat en aquest torn. Si us plau, resol el problema de l'eina abans d'intentar completar."
-	},
-	"tasks": {
-		"delegated": "Delegat a subtasca",
-		"delegated_to": "Delegat a la tasca {{childId}}",
-		"delegation_completed": "Subtasca completada, reprenent la tasca principal",
-		"awaiting_child": "Esperant la tasca filla {{childId}}"
 	},
 	"costs": {
 		"own": "Propi",

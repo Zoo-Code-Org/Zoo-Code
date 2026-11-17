@@ -152,8 +152,7 @@ describe("formatNative", () => {
 		const serialized = serializeCustomTool(tool)
 		const result = formatNative(serialized)
 		const props = result.function.parameters?.properties as
-			| Record<string, { type: string; description?: string }>
-			| undefined
+			Record<string, { type: string; description?: string }> | undefined
 
 		expect(props?.str?.type).toBe("string")
 		expect(props?.num?.type).toBe("number")

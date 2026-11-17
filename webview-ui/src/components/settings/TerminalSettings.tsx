@@ -7,7 +7,11 @@ import { buildDocLink } from "@src/utils/docLinks"
 import { useEvent, useMount } from "react-use"
 import { Terminal } from "lucide-react"
 
-import { type ExtensionMessage, type TerminalOutputPreviewSize } from "@roo-code/types"
+import {
+	type ExtensionMessage,
+	type TerminalOutputPreviewSize,
+	DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
+} from "@roo-code/types"
 
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Slider, Button } from "@/components/ui"
@@ -21,6 +25,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 	terminalOutputPreviewSize?: TerminalOutputPreviewSize
 	terminalShellIntegrationTimeout?: number
 	terminalShellIntegrationDisabled?: boolean
+	collapseCommandOutputByDefault?: boolean
 	terminalCommandDelay?: number
 	terminalPowershellCounter?: boolean
 	terminalZshClearEolMark?: boolean
@@ -33,6 +38,7 @@ type TerminalSettingsProps = HTMLAttributes<HTMLDivElement> & {
 		| "terminalOutputPreviewSize"
 		| "terminalShellIntegrationTimeout"
 		| "terminalShellIntegrationDisabled"
+		| "collapseCommandOutputByDefault"
 		| "terminalCommandDelay"
 		| "terminalPowershellCounter"
 		| "terminalZshClearEolMark"
@@ -51,6 +57,7 @@ export const TerminalSettings = ({
 	terminalOutputPreviewSize,
 	terminalShellIntegrationTimeout,
 	terminalShellIntegrationDisabled,
+	collapseCommandOutputByDefault,
 	terminalCommandDelay,
 	terminalPowershellCounter,
 	terminalZshClearEolMark,
@@ -151,6 +158,26 @@ export const TerminalSettings = ({
 					</div>
 				</div>
 
+				<SearchableSetting
+					settingId="terminal-collapse-command-output"
+					section="terminal"
+					label={t("settings:terminal.collapseCommandOutput.label")}>
+					<VSCodeCheckbox
+						checked={collapseCommandOutputByDefault ?? DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT}
+						onChange={(event) =>
+							setCachedStateField(
+								"collapseCommandOutputByDefault",
+								(event.target as HTMLInputElement).checked,
+							)
+						}
+						data-testid="terminal-collapse-command-output-checkbox">
+						<span className="font-medium">{t("settings:terminal.collapseCommandOutput.label")}</span>
+					</VSCodeCheckbox>
+					<div className="text-vscode-descriptionForeground text-sm mt-1">
+						{t("settings:terminal.collapseCommandOutput.description")}
+					</div>
+				</SearchableSetting>
+
 				{/* Advanced Settings */}
 				<div className="flex flex-col gap-3">
 					<div className="flex flex-col gap-1">
@@ -178,7 +205,7 @@ export const TerminalSettings = ({
 								</span>
 							</VSCodeCheckbox>
 							<div className="text-vscode-descriptionForeground text-sm mt-1">
-								<Trans i18nKey="settings:terminal.shellIntegrationDisabled.description">
+								<Trans t={t} i18nKey="settings:terminal.shellIntegrationDisabled.description">
 									<VSCodeLink
 										href={buildDocLink(
 											"features/shell-integration#use-inline-terminal-recommended",
@@ -250,7 +277,7 @@ export const TerminalSettings = ({
 									)}
 
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.profile.description">
+										<Trans t={t} i18nKey="settings:terminal.profile.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration",
@@ -281,7 +308,7 @@ export const TerminalSettings = ({
 										<span className="font-medium">{t("settings:terminal.inheritEnv.label")}</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.inheritEnv.description">
+										<Trans t={t} i18nKey="settings:terminal.inheritEnv.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#inherit-environment-variables",
@@ -319,7 +346,7 @@ export const TerminalSettings = ({
 										</span>
 									</div>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.shellIntegrationTimeout.description">
+										<Trans t={t} i18nKey="settings:terminal.shellIntegrationTimeout.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#terminal-shell-integration-timeout",
@@ -355,7 +382,7 @@ export const TerminalSettings = ({
 										<span className="w-10">{terminalCommandDelay ?? 0}ms</span>
 									</div>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.commandDelay.description">
+										<Trans t={t} i18nKey="settings:terminal.commandDelay.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#terminal-command-delay",
@@ -383,7 +410,7 @@ export const TerminalSettings = ({
 										</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.powershellCounter.description">
+										<Trans t={t} i18nKey="settings:terminal.powershellCounter.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#enable-powershell-counter-workaround",
@@ -411,7 +438,7 @@ export const TerminalSettings = ({
 										</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.zshClearEolMark.description">
+										<Trans t={t} i18nKey="settings:terminal.zshClearEolMark.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#clear-zsh-eol-mark",
@@ -435,7 +462,7 @@ export const TerminalSettings = ({
 										<span className="font-medium">{t("settings:terminal.zshOhMy.label")}</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.zshOhMy.description">
+										<Trans t={t} i18nKey="settings:terminal.zshOhMy.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#enable-oh-my-zsh-integration",
@@ -459,7 +486,7 @@ export const TerminalSettings = ({
 										<span className="font-medium">{t("settings:terminal.zshP10k.label")}</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.zshP10k.description">
+										<Trans t={t} i18nKey="settings:terminal.zshP10k.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#enable-powerlevel10k-integration",
@@ -483,7 +510,7 @@ export const TerminalSettings = ({
 										<span className="font-medium">{t("settings:terminal.zdotdir.label")}</span>
 									</VSCodeCheckbox>
 									<div className="text-vscode-descriptionForeground text-sm mt-1">
-										<Trans i18nKey="settings:terminal.zdotdir.description">
+										<Trans t={t} i18nKey="settings:terminal.zdotdir.description">
 											<VSCodeLink
 												href={buildDocLink(
 													"features/shell-integration#enable-zdotdir-handling",

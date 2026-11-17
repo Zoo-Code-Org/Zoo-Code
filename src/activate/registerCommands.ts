@@ -4,16 +4,16 @@ import delay from "delay"
 import type { CommandId } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { Package } from "../shared/package"
 import { getCommand } from "../utils/commands"
 import { ClineProvider } from "../core/webview/ClineProvider"
+import type { WebviewFocusTracker } from "../core/webview/WebviewFocusTracker"
 import { ContextProxy } from "../core/config/ContextProxy"
 import { focusPanel } from "../utils/focusPanel"
 import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
-import { t } from "../i18n"
+import { createDiagnosticsReport } from "../services/diagnostics"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -77,13 +77,10 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // lifecycle alongside the command registration, so it's intentionally
 // excluded from this map.
 //
-// Callback shape mirrors VS Code's own `commands.registerCommand` signature
-// (`(...args: any[]) => any`), with the return narrowed to `unknown` so
-// callers must inspect before using. `any[]` for args is unavoidable: the
-// callbacks here are heterogeneous (`importSettings` takes an optional
-// `filePath?: string`, others take none) and VS Code dispatches positional
-// args dynamically.
-type CommandCallback = (...args: any[]) => unknown
+// `never[]` deliberately lets callbacks with different parameters share one map
+// type while rejecting direct calls with arguments. VS Code dispatches positional
+// arguments dynamically; `unknown` requires callers to inspect returned values.
+type CommandCallback = (...args: never[]) => unknown
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -109,9 +106,10 @@ const getCommandsMap = ({
 	popoutButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("popout")
 
-		return openClineInNewTab({ context, outputChannel })
+		return openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker })
 	},
-	openInNewTab: () => openClineInNewTab({ context, outputChannel }),
+	openInNewTab: () =>
+		openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker }),
 	settingsButtonClicked: () => {
 		const visibleProvider = getVisibleProviderOrLog(outputChannel)
 
@@ -151,7 +149,7 @@ const getCommandsMap = ({
 				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
 			)
 	},
-	newTask: handleNewTask,
+	newTask: (params: { prompt?: string } | null | undefined) => handleNewTask(params, provider.webviewFocusTracker),
 	setCustomStoragePath: async () => {
 		const { promptForCustomStoragePath } = await import("../utils/storage")
 		await promptForCustomStoragePath()
@@ -172,6 +170,12 @@ const getCommandsMap = ({
 			filePath,
 		)
 	},
+	createDiagnosticsReport: () =>
+		createDiagnosticsReport({
+			context,
+			outputChannel,
+			providers: ClineProvider.getAllInstances(),
+		}),
 	focusInput: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
@@ -183,6 +187,9 @@ const getCommandsMap = ({
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing input: ${error}`)
 		}
+	},
+	retryWebviewRecovery: async () => {
+		await (ClineProvider.getVisibleInstance() ?? provider).retryWebviewRecovery()
 	},
 	focusPanel: async () => {
 		try {
@@ -220,7 +227,13 @@ const getCommandsMap = ({
 	},
 })
 
-export const openClineInNewTab = async ({ context, outputChannel }: Omit<RegisterCommandOptions, "provider">) => {
+type OpenClineInNewTabOptions = {
+	context: vscode.ExtensionContext
+	outputChannel: vscode.OutputChannel
+	webviewFocusTracker: WebviewFocusTracker
+}
+
+export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).
@@ -231,12 +244,19 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 	let mdmService: MdmService | undefined
 	try {
 		mdmService = MdmService.getInstance()
-	} catch (error) {
+	} catch {
 		// MDM service not initialized, which is fine - extension can work without it
 		mdmService = undefined
 	}
 
-	const tabProvider = new ClineProvider(context, outputChannel, "editor", contextProxy, mdmService)
+	const tabProvider = new ClineProvider(
+		context,
+		outputChannel,
+		"editor",
+		contextProxy,
+		webviewFocusTracker,
+		mdmService,
+	)
 	const lastCol = Math.max(...vscode.window.visibleTextEditors.map((editor) => editor.viewColumn || 0))
 
 	// Check if there are any visible text editors, otherwise open a new group
@@ -282,7 +302,8 @@ export const openClineInNewTab = async ({ context, outputChannel }: Omit<Registe
 	// Handle panel closing events.
 	newPanel.onDidDispose(
 		() => {
-			setPanel(undefined, "tab")
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener

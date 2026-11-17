@@ -89,7 +89,7 @@ export class OutputInterceptor {
 	 *
 	 * @param options - Configuration options for the interceptor
 	 */
-	constructor(private readonly options: OutputInterceptorOptions) {
+	constructor(options: OutputInterceptorOptions) {
 		this.previewBytes = TERMINAL_PREVIEW_BYTES[options.previewSize]
 		this.headBudget = Math.floor(this.previewBytes / 2)
 		this.tailBudget = this.previewBytes - this.headBudget

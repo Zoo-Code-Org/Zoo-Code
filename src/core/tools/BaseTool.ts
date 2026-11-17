@@ -10,7 +10,7 @@ export interface ToolCallbacks {
 	askApproval: AskApproval
 	handleError: HandleError
 	pushToolResult: PushToolResult
-	toolCallId?: string
+	toolCallId: string
 }
 
 /**
@@ -58,7 +58,7 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * @param task - Task instance
 	 * @param block - Partial ToolUse block
 	 */
-	async handlePartial(task: Task, block: ToolUse<TName>): Promise<void> {
+	async handlePartial(_task: Task, _block: ToolUse<TName>): Promise<void> {
 		// Default: no-op for partial messages
 		// Tools can override to show streaming UI updates
 	}

@@ -61,7 +61,7 @@ const clerkMeResponseSchema = z.object({
 				}),
 			)
 			.optional(),
-		public_metadata: z.record(z.any()).optional(),
+		public_metadata: z.record(z.string(), z.any()).optional(),
 	}),
 })
 
@@ -233,7 +233,7 @@ export class WebAuthService extends EventEmitter<AuthServiceEvents> implements A
 			return credentials
 		} catch (error) {
 			if (error instanceof z.ZodError) {
-				this.log("[auth] Invalid credentials format:", error.errors)
+				this.log("[auth] Invalid credentials format:", error.issues)
 			} else {
 				this.log("[auth] Failed to parse stored credentials:", error)
 			}

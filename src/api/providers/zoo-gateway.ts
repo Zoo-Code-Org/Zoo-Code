@@ -8,9 +8,10 @@ import {
 	ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 	VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS,
 	providerIdentifiers,
+	type ModelRecord,
 } from "@roo-code/types"
 
-import { ApiHandlerOptions } from "../../shared/api"
+import { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { clearZooCodeToken, getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../services/zoo-code-auth"
 import { Package } from "../../shared/package"
 import { t } from "../../i18n"
@@ -18,10 +19,29 @@ import { t } from "../../i18n"
 import { ApiStream } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { addCacheBreakpoints } from "../transform/caching/vercel-ai-gateway"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 
-import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
+import type {
+	SingleCompletionHandler,
+	ApiHandlerCreateMessageMetadata,
+	CompletePromptOptions,
+	ModelCacheScope,
+} from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
+import { getZooGatewayModels } from "./fetchers/zoo-gateway"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	throwIfAborted,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
+
+const ZOO_GATEWAY_PROVIDER_NAME = "Zoo Gateway"
 
 function getApiErrorStatus(error: unknown): number | undefined {
 	if (typeof error === "object" && error !== null && "status" in error) {
@@ -170,6 +190,14 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		})
 	}
 
+	override getModelCacheScope(): ModelCacheScope {
+		return { urlScoped: true, keyScoped: true, authScoped: true }
+	}
+
+	async fetchModels(options: GetModelsOptions): Promise<ModelRecord> {
+		return getZooGatewayModels({ zooSessionToken: options.apiKey, zooGatewayBaseUrl: options.baseUrl })
+	}
+
 	private ensureAuthenticated(): void {
 		if (!resolveZooGatewaySessionToken(this.options.zooSessionToken)) {
 			throw new Error(ZOO_GATEWAY_AUTH_ERROR)
@@ -193,7 +221,7 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		// Apply prompt caching for models that support it
 		// Zoo Gateway serves the same models as Vercel AI Gateway, so caching support is identical
 		if (VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has(modelId) && info.supportsPromptCache) {
-			addCacheBreakpoints(systemPrompt, openAiMessages)
+			addCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, info))
 		}
 
 		// Build request headers with enrichment metadata
@@ -279,11 +307,32 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		this.ensureAuthenticated()
-
-		const { id: modelId, info } = await this.fetchModel()
+		// Same abort-signal contract as the other providers (see requesty.ts): the SDK gets a
+		// per-request signal bridged from the caller's signal, so its abort listener does not stay on
+		// the caller's long-lived signal. The `finally` below detaches the bridge on every exit path.
+		const { signal: bridgedCallerSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			options?.abortSignal,
+		)
+		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
 
 		try {
+			// A cancel that came first wins over every other failure, also a missing session.
+			throwIfAborted(requestAbortSignal)
+			this.ensureAuthenticated()
+
+			let model: Awaited<ReturnType<ZooGatewayHandler["fetchModel"]>>
+			try {
+				model = requestAbortSignal
+					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
+					: await this.fetchModel()
+			} catch (error) {
+				if (isRequestAborted(error, requestAbortSignal)) {
+					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
+				}
+				throw error
+			}
+			const { id: modelId, info } = model
+
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
@@ -296,21 +345,54 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
+			const createOptions: OpenAI.RequestOptions = {
+				...(requestAbortSignal && { signal: requestAbortSignal }),
+				...(hasUsableTimeout(options?.timeoutMs) && { timeout: toSdkTimeoutMs(options.timeoutMs) }),
+			}
+
+			let response: OpenAI.Chat.ChatCompletion
 			try {
-				await surfaceGatewayApiError(error)
-			} catch (surfaceError) {
-				console.error(
-					"Failed to surface Zoo Gateway error:",
-					surfaceError instanceof Error ? surfaceError.message : surfaceError,
-				)
+				const pendingCompletion = this.client.chat.completions.create(requestOptions, createOptions)
+				// Race the completion against the signal: the SDK does not observe the signal while it
+				// sleeps between retries, so awaiting the SDK call alone can outlive the cancel.
+				response = requestAbortSignal
+					? await rejectOnAbort(pendingCompletion, requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
+					: await pendingCompletion
+			} catch (error) {
+				// A cancel or timeout is not a gateway failure: do not show a gateway error for it.
+				if (requestAbortSignal?.aborted) {
+					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
+				}
+				try {
+					// The notification can wait for the user. A cancel or timeout must still settle at once.
+					const surfacing = surfaceGatewayApiError(error)
+					await (requestAbortSignal
+						? rejectOnAbort(surfacing, requestAbortSignal, ZOO_GATEWAY_PROVIDER_NAME)
+						: surfacing)
+				} catch (surfaceError) {
+					if (!requestAbortSignal?.aborted) {
+						console.error(
+							"Failed to surface Zoo Gateway error:",
+							surfaceError instanceof Error ? surfaceError.message : surfaceError,
+						)
+					}
+				}
+				if (requestAbortSignal?.aborted) {
+					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
+				}
+				if (error instanceof Error) {
+					throw new Error(`Zoo Gateway completion error: ${error.message}`)
+				}
+				throw error
 			}
-			if (error instanceof Error) {
-				throw new Error(`Zoo Gateway completion error: ${error.message}`)
+
+			if (requestAbortSignal?.aborted) {
+				// The response resolved after the request was aborted: do not return the late result.
+				throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
 			}
-			throw error
+			return response.choices[0]?.message.content || ""
+		} finally {
+			removeExternalAbortListener()
 		}
 	}
 }

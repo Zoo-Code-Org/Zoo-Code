@@ -58,14 +58,6 @@ export function getModeBySlug(slug: string, customModes?: ModeConfig[]): ModeCon
 	return modes.find((mode) => mode.slug === slug)
 }
 
-export function getModeConfig(slug: string, customModes?: ModeConfig[]): ModeConfig {
-	const mode = getModeBySlug(slug, customModes)
-	if (!mode) {
-		throw new Error(`No mode found for slug: ${slug}`)
-	}
-	return mode
-}
-
 // Get all available modes, with custom modes overriding built-in modes
 export function getAllModes(customModes?: ModeConfig[]): ModeConfig[] {
 	if (!customModes?.length) {
@@ -88,11 +80,6 @@ export function getAllModes(customModes?: ModeConfig[]): ModeConfig[] {
 	})
 
 	return allModes
-}
-
-// Check if a mode is custom or an override
-export function isCustomMode(slug: string, customModes?: ModeConfig[]): boolean {
-	return !!customModes?.some((mode) => mode.slug === slug)
 }
 
 /**

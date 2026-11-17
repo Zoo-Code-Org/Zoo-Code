@@ -23,6 +23,7 @@ import { useAddNonInteractiveClickListener } from "./components/ui/hooks/useNonI
 import { TooltipProvider } from "./components/ui/tooltip"
 import { STANDARD_TOOLTIP_DELAY } from "./components/ui/standard-tooltip"
 import { useThemeFixtureProbe } from "./utils/useThemeFixtureProbe"
+import { recordDiagnosticsActiveTab } from "./utils/diagnostics"
 
 type Tab = "settings" | "history" | "chat" | "marketplace"
 
@@ -168,6 +169,8 @@ const App = () => {
 
 	useEvent("message", onMessage)
 
+	useEffect(() => recordDiagnosticsActiveTab(tab), [tab])
+
 	useEffect(() => {
 		if (shouldShowAnnouncement && tab === "chat") {
 			setShowAnnouncement(true)
@@ -205,6 +208,26 @@ const App = () => {
 
 	// Tell the extension that we are ready to receive messages.
 	useEffect(() => vscode.postMessage({ type: "webviewDidLaunch" }), [])
+
+	// Heartbeat so the extension watchdog can detect a crashed webview renderer
+	// process (gray screen) and reload the view.
+	useEffect(() => {
+		const postHeartbeat = () => vscode.postMessage({ type: "webviewHeartbeat", timestamp: Date.now() })
+		postHeartbeat()
+		const interval = setInterval(postHeartbeat, 30_000)
+		return () => clearInterval(interval)
+	}, [])
+
+	useEffect(() => {
+		// Window activation and programmatic focus do not identify a chat interaction.
+		const onInteraction = () => vscode.postMessage({ type: "webviewDidFocus" })
+		document.addEventListener("pointerdown", onInteraction, true)
+		document.addEventListener("keydown", onInteraction, true)
+		return () => {
+			document.removeEventListener("pointerdown", onInteraction, true)
+			document.removeEventListener("keydown", onInteraction, true)
+		}
+	}, [])
 
 	// Initialize source map support for better error reporting
 	useEffect(() => {

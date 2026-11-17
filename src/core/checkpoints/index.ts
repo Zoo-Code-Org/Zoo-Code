@@ -16,6 +16,8 @@ import { DIFF_VIEW_URI_SCHEME } from "../../integrations/editor/DiffViewProvider
 
 import { CheckpointServiceOptions, RepoPerTaskCheckpointService } from "../../services/checkpoints"
 
+import { assertRecordedCheckpoint } from "./recordedCheckpoint"
+
 const WARNING_THRESHOLD_MS = 5000
 
 function sendCheckpointInitWarn(task: Task, type?: "WAIT_TIMEOUT" | "INIT_TIMEOUT", timeout?: number) {
@@ -44,7 +46,7 @@ export async function getCheckpointService(task: Task, { interval = 250 }: { int
 
 		try {
 			provider?.log(message)
-		} catch (err) {
+		} catch {
 			// NO-OP
 		}
 	}
@@ -238,6 +240,8 @@ export async function checkpointRestore(
 	task: Task,
 	{ ts, commitHash, mode, operation = "delete" }: CheckpointRestoreOptions,
 ) {
+	assertRecordedCheckpoint(task, commitHash)
+
 	const service = await getCheckpointService(task)
 
 	if (!service) {
@@ -295,9 +299,9 @@ export async function checkpointRestore(
 		// task flow and the communication between the webview and the
 		// `Task` instance.
 		provider?.cancelTask()
-	} catch (err) {
-		provider?.log("[checkpointRestore] disabling checkpoints for this task")
-		task.enableCheckpoints = false
+	} catch (error) {
+		provider?.log("[checkpointRestore] failed to restore checkpoint")
+		throw error
 	}
 }
 
@@ -314,7 +318,14 @@ export type CheckpointDiffOptions = {
 	mode: "from-init" | "checkpoint" | "to-current" | "full"
 }
 
-export async function checkpointDiff(task: Task, { ts, previousCommitHash, commitHash, mode }: CheckpointDiffOptions) {
+export async function checkpointDiff(task: Task, { commitHash, mode }: CheckpointDiffOptions) {
+	try {
+		assertRecordedCheckpoint(task, commitHash)
+	} catch (error) {
+		void vscode.window.showErrorMessage(error instanceof Error ? error.message : String(error))
+		return
+	}
+
 	const service = await getCheckpointService(task)
 
 	if (!service) {
@@ -384,7 +395,7 @@ export async function checkpointDiff(task: Task, { ts, previousCommitHash, commi
 				}),
 			]),
 		)
-	} catch (err) {
+	} catch {
 		const provider = task.providerRef.deref()
 		provider?.log("[checkpointDiff] disabling checkpoints for this task")
 		task.enableCheckpoints = false

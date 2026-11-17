@@ -2,7 +2,7 @@ import * as React from "react"
 import { CaretUpIcon } from "@radix-ui/react-icons"
 import { Check, X } from "lucide-react"
 import { Fzf } from "fzf"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { cn } from "@/lib/utils"
 import { useRooPortal } from "./hooks/useRooPortal"
@@ -11,7 +11,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui"
 import { StandardTooltip } from "@/components/ui"
 
 export enum DropdownOptionType {
-	ITEM = "item",
 	SEPARATOR = "separator",
 	SHORTCUT = "shortcut",
 	ACTION = "action",
@@ -63,7 +62,7 @@ export const SelectDropdown = React.memo(
 			},
 			ref,
 		) => {
-			const { t } = useTranslation()
+			const { t } = useAppTranslation()
 			const [open, setOpen] = React.useState(false)
 			const [searchValue, setSearchValue] = React.useState("")
 			const searchInputRef = React.useRef<HTMLInputElement>(null)

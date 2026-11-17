@@ -46,11 +46,13 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.86.0
+## What's New in v3.98.0
 
-- ✨ **New model support:** Use GPT-6.1 Sol, get the corrected Claude Opus 5.5 output budget, and select DeepSeek V4.1 Flash on OpenCode Go.
-- 🧭 **Reliable task aborts and interruptions:** Preserve the first abort reason, reset stream-abort state for each request, and stop interrupted tasks from replaying rejected subtasks.
-- 🛠️ **Dependable tools, prompts, and UI streaming:** Keep streamed tool arguments intact, enforce MCP tool policy, prevent invented line numbers, and smooth chat updates.
+- 🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
+- 🔌 **Expanded model and provider support:** Use GPT-6.1 Terra and fetch the latest Friendli model list.
+- 🛡️ **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
 
 <details>
   <summary>🌐 Available languages</summary>

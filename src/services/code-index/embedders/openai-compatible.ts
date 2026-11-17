@@ -179,9 +179,9 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 		// Known patterns for major providers
 		const patterns = [
 			// Azure OpenAI: /deployments/{deployment-name}/embeddings
-			/\/deployments\/[^\/]+\/embeddings(\?|$)/,
+			/\/deployments\/[^/]+\/embeddings(\?|$)/,
 			// Azure Databricks: /serving-endpoints/{endpoint-name}/invocations
-			/\/serving-endpoints\/[^\/]+\/invocations(\?|$)/,
+			/\/serving-endpoints\/[^/]+\/invocations(\?|$)/,
 			// Direct endpoints: ends with /embeddings (before query params)
 			/\/embeddings(\?|$)/,
 			// Some providers use /embed instead of /embeddings
@@ -240,7 +240,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 
 		try {
 			return await response.json()
-		} catch (e) {
+		} catch {
 			const error = new Error(`Failed to parse response JSON`) as HttpError
 			error.status = response.status
 			throw error
@@ -445,7 +445,7 @@ export class OpenAICompatibleEmbedder implements IEmbedder {
 	/**
 	 * Updates global rate limit state when a 429 error occurs
 	 */
-	private async updateGlobalRateLimitState(error: HttpError): Promise<void> {
+	private async updateGlobalRateLimitState(_error: HttpError): Promise<void> {
 		const release = await OpenAICompatibleEmbedder.globalRateLimitState.mutex.acquire()
 		try {
 			const state = OpenAICompatibleEmbedder.globalRateLimitState

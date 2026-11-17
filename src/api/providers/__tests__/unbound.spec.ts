@@ -1,6 +1,8 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
+import { unboundDefaultModelInfo } from "@roo-code/types"
+
 import { UnboundHandler } from "../unbound"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -32,9 +34,9 @@ vi.mock("../fetchers/modelCache", () => ({
 			description: "GPT-4o",
 		},
 	}),
-	refreshModels: vi.fn(async (options) => {
+	refreshModels: vi.fn(async (options, handler) => {
 		const { getModels } = await import("../fetchers/modelCache")
-		return getModels(options)
+		return getModels(options, handler)
 	}),
 }))
 
@@ -200,5 +202,23 @@ describe("UnboundHandler", () => {
 				messages: [{ role: "system", content: "Write a haiku" }],
 			}),
 		)
+	})
+
+	describe("model catalog", () => {
+		it("reports its cache scope", () => {
+			const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })
+			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
+		})
+
+		it("populates this.models so getModel() stops returning the default info", async () => {
+			const handler = new UnboundHandler({ unboundApiKey: "test-key", unboundModelId: "openai/gpt-4o" })
+
+			expect(handler.getModel().info.description).toBe(unboundDefaultModelInfo.description)
+
+			await handler.ensureModelFetched()
+
+			expect(handler.getModel().info.description).toBe("GPT-4o")
+			expect(handler.getModel().info.maxTokens).toBe(4096)
+		})
 	})
 })

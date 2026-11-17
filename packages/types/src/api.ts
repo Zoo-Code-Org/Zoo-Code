@@ -69,6 +69,15 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		sequence: TaskApiConversationHistorySequence,
 	): Promise<boolean>
 	/**
+	 * Checks whether the persisted ui_messages.json for a task contains a
+	 * message with the given text. Reads from disk, so it only returns true
+	 * once the final write is durable. Intended for use in tests only.
+	 * @param taskId The ID of the task.
+	 * @param text The text to look for in persisted UI messages.
+	 * @returns True when a persisted UI message contains the text, or false if unavailable.
+	 */
+	hasTaskUiMessageText(taskId: string, text: string): Promise<boolean>
+	/**
 	 * Returns the current task stack.
 	 * @returns An array of task IDs.
 	 */

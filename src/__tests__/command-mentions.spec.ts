@@ -272,7 +272,7 @@ npm install
 
 	describe("command mention regex patterns", () => {
 		it("should match valid command mention patterns anywhere", () => {
-			const commandRegex = /\/([a-zA-Z0-9_\.-]+)(?=\s|$)/g
+			const commandRegex = /\/([a-zA-Z0-9_.-]+)(?=\s|$)/g
 
 			const validPatterns = ["/setup", "/build-prod", "/test_suite", "/my-command", "/command123"]
 
@@ -284,19 +284,19 @@ npm install
 		})
 
 		it("should match command patterns in middle of text", () => {
-			const commandRegex = /\/([a-zA-Z0-9_\.-]+)(?=\s|$)/g
+			const commandRegex = /\/([a-zA-Z0-9_.-]+)(?=\s|$)/g
 
 			const validPatterns = ["Please /setup", "Run /build now", "Use /deploy here"]
 
 			validPatterns.forEach((pattern) => {
 				const match = pattern.match(commandRegex)
 				expect(match).toBeTruthy()
-				expect(match![0]).toMatch(/^\/[a-zA-Z0-9_\.-]+$/)
+				expect(match![0]).toMatch(/^\/[a-zA-Z0-9_.-]+$/)
 			})
 		})
 
 		it("should match commands at start of new lines", () => {
-			const commandRegex = /\/([a-zA-Z0-9_\.-]+)(?=\s|$)/g
+			const commandRegex = /\/([a-zA-Z0-9_.-]+)(?=\s|$)/g
 
 			const multilineText = "First line\n/setup the project\nAnother line\n/deploy when ready"
 			const matches = multilineText.match(commandRegex)
@@ -309,7 +309,7 @@ npm install
 		})
 
 		it("should match multiple commands in message", () => {
-			const commandRegex = /(?:^|\s)\/([a-zA-Z0-9_\.-]+)(?=\s|$)/g
+			const commandRegex = /(?:^|\s)\/([a-zA-Z0-9_.-]+)(?=\s|$)/g
 
 			const validText = "/setup the project\nThen /deploy later"
 			const matches = validText.match(commandRegex)
@@ -321,7 +321,7 @@ npm install
 		})
 
 		it("should not match invalid command patterns", () => {
-			const commandRegex = /\/([a-zA-Z0-9_\.-]+)(?=\s|$)/g
+			const commandRegex = /\/([a-zA-Z0-9_.-]+)(?=\s|$)/g
 
 			const invalidPatterns = ["/ space", "/with space", "/with/slash", "//double", "/with@symbol"]
 

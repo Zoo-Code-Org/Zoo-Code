@@ -103,6 +103,8 @@ export function isNerdFontSupported(): boolean {
 
 /**
  * Reset the Nerd Font detection cache (useful for testing).
+ *
+ * @internal
  */
 export function resetNerdFontCache(): void {
 	nerdFontSupported = null
@@ -164,6 +166,8 @@ export function Icon({ name, useNerdFont, width = 2, color, ...textProps }: Icon
 
 /**
  * Get the raw icon character (useful for string concatenation).
+ *
+ * @internal
  */
 export function getIconChar(name: IconName, useNerdFont?: boolean): string {
 	const iconDef = ICONS[name]

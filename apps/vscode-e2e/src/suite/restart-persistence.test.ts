@@ -54,6 +54,14 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		await waitUntilCompleted({ api, taskId })
 		assert.strictEqual(sawMarker, true, `Completion should include ${MARKER}`)
 
+		// TaskCompleted and the UI marker do not acknowledge all three files.
+		// Check both persisted histories and the store's published history item.
+		// TaskHistoryStore publishes newly created cache entries only after writing them.
+		const createdTaskId: string = taskId
+		await waitFor(() => api.hasTaskUiMessageText(createdTaskId, MARKER))
+		await waitForMarkedCompletion(api, createdTaskId)
+		await waitFor(async () => (await api.getTaskHistoryItem(createdTaskId)) !== undefined)
+
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
 			phase: "create",

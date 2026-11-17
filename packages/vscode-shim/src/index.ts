@@ -30,6 +30,7 @@ export {
 	CancellationTokenSource,
 	CodeLens,
 	LanguageModelTextPart,
+	LanguageModelDataPart,
 	LanguageModelToolCallPart,
 	LanguageModelToolResultPart,
 	FileSystemError,

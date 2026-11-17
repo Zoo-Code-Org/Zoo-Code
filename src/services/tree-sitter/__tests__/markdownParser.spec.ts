@@ -500,7 +500,7 @@ Some content here.
 })
 
 // Helper function to mimic the processCaptures function from index.ts
-function processCaptures(captures: any[], lines: string[], minComponentLines: number = 4): string | null {
+function processCaptures(captures: any[], _lines: string[], minComponentLines: number = 4): string | null {
 	if (captures.length === 0) {
 		return null
 	}

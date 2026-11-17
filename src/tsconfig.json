@@ -4,6 +4,7 @@
 		"esModuleInterop": true,
 		"experimentalDecorators": true,
 		"forceConsistentCasingInFileNames": true,
+		"incremental": true,
 		"isolatedModules": true,
 		"lib": ["es2022", "esnext.disposable", "DOM"],
 		"module": "esnext",
@@ -17,6 +18,7 @@
 		"sourceMap": true,
 		"strict": true,
 		"target": "ES2022",
+		"tsBuildInfoFile": "node_modules/.cache/tsc/src.tsbuildinfo",
 		"useDefineForClassFields": true,
 		"useUnknownInCatchVariables": false
 	},

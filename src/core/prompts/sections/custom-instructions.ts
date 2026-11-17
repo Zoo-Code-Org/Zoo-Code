@@ -1,6 +1,5 @@
 import fs from "fs/promises"
 import path from "path"
-import * as os from "os"
 import { Dirent } from "fs"
 
 import { isLanguage } from "@roo-code/types"
@@ -12,7 +11,6 @@ import {
 	getRooDirectoriesForCwd,
 	getAllRooDirectoriesForCwd,
 	getAgentsDirectoriesForCwd,
-	getGlobalRooDirectory,
 } from "../../../services/roo-config"
 
 /**
@@ -38,7 +36,7 @@ async function directoryExists(dirPath: string): Promise<boolean> {
 	try {
 		const stats = await fs.stat(dirPath)
 		return stats.isDirectory()
-	} catch (err) {
+	} catch {
 		return false
 	}
 }
@@ -122,7 +120,7 @@ async function resolveSymLink(
 			// Handle nested symlinks by awaiting the recursive call
 			await resolveSymLink(resolvedTarget, fileInfo, depth + 1)
 		}
-	} catch (err) {
+	} catch {
 		// Skip invalid symlinks
 	}
 }
@@ -165,7 +163,7 @@ async function readTextFilesFromDirectory(dirPath: string): Promise<Array<{ file
 						return { filename: resolvedPath, content, sortKey: originalPath }
 					}
 					return null
-				} catch (err) {
+				} catch {
 					return null
 				}
 			}),
@@ -185,7 +183,7 @@ async function readTextFilesFromDirectory(dirPath: string): Promise<Array<{ file
 				return filenameA.localeCompare(filenameB)
 			})
 			.map(({ filename, content }) => ({ filename, content }))
-	} catch (err) {
+	} catch {
 		return []
 	}
 }
@@ -277,7 +275,7 @@ async function readAgentRulesFile(filePath: string): Promise<string> {
 				resolvedPath = fileInfo[0].resolvedPath
 			}
 		}
-	} catch (err) {
+	} catch {
 		// If lstat fails (file doesn't exist), return empty
 		return ""
 	}
@@ -321,7 +319,7 @@ async function loadAgentRulesFileFromDirectory(
 				// Found a standard file, don't check alternative
 				break
 			}
-		} catch (err) {
+		} catch {
 			// Silently ignore errors - agent rules files are optional
 		}
 	}
@@ -338,21 +336,11 @@ async function loadAgentRulesFileFromDirectory(
 				: `# Agent Rules Local (${localFilename}):`
 			results.push(`${localHeader}\n${localContent}`)
 		}
-	} catch (err) {
+	} catch {
 		// Silently ignore errors - local agent rules file is optional
 	}
 
 	return results.join("\n\n")
-}
-
-/**
- * Load AGENTS.md or AGENT.md file from the project root if it exists
- * Checks for both AGENTS.md (standard) and AGENT.md (alternative) for compatibility
- *
- * @deprecated Use loadAllAgentRulesFiles for loading from all directories
- */
-async function loadAgentRulesFile(cwd: string): Promise<string> {
-	return loadAgentRulesFileFromDirectory(cwd, false, cwd)
 }
 
 /**

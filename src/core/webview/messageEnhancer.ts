@@ -1,9 +1,8 @@
-import { ProviderSettings, ClineMessage, GlobalState, TelemetryEventName } from "@roo-code/types"
+import { ProviderSettings, ClineMessage, TelemetryEventName } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { supportPrompt } from "../../shared/support-prompt"
 import { singleCompletionHandler } from "../../utils/single-completion-handler"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
-import { ClineProvider } from "./ClineProvider"
 
 export interface MessageEnhancerOptions {
 	text: string
@@ -14,6 +13,12 @@ export interface MessageEnhancerOptions {
 	includeTaskHistoryInEnhance?: boolean
 	currentClineMessages?: ClineMessage[]
 	providerSettingsManager: ProviderSettingsManager
+	/**
+	 * Task the enhancement belongs to, when one is open. Passed through to the provider so
+	 * repeated enhancements of one task reuse a single prompt-cache bucket instead of
+	 * starting a new one per handler instance.
+	 */
+	taskId?: string
 }
 
 export interface MessageEnhancerResult {
@@ -42,6 +47,7 @@ export class MessageEnhancer {
 				includeTaskHistoryInEnhance,
 				currentClineMessages,
 				providerSettingsManager,
+				taskId,
 			} = options
 
 			// Determine which API configuration to use
@@ -77,7 +83,11 @@ export class MessageEnhancer {
 			)
 
 			// Call the single completion handler to get the enhanced prompt
-			const enhancedText = await singleCompletionHandler(configToUse, enhancementPrompt)
+			const enhancedText = await singleCompletionHandler(
+				configToUse,
+				enhancementPrompt,
+				taskId ? { taskId } : undefined,
+			)
 
 			return {
 				success: true,

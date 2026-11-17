@@ -1,4 +1,4 @@
-export function resolveVerbosity(argv = process.argv, env = process.env) {
+export function resolveVerbosity(argv = process.argv, _env = process.env) {
 	// Check if --no-silent flag is used (native vitest flag)
 	const cliNoSilent = argv.includes("--no-silent") || argv.includes("--silent=false")
 	const silent = !cliNoSilent // Silent by default

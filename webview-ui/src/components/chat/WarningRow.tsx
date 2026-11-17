@@ -30,7 +30,7 @@ export interface WarningRowProps {
  *   onAction={() => openSettings()}
  * />
  */
-export const WarningRow: React.FC<WarningRowProps> = ({ title, message, docsURL, actionText, onAction }) => {
+const WarningRow: React.FC<WarningRowProps> = ({ title, message, docsURL, actionText, onAction }) => {
 	const { t } = useAppTranslation()
 
 	return (

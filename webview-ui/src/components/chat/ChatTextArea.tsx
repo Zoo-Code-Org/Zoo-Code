@@ -27,6 +27,7 @@ import { StandardTooltip } from "@src/components/ui"
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
+import { ModelSelector } from "./ModelSelector"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -34,6 +35,26 @@ import { IndexingStatusBadge } from "./IndexingStatusBadge"
 import { ZooCodeAuthBadge } from "./ZooCodeAuthBadge"
 import { usePromptHistory } from "./hooks/usePromptHistory"
 import { disabledChatControlClassName, enabledChatControlClassName } from "./chatControlStyles"
+
+// Data transfer types that signal a file-oriented drag rather than an in-webview
+// text selection drag. "Files" covers drags from the OS file manager; the
+// remaining types are set by VS Code when dragging resources from the Explorer
+// or editor tabs, in local and remote workspaces alike (see fillEditorsDragData
+// in VS Code's workbench drag-and-drop code). Bare text/uri-list also
+// identifies browser link drags, so it must retain native drop behavior.
+const FILE_DRAG_DATA_TRANSFER_TYPES = [
+	"Files",
+	"ResourceURLs",
+	"CodeEditors",
+	"CodeFiles",
+	"application/vnd.code.uri-list",
+]
+
+// Chromium lowercases custom drag types; compare without relying on casing.
+const isFileDrag = (dataTransfer: DataTransfer): boolean =>
+	dataTransfer.types.some((type) =>
+		FILE_DRAG_DATA_TRANSFER_TYPES.some((fileType) => fileType.toLowerCase() === type.toLowerCase()),
+	)
 
 interface ChatTextAreaProps {
 	inputValue: string
@@ -92,6 +113,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const {
 			filePaths,
 			openedTabs,
+			apiConfiguration,
 			currentApiConfigName,
 			listApiConfigMeta,
 			customModes,
@@ -965,8 +987,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						className={cn("chat-text-area", !isEditMode && "relative", "flex", "flex-col", "outline-none")}
 						onDrop={handleDrop}
 						onDragOver={(e) => {
-							// Only allowed to drop images/files on shift key pressed.
-							if (!e.shiftKey) {
+							// Accept file drags from the OS file manager, the VS Code
+							// Explorer, and editor tabs without requiring Shift. In-webview
+							// text drags, such as moving a selection inside the input, keep
+							// the browser's native drop behavior unless Shift is held.
+							if (!e.shiftKey && !isFileDrag(e.dataTransfer)) {
 								setIsDraggingOver(false)
 								return
 							}
@@ -1097,7 +1122,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								placeholder={placeholderText}
 								minRows={3}
 								maxRows={15}
-								autoFocus={true}
+								autoFocus={document.hasFocus()}
 								className={cn(
 									"w-full",
 									"text-vscode-input-foreground",
@@ -1318,6 +1343,12 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							togglePinnedApiConfig={togglePinnedApiConfig}
 							lockApiConfigAcrossModes={!!lockApiConfigAcrossModes}
 							onToggleLockApiConfig={handleToggleLockApiConfig}
+						/>
+						<ModelSelector
+							apiConfiguration={apiConfiguration}
+							disabled={selectApiConfigDisabled}
+							title={t("chat:selectModel")}
+							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink"
 						/>
 						<AutoApproveDropdown triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0" />
 					</div>

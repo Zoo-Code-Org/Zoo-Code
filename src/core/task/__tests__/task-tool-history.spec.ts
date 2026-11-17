@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest"
+import { describe, it, expect } from "vitest"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 describe("Task Tool History Handling", () => {

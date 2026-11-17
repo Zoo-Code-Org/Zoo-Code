@@ -65,7 +65,7 @@ export class QdrantVectorStore implements IVectorStore {
 					"User-Agent": "Zoo-Code",
 				},
 			})
-		} catch (urlError) {
+		} catch {
 			// If URL parsing fails, fall back to URL-based config
 			// Note: This fallback won't correctly handle prefixes, but it's a last resort for malformed URLs.
 			this.client = new QdrantClient({
@@ -104,7 +104,7 @@ export class QdrantVectorStore implements IVectorStore {
 
 		try {
 			// Attempt to parse as complete URL - return as-is, let constructor handle ports
-			const parsedUrl = new URL(trimmedUrl)
+			new URL(trimmedUrl)
 			return trimmedUrl
 		} catch {
 			// Failed to parse as URL - treat as hostname

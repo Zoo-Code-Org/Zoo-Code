@@ -182,7 +182,7 @@ describe("Amazon Bedrock VPC Endpoint Functionality", () => {
 			// Make a request to ensure the endpoint configuration persists
 			try {
 				await handler.completePrompt("Test prompt")
-			} catch (error) {
+			} catch {
 				// Ignore errors, we're just testing the client configuration persistence
 			}
 

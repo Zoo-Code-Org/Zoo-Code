@@ -159,7 +159,7 @@ export class CustomModesManager {
 				try {
 					// Try parsing the original content as JSON (not the cleaned content)
 					return JSON.parse(content)
-				} catch (jsonError) {
+				} catch {
 					// JSON also failed, show the original YAML error
 					const errorMsg = yamlError instanceof Error ? yamlError.message : String(yamlError)
 					console.error(`[CustomModesManager] Failed to parse YAML from ${filePath}:`, errorMsg)
@@ -406,11 +406,11 @@ export class CustomModesManager {
 			// Validate the mode configuration before saving
 			const validationResult = modeConfigSchema.safeParse(config)
 			if (!validationResult.success) {
-				const errorMessages = validationResult.error.errors
+				const errorMessages = validationResult.error.issues
 					.map((err) => `${err.path.join(".")}: ${err.message}`)
 					.join(", ")
 				const errorMessage = `Invalid mode configuration: ${errorMessages}`
-				logger.error("Mode validation failed", { slug, errors: validationResult.error.errors })
+				logger.error("Mode validation failed", { slug, errors: validationResult.error.issues })
 				vscode.window.showErrorMessage(t("common:customModes.errors.updateFailed", { error: errorMessage }))
 				throw new Error(errorMessage)
 			}
@@ -467,7 +467,7 @@ export class CustomModesManager {
 
 		try {
 			content = await fs.readFile(filePath, "utf-8")
-		} catch (error) {
+		} catch {
 			// File might not exist yet.
 			content = yaml.stringify({ customModes: [] }, { lineWidth: 0 })
 		}
@@ -476,7 +476,7 @@ export class CustomModesManager {
 
 		try {
 			settings = this.parseYamlSafely(content, filePath)
-		} catch (error) {
+		} catch {
 			// Error already logged in parseYamlSafely
 			settings = { customModes: [] }
 		}
@@ -648,7 +648,7 @@ export class CustomModesManager {
 					} else {
 						return false // No .roomodes file and not in custom modes
 					}
-				} catch (error) {
+				} catch {
 					return false // Cannot read .roomodes and not in custom modes
 				}
 			}
@@ -675,7 +675,7 @@ export class CustomModesManager {
 				if (!stats.isDirectory()) {
 					return false
 				}
-			} catch (error) {
+			} catch {
 				return false
 			}
 
@@ -695,7 +695,7 @@ export class CustomModesManager {
 				}
 
 				return false // No files with content found
-			} catch (error) {
+			} catch {
 				return false
 			}
 		} catch (error) {
@@ -738,7 +738,7 @@ export class CustomModesManager {
 							// Find the mode in .roomodes
 							mode = roomodesModes.find((m: any) => m.slug === slug)
 						}
-					} catch (error) {
+					} catch {
 						// Continue to check built-in modes
 					}
 				}
@@ -798,7 +798,7 @@ export class CustomModesManager {
 						}
 					}
 				}
-			} catch (error) {
+			} catch {
 				// Directory doesn't exist, which is fine - mode might not have rules
 			}
 
@@ -866,7 +866,7 @@ export class CustomModesManager {
 		try {
 			await fs.rm(rulesFolderPath, { recursive: true, force: true })
 			logger.info(`Removed existing ${source} rules folder for mode ${importMode.slug}`)
-		} catch (error) {
+		} catch {
 			// It's okay if the folder doesn't exist
 			logger.debug(`No existing ${source} rules folder to remove for mode ${importMode.slug}`)
 		}
@@ -890,7 +890,7 @@ export class CustomModesManager {
 
 				// Check if path starts with a rules-* folder (old export format)
 				let cleanedRelativePath = normalizedRelativePath
-				const rulesMatch = normalizedRelativePath.match(/^rules-[^\/\\]+[\/\\]/)
+				const rulesMatch = normalizedRelativePath.match(/^rules-[^/\\]+[/\\]/)
 				if (rulesMatch) {
 					// Strip the entire rules-* folder reference for backwards compatibility
 					cleanedRelativePath = normalizedRelativePath.substring(rulesMatch[0].length)
@@ -963,11 +963,11 @@ export class CustomModesManager {
 				const validationResult = modeConfigSchema.safeParse(modeConfig)
 				if (!validationResult.success) {
 					logger.error(`Invalid mode configuration for ${modeConfig.slug}`, {
-						errors: validationResult.error.errors,
+						errors: validationResult.error.issues,
 					})
 					return {
 						success: false,
-						error: `Invalid mode configuration for ${modeConfig.slug}: ${validationResult.error.errors.map((e) => e.message).join(", ")}`,
+						error: `Invalid mode configuration for ${modeConfig.slug}: ${validationResult.error.issues.map((e) => e.message).join(", ")}`,
 					}
 				}
 

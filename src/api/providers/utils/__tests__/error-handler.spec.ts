@@ -1,4 +1,4 @@
-import { handleProviderError, handleOpenAIError } from "../error-handler"
+import { getNumericHttpStatus, handleOpenAIError, handleProviderError, hasNumericHttpStatus } from "../error-handler"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -45,6 +45,81 @@ describe("handleProviderError", () => {
 
 			expect(result).toBeInstanceOf(Error)
 			expect((result as any).status).toBeUndefined()
+		})
+
+		// AI SDK APICallError exposes the HTTP status as statusCode, not status — the same
+		// fallback applies to non-Error exceptions so a real 429 reaches the .status check in
+		// Task.backoffAndAnnounce regardless of how the provider threw it.
+		it("should fall back to a numeric statusCode for non-Error exceptions without status", () => {
+			const error = { statusCode: 429, message: "Rate limit exceeded" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect((result as { status?: number }).status).toBe(429)
+		})
+
+		it("should not add status for non-Error exceptions lacking status and statusCode", () => {
+			const error = { message: "Something went wrong" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect(result).not.toHaveProperty("status")
+		})
+
+		it("should not treat a non-numeric statusCode as a status", () => {
+			// Only numeric statusCode values are preserved: the typeof guard must reject strings.
+			const error = { message: "weird", statusCode: "429" }
+
+			const result = handleProviderError(error, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			// Asserting only the instance type would also pass if the string "429" were
+			// copied into .status, which is the regression the typeof guard prevents.
+			expect(result).not.toHaveProperty("status")
+		})
+
+		it("should prefer a numeric statusCode when status is null", () => {
+			// A null status is not a status: backoff only understands a number, so the
+			// numeric statusCode must win.
+			const error = { message: "Rate limit exceeded", status: null, statusCode: 429 }
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(429)
+		})
+
+		it("should prefer a numeric statusCode when status is a nonnumeric value", () => {
+			// A truthy nonnumeric status would be echoed into the retry header, so it must
+			// not win over a numeric statusCode.
+			const error = new Error("weird")
+			;(error as { status?: unknown }).status = "429"
+			;(error as { statusCode?: number }).statusCode = 401
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(401)
+		})
+
+		it("should keep a numeric status and ignore a nonnumeric statusCode", () => {
+			const error = { message: "weird", status: 503, statusCode: "429" }
+			const result = handleProviderError(error, providerName)
+			expect((result as { status?: number }).status).toBe(503)
+		})
+
+		it("should not treat a nonnumeric statusCode as a status on an Error input", () => {
+			// The typeof guard is what makes this total: an Error instance with a string
+			// statusCode must not gain a status property.
+			const error = new Error("weird")
+			;(error as { statusCode?: unknown }).statusCode = "429"
+			const result = handleProviderError(error, providerName)
+			expect(result).not.toHaveProperty("status")
+		})
+
+		it("should wrap a null throw gracefully instead of re-throwing", () => {
+			// Providers can throw non-object values (e.g. `throw null`): the optional chaining
+			// must keep the handler total over any thrown value.
+			const result = handleProviderError(null, providerName)
+
+			expect(result).toBeInstanceOf(Error)
+			expect(result.message).toContain("TestProvider completion error")
 		})
 	})
 
@@ -279,5 +354,73 @@ describe("handleOpenAIError (backward compatibility)", () => {
 
 		expect(result.message).toBe("Roo Code Cloud completion error: Authentication failed")
 		expect((result as any).status).toBe(401)
+	})
+})
+
+describe("hasNumericHttpStatus", () => {
+	it("recognizes a numeric status or statusCode", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("401"), { status: 401 }))).toBe(true)
+		expect(hasNumericHttpStatus(Object.assign(new Error("429"), { statusCode: 429 }))).toBe(true)
+	})
+
+	it("rejects non-numeric, non-finite, and non-object values", () => {
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: "429" }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: Number.NaN }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: Infinity }))).toBe(false)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { statusCode: Infinity }))).toBe(false)
+		expect(hasNumericHttpStatus(new Error("plain"))).toBe(false)
+		expect(hasNumericHttpStatus(undefined)).toBe(false)
+		expect(hasNumericHttpStatus(null)).toBe(false)
+		expect(hasNumericHttpStatus("429")).toBe(false)
+		expect(hasNumericHttpStatus(429)).toBe(false)
+		// A callable is not an HTTP error carrier, even when a numeric status is
+		// attached: the object guard must reject it (kills the surviving mutant on
+		// that guard).
+		expect(hasNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBe(false)
+	})
+
+	it("falls through to a numeric statusCode when status is not numeric", () => {
+		expect(hasNumericHttpStatus({ status: "429", statusCode: 429 })).toBe(true)
+		expect(hasNumericHttpStatus(Object.assign(new Error("x"), { status: "500", statusCode: 503 }))).toBe(true)
+	})
+})
+
+describe("getNumericHttpStatus", () => {
+	it("returns the numeric status, preferring status over statusCode", () => {
+		expect(getNumericHttpStatus(Object.assign(new Error("401"), { status: 401 }))).toBe(401)
+		expect(getNumericHttpStatus(Object.assign(new Error("429"), { statusCode: 429 }))).toBe(429)
+		// Field order is the contract: status first, exactly as hasNumericHttpStatus reads it.
+		expect(getNumericHttpStatus({ status: 401, statusCode: 429 })).toBe(401)
+		expect(getNumericHttpStatus({ status: 401, statusCode: "nope" })).toBe(401)
+	})
+
+	it("falls back to a numeric statusCode when status is absent or not numeric", () => {
+		// The fallback exists for the AI SDK's APICallError shape, which carries statusCode only.
+		expect(getNumericHttpStatus({ statusCode: 429 })).toBe(429)
+		expect(getNumericHttpStatus({ status: "429", statusCode: 429 })).toBe(429)
+		expect(getNumericHttpStatus(Object.assign(new Error("x"), { status: Number.NaN, statusCode: 503 }))).toBe(503)
+		expect(getNumericHttpStatus(Object.assign(new Error("x"), { status: "500", statusCode: 503 }))).toBe(503)
+	})
+
+	it("returns undefined when no field carries a finite number", () => {
+		expect(getNumericHttpStatus(new Error("plain"))).toBeUndefined()
+		expect(getNumericHttpStatus({ status: "429" })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: Number.NaN })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: Infinity })).toBeUndefined()
+		expect(getNumericHttpStatus({ statusCode: Infinity })).toBeUndefined()
+		expect(getNumericHttpStatus({ status: null, statusCode: null })).toBeUndefined()
+		expect(getNumericHttpStatus({})).toBeUndefined()
+	})
+
+	it("returns undefined for values that are not error-carrying objects", () => {
+		// The object guard runs before any field read: without it these inputs would either
+		// throw on a property access or report a status from a non-carrier.
+		expect(getNumericHttpStatus(null)).toBeUndefined()
+		expect(getNumericHttpStatus(undefined)).toBeUndefined()
+		expect(getNumericHttpStatus("429")).toBeUndefined()
+		expect(getNumericHttpStatus(429)).toBeUndefined()
+		// A callable is not an HTTP error carrier even when a numeric status is attached.
+		expect(getNumericHttpStatus(Object.assign(() => undefined, { status: 429 }))).toBeUndefined()
+		expect(getNumericHttpStatus(Object.assign(() => undefined, { statusCode: 429 }))).toBeUndefined()
 	})
 })

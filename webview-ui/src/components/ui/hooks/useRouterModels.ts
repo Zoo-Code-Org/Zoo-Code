@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query"
+import { replaceEqualDeep, useQuery } from "@tanstack/react-query"
 
 import {
 	allRouterModelsProvider,
@@ -23,6 +23,19 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		// query. The extension host echoes the ID in the routerModels response.
 		const requestId = crypto.randomUUID()
 
+		const cleanup = () => {
+			signal?.removeEventListener("abort", onAbort)
+			if (typeof window !== "undefined") {
+				window.removeEventListener("message", handler)
+			}
+		}
+
+		const onAbort = () => {
+			clearTimeout(timeout)
+			cleanup()
+			reject(new DOMException("Router models request aborted", "AbortError"))
+		}
+
 		const timeout = setTimeout(() => {
 			cleanup()
 			reject(new Error("Router models request timed out"))
@@ -39,6 +52,7 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 					return
 				}
 
+				clearTimeout(timeout)
 				cleanup()
 
 				if (message.routerModels) {
@@ -49,31 +63,12 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			}
 		}
 
-		const cleanup = () => {
-			clearTimeout(timeout)
-			if (typeof window !== "undefined") {
-				window.removeEventListener("message", handler)
-			}
-			signal?.removeEventListener("abort", onAbort)
+		if (signal?.aborted) {
+			onAbort()
+			return
 		}
 
-		const onAbort = () => {
-			cleanup()
-			reject(new DOMException("Router models request aborted", "AbortError"))
-		}
-
-		// React Query cancels the queryFn when the consuming component unmounts or
-		// the query is removed. Honour that signal so the window listener and the
-		// timeout do not outlive the request (and a stale response can never
-		// resolve a disposed query).
-		if (signal) {
-			if (signal.aborted) {
-				onAbort()
-				return
-			}
-			signal.addEventListener("abort", onAbort, { once: true })
-		}
-
+		signal?.addEventListener("abort", onAbort, { once: true })
 		window.addEventListener("message", handler)
 		vscode.postMessage({
 			type: RouterModelsMessageType.requestRouterModels,
@@ -87,5 +82,16 @@ export const useRouterModels = (opts: UseRouterModelsOptions = {}) => {
 		queryKey: [RouterModelsMessageType.routerModels, provider || allRouterModelsProvider],
 		queryFn: ({ signal }) => fetchRouterModels(provider, signal),
 		enabled: opts.enabled !== false,
+		// Structural sharing copies into `{}`, where an own "__proto__" model ID would swap the
+		// copy's prototype instead of becoming a key, so skip sharing for such catalogs.
+		structuralSharing: (oldData, newData) =>
+			hasOwnProtoModelId(newData) ? newData : replaceEqualDeep(oldData, newData),
 	})
 }
+
+const hasOwnProtoModelId = (data: unknown): boolean =>
+	typeof data === "object" &&
+	data !== null &&
+	Object.values(data).some(
+		(models) => typeof models === "object" && models !== null && Object.hasOwn(models, "__proto__"),
+	)

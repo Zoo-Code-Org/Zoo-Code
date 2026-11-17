@@ -89,7 +89,7 @@ export class CodeIndexOllamaEmbedder implements IEmbedder {
 				let errorBody = t("embeddings:ollama.couldNotReadErrorBody")
 				try {
 					errorBody = await response.text()
-				} catch (e) {
+				} catch {
 					// Ignore error reading body
 				}
 				throw new Error(

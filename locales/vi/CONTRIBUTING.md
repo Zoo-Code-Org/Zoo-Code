@@ -11,98 +11,133 @@
 </sub>
 </div>
 
+<a id="contributing-to-zoo-code"></a>
+
 # Đóng góp cho Zoo Code
 
-Zoo Code là một dự án do cộng đồng điều khiển và chúng tôi vô cùng trân trọng mọi đóng góp. Để hợp lý hóa việc cộng tác, chúng tôi hoạt động trên cơ sở [Ưu tiên vấn đề](#cách-tiếp-cận-ưu-tiên-vấn-đề), có nghĩa là tất cả các [Yêu cầu kéo (PR)](#gửi-yêu-cầu-kéo) trước tiên phải được liên kết với một Vấn đề trên GitHub. Vui lòng xem kỹ hướng dẫn này.
+Zoo Code là dự án cộng đồng. Chúng mình trân trọng mọi đóng góp. Chúng mình làm việc theo cách [tạo Issue trước](#issue-first-approach). Mỗi [Pull Request (PR)](#submitting-a-pull-request) phải liên kết đến một GitHub Issue. Hãy đọc kỹ hướng dẫn này.
 
-## Bảng mục lục
+<a id="table-of-contents"></a>
 
-- [Trước khi bạn đóng góp](#trước-khi-bạn-đóng-góp)
-- [Tìm kiếm và lập kế hoạch đóng góp của bạn](#tìm-kiếm-và-lập-kế-hoạch-đóng-góp-của-bạn)
-- [Quy trình phát triển và gửi](#quy-trình-phát-triển-và-gửi)
-- [Kỳ vọng về Yêu cầu kéo](#kỳ-vọng-về-yêu-cầu-kéo)
-- [Đóng góp có sự hỗ trợ của AI](#đóng-góp-có-sự-hỗ-trợ-của-ai)
-- [Pháp lý](#pháp-lý)
+## Mục lục
 
-## Trước khi bạn đóng góp
+- [Trước khi đóng góp](#before-you-contribute)
+- [Tìm và lên kế hoạch đóng góp](#finding--planning-your-contribution)
+- [Quy trình phát triển và gửi thay đổi](#development--submission-process)
+    - [Yêu cầu đối với Pull Request](#pull-request-expectations)
+    - [Đóng góp có AI hỗ trợ](#ai-assisted-contributions)
+    - [Cách viết](#writing-style)
+- [Điều kiện pháp lý](#legal)
+
+<a id="before-you-contribute"></a>
+
+## Trước khi đóng góp
+
+<a id="1-code-of-conduct"></a>
 
 ### 1. Quy tắc ứng xử
 
-Tất cả những người đóng góp phải tuân thủ [Quy tắc ứng xử](./CODE_OF_CONDUCT.md) của chúng tôi.
+Mọi người đóng góp phải tuân theo [Quy tắc ứng xử](./CODE_OF_CONDUCT.md) của chúng mình.
+
+<a id="2-project-roadmap"></a>
 
 ### 2. Lộ trình dự án
 
-Lộ trình của chúng tôi hướng dẫn định hướng của dự án. Hãy điều chỉnh những đóng góp của bạn với những mục tiêu chính này:
+Lộ trình cho biết hướng phát triển của dự án. Hãy điều chỉnh đóng góp của bạn theo các mục tiêu này:
+
+<a id="reliability-first"></a>
 
 ### Ưu tiên độ tin cậy
 
-- Đảm bảo việc chỉnh sửa diff và thực thi lệnh luôn đáng tin cậy.
-- Giảm các điểm ma sát ngăn cản việc sử dụng thường xuyên.
-- Đảm bảo hoạt động trơn tru trên tất cả các ngôn ngữ và nền tảng.
-- Mở rộng hỗ trợ mạnh mẽ cho nhiều nhà cung cấp và mô hình AI.
+- Đảm bảo chỉnh sửa bằng diff và chạy lệnh hoạt động tin cậy mỗi lần.
+- Loại bỏ các vấn đề khiến mọi người không thể dùng Zoo Code hằng ngày.
+- Giúp Zoo Code hoạt động với mọi ngôn ngữ, khu vực và nền tảng.
+- Hỗ trợ thêm các nhà cung cấp AI và mô hình.
 
-### Trải nghiệm người dùng nâng cao
+<a id="enhanced-user-experience"></a>
 
-- Hợp lý hóa giao diện người dùng/trải nghiệm người dùng để rõ ràng và trực quan.
-- Liên tục cải thiện quy trình làm việc để đáp ứng những kỳ vọng cao của các nhà phát triển đối với các công cụ sử dụng hàng ngày.
+### Cải thiện trải nghiệm người dùng
 
-### Dẫn đầu về hiệu suất tác nhân
+- Làm cho UI và UX rõ ràng, dễ dùng.
+- Cải thiện quy trình làm việc. Lập trình viên kỳ vọng chất lượng cao ở những công cụ họ dùng hằng ngày.
 
-- Thiết lập các tiêu chuẩn đánh giá toàn diện (evals) để đo lường năng suất trong thế giới thực.
-- Giúp mọi người dễ dàng chạy và diễn giải các đánh giá này.
-- Cung cấp các cải tiến cho thấy sự gia tăng rõ ràng về điểm số đánh giá.
+<a id="leading-on-agent-performance"></a>
 
-Hãy đề cập đến sự phù hợp với các lĩnh vực này trong PR của bạn.
+### Dẫn đầu về hiệu suất tác tử
+
+- Xây dựng các bài đánh giá (evals) đo năng suất trong thực tế.
+- Giúp evals dễ chạy và dễ đọc.
+- Phát hành những cải tiến làm tăng rõ rệt điểm evals.
+
+Trong PR, hãy nêu thay đổi hỗ trợ những lĩnh vực nào ở trên.
+
+<a id="3-join-the-zoo-code-community"></a>
 
 ### 3. Tham gia cộng đồng Zoo Code
 
-- **Discord:** Tham gia [Discord](https://discord.gg/VxfP4Vx3gX) của chúng tôi.
-- **Reddit:** Tham gia [Reddit](https://www.reddit.com/r/ZooCode/) của chúng tôi.
+- **Discord:** Tham gia [Discord](https://discord.gg/VxfP4Vx3gX) của chúng mình.
+- **Reddit:** Tham gia [Reddit](https://www.reddit.com/r/ZooCode/) của chúng mình.
 
-## Tìm kiếm và lập kế hoạch đóng góp của bạn
+<a id="finding--planning-your-contribution"></a>
+
+## Tìm và lên kế hoạch đóng góp
+
+<a id="types-of-contributions"></a>
 
 ### Các loại đóng góp
 
-- **Sửa lỗi:** giải quyết các vấn đề về mã.
-- **Tính năng mới:** thêm chức năng.
-- **Tài liệu:** cải thiện hướng dẫn và sự rõ ràng.
+- **Sửa lỗi:** Sửa các vấn đề trong mã.
+- **Tính năng mới:** Thêm chức năng.
+- **Tài liệu:** Cải thiện hướng dẫn và làm cho chúng rõ ràng hơn.
 
-### Cách tiếp cận Ưu tiên vấn đề
+<a id="issue-first-approach"></a>
 
-Tất cả các đóng góp đều bắt đầu bằng một Vấn đề trên GitHub bằng cách sử dụng các mẫu gọn nhẹ của chúng tôi.
+### Tạo Issue trước
 
-- **Kiểm tra các vấn đề hiện có**: Tìm kiếm trong [Vấn đề trên GitHub](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
-- **Tạo một vấn đề** bằng cách sử dụng:
-    - **Cải tiến:** mẫu "Yêu cầu cải tiến" (ngôn ngữ đơn giản tập trung vào lợi ích của người dùng).
-    - **Lỗi:** mẫu "Báo cáo lỗi" (tái tạo tối thiểu + mong đợi so với thực tế + phiên bản).
-- **Bạn muốn làm việc với nó?** Bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho nhóm cốt lõi trên [Discord](https://discord.gg/VxfP4Vx3gX) để được giao. Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
-- **PR phải liên kết đến vấn đề.** Các PR không được liên kết có thể bị đóng.
+Mỗi đóng góp bắt đầu bằng một GitHub Issue. Hãy dùng các mẫu ngắn của chúng mình.
 
-### Quyết định nên làm gì
+- **Kiểm tra Issue hiện có:** Tìm trong [GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- **Tạo Issue** bằng:
+    - **Cải tiến:** Mẫu "Enhancement Request" (ngôn ngữ đơn giản, tập trung vào lợi ích cho người dùng).
+    - **Lỗi:** Mẫu "Bug Report" (ví dụ tái hiện tối thiểu, kết quả mong đợi và thực tế, phiên bản).
+- **Viết Issue** theo phần [Cách viết](#writing-style) bên dưới.
+- **Bạn muốn làm việc này?** Bình luận "Claiming" trong Issue. Sau đó liên hệ nhóm nòng cốt trên [Discord](https://discord.gg/VxfP4Vx3gX) để được giao việc. Nhóm nòng cốt xác nhận việc giao trong luồng thảo luận.
+- **PR phải liên kết đến Issue.** Chúng mình có thể đóng PR không có liên kết.
 
-- Hãy xem [trang GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues) để tìm issues.
-- Để biết tài liệu, hãy truy cập [Tài liệu Zoo Code](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
+<a id="deciding-what-to-work-on"></a>
 
-### Báo cáo lỗi
+### Chọn việc để làm
 
-- Trước tiên hãy kiểm tra các báo cáo hiện có.
-- Tạo một lỗi mới bằng cách sử dụng [mẫu "Báo cáo lỗi"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) với:
-    - Các bước tái tạo rõ ràng, được đánh số
-    - Kết quả mong đợi so với thực tế
-    - Phiên bản Zoo Code (bắt buộc); nhà cung cấp/mô hình API nếu có liên quan
-- **Vấn đề bảo mật**: Báo cáo riêng tư qua [tư vấn bảo mật](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+- Xem [trang GitHub Issues](https://github.com/Zoo-Code-Org/Zoo-Code/issues).
+- Với tài liệu, hãy đến [Zoo Code Docs](https://github.com/Zoo-Code-Org/Zoo-Code-Docs).
 
-## Quy trình phát triển và gửi
+<a id="reporting-bugs"></a>
 
-### Thiết lập phát triển
+### Báo lỗi
 
-1. **Rẽ nhánh & Sao chép:**
+- Trước tiên, kiểm tra các báo cáo hiện có.
+- Tạo báo cáo lỗi mới bằng [mẫu "Bug Report"](https://github.com/Zoo-Code-Org/Zoo-Code/issues/new/choose) và thêm:
+    - Các bước tái hiện rõ ràng, có đánh số
+    - Kết quả mong đợi và kết quả thực tế
+    - Phiên bản Zoo Code (bắt buộc)
+    - Nhà cung cấp API và mô hình, nếu có liên quan
+- **Vấn đề bảo mật:** Báo riêng qua [security advisories](https://github.com/Zoo-Code-Org/Zoo-Code/security/advisories/new).
+
+<a id="development--submission-process"></a>
+
+## Quy trình phát triển và gửi thay đổi
+
+<a id="development-setup"></a>
+
+### Thiết lập môi trường phát triển
+
+1. **Tạo fork và clone:**
 
 ```
 git clone https://github.com/YOUR_USERNAME/Zoo-Code.git
 ```
 
-2. **Cài đặt các phụ thuộc:**
+2. **Cài các gói phụ thuộc:**
 
 ```
 pnpm install
@@ -110,60 +145,117 @@ pnpm install
 
 3. **Gỡ lỗi:** Mở bằng VS Code (`F5`).
 
+<a id="writing-code-guidelines"></a>
+
 ### Hướng dẫn viết mã
 
-- Một PR tập trung cho mỗi tính năng hoặc bản sửa lỗi.
-- Tuân thủ các phương pháp hay nhất của ESLint và TypeScript.
-- Viết các cam kết rõ ràng, mô tả có tham chiếu đến các vấn đề (ví dụ: `Sửa lỗi #123`).
-- Cung cấp thử nghiệm kỹ lưỡng (`npm test`).
+- Mỗi tính năng hoặc bản sửa lỗi chỉ có một PR tập trung vào việc đó.
+- Làm theo các cách dùng tốt nhất của ESLint và TypeScript.
+- Viết thông điệp commit rõ ràng, có mô tả và tham chiếu đến Issue (ví dụ, `Fixes #123`). Làm theo phần [Cách viết](#writing-style).
+- Kiểm thử đầy đủ thay đổi của bạn (`npm test`).
 - Rebase lên nhánh `main` mới nhất trước khi gửi.
 
-### Gửi yêu cầu kéo
+<a id="submitting-a-pull-request"></a>
 
-- Bắt đầu với tư cách là **PR nháp** nếu bạn đang tìm kiếm phản hồi sớm.
-- Mô tả rõ ràng những thay đổi của bạn theo Mẫu yêu cầu kéo.
-- Liên kết vấn đề trong mô tả/tiêu đề PR (ví dụ: "Sửa lỗi #123").
-- Cung cấp ảnh chụp màn hình/video cho các thay đổi giao diện người dùng.
-- Cho biết nếu cần cập nhật tài liệu.
+### Gửi Pull Request
 
-### Chính sách yêu cầu kéo
+- Bắt đầu với **Draft PR** nếu bạn muốn nhận góp ý sớm.
+- Mô tả thay đổi bằng Pull Request Template. Làm theo phần [Cách viết](#writing-style).
+- Liên kết Issue trong mô tả hoặc tiêu đề PR (ví dụ, "Fixes #123").
+- Thêm ảnh chụp màn hình hoặc video cho thay đổi UI.
+- Nêu rõ thay đổi có cần cập nhật tài liệu không.
 
-- Phải tham chiếu đến một Vấn đề GitHub đã được giao. Để được giao: bình luận "Nhận" trên vấn đề và nhắn tin trực tiếp cho nhóm cốt lõi trên [Discord](https://discord.gg/VxfP4Vx3gX). Việc giao nhiệm vụ sẽ được xác nhận trong chuỗi.
-- Các PR không được liên kết có thể bị đóng.
-- Các PR phải vượt qua các bài kiểm tra CI, phù hợp với lộ trình và có tài liệu rõ ràng.
+<a id="pull-request-policy"></a>
 
-### Quy trình xem xét
+### Chính sách Pull Request
 
-- **Phân loại hàng ngày:** kiểm tra nhanh bởi những người bảo trì.
-- **Xem xét sâu hàng tuần:** đánh giá toàn diện.
-- **Lặp lại nhanh chóng** dựa trên phản hồi.
+- PR phải tham chiếu đến một GitHub Issue đã được giao. Để được giao, hãy bình luận "Claiming" trong Issue. Sau đó liên hệ nhóm nòng cốt trên [Discord](https://discord.gg/VxfP4Vx3gX). Nhóm nòng cốt xác nhận việc giao trong luồng thảo luận.
+- Chúng mình có thể đóng PR không có liên kết.
+- PR phải vượt qua kiểm thử CI, theo đúng lộ trình và có tài liệu rõ ràng.
 
-### Kỳ vọng về Yêu cầu kéo
+<a id="review-process"></a>
 
-Các Yêu cầu kéo phải có thể xem xét được, đã được kiểm tra và có thể bảo trì. Trước khi mở PR, hãy đảm bảo rằng:
+### Quy trình đánh giá
 
-- Thay đổi được giới hạn trong một vấn đề, lỗi hoặc cải tiến cụ thể.
-- Bạn có thể giải thích thay đổi làm gì và tại sao nó đúng.
-- Bạn đã kiểm tra thay đổi cục bộ khi có thể thực hiện được.
-- Bạn sẵn sàng phản hồi phản hồi xem xét và thực hiện các thay đổi tiếp theo hợp lý.
-- PR không yêu cầu những người bảo trì viết lại, thiết kế lại hoặc tiếp quản đáng kể việc triển khai trước khi có thể hợp nhất.
+PR sẵn sàng để đánh giá phải đáp ứng các điều kiện sau:
 
-Những người bảo trì có thể đóng các PR không đầy đủ, quá rộng, không hoạt động, không phù hợp với hướng dự án hoặc tạo ra gánh nặng xem xét hoặc bảo trì không tương xứng. Đóng PR không phải là phán xét về người đóng góp; đó là quyết định của người bảo trì rằng thay đổi không thể được chấp nhận ở dạng hiện tại.
+- Vượt qua các kiểm tra CI bắt buộc.
+- Xử lý những góp ý đánh giá cần hành động.
+- Nhận chấp thuận mới từ người bảo trì hoặc CODEOWNER. Việc này diễn ra sau khi đánh giá tự động hoàn tất cho commit mới nhất.
 
-### Đóng góp có sự hỗ trợ của AI
+Đánh giá tự động có thể thêm bình luận hướng dẫn và nhãn trạng thái do hệ thống quản lý. Hãy làm theo bước tiếp theo trong bình luận. Đừng tự sửa các nhãn. Commit mới đặt lại trạng thái đánh giá của mã đã thay đổi.
 
-Việc sử dụng các công cụ AI được phép, nhưng người đóng góp vẫn hoàn toàn chịu trách nhiệm về các bài nộp của họ.
+Nhãn `community-approved` cho biết commit mới nhất đã nhận chấp thuận mới từ cộng đồng. Sau đó PR chờ người bảo trì đánh giá. Nhãn giúp người bảo trì cân nhắc mức ưu tiên. Nhãn không thay thế đánh giá của người bảo trì hay kiểm tra bắt buộc. Quy trình đánh giá quản lý nhãn này.
 
-Nếu bạn sử dụng các công cụ AI để giúp tạo PR, bạn phải:
+Đánh giá tự động giúp người bảo trì. Nó không thay thế chấp thuận của con người. Người đóng góp bên ngoài không thể điều khiển CodeRabbit bằng bình luận. Đánh giá đủ điều kiện tự chạy lại sau khi CI bắt buộc thành công. Người bảo trì xử lý các lần chạy lại ngoại lệ. Cảnh báo chỉ mang tính hướng dẫn, trừ khi chính sách kho mã quy định khác. Các kiểm tra bắt buộc có sẵn của GitHub, quy tắc CODEOWNER và biện pháp bảo vệ đánh giá quyết định PR có thể được hợp nhất không.
 
-- Xem xét và hiểu mọi thay đổi có ý nghĩa.
-- Có thể giải thích việc triển khai và sự đánh đổi bằng lời của chính bạn.
-- Tự kiểm tra thay đổi. Nếu kiểm tra không thực tế trong môi trường của bạn, hãy giải thích lý do trong mô tả PR và mô tả cách người xem xét có thể xác minh thay đổi.
-- Xác minh rằng mã được tạo là chính xác, cần thiết và tương thích với giấy phép dự án.
-- Cân nhắc tiết lộ sự hỗ trợ AI trong mô tả PR khi nó đã định hình đáng kể mã, kiểm tra hoặc thiết kế — điều này giúp người xem xét đưa ra phản hồi tốt hơn.
+- **Sàng lọc hằng ngày:** Người bảo trì kiểm tra nhanh.
+- **Đánh giá sâu hằng tuần:** Người bảo trì đánh giá đầy đủ.
+- **Nhanh chóng chỉnh sửa** khi nhận góp ý.
 
-Vui lòng không gửi các thay đổi do AI tạo ra mà bạn không hiểu hoặc không thể duy trì trong quá trình xem xét. Những người bảo trì có thể đóng các PR có vẻ được hỗ trợ đáng kể bởi AI nhưng thiếu xác minh của con người, lý do rõ ràng hoặc theo dõi xem xét.
+<a id="pull-request-expectations"></a>
 
-## Pháp lý
+### Yêu cầu đối với Pull Request
 
-Bằng cách đóng góp, bạn đồng ý rằng những đóng góp của bạn sẽ được cấp phép theo Giấy phép Apache 2.0, phù hợp với việc cấp phép của Zoo Code.
+PR phải dễ đánh giá, đã được kiểm thử và dễ bảo trì. Trước khi mở PR, hãy kiểm tra các điểm sau:
+
+- Thay đổi giải quyết một Issue, lỗi hoặc cải tiến cụ thể.
+- Bạn có thể giải thích thay đổi làm gì và vì sao nó đúng.
+- Bạn đã kiểm thử thay đổi trên máy của mình khi có thể.
+- Bạn sẽ trả lời góp ý đánh giá và thực hiện những thay đổi tiếp theo hợp lý.
+- Người bảo trì không cần viết lại, thiết kế lại hoặc tiếp quản thay đổi trước khi hợp nhất.
+
+Người bảo trì có thể đóng PR vì các lý do sau:
+
+- PR chưa hoàn chỉnh.
+- Phạm vi quá rộng.
+- Không có hoạt động.
+- Không theo hướng phát triển của dự án.
+- Tạo ra quá nhiều việc đánh giá hoặc bảo trì.
+
+Đóng PR không phải là đánh giá người đóng góp. Điều đó có nghĩa là người bảo trì không thể nhận thay đổi ở dạng hiện tại.
+
+Bot cũng tự động đóng PR:
+
+- **60 ngày không hoạt động:** Bot đánh dấu PR là cũ sau 60 ngày không có hoạt động. Nếu vẫn không có hoạt động sau 7 ngày nữa, bot đóng PR. Bình luận, commit hoặc đánh giá mới đặt lại bộ đếm.
+- **Tác giả không hoạt động trong 14 ngày:** Khi người đánh giá yêu cầu thay đổi, bot thêm nhãn `awaiting-author`. Hoạt động của tác giả đặt lại bộ đếm không hoạt động. Khi thay đổi đã sẵn sàng, hãy yêu cầu người đánh giá đánh giá lại.
+
+Để ngăn PR tự động đóng, hãy thêm nhãn `do-not-close`, `pinned` hoặc `work-in-progress`.
+
+<a id="ai-assisted-contributions"></a>
+
+### Đóng góp có AI hỗ trợ
+
+Bạn có thể dùng công cụ AI. Bạn vẫn chịu toàn bộ trách nhiệm về đóng góp đã gửi.
+
+Nếu dùng công cụ AI để hỗ trợ tạo PR, bạn phải:
+
+- Xem xét và hiểu từng thay đổi quan trọng.
+- Giải thích cách triển khai và các đánh đổi bằng lời của mình.
+- Tự kiểm thử thay đổi. Nếu không thể kiểm thử trong môi trường của mình, hãy giải thích lý do trong mô tả PR. Cũng hãy mô tả cách người đánh giá có thể xác minh thay đổi.
+- Kiểm tra mã được tạo là đúng, cần thiết và tương thích với giấy phép dự án.
+- Cân nhắc việc nêu hỗ trợ của AI trong mô tả PR. Hãy nêu khi AI làm thay đổi đáng kể mã, kiểm thử hoặc thiết kế. Điều này giúp người đánh giá đưa ra góp ý tốt hơn.
+
+Đừng gửi thay đổi do AI tạo mà bạn không hiểu. Đừng gửi thay đổi mà bạn không thể bảo trì trong quá trình đánh giá. Người bảo trì có thể đóng PR có vẻ dùng nhiều hỗ trợ từ AI. Họ có thể làm vậy nếu thiếu xác minh của con người, lý do rõ ràng hoặc theo dõi góp ý đánh giá.
+
+<a id="writing-style"></a>
+
+### Cách viết
+
+Các quy tắc này chỉ áp dụng cho văn bản tiếng Anh. Viết tiêu đề và nội dung Issue, tiêu đề và mô tả PR, cùng thông điệp commit bằng [Simplified Technical English (ASD-STE100)](https://www.asd-ste100.org/). Mẫu Issue và PR cũng có lời nhắc này.
+
+- Dùng câu ngắn. Mỗi câu hướng dẫn có tối đa 20 từ.
+- Dùng từ đơn giản. Viết "use", không viết "utilize". Viết "start", không viết "commence".
+- Dùng thể chủ động. Viết "the parser reads the file", không viết "the file is read by the parser".
+- Mỗi câu chỉ nêu một ý.
+- Không dùng dạng rút gọn, dấu chấm phẩy hoặc dấu gạch ngang dài.
+- Giữ tiêu đề ngắn và cụ thể.
+- Không sửa nội dung chính xác của nhật ký, thông báo lỗi, định danh, lệnh hoặc bằng chứng tái hiện. Dán nguyên văn.
+
+Các quy tắc này là hướng dẫn viết. Người đánh giá không kiểm tra việc tuân thủ ASD-STE100 chính thức. Mã, định danh và cú pháp lệnh nằm ngoài quy tắc này.
+
+<a id="legal"></a>
+
+## Điều kiện pháp lý
+
+Khi đóng góp, bạn đồng ý rằng đóng góp của mình dùng Giấy phép Apache 2.0. Đây là giấy phép của Zoo Code.

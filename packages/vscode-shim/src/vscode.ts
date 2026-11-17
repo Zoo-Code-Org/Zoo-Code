@@ -23,6 +23,7 @@ export {
 	CodeActionKind,
 	CodeLens,
 	LanguageModelTextPart,
+	LanguageModelDataPart,
 	LanguageModelToolCallPart,
 	LanguageModelToolResultPart,
 	FileSystemError,

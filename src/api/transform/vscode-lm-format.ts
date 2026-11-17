@@ -1,6 +1,19 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import * as vscode from "vscode"
 
+import { createImagePart, createUserMessage, type ImagePart } from "./vscode-lm-image-part"
+import {
+	HAS_LONE_SURROGATE,
+	LONE_SURROGATE,
+	sanitizeIdentifierSurrogates,
+	sanitizeSurrogates,
+	sanitizeSurrogatesDeep,
+} from "./sanitize-surrogates"
+
+// Re-exported so existing consumers keep a single import site; the shared definitions
+// live in ./sanitize-surrogates so non-VS-Code transforms can use them too.
+export { sanitizeIdentifierSurrogates, sanitizeSurrogates, sanitizeSurrogatesDeep }
+
 /**
  * Safely converts a value into a plain object.
  */
@@ -27,43 +40,6 @@ function asObjectSafe(value: unknown): object {
 		return {}
 	}
 }
-
-/**
- * Replaces unpaired UTF-16 surrogate code units with the Unicode replacement character (U+FFFD).
- *
- * The VS Code LM backend forwards requests to model APIs that require valid UTF-8. A lone surrogate
- * — e.g. left behind when some upstream step slices a string through an astral-plane character
- * (emoji, CJK extension, etc.) — cannot be encoded as UTF-8, so the backend rejects the entire
- * request with a 400 ("string contains an unpaired UTF-16 surrogate code point and cannot be
- * encoded as valid UTF-8"). Valid surrogate pairs are matched by the lookahead/lookbehind and left
- * untouched. The regex intentionally omits the `u` flag so it operates on UTF-16 code units.
- */
-const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g
-
-export function sanitizeSurrogates(text: string): string {
-	if (!text) {
-		return text
-	}
-	return text.replace(LONE_SURROGATE, "\uFFFD")
-}
-
-/**
- * Sanitizes a tool call / tool result identifier without losing its distinctness.
- *
- * Plain {@link sanitizeSurrogates} maps every lone surrogate to the same U+FFFD, so ids differing
- * only in that surrogate collapse into one; VS Code matches results to calls by `callId`, so the
- * collision misroutes distinct tool calls. Appending the original code unit keeps the mapping
- * injective, and being a pure function of the input it keeps a call and its result paired.
- */
-export function sanitizeIdentifierSurrogates(identifier: string): string {
-	// Escaping MUST precede encoding, or the encoding pass re-escapes its own markers.
-	return identifier
-		.replace(/\uFFFD/g, "\uFFFDFFFD")
-		.replace(LONE_SURROGATE, (unit) => `\uFFFD${unit.charCodeAt(0).toString(16).toUpperCase()}`)
-}
-
-/** Non-global twin of {@link LONE_SURROGATE}; `test` on a `/g` regex is stateful via `lastIndex`. */
-const HAS_LONE_SURROGATE = new RegExp(LONE_SURROGATE.source)
 
 /** Marks a name whose `_u` sequences would otherwise be read as encoding markers when decoded. */
 const TOOL_NAME_MARKER = /_u(?:u|[0-9A-Fa-f]{4})/
@@ -117,37 +93,30 @@ export function decodeToolNameSurrogates(name: string): string {
 	return decoded
 }
 
-/**
- * Applies {@link sanitizeSurrogates} to every string nested in a tool-call argument object. The
- * backend rejects the whole request for a lone surrogate anywhere in the JSON payload, so a tool
- * argument carrying a sliced astral character fails the request just as message text would.
- *
- * LIMITATION: keys are sanitized with the same lossy mapping, so keys differing only in their lone
- * surrogate (`"a\uD800"`, `"a\uD801"`) both become `"a\uFFFD"` and the last value wins. This also
- * applies to tool schemas, where colliding property definitions collapse and `required` can end up
- * with duplicate entries. Accepted deliberately: the alternative is rewriting keys into a form no
- * schema reference would match, and a request that reaches the backend beats one rejected outright.
- */
-export function sanitizeSurrogatesDeep(value: unknown): unknown {
-	if (typeof value === "string") {
-		return sanitizeSurrogates(value)
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
+function convertImageToVsCodeLmPart(image: Anthropic.Messages.ImageBlockParam, supportsImages: boolean) {
+	if (supportsImages && image.source.type === "base64" && SUPPORTED_IMAGE_MEDIA_TYPES.has(image.source.media_type)) {
+		// Pass decoded bytes, not the base64 string, to avoid encoding the image twice.
+		const bytes = Buffer.from(image.source.data, "base64")
+		if (bytes.length > 0) {
+			const part = createImagePart(bytes, image.source.media_type)
+			if (!part) {
+				throw new Error("Image input requires a newer version of VS Code that can send image data.")
+			}
+			return part
+		}
 	}
-	if (Array.isArray(value)) {
-		return value.map(sanitizeSurrogatesDeep)
-	}
-	if (value && typeof value === "object") {
-		return Object.fromEntries(
-			Object.entries(value as Record<string, unknown>).map(([key, nested]) => [
-				sanitizeSurrogates(key),
-				sanitizeSurrogatesDeep(nested),
-			]),
-		)
-	}
-	return value
+	return new vscode.LanguageModelTextPart(
+		image.source.type === "base64"
+			? `[Image (base64): ${image.source.media_type} not supported by VSCode LM API]`
+			: `[Image (${image.source.type}): not supported by VSCode LM API]`,
+	)
 }
 
 export function convertToVsCodeLmMessages(
 	anthropicMessages: Anthropic.Messages.MessageParam[],
+	supportsImages = false,
 ): vscode.LanguageModelChatMessage[] {
 	const vsCodeLmMessages: vscode.LanguageModelChatMessage[] = []
 
@@ -186,19 +155,12 @@ export function convertToVsCodeLmMessages(
 					// Convert tool messages to ToolResultParts
 					...toolMessages.map((toolMessage) => {
 						// Process tool result content into TextParts
-						const toolContentParts: vscode.LanguageModelTextPart[] =
+						const toolContentParts: Array<vscode.LanguageModelTextPart | ImagePart> =
 							typeof toolMessage.content === "string"
 								? [new vscode.LanguageModelTextPart(sanitizeSurrogates(toolMessage.content))]
 								: (toolMessage.content?.map((part) => {
 										if (part.type === "image") {
-											if (part.source.type === "base64") {
-												return new vscode.LanguageModelTextPart(
-													`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
-												)
-											}
-											return new vscode.LanguageModelTextPart(
-												`[Image (${part.source.type}): not supported by VSCode LM API]`,
-											)
+											return convertImageToVsCodeLmPart(part, supportsImages)
 										}
 										if (part.type === "text") {
 											return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
@@ -215,21 +177,14 @@ export function convertToVsCodeLmMessages(
 					// Convert non-tool messages to TextParts after tool messages
 					...nonToolMessages.map((part) => {
 						if (part.type === "image") {
-							if (part.source.type === "base64") {
-								return new vscode.LanguageModelTextPart(
-									`[Image (base64): ${part.source.media_type} not supported by VSCode LM API]`,
-								)
-							}
-							return new vscode.LanguageModelTextPart(
-								`[Image (${part.source.type}): not supported by VSCode LM API]`,
-							)
+							return convertImageToVsCodeLmPart(part, supportsImages)
 						}
 						return new vscode.LanguageModelTextPart(sanitizeSurrogates(part.text))
 					}),
 				]
 
 				// Add single user message with all content parts
-				vsCodeLmMessages.push(vscode.LanguageModelChatMessage.User(contentParts))
+				vsCodeLmMessages.push(createUserMessage(contentParts))
 				break
 			}
 
@@ -284,6 +239,9 @@ export function convertToVsCodeLmMessages(
 	return vsCodeLmMessages
 }
 
+/**
+ * @internal
+ */
 export function convertToAnthropicRole(vsCodeLmMessageRole: vscode.LanguageModelChatMessageRole): string | null {
 	switch (vsCodeLmMessageRole) {
 		case vscode.LanguageModelChatMessageRole.Assistant:

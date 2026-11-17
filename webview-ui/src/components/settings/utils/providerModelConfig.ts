@@ -1,4 +1,4 @@
-import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
+import type { ProviderName, ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 import {
 	providerIdentifiers,
 	anthropicDefaultModelId,
@@ -16,7 +16,6 @@ import {
 	xaiDefaultModelId,
 	sambaNovaDefaultModelId,
 	internationalZAiDefaultModelId,
-	mainlandZAiDefaultModelId,
 	fireworksDefaultModelId,
 	friendliDefaultModelId,
 	minimaxDefaultModelId,
@@ -29,10 +28,11 @@ import {
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
 	kenariDefaultModelId,
+	ioIntelligenceDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
-	zaiApiLineConfigs,
 	getZAiModels,
+	getProviderDefaultModelId,
 } from "@roo-code/types"
 
 import { MODELS_BY_PROVIDER } from "../constants"
@@ -98,10 +98,9 @@ export const getProviderServiceConfig = (provider: ProviderName): ProviderServic
 }
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
-	// Handle Z.ai's China/International entrypoint distinction
-	if (provider === providerIdentifiers.zai && apiConfiguration) {
-		const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-		return zaiApiLineConfigs[apiLine].isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
+	// Z.ai's default depends on the configured China/International API line.
+	if (provider === providerIdentifiers.zai) {
+		return getProviderDefaultModelId(provider, apiConfiguration ?? {})
 	}
 
 	return PROVIDER_DEFAULT_MODEL_IDS[provider] ?? ""
@@ -145,6 +144,10 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	},
 	[providerIdentifiers.opencodeGo]: { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
 	[providerIdentifiers.kenari]: { field: "kenariModelId", default: kenariDefaultModelId },
+	[providerIdentifiers.ioIntelligence]: {
+		field: "ioIntelligenceModelId",
+		default: ioIntelligenceDefaultModelId,
+	},
 	[providerIdentifiers.nanogpt]: { field: "nanoGptModelId", default: nanoGptDefaultModelId },
 	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 	[providerIdentifiers.openai]: { field: "openAiModelId" },
@@ -180,12 +183,33 @@ export const getStaticModelsForProvider = (
 	provider: ProviderName,
 	customArnLabel?: string,
 	apiConfiguration?: ProviderSettings,
+	routerModels?: RouterModels,
 ): Record<string, ModelInfo> => {
+	// Friendli's static list is only a fallback for its fetched /v1/models list.
+	const friendliRouterModels = routerModels?.friendli
+	if (
+		provider === providerIdentifiers.friendli &&
+		friendliRouterModels &&
+		Object.keys(friendliRouterModels).length > 0
+	) {
+		return friendliRouterModels
+	}
+
 	if (provider === providerIdentifiers.zai) {
 		return getZAiModels(apiConfiguration?.zaiApiLine)
 	}
 
 	const models = MODELS_BY_PROVIDER[provider] ?? {}
+
+	// MiMo ships new model generations frequently (the V2.5 line is EOL), so the
+	// host-fetched catalog is merged on top of the static list: the generic picker
+	// (MiMo has no dedicated picker component) stays populated before the router
+	// response arrives and post-V2.6 releases become selectable without an
+	// extension update. Fetched entries win so catalog metadata stays current.
+	const mimoRouterModels = routerModels?.mimo
+	if (provider === providerIdentifiers.mimo && mimoRouterModels && Object.keys(mimoRouterModels).length > 0) {
+		return { ...models, ...mimoRouterModels }
+	}
 
 	// Add custom-arn option for Bedrock
 	if (provider === providerIdentifiers.bedrock) {
@@ -226,6 +250,7 @@ export const PROVIDERS_WITH_CUSTOM_MODEL_UI: ProviderName[] = [
 	providerIdentifiers.ollama,
 	providerIdentifiers.lmstudio,
 	providerIdentifiers.vscodeLm,
+	providerIdentifiers.githubCopilot,
 	providerIdentifiers.moonshot, // Moonshot has custom ModelPicker inside Moonshot.tsx
 ]
 
@@ -236,6 +261,14 @@ export const shouldUseGenericModelPicker = (provider: ProviderName): boolean => 
 	return isStaticModelProvider(provider) && !PROVIDERS_WITH_CUSTOM_MODEL_UI.includes(provider)
 }
 
+const isArn = (modelId: string): boolean => modelId.trim().startsWith("arn:")
+
+/**
+ * Maps a Bedrock model picker selection to the stored model ID.
+ * A pasted ARN selects the "custom-arn" pseudo-model; the ARN itself goes to awsCustomArn.
+ */
+export const toBedrockModelId = (modelId: string): string => (isArn(modelId) ? "custom-arn" : modelId)
+
 /**
  * Handles provider-specific side effects when a model is changed.
  * Centralizes provider-specific logic to keep it out of the ApiOptions template.
@@ -245,9 +278,14 @@ export const handleModelChangeSideEffects = <K extends keyof ProviderSettings>(
 	modelId: string,
 	setApiConfigurationField: (field: K, value: ProviderSettings[K]) => void,
 ): void => {
-	// Bedrock: Clear custom ARN if not using custom ARN option
-	if (provider === providerIdentifiers.bedrock && modelId !== "custom-arn") {
-		setApiConfigurationField("awsCustomArn" as K, "" as ProviderSettings[K])
+	if (provider === providerIdentifiers.bedrock) {
+		// The base model and context window belong to a specific ARN (the provider applies the context
+		// window to every Bedrock model), so reset them whenever the ARN is replaced or cleared.
+		if (modelId !== "custom-arn") {
+			setApiConfigurationField("awsCustomArn" as K, (isArn(modelId) ? modelId.trim() : "") as ProviderSettings[K])
+			setApiConfigurationField("awsCustomArnBaseModelId" as K, "" as ProviderSettings[K])
+			setApiConfigurationField("awsModelContextWindow" as K, undefined as ProviderSettings[K])
+		}
 	}
 
 	// All providers: Clear reasoning settings when switching models to allow
