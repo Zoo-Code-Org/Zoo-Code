@@ -9,10 +9,7 @@
 	},
 	"answers": {
 		"yes": "Yes",
-		"no": "No",
-		"cancel": "Cancel",
-		"remove": "Remove",
-		"keep": "Keep"
+		"cancel": "Cancel"
 	},
 	"number_format": {
 		"thousand_suffix": "k",
@@ -33,19 +30,11 @@
 			"copy": "Copy",
 			"save": "Save Image",
 			"viewCode": "View Code",
-			"viewDiagram": "View Diagram",
 			"close": "Close"
-		},
-		"modal": {
-			"codeTitle": "Mermaid Code"
 		},
 		"tabs": {
 			"diagram": "Diagram",
 			"code": "Code"
-		},
-		"feedback": {
-			"imageCopied": "Image copied to clipboard",
-			"copyError": "Error copying image"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Image"
 		},
 		"noData": "No image data"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Invalid data URI format",
-			"copyingImage": "Error copying image: {{error}}",
-			"openingImage": "Error opening image: {{error}}",
-			"pathNotExists": "Path does not exist: {{path}}",
-			"couldNotOpen": "Could not open file: {{error}}",
-			"couldNotOpenGeneric": "Could not open file!"
-		},
-		"success": {
-			"imageDataUriCopied": "Image data URI copied to clipboard"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Delete Message",
@@ -77,35 +53,35 @@
 		"editOnly": "No, edit message only",
 		"deleteOnly": "No, delete message only",
 		"restoreToCheckpoint": "Yes, restore the checkpoint",
-		"proceed": "Proceed",
-		"dontShowAgain": "Don't show this again"
+		"proceed": "Proceed"
 	},
 	"time_ago": {
 		"just_now": "just now",
-		"seconds_ago": "{{count}} seconds ago",
+		"seconds_ago_one": "{{count}} second ago",
+		"seconds_ago_other": "{{count}} seconds ago",
 		"minute_ago": "a minute ago",
-		"minutes_ago": "{{count}} minutes ago",
+		"minutes_ago_one": "{{count}} minute ago",
+		"minutes_ago_other": "{{count}} minutes ago",
 		"hour_ago": "an hour ago",
-		"hours_ago": "{{count}} hours ago",
+		"hours_ago_one": "{{count}} hour ago",
+		"hours_ago_other": "{{count}} hours ago",
 		"day_ago": "a day ago",
-		"days_ago": "{{count}} days ago",
+		"days_ago_one": "{{count}} day ago",
+		"days_ago_other": "{{count}} days ago",
 		"week_ago": "a week ago",
-		"weeks_ago": "{{count}} weeks ago",
+		"weeks_ago_one": "{{count}} week ago",
+		"weeks_ago_other": "{{count}} weeks ago",
 		"month_ago": "a month ago",
-		"months_ago": "{{count}} months ago",
+		"months_ago_one": "{{count}} month ago",
+		"months_ago_other": "{{count}} months ago",
 		"year_ago": "a year ago",
-		"years_ago": "{{count}} years ago"
+		"years_ago_one": "{{count}} year ago",
+		"years_ago_other": "{{count}} years ago"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "Waited {{timeout}} seconds for checkpoint initialization. If you don't need the checkpoint feature, please turn it off in <settingsLink>the checkpoint settings</settingsLink>.",
 		"init_checkpoint_fail_long_time": "Checkpoint initialization has taken more than {{timeout}} seconds, so checkpoints are disabled for this task. You can disable checkpoints or extend the waiting time in <settingsLink>the checkpoint settings</settingsLink>.",
 		"attempt_completion_tool_failed": "Cannot execute attempt_completion because a previous tool call failed in this turn. Please address the tool failure before attempting completion."
-	},
-	"tasks": {
-		"delegated": "Delegated to subtask",
-		"delegated_to": "Delegated to task {{childId}}",
-		"delegation_completed": "Subtask completed, resuming parent",
-		"awaiting_child": "Awaiting child task {{childId}}"
 	},
 	"costs": {
 		"own": "Own",

@@ -48,7 +48,12 @@ type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
 const CODEX_API_BASE_URL = "https://chatgpt.com/backend-api/codex"
 const LUNA_MODEL_ID = "gpt-5.6-luna"
 const LUNA_CODEX_VERSION = "0.144.0"
-const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([LUNA_MODEL_ID, "gpt-6-astra", "gpt-6.1-sol"])
+const RESPONSES_LITE_MODEL_IDS = new Set<OpenAiCodexModelId>([
+	LUNA_MODEL_ID,
+	"gpt-6-astra",
+	"gpt-6.1-sol",
+	"gpt-6.1-terra",
+])
 
 /**
  * A refusal is streamed as text so the chat still shows why the model declined, but it is not part
@@ -627,7 +632,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						if (block.type === "text") {
 							content.push({ type: "input_text", text: block.text })
 						} else if (block.type === "image") {
-							const image = block as Anthropic.Messages.ImageBlockParam
+							const image = block
 							if (image.source.type === "base64") {
 								const imageUrl = `data:${image.source.media_type};base64,${image.source.data}`
 								content.push({ type: "input_image", image_url: imageUrl })
