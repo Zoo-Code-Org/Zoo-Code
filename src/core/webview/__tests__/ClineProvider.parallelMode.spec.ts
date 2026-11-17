@@ -569,6 +569,9 @@ vi.mock("../../config/ProviderSettingsManager", async (importOriginal) => {
 					}
 				}),
 				getModeConfigId: vi.fn().mockImplementation(async (mode: string) => gate.modeApiConfigs[mode]),
+				// The window-local snapshot source (#2110): the real manager reports the whole mode -> profile id
+				// map, and ClineProvider holds that snapshot as this window's view of the shared mapping.
+				getModeConfigIds: vi.fn().mockImplementation(async () => ({ ...gate.modeApiConfigs })),
 				getSelectionAndModeConfigs: vi.fn().mockImplementation(async () => ({
 					currentApiConfigName: gate.currentApiConfigName,
 					modeApiConfigs: { ...gate.modeApiConfigs },
@@ -2641,6 +2644,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
+			// #2110 resolves a mode's profile from this window's snapshot of the shared mapping, so the
+			// mapping this scenario stands for has to live in that snapshot. The live manager lookup below
+			// stays as the fallback the window consults when a snapshotted id disappears.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
@@ -2652,7 +2659,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "mode-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			// The profile listing is read twice on this path (getModeConfigId verifies the snapshotted id
+			// against it, then the switch reads it again), so it must answer both reads.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
 			const activateProfileSpy = vi
 				.spyOn(provider.providerSettingsManager, "activateProfile")
@@ -2673,9 +2682,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
+			// The mapping has to live in this window's snapshot for the mode-linked lookup to run (#2110).
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "empty-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
 			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			// Read twice on this path (the snapshot id is verified against the listing, then the switch
+			// reads it again), so the unconfigured profile must be present for both reads.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
 				id: "empty-profile-id",
 				name: "empty-profile",
