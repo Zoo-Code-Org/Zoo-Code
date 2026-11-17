@@ -13,8 +13,9 @@ import { buildAutoDenyReason, checkAutoApproval } from "../auto-approval"
 import { BLANKET_DENY_AUTO_DENY_KINDS, isBlanketDenyEngaged, Task } from "../task/Task"
 import type { ClineProvider } from "../webview/ClineProvider"
 
+import "../../utils/path"
 import type { DcgDecision } from "../../services/destructive-command-guard"
-import { ToolUse, ToolResponse } from "../../shared/tools"
+import type { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
 import { unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../../utils/text-normalization"
 import { parseCommand } from "../../shared/parse-command"
@@ -763,7 +764,7 @@ function formatPersistedOutput(
 	const exitStatus = formatExitStatus(exitDetails)
 	const sizeStr = formatBytes(result.totalBytes)
 	const artifactId = result.artifactPath ? path.basename(result.artifactPath) : ""
-	const cleanPreview = stripAnsi(result.preview)
+	const cleanPreview = truncateTerminalOutput(result.preview)
 
 	return [
 		`Command executed in '${workingDir}'. ${exitStatus}`,
