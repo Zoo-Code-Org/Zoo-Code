@@ -378,6 +378,78 @@ describe("OpencodeGoHandler", () => {
 			expect(callArgs.messages.filter((m) => m.role === "user")).toHaveLength(1)
 		})
 
+		it("preserves reasoning across a tool-call continuation for MiMo V2.6 Flash", async () => {
+			// Xiaomi's deep-thinking guide requires the reasoning from the assistant
+			// turn to be passed back on the tool-call continuation. MiMo V2.6 must
+			// therefore convert through convertToR1Format (preserveReasoning) and
+			// keep the reasoning -> tool_call -> tool_result history intact.
+			vitest.mocked(getModels).mockImplementationOnce(async () => ({
+				"mimo-v2.6-flash": { ...opencodeGoModels["mimo-v2.6-flash"] },
+			}))
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Done" }, index: 0 }] },
+					{
+						choices: [{ delta: {}, index: 0 }],
+						usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+					},
+				]),
+			)
+
+			const handler = new OpencodeGoHandler({ ...mockOptions, opencodeGoModelId: "mimo-v2.6-flash" })
+			const messages: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: "Read the config file" },
+				{
+					role: "assistant",
+					content: [
+						{ type: "text", text: "I will read it." },
+						{ type: "tool_use", id: "call_mimo_1", name: "read_file", input: { path: "config.json" } },
+					],
+					reasoning_content: "The user wants the config contents.",
+				} as Anthropic.Messages.MessageParam,
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "call_mimo_1", content: '{"a":1}' },
+						{ type: "text", text: "<environment_details>cwd: /repo</environment_details>" },
+					],
+				},
+			]
+
+			await collectStream(handler.createMessage("sys", messages))
+
+			const callArgs = mockCreate.mock.calls[0][0] as {
+				model: string
+				messages: Array<Record<string, unknown>>
+			}
+			expect(callArgs.model).toBe("mimo-v2.6-flash")
+
+			// Index 0 is the system prompt; the converted history follows it.
+			expect(callArgs.messages[0]).toEqual({ role: "system", content: "sys" })
+			const [, userMessage, assistantMessage, toolMessage] = callArgs.messages
+			expect(userMessage).toEqual({ role: "user", content: "Read the config file" })
+			// The assistant turn keeps both its reasoning and its tool call.
+			expect(assistantMessage).toMatchObject({
+				role: "assistant",
+				reasoning_content: "The user wants the config contents.",
+			})
+			expect(assistantMessage.tool_calls).toEqual([
+				{
+					id: "call_mimo_1",
+					type: "function",
+					function: { name: "read_file", arguments: '{"path":"config.json"}' },
+				},
+			])
+			// The tool result follows as a tool message, with the trailing
+			// environment details merged in so no user turn drops the reasoning.
+			expect(toolMessage).toEqual({
+				role: "tool",
+				tool_call_id: "call_mimo_1",
+				content: '{"a":1}\n\n<environment_details>cwd: /repo</environment_details>',
+			})
+			expect(callArgs.messages.filter((message) => message.role === "user")).toHaveLength(1)
+		})
+
 		it("emits a usage chunk with zeroed tokens when the stream reports no usage", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([
@@ -1028,13 +1100,19 @@ describe("OpencodeGoHandler", () => {
 
 		it("stops an in-flight Responses iterator when its abort signal rejects the read", async () => {
 			const controller = new AbortController()
+			// The iterator's own listener and the request-level listener race to reject the same
+			// promise, so the double is one object and the assertion below pins which rejection
+			// propagated. opencode-go hands the caller's signal straight to the SDK and never
+			// normalises it into a provider AbortError, so there is no provider message to assert
+			// on this path: identity is the strongest statement that is true here.
+			const abortDouble = new Error("request aborted")
 			let rejectNext: ((reason?: unknown) => void) | undefined
 			const iterator = {
 				next: vitest.fn().mockImplementation(
 					() =>
 						new Promise((_resolve, reject) => {
 							rejectNext = reject
-							controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), {
+							controller.signal.addEventListener("abort", () => reject(abortDouble), {
 								once: true,
 							})
 						}),
@@ -1045,7 +1123,7 @@ describe("OpencodeGoHandler", () => {
 				},
 			}
 			mockResponsesCreate.mockImplementation(async (_body: unknown, options: { signal?: AbortSignal }) => {
-				options.signal?.addEventListener("abort", () => rejectNext?.(new Error("request aborted")), {
+				options.signal?.addEventListener("abort", () => rejectNext?.(abortDouble), {
 					once: true,
 				})
 				return iterator
@@ -1060,7 +1138,7 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(nextPromise).rejects.toThrow("request aborted")
+			await expect(nextPromise).rejects.toBe(abortDouble)
 			expect(iterator.return).toHaveBeenCalled()
 		})
 
@@ -1401,8 +1479,14 @@ describe("OpencodeGoHandler", () => {
 
 		it("rejects non-streaming Responses completion when the abort signal fires", async () => {
 			const controller = new AbortController()
+			// One double object here too. The Responses completion path wraps every failure
+			// (`opencode-go.ts:439` throws `Opencode Go completion error: <message>`), so the
+			// abort surfaces as a new Error carrying the double's text behind the provider prefix,
+			// not as the double and not as an AbortError. The assertion below pins that whole
+			// message; a bare "abort" substring would also match a raw SDK error.
+			const abortDouble = new Error("request aborted")
 			const request = new Promise<never>((_resolve, reject) => {
-				controller.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true })
+				controller.signal.addEventListener("abort", () => reject(abortDouble), { once: true })
 			})
 			mockResponsesCreate.mockReturnValue(request)
 			const handler = new OpencodeGoHandler(lunaOptions)
@@ -1411,7 +1495,10 @@ describe("OpencodeGoHandler", () => {
 			await vitest.waitFor(() => expect(mockResponsesCreate).toHaveBeenCalled())
 			controller.abort()
 
-			await expect(completion).rejects.toThrow("request aborted")
+			await expect(completion).rejects.toMatchObject({
+				name: "Error",
+				message: `Opencode Go completion error: ${abortDouble.message}`,
+			})
 		})
 
 		it("completePrompt calls responses.create and returns output_text", async () => {

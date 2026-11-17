@@ -47,11 +47,13 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.92.0
+## Novetats a la v3.98.0
 
-- ✨ **Tria de models més ràpida i compatibilitat millorada:** Canvia de model des de l'editor de missatges del xat. Utilitza Claude Haiku 5.5 a Amazon Bedrock, obtén unes capacitats de Kimi K3 més precises a OpenRouter i utilitza els límits corregits de Gemini 4 Argon a Vercel AI Gateway.
-- 🧭 **Fluxos de treball de terminal, edició, xat i remots més fiables:** Configura la sortida de les ordres perquè es replegui per defecte quan vulguis, obtén errors d'edició més clars, mantén visibles les files de raonament i d'API i evita problemes d'inici i de proxy als espais de treball remots.
-- 🔌 **Marketplace d'MCP ampliat:** Connecta Zoo Code a AnySearch, Mailtea i Tradehand mitjançant el marketplace d'MCP.
+- 🎟️ Prova la propera subscripció Zoo Pass. 2 setmanes d'accés gratuït; places limitades
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Títols de tasques automàtics i més control dels models:** Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.
+- 🔌 **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra i obtén la llista més recent de models de Friendli.
+- 🛡️ **Xats i edicions més segurs i responsius:** Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON.
 
 ## Què pot fer Zoo Code per TU?
 

@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 export type FireworksModelId =
 	| "accounts/fireworks/models/kimi-k2-instruct"
@@ -320,3 +329,14 @@ export const fireworksModels = {
 			"Z.ai GLM-5.1 is the latest coding-focused model in the GLM family, with exceptional performance on complex programming tasks and enhanced reasoning and code generation quality.",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const fireworksProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.fireworks,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => fireworksDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		fireworksApiKey: z.string().optional(),
+	},
+})

@@ -9,10 +9,13 @@ import type { ProviderSettings } from "@roo-code/types"
 import TaskHeader, { TaskHeaderProps } from "../TaskHeader"
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key, // Simple mock that returns the key
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	// Mock initReactI18next to prevent initialization errors in tests
 	initReactI18next: {
 		type: "3rdParty",
@@ -38,9 +41,11 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 // Create a variable to hold the mock state
 const mockExtensionState: {
 	apiConfiguration: ProviderSettings
-	currentTaskItem: { id: string; task?: string; title?: string } | null
+	currentTaskItem: { id: string; task?: string; title?: string; autoTitle?: string } | null
 	clineMessages: any[]
 	taskHistory: any[]
+	timeFormat?: "auto" | "12h" | "24h"
+	dateFormat?: "auto" | "mdy" | "dmy" | "ymd"
 } = {
 	apiConfiguration: {
 		apiProvider: providerIdentifiers.anthropic,
@@ -148,6 +153,82 @@ describe("TaskHeader", () => {
 		const condenseButton = buttons.find((button) => button.querySelector("svg.lucide-list-chevrons-down-up"))
 		expect(condenseButton).toBeDefined()
 		expect(condenseButton?.querySelector("svg")).toBeInTheDocument()
+	})
+
+	describe("when the task was sent", () => {
+		const SENT = new Date(2024, 2, 7, 14, 41, 0, 0).getTime() // years back: a date, not "Today"
+		const expand = () => fireEvent.click(screen.getByText("Test task"))
+		const task = { ...defaultProps.task, ts: SENT }
+
+		afterEach(() => {
+			delete mockExtensionState.timeFormat
+			delete mockExtensionState.dateFormat
+		})
+
+		it("shows the time under the expanded task, in the chosen time and date format", () => {
+			Object.assign(mockExtensionState, { timeFormat: "24h", dateFormat: "ymd" })
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+
+			const timestamp = screen.getByTestId("message-timestamp")
+			expect(timestamp.textContent).toContain("2024-03-07")
+			expect(timestamp.textContent).toContain("14:41")
+			expect(timestamp).toHaveAttribute("datetime", new Date(SENT).toISOString())
+		})
+
+		it("follows a different format", () => {
+			Object.assign(mockExtensionState, { timeFormat: "12h", dateFormat: "dmy" })
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+
+			const text = screen.getByTestId("message-timestamp").textContent!
+			expect(text).toContain("07/03/2024")
+			expect(text).toMatch(/2:41\s?PM/i)
+		})
+
+		it.each([
+			["zero", 0],
+			["negative", -1],
+			["not a number", Number.NaN],
+			["beyond the range of a date", 8.64e15 + 1],
+		])("shows no time, and still the expanded task, when the task's time is %s", (_name, ts) => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={{ ...defaultProps.task, ts }} />)
+
+			expand()
+
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+			expect(screen.queryByTestId("message-timestamp")).not.toBeInTheDocument()
+		})
+
+		it("leaves no empty block under the expanded task when the time is invalid", () => {
+			const valid = renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+			const withTime = valid.container.querySelectorAll("div").length
+			valid.unmount()
+
+			const invalid = renderWithExtensionState(
+				<TaskHeader {...defaultProps} task={{ ...defaultProps.task, ts: 0 }} />,
+			)
+			expand()
+
+			expect(invalid.container.querySelectorAll("div").length).toBe(withTime - 1)
+		})
+
+		it("is not shown while the task is collapsed", () => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+
+			expect(screen.queryByTestId("message-timestamp")).not.toBeInTheDocument()
+		})
+
+		it("keeps the task expanded when the time is clicked, as for the other controls under the task", () => {
+			renderWithExtensionState(<TaskHeader {...defaultProps} task={task} />)
+			expand()
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+
+			fireEvent.click(screen.getByTestId("message-timestamp"))
+
+			expect(screen.getByText("chat:task.title")).toBeInTheDocument()
+		})
 	})
 
 	it("should call handleCondenseContext when condense context button is clicked", () => {
@@ -287,6 +368,17 @@ describe("TaskHeader", () => {
 			renderTaskHeader()
 
 			expect(screen.getByText("My title")).toBeInTheDocument()
+			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
+		})
+
+		it.each([
+			["the custom title over the generated title", "My title", "Generated", "My title"],
+			["the generated title without a custom title", undefined, "Generated", "Generated"],
+		])("shows %s in the collapsed header", (_label, title, autoTitle, expected) => {
+			mockExtensionState.currentTaskItem = { id: "test-task-id", task: "Test task", title, autoTitle }
+			renderTaskHeader()
+
+			expect(screen.getByText(expected)).toBeInTheDocument()
 			expect(screen.queryByText("Test task")).not.toBeInTheDocument()
 		})
 

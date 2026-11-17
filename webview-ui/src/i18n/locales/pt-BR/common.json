@@ -14,10 +14,7 @@
 	},
 	"answers": {
 		"yes": "Sim",
-		"no": "Não",
-		"cancel": "Cancelar",
-		"remove": "Remover",
-		"keep": "Manter"
+		"cancel": "Cancelar"
 	},
 	"ui": {
 		"search_placeholder": "Pesquisar...",
@@ -33,19 +30,11 @@
 			"copy": "Copiar",
 			"save": "Salvar imagem",
 			"viewCode": "Ver código",
-			"viewDiagram": "Ver diagrama",
 			"close": "Fechar"
-		},
-		"modal": {
-			"codeTitle": "Código Mermaid"
 		},
 		"tabs": {
 			"diagram": "Diagrama",
 			"code": "Código"
-		},
-		"feedback": {
-			"imageCopied": "Imagem copiada para a área de transferência",
-			"copyError": "Erro ao copiar imagem"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Imagem"
 		},
 		"noData": "Nenhum dado de imagem"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Formato de URI de dados inválido",
-			"copyingImage": "Erro ao copiar imagem: {{error}}",
-			"openingImage": "Erro ao abrir imagem: {{error}}",
-			"pathNotExists": "Caminho não existe: {{path}}",
-			"couldNotOpen": "Não foi possível abrir o arquivo: {{error}}",
-			"couldNotOpenGeneric": "Não foi possível abrir o arquivo!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI de dados da imagem copiada para a área de transferência"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Excluir Mensagem",
@@ -77,35 +53,42 @@
 		"editOnly": "Não, apenas editar a mensagem",
 		"deleteOnly": "Não, apenas excluir a mensagem",
 		"restoreToCheckpoint": "Sim, restaurar o checkpoint",
-		"proceed": "Prosseguir",
-		"dontShowAgain": "Não mostrar novamente"
+		"proceed": "Prosseguir"
 	},
 	"time_ago": {
 		"just_now": "agora mesmo",
-		"seconds_ago": "há {{count}} segundos",
+		"seconds_ago_one": "há {{count}} segundo",
+		"seconds_ago_many": "há {{count}} segundos",
+		"seconds_ago_other": "há {{count}} segundos",
 		"minute_ago": "há um minuto",
-		"minutes_ago": "há {{count}} minutos",
+		"minutes_ago_one": "há {{count}} minuto",
+		"minutes_ago_many": "há {{count}} minutos",
+		"minutes_ago_other": "há {{count}} minutos",
 		"hour_ago": "há uma hora",
-		"hours_ago": "há {{count}} horas",
+		"hours_ago_one": "há {{count}} hora",
+		"hours_ago_many": "há {{count}} horas",
+		"hours_ago_other": "há {{count}} horas",
 		"day_ago": "há um dia",
-		"days_ago": "há {{count}} dias",
+		"days_ago_one": "há {{count}} dia",
+		"days_ago_many": "há {{count}} dias",
+		"days_ago_other": "há {{count}} dias",
 		"week_ago": "há uma semana",
-		"weeks_ago": "há {{count}} semanas",
+		"weeks_ago_one": "há {{count}} semana",
+		"weeks_ago_many": "há {{count}} semanas",
+		"weeks_ago_other": "há {{count}} semanas",
 		"month_ago": "há um mês",
-		"months_ago": "há {{count}} meses",
+		"months_ago_one": "há {{count}} mês",
+		"months_ago_many": "há {{count}} meses",
+		"months_ago_other": "há {{count}} meses",
 		"year_ago": "há um ano",
-		"years_ago": "há {{count}} anos"
+		"years_ago_one": "há {{count}} ano",
+		"years_ago_many": "há {{count}} anos",
+		"years_ago_other": "há {{count}} anos"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "Você esperou {{timeout}} segundos para inicializar o checkpoint. Se não precisa dessa função, desative nas <settingsLink>configurações do checkpoint</settingsLink>.",
 		"init_checkpoint_fail_long_time": "A inicialização do checkpoint levou mais de {{timeout}} segundos, então os checkpoints foram desativados para esta tarefa. Você pode desativar os checkpoints ou aumentar o tempo de espera nas <settingsLink>configurações do checkpoint</settingsLink>.",
 		"attempt_completion_tool_failed": "Não é possível executar attempt_completion porque uma chamada de ferramenta anterior falhou neste turno. Por favor, resolva a falha da ferramenta antes de tentar concluir."
-	},
-	"tasks": {
-		"delegated": "Delegado para subtarefa",
-		"delegated_to": "Delegado para tarefa {{childId}}",
-		"delegation_completed": "Subtarefa concluída, retomando tarefa pai",
-		"awaiting_child": "Aguardando tarefa filha {{childId}}"
 	},
 	"costs": {
 		"own": "Próprio",

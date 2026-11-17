@@ -1,3 +1,5 @@
+import type * as vscode from "vscode"
+
 import { TerminalProcess } from "../TerminalProcess"
 import { Terminal } from "../Terminal"
 
@@ -15,8 +17,9 @@ vi.mock("vscode", () => ({
 }))
 
 describe("TerminalProcess ANSI Handling", () => {
-	let terminalProcess: any // Using any to access private methods
-	let mockTerminal: any
+	let terminalProcess: TerminalProcess
+	// vscode.Terminal double provides shellIntegration/name/processId/exitStatus/state.
+	let mockTerminal: vscode.Terminal
 
 	beforeEach(() => {
 		mockTerminal = {
@@ -32,7 +35,7 @@ describe("TerminalProcess ANSI Handling", () => {
 			hide: vi.fn(),
 			show: vi.fn(),
 			sendText: vi.fn(),
-		}
+		} as unknown as vscode.Terminal
 
 		const terminalInfo = new Terminal(1, mockTerminal, "/tmp")
 		terminalProcess = new TerminalProcess(terminalInfo)
@@ -41,31 +44,31 @@ describe("TerminalProcess ANSI Handling", () => {
 	describe("removeVSCodeShellIntegration", () => {
 		it("should preserve standard ANSI SGR sequences", () => {
 			const input = "\x1B[32mgreen text\x1B[0m"
-			const result = terminalProcess.removeVSCodeShellIntegration(input)
+			const result = terminalProcess["removeVSCodeShellIntegration"](input)
 			expect(result).toBe("\x1B[32mgreen text\x1B[0m")
 		})
 
 		it("should remove OSC 633 sequences", () => {
 			const input = "\x1B]633;A\x07some text"
-			const result = terminalProcess.removeVSCodeShellIntegration(input)
+			const result = terminalProcess["removeVSCodeShellIntegration"](input)
 			expect(result).toBe("some text")
 		})
 
 		it("should remove OSC 133 sequences", () => {
 			const input = "\x1B]133;A\x07some text"
-			const result = terminalProcess.removeVSCodeShellIntegration(input)
+			const result = terminalProcess["removeVSCodeShellIntegration"](input)
 			expect(result).toBe("some text")
 		})
 
 		it("should handle mixed sequences", () => {
 			const input = "\x1B]633;C\x07\x1B[1m\x1B[32m✓\x1B[39m\x1B[22m test passed"
-			const result = terminalProcess.removeVSCodeShellIntegration(input)
+			const result = terminalProcess["removeVSCodeShellIntegration"](input)
 			expect(result).toBe("\x1B[1m\x1B[32m✓\x1B[39m\x1B[22m test passed")
 		})
 
 		it("should remove other OSC sequences", () => {
 			const input = "\x1B]0;Console Title\x07Content"
-			const result = terminalProcess.removeVSCodeShellIntegration(input)
+			const result = terminalProcess["removeVSCodeShellIntegration"](input)
 			expect(result).toBe("Content")
 		})
 	})
@@ -73,13 +76,13 @@ describe("TerminalProcess ANSI Handling", () => {
 	describe("stripCursorSequences", () => {
 		it("should remove cursor movement codes", () => {
 			const input = "text\x1B[1Aup\x1B[2Kclear"
-			const result = terminalProcess.stripCursorSequences(input)
+			const result = terminalProcess["stripCursorSequences"](input)
 			expect(result).toBe("textupclear")
 		})
 
 		it("should preserve colors while removing cursor codes", () => {
 			const input = "\x1B[31mred\x1B[1B\x1B[32mgreen"
-			const result = terminalProcess.stripCursorSequences(input)
+			const result = terminalProcess["stripCursorSequences"](input)
 			expect(result).toBe("\x1B[31mred\x1B[32mgreen")
 		})
 	})
