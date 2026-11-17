@@ -23,6 +23,35 @@ import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
 
+/** Provider lookups the extension host runs for the webview, keeping provider origins out of the CSP. */
+export type ProviderInfoKind = keyof ProviderInfoResultMap
+
+export interface ProviderInfoParams {
+	apiKey?: string
+	baseUrl?: string
+	modelId?: string
+}
+
+/** Result of each lookup. The host and the webview share it, so the kind fixes the result type. */
+export interface ProviderInfoResultMap {
+	openRouterKeyInfo: {
+		label: string
+		usage: number
+		is_free_tier: boolean
+		is_provisioning_key: boolean
+		rate_limit: { requests: number; interval: string }
+		limit: number | null
+	} | null
+	openRouterModelProviders: Record<string, ModelInfo & { label: string }>
+	requestyKeyInfo: {
+		name: string
+		monthly_limit: string
+		monthly_spend: string
+		org_balance: string
+		config: { aliases?: Record<string, unknown> }
+	} | null
+}
+
 /**
  * ExtensionMessage
  * Extension -> Webview | CLI
@@ -66,6 +95,7 @@ export interface ExtensionMessage {
 		| "ttsStart"
 		| "ttsStop"
 		| "fileSearchResults"
+		| "providerInfo"
 		| "toggleApiConfigPin"
 		| "acceptInput"
 		| "setHistoryPreviewCollapsed"
@@ -551,6 +581,7 @@ export interface WebviewMessage {
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
+		| "requestProviderInfo"
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
