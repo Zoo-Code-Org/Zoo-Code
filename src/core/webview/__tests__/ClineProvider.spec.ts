@@ -5076,6 +5076,376 @@ describe("ClineProvider", () => {
 				await provider.dispose()
 			}
 		})
+		it("refreshes a delegated task on the saved profile from the view that pins another profile", async () => {
+			// Review thread 4506513932 (node PRRT_kwDOSK-bwM61BXEu in my capture,
+			// original_line 542 of 446a89921fd7bdd235ec9e9729c7e9b6535030e8, where lines
+			// 541-542 are the pinnedProfileName getter the update-path filter reads,
+			// Minor under Functional Correctness with a Quick win, unresolved): refresh
+			// any delegated task using the updated profile even when its view pins a
+			// different profile, while keeping the overlay half pinned-based. Both halves
+			// are asserted as set membership: the overlay half is the only writer of a
+			// view's buffered apiConfiguration in this flow, so an untouched buffer
+			// identifies a view the refresh skipped.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const taskSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const pinnedSibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// The task sibling pins one profile and runs a task that follows the profile
+				// being saved: the task half must reach it, the overlay half must not.
+				const taskSiblingBuffer = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "pinned-sibling-buffered-settings",
+				}
+				taskSibling["viewLocalState"].currentApiConfigName = "profile-pinned-by-task-sibling"
+				taskSibling["viewLocalState"].apiConfiguration = taskSiblingBuffer
+				// The pinned sibling buffers the profile being saved and runs a task under
+				// it: it belongs to both halves, which is the behaviour the ask preserves.
+				pinnedSibling["viewLocalState"].currentApiConfigName = "profile-being-saved"
+				pinnedSibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "saved-sibling-buffered-settings",
+				}
+				const taskSiblingTask = {
+					taskId: "task-following-saved-profile",
+					taskApiConfigName: "profile-being-saved",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "stale-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				const pinnedSiblingTask = {
+					taskId: "task-following-pinned-profile",
+					taskApiConfigName: "profile-being-saved",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "stale-pinned-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				// The doubles stand in for live tasks; the double assertion is this file.
+				// existing shape for a getCurrentTask double (see the profile-deletion tests
+				// in this describe block), kept because a full Task needs an extension host.
+				vi.spyOn(taskSibling, "getCurrentTask").mockReturnValue(
+					taskSiblingTask as unknown as ReturnType<typeof taskSibling.getCurrentTask>,
+				)
+				vi.spyOn(pinnedSibling, "getCurrentTask").mockReturnValue(
+					pinnedSiblingTask as unknown as ReturnType<typeof pinnedSibling.getCurrentTask>,
+				)
+				// The updating view has no task of its own here, so its mutation site is out
+				// of the way and every rebuild below comes from the fan-out.
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(taskSibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(pinnedSibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-being-saved",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				const id = await provider.upsertProviderProfile(
+					"profile-being-saved",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "newly-saved-key" },
+					false,
+				)
+				expect(id).toBe("saved-id")
+				// Task half, and only the task half, for the sibling whose pin names another
+				// profile: its handler was rebuilt with the saved settings and its state was
+				// re-posted, so the running conversation stops sending the stale key.
+				expect(taskSiblingTask.updateApiConfiguration).toHaveBeenCalledTimes(1)
+				expect(taskSiblingTask.updateApiConfiguration).toHaveBeenCalledWith(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				expect(taskSibling.postStateToWebview).toHaveBeenCalledTimes(1)
+				// Not in the overlay half: the buffer is still the very object this view
+				// loaded, and the pin still names this view profile rather than the profile
+				// another view saved.
+				expect(taskSibling["viewLocalState"].apiConfiguration).toBe(taskSiblingBuffer)
+				expect(taskSibling["viewLocalState"].currentApiConfigName).toBe("profile-pinned-by-task-sibling")
+				// The task keeps its own sticky profile name: only its handler settings move.
+				expect(taskSiblingTask.setTaskApiConfigName).not.toHaveBeenCalled()
+				// Both halves for the sibling whose pin matches the saved profile: its buffer
+				// is replaced with the stored settings and its handler is rebuilt.
+				expect(pinnedSibling["viewLocalState"].apiConfiguration).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				expect(pinnedSibling["viewLocalState"].currentApiConfigName).toBe("profile-being-saved")
+				expect(pinnedSiblingTask.updateApiConfiguration).toHaveBeenCalledTimes(1)
+				expect(pinnedSibling.postStateToWebview).toHaveBeenCalledTimes(1)
+				// Wait on the serialized view-state write queue so queued persistence finishes
+				// while the console spies are still installed and teardown has no pending writes.
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await taskSibling.dispose()
+				await pinnedSibling.dispose()
+				await provider.dispose()
+			}
+		})
+
+		it("rebuilds the updating view's own task when that task follows the profile it saves under another pin", async () => {
+			// The self question of the same ask: the update arrives from this provider,
+			// which the fan-out has always excluded, so the rebuild of this view.
+			// own task belongs at the mutation site. The view pins one profile and the
+			// task it runs follows the profile it saves: before this change neither the
+			// mutation site (gated on the pin) nor the fan-out (gated on being another
+			// instance) rebuilt it, and the task kept sending the pre-save settings.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const ownBuffer = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "updating-view-buffered-settings",
+				}
+				provider["viewLocalState"].currentApiConfigName = "profile-pinned-by-updating-view"
+				provider["viewLocalState"].apiConfiguration = ownBuffer
+				const ownTask = {
+					taskId: "task-of-updating-view",
+					taskApiConfigName: "profile-self-saved-under-another-pin",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "stale-own-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					ownTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				const postStateSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-self-saved-under-another-pin",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				const id = await provider.upsertProviderProfile(
+					"profile-self-saved-under-another-pin",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "newly-saved-key" },
+					false,
+				)
+				expect(id).toBe("saved-id")
+				// Exactly one rebuild, from the mutation site, and exactly one state post: the
+				// exclusion of this instance from the fan-out is not a second behaviour change
+				// because the originating view is refreshed where its own write lands.
+				expect(ownTask.updateApiConfiguration).toHaveBeenCalledTimes(1)
+				expect(ownTask.updateApiConfiguration).toHaveBeenCalledWith(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				expect(postStateSpy).toHaveBeenCalledTimes(1)
+				// The pin is untouched: a save that does not activate does not re-point the
+				// updating view's buffer onto the profile it merely saved.
+				expect(provider["viewLocalState"].apiConfiguration).toBe(ownBuffer)
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-pinned-by-updating-view")
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await provider.dispose()
+			}
+		})
+
+		it("leaves the pinned sibling's buffer and task handler pre-save when a write of the group fails", async () => {
+			// Preserve-clause control for review thread 4506513932, printed beside the
+			// test above: the sibling refresh is still the last step of the group, so a
+			// failing write ahead of it leaves both the pinned buffer and the pinned
+			// task handler on the pre-save state, and the log names the earlier write
+			// rather than a refresh failure. The ordering and the logged-not-thrown shape
+			// are what the answered thread 4506517321 gates; widening the sets does not
+			// move them.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const bufferedSettings = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "pre-save-sibling-settings",
+				}
+				sibling["viewLocalState"].currentApiConfigName = "profile-gated-by-write-order"
+				sibling["viewLocalState"].apiConfiguration = bufferedSettings
+				const siblingTask = {
+					taskId: "task-following-gated-profile",
+					taskApiConfigName: "profile-gated-by-write-order",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "pre-save-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+				)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-gated-by-write-order",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-id")
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(
+					"profile-gated-by-write-order",
+				)
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				// The state post of the activation group fails, which is a write of the group
+				// and happens before the sibling refresh is invoked.
+				vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("state write down"))
+				const logLines: string[] = []
+				vi.spyOn(provider, "log").mockImplementation((message: string) => {
+					logLines.push(message)
+				})
+				const id = await provider.upsertProviderProfile("profile-gated-by-write-order", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				// The save failed on its own write: upsertProviderProfile swallows the failure
+				// and reports no id, and the log line that names the cause is the earlier
+				// write, not a sibling refresh.
+				expect(id).toBeUndefined()
+				expect(logLines.filter((line: string) => line.includes("state write down")).length).toBe(1)
+				expect(
+					logLines.filter((line: string) => line.includes("failed to refresh the sibling views")).length,
+				).toBe(0)
+				// Neither half of the refresh ran for the pinned sibling: no overlay write,
+				// and the task handler still holds the settings it was built with.
+				expect(sibling["viewLocalState"].apiConfiguration).toBe(bufferedSettings)
+				expect(siblingTask.updateApiConfiguration).not.toHaveBeenCalled()
+				expect(sibling.postStateToWebview).not.toHaveBeenCalled()
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+
+		it("logs a failed sibling refresh instead of failing the save whose writes landed", async () => {
+			// The other half of the preserve clause: the refresh is logged rather than
+			// thrown, so a view whose own refresh step fails cannot turn a committed save
+			// into a failed one. Review thread 4506513932, printed beside the test above.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				sibling["viewLocalState"].currentApiConfigName = "profile-refreshed-and-thrown"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "pre-refresh-sibling-settings",
+				}
+				const siblingTask = {
+					taskId: "task-following-thrown-profile",
+					taskApiConfigName: "profile-refreshed-and-thrown",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "pre-refresh-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+					siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+				)
+				// The refresh reaches this view, rewrites its buffer, and then fails when it
+				// re-posts its state: the failure is the last step of the save.
+				vi.spyOn(sibling, "postStateToWebview").mockRejectedValue(new Error("sibling post down"))
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-refreshed-and-thrown",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				const logLines: string[] = []
+				vi.spyOn(provider, "log").mockImplementation((message: string) => {
+					logLines.push(message)
+				})
+				const id = await provider.upsertProviderProfile(
+					"profile-refreshed-and-thrown",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "newly-saved-key" },
+					false,
+				)
+				// The save reports the id its own write produced even though the sibling
+				// refresh threw, and the throw is what the log line names.
+				expect(id).toBe("saved-id")
+				expect(logLines.filter((line: string) => line.includes("sibling post down")).length).toBe(1)
+				expect(
+					logLines.filter((line: string) => line.includes("failed to refresh the sibling views")).length,
+				).toBe(1)
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
 
 		it("fails the upsert and compensates the record when the post-save read-back fails", async () => {
 			const provider = new ClineProvider(

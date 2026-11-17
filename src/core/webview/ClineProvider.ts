@@ -3446,9 +3446,11 @@ export class ClineProvider
 				await this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig())
 
 				// A save that does not activate still changes the profile's settings, and
-				// every view pinned to it buffers a full copy of them. Refresh those views
-				// (and this one when it is the pinned view) or their getState() keeps
-				// serving the settings captured before the save under the same name.
+				// every view pinned to it buffers a full copy of them. Refresh those views,
+				// refresh this view when it is the pinned view, and rebuild this view's own
+				// conversation when it follows the saved profile under another pin; otherwise
+				// their getState() keeps serving the settings captured before the save under
+				// the same name.
 				if (this.pinnedProfileName === name) {
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 					// Only rebuild when the task actually runs under the saved profile: a
@@ -3458,6 +3460,15 @@ export class ClineProvider
 					if (this.getCurrentTask()?.taskApiConfigName === name) {
 						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 					}
+				} else if (this.getCurrentTask()?.taskApiConfigName === name) {
+					// The fan-out is taken over other instances only, so the conversation of
+					// the view performing this save is refreshed here. This view pins another
+					// profile, so its buffer keeps that profile's settings, but the task it
+					// runs follows the profile that was just saved and must stop sending the
+					// pre-save settings: review thread 4506513932, printed beside the refresh
+					// method below. Placed ahead of this view's own state post so the state
+					// re-posted below carries the rebuilt handler.
+					this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
 				}
 			}
 
@@ -3952,27 +3963,46 @@ export class ClineProvider
 	}
 
 	/**
-	 * Refresh the view-local apiConfiguration buffer of the other live views
-	 * pinned to the given profile. An upsert/activation rewrites the profile's
-	 * settings in the shared store and the store-backed manager, but a view
-	 * whose buffer loaded the profile earlier keeps shadowing the stale
-	 * settings in its getState() until its own next mutation. The originating
-	 * view refreshes its buffer at the mutation site itself.
+	/**
+	 * Refresh the other live views after a profile is saved or activated.
+	 * The two sets below are taken differently, on purpose, and the split is
+	 * what review thread 4506513932 (node PRRT_kwDOSK-bwM61BXEu in my capture,
+	 * original_line 542 of 446a89921fd7bdd235ec9e9729c7e9b6535030e8, where lines
+	 * 541-542 are the pinnedProfileName getter the first filter reads) asks for.
+	 * An upsert or activation rewrites the profile's settings in the shared store
+	 * and in the store-backed manager, and a view whose buffer loaded that profile
+	 * earlier keeps shadowing the stale settings in its getState() until its own
+	 * next mutation: that overlay half stays taken from each view's pin. A task
+	 * carries its own sticky profile name, so the handler half is taken from the
+	 * task instead, and a delegated task that follows the saved profile is rebuilt
+	 * in the view running it even when that view pins a different profile - the
+	 * case this method used to miss, because a view whose pin named another
+	 * profile was never in the set at all. The originating view is in neither set:
+	 * it refreshes its buffer and rebuilds its own task at the mutation site above.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
 	): Promise<void> {
-		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === name,
+		const others = ClineProvider.getAllInstances().filter((instance) => instance !== this)
+		// The overlay half stays pinned-based: a view buffers a full copy of a
+		// profile's settings only while its own pin names that profile, and writing
+		// a buffer that intentionally holds another profile would re-point it.
+		const pinnedViews = others.filter((instance) => instance.pinnedProfileName === name)
+		// The handler half follows each task's own sticky profile name, so the
+		// conversation of a view pinned to another profile is still rebuilt on the
+		// saved settings. A view in the overlay half is refreshed there, so the two
+		// sets are disjoint by construction and no view is refreshed twice.
+		const taskBoundViews = others.filter(
+			(instance) => instance.pinnedProfileName !== name && instance.getCurrentTask()?.taskApiConfigName === name,
 		)
 
-		if (affected.length === 0) {
+		if (pinnedViews.length === 0 && taskBoundViews.length === 0) {
 			return
 		}
 
-		await Promise.all(
-			affected.map(async (instance) => {
+		await Promise.all([
+			...pinnedViews.map(async (instance) => {
 				// Direct private access: compile-time safe across sibling instances.
 				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 
@@ -3988,7 +4018,16 @@ export class ClineProvider
 				}
 				await instance.postStateToWebview()
 			}),
-		)
+			// The task-only half rebuilds the handler and re-posts the state so that
+			// webview shows the settings its conversation now runs on, and leaves the
+			// buffer and the pin alone: the view still pins another profile.
+			...taskBoundViews.map(async (instance) => {
+				// Direct private access across sibling instances of the same class is
+				// compile-time safe.
+				instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+				await instance.postStateToWebview()
+			}),
+		])
 	}
 
 	/**
