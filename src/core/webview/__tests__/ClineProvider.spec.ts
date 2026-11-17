@@ -5368,6 +5368,159 @@ describe("ClineProvider", () => {
 			}
 		})
 
+		it("restores the acting view's own task when a non-activating save fails after its rebuild", async () => {
+			// Review thread 4594702295 (created 2026-11-17T02:56:13Z, printed at line 3471 of
+			// ClineProvider.ts with original_line 3471) names the compensation gap: both rebuilds
+			// in the non-activating branch land ahead of the state post, and every restore in the
+			// catch covers the manager record, the manager selection, the mode mapping and the
+			// shared/per-view state - none of them touches the task. This view pins one profile
+			// and its own task follows the profile being saved, so the rebuild runs and the
+			// post rejects: the task must go back to the configuration it ran on before the save.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const ownBuffer = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "updating-view-buffered-settings",
+				}
+				provider["viewLocalState"].currentApiConfigName = "profile-pinned-by-updating-view"
+				provider["viewLocalState"].apiConfiguration = ownBuffer
+				const ownTask = {
+					taskId: "task-restored-after-post-failure",
+					taskApiConfigName: "profile-self-saved-then-rolled-back",
+					apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "pre-save-own-task-key" },
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				// The double stands in for a live task in this file existing getCurrentTask
+				// shape; a full Task needs an extension host.
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					ownTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("state post rejected"))
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-self-saved-then-rolled-back",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				// upsertProviderProfile owns the error surface: it logs, shows a message and
+				// returns undefined, so the failed post is proven by the absent id and by the
+				// task calls below rather than by a thrown error at this call.
+				const id = await provider.upsertProviderProfile(
+					"profile-self-saved-then-rolled-back",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "newly-saved-key" },
+					false,
+				)
+				expect(id).toBeUndefined()
+				// Both halves of the task move, in this order: the rebuild carries the settings
+				// this save wrote, the compensation carries the settings the task ran on before
+				// it. The second call is the restore the thread names.
+				expect(ownTask.updateApiConfiguration).toHaveBeenCalledTimes(2)
+				expect(ownTask.updateApiConfiguration.mock.calls[0][0]).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				expect(ownTask.updateApiConfiguration.mock.calls[1][0]).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "pre-save-own-task-key",
+					}),
+				)
+				// Only the settings move back: this save never re-pointed the sticky name, so
+				// the compensation may not move it either.
+				expect(ownTask.setTaskApiConfigName).not.toHaveBeenCalled()
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("profile-pinned-by-updating-view")
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await provider.dispose()
+			}
+		})
+
+		it("restores the acting view's own task when a pinned-profile save fails after its rebuild", async () => {
+			// The same compensation on the other branch of the same save: here the view pins
+			// the profile it saves, so its buffer is rewritten first and its task rebuilt at
+			// line 3461 of ClineProvider.ts before the state post rejects. The task half of
+			// the restore has to cover both rebuilds, not only the one the thread points at.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				const ownBuffer = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "pinned-view-buffered-settings",
+				}
+				provider["viewLocalState"].currentApiConfigName = "profile-self-saved-and-pinned"
+				provider["viewLocalState"].apiConfiguration = ownBuffer
+				const ownTask = {
+					taskId: "task-restored-after-pinned-save-failure",
+					taskApiConfigName: "profile-self-saved-and-pinned",
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "pre-save-pinned-task-key",
+					},
+					updateApiConfiguration: vi.fn(),
+					setTaskApiConfigName: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					ownTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockRejectedValueOnce(new Error("state post rejected"))
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "profile-self-saved-and-pinned",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "newly-saved-key",
+				})
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+				const id = await provider.upsertProviderProfile(
+					"profile-self-saved-and-pinned",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "newly-saved-key" },
+					false,
+				)
+				expect(id).toBeUndefined()
+				expect(ownTask.updateApiConfiguration).toHaveBeenCalledTimes(2)
+				expect(ownTask.updateApiConfiguration.mock.calls[0][0]).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newly-saved-key",
+					}),
+				)
+				expect(ownTask.updateApiConfiguration.mock.calls[1][0]).toEqual(
+					expect.objectContaining({
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "pre-save-pinned-task-key",
+					}),
+				)
+				expect(ownTask.setTaskApiConfigName).not.toHaveBeenCalled()
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await provider.dispose()
+			}
+		})
+
 		it("leaves the pinned sibling's buffer and task handler pre-save when a write of the group fails", async () => {
 			// Preserve-clause control for review thread 4506513932, printed beside the
 			// test above: the sibling refresh is still the last step of the group, so a

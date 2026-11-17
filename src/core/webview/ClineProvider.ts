@@ -3334,6 +3334,18 @@ export class ClineProvider
 		// copies. The shared/per-view snapshot is taken at the same point.
 		const managerSnapshot = await this._snapshotProviderManagerState(name)
 		const preWriteSnapshot = this._snapshotProfileActivationState()
+		// Review thread 4594702295 (created 2026-11-17T02:56:13Z, printed at line 3471 of
+		// this head with original_line 3471) names the one restore this method catch was
+		// missing. Both rebuilds in the non-activating branch below land ahead of the state
+		// post at line 3475, and every restore in the catch covers the manager record, the
+		// manager selection, the mode mapping and the shared/per-view state, so a rejected
+		// post left the conversation this view runs sending the settings the failed save had
+		// written while the durable stores went back to what they were. Captured here and
+		// assigned only by that branch, then restored through the rebuild path the file
+		// already uses for the task, with the task identity as the guard so a task swapped
+		// or disposed while the compensation ran is left alone.
+		let priorTaskConfig: ProviderSettings | undefined
+		let priorTaskId: string | undefined
 		let id: string
 		try {
 			id = await this.providerSettingsManager.saveConfig(name, providerSettings)
@@ -3451,6 +3463,13 @@ export class ClineProvider
 				// conversation when it follows the saved profile under another pin; otherwise
 				// their getState() keeps serving the settings captured before the save under
 				// the same name.
+				// Both rebuilds below happen inside this branch, so the task snapshot is taken
+				// here rather than at each call: a save that reaches neither rebuild leaves
+				// priorTaskConfig undefined and the compensation restores nothing it did not
+				// change.
+				const priorTask = this.getCurrentTask()
+				priorTaskConfig = priorTask?.apiConfiguration
+				priorTaskId = priorTask?.taskId
 				if (this.pinnedProfileName === name) {
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 					// Only rebuild when the task actually runs under the saved profile: a
@@ -3518,6 +3537,29 @@ export class ClineProvider
 				}
 			}
 			await this._restoreProfileActivationState(preWriteSnapshot)
+			// Put this view.own task back the way it was, through the rebuild path the file
+			// already uses for it: the helper rebuilds the handler and syncs the parser from
+			// the settings it is given, and the identity option makes the call a no-op when
+			// the task was swapped or disposed while the compensation ran. Logged rather than
+			// thrown, matching the mode-mapping restore above, so a failed restore can neither
+			// strand the rest of the compensation nor replace the original error. The
+			// activating branch above rebuilds at line 3441 and keeps the same gap; it is
+			// named rather than widened here, because that branch has no state post between
+			// its rebuild and its last await for this save shape.
+			if (priorTaskConfig !== undefined && priorTaskId !== undefined) {
+				try {
+					this.updateTaskApiHandlerIfNeeded(priorTaskConfig, {
+						forceRebuild: true,
+						expectedCurrentTaskId: priorTaskId,
+					})
+				} catch (restoreError) {
+					this.log(
+						`[ClineProvider] profile-save rollback failed for the task api handler: ${
+							restoreError instanceof Error ? restoreError.message : String(restoreError)
+						}`,
+					)
+				}
+			}
 			throw error
 		}
 	}
