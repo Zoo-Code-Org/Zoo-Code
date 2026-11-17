@@ -101,35 +101,112 @@ describe("command approval display", () => {
 	})
 
 	const evil = "x\x1b[2K\r\x9b\u202e\u2028\u034f"
-	it.each([
-		["followup", JSON.stringify({ question: evil, suggest: [{ answer: evil, mode: evil }] })],
-		["tool", JSON.stringify({ tool: evil, [evil]: evil })],
-		["use_mcp_server", JSON.stringify({ type: "use_mcp_tool", server_name: evil, tool_name: evil })],
-		["use_mcp_server", JSON.stringify({ type: "access_mcp_resource", server_name: evil, uri: evil })],
-		["api_req_failed", evil],
-		["mistake_limit_reached", evil],
-		["auto_approval_max_req_reached", evil],
-		["resume_task", evil],
-		["unknown_ask", evil],
-	])("escapes untrusted text of ask %s", async (ask, text) => {
+	const shown = String.raw`"x\u001b[2K\r\u009b\u202e\u2028\u034f"`
+	const yes = { type: "askResponse", askResponse: "yesButtonClicked" }
+	const answered = { handled: true, response: "messageResponse" }
+	const approved = { handled: true, response: "yesButtonClicked" }
+
+	async function run(
+		ask: string,
+		text: string,
+		arrange: (promptManager: PromptManager) => void = () => {},
+		nonInteractive = false,
+	) {
 		const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true)
 		const promptManager = new PromptManager()
 		vi.spyOn(promptManager, "promptForYesNo").mockResolvedValue(true)
-		vi.spyOn(promptManager, "promptForInput").mockResolvedValue(evil)
-		vi.spyOn(promptManager, "promptWithTimeout").mockResolvedValue({
-			value: evil,
-			timedOut: false,
-			cancelled: false,
-		})
+		arrange(promptManager)
+		const sendMessage = vi.fn()
 		const dispatcher = new AskDispatcher({
 			outputManager: new OutputManager(),
 			promptManager,
-			sendMessage: vi.fn(),
+			sendMessage,
+			nonInteractive,
 		})
+		const result = await dispatcher.handleAsk({ ts: 1, type: "ask", ask: ask as ClineAsk, text })
+		return { printed: stdout.mock.calls.map(([chunk]) => String(chunk)).join(""), sendMessage, result }
+	}
 
-		await dispatcher.handleAsk({ ts: 1, type: "ask", ask: ask as ClineAsk, text })
+	it.each([
+		["tool", JSON.stringify({ tool: evil, [evil]: evil }), `\n[Tool Request] ${shown}\n  ${shown}: ${shown}\n`],
+		[
+			"use_mcp_server",
+			JSON.stringify({ type: "use_mcp_tool", server_name: evil, tool_name: evil }),
+			`\n[mcp request]\n  Server: ${shown}\n  Tool: ${shown}\n`,
+		],
+		[
+			"use_mcp_server",
+			JSON.stringify({ type: "access_mcp_resource", server_name: evil, uri: evil }),
+			`\n[mcp request]\n  Server: ${shown}\n  Resource: ${shown}\n`,
+		],
+		["api_req_failed", evil, `\n[api request failed]\n  Error: ${shown}\n`],
+		["mistake_limit_reached", evil, `\n[mistake limit reached]\n  Details: ${shown}\n`],
+		["auto_approval_max_req_reached", evil, `\n[auto-approval limit reached]\n  Details: ${shown}\n`],
+		["resume_task", evil, `\n[Resume Task]\n  ${shown}\n`],
+		["unknown_ask", evil, `\n[unknown_ask]\n  ${shown}\n`],
+	])("escapes untrusted text of ask %s", async (ask, text, expected) => {
+		const { printed, sendMessage, result } = await run(ask, text)
 
-		const printed = stdout.mock.calls.map(([chunk]) => String(chunk)).join("")
-		expect(printed.replaceAll("\n", "")).not.toMatch(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/u)
+		expect(printed).toBe(expected)
+		expect(sendMessage).toHaveBeenCalledExactlyOnceWith(yes)
+		expect(result).toEqual(approved)
+	})
+
+	const suggestions = JSON.stringify({ question: evil, suggest: [{ answer: evil, mode: evil }] })
+	const listing = `\n[question] ${shown}\n\nSuggested answers:\n  1. ${shown} (mode: ${shown})\n\n`
+	it.each([
+		[
+			"typed answer",
+			evil,
+			(m: PromptManager) => vi.spyOn(m, "promptForInput").mockResolvedValue(evil),
+			false,
+			"",
+			evil,
+		],
+		[
+			"selected number",
+			suggestions,
+			(m: PromptManager) => vi.spyOn(m, "promptForInput").mockResolvedValue("1"),
+			false,
+			`Selected: ${shown}\n`,
+			evil,
+		],
+		[
+			"rejected input",
+			suggestions,
+			(m: PromptManager) => vi.spyOn(m, "promptForInput").mockRejectedValue(new Error("closed")),
+			false,
+			`[Using default: ${shown}]\n`,
+			evil,
+		],
+		[
+			"timeout",
+			suggestions,
+			(m: PromptManager) =>
+				vi.spyOn(m, "promptWithTimeout").mockResolvedValue({ value: evil, timedOut: true, cancelled: false }),
+			true,
+			`[Using default: ${shown}]\n`,
+			evil,
+		],
+		[
+			"cancellation",
+			suggestions,
+			(m: PromptManager) =>
+				vi.spyOn(m, "promptWithTimeout").mockResolvedValue({ value: evil, timedOut: false, cancelled: true }),
+			true,
+			`[Using default: ${shown}]\n`,
+			evil,
+		],
+	])("escapes followup text on %s", async (name, text, arrange, nonInteractive, tail, answer) => {
+		const { printed, sendMessage, result } = await run("followup", text, arrange, nonInteractive)
+
+		const head = name === "typed answer" ? `\n[question] ${shown}\n` : listing
+		expect(printed).toBe(head + tail)
+		expect(sendMessage).toHaveBeenCalledExactlyOnceWith({
+			type: "askResponse",
+			askResponse: "messageResponse",
+			text: answer,
+		})
+		expect(result).toEqual(answered)
 	})
 })

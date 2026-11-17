@@ -4,9 +4,10 @@
 \* Source: the command text from the model. Another actor can shape it (prompt injection).
 \* Failure: a raw control, format, or line-break character in the prompt text changes what the user sees.
 \* Invariant: NoRawUnsafeChar. Each char is a class. Only the class and the escape rule are modeled.
-\* Variants: Raw is the code before the fix. Json is JSON.stringify alone. NoIgnorable is JSON plus the Cc and Cf regex. Fixed adds Default_Ignorable_Code_Point.
+\* Settings: CommandApprovalDisplayMC.tla holds the bounds and the variants. Variants: Raw is the code before the fix. Json is JSON.stringify alone. NoIgnorable is JSON plus the Cc and Cf regex. Fixed adds Default_Ignorable_Code_Point.
+\* Run: java -cp <jar> tlc2.TLC -metadir <dir> -config CommandApprovalDisplay.Json.cfg CommandApprovalDisplayMC.tla
 \* Expect: Raw fails at once. Json fails on DEL, C1, format, U+2028 and astral format chars. Fixed holds.
-\* Result, MaxLen 2: Raw fails with a newline. Json fails with DEL. Fixed holds in 73 states. All matched Expect.
+\* Result, MaxLen 2: Raw fails with a newline. Json fails with DEL. Fixed holds in 91 states. All matched Expect.
 \* Replay: Json alone prints DEL, U+2028 and U+E0001 raw in real code. The property test fails with the regex removed.
 \* Property tests: ask-dispatcher.test.ts, the random command test and "escapes untrusted text of ask". Both pass.
 \* Sabotage: with the helper as identity, 18 of 19 tests fail.
@@ -14,12 +15,12 @@
 \* Sinks: the helper now guards the command, question, suggestion, tool, MCP, error, detail, resume and generic lines.
 \* Not guarded: the ask label [${ask}]. It is a ClineAsk value, not model text.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review: 0 covered, 1 added (bot thread on U+034F, PR 2473), 0 gap. The bot also asked for deny-path tests. The spec has no accept or reject step, so that is a gap.
+\* Review: 0 covered, 2 added (bot threads on U+034F and on the MC module, PR 2473), 0 gap. The bot also asked for deny-path tests. The spec has no accept or reject step, so that is a gap.
 \* Result after the thread, MaxLen 2: NoIgnorable fails with U+034F. Fixed holds.
 
 EXTENDS Naturals, Sequences
 
-CONSTANTS MaxLen, Variant   \* Variant is "Raw", "Json", "NoIgnorable" or "Fixed"
+CONSTANTS Esc, Inputs   \* Esc: classes the code escapes. Inputs: texts to check. CommandApprovalDisplayMC sets both.
 
 VARIABLE in
 
@@ -30,15 +31,8 @@ JsonEsc == {"nl", "bs"}
 RegexEsc == {"del", "c1", "fmt", "ls", "astral"}
 Ignorable == {"ign"}   \* Default_Ignorable_Code_Point outside Cc and Cf, for example U+034F.
 
-Inputs == UNION {[1..n -> Alphabet] : n \in 0..MaxLen}
 
-Escapes(c) ==
-    CASE Variant = "Raw"  -> FALSE
-      [] Variant = "Json" -> c \in JsonEsc
-      [] Variant = "NoIgnorable" -> c \in JsonEsc \cup RegexEsc
-      [] Variant = "Fixed" -> c \in JsonEsc \cup RegexEsc \cup Ignorable
-
-Shown(s) == [p \in 1..Len(s) |-> IF Escapes(s[p]) THEN <<"esc", s[p]>> ELSE <<"raw", s[p]>>]
+Shown(s) == [p \in 1..Len(s) |-> IF s[p] \in Esc THEN <<"esc", s[p]>> ELSE <<"raw", s[p]>>]
 
 TypeOK == in \in Inputs
 
