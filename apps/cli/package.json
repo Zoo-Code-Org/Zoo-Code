@@ -9,8 +9,8 @@
 		"roo": "dist/index.js"
 	},
 	"scripts": {
-		"format": "prettier --write 'src/**/*.ts'",
-		"lint": "eslint src --ext .ts --max-warnings=0",
+		"format": "prettier --write 'src/**/*.{ts,tsx}'",
+		"lint": "eslint src --ext .ts,.tsx --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",

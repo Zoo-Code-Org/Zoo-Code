@@ -2,9 +2,9 @@ import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { Plus, Globe, Folder, Edit, Trash2 } from "lucide-react"
 import { Trans } from "react-i18next"
 
+import { useAppTranslation } from "@/i18n/TranslationContext"
 import type { Command } from "@roo-code/types"
 
-import { useAppTranslation } from "@/i18n/TranslationContext"
 import { useExtensionState } from "@/context/ExtensionStateContext"
 import {
 	AlertDialog,
@@ -148,6 +148,7 @@ export const SlashCommandsSettings: React.FC = () => {
 				<div className="flex flex-col gap-2 px-5 py-2">
 					<p className="text-vscode-descriptionForeground text-sm m-0">
 						<Trans
+							t={t}
 							i18nKey="settings:slashCommands.description"
 							components={{
 								DocsLink: (

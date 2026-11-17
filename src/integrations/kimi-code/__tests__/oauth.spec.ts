@@ -1,16 +1,19 @@
+import type { ExtensionContext } from "vscode"
+
 import { KIMI_CODE_OAUTH_CONFIG, KimiCodeOAuthManager } from "../oauth"
 
 const createContext = () => {
 	const values = new Map<string, string>()
 	return {
 		values,
+		// ExtensionContext double provides secrets.get/store/delete only.
 		context: {
 			secrets: {
 				get: vi.fn(async (key: string) => values.get(key)),
 				store: vi.fn(async (key: string, value: string) => void values.set(key, value)),
 				delete: vi.fn(async (key: string) => void values.delete(key)),
 			},
-		} as any,
+		} as unknown as ExtensionContext,
 	}
 }
 

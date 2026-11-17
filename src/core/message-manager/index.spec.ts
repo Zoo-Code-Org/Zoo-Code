@@ -204,6 +204,50 @@ describe("MessageManager", () => {
 			expect(hasSummary).toBe(false)
 		})
 
+		it.each([
+			["carries the condenseId", "emergency-summary", false],
+			["has no condenseId (pre-#1769 emergency event)", undefined, true],
+		] as const)(
+			"deleting an emergency condense row that %s removes its summary only via the id",
+			async (_label, eventCondenseId, summarySurvives) => {
+				const condenseId = "emergency-summary"
+				// The summary sits just after the last pre-condense message (ts 301), while the
+				// condense row is emitted later (ts 400); deleting that row cuts after the summary,
+				// so only the id-based cleanup can remove it.
+				mockTask.clineMessages = [
+					{ ts: 100, say: "user", text: "First" },
+					{ ts: 300, say: "assistant", text: "Response" },
+					{
+						ts: 400,
+						say: "condense_context",
+						contextCondense: { condenseId: eventCondenseId, summary: "Summary" },
+					},
+				]
+				mockTask.apiConversationHistory = [
+					{ ts: 100, role: "user", content: [{ type: "text", text: "First" }], condenseParent: condenseId },
+					{
+						ts: 300,
+						role: "assistant",
+						content: [{ type: "text", text: "Response" }],
+						condenseParent: condenseId,
+					},
+					{
+						ts: 301,
+						role: "user",
+						content: [{ type: "text", text: "Summary" }],
+						isSummary: true,
+						condenseId,
+					},
+				]
+
+				await manager.rewindToTimestamp(400)
+
+				const apiCall: Array<{ isSummary?: boolean; condenseId?: string }> =
+					mockTask.overwriteApiConversationHistory.mock.calls[0]?.[0] ?? mockTask.apiConversationHistory
+				expect(apiCall.some((m) => m.isSummary && m.condenseId === condenseId)).toBe(summarySurvives)
+			},
+		)
+
 		it("should clear orphaned condenseParent tags via cleanup", async () => {
 			const condenseId = "summary-123"
 

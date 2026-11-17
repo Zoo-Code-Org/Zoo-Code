@@ -14,10 +14,7 @@
 	},
 	"answers": {
 		"yes": "Да",
-		"no": "Нет",
-		"cancel": "Отмена",
-		"remove": "Удалить",
-		"keep": "Оставить"
+		"cancel": "Отмена"
 	},
 	"ui": {
 		"search_placeholder": "Поиск...",
@@ -33,19 +30,11 @@
 			"copy": "Копировать",
 			"save": "Сохранить изображение",
 			"viewCode": "Посмотреть код",
-			"viewDiagram": "Посмотреть диаграмму",
 			"close": "Закрыть"
-		},
-		"modal": {
-			"codeTitle": "Код Mermaid"
 		},
 		"tabs": {
 			"diagram": "Диаграмма",
 			"code": "Код"
-		},
-		"feedback": {
-			"imageCopied": "Изображение скопировано в буфер обмена",
-			"copyError": "Ошибка копирования изображения"
 		}
 	},
 	"image": {
@@ -53,19 +42,6 @@
 			"view": "Изображение"
 		},
 		"noData": "Нет данных изображения"
-	},
-	"file": {
-		"errors": {
-			"invalidDataUri": "Неверный формат URI данных",
-			"copyingImage": "Ошибка копирования изображения: {{error}}",
-			"openingImage": "Ошибка открытия изображения: {{error}}",
-			"pathNotExists": "Путь не существует: {{path}}",
-			"couldNotOpen": "Не удалось открыть файл: {{error}}",
-			"couldNotOpenGeneric": "Не удалось открыть файл!"
-		},
-		"success": {
-			"imageDataUriCopied": "URI данных изображения скопирован в буфер обмена"
-		}
 	},
 	"confirmation": {
 		"deleteMessage": "Удалить Сообщение",
@@ -77,35 +53,49 @@
 		"editOnly": "Нет, только редактировать сообщение",
 		"deleteOnly": "Нет, только удалить сообщение",
 		"restoreToCheckpoint": "Да, восстановить контрольную точку",
-		"proceed": "Продолжить",
-		"dontShowAgain": "Больше не показывать"
+		"proceed": "Продолжить"
 	},
 	"time_ago": {
 		"just_now": "только что",
-		"seconds_ago": "{{count}} секунд назад",
+		"seconds_ago_one": "{{count}} секунду назад",
+		"seconds_ago_few": "{{count}} секунды назад",
+		"seconds_ago_many": "{{count}} секунд назад",
+		"seconds_ago_other": "{{count}} секунды назад",
 		"minute_ago": "минуту назад",
-		"minutes_ago": "{{count}} минут назад",
+		"minutes_ago_one": "{{count}} минуту назад",
+		"minutes_ago_few": "{{count}} минуты назад",
+		"minutes_ago_many": "{{count}} минут назад",
+		"minutes_ago_other": "{{count}} минуты назад",
 		"hour_ago": "час назад",
-		"hours_ago": "{{count}} часов назад",
+		"hours_ago_one": "{{count}} час назад",
+		"hours_ago_few": "{{count}} часа назад",
+		"hours_ago_many": "{{count}} часов назад",
+		"hours_ago_other": "{{count}} часа назад",
 		"day_ago": "день назад",
-		"days_ago": "{{count}} дней назад",
+		"days_ago_one": "{{count}} день назад",
+		"days_ago_few": "{{count}} дня назад",
+		"days_ago_many": "{{count}} дней назад",
+		"days_ago_other": "{{count}} дня назад",
 		"week_ago": "неделю назад",
-		"weeks_ago": "{{count}} недель назад",
+		"weeks_ago_one": "{{count}} неделю назад",
+		"weeks_ago_few": "{{count}} недели назад",
+		"weeks_ago_many": "{{count}} недель назад",
+		"weeks_ago_other": "{{count}} недели назад",
 		"month_ago": "месяц назад",
-		"months_ago": "{{count}} месяцев назад",
+		"months_ago_one": "{{count}} месяц назад",
+		"months_ago_few": "{{count}} месяца назад",
+		"months_ago_many": "{{count}} месяцев назад",
+		"months_ago_other": "{{count}} месяца назад",
 		"year_ago": "год назад",
-		"years_ago": "{{count}} лет назад"
+		"years_ago_one": "{{count}} год назад",
+		"years_ago_few": "{{count}} года назад",
+		"years_ago_many": "{{count}} лет назад",
+		"years_ago_other": "{{count}} года назад"
 	},
 	"errors": {
 		"wait_checkpoint_long_time": "Ожидание инициализации контрольной точки заняло {{timeout}} секунд. Если тебе не нужна эта функция, отключи её в <settingsLink>настройках контрольных точек</settingsLink>.",
 		"init_checkpoint_fail_long_time": "Инициализация контрольной точки заняла более {{timeout}} секунд, поэтому контрольные точки отключены для этой задачи. Ты можешь отключить контрольные точки или увеличить время ожидания в <settingsLink>настройках контрольных точек</settingsLink>.",
 		"attempt_completion_tool_failed": "Невозможно выполнить attempt_completion, потому что предыдущий вызов инструмента не удался в этом повороте. Пожалуйста, устрани сбой инструмента перед попыткой завершения."
-	},
-	"tasks": {
-		"delegated": "Делегировано подзадаче",
-		"delegated_to": "Делегировано задаче {{childId}}",
-		"delegation_completed": "Подзадача завершена, возобновление родительской задачи",
-		"awaiting_child": "Ожидание дочерней задачи {{childId}}"
 	},
 	"costs": {
 		"own": "Собственные",

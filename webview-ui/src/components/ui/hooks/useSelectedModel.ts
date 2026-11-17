@@ -21,7 +21,6 @@ import {
 	openAiCodexModels,
 	sambaNovaModels,
 	getZAiModels,
-	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
 	basetenModels,
@@ -134,12 +133,15 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	// before the selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
-				? !routerModels.isLoading
-				: routerModels.data &&
-					routerModels.data[dynamicProvider] !== undefined &&
-					typeof routerModels.data[dynamicProvider] === "object" &&
-					!routerModels.isLoading
+			? dynamicProvider === providerIdentifiers.friendli
+				? true // static friendliModels cover the window before /v1/models data arrives
+				: dynamicProvider === providerIdentifiers.litellm ||
+					  dynamicProvider === providerIdentifiers.ioIntelligence
+					? !routerModels.isLoading
+					: routerModels.data &&
+						routerModels.data[dynamicProvider] !== undefined &&
+						typeof routerModels.data[dynamicProvider] === "object" &&
+						!routerModels.isLoading
 			: true
 
 	const isReady =
@@ -162,10 +164,18 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
-						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
+						id:
+							apiConfiguration.apiModelId ||
+							getProviderDefaultModelId(providerIdentifiers.kimiCode, apiConfiguration),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
+				: {
+						id: getProviderDefaultModelId(
+							activeProvider ?? providerIdentifiers.openrouter,
+							apiConfiguration ?? {},
+						),
+						info: undefined,
+					}
 
 	return {
 		provider,
@@ -206,7 +216,7 @@ function getSelectedModel({
 	// the `undefined` case are used to show the invalid selection to prevent
 	// users from seeing the default model if their selection is invalid
 	// this gives a better UX than showing the default model
-	const defaultModelId = getProviderDefaultModelId(provider)
+	const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 	switch (provider) {
 		case providerIdentifiers.openrouter: {
 			const id = getValidatedModelId(
@@ -393,9 +403,8 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-			const isChina = zaiApiLineConfigs[apiLine].isChina
 			const models = getZAiModels(apiLine)
-			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
+			const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 			const configuredId = apiConfiguration.apiModelId
 			if (configuredId) {
 				return { id: configuredId, info: models[configuredId] ?? openAiModelInfoSaneDefaults }
@@ -506,8 +515,14 @@ function getSelectedModel({
 		case providerIdentifiers.fireworks:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
+			const id = apiConfiguration.apiModelId || defaultModelId
+			// Mirror the backend getModel(): own-property reads only (an ID such as "toString" must
+			// not resolve to an inherited member), and sane defaults when neither catalog has the ID.
+			const fetched = routerModels.friendli
+			const info =
+				(fetched && Object.hasOwn(fetched, id) ? fetched[id] : undefined) ??
+				(Object.hasOwn(friendliModels, id) ? friendliModels[id as keyof typeof friendliModels] : undefined) ??
+				openAiModelInfoSaneDefaults
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
