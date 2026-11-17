@@ -1,4 +1,5 @@
-import { GlobalState, ClineMessage } from "@roo-code/types"
+import { describe, it, expect, beforeEach, vi } from "vitest"
+import type { GlobalState, ClineMessage } from "../../../../packages/types/src"
 
 import { AutoApprovalHandler } from "../AutoApprovalHandler"
 
