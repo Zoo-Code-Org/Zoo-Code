@@ -76,6 +76,7 @@ describe("API - configuration", () => {
 				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -129,6 +130,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId,
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -180,6 +182,7 @@ describe("API - configuration", () => {
 				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -216,6 +219,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				hasConfig: vi.fn().mockResolvedValue(false),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -263,6 +267,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -390,6 +395,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -445,6 +451,7 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -511,6 +518,7 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -623,6 +631,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -703,6 +712,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -773,6 +783,7 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -837,6 +848,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -907,6 +919,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -968,6 +981,7 @@ describe("API - configuration", () => {
 				setModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel

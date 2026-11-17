@@ -244,6 +244,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
 		// the record it wrote: the real manager reads back the stored record, and
@@ -982,6 +984,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			const mockTask = new Task({
 				...defaultTaskOptions,
 				apiConfiguration: {
@@ -1036,6 +1039,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			await provider.addClineToStack(mockTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			// The mode profile a switch resolves comes from this window's view of the shared map
+			// (#2110), so the scenario needs this window's opening snapshot to carry the mapping
+			// rather than only the shared store's answer.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
 				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
@@ -1103,6 +1110,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			})
 			await provider.addClineToStack(mockTask)
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
+			// The mode profile a switch resolves comes from this window's view of the shared map
+			// (#2110), so the scenario needs this window's opening snapshot to carry the mapping
+			// rather than only the shared store's answer.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
 				.mockResolvedValue([{ name: "ask-profile", id: "ask-id", apiProvider: providerIdentifiers.openrouter }])
