@@ -5075,15 +5075,21 @@ export class ClineProvider
 		// A view-local profile is a complete snapshot, not a patch over the shared store.
 		// Spreading it on top of providerSettings would let a key the profile never defined
 		// leak in from another profile, which ContextProxy.setProviderSettings deliberately
-		// prevents by clearing omitted keys. Use the view's own settings in place and take
-		// only apiProvider from the shared state when the profile does not carry one.
+		// prevents by clearing omitted keys. Use the view's own settings in place and
+		// default an omitted apiProvider to Anthropic rather than to the shared
+		// provider: review thread PRRT_kwDOSK-bwM61BXE5, printed at line 5086 of
+		// f50c23bc81 with original_line 4987 and unread in the 2026-11-16 capture,
+		// reports that a pinned profile which carries no provider then starts tasks
+		// on Bedrock or OpenAI without their credentials. A view with no overlay at
+		// all still takes the shared settings below, which is the other thread's
+		// construct and untouched here.
 		// The overlay is read from the buffer itself: the raw apiConfiguration state key
 		// is a partial patch from shared-store paths, not a view snapshot.
 		const viewApiConfiguration = this.viewLocalState.apiConfiguration
 		const resolvedApiConfiguration = viewApiConfiguration
 			? {
 					...viewApiConfiguration,
-					apiProvider: viewApiConfiguration.apiProvider ?? providerSettings.apiProvider,
+					apiProvider: viewApiConfiguration.apiProvider ?? providerIdentifiers.anthropic,
 				}
 			: providerSettings
 

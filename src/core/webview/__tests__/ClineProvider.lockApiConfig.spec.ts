@@ -435,4 +435,38 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			expect(savedDefault).toBe("pinned-id")
 		})
 	})
+
+	describe("getState resolves a view overlay that omits apiProvider", () => {
+		beforeEach(async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+		})
+
+		it("defaults the unset local provider to Anthropic instead of inheriting the shared provider", async () => {
+			// The observed state is asserted before the fix is applied, so the failing
+			// run prints what the pin inherits today: the overlay carries a model id
+			// and no apiProvider, while the shared store names Bedrock.
+			await provider["updateGlobalState"]("apiProvider", providerIdentifiers.bedrock)
+			await provider["updateGlobalState"]("apiModelId", "shared-model")
+			provider["viewLocalState"].apiConfiguration = { apiModelId: "pinned-model" }
+
+			const state = await provider.getState()
+
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.anthropic)
+			expect(state.apiConfiguration.apiModelId).toBe("pinned-model")
+		})
+
+		it("leaves the no-overlay branch on the shared settings, which is the other thread's construct", async () => {
+			// Control, not a fix: with no view overlay the resolver returns the shared
+			// settings object outright, so the activated-profile thread is answered by
+			// a different mechanism than the unset-provider default changed here.
+			await provider["updateGlobalState"]("apiProvider", providerIdentifiers.bedrock)
+			await provider["updateGlobalState"]("apiModelId", "shared-model")
+			delete provider["viewLocalState"].apiConfiguration
+
+			const state = await provider.getState()
+
+			expect(state.apiConfiguration.apiProvider).toBe(providerIdentifiers.bedrock)
+			expect(state.apiConfiguration.apiModelId).toBe("shared-model")
+		})
+	})
 })
