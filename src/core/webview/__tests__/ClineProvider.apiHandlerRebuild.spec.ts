@@ -641,11 +641,25 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		test("reports a partial state when the previous profile cannot be restored", async () => {
 			const manager = provider["providerSettingsManager"]
 			vi.mocked(manager.setModeConfig).mockRejectedValue(new Error("activation failed"))
+			// The restore is a record write and not a profile switch, so it can only fail where it
+			// actually writes: reject the second saveConfig - the one that puts the stored profile back -
+			// and let the forward save land.
+			const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
+			let saves = 0
+			vi.mocked(manager.saveConfig).mockImplementation(async (name, config) => {
+				saves++
+				if (saves > 1) {
+					throw new Error("record store refused the restore write")
+				}
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			})
 
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "anthropic/claude",
 			})
 
+			expect(saves).toBe(2)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
 		})
 
@@ -823,6 +837,88 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("restores the stored record without re-activating the profile after a failed save", async () => {
+			// Two profiles, so activating the saved one is a visible move: this view, the shared
+			// selection and the mode mapping this window opened with all name the other profile, and the
+			// shared provider settings are that profile's settings.
+			const records: Record<string, Record<string, unknown> | undefined> = {
+				"test-config": { ...storedProfile },
+				"other-config": {
+					name: "other-config",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "mock-key",
+					openRouterModelId: "openai/gpt-4o",
+				},
+			}
+			const modeMap: Record<string, string | undefined> = { code: "other-id" }
+			const events: string[] = []
+			const manager = provider["providerSettingsManager"]
+			// The double stands in for the manager store so the record, the profile list and the mode
+			// mapping are readable after the rollback instead of only observable through call counts.
+			manager.getProfile = vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+				const record = records[name]
+				if (!record) {
+					throw new Error(`Profile '${name}' not found`)
+				}
+				return { ...record }
+			})
+			manager.saveConfig = vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				events.push(`save:${String(config.openRouterModelId)}`)
+				records[name] = { ...records[name], ...config, name, id: "test-id" }
+				return records[name]?.id as string
+			})
+			manager.listConfig = vi.fn().mockResolvedValue([
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "other-config", id: "other-id", apiProvider: providerIdentifiers.openrouter },
+			])
+			manager.setModeConfig = vi.fn().mockImplementation(async (mode: string, id: string) => {
+				modeMap[mode] = id
+			})
+			manager.getModeConfigId = vi.fn().mockImplementation(async (mode: string) => modeMap[mode])
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "other-id" })
+
+			await provider.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const selectionBefore = provider.contextProxy.getValue("currentApiConfigName")
+			const mappingBefore = { ...modeMap }
+			const sharedBefore = provider.contextProxy.getProviderSettings()
+
+			// The failed forward persist: the record write lands and the shared provider-settings write
+			// the activation pairs with it rejects, so the group compensates and rethrows.
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+				new Error("shared provider settings write failed"),
+			)
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+				events.push("post")
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			// The recovery did its job: the stored record is back, so the model the failed save wrote is
+			// gone from the profile store.
+			await expect(manager.getProfile({ name: "test-config" })).resolves.toMatchObject({
+				openRouterModelId: "openai/gpt-4",
+				rateLimitSeconds: 5,
+			})
+			// And the recovery is a record restore, not a profile switch: the selection, this window's
+			// mode mapping and the shared provider settings are what they were before the failed save.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe(selectionBefore)
+			expect(modeMap).toEqual(mappingBefore)
+			expect(provider.contextProxy.getProviderSettings()).toEqual(sharedBefore)
+			// The error handling and the view refresh are intact: the failed save still surfaces, and the
+			// recovery still posts the state it restored.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+			expect(postSpy).toHaveBeenCalled()
+			expect(events.lastIndexOf("post")).toBeGreaterThan(events.lastIndexOf("save:openai/gpt-4"))
 		})
 	})
 

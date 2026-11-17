@@ -6666,6 +6666,119 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("refuses the completion rebuild when a task navigation replaces the conversation mid-activation", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// Both the shared selection and this view name the profile being deleted, so the deletion
+			// completes the survivor's activation below its catch - the path that rebuilds the running
+			// conversation.
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "doomed-profile")
+			const actingTask = {
+				taskId: "acting-task",
+				taskApiConfigName: "doomed-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "doomed-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					actingTask.taskApiConfigName = name
+				}),
+			}
+			const navigatedTask = {
+				taskId: "navigated-task",
+				taskApiConfigName: "keeper-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			// Structural doubles: these paths touch only the sticky name and the API handler, so a minimal
+			// task keeps the assertion on the setter instead of on Task internals. The assertion below is
+			// for the private return type of getCurrentTask, not for the shape.
+			let currentTask: { taskId: string } = actingTask
+			vi.spyOn(provider, "getCurrentTask").mockImplementation(
+				() => currentTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "doomed-profile"
+						? {
+								name: "doomed-profile",
+								id: "doomed-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "doomed-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("keeper-id"),
+				activateProfile: vi.fn().mockImplementation(async () => {
+					// The navigation: this window opens another conversation while the activation awaits
+					// the settings manager, so from here on the current task is a different conversation.
+					currentTask = navigatedTask
+					return {
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			const events: Array<{ name: string; provider?: string }> = []
+			const listener = (config: { name: string; provider?: string }) => {
+				events.push(config)
+			}
+			provider.on(RooCodeEventName.ProviderProfileChanged, listener)
+
+			await provider.deleteProviderProfile(doomedProfile)
+
+			// The rebuild inside the deletion group ran while the acting conversation was still the
+			// current task, so the survivor's settings landed on the conversation that ran under the
+			// deleted profile.
+			expect(actingTask.updateApiConfiguration).toHaveBeenCalledTimes(1)
+			expect(actingTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ apiKey: "keeper-key" }),
+			)
+			// The completion below the catch must not rebuild the conversation the navigation opened: it
+			// never ran under the deleted profile, and between the activation await and that call the
+			// current task is no longer the conversation the deletion set out to repair.
+			expect(navigatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(navigatedTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			// The deletion's completion itself still ran: the survivor is selected with its own
+			// settings, the mode mapping followed it, and watchers heard about the replacement.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+			expect(provider.contextProxy.getProviderSettings()).toMatchObject({ apiKey: "keeper-key" })
+			expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith(
+				(await provider.getState()).mode,
+				"keeper-id",
+			)
+			expect(events).toEqual([{ name: "keeper-profile", provider: providerIdentifiers.anthropic }])
+			provider.off(RooCodeEventName.ProviderProfileChanged, listener)
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+		})
+
 		it("leaves a task that runs another profile alone when the pinned profile is deleted", async () => {
 			// The negative half of the guard the deferral latches on: this view is pinned to the
 			// profile being deleted while its conversation follows a different sticky profile, so

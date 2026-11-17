@@ -3578,9 +3578,13 @@ export class ClineProvider
 					await this.persistProviderProfile(name, merged as ProviderSettings, true)
 				} catch (persistError) {
 					// Saving and activating are separate writes. Put the previous profile back so
-					// storage, context settings, and the task do not disagree about the model.
+					// storage, context settings, and the task do not disagree about the model. The
+					// restore does not activate: this rollback runs precisely because activating the
+					// new settings failed, and selecting the profile again here would move the
+					// selection, the mode mapping and the shared provider settings as a side effect
+					// of writing the record back.
 					try {
-						await this.persistProviderProfile(name, stored as ProviderSettings, true)
+						await this.persistProviderProfile(name, stored as ProviderSettings, false)
 					} catch (restoreError) {
 						partialState = true
 						this.log(
@@ -4285,6 +4289,12 @@ export class ClineProvider
 		if (deletedWasGlobal || viewWasPinnedToDeleted) {
 			let activationFailed = false
 			let activationError: unknown
+			// Latched before the activation await below: task navigation can replace the current task
+			// while that activation is in flight, and the rebuild under this block would then hand the
+			// survivor's settings to a conversation that never ran under the deleted profile. Same
+			// discipline the write group above latches with its flag: the id says which conversation
+			// owes the rebuild, and the helper refuses a task it did not capture.
+			const completionTaskId = this.getCurrentTask()?.taskId
 			try {
 				const {
 					id: survivingId,
@@ -4299,7 +4309,10 @@ export class ClineProvider
 				// The deleted profile was the one a live conversation may be running: mirror
 				// activateProviderProfileUnlocked's completion so the running handler serves the survivor's
 				// settings instead of the deleted profile's stale configuration.
-				this.updateTaskApiHandlerIfNeeded(activatedSettings, { forceRebuild: true })
+				this.updateTaskApiHandlerIfNeeded(activatedSettings, {
+					forceRebuild: true,
+					expectedCurrentTaskId: completionTaskId,
+				})
 				if (activatedSettings.apiProvider) {
 					this.emit(RooCodeEventName.ProviderProfileChanged, {
 						name: profileToActivate,
