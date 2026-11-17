@@ -36,7 +36,9 @@ const RETRY_INFO_TYPE = "type.googleapis.com/google.rpc.RetryInfo"
  */
 function buildTask(): { task: Task; sayMock: ReturnType<typeof vi.fn> } {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	// `abort` is a getter on the prototype (upstream moved it into the run-state
+	// reducer), so the flag must be seeded as an own property, not assigned.
+	Object.defineProperty(task, "abort", { value: false, writable: true, enumerable: true, configurable: true })
 	task["rateLimitClock"] = createRateLimitClock()
 	const sayMock = vi.fn().mockResolvedValue(undefined)
 	task.say = sayMock
