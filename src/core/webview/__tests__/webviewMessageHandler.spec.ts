@@ -2275,6 +2275,65 @@ describe("webviewMessageHandler - updateSettings profile pin", () => {
 		// The pin itself still lands, so the selection is not silently dropped.
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "profile-b")
 	})
+
+	it("restores the view's prior overlay when the pin write fails after the seed", async () => {
+		// Review thread 4595383337: this handler seeds the view's overlay from the selected
+		// record and only then writes the pin. When that write rejects, the seeded settings
+		// must not stay behind under a pin that never moved, so the handler has to put back
+		// the overlay this view held before the seed.
+		const view = mockClineProvider as unknown as Record<string, unknown>
+		view.pinnedProfileOverlay = { apiProvider: providerIdentifiers.anthropic }
+		const seedView = mockClineProvider as unknown as {
+			providerSettingsManager: { getProfile: ReturnType<typeof vi.fn> }
+		}
+		seedView.providerSettingsManager = {
+			getProfile: vi.fn().mockResolvedValue({
+				name: "profile-b",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-b",
+			}),
+		}
+		const order: string[] = []
+		const overlayTag = (value: unknown): string =>
+			typeof value === "object" && value !== null && "apiProvider" in value ? String(value.apiProvider) : "none"
+		const saveViewStateMock = vi.mocked(mockClineProvider.saveViewState)
+		const setValueMock = vi.mocked(mockClineProvider.setValue)
+		// This file shares one set of module-level doubles between its suites, and the
+		// afterEach above restores their identities, not their implementations: capture
+		// what each did before this row and put it back when the row is done.
+		const previousSaveViewState = saveViewStateMock.getMockImplementation()
+		saveViewStateMock.mockImplementation(async (...args: unknown[]) => {
+			order.push(`overlay:${overlayTag(args[1])}`)
+		})
+		// The pin write is called once here, so a one-shot implementation cannot leak.
+		setValueMock.mockImplementationOnce(async (key: string, value: unknown) => {
+			order.push(`write:${key}=${String(value)}`)
+			throw new Error("pin write failed")
+		})
+		let thrown: unknown
+		try {
+			await webviewMessageHandler(mockClineProvider, {
+				type: "updateSettings",
+				updatedSettings: { currentApiConfigName: "profile-b" },
+			})
+		} catch (error) {
+			thrown = error
+		} finally {
+			if (previousSaveViewState) {
+				saveViewStateMock.mockImplementation(previousSaveViewState)
+			} else {
+				saveViewStateMock.mockImplementation(async () => undefined)
+			}
+			delete view.pinnedProfileOverlay
+		}
+		expect(thrown).toBeInstanceOf(Error)
+		// The seed lands, the pin write fails, and only then does the overlay go back to
+		// what this view held before the seed - anthropic, not the seeded openrouter record.
+		expect(order).toEqual(["overlay:openrouter", "write:currentApiConfigName=profile-b", "overlay:anthropic"])
+		expect(mockClineProvider.saveViewState).toHaveBeenLastCalledWith("apiConfiguration", {
+			apiProvider: providerIdentifiers.anthropic,
+		})
+	})
 })
 
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {

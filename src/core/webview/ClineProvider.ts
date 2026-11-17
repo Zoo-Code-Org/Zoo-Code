@@ -545,6 +545,16 @@ export class ClineProvider
 		return this.viewLocalState.currentApiConfigName
 	}
 
+	/**
+	 * This view's profile settings overlay from the view-local buffer. Exposed for the
+	 * message handler, which must not reach viewLocalState through bracket access: review
+	 * thread 4595383337 needs the handler to put this exact value back when a pin write
+	 * fails after the overlay was seeded for the new name.
+	 */
+	get pinnedProfileOverlay(): ProviderSettings | undefined {
+		return this.viewLocalState.apiConfiguration
+	}
+
 	public isViewLaunched = false
 	public settingsImportedAt?: number
 	public readonly latestAnnouncementId = "nov-2026-v3.98.0-titles-models-reliability" // v3.98.0 task titles, model support, and reliability

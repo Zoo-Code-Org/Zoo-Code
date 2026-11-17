@@ -842,6 +842,9 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// Only the pin branch below assigns this: the overlay this view held before that
+					// branch moved it, kept so a pin write that fails can put it back.
+					let priorViewOverlay: ProviderSettings | undefined
 					// An invalid display value is ignored, before anything is done for it.
 					if (isInvalidDisplayValue(key, value)) {
 						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
@@ -974,6 +977,7 @@ export const webviewMessageHandler = async (
 						// rather than some other profile's. The seed is in-memory only (_persistViewLocalStateFrom
 						// Mutation carries mode and currentApiConfigName), so the durable write stays the pin.
 						const pinnedName = typeof value === "string" ? value : undefined
+						priorViewOverlay = provider.pinnedProfileOverlay
 						if (pinnedName) {
 							try {
 								const { name: _seedProfileName, ...seedProfile } =
@@ -993,7 +997,17 @@ export const webviewMessageHandler = async (
 
 					// Route through provider.setValue so view-local buffer/pin sync stays
 					// consistent with the other mutation paths.
-					await provider.setValue(key as keyof RooCodeSettings, newValue)
+					try {
+						await provider.setValue(key as keyof RooCodeSettings, newValue)
+					} catch (error) {
+						if (key === "currentApiConfigName") {
+							// Review thread 4595383337: the pin did not move, so the overlay this iteration
+							// seeded or cleared cannot stay under the name it is pinned to now - put back
+							// exactly what this view held before the branch ran.
+							await provider.saveViewState("apiConfiguration", priorViewOverlay)
+						}
+						throw error
+					}
 				}
 			} catch (error) {
 				failed = true
