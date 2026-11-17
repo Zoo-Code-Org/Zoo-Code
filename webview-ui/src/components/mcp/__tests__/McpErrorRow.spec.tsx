@@ -43,6 +43,69 @@ describe("formatRelativeTimestamp", () => {
 		expect(() => formatRelativeTimestamp(new Date(Number.NaN), BASE)).toThrow(RangeError)
 	})
 
+	// The maintainer asked for the DST behaviour to be pinned against the
+	// replaced helper. Every expectation below was captured by running the real
+	// date-fns 4.1.0 `formatRelative` on the same inputs before these tests were
+	// written, so they pin parity rather than new behaviour.
+	describe("DST and skipped local dates (date-fns 4.1.0 pinned)", () => {
+		const withTimeZone = (tz: string, run: () => void) => {
+			const hadPreviousTz = "TZ" in process.env
+			const previousTz = process.env.TZ
+			process.env.TZ = tz
+
+			try {
+				run()
+			} finally {
+				// Restoring with `undefined` would set the literal string
+				// "undefined", which Node resolves as UTC; delete instead when the
+				// variable was absent so the machine's local zone comes back.
+				if (hadPreviousTz) {
+					process.env.TZ = previousTz
+				} else {
+					delete process.env.TZ
+				}
+			}
+		}
+
+		it("counts the skipped Pacific/Apia 2011-12-30 as a full day", () => {
+			// Samoa skipped 2011-12-30 entirely when it jumped from UTC-11 to
+			// UTC+13. The 12-29 and 12-31 local midnights are only 24h apart, but
+			// date-fns reports two calendar days: "Saturday at 12:00 PM".
+			withTimeZone("Pacific/Apia", () => {
+				const dec29 = new Date(2011, 11, 29, 12, 0)
+				const dec31 = new Date(2011, 11, 31, 12, 0)
+
+				expect(dec29.getFullYear()).toBe(2011)
+				expect(dec31.getFullYear()).toBe(2011)
+				expect(formatRelativeTimestamp(dec31, dec29)).toBe("Saturday at 12:00 PM")
+				expect(formatRelativeTimestamp(dec29, dec31)).toBe("last Thursday at 12:00 PM")
+				expect(formatRelativeTimestamp(dec29, dec29)).toBe("today at 12:00 PM")
+			})
+		})
+
+		it("rounds a 23-hour spring-forward day to one day", () => {
+			// America/New_York, 2026-03-08: 02:00 EST jumps to 03:00 EDT.
+			withTimeZone("America/New_York", () => {
+				const mar8 = new Date(2026, 2, 8, 12, 0)
+				const mar9 = new Date(2026, 2, 9, 12, 0)
+
+				expect(formatRelativeTimestamp(mar9, mar8)).toBe("tomorrow at 12:00 PM")
+				expect(formatRelativeTimestamp(mar8, mar9)).toBe("yesterday at 12:00 PM")
+			})
+		})
+
+		it("rounds a 25-hour fall-back day to one day", () => {
+			// America/New_York, 2026-11-01: 02:00 EDT repeats as 02:00 EST.
+			withTimeZone("America/New_York", () => {
+				const nov1 = new Date(2026, 10, 1, 12, 0)
+				const nov2 = new Date(2026, 10, 2, 12, 0)
+
+				expect(formatRelativeTimestamp(nov2, nov1)).toBe("tomorrow at 12:00 PM")
+				expect(formatRelativeTimestamp(nov1, nov2)).toBe("yesterday at 12:00 PM")
+			})
+		})
+	})
+
 	it("keeps two-digit years instead of remapping them to 1900s", () => {
 		// `new Date(99, 11, 31)` would mean 1999. These are real year-99 dates, and
 		// the day delta across the year-99/100 boundary must stay one day.
