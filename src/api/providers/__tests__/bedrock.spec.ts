@@ -1159,6 +1159,25 @@ describe("AwsBedrockHandler", () => {
 			expect(model.info.outputPrice).toBe(22.5)
 		})
 
+		it("carries the tier's own cacheWritesPrice1h when the 1M context tier applies", () => {
+			// Review pin: the 1M merge overrode inputPrice but must also carry the
+			// tier's TTL rate. The entry-level 1h rate was derived from the 200K input
+			// price, so a fallback to it bills a 1M-context 1h write at half the rate.
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-4-6",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsBedrock1MContext: true,
+			})
+
+			const model = handler.getModel()
+
+			// Tier input price 6.0 => 1h rate must be 2x that, not the 200K entry's 6.0.
+			expect(model.info.cacheWritesPrice1h).toBe(12.0)
+			expect(model.info.cacheWritesPrice1h).not.toBe(6.0)
+		})
+
 		it("should use default context window when awsBedrock1MContext is false for Claude Sonnet 4", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: BEDROCK_1M_CONTEXT_MODEL_IDS[0],

@@ -11,6 +11,11 @@ import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 import ApiOptions from "../ApiOptions"
 import { MODELS_BY_PROVIDER, PROVIDERS } from "../constants"
 
+type ProviderOption = {
+	value: string
+	label: string
+}
+
 // Mock the extension state context
 vi.mock("@src/context/ExtensionStateContext", () => ({
 	ExtensionStateContextProvider: ({ children }: any) => children,
@@ -113,6 +118,11 @@ describe("ApiOptions Provider Filtering", () => {
 		return renderWithExtensionState(<ApiOptions {...props} />)
 	}
 
+	const getProviderOptions = (): ProviderOption[] => {
+		const selectElement = screen.getByTestId("provider-select")
+		return JSON.parse(selectElement.getAttribute("data-options") || "[]") as ProviderOption[]
+	}
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 		vi.mocked(useSelectedModel).mockReturnValue({
@@ -188,6 +198,64 @@ describe("ApiOptions Provider Filtering", () => {
 		expect(providerValues).toContain("anthropic") // static provider
 		expect(providerValues).toContain("openrouter") // dynamic provider
 		expect(providerValues).toContain("ollama") // dynamic provider
+	})
+
+	it("pins Zoo Gateway first while preserving alphabetical order for the remaining providers", () => {
+		renderWithProviders()
+
+		const options = getProviderOptions()
+		const remainingLabels = options.slice(1).map(({ label }) => label)
+
+		expect(options[0]?.value).toBe(providerIdentifiers.zooGateway)
+		expect(remainingLabels).toEqual([...remainingLabels].sort((a, b) => a.localeCompare(b)))
+	})
+
+	it("pins Zoo Gateway first and OpenRouter second in the welcome view", () => {
+		renderWithProviders({ ...defaultProps, fromWelcomeView: true })
+
+		const providerValues = getProviderOptions().map(({ value }) => value)
+
+		expect(providerValues.slice(0, 2)).toEqual([providerIdentifiers.zooGateway, providerIdentifiers.openrouter])
+	})
+
+	it("does not reintroduce Zoo Gateway when an organization allow list excludes it", () => {
+		vi.mocked(useExtensionState).mockReturnValueOnce({
+			...useExtensionState(),
+			organizationAllowList: {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.anthropic]: { allowAll: true },
+					[providerIdentifiers.openrouter]: { allowAll: true },
+				},
+			},
+		})
+
+		renderWithProviders()
+
+		expect(getProviderOptions().map(({ value }) => value)).toEqual([
+			providerIdentifiers.anthropic,
+			providerIdentifiers.openrouter,
+		])
+	})
+
+	it("keeps Zoo Gateway first when an organization allow list includes it", () => {
+		vi.mocked(useExtensionState).mockReturnValueOnce({
+			...useExtensionState(),
+			organizationAllowList: {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.anthropic]: { allowAll: true },
+					[providerIdentifiers.zooGateway]: { allowAll: true },
+				},
+			},
+		})
+
+		renderWithProviders()
+
+		expect(getProviderOptions().map(({ value }) => value)).toEqual([
+			providerIdentifiers.zooGateway,
+			providerIdentifiers.anthropic,
+		])
 	})
 
 	it("should hide static providers with empty models", () => {

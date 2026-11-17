@@ -84,6 +84,7 @@ import * as copilotProvider from "../../../api/providers/github-copilot"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
+import { experimentDefault } from "../../../shared/experiments"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
@@ -772,7 +773,7 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
-import { t } from "../../../i18n"
+import { changeLanguage, t } from "../../../i18n"
 
 vi.mock("vscode", () => {
 	const showInformationMessage = vi.fn()
@@ -801,6 +802,7 @@ vi.mock("vscode", () => {
 })
 
 vi.mock("../../../i18n", () => ({
+	changeLanguage: vi.fn(),
 	t: vi.fn((key: string, args?: Record<string, any>) => {
 		// For the delete confirmation with rules, we need to return the interpolated string
 		if (key === "common:confirmation.delete_custom_mode_with_rules" && args) {
@@ -1211,6 +1213,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1346,6 +1349,30 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.anything(),
 		)
 		expect(mockFlushModels).not.toHaveBeenCalled()
+	})
+
+	it("fetches only Friendli when the provider filter is friendli", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockGetModels.mockResolvedValue({
+			"zai-org/GLM-5.2": { maxTokens: 131072, contextWindow: 1000000, supportsPromptCache: true },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.friendli },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.friendli }, expect.anything())
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				friendli: {
+					"zai-org/GLM-5.2": expect.objectContaining({ contextWindow: 1000000 }),
+				},
+			},
+			values: { provider: providerIdentifiers.friendli },
+		})
 	})
 
 	it("prefers an unsaved NanoGPT key and refreshes the matching key-scoped cache", async () => {
@@ -1486,6 +1513,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1553,6 +1581,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -2972,6 +3001,60 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 	})
 })
 
+describe("webviewMessageHandler - experiments", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists dynamicThinkingEffort true merged with the saved experiments", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "experiments" ? { preventFocusDisruption: true } : undefined,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: { dynamicThinkingEffort: true } },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: true,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists dynamicThinkingEffort false over a previously enabled value", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "experiments" ? { dynamicThinkingEffort: true } : undefined,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: { dynamicThinkingEffort: false } },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			dynamicThinkingEffort: false,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists the experiment defaults when no experiments are saved yet", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: {} },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			...experimentDefault,
+			dynamicThinkingEffort: false,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+})
+
 describe("webviewMessageHandler - collapseCommandOutputByDefault", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -3051,5 +3134,192 @@ describe("webviewMessageHandler - renameTaskWithId", () => {
 		await webviewMessageHandler(mockClineProvider, { type: "renameTaskWithId", ...payload })
 
 		expect(vi.mocked(mockClineProvider.renameTaskWithId).mock.calls).toEqual(expectedCalls)
+	})
+})
+
+// The display settings are written like any other setting, but the webview is not trusted: a value that its own
+// controls cannot produce (a hand-written message) is ignored before anything is done for it.
+describe("updateSettings with the display settings", () => {
+	const save = (updatedSettings: Record<string, unknown>) =>
+		webviewMessageHandler(mockClineProvider, { type: "updateSettings", updatedSettings })
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	afterEach(() => {
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockReset().mockResolvedValue(undefined)
+	})
+
+	it.each([
+		["timeFormat", "auto"],
+		["timeFormat", "12h"],
+		["timeFormat", "24h"],
+		["dateFormat", "auto"],
+		["dateFormat", "mdy"],
+		["dateFormat", "dmy"],
+		["dateFormat", "ymd"],
+		["showRelativeTimes", true],
+		["showRelativeTimes", false],
+		["timeFormat", undefined],
+		["showRelativeTimes", undefined],
+	])("persists %s = %j as it is", async (key, value) => {
+		await save({ [key]: value })
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith(key, value)
+		expect(mockClineProvider.log).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it.each([["de"], ["ja"], ["zh-TW"]])("applies and stores the display language %s", async (language) => {
+		await save({ language })
+
+		expect(changeLanguage).toHaveBeenCalledWith(language)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("language", language)
+	})
+
+	it.each([[undefined], [null]])("uses the default language for %s", async (language) => {
+		await save({ language })
+
+		expect(changeLanguage).toHaveBeenCalledWith("en")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("language", "en")
+	})
+
+	it.each([
+		["timeFormat", "13h"],
+		["timeFormat", 24],
+		["dateFormat", "dd/mm"],
+		["showRelativeTimes", "yes"],
+		["language", "xx-not-a-language"],
+		["language", 42],
+		["language", ""],
+	])("ignores %s = %j, and says so in the log", async (key, value) => {
+		await save({ [key]: value })
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith(key, expect.anything())
+		expect(changeLanguage).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(`[updateSettings] Ignored an invalid value for ${key}`)
+	})
+
+	it("still saves the other settings sent with an invalid display value, and refreshes the webview", async () => {
+		await save({ timeFormat: "13h", dateFormat: "ymd", soundEnabled: true })
+
+		expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalledWith("timeFormat", expect.anything())
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("dateFormat", "ymd")
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("soundEnabled", true)
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("is not a transaction: if a write fails, the earlier ones stay, the later ones are not written, and the error is thrown", async () => {
+		const failure = new Error("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat") throw failure
+		})
+
+		await expect(save({ timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false })).rejects.toBe(failure)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat"])
+		// The webview is refreshed even so, to show what is really stored.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	describe("the save result", () => {
+		const saveWithId = (updatedSettings: Record<string, unknown>, requestId?: string) =>
+			webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId, updatedSettings })
+		const saveAs = (updatedSettings: Record<string, unknown>) => saveWithId(updatedSettings, "save-1")
+
+		const results = () =>
+			vi
+				.mocked(mockClineProvider.postMessageToWebview)
+				.mock.calls.map(([message]) => message)
+				.filter((message) => message.type === "settingsSaveResult")
+
+		it("reports a stored save, after the state was refreshed", async () => {
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			const [refreshOrder] = vi.mocked(mockClineProvider.postStateToWebview).mock.invocationCallOrder
+			const [resultOrder] = vi.mocked(mockClineProvider.postMessageToWebview).mock.invocationCallOrder
+			expect(refreshOrder).toBeLessThan(resultOrder)
+		})
+
+		it.each([
+			["an Error", new Error("storage unavailable"), "storage unavailable"],
+			["something that is not an Error", "disk full", "disk full"],
+		])("reports a failed save with the reason, for %s, and still throws it", async (_name, failure, reason) => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(failure)
+
+			await expect(saveAs({ dateFormat: "ymd" })).rejects.toBe(failure)
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: reason },
+			])
+		})
+
+		it("does nothing, and reports nothing, for a message that carries no settings", async () => {
+			await webviewMessageHandler(mockClineProvider, { type: "updateSettings", requestId: "save-1" })
+
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+			expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+			expect(results()).toEqual([])
+		})
+
+		it("sends no result for a save that has no request id", async () => {
+			await saveWithId({ timeFormat: "24h" })
+
+			expect(results()).toEqual([])
+		})
+
+		it("still reports a stored save when refreshing the state fails", async () => {
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce(new Error("webview gone"))
+
+			await saveAs({ timeFormat: "24h" })
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: true }])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
+
+		it("reports a failed save when refreshing the state fails too", async () => {
+			vi.mocked(mockClineProvider.contextProxy.setValue).mockRejectedValue(new Error("no"))
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce("webview gone")
+
+			await expect(saveAs({ timeFormat: "24h" })).rejects.toThrow("no")
+
+			expect(results()).toEqual([
+				{ type: "settingsSaveResult", requestId: "save-1", success: false, error: "no" },
+			])
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+		})
+	})
+
+	it("completes a partial save when the same values are saved again", async () => {
+		let failOnce = true
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockImplementation(async (key) => {
+			if (key === "dateFormat" && failOnce) {
+				failOnce = false
+				throw new Error("storage unavailable")
+			}
+		})
+		const values = { timeFormat: "24h", dateFormat: "ymd", showRelativeTimes: false }
+
+		await expect(save(values)).rejects.toThrow("storage unavailable")
+		vi.mocked(mockClineProvider.contextProxy.setValue).mockClear()
+		await save(values)
+
+		const written = vi.mocked(mockClineProvider.contextProxy.setValue).mock.calls.map(([key]) => key)
+		expect(written).toEqual(["timeFormat", "dateFormat", "showRelativeTimes"])
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(2) // once for the failed save, once for this one
+	})
+
+	it("does not take a key that only exists on every object for a display setting", async () => {
+		await save({ constructor: "x", toString: "y" })
+
+		expect(mockClineProvider.log).not.toHaveBeenCalled()
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("constructor", "x")
 	})
 })

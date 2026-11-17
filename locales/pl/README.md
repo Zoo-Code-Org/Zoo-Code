@@ -45,11 +45,13 @@ Zoo Code rozwija fundament stworzony przez Roo Code i stale rozszerza go o:
 - **Bardziej niezawodne workflow terminala i edycji** — poprawki przedwczesnego kończenia poleceń terminala, race condition stanu zadań, zarządzania kontekstem, edycji diff i użycia narzędzi właściwych dla providerów.
 - **Większą kontrolę nad workspace** — zarządzanie regułami, ograniczenia MCP dla poszczególnych trybów, kontrolę ścieżek multi-root, opcje reasoning modeli i akcje przeglądu zmian po ukończeniu.
 
-## Nowości w v3.94.0
+## Nowości w v3.98.0
 
-- ✨ **Szersza obsługa modeli i dostawców:** Używaj Claude Haiku 5.5 przez Anthropic, wysyłaj obrazy do zgodnych modeli VS Code LM, dostrajaj temperaturę dla modeli OpenCode Go Responses i anuluj żądania w czysty sposób u większej liczby dostawców.
-- 🔐 **Bardziej elastyczne MCP OAuth:** Skonfiguruj statyczne ustawienia klienta OAuth, użyj niestandardowych ścieżek callback, odkrywaj szczegóły uwierzytelniania z nagłówka `WWW-Authenticate` i zobacz błędy callback przed ponowną próbą.
-- 🧭 **Płynniejsze czaty i długie sesje:** Zmieniaj nazwy zadań w historii, przeciągaj pliki do czatu bez przytrzymywania Shift, zmniejszaj ilość pamięci zachowywanej podczas długich sesji i utrzymuj stabilne linki podzadań oraz zastąpione widoki webview.
+- 🎟️ Wypróbuj nadchodzącą subskrypcję Zoo Pass. 2 tygodnie bezpłatnego dostępu; ograniczona liczba miejsc
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Automatyczne tytuły zadań i dokładniejsza kontrola modeli:** Automatycznie generuj tytuły nowych zadań głównych i wypróbuj eksperymentalne ustawienie dynamicznego nakładu myślenia.
+- 🔌 **Szersza obsługa modeli i dostawców:** Korzystaj z GPT-6.1 Terra i pobieraj najnowszą listę modeli Friendli.
+- 🛡️ **Bezpieczniejsze i bardziej responsywne czaty oraz edycje:** Poprawnie anuluj żądania OpenAI Native i Requesty, chroń diffy poza obszarem roboczym przed przypadkową automatyczną akceptacją, spójnie zmieniaj język interfejsu i unikaj niejednoznacznego przywracania kopii zapasowych JSON.
 
 ## Co Zoo Code może zrobić dla CIEBIE?
 
