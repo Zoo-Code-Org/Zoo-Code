@@ -1,10 +1,18 @@
 import OpenAI from "openai"
 
-import { mimoModels, mimoDefaultModelId, MIMO_DEFAULT_TEMPERATURE, type ModelInfo } from "@roo-code/types"
+import {
+	mimoModels,
+	mimoDefaultModelId,
+	MIMO_DEFAULT_TEMPERATURE,
+	type ModelInfo,
+	type ModelRecord,
+} from "@roo-code/types"
 
-import type { ApiHandlerOptions } from "../../shared/api"
+import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 
 import { ApiStream } from "../transform/stream"
+
+import type { ModelCacheScope } from "../index"
 import { convertToR1Format } from "../transform/r1-format"
 import { getModelParams } from "../transform/model-params"
 import { calculateApiCostOpenAI } from "../../shared/cost"
@@ -16,7 +24,7 @@ import { NOT_PROVIDED } from "./constants"
 import type { ApiHandlerCreateMessageMetadata } from "../index"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 
-import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, stripTrailingSlashes } from "./fetchers/mimo"
+import { ALLOWED_BASE_URLS, MIMO_DEFAULT_BASE_URL, getMimoModels, stripTrailingSlashes } from "./fetchers/mimo"
 
 /**
  * MiMoHandler extends OpenAiHandler with MiMo-specific adaptations.
@@ -51,6 +59,18 @@ export class MimoHandler extends OpenAiHandler {
 			openAiStreamingEnabled: true,
 			includeMaxTokens: false,
 		})
+	}
+
+	override getModelCacheScope(): ModelCacheScope {
+		// MiMo catalogs differ per endpoint (token-plan clusters vs. the default
+		// PAYG endpoint) and per API key (token-plan and PAYG catalogs are
+		// authenticated per key), so both dimensions scope the cache key.
+		return { urlScoped: true, keyScoped: true, authScoped: false }
+	}
+
+	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
+		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
+		return getMimoModels(options.baseUrl, options.apiKey, ...fetchOpts)
 	}
 
 	/**
