@@ -16,6 +16,8 @@
 
 import readline from "readline"
 
+import { toDisplayText } from "@/lib/utils/display-text.js"
+
 // =============================================================================
 // Types
 // =============================================================================
@@ -178,7 +180,9 @@ export class PromptManager {
 				if (!resolved) {
 					resolved = true
 					cleanup()
-					this.stdout.write(`\n[Timeout - using default: ${defaultValue || "(empty)"}]\n`)
+					this.stdout.write(
+						`\n[Timeout - using default: ${defaultValue ? toDisplayText(defaultValue) : "(empty)"}]\n`,
+					)
 					resolve({ value: defaultValue, timedOut: true, cancelled: false })
 				}
 			}, timeoutMs)

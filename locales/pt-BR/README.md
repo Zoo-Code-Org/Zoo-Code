@@ -47,11 +47,13 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.92.0
+## Novidades na v3.98.0
 
-- ✨ **Escolha de modelos mais rápida e suporte aprimorado a modelos:** Troque de modelo pelo campo de composição do chat. Use Claude Haiku 5.5 no Amazon Bedrock, obtenha recursos mais precisos do Kimi K3 no OpenRouter e use os limites corrigidos do Gemini 4 Argon no Vercel AI Gateway.
-- 🧭 **Fluxos de trabalho de terminal, edição, chat e ambientes remotos mais confiáveis:** Escolha recolher a saída de comandos por padrão, veja falhas de edição mais claras, mantenha visíveis as linhas de raciocínio e de API e evite problemas de inicialização e proxy em espaços de trabalho remotos.
-- 🔌 **Marketplace de MCP expandido:** Conecte o Zoo Code ao AnySearch, Mailtea e Tradehand pelo marketplace de MCP.
+- 🎟️ Experimente a próxima assinatura do Zoo Pass. 2 semanas de acesso gratuito; vagas limitadas
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Títulos automáticos de tarefas e controle mais preciso de modelos:** Gere títulos para novas tarefas raiz automaticamente e experimente a configuração experimental de esforço de raciocínio dinâmico.
+- 🔌 **Suporte ampliado a modelos e provedores:** Use GPT-6.1 Terra e obtenha a lista mais recente de modelos do Friendli.
+- 🛡️ **Chats e edições mais seguros e responsivos:** Cancele solicitações do OpenAI Native e do Requesty corretamente, proteja diffs fora do workspace contra aprovação automática acidental, alterne os idiomas da interface de forma consistente e evite recuperações ambíguas de backups JSON.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

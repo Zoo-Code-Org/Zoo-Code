@@ -1,6 +1,4 @@
 {
-	"title": "Modi",
-	"done": "Fatto",
 	"modes": {
 		"title": "Modalità",
 		"createNewMode": "Crea nuova modalità",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Esporta modalità",
-		"description": "Esporta questa modalità in un file YAML con tutte le regole incluse per una facile condivisione con altri.",
-		"export": "Esporta modalità",
-		"exporting": "Esportazione..."
+		"export": "Esporta modalità"
 	},
 	"importMode": {
 		"selectLevel": "Scegli dove importare questa modalità:",
@@ -81,7 +77,6 @@
 		"title": "Prompt di sistema (modalità {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompt di supporto",
 		"resetPrompt": "Ripristina il prompt {{promptType}} ai valori predefiniti",
 		"prompt": "Prompt",
 		"enhance": {
@@ -94,10 +89,12 @@
 			"includeTaskHistory": "Includi cronologia attività come contesto",
 			"includeTaskHistoryDescription": "Quando abilitato, gli ultimi 10 messaggi della conversazione corrente verranno inclusi come contesto durante il miglioramento dei prompt, aiutando a generare suggerimenti più rilevanti e consapevoli del contesto."
 		},
-		"condense": {
-			"apiConfiguration": "Configurazione API per la condensazione del contesto",
-			"apiConfigDescription": "Seleziona quale configurazione API utilizzare per le operazioni di condensazione del contesto. Lascia deselezionato per utilizzare la configurazione attiva corrente.",
-			"useCurrentConfig": "Usa la configurazione API currently selezionata"
+		"taskTitle": {
+			"enabled": "Genera automaticamente i titoli delle attività",
+			"enabledDescription": "Riassume in background il primo prompt di ogni nuova attività in un titolo breve. Le richieste di titolo non sono incluse nel costo dell'attività. I profili GitHub Copilot e VS Code LM consumano la tua quota.",
+			"apiConfiguration": "Configurazione API",
+			"useTaskConfig": "Usa la configurazione API dell'attività",
+			"apiConfigDescription": "Si consiglia un profilo leggero senza ragionamento. Se scegli un altro profilo, l'inizio del prompt viene inviato a quel provider."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Avvia nuova attività",
 				"description": "Avvia una nuova attività con il tuo input. Disponibile nella palette dei comandi."
+			},
+			"TASK_TITLE": {
+				"label": "Titolo dell'attività",
+				"description": "Genera in background un titolo breve per le nuove attività. Viene mostrato nella cronologia e nell'intestazione dell'attività. Configuralo qui sotto."
 			}
 		}
 	},
@@ -196,7 +197,6 @@
 		"title": "Elimina modalità",
 		"message": "Sei sicuro di voler eliminare la modalità \"{{modeName}}\"?",
 		"rulesFolder": "Questa modalità ha una cartella di regole in {{folderPath}} che verrà eliminata.",
-		"descriptionNoRules": "Sei sicuro di voler eliminare questa modalità personalizzata?",
 		"confirm": "Elimina",
 		"cancel": "Annulla"
 	}

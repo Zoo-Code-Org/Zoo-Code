@@ -3,6 +3,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
+import * as recovery from "../../../utils/jsonFileRecovery"
 
 import type { HistoryItem } from "@roo-code/types"
 
@@ -459,14 +460,33 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	afterEach(async () => {
+		// The explicit rotation keeps the spy handles reusable across tests; the
+		// blanket restore is the upstream safety net for any other spy a test
+		// created without registering it here.
 		mtimeSpy?.mockRestore()
 		mtimeSpy = undefined
 		syncMtimeSpy?.mockRestore()
 		syncMtimeSpy = undefined
+		vi.restoreAllMocks()
 		safeWriteJsonMock.mockImplementation(writeJson)
 		for (const disposable of disposables) disposable.dispose()
 		disposables.clear()
 		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it.each(["EACCES", "EIO", "ELOCKED", "missing"])("handles failed startup recovery: %s", async (code) => {
+		const item = makeItem({ id: "recovery-failure", status: "active" })
+		await seedItems(tmpDir, [item])
+		await store.initialize()
+		store.dispose()
+		const target = path.join(tmpDir, "tasks", item.id, GlobalFileNames.historyItem)
+		await fs.rename(target, path.join(path.dirname(target), `.${path.basename(target)}.bak_1.tmp`))
+		const recover = vi.spyOn(recovery, "recoverMissingJsonFile")
+		if (code === "missing") recover.mockResolvedValue(false)
+		else recover.mockRejectedValue(Object.assign(new Error("recovery failed"), { code }))
+		await store.reconcile()
+		expect(recover).toHaveBeenCalledWith(target, { waitForStaleLock: false })
+		expect(store.get(item.id)).toEqual(code === "missing" ? undefined : item)
 	})
 
 	it("repairs orphaned delegation: delegated parent whose child does not exist → active", async () => {
@@ -1597,30 +1617,42 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
-	it("replays an intent at target without writing task files", async () => {
-		// The child is already interrupted and the parent still holds the link, which
-		// is exactly the completed state of the repair: nothing to write, journal removed.
-		const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
-		const parent = makeItem({
-			id: "parent-at-target",
-			status: "delegated",
-			awaitingChildId: child.id,
-			delegatedToId: child.id,
-		})
-		await seedItems(tmpDir, [parent, child])
-		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
-		await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
+	it.each([false, true])(
+		"replays an intent at target without writing task files (backup: %s)",
+		async (backup) => {
+			// The child is already interrupted and the parent still holds the link, which
+			// is exactly the completed state of the repair: nothing to write, journal removed.
+			// The backup variant covers a journal left as an orphaned `.bak_*.tmp` by an
+			// interrupted replacement: the recovery pass restores it before the replay.
+			const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
+			const parent = makeItem({
+				id: "parent-at-target",
+				status: "delegated",
+				awaitingChildId: child.id,
+				delegatedToId: child.id,
+			})
+			await seedItems(tmpDir, [parent, child])
+			const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+			await fs.writeFile(intentPath, JSON.stringify(makeRepairIntent(parent, child)))
 
-		const writeCalls: string[] = []
-		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
-			writeCalls.push(filePath)
-			await writeJson(filePath, data)
-		})
-		await store.initialize()
+			if (backup) {
+				await fs.rename(
+					intentPath,
+					path.join(path.dirname(intentPath), `.${path.basename(intentPath)}.bak_1.tmp`),
+				)
+			}
 
-		expect(writeCalls.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
-		await expect(fs.access(intentPath)).rejects.toThrow()
-	})
+			const writeCalls: string[] = []
+			safeWriteJsonMock.mockImplementation(async (filePath, data) => {
+				writeCalls.push(filePath)
+				await writeJson(filePath, data)
+			})
+			await store.initialize()
+
+			expect(writeCalls.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
+			await expect(fs.access(intentPath)).rejects.toThrow()
+		},
+	)
 
 	it("removes the repair-intent file after successful replay", async () => {
 		const child = makeItem({ id: "child-deferred-index", status: "active", parentTaskId: "parent-deferred-index" })

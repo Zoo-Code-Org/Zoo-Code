@@ -33,10 +33,10 @@ const mockTranslate = (key: string, options?: Record<string, any>): string => {
 // Create mock context
 export const TranslationContext = createContext<{
 	t: (key: string, options?: Record<string, any>) => string
-	i18n: any
+	language: string
 }>({
 	t: mockTranslate,
-	i18n: {},
+	language: "en",
 })
 
 // Mock translation provider component
@@ -45,7 +45,7 @@ export const TranslationProvider: React.FC<{ children: ReactNode }> = ({ childre
 		<TranslationContext.Provider
 			value={{
 				t: mockTranslate,
-				i18n: {},
+				language: "en",
 			}}>
 			{children}
 		</TranslationContext.Provider>

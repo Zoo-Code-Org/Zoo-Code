@@ -34,15 +34,29 @@ const getProfileShellOriginal = Terminal.getProfileShell.bind(Terminal)
 describe("Shell Detection Tests", () => {
 	let originalPlatform: string
 	let originalEnv: NodeJS.ProcessEnv
-	let originalGetConfig: any
+	let originalGetConfig: typeof vscode.workspace.getConfiguration
+
+	type TerminalProfileSpec = { path?: string | string[]; source?: string }
+
+	function stubGetConfiguration(handler: (section?: string) => unknown): void {
+		Object.assign(vscode.workspace, { getConfiguration: handler })
+	}
+
+	function userInfoStub(shell: string): ReturnType<typeof userInfo> {
+		return { username: "tester", uid: 1000, gid: 1000, homedir: "/home/tester", shell }
+	}
 
 	/**
 	 * Stubs VS Code config using inspect() on the correct section names, matching
 	 * how Terminal.getConfiguredDefaultProfileName and Terminal.getConfiguredProfiles
 	 * read config (globalValue only — workspace excluded per APPLICATION scope).
 	 */
-	function mockVsCodeConfig(platformKey: string, defaultProfileName: string | null, profiles: Record<string, any>) {
-		vscode.workspace.getConfiguration = (section?: string) => {
+	function mockVsCodeConfig(
+		platformKey: string,
+		defaultProfileName: string | null,
+		profiles: Record<string, TerminalProfileSpec>,
+	) {
+		stubGetConfiguration((section) => {
 			if (section === "terminal.integrated") {
 				return {
 					inspect: (key: string) => {
@@ -53,7 +67,7 @@ describe("Shell Detection Tests", () => {
 						}
 					},
 					get: () => undefined,
-				} as any
+				}
 			}
 			if (section === "terminal.integrated.profiles") {
 				return {
@@ -65,10 +79,10 @@ describe("Shell Detection Tests", () => {
 						}
 					},
 					get: () => undefined,
-				} as any
+				}
 			}
-			return { get: () => undefined, inspect: () => undefined } as any
-		}
+			return { get: () => undefined, inspect: () => undefined }
+		})
 	}
 
 	beforeEach(() => {
@@ -79,7 +93,7 @@ describe("Shell Detection Tests", () => {
 		delete process.env.SHELL
 		delete process.env.COMSPEC
 
-		vi.mocked(userInfo).mockReturnValue({ shell: null } as any)
+		vi.mocked(userInfo).mockReturnValue(userInfoStub(""))
 		// Default: PowerShell 7 is not installed, so the probe falls back to legacy.
 		vi.mocked(existsSync).mockReturnValue(false)
 		// Clear Zoo profile override and execa shell path between tests.
@@ -107,7 +121,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses explicit PowerShell 7 path from VS Code config (profile path)", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
 			})
@@ -115,7 +129,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh.exe"] },
 			})
@@ -131,7 +145,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses PowerShell 7 path if source is 'PowerShell' but no explicit path", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { source: "PowerShell" },
 			})
@@ -183,7 +197,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("falls back to safe shell when the configured profile path is non-allowlisted", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Custom\\evil.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Custom\\evil.exe")
 			mockVsCodeConfig("windows", "Custom", {
 				Custom: { path: "C:\\Custom\\evil.exe" },
 			})
@@ -191,7 +205,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses cmd.exe when a Command Prompt profile is explicitly configured", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Windows\\System32\\cmd.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Windows\\System32\\cmd.exe")
 			mockVsCodeConfig("windows", "Command Prompt", {
 				"Command Prompt": { path: "C:\\Windows\\System32\\cmd.exe" },
 			})
@@ -208,7 +222,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses VS Code profile path if available", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/fish")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/local/bin/fish")
 			mockVsCodeConfig("osx", "MyCustomShell", {
 				MyCustomShell: { path: "/usr/local/bin/fish" },
 			})
@@ -216,7 +230,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/opt/homebrew/bin/zsh")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/opt/homebrew/bin/zsh")
 			mockVsCodeConfig("osx", "zsh", {
 				zsh: { path: ["/opt/homebrew/bin/zsh", "/bin/zsh"] },
 			})
@@ -225,7 +239,7 @@ describe("Shell Detection Tests", () => {
 
 		it("falls back to userInfo().shell if no VS Code config is available", () => {
 			mockVsCodeConfig("osx", null, {})
-			vi.mocked(userInfo).mockReturnValue({ shell: "/opt/homebrew/bin/zsh" } as any)
+			vi.mocked(userInfo).mockReturnValue(userInfoStub("/opt/homebrew/bin/zsh"))
 			expect(getShell()).toBe("/opt/homebrew/bin/zsh")
 		})
 
@@ -250,7 +264,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("uses VS Code profile path if available", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/fish")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/bin/fish")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/fish" },
 			})
@@ -258,7 +272,7 @@ describe("Shell Detection Tests", () => {
 		})
 
 		it("should handle array path from VSCode terminal profile", () => {
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/bash")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/local/bin/bash")
 			mockVsCodeConfig("linux", "bash", {
 				bash: { path: ["/usr/local/bin/bash", "/bin/bash"] },
 			})
@@ -267,7 +281,7 @@ describe("Shell Detection Tests", () => {
 
 		it("falls back to userInfo().shell if no VS Code config is available", () => {
 			mockVsCodeConfig("linux", null, {})
-			vi.mocked(userInfo).mockReturnValue({ shell: "/usr/bin/zsh" } as any)
+			vi.mocked(userInfo).mockReturnValue(userInfoStub("/usr/bin/zsh"))
 			expect(getShell()).toBe("/usr/bin/zsh")
 		})
 
@@ -295,10 +309,10 @@ describe("Shell Detection Tests", () => {
 
 		it("handles VS Code config errors gracefully, falling back to userInfo shell if present", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () => {
+			stubGetConfiguration(() => {
 				throw new Error("Configuration error")
-			}
-			vi.mocked(userInfo).mockReturnValue({ shell: "/bin/bash" } as any)
+			})
+			vi.mocked(userInfo).mockReturnValue(userInfoStub("/bin/bash"))
 			expect(getShell()).toBe("/bin/bash")
 		})
 
@@ -314,9 +328,9 @@ describe("Shell Detection Tests", () => {
 
 		it("falls back fully to default shell paths if everything fails", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () => {
+			stubGetConfiguration(() => {
 				throw new Error("Configuration error")
-			}
+			})
 			vi.mocked(userInfo).mockImplementation(() => {
 				throw new Error("userInfo error")
 			})
@@ -326,11 +340,10 @@ describe("Shell Detection Tests", () => {
 
 		it("handles inspect() returning undefined gracefully", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = () =>
-				({
-					inspect: () => undefined,
-					get: () => undefined,
-				}) as any
+			stubGetConfiguration(() => ({
+				inspect: () => undefined,
+				get: () => undefined,
+			}))
 			expect(getShell()).toBe("/bin/bash")
 		})
 	})
@@ -343,7 +356,7 @@ describe("Shell Detection Tests", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
 			vi.mocked(existsSync).mockReturnValue(false)
 			// globalValue is undefined; only workspaceValue is set
-			vscode.workspace.getConfiguration = (section?: string) => {
+			stubGetConfiguration((section) => {
 				if (section === "terminal.integrated") {
 					return {
 						inspect: (_key: string) => ({
@@ -352,7 +365,7 @@ describe("Shell Detection Tests", () => {
 							workspaceValue: "PowerShell",
 						}),
 						get: () => undefined,
-					} as any
+					}
 				}
 				if (section === "terminal.integrated.profiles") {
 					return {
@@ -362,17 +375,17 @@ describe("Shell Detection Tests", () => {
 							workspaceValue: { PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" } },
 						}),
 						get: () => undefined,
-					} as any
+					}
 				}
-				return { get: () => undefined, inspect: () => undefined } as any
-			}
+				return { get: () => undefined, inspect: () => undefined }
+			})
 			// No global profile → falls back to PS legacy (existsSync returns false for PS7)
 			expect(getShell()).toBe("C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe")
 		})
 
 		it("Linux: ignores a workspace-scoped default profile", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vscode.workspace.getConfiguration = (section?: string) => {
+			stubGetConfiguration((section) => {
 				if (section === "terminal.integrated") {
 					return {
 						inspect: (_key: string) => ({
@@ -381,7 +394,7 @@ describe("Shell Detection Tests", () => {
 							workspaceValue: "CustomShell",
 						}),
 						get: () => undefined,
-					} as any
+					}
 				}
 				if (section === "terminal.integrated.profiles") {
 					return {
@@ -391,10 +404,10 @@ describe("Shell Detection Tests", () => {
 							workspaceValue: { CustomShell: { path: "/usr/bin/fish" } },
 						}),
 						get: () => undefined,
-					} as any
+					}
 				}
-				return { get: () => undefined, inspect: () => undefined } as any
-			}
+				return { get: () => undefined, inspect: () => undefined }
+			})
 			// No global profile → falls through to /bin/bash
 			expect(getShell()).toBe("/bin/bash")
 		})
@@ -434,7 +447,7 @@ describe("Shell Detection Tests", () => {
 	describe("Shell Validation", () => {
 		it("should allow common Windows shells", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "C:\\Program Files\\PowerShell\\7\\pwsh.exe" },
 			})
@@ -443,7 +456,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should allow common Unix shells", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/fish")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/bin/fish")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/fish" },
 			})
@@ -452,7 +465,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should handle case-insensitive matching on Windows", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "c:\\windows\\system32\\cmd.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "c:\\windows\\system32\\cmd.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: "c:\\windows\\system32\\cmd.exe" },
 			})
@@ -461,7 +474,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should reject unknown shells and use fallback", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/bin/malicious-shell")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/bin/malicious-shell")
 			mockVsCodeConfig("linux", "CustomProfile", {
 				CustomProfile: { path: "/usr/bin/malicious-shell" },
 			})
@@ -470,7 +483,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should resolve array shell paths and use first path", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\Program Files\\PowerShell\\7\\pwsh.exe")
 			mockVsCodeConfig("windows", "PowerShell", {
 				PowerShell: { path: ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh"] },
 			})
@@ -479,7 +492,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should reject non-allowed shell paths and fall back to safe defaults", () => {
 			Object.defineProperty(process, "platform", { value: "win32" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "C:\\malicious\\shell.exe")
+			vi.mocked(existsSync).mockImplementation((p) => p === "C:\\malicious\\shell.exe")
 			mockVsCodeConfig("windows", "Malicious", {
 				Malicious: { path: "C:\\malicious\\shell.exe" },
 			})
@@ -489,7 +502,7 @@ describe("Shell Detection Tests", () => {
 
 		it("should validate shells from VS Code config", () => {
 			Object.defineProperty(process, "platform", { value: "darwin" })
-			vi.mocked(existsSync).mockImplementation((p: any) => p === "/usr/local/bin/custom-shell")
+			vi.mocked(existsSync).mockImplementation((p) => p === "/usr/local/bin/custom-shell")
 			mockVsCodeConfig("osx", "MyCustomShell", {
 				MyCustomShell: { path: "/usr/local/bin/custom-shell" },
 			})
@@ -499,14 +512,14 @@ describe("Shell Detection Tests", () => {
 		it("should validate shells from userInfo", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
 			mockVsCodeConfig("linux", null, {})
-			vi.mocked(userInfo).mockReturnValue({ shell: "/usr/bin/evil-shell" } as any)
+			vi.mocked(userInfo).mockReturnValue(userInfoStub("/usr/bin/evil-shell"))
 			expect(getShell()).toBe("/bin/bash")
 		})
 
 		it("should validate shells from environment variables", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
 			mockVsCodeConfig("linux", null, {})
-			vi.mocked(userInfo).mockReturnValue({ shell: null } as any)
+			vi.mocked(userInfo).mockReturnValue(userInfoStub(""))
 			process.env.SHELL = "/opt/custom/shell"
 			expect(getShell()).toBe("/bin/bash")
 		})
@@ -522,7 +535,7 @@ describe("Shell Detection Tests", () => {
 		it("should handle empty or null shell paths", () => {
 			Object.defineProperty(process, "platform", { value: "linux" })
 			mockVsCodeConfig("linux", null, {})
-			vi.mocked(userInfo).mockReturnValue({ shell: "" } as any)
+			vi.mocked(userInfo).mockReturnValue(userInfoStub(""))
 			delete process.env.SHELL
 			expect(getShell()).toBe("/bin/bash")
 		})

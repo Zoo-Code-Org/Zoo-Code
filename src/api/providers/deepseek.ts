@@ -15,6 +15,7 @@ import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { convertToR1Format } from "../transform/r1-format"
+import { normalizeChatUsage } from "../transform/chat-usage-normalization"
 
 import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
@@ -227,13 +228,20 @@ export class DeepSeekHandler extends OpenAiHandler {
 	}
 
 	// Override to handle DeepSeek's usage metrics, including caching.
+	// DeepSeek reports cache counters in two shapes that describe the same
+	// quantities: top-level `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+	// and nested `prompt_tokens_details.cached_tokens`. The normalizer resolves
+	// one value per field and never sums the shapes.
+	// https://api-docs.deepseek.com/api/create-chat-completion
 	protected override processUsageMetrics(usage: any, _modelInfo?: any): ApiStreamUsageChunk {
+		const normalized = normalizeChatUsage(usage)
+
 		return {
 			type: "usage",
-			inputTokens: usage?.prompt_tokens || 0,
-			outputTokens: usage?.completion_tokens || 0,
-			cacheWriteTokens: usage?.prompt_tokens_details?.cache_miss_tokens,
-			cacheReadTokens: usage?.prompt_tokens_details?.cached_tokens,
+			inputTokens: normalized?.inputTokens ?? 0,
+			outputTokens: normalized?.outputTokens ?? 0,
+			cacheWriteTokens: normalized?.cacheWriteTokens,
+			cacheReadTokens: normalized?.cacheReadTokens,
 		}
 	}
 }

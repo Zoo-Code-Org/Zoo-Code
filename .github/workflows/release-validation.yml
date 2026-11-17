@@ -16,6 +16,12 @@ on:
             - "releases/**"
             - ".github/workflows/release-validation.yml"
 
+# Cancel superseded runs when a pull request is updated. Non-PR events keep
+# unique groups, so manual runs are never cancelled.
+concurrency:
+    group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
     contents: read
 

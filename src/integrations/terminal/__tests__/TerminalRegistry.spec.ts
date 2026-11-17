@@ -1,5 +1,6 @@
 // npx vitest run src/integrations/terminal/__tests__/TerminalRegistry.spec.ts
 
+import type { MockInstance } from "vitest"
 import * as vscode from "vscode"
 
 import { restoreGlobals } from "../../../test-utils/reset"
@@ -16,13 +17,14 @@ vi.mock("execa", () => ({
 }))
 
 describe("TerminalRegistry", () => {
-	let mockCreateTerminal: any
+	// createTerminal is overloaded; MockInstance keeps the spy's overload set.
+	let mockCreateTerminal: MockInstance<typeof vscode.window.createTerminal>
 
 	beforeEach(() => {
 		TerminalRegistry["terminals"] = []
 		Terminal.setTerminalProfile(undefined)
 		mockCreateTerminal = vi.spyOn(vscode.window, "createTerminal").mockImplementation(
-			(..._args: any[]) =>
+			(..._args: unknown[]) =>
 				({
 					exitStatus: undefined,
 					name: "Zoo Code",
@@ -39,7 +41,7 @@ describe("TerminalRegistry", () => {
 					shellIntegration: {
 						executeCommand: vi.fn(),
 					},
-				}) as any,
+				}) as unknown as vscode.Terminal,
 		)
 	})
 
@@ -209,8 +211,8 @@ describe("TerminalRegistry", () => {
 	})
 
 	describe("onDidEndTerminalShellExecution race condition (#489, #622)", () => {
-		let startHandler: (e: any) => Promise<void>
-		let endHandler: (e: any) => Promise<void>
+		let startHandler: (e: vscode.TerminalShellExecutionStartEvent) => Promise<void>
+		let endHandler: (e: vscode.TerminalShellExecutionEndEvent) => Promise<void>
 
 		beforeEach(() => {
 			// Reset the initialized flag so we can call initialize() in this block.
@@ -218,15 +220,21 @@ describe("TerminalRegistry", () => {
 
 			// The global vscode mock doesn't define shell execution event
 			// methods, so add them before spying.
-			;(vscode.window as any).onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
-			;(vscode.window as any).onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
+			type MockWindow = Omit<
+				typeof vscode.window,
+				"onDidStartTerminalShellExecution" | "onDidEndTerminalShellExecution"
+			> &
+				Record<string, unknown>
+			const mockWindow = vscode.window as MockWindow
+			mockWindow.onDidStartTerminalShellExecution ??= () => ({ dispose: () => {} })
+			mockWindow.onDidEndTerminalShellExecution ??= () => ({ dispose: () => {} })
 
-			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution" as any).mockImplementation((handler: any) => {
+			vi.spyOn(vscode.window, "onDidStartTerminalShellExecution").mockImplementation((handler) => {
 				startHandler = handler
 				return { dispose: vi.fn() }
 			})
 
-			vi.spyOn(vscode.window, "onDidEndTerminalShellExecution" as any).mockImplementation((handler: any) => {
+			vi.spyOn(vscode.window, "onDidEndTerminalShellExecution").mockImplementation((handler) => {
 				endHandler = handler
 				return { dispose: vi.fn() }
 			})
@@ -241,23 +249,25 @@ describe("TerminalRegistry", () => {
 
 		it("calls shellExecutionComplete when end event fires before running is set (race)", async () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode") as Terminal
+			// TerminalProcess double provides command/emit/hasUnretrievedOutput.
 			const mockProcess = {
 				command: "echo hello",
 				emit: vi.fn(),
 				hasUnretrievedOutput: vi.fn().mockReturnValue(false),
-			} as any
+			} as unknown as TerminalProcess
 			terminal.process = mockProcess
 
 			// Simulate the race: running is still false (setActiveStream hasn't
 			// been called yet), but the end event fires.
 			expect(terminal.running).toBe(false)
 
-			const mockExecution = { commandLine: { value: "echo hello" } }
+			// TerminalShellExecution double provides commandLine only.
+			const mockExecution = { commandLine: { value: "echo hello" } } as unknown as vscode.TerminalShellExecution
 			await endHandler({
 				terminal: terminal.terminal,
 				execution: mockExecution,
 				exitCode: 0,
-			})
+			} as vscode.TerminalShellExecutionEndEvent)
 
 			// shellExecutionComplete should have been called exactly once, emitting
 			// shell_execution_complete so TerminalProcess.run() unblocks.
@@ -280,12 +290,13 @@ describe("TerminalRegistry", () => {
 
 			expect(terminal.running).toBe(false)
 
-			const mockExecution = { commandLine: { value: "echo hello" } }
+			// TerminalShellExecution double provides commandLine only.
+			const mockExecution = { commandLine: { value: "echo hello" } } as unknown as vscode.TerminalShellExecution
 			await endHandler({
 				terminal: terminal.terminal,
 				execution: mockExecution,
 				exitCode: 0,
-			})
+			} as vscode.TerminalShellExecutionEndEvent)
 
 			expect(terminal.busy).toBe(false)
 			expect(completeSpy).not.toHaveBeenCalled()
@@ -304,7 +315,8 @@ describe("TerminalRegistry", () => {
 				// already be pointing at a different (or no) execution by the time A's stale
 				// event finally arrives.
 				const processA = new TerminalProcess(terminal)
-				const executionA = { commandLine: { value: "command A" } } as any
+				// TerminalShellExecution double provides commandLine only.
+				const executionA = { commandLine: { value: "command A" } } as unknown as vscode.TerminalShellExecution
 				processA.ownExecution = executionA
 				const emitA = vi.spyOn(processA, "emit")
 
@@ -312,7 +324,8 @@ describe("TerminalRegistry", () => {
 				// state TerminalRegistry sees by the time A's late event arrives: a live
 				// process with its own, different execution.
 				const processB = new TerminalProcess(terminal)
-				const executionB = { commandLine: { value: "command B" } } as any
+				// TerminalShellExecution double provides commandLine only.
+				const executionB = { commandLine: { value: "command B" } } as unknown as vscode.TerminalShellExecution
 				processB.ownExecution = executionB
 				terminal.process = processB
 				terminal.running = true
@@ -323,7 +336,7 @@ describe("TerminalRegistry", () => {
 					terminal: terminal.terminal,
 					execution: executionA,
 					exitCode: 1,
-				})
+				} as vscode.TerminalShellExecutionEndEvent)
 
 				// B must be completely unaffected: no shell_execution_complete delivered to
 				// either process, and B is still the terminal's live process.
@@ -337,7 +350,7 @@ describe("TerminalRegistry", () => {
 					terminal: terminal.terminal,
 					execution: executionB,
 					exitCode: 0,
-				})
+				} as vscode.TerminalShellExecutionEndEvent)
 
 				expect(emitB).toHaveBeenCalledWith("shell_execution_complete", expect.objectContaining({ exitCode: 0 }))
 			},
@@ -348,7 +361,11 @@ describe("TerminalRegistry", () => {
 
 			// processA owns executionA — this is the current, live command.
 			const processA = new TerminalProcess(terminal)
-			const executionA = { commandLine: { value: "command A" }, read: vi.fn() } as any
+			// TerminalShellExecution double provides commandLine and read().
+			const executionA = {
+				commandLine: { value: "command A" },
+				read: vi.fn(),
+			} as unknown as vscode.TerminalShellExecution
 			processA.ownExecution = executionA
 			terminal.process = processA
 			const setStreamSpy = vi.spyOn(terminal, "setActiveStream")
@@ -356,11 +373,15 @@ describe("TerminalRegistry", () => {
 			// A stale start event arrives referencing a *different* execution (executionB).
 			// This can happen when VSCode fires a delayed start event for a prior terminal
 			// session on the same reused terminal object.
-			const executionB = { commandLine: { value: "stale command" }, read: vi.fn() } as any
+			// TerminalShellExecution double provides commandLine and read().
+			const executionB = {
+				commandLine: { value: "stale command" },
+				read: vi.fn(),
+			} as unknown as vscode.TerminalShellExecution
 			await startHandler({
 				terminal: terminal.terminal,
 				execution: executionB,
-			})
+			} as vscode.TerminalShellExecutionStartEvent)
 
 			// The stale event must be ignored: read() must not be called on it and the
 			// terminal's active stream must not be replaced.
@@ -373,7 +394,11 @@ describe("TerminalRegistry", () => {
 
 			const process = new TerminalProcess(terminal)
 			const mockStream = (async function* () {})()
-			const execution = { commandLine: { value: "echo hi" }, read: vi.fn().mockReturnValue(mockStream) } as any
+			// TerminalShellExecution double provides commandLine and read().
+			const execution = {
+				commandLine: { value: "echo hi" },
+				read: vi.fn().mockReturnValue(mockStream),
+			} as unknown as vscode.TerminalShellExecution
 			process.ownExecution = execution
 			terminal.process = process
 			const setStreamSpy = vi.spyOn(terminal, "setActiveStream")
@@ -381,7 +406,7 @@ describe("TerminalRegistry", () => {
 			await startHandler({
 				terminal: terminal.terminal,
 				execution,
-			})
+			} as vscode.TerminalShellExecutionStartEvent)
 
 			expect(execution.read).toHaveBeenCalledTimes(1)
 			expect(setStreamSpy).toHaveBeenCalledWith(mockStream)
@@ -395,7 +420,8 @@ describe("TerminalRegistry", () => {
 			const abort = vi.fn()
 			terminal.taskId = "task-245"
 			terminal.busy = true
-			terminal.process = { abort } as any
+			// TerminalProcess double provides abort() only.
+			terminal.process = { abort } as unknown as TerminalProcess
 
 			TerminalRegistry.releaseTerminalsForTask("task-245")
 
@@ -408,7 +434,8 @@ describe("TerminalRegistry", () => {
 			const abort = vi.fn()
 			terminal.taskId = "task-idle"
 			terminal.busy = false
-			terminal.process = { abort } as any
+			// TerminalProcess double provides abort() only.
+			terminal.process = { abort } as unknown as TerminalProcess
 
 			TerminalRegistry.releaseTerminalsForTask("task-idle")
 
@@ -423,10 +450,12 @@ describe("TerminalRegistry", () => {
 			const abortB = vi.fn()
 			a.taskId = "task-A"
 			a.busy = true
-			a.process = { abort: abortA } as any
+			// TerminalProcess double provides abort() only.
+			a.process = { abort: abortA } as unknown as TerminalProcess
 			b.taskId = "task-B"
 			b.busy = true
-			b.process = { abort: abortB } as any
+			// TerminalProcess double provides abort() only.
+			b.process = { abort: abortB } as unknown as TerminalProcess
 
 			TerminalRegistry.releaseTerminalsForTask("task-A")
 
@@ -440,11 +469,12 @@ describe("TerminalRegistry", () => {
 			const terminal = TerminalRegistry.createTerminal("/test/path", "vscode")
 			terminal.taskId = "task-throw"
 			terminal.busy = true
+			// TerminalProcess double provides abort() only.
 			terminal.process = {
 				abort: vi.fn(() => {
 					throw new Error("boom")
 				}),
-			} as any
+			} as unknown as TerminalProcess
 
 			expect(() => TerminalRegistry.releaseTerminalsForTask("task-throw")).not.toThrow()
 			expect(terminal.taskId).toBeUndefined()

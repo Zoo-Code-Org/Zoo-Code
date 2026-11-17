@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest"
+import type { EmbedderProvider } from "@roo-code/types"
+
 import {
 	getModelDimension,
 	getModelScoreThreshold,
@@ -48,7 +50,9 @@ describe("embeddingModels", () => {
 		})
 
 		it("should return undefined for unknown provider", () => {
-			const dimension = getModelDimension("unknown-provider" as any, "some-model")
+			// Exercise the runtime fallback for an unrecognized provider value.
+			const unknownProvider = "unknown-provider" as unknown as EmbedderProvider
+			const dimension = getModelDimension(unknownProvider, "some-model")
 			expect(dimension).toBeUndefined()
 		})
 
