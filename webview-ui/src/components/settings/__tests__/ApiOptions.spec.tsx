@@ -737,6 +737,9 @@ describe("ApiOptions", () => {
 			})
 
 			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+			expect(
+				screen.queryByRole("combobox", { name: "settings:providers.litellmPreserveReasoning.label" }),
+			).not.toBeInTheDocument()
 		})
 	})
 

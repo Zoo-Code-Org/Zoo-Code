@@ -110,6 +110,22 @@ describe("LiteLLMHandler", () => {
 		expect(await otherProfile.fetchModel()).toEqual({ id: "alias", info: { ...info, preserveReasoning: false } })
 	})
 
+	it.each([
+		{ setting: undefined, detected: true },
+		{ setting: undefined, detected: false },
+		{ setting: "auto", detected: true },
+		{ setting: "auto", detected: false },
+	] as const)("keeps detected metadata unchanged for $setting / $detected", async ({ setting, detected }) => {
+		const info: ModelInfo = Object.freeze({ ...litellmDefaultModelInfo, preserveReasoning: detected })
+		const provider = new LiteLLMHandler({
+			...mockOptions,
+			litellmModelId: "alias",
+			litellmPreserveReasoning: setting,
+		})
+		vi.mocked(getModels).mockResolvedValueOnce({ alias: info })
+		expect((await provider.fetchModel()).info).toBe(info)
+	})
+
 	describe("prompt caching", () => {
 		it("should add cache control headers when litellmUsePromptCache is enabled", async () => {
 			const optionsWithCache: ApiHandlerOptions = {
