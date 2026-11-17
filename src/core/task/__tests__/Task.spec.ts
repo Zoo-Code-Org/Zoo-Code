@@ -8337,6 +8337,80 @@ describe("Queued message processing after condense", () => {
 		expect(queue.isEmpty()).toBe(true)
 	})
 
+	it("does not let a surplus blocked drain send a message that arrived later", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const id = queue.addMessage("old")!.id
+		const token = queue.beginEdit(id)!
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		task.processQueuedMessages()
+		queue.addMessage("later")
+		queue.commitEdit(id, token, "edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["edited"])
+		expect(queue.messages.map((m) => m.text)).toEqual(["later"])
+	})
+
+	it("serves a blocked drain when the first of two held messages commits", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const a = queue.addMessage("a")!.id
+		const b = queue.addMessage("b")!.id
+		const tokenA = queue.beginEdit(a)!
+		queue.beginEdit(b)
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.commitEdit(a, tokenA, "a edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["a edited"])
+	})
+
+	it("keeps a blocked drain when one of its held messages is removed, then serves it", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const a = queue.addMessage("a")!.id
+		const b = queue.addMessage("b")!.id
+		const tokenA = queue.beginEdit(a)!
+		queue.beginEdit(b)
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.removeMessage(b)
+		vi.runAllTimers()
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		queue.commitEdit(a, tokenA, "a edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["a edited"])
+	})
+
 	it("does not retry a drain that no edit blocked", async () => {
 		const task = new Task({
 			provider: createProvider(),

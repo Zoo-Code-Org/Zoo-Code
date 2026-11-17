@@ -83,8 +83,16 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return token
 	}
 
-	public hasPendingEdit(): boolean {
-		return this.editTokens.size > 0
+	public editingIds(): string[] {
+		return [...this.editTokens.keys()]
+	}
+
+	/** "held" means a claim or an edit holds the message. */
+	public status(id: string): "gone" | "held" | "queued" {
+		if (!this.findMessage(id).message) {
+			return "gone"
+		}
+		return this.claimedMessageIds.has(id) ? "held" : "queued"
 	}
 
 	/** Sets text, segments and images together for the newest edit, then lets the message go. */

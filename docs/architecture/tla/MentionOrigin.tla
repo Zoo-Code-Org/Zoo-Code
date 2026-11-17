@@ -5,37 +5,25 @@
 \* Invariant: NoGeneratedTagged. A letter tagged user is a letter the user typed.
 \* It replaces a count check (user tags <= typed letters). This form implies the count check.
 \* Expected before the run: the edits hold. A change of two ranges would fail with generated text between them.
-\* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 2,193 states.
-\* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 71,225 states and takes 30 seconds.
-\* A change of two ranges in one event fails with either retagger. A textarea input event cannot send it.
-\* The queue editor saves only the final text. QueueSave models it: two edits, then one save. See PR 2421 review 2.
-\* Expected before the run: QueueEdit "Batch" (one retag at save, as MessageQueueService did) fails at MaxLen 3.
-\* Result: "Batch" fails in 3 states, even at MaxLen 2 (generated "a", type "a" on both sides, middle "a" turns user).
-\* The review example (trim both ends of "X @/etc/passwd Y") is the same class.
-\* "PerEvent" (the webview retags at each input event and sends the segments) holds. The server only checks them.
+\* Failure 2 (PR 2421 review 2): the queue editor saves only the final text. QueueSave models two edits, then one save.
 \* Replay: paste "@/x" before generated "@/x", then replace the first typed "@". The generated copy turns user.
-\* The finding is real in applyEdit. The fix runs the diff from both ends and keeps "u" only where both agree.
-\* Property test: mentionSegments.spec.ts, "never tags a generated letter user". It fails on the old code.
-\* Actions: Change (typing), Load (ArrowUp loads a stored prompt), HistoryRestoreAct (ArrowDown), UndoAct.
-\* Load can have the draft's letters, and HistoryRestoreAct has no guard on them. Every order of the four runs.
-\* nav is the history navigation state. Load saves the draft only when nav is false. Typing, undo and restore end nav.
-\* UndoAct restores any other text, so it covers consecutive undos and redos through the whole undo stack.
-\* HistoryRestore "AsEdit" (restore through applyEdit) fails in 3 states. "Saved" holds. The history hook does this.
-\* UndoRestore "AsEdit" fails in 2 states. "Retained" (keep the old tags, tag the new text generated) fails in 3.
-\* "AllGenerated" (the whole draft turns generated) holds. ChatTextArea does this for historyUndo and historyRedo.
-\* Tests: ChatTextArea.spec.tsx (history input types) and ChatView.clear-approval-buttons.spec.tsx (delete, undo, send).
+\* The fix runs the diff from both ends and keeps "u" only where both agree. The webview retags each input event.
+\* The server only checks the segments. Property test: mentionSegments.spec.ts, "never tags a generated letter user".
+\* Actions: Change (typing), Load (ArrowUp), HistoryRestoreAct (ArrowDown), UndoAct, QueueSave (Batch only).
+\* nav is the history navigation state. Load saves the draft only when nav is false.
+\* | Config                    | Variant                          | Verdict            |
+\* | MentionOrigin.cfg         | Both, Saved, AllGenerated        | holds (71,225 states at MaxLen 3) |
+\* | MentionOrigin.Code.cfg    | retagger of the old code         | fails in 2 states  |
+\* | MentionOrigin.History.cfg | restore through applyEdit        | fails in 3 states  |
+\* | MentionOrigin.Undo.cfg    | undo through applyEdit           | fails in 2 states  |
+\* | MentionOrigin.Retained.cfg| undo keeps old tags              | fails in 3 states  |
+\* | MentionOrigin.Queue.cfg   | one retag at queue save (Batch)  | fails in 3 states  |
 \* Cost of AllGenerated: after an undo or redo the user must retype a mention that was in the draft.
-\* Not modeled: normalizeSegments (the text match check), merge, trim and the host expansion.
-\* Tests: QueuedMessages.spec.tsx (per-event tags), MessageQueueService.spec.ts (the server keeps the tags).
-\* Configs: MentionOrigin.cfg must pass. Must fail: .Code, .History, .Undo, .Retained, .Queue.
-\* Cost: each run takes under 10 seconds at MaxLen 2. Agent time is not measured.
-\* Review: 0 covered, 8 added (history restore, per-position form, native undo, one run for both restores,
-\* no guard on the restore letters, navigation state, any undo target, queue save; PR 2421), 0 gap.
-\* The queue save was a "not modeled" note in the first version. The second review found it.
-\* ChatView postDraft: one helper reads the segments for each send and clears the draft. No model change.
-\* Null result: the spec has no action for the send sites. The existing ChatView tests and a mutation check cover them.
+\* Not modeled: normalizeSegments, merge, trim and the host expansion. Tests: QueuedMessages.spec.tsx, ChatTextArea.spec.tsx.
+\* Cost: each run takes under 30 seconds. Agent time is not measured.
+\* Review: 0 covered, 8 added, 0 gap (PR 2421). TLC found the equal-letter failure. No review thread named it.
+\* Null result: the spec has no action for the send sites. ChatView tests and a mutation check cover them.
 \* The first version came after the code and the reviews. It is not an independent first pass.
-\* No review thread named the equal-letter failure. TLC found it.
 
 EXTENDS Naturals, Sequences, FiniteSets
 
@@ -138,12 +126,12 @@ UndoAct == \E t \in Seqs(Cell, MaxLen) :
     /\ nav' = FALSE
     /\ UNCHANGED snap
 
-\* The queue editor holds two edits and saves once. "Batch" retags the net change. "PerEvent" retags each edit.
+\* "Batch": the queue editor holds two edits and retags the net change at save. "PerEvent" is two Change steps.
+\* So only "Batch" adds an action. It is the old server behavior.
 QueueSave == \E t1 \in Edits(text) : \E t \in Edits(t1) :
+    /\ QueueEdit = "Batch"
     /\ text' = t
-    /\ tags' = IF QueueEdit = "Batch"
-               THEN Retag(Letters(text), tags, Letters(t), "u")
-               ELSE Retag(Letters(t1), Retag(Letters(text), tags, Letters(t1), "u"), Letters(t), "u")
+    /\ tags' = Retag(Letters(text), tags, Letters(t), "u")
     /\ nav' = FALSE
     /\ UNCHANGED snap
 

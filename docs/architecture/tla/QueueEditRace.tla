@@ -9,9 +9,10 @@
 \* Claim (hold the message and commit text, source and images together, only for the latest edit).
 \* First version (PR 2421, CodeRabbit thread 1): edits had distinct text. It hid the same-text case.
 \* Result: "Await" fails DrainedWhole in 6 states. "Text" fails DrainedWhole in 6 states. "Claim" holds.
-\* Review: 0 covered, 2 added (the await before the update; the same-text edit and the drained image), 0 gap.
+\* Review: 0 covered, 2 added (the await before the update; the same-text edit and the drained image), 3 gap.
+\* The 3 gaps are the lost drain, the merged drains and the surplus retry. QueueDrainRetry.tla models them.
 \* Not modeled: the image content, a failed scan (the handler then keeps the old images), and the webview.
-\* Configs: QueueEditRace.cfg (Claim) must pass. Must fail: .Await, .Text.
+\* Configs: QueueEditRace.cfg (Claim) must pass. Must fail: .Await, .Text (DrainedWhole) and .Monotone (Await, Monotone only).
 \* Cost: each run takes under 5 seconds. Agent time is not measured.
 
 EXTENDS Naturals
@@ -53,6 +54,9 @@ Drain == /\ present /\ ~claimed
 Next == Begin \/ (\E v \in 1..MaxEdits : Resolve(v)) \/ Drain
 
 Spec == Init /\ [][Next]_vars
+
+TypeOK == /\ present \in BOOLEAN /\ claimed \in BOOLEAN /\ pend \subseteq 1..MaxEdits
+          /\ {src, imgs, began, latest} \subseteq 0..MaxEdits /\ (drained = <<>> \/ \E a, b, c \in 0..MaxEdits : drained = <<a, b, c>>)
 
 DrainedWhole == drained # <<>> => drained[1] = drained[3] /\ drained[2] = drained[3]
 Monotone == [][src' >= src /\ imgs' >= imgs]_vars
