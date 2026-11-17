@@ -237,6 +237,23 @@ describe("resolveImageMentions", () => {
 		expect(result.images).toHaveLength(1)
 	})
 
+	it("should not let a kept mention take the last slot from a new mention", async () => {
+		const url = (name: string) => `data:image/png;base64,${Buffer.from(name).toString("base64")}`
+		const existing = [url("a.png"), ...Array.from({ length: 18 }, (_, i) => url(`pasted-${i}`))]
+		mockReadImageAsDataUrl.mockImplementation(async (file) => {
+			const dataUrl = url(path.basename(file))
+			return { dataUrl, buffer: Buffer.from(dataUrl) }
+		})
+
+		const result = await resolveImageMentions({
+			text: "@/a.png and @/b.png",
+			images: existing,
+			cwd: "/workspace",
+		})
+
+		expect(result.images).toEqual([...existing, url("b.png")])
+	})
+
 	it("should skip images when supportsImages is false", async () => {
 		const dataUrl = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`
 		mockReadImageAsDataUrl.mockResolvedValue({ dataUrl, buffer: Buffer.from("png-bytes") })

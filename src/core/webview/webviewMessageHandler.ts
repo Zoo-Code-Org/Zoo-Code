@@ -4070,9 +4070,7 @@ export const webviewMessageHandler = async (
 			if (edit.success) {
 				const { id, text, segments: given } = edit.data
 				const segments = segmentsOf(edit.data)
-				const resolved = await resolveIncomingImages({ text, images: edit.data.images, segments })
-				// An edit can keep a mention that already attached its image. The same data URL attaches once.
-				const images = [...new Set(resolved.images)]
+				const { images } = await resolveIncomingImages({ text, images: edit.data.images, segments })
 				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images, given)
 			}
 

@@ -70,7 +70,7 @@ export async function resolveImageMentions({
 	maxImageFileSize = DEFAULT_MAX_IMAGE_FILE_SIZE_MB,
 	maxTotalImageSize = DEFAULT_MAX_TOTAL_IMAGE_SIZE_MB,
 }: ResolveImageMentionsOptions): Promise<ResolveImageMentionsResult> {
-	const existingImages = Array.isArray(images) ? images : []
+	const existingImages = Array.isArray(images) ? dedupePreserveOrder(images) : []
 	if (existingImages.length >= MAX_IMAGES_PER_MESSAGE) {
 		return { text, images: existingImages.slice(0, MAX_IMAGES_PER_MESSAGE) }
 	}
@@ -134,6 +134,10 @@ export async function resolveImageMentions({
 			const { dataUrl } = await readImageAsDataUrlWithBuffer(absPath)
 			if (!isSupportedImageMimeType(getImageMimeType(dataUrl))) {
 				// Fail-soft: skip formats unsupported by the shared image-block contract.
+				continue
+			}
+			// An image that is already attached takes no slot, so a kept mention cannot crowd out a new one.
+			if (existingImages.includes(dataUrl) || newImages.includes(dataUrl)) {
 				continue
 			}
 			newImages.push(dataUrl)

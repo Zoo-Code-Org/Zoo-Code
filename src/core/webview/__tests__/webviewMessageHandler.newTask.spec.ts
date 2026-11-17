@@ -180,17 +180,6 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: scanned }))
 		})
 
-		it("stores a resolved image once when the edit keeps its mention", async () => {
-			resolveImageMentions.mockResolvedValueOnce({ text: "", images: ["data:a", "data:a", "data:b"] })
-			await edit({ id: "q1", text: "see @/a.png", images: ["data:a"], segments: [user("see @/a.png")] })
-			expect(currentTask.messageQueueService.updateMessage).toHaveBeenCalledWith(
-				"q1",
-				"see @/a.png",
-				["data:a", "data:b"],
-				[user("see @/a.png")],
-			)
-		})
-
 		it.each([
 			{ label: "missing", payload: undefined },
 			{ label: "not an object", payload: "q1" },
