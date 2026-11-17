@@ -4,24 +4,24 @@ import { renderWithExtensionState, screen } from "@/utils/test-utils"
 import { ChatRowContent } from "../ChatRow"
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
-		t: (key: string) => {
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: (key: string, options?: { defaultValue?: string }) => {
 			const map: Record<string, string> = {
 				"chat:apiRequest.rateLimitWait": "Rate limiting",
 				"chat:apiRequest.failed": "API Request Failed",
 				"chat:apiRequest.errorTitle": "Provider Error",
+				"chat:apiRequest.errorMessage.401": "Couldn't authenticate with provider.",
 				"chat:apiRequest.errorMessage.unknown": "Unknown API error. Please report this on GitHub.",
 				"chat:apiRequest.errorMessage.docs": "Docs",
 			}
-			return map[key] ?? key
-		},
-		i18n: {
-			exists: () => false,
+			return map[key] ?? options?.defaultValue ?? key
 		},
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 function renderChatRow(message: any) {
@@ -73,6 +73,20 @@ describe("ChatRow - rate limit wait", () => {
 		expect(screen.queryByText("Rate limiting")).toBeNull()
 		// Nothing should be rendered
 		expect(container.firstChild).toBeNull()
+	})
+
+	it("shows the message for a known API error code", () => {
+		const message: any = {
+			type: "say",
+			say: "api_req_retry_delayed",
+			ts: Date.now(),
+			text: "401 Unauthorized",
+		}
+
+		renderChatRow(message)
+
+		expect(screen.getByText("Couldn't authenticate with provider.")).toBeInTheDocument()
+		expect(screen.queryByText("Unknown API error. Please report this on GitHub.")).not.toBeInTheDocument()
 	})
 
 	it("links unknown API errors to GitHub issues", () => {

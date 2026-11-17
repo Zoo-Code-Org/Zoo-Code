@@ -1,6 +1,4 @@
 {
-	"title": "モード",
-	"done": "完了",
 	"modes": {
 		"title": "モード",
 		"createNewMode": "新しいモードを作成",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "モードをエクスポート",
-		"description": "このモードをすべてのルールを含むYAMLファイルにエクスポートして、他のユーザーと簡単に共有できます。",
-		"export": "モードをエクスポート",
-		"exporting": "エクスポート中..."
+		"export": "モードをエクスポート"
 	},
 	"importMode": {
 		"selectLevel": "このモードをインポートする場所を選択してください：",
@@ -81,7 +77,6 @@
 		"title": "システムプロンプト（{{modeName}}モード）"
 	},
 	"supportPrompts": {
-		"title": "サポートプロンプト",
 		"resetPrompt": "{{promptType}}プロンプトをデフォルトにリセット",
 		"prompt": "プロンプト",
 		"enhance": {
@@ -94,10 +89,12 @@
 			"includeTaskHistory": "タスク履歴をコンテキストとして含める",
 			"includeTaskHistoryDescription": "有効にすると、現在の会話の最後の10メッセージがプロンプト強化時にコンテキストとして含まれ、より関連性が高くコンテキストを意識した提案の生成に役立ちます。"
 		},
-		"condense": {
-			"apiConfiguration": "コンテキスト圧縮のためのAPI構成",
-			"apiConfigDescription": "コンテキスト圧縮操作に使用するAPI構成を選択します。現在アクティブな構成を使用するには、選択しないままにします。",
-			"useCurrentConfig": "現在選択されているAPI構成を使用する"
+		"taskTitle": {
+			"enabled": "タスクタイトルを自動生成",
+			"enabledDescription": "新しいタスクの最初のプロンプトを、バックグラウンドで短いタイトルに要約します。タイトル生成のリクエストはタスクのコストに含まれません。GitHub Copilot と VS Code LM のプロファイルはクォータを消費します。",
+			"apiConfiguration": "API設定",
+			"useTaskConfig": "タスクで使用しているAPI設定を使用",
+			"apiConfigDescription": "軽量な非推論プロファイルを推奨します。別のプロファイルを選択すると、プロンプトの冒頭部分がそのプロバイダーに送信されます。"
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "新しいタスクを開始",
 				"description": "入力内容で新しいタスクを開始できます。コマンドパレットから利用できます。"
+			},
+			"TASK_TITLE": {
+				"label": "タスクタイトル",
+				"description": "新しいタスクの短いタイトルをバックグラウンドで生成します。履歴とタスクヘッダーに表示されます。以下で設定できます。"
 			}
 		}
 	},
@@ -196,7 +197,6 @@
 		"title": "モードを削除",
 		"message": "モード「{{modeName}}」を削除してもよろしいですか？",
 		"rulesFolder": "このモードには{{folderPath}}にルールフォルダがあり、それも削除されます。",
-		"descriptionNoRules": "このカスタムモードを削除してもよろしいですか？",
 		"confirm": "削除",
 		"cancel": "キャンセル"
 	}

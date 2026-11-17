@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://platform.moonshot.ai/
 export type MoonshotModelId = keyof typeof moonshotModels
@@ -120,3 +129,17 @@ export const moonshotModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export const MOONSHOT_DEFAULT_TEMPERATURE = 0.6
+
+export const moonshotProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.moonshot,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => moonshotDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		moonshotBaseUrl: z
+			.union([z.literal("https://api.moonshot.ai/v1"), z.literal("https://api.moonshot.cn/v1")])
+			.optional(),
+		moonshotApiKey: z.string().optional(),
+	},
+})

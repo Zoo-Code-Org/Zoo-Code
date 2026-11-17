@@ -290,13 +290,15 @@ function flattenTopLevelComposition(schema: Record<string, unknown>): Record<str
  * @param schema - The JSON Schema to normalize
  * @returns A normalized schema object that is JSON Schema draft 2020-12 compliant
  */
-export function normalizeToolSchema(schema: Record<string, unknown>): Record<string, unknown> {
+export function normalizeToolSchema(schema: Record<string, unknown>): Record<string, unknown>
+export function normalizeToolSchema(schema: unknown): unknown
+export function normalizeToolSchema(schema: unknown): unknown {
 	if (typeof schema !== "object" || schema === null) {
 		return schema
 	}
 
 	// First, flatten any top-level composition keywords before normalizing
-	const flattenedSchema = flattenTopLevelComposition(schema)
+	const flattenedSchema = flattenTopLevelComposition(schema as Record<string, unknown>)
 
 	const result = NormalizedToolSchemaInternal.safeParse(flattenedSchema)
 	return result.success ? result.data : flattenedSchema
