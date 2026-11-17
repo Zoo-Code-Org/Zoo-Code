@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 
 import {
 	type ModeConfig,
+	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	type RooCodeSettings,
 	providerIdentifiers,
@@ -880,6 +881,115 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
 				"tab-to-preserve": { mode: "architect" },
 			})
+		})
+	})
+
+	describe("deferred task rebuild stays bound to the guarded task", () => {
+		it("does not rebuild a task that navigated in while the deletion group awaited", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runningProfile: ProviderSettingsEntry = {
+				name: "running-profile",
+				id: "running-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [runningProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			// A closed view's persisted pin is what makes this deletion re-point at the survivor:
+			// neither the shared selection nor this view's own pin names the deleted profile, so the
+			// post-commit completion below the catch never runs and the only rebuild left standing is
+			// the deferred one inside the group.
+			await provider.contextProxy.setValue("viewStates", {
+				"closed-tab": { currentApiConfigName: "running-profile" },
+			})
+			provider["viewLocalState"].currentApiConfigName = "keeper-profile"
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "running-profile"
+						? {
+								name: "running-profile",
+								id: "running-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "running-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			// The navigation instrument: which task the provider answers with flips at the moment the
+			// awaited strict sticky write moves the guarded task's own profile name, which is the first
+			// await below the eligibility guard. No row of the deletion group is replaced, so the
+			// rebuild below still runs on the real path and only the lookup answer changes.
+			let navigated = false
+			const guardedTask = {
+				taskId: "task-under-deleted-profile",
+				taskApiConfigName: "running-profile",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "running-key",
+				},
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					guardedTask.taskApiConfigName = name
+					navigated = true
+				}),
+			}
+			const navigatedTask = {
+				taskId: "task-after-navigation",
+				taskApiConfigName: "keeper-profile",
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openai,
+					openAIApiKey: "other-key",
+				},
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			// The double is structural, so the lookup below needs a double assertion: the path touches
+			// only the sticky name and the API handler, matching the task-double shape already used in
+			// ClineProvider.spec.ts.
+			vi.spyOn(provider, "getCurrentTask").mockImplementation(
+				() =>
+					(navigated ? navigatedTask : guardedTask) as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			await provider.deleteProviderProfile(runningProfile)
+			await ClineProvider["persistedViewStateWriteQueue"]
+			// Positive control that the group ran through to its deferred rebuild: the closed view's
+			// persisted pin was re-pointed, so the row below measures a rebuild landing on the wrong
+			// task and not an early rejection that skipped the writes.
+			expect(provider.contextProxy.getValue("viewStates")).toMatchObject({
+				"closed-tab": { currentApiConfigName: "keeper-profile" },
+			})
+			expect(navigatedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(guardedTask.setTaskApiConfigName).toHaveBeenCalledWith("keeper-profile")
+			expect(guardedTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(provider.pinnedProfileName).toBe("keeper-profile")
+			await provider.dispose()
 		})
 	})
 

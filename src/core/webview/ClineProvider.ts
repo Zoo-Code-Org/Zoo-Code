@@ -4067,7 +4067,13 @@ export class ClineProvider
 			// this guard moves the conversation's sticky name to the survivor, so after it the name
 			// the task actually ran under is no longer readable from the task itself.
 			let rebuildActingTaskAfterWrites = false
-			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+			// Latched with the flag: the flag says a rebuild is owed, the id says to which
+			// conversation. Task navigation can replace the current task inside any of the three
+			// awaits below, and the helper below already refuses a mismatched task when an id is given.
+			let guardedTaskId: string | undefined
+			const guardedTask = this.getCurrentTask()
+			if (guardedTask?.taskApiConfigName === profileToDelete.name) {
+				guardedTaskId = guardedTask.taskId
 				// Strict: a task left naming the deleted profile must fail the deletion so the write
 				// group above is rolled back instead of reporting a successful deletion.
 				// It runs before the rebuild below on purpose: a rebuilt API handler is not part of that
@@ -4095,7 +4101,10 @@ export class ClineProvider
 			// rebuild and the sibling refresh above follows; the latch keeps the guard's own
 			// decision point, which sits before the sticky write moved the name.
 			if (rebuildActingTaskAfterWrites && survivingSettings) {
-				this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+				this.updateTaskApiHandlerIfNeeded(survivingSettings, {
+					forceRebuild: true,
+					expectedCurrentTaskId: guardedTaskId,
+				})
 			}
 		} catch (error) {
 			// The manager delete committed but a later write failed: restore the
