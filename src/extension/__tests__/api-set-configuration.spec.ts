@@ -185,12 +185,16 @@ describe("API.setConfiguration", () => {
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
 			},
+			// #2110 moved the forward mode-profile write onto the provider setter (it also
+			// updates this window's local mapping); the compensation restores via the manager.
+			setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
-				setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
+				// The restore path is the manager's; it lands, so only the forward write failed.
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
@@ -234,16 +238,16 @@ describe("API.setConfiguration", () => {
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
 			},
+			// #2110: the forward write goes through the provider setter, the restore through
+			// the manager - both fail here, so both failures must be reported.
+			setModeConfig: vi.fn().mockRejectedValueOnce(new Error("mode write failed")),
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),
 				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
 				// The forward mode write fails, and the mode restore fails too.
-				setModeConfig: vi
-					.fn()
-					.mockRejectedValueOnce(new Error("mode write failed"))
-					.mockRejectedValueOnce(new Error("mode restore failed")),
+				setModeConfig: vi.fn().mockRejectedValue(new Error("mode restore failed")),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
@@ -285,12 +289,15 @@ describe("API.setConfiguration", () => {
 			contextProxy: {
 				setValues: vi.fn().mockResolvedValue(undefined),
 			},
+			// #2110 moved the forward mode-profile write onto the provider setter; the
+			// compensation still restores through the manager below.
+			setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("transient read failure")),
 				hasConfig: vi.fn().mockResolvedValue(true),
 				getModeConfigId: vi.fn().mockResolvedValue("old-mode-id"),
 				saveConfig: vi.fn().mockResolvedValue("default-id"),
-				setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
 				deleteConfig: vi.fn().mockResolvedValue(undefined),
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
@@ -435,12 +442,31 @@ describe("API.setConfiguration", () => {
 	it("awaits every mode write before compensating the landed mappings", async () => {
 		const calls: string[] = []
 		let landArchitect: (() => void) | undefined
+		const setModeConfig = vi.fn().mockImplementation(async (mode: string, configId: string) => {
+			if (configId === "new-code") {
+				calls.push("write:code")
+				throw new Error("mode write failed")
+			}
+			if (configId === "new-architect") {
+				calls.push("write:architect")
+				await new Promise<void>((resolve) => {
+					landArchitect = resolve
+				})
+				calls.push("landed:architect")
+				return
+			}
+			calls.push(`restore:${mode}`)
+		})
 		const provider = Object.assign({} as ClineProvider, {
 			context: {},
 			on: vi.fn(),
 			getValue: vi.fn(),
 			setValues: vi.fn().mockResolvedValue(undefined),
 			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			// #2110 routes the forward mode writes through the provider setter and leaves the
+			// compensation restore on the manager; one recorder backs both surfaces so the
+			// ordering asserted below is the real cross-path ordering.
+			setModeConfig,
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),
@@ -451,21 +477,7 @@ describe("API.setConfiguration", () => {
 					.mockImplementation(async (mode: string) =>
 						mode === "code" ? "old-code" : mode === "architect" ? "old-architect" : undefined,
 					),
-				setModeConfig: vi.fn().mockImplementation(async (mode: string, configId: string) => {
-					if (configId === "new-code") {
-						calls.push("write:code")
-						throw new Error("mode write failed")
-					}
-					if (configId === "new-architect") {
-						calls.push("write:architect")
-						await new Promise<void>((resolve) => {
-							landArchitect = resolve
-						})
-						calls.push("landed:architect")
-						return
-					}
-					calls.push(`restore:${mode}`)
-				}),
+				setModeConfig,
 			},
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
 		})

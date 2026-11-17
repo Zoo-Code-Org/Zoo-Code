@@ -1,5 +1,7 @@
 import type OpenAI from "openai"
 
+export const MAX_FOLLOW_UP_SUGGESTIONS = 4
+
 const ASK_FOLLOWUP_QUESTION_DESCRIPTION = `Ask the user a question to gather additional information needed to complete the task. Use when you need clarification or more details to proceed effectively.
 
 Parameters:
@@ -52,7 +54,6 @@ export default {
 						additionalProperties: false,
 					},
 					minItems: 1,
-					maxItems: 4,
 				},
 			},
 			required: ["question", "follow_up"],

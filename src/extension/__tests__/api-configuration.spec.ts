@@ -26,7 +26,10 @@ describe("API - configuration", () => {
 			setValues,
 			log: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig, getProfile, getModeConfigId },
+			providerSettingsManager: { saveConfig, getProfile, getModeConfigId },
+			// #2110 moved the forward mode-profile write onto the provider so this window's
+			// local mode choice is updated too; the double follows that surface.
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -64,7 +67,10 @@ describe("API - configuration", () => {
 			setValues,
 			log: vi.fn(),
 			contextProxy: { setValues },
-			providerSettingsManager: { saveConfig, setModeConfig, getProfile, getModeConfigId },
+			providerSettingsManager: { saveConfig, getProfile, getModeConfigId },
+			// #2110 moved the forward mode-profile write onto the provider so this window's
+			// local mode choice is updated too; the double follows that surface.
+			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel

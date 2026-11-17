@@ -689,6 +689,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// differs from the switched "architect".
 			await provider.saveViewState("mode", "code")
 			await provider.contextProxy.setValue("mode", "code")
+			// #2110 reads the mapping window-locally: seed this window's snapshot with an id
+			// the listing no longer contains, so the read verifies it, misses, and falls
+			// through to the shared lookup - which rejects exactly as before.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "gone-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
 				new Error("activation read failed"),
 			)
@@ -800,6 +805,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// timed-out switch, so a newer mutation may own the mode stores: the late
 			// rollback must not replay the pre-switch values over them.
 			const controller = new AbortController()
+			// #2110 reads the mapping window-locally: a stale snapshot entry drives the read
+			// to the shared lookup, which aborts and then rejects exactly as before.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "gone-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async () => {
 				controller.abort()
 				throw new Error("late activation read failure")
@@ -829,6 +838,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// the reconcile rolls every store back, so listeners must not be left tracking
 			// the rolled-back mode: ModeChanged must not have fired for it, and the task's
 			// TaskModeSwitched must be re-emitted with the restored mode.
+			// #2110 reads the mapping window-locally: seed this window's snapshot with an id
+			// the listing no longer contains, so the read verifies it, misses, and falls
+			// through to the shared lookup - which rejects exactly as before.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "gone-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockRejectedValue(
 				new Error("activation read failed"),
 			)
@@ -896,7 +910,11 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
 
-			expect(setModeConfig).toHaveBeenCalledWith("architect", "x-id")
+			// #2110 keeps this recording window-local: the shared modeApiConfigs map belongs
+			// to every window, so the switch stores this view's profile in this window's map
+			// and leaves the shared write alone. The x-id-vs-y-id discrimination is unchanged.
+			expect(provider["localModeConfigIds"].get("architect")).toBe("x-id")
+			expect(setModeConfig).not.toHaveBeenCalled()
 		})
 
 		it("reconciles the switch when the mode-linked profile lookup fails", async () => {
@@ -947,7 +965,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// committed-switch guard at that point - and only a later shared write
 			// fails: the activated profile is already in place, so the switch must
 			// be kept rather than reconciled.
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
+			// #2110 resolves the mode profile window-locally, so seed this window's opening
+			// snapshot; the listing below still verifies the id and the activation runs.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
 			])
@@ -961,14 +981,17 @@ describe("ClineProvider - Sticky Mode", () => {
 				name: "architect-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			})
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockRejectedValue(
-				new Error("set-mode-config failed"),
-			)
+			// The mode-linked activation no longer persists the mode mapping on a switch
+			// (persistModeConfig is false, #2110), so fail the next shared write instead: the
+			// task's sticky provider profile, which lands after the activated profile.
+			provider["persistStickyProviderProfileToCurrentTask"] = vi
+				.fn()
+				.mockRejectedValue(new Error("sticky profile write failed"))
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			await provider.addClineToStack(mockTask)
 
 			await expect(provider["handleModeSwitchUnlocked"]("architect", mockTask)).rejects.toThrow(
-				"set-mode-config failed",
+				"sticky profile write failed",
 			)
 
 			expect(provider.getValue("mode")).toBe("architect")

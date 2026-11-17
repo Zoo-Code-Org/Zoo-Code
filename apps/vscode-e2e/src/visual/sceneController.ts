@@ -108,6 +108,8 @@ export async function run(): Promise<void> {
 			openRouterModelId: "openai/gpt-4.1",
 			openRouterBaseUrl: `${aimockUrl}/v1`,
 			telemetrySetting: "disabled",
+			// A generated title lands asynchronously and would race the task header screenshot.
+			taskTitleGenerationEnabled: false,
 		})
 		await log(`aimock=${aimockUrl}`)
 		let completionHandler: ((event: { message: ClineMessage }) => void) | undefined

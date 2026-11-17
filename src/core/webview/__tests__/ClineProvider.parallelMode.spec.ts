@@ -534,6 +534,9 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 				apiProvider: providerIdentifiers.anthropic,
 			})),
 			setModeConfig: vi.fn().mockResolvedValue(undefined),
+			// #2110: the constructor snapshots this window's mode profile choices through
+			// getModeConfigIds(), so the double has to answer it or construction throws.
+			getModeConfigIds: vi.fn().mockResolvedValue({}),
 			getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			resetAllConfigs: vi.fn().mockResolvedValue(undefined),
 			deleteConfig: vi.fn().mockResolvedValue(undefined),
@@ -1670,7 +1673,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
+			// #2110: the mode profile is resolved window-locally, so this window's opening
+			// snapshot has to carry the mapping; the shared manager lookup stays untouched.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "profile-id" })
+			const getModeConfigIdSpy = vi.spyOn(provider.providerSettingsManager, "getModeConfigId")
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
 				name: "mode-profile",
@@ -1681,15 +1687,17 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "mode-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue(profileSettings)
 			const activateProfileSpy = vi
 				.spyOn(provider.providerSettingsManager, "activateProfile")
-				.mockResolvedValueOnce(profileSettings)
+				.mockResolvedValue(profileSettings)
 
 			await provider.handleModeSwitch("architect")
 
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "mode-profile" })
+			// #2110 resolves the mapping window-locally, so the shared lookup is not consulted.
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
 
 			await provider.dispose()
 		})

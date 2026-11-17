@@ -997,7 +997,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// still in flight, and that write could land after its own restore.
 			const modeWriteResults = await Promise.allSettled(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+					this.sidebarProvider.setModeConfig(mode as Mode, configId),
 				),
 			)
 			const failedModeWrite = modeWriteResults.find((result) => result.status === "rejected")
