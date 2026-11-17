@@ -2306,7 +2306,10 @@ describe("Task persistence", () => {
 			const { processed, parsed } = await resumeWith({ text: "", images: ["data:image/png;base64,AA"] })
 
 			expect(parsed).toEqual([])
-			expect(processed.content.some((block: { type: string }) => block.type === "image")).toBe(true)
+			expect(processed.content).toContainEqual({
+				type: "image",
+				source: { type: "base64", media_type: "image/png", data: "AA" },
+			})
 			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
 		})
 

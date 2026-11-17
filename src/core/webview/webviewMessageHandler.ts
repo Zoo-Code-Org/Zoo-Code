@@ -4068,8 +4068,12 @@ export const webviewMessageHandler = async (
 		case "editQueuedMessage": {
 			const edit = editQueuedMessagePayloadSchema.safeParse(message.payload)
 			if (edit.success) {
-				const { id, text, images, segments } = edit.data
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images, segments)
+				const { id, text, segments: given } = edit.data
+				const segments = segmentsOf(edit.data)
+				const resolved = await resolveIncomingImages({ text, images: edit.data.images, segments })
+				// An edit can keep a mention that already attached its image. The same data URL attaches once.
+				const images = [...new Set(resolved.images)]
+				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images, given)
 			}
 
 			break

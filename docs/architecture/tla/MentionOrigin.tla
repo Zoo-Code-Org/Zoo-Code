@@ -39,8 +39,8 @@
 
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS Alphabet, MaxLen, MaxInit, Retagger, HistoryRestore, UndoRestore, QueueEdit
-\* QueueEdit: "Batch" or "PerEvent".
+CONSTANTS Alphabet, MaxLen, MaxInit, MaxRepl, Retagger, HistoryRestore, UndoRestore, QueueEdit
+\* QueueEdit: "Batch" or "PerEvent". MaxRepl: the longest typed replacement in one edit.
 \* Retagger: "Code" or "Both". HistoryRestore: "Saved" or "AsEdit".
 \* UndoRestore: "AllGenerated", "Retained" or "AsEdit".
 
@@ -89,7 +89,7 @@ Retag(oldL, oldT, newL, f) ==
 Replace(s, i, j, r) ==
     SubSeq(s, 1, i) \o [p \in 1..Len(r) |-> [c |-> r[p], o |-> "u"]] \o SubSeq(s, j+1, Len(s))
 
-Rs == Seqs(Alphabet, 2)
+Rs == Seqs(Alphabet, MaxRepl)
 One(s) == UNION {UNION {{Replace(s, i, j, r) : r \in Rs} : j \in i..Len(s)} : i \in 0..Len(s)}
 Edits(s) == {t \in One(s) : Len(t) <= MaxLen}
 
