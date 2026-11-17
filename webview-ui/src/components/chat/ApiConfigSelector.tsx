@@ -1,5 +1,6 @@
-import { useState, useMemo, useCallback } from "react"
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react"
 import { Fzf } from "fzf"
+import { Brain, ChevronDown } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { enabledSelectorTriggerClassName, selectorTriggerClassName } from "@/components/ui/selectorTriggerStyles"
@@ -10,10 +11,15 @@ import { vscode } from "@/utils/vscode"
 import { Button } from "@/components/ui"
 
 import { IconButton } from "./IconButton"
+import { PickerSearchField } from "./PickerSearchField"
+import { handlePickerNavigation, pickerResultsClassName } from "./model-picker/pickerNavigation"
 
 interface ApiConfigSelectorProps {
 	value: string
 	displayName: string
+	modelId?: string
+	reasoningEffort?: string
+	quickSettings?: ReactNode
 	disabled?: boolean
 	title: string
 	onChange: (value: string) => void
@@ -28,6 +34,9 @@ interface ApiConfigSelectorProps {
 export const ApiConfigSelector = ({
 	value,
 	displayName,
+	modelId,
+	reasoningEffort,
+	quickSettings,
 	disabled = false,
 	title,
 	onChange,
@@ -41,6 +50,12 @@ export const ApiConfigSelector = ({
 	const { t } = useAppTranslation()
 	const [open, setOpen] = useState(false)
 	const [searchValue, setSearchValue] = useState("")
+	const [showProfiles, setShowProfiles] = useState(false)
+	const [pendingProfileId, setPendingProfileId] = useState<string | null>(null)
+	const isProfileView = !quickSettings || showProfiles
+	useEffect(() => {
+		if (pendingProfileId === value) setPendingProfileId(null)
+	}, [value, pendingProfileId])
 	const portalContainer = useRooPortal("roo-portal")
 
 	// Create searchable items for fuzzy search.
@@ -79,10 +94,13 @@ export const ApiConfigSelector = ({
 	const handleSelect = useCallback(
 		(configId: string) => {
 			onChange(configId)
-			setOpen(false)
+			if (quickSettings) {
+				setPendingProfileId(configId === value ? null : configId)
+				setShowProfiles(false)
+			} else setOpen(false)
 			setSearchValue("")
 		},
-		[onChange],
+		[onChange, quickSettings, value],
 	)
 
 	const handleEditClick = useCallback(() => {
@@ -97,25 +115,28 @@ export const ApiConfigSelector = ({
 			return (
 				<div
 					key={config.id}
-					onClick={() => handleSelect(config.id)}
 					className={cn(
 						"px-3 py-1.5 text-sm cursor-pointer flex items-center group",
 						"hover:bg-vscode-list-hoverBackground",
 						isCurrentConfig &&
 							"bg-vscode-list-activeSelectionBackground text-vscode-list-activeSelectionForeground",
 					)}>
-					<div className="flex-1 min-w-0 flex items-center gap-1 overflow-hidden">
+					<button
+						type="button"
+						data-picker-result
+						aria-pressed={isCurrentConfig}
+						disabled={disabled}
+						onClick={() => handleSelect(config.id)}
+						className="flex min-w-0 flex-1 cursor-pointer items-center gap-1 overflow-hidden border-none bg-transparent p-0 text-left text-inherit focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder">
 						<span className="flex-shrink-0">{config.name}</span>
 						{config.modelId && (
 							<>
-								<span
-									className="text-vscode-descriptionForeground opacity-70 min-w-0 overflow-hidden"
-									style={{ direction: "rtl", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+								<span className="min-w-0 truncate text-vscode-descriptionForeground opacity-70">
 									{config.modelId}
 								</span>
 							</>
 						)}
-					</div>
+					</button>
 					<div className="flex items-center gap-1">
 						{isCurrentConfig && (
 							<div className="size-5 p-1 flex items-center justify-center">
@@ -126,7 +147,8 @@ export const ApiConfigSelector = ({
 							<Button
 								variant="ghost"
 								size="icon"
-								tabIndex={-1}
+								aria-label={isPinned ? t("chat:unpin") : t("chat:pin")}
+								disabled={disabled}
 								onClick={(e) => {
 									e.stopPropagation()
 									togglePinnedApiConfig(config.id)
@@ -143,11 +165,20 @@ export const ApiConfigSelector = ({
 				</div>
 			)
 		},
-		[value, handleSelect, t, togglePinnedApiConfig],
+		[value, handleSelect, t, togglePinnedApiConfig, disabled],
 	)
 
 	return (
-		<Popover open={open} onOpenChange={setOpen} data-testid="api-config-selector-root">
+		<Popover
+			open={open}
+			onOpenChange={(nextOpen) => {
+				setOpen(nextOpen)
+				if (!nextOpen) {
+					setShowProfiles(false)
+					setSearchValue("")
+				}
+			}}
+			data-testid="api-config-selector-root">
 			<StandardTooltip content={title}>
 				<PopoverTrigger
 					disabled={disabled}
@@ -158,71 +189,118 @@ export const ApiConfigSelector = ({
 						disabled ? "opacity-50 cursor-not-allowed" : enabledSelectorTriggerClassName,
 						triggerClassName,
 					)}>
-					<span className="truncate">{displayName}</span>
+					<span className="flex min-w-0 items-center gap-1.5">
+						<span className="truncate">
+							<span className="opacity-70">{displayName}</span>
+							{modelId && <> / {modelId}</>}
+						</span>
+						{reasoningEffort && reasoningEffort !== "disable" && (
+							<span
+								aria-label={t("chat:modelPicker.reasoningEffortValue", {
+									effort: t(`chat:modelPicker.effort.${reasoningEffort}`),
+								})}
+								className="inline-flex shrink-0 items-center gap-1 rounded border border-vscode-input-border px-1 py-0.5 text-[10px] leading-none">
+								<Brain aria-hidden="true" className="size-3" />
+								{t(`chat:modelPicker.effort.${reasoningEffort}`)}
+							</span>
+						)}
+					</span>
 				</PopoverTrigger>
 			</StandardTooltip>
 			<PopoverContent
 				align="start"
 				sideOffset={4}
 				container={portalContainer}
-				className="p-0 overflow-hidden w-[300px]">
-				<div className="flex flex-col w-full">
-					{/* Search input or info blurb */}
-					{listApiConfigMeta.length > 6 ? (
-						<div className="relative p-2 border-b border-vscode-dropdown-border">
-							<input
-								aria-label={t("common:ui.search_placeholder")}
-								value={searchValue}
-								onChange={(e) => setSearchValue(e.target.value)}
-								placeholder={t("common:ui.search_placeholder")}
-								className="w-full h-8 px-2 py-1 text-xs bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded focus:outline-0"
-								autoFocus
+				className="flex max-h-[var(--radix-popover-content-available-height)] w-[300px] max-w-[calc(100vw-16px)] flex-col overflow-hidden p-0">
+				<div className="flex min-h-0 w-full flex-col">
+					{quickSettings && (
+						<button
+							type="button"
+							aria-label={t("chat:modelPicker.selectProfile")}
+							aria-expanded={showProfiles}
+							disabled={disabled}
+							onClick={() => {
+								setShowProfiles(!showProfiles)
+								setSearchValue("")
+							}}
+							className="flex w-full min-w-0 shrink-0 cursor-pointer items-center gap-2 border-none border-b border-solid border-vscode-dropdown-border bg-transparent px-3 py-2.5 text-left text-xs text-vscode-foreground hover:bg-vscode-list-hoverBackground focus-visible:ring-1 focus-visible:ring-vscode-focusBorder">
+							<span className="shrink-0 text-vscode-descriptionForeground">
+								{t("chat:modelPicker.profile")}
+							</span>
+							<span className="min-w-0 flex-1 truncate font-semibold">{displayName}</span>
+							<ChevronDown
+								aria-hidden="true"
+								className={cn("size-3 shrink-0 transition-transform", showProfiles && "rotate-180")}
 							/>
-							{searchValue.length > 0 && (
-								<div className="absolute right-4 top-0 bottom-0 flex items-center justify-center">
-									<span
-										className="codicon codicon-close text-vscode-input-foreground opacity-50 hover:opacity-100 text-xs cursor-pointer"
-										onClick={() => setSearchValue("")}
-									/>
-								</div>
-							)}
-						</div>
-					) : (
-						<div className="p-3 border-b border-vscode-dropdown-border">
-							<p className="text-xs text-vscode-descriptionForeground m-0">
-								{t("prompts:apiConfiguration.select")}
-							</p>
-						</div>
+						</button>
 					)}
-
-					{/* Config list - single scroll container */}
-					{filteredConfigs.length === 0 && searchValue ? (
-						<div className="py-2 px-3 text-sm text-vscode-foreground/70">{t("common:ui.no_results")}</div>
-					) : (
-						<div className="max-h-[300px] overflow-y-auto">
-							{/* Pinned configs - sticky header */}
-							{pinnedConfigs.length > 0 && (
+					<div className="flex min-h-0 flex-col overflow-y-auto" onKeyDown={handlePickerNavigation}>
+						{!isProfileView &&
+							(pendingProfileId && pendingProfileId !== value ? (
 								<div
+									role="status"
 									className={cn(
-										"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
-										unpinnedConfigs.length > 0 && "border-b border-vscode-dropdown-foreground/10",
+										pickerResultsClassName,
+										"p-3 text-xs text-vscode-descriptionForeground",
+									)}>
+									{t("chat:modelPicker.loadingProfile")}
+								</div>
+							) : (
+								quickSettings
+							))}
+						{isProfileView && (
+							<>
+								{/* Search input or info blurb */}
+								{quickSettings || listApiConfigMeta.length > 6 ? (
+									<PickerSearchField
+										label={t("common:ui.search_placeholder")}
+										value={searchValue}
+										onChange={setSearchValue}
+										disabled={disabled}
+									/>
+								) : (
+									<div className="p-3 border-b border-vscode-dropdown-border">
+										<p className="text-xs text-vscode-descriptionForeground m-0">
+											{t("prompts:apiConfiguration.select")}
+										</p>
+									</div>
+								)}
+
+								{/* Config list - single scroll container */}
+								<div className={pickerResultsClassName}>
+									{filteredConfigs.length === 0 ? (
+										<div className="px-3 py-2 text-xs text-vscode-descriptionForeground">
+											{t("common:ui.no_results")}
+										</div>
+									) : (
+										<div>
+											{/* Pinned configs - sticky header */}
+											{pinnedConfigs.length > 0 && (
+												<div
+													className={cn(
+														"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
+														unpinnedConfigs.length > 0 &&
+															"border-b border-vscode-dropdown-foreground/10",
+													)}
+													aria-label="Pinned configurations">
+													{pinnedConfigs.map((config) => renderConfigItem(config, true))}
+												</div>
+											)}
+
+											{/* Unpinned configs */}
+											{unpinnedConfigs.length > 0 && (
+												<div className="py-1" aria-label="All configurations">
+													{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
+												</div>
+											)}
+										</div>
 									)}
-									aria-label="Pinned configurations">
-									{pinnedConfigs.map((config) => renderConfigItem(config, true))}
 								</div>
-							)}
-
-							{/* Unpinned configs */}
-							{unpinnedConfigs.length > 0 && (
-								<div className="py-1" aria-label="All configurations">
-									{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
-								</div>
-							)}
-						</div>
-					)}
-
+							</>
+						)}
+					</div>
 					{/* Bottom bar with buttons on left and title on right */}
-					<div className="flex flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
+					<div className="flex shrink-0 flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
 						<div className="flex flex-row gap-1">
 							<IconButton
 								iconClass="codicon-settings-gear"

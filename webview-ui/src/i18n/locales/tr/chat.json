@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "Profil:",
+		"selectProfile": "Profil seç",
+		"loadingProfile": "Profil yükleniyor…",
+		"searchModels": "Model ara",
+		"providerModels": "Geçerli sağlayıcının modelleri",
+		"modelSettingsHint": "Profil ayarlarından bir model seç.",
+		"clearSearch": "Aramayı temizle",
+		"reasoningEffort": "Akıl yürütme çabası",
+		"reasoningEffortValue": "Akıl yürütme çabası: {{effort}}",
+		"off": "Kapalı",
+		"effort": {
+			"none": "Yok",
+			"minimal": "Asgari",
+			"low": "Düşük",
+			"medium": "Orta",
+			"high": "Yüksek",
+			"xhigh": "Çok yüksek",
+			"max": "Azami"
+		}
+	},
 	"task": {
 		"title": "Görev",
 		"expand": "Görevi genişlet",

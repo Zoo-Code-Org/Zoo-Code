@@ -80,6 +80,7 @@ vi.mock("@roo-code/telemetry", () => ({
 import type { ModelRecord } from "@roo-code/types"
 import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
+import * as openAiProvider from "../../../api/providers/openai"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
@@ -137,6 +138,115 @@ const mockClineProvider = {
 	getSkillsManager: vi.fn(),
 	cwd: "/mock/workspace",
 } as unknown as ClineProvider
+
+describe("webviewMessageHandler - OpenAI model discovery", () => {
+	const values = { baseUrl: "https://compatible.test/v1", apiKey: "secret", openAiHeaders: { custom: "header" } }
+
+	beforeEach(() => vi.clearAllMocks())
+	afterEach(() => vi.restoreAllMocks())
+
+	it.each([undefined, "request-1", ""])("preserves the response contract for requestId %j", async (requestId) => {
+		const fetch = vi.spyOn(openAiProvider, "getOpenAiModels").mockResolvedValue(["model"])
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			...(requestId !== undefined ? { requestId } : {}),
+			values,
+		})
+		expect(fetch).toHaveBeenCalledExactlyOnceWith(values.baseUrl, values.apiKey, values.openAiHeaders)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "openAiModels",
+			openAiModels: ["model"],
+			...(requestId !== undefined ? { requestId } : {}),
+		})
+	})
+
+	it.each([undefined, "empty-request"])(
+		"returns empty catalogs with the same correlation contract: %j",
+		async (requestId) => {
+			vi.spyOn(openAiProvider, "getOpenAiModels").mockResolvedValue([])
+			await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiModels", requestId, values })
+			expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "openAiModels",
+				openAiModels: [],
+				...(requestId !== undefined ? { requestId } : {}),
+			})
+		},
+	)
+
+	it.each([
+		undefined,
+		{},
+		{ baseUrl: values.baseUrl },
+		{ apiKey: values.apiKey },
+		{ ...values, apiKey: "" },
+		{ ...values, baseUrl: "" },
+	])("answers correlated missing configuration but preserves legacy silence: %j", async (incomplete) => {
+		const fetch = vi.spyOn(openAiProvider, "getOpenAiModels")
+		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiModels", values: incomplete })
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			requestId: "missing",
+			values: incomplete,
+		})
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "openAiModels",
+			requestId: "missing",
+			openAiModels: [],
+			error: "Configure an OpenAI-compatible base URL and API key in Settings.",
+		})
+		expect(fetch).not.toHaveBeenCalled()
+	})
+
+	it("returns a correlated failure without exposing fetch error credentials", async () => {
+		vi.spyOn(openAiProvider, "getOpenAiModels").mockRejectedValue(new Error("Authorization: secret"))
+		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiModels", requestId: "failed", values })
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "openAiModels",
+			requestId: "failed",
+			openAiModels: [],
+			error: "Model discovery failed; configure this model in Settings.",
+		})
+	})
+
+	it("preserves legacy propagation of unexpected fetch errors without a new response payload", async () => {
+		vi.spyOn(openAiProvider, "getOpenAiModels").mockRejectedValue(new Error("unexpected failure"))
+		await expect(webviewMessageHandler(mockClineProvider, { type: "requestOpenAiModels", values })).rejects.toThrow(
+			"unexpected failure",
+		)
+		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("echoes each request's identifier when concurrent fetches complete out of order", async () => {
+		let completeFirst!: (models: string[]) => void
+		vi.spyOn(openAiProvider, "getOpenAiModels")
+			.mockImplementationOnce(
+				() =>
+					new Promise((resolve) => {
+						completeFirst = resolve
+					}),
+			)
+			.mockResolvedValueOnce(["new"])
+		const first = webviewMessageHandler(mockClineProvider, {
+			type: "requestOpenAiModels",
+			requestId: "first",
+			values,
+		})
+		await webviewMessageHandler(mockClineProvider, { type: "requestOpenAiModels", requestId: "second", values })
+		completeFirst(["old"])
+		await first
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenNthCalledWith(1, {
+			type: "openAiModels",
+			requestId: "second",
+			openAiModels: ["new"],
+		})
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenNthCalledWith(2, {
+			type: "openAiModels",
+			requestId: "first",
+			openAiModels: ["old"],
+		})
+	})
+})
 
 describe("webviewMessageHandler - Copilot authentication", () => {
 	beforeEach(() => {

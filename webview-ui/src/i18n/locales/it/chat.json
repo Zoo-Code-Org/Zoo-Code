@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "Profilo:",
+		"selectProfile": "Scegli un profilo",
+		"loadingProfile": "Caricamento del profilo…",
+		"searchModels": "Cerca modelli",
+		"providerModels": "Modelli del fornitore attuale",
+		"modelSettingsHint": "Scegli un modello nelle impostazioni del profilo.",
+		"clearSearch": "Cancella la ricerca",
+		"reasoningEffort": "Sforzo di ragionamento",
+		"reasoningEffortValue": "Sforzo di ragionamento: {{effort}}",
+		"off": "Disattivato",
+		"effort": {
+			"none": "Nessuno",
+			"minimal": "Minimo",
+			"low": "Basso",
+			"medium": "Medio",
+			"high": "Alto",
+			"xhigh": "Molto alto",
+			"max": "Massimo"
+		}
+	},
 	"task": {
 		"title": "Attività",
 		"expand": "Espandi attività",

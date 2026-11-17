@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "프로필:",
+		"selectProfile": "프로필 선택",
+		"loadingProfile": "프로필 불러오는 중…",
+		"searchModels": "모델 검색",
+		"providerModels": "현재 제공업체의 모델",
+		"modelSettingsHint": "프로필 설정에서 모델을 선택해 줘.",
+		"clearSearch": "검색 지우기",
+		"reasoningEffort": "추론 강도",
+		"reasoningEffortValue": "추론 강도: {{effort}}",
+		"off": "끄기",
+		"effort": {
+			"none": "없음",
+			"minimal": "최소",
+			"low": "낮음",
+			"medium": "보통",
+			"high": "높음",
+			"xhigh": "매우 높음",
+			"max": "최대"
+		}
+	},
 	"task": {
 		"title": "작업",
 		"expand": "작업 펼치기",

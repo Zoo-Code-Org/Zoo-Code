@@ -73,7 +73,6 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
 	isRetiredProvider,
-	modelIdKeys,
 	providerIdentifiers,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
@@ -98,6 +97,7 @@ import { formatLanguage } from "../../shared/language"
 import { WebviewMessage } from "../../shared/WebviewMessage"
 import { EMBEDDING_MODEL_PROFILES } from "../../shared/embeddingModels"
 import { ProfileValidator } from "../../shared/ProfileValidator"
+import { mergeProfileModelPatch } from "./profileModelPatch"
 
 import { Terminal } from "../../integrations/terminal/Terminal"
 import { downloadTask, getTaskFileName } from "../../integrations/misc/export-markdown"
@@ -211,22 +211,6 @@ function scheduleTask(
 		}
 	})
 }
-
-// Keys a model-selector patch may touch: model IDs plus settings reset on model change.
-const PROFILE_MODEL_ID_PATCH_KEYS: ReadonlySet<string> = new Set(modelIdKeys)
-
-const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
-
-// These keys can only be cleared. Setting `awsCustomArn` would let a patch invoke a Bedrock
-// resource that the organization allow-list never checked, because the allow-list sees `apiModelId`.
-const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
-	"reasoningEffort",
-	"modelMaxTokens",
-	"modelMaxThinkingTokens",
-	"awsCustomArn",
-	"awsCustomArnBaseModelId",
-	"awsModelContextWindow",
-])
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
@@ -2294,7 +2278,7 @@ export class ClineProvider
 	}
 
 	/**
-	 * Applies a model change to the latest stored profile inside the mutation queue,
+	 * Applies a model/reasoning change to the latest stored profile inside the mutation queue,
 	 * so a stale webview snapshot cannot overwrite newer profile settings.
 	 * A `null` patch value clears the key.
 	 */
@@ -2315,45 +2299,11 @@ export class ClineProvider
 						)
 					}
 
-					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
-
-					for (const [key, value] of Object.entries(patch)) {
-						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
-							if (typeof value !== "string" || value.length === 0) {
-								throw new Error(`Key "${key}" must be a non-empty string in a model patch`)
-							}
-
-							merged[key] = value
-						} else if (PROFILE_MODEL_RESET_ONLY_KEYS.has(key)) {
-							if (value !== null && value !== undefined) {
-								throw new Error(`Key "${key}" can only be cleared in a model patch`)
-							}
-
-							delete merged[key]
-						} else {
-							throw new Error(`Key "${key}" is not allowed in a model patch`)
-						}
-					}
-
-					if (storedProvider === providerIdentifiers.bedrock) {
-						if (merged.apiModelId === BEDROCK_CUSTOM_ARN_MODEL_ID) {
-							// The allow-list only sees apiModelId, so a patch must not select an ARN it cannot supply.
-							if (!merged.awsCustomArn) {
-								throw new Error(
-									`Model "${BEDROCK_CUSTOM_ARN_MODEL_ID}" requires an existing custom ARN`,
-								)
-							}
-						} else {
-							// A retained ARN would override the allow-listed model, so drop it with its context fields.
-							for (const key of PROFILE_MODEL_RESET_ONLY_KEYS) {
-								if (key.startsWith("aws")) delete merged[key]
-							}
-						}
-					}
+					const merged = mergeProfileModelPatch(stored, expectedProvider, patch)
 
 					const { organizationAllowList } = await this.getState()
 
-					if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+					if (!ProfileValidator.isProfileAllowed(merged, organizationAllowList)) {
 						throw new OrganizationAllowListViolationError(
 							t("common:errors.violated_organization_allowlist"),
 						)
@@ -2362,7 +2312,7 @@ export class ClineProvider
 					if (signal.aborted) return
 
 					try {
-						await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+						await this.persistProviderProfile(name, merged, true, signal)
 					} catch (persistError) {
 						// Saving and activating are separate writes. Put the previous profile back so
 						// storage, context settings, and the task do not disagree about the model.

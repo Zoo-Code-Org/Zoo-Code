@@ -12,6 +12,10 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"unified-model-picker": async () => {
+		const { UnifiedModelPickerStory } = await import("./UnifiedModelPicker.fixture")
+		return <UnifiedModelPickerStory />
+	},
 	"terminal-settings": async () => {
 		const [{ AppProviders }, { TerminalSettings }] = await Promise.all([
 			import("../AppProviders"),

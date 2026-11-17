@@ -3,7 +3,7 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage } from "@roo-code/types"
+import { type ExtensionMessage } from "@roo-code/types"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -23,11 +23,13 @@ import {
 import { cn } from "@src/lib/utils"
 import { convertToMentionPath } from "@src/utils/path-mentions"
 import { StandardTooltip } from "@src/components/ui"
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import Thumbnails from "../common/Thumbnails"
 import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
-import { ModelSelector } from "./ModelSelector"
+import { ProfileQuickSettings } from "./ProfileQuickSettings"
+import { getReasoningSelection } from "./model-picker"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -127,6 +129,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			enterBehavior,
 			lockApiConfigAcrossModes,
 		} = useExtensionState()
+		const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
+		const { currentEffort: reasoningEffort } = getReasoningSelection(apiConfiguration, selectedModelInfo)
 
 		// Find the ID and display text for the currently selected API configuration.
 		const { currentConfigId, displayName } = useMemo(() => {
@@ -1334,6 +1338,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						<ApiConfigSelector
 							value={currentConfigId}
 							displayName={displayName}
+							modelId={selectedModelId}
+							reasoningEffort={reasoningEffort}
+							quickSettings={
+								<ProfileQuickSettings key={currentConfigId} disabled={selectApiConfigDisabled} />
+							}
 							disabled={selectApiConfigDisabled}
 							title={t("chat:selectApiConfig")}
 							onChange={handleApiConfigChange}
@@ -1343,12 +1352,6 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							togglePinnedApiConfig={togglePinnedApiConfig}
 							lockApiConfigAcrossModes={!!lockApiConfigAcrossModes}
 							onToggleLockApiConfig={handleToggleLockApiConfig}
-						/>
-						<ModelSelector
-							apiConfiguration={apiConfiguration}
-							disabled={selectApiConfigDisabled}
-							title={t("chat:selectModel")}
-							triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink"
 						/>
 						<AutoApproveDropdown triggerClassName="min-w-[28px] text-ellipsis overflow-hidden flex-shrink min-[310px]:overflow-visible min-[310px]:flex-shrink-0" />
 					</div>

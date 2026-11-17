@@ -3,6 +3,7 @@ import { vscode } from "@/utils/vscode"
 import { providerIdentifiers } from "@roo-code/types"
 
 import { ApiConfigSelector } from "../ApiConfigSelector"
+import type { ComponentProps, PropsWithChildren } from "react"
 
 // Mock the dependencies
 vi.mock("@/utils/vscode", () => ({
@@ -31,26 +32,33 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 	}),
 }))
 
-// Mock the getModelId function from @roo-code/types
-vi.mock("@roo-code/types", () => ({
-	getModelId: (config: any) => config?.apiModelId || undefined,
-}))
-
 // Mock Popover components to be testable
 vi.mock("@/components/ui", () => ({
-	Popover: ({ children, open }: any) => (
+	Popover: ({
+		children,
+		open,
+		onOpenChange,
+	}: {
+		children: React.ReactNode
+		open: boolean
+		onOpenChange: (open: boolean) => void
+	}) => (
 		<div data-testid="popover-root" data-open={open}>
+			<button data-testid="toggle-popover" onClick={() => onOpenChange(!open)}>
+				Toggle popover
+			</button>
 			{children}
 		</div>
 	),
-	PopoverTrigger: ({ children, disabled, ...props }: any) => (
-		<button data-testid="dropdown-trigger" disabled={disabled} onClick={() => props.onClick?.()} {...props}>
+	PopoverTrigger: ({ children, disabled, ...props }: ComponentProps<"button">) => (
+		<button data-testid="dropdown-trigger" disabled={disabled} {...props}>
 			{children}
 		</button>
 	),
-	PopoverContent: ({ children }: any) => <div data-testid="popover-content">{children}</div>,
-	StandardTooltip: ({ children }: any) => <>{children}</>,
-	Button: ({ children, onClick, ...props }: any) => (
+	PopoverAnchor: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+	PopoverContent: ({ children }: PropsWithChildren) => <div data-testid="popover-content">{children}</div>,
+	StandardTooltip: ({ children }: PropsWithChildren) => <>{children}</>,
+	Button: ({ children, onClick, ...props }: ComponentProps<"button">) => (
 		<button onClick={onClick} {...props}>
 			{children}
 		</button>
@@ -87,6 +95,88 @@ describe("ApiConfigSelector", () => {
 		const trigger = screen.getByTestId("dropdown-trigger")
 		expect(trigger).toBeInTheDocument()
 		expect(trigger).toHaveTextContent("Config 1")
+	})
+
+	test("shows models by default and temporarily replaces them with profiles", () => {
+		const { rerender } = render(
+			<ApiConfigSelector {...defaultProps} quickSettings={<div>Model settings panel</div>} />,
+		)
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		expect(screen.getByText("Model settings panel")).toBeInTheDocument()
+		expect(screen.queryByText("Config 2")).not.toBeInTheDocument()
+		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.selectProfile" }))
+		expect(screen.queryByText("Model settings panel")).not.toBeInTheDocument()
+		fireEvent.mouseEnter(screen.getByText("Config 2"))
+		expect(mockOnChange).not.toHaveBeenCalled()
+		fireEvent.click(screen.getByText("Config 2"))
+		expect(mockOnChange).toHaveBeenCalledWith("config2")
+		expect(screen.getByText("chat:modelPicker.loadingProfile")).toBeInTheDocument()
+		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "true")
+		rerender(
+			<ApiConfigSelector
+				{...defaultProps}
+				value="config2"
+				displayName="Config 2"
+				quickSettings={<div>New profile models</div>}
+			/>,
+		)
+		expect(screen.getByText("New profile models")).toBeInTheDocument()
+		expect(screen.queryByText("chat:modelPicker.loadingProfile")).not.toBeInTheDocument()
+	})
+
+	test("can return from profile selection without changing the active profile", () => {
+		render(<ApiConfigSelector {...defaultProps} quickSettings={<div>Model settings panel</div>} />)
+		const header = screen.getByRole("button", { name: "chat:modelPicker.selectProfile" })
+		fireEvent.click(header)
+		fireEvent.click(header)
+		expect(screen.getByText("Model settings panel")).toBeInTheDocument()
+		expect(mockOnChange).not.toHaveBeenCalled()
+	})
+
+	test("keeps the picker open after interacting with model settings", () => {
+		render(<ApiConfigSelector {...defaultProps} quickSettings={<button>Choose model</button>} />)
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "true")
+		fireEvent.click(screen.getByRole("button", { name: "Choose model" }))
+		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "true")
+	})
+
+	test("keeps profile search available for a short profile list in the combined picker", () => {
+		render(<ApiConfigSelector {...defaultProps} quickSettings={<div>Model settings panel</div>} />)
+		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.selectProfile" }))
+		const input = screen.getByRole("textbox")
+		expect(input.parentElement?.parentElement).toHaveClass("px-3", "py-2")
+		const focus = vi.fn()
+		input.focus = focus
+		fireEvent.change(input, { target: { value: "Config 2" } })
+		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.clearSearch" }))
+		expect(input).toHaveValue("")
+		expect(focus).toHaveBeenCalled()
+	})
+
+	test("shows profile / model and the reasoning badge on the existing trigger", () => {
+		render(<ApiConfigSelector {...defaultProps} modelId="gpt-6.1-sol" reasoningEffort="high" />)
+		const trigger = screen.getByTestId("dropdown-trigger")
+		expect(trigger).toHaveTextContent("Config 1 / gpt-6.1-sol")
+		expect(trigger.querySelector('[aria-label="chat:modelPicker.reasoningEffortValue"]')).toHaveTextContent(
+			"chat:modelPicker.effort.high",
+		)
+		fireEvent.click(screen.getByText("Config 2"))
+		expect(mockOnChange).toHaveBeenCalledWith("config2")
+	})
+
+	test.each([undefined, "disable"])("hides the badge when effort is %s", (reasoningEffort) => {
+		render(<ApiConfigSelector {...defaultProps} modelId="gpt-6.1-sol" reasoningEffort={reasoningEffort} />)
+		expect(
+			screen
+				.getByTestId("dropdown-trigger")
+				.querySelector('[aria-label="chat:modelPicker.reasoningEffortValue"]'),
+		).toBeNull()
+	})
+
+	test("keeps none visible as a valid reasoning effort", () => {
+		render(<ApiConfigSelector {...defaultProps} modelId="gpt-6.1-sol" reasoningEffort="none" />)
+		expect(screen.getByLabelText("chat:modelPicker.reasoningEffortValue")).toBeInTheDocument()
 	})
 
 	test("handles disabled state correctly", () => {
@@ -429,8 +519,8 @@ describe("ApiConfigSelector", () => {
 		fireEvent.change(searchInput, { target: { value: "Config" } })
 
 		// Pin a config
-		const config2Row = screen.getByText("Config 2").closest("div")
-		const pinButton = config2Row?.querySelector("button")
+		const config2Row = screen.getByText("Config 2").closest("button")?.parentElement
+		const pinButton = config2Row?.querySelector('button[aria-label="chat:pin"]')
 		if (pinButton) {
 			fireEvent.click(pinButton)
 		}
@@ -464,8 +554,8 @@ describe("ApiConfigSelector", () => {
 
 		const popoverContent = screen.getByTestId("popover-content")
 
-		// Should have a single scroll container with max-h-[300px] and overflow-y-auto
-		const scrollContainer = popoverContent.querySelector(".max-h-\\[300px\\].overflow-y-auto")
+		// Results keep a fixed height regardless of result count.
+		const scrollContainer = popoverContent.querySelector(".h-\\[300px\\].overflow-y-auto")
 		expect(scrollContainer).toBeInTheDocument()
 
 		// Check for pinned configs sticky header
@@ -518,8 +608,8 @@ describe("ApiConfigSelector", () => {
 
 		const popoverContent = screen.getByTestId("popover-content")
 
-		// Should have a single scroll container with max-h-[300px] and overflow-y-auto
-		const scrollContainer = popoverContent.querySelector(".max-h-\\[300px\\].overflow-y-auto")
+		// Results keep a fixed height regardless of result count.
+		const scrollContainer = popoverContent.querySelector(".h-\\[300px\\].overflow-y-auto")
 		expect(scrollContainer).toBeInTheDocument()
 
 		// No pinned section should exist when no configs are pinned
