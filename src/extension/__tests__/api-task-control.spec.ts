@@ -82,6 +82,7 @@ type ProviderDouble = EventEmitter & {
 	viewStateReadiness: Promise<void>
 	taskHistoryStore: Map<string, unknown>
 	webviewFocusTracker: typeof focusTrackerDouble
+	awaitProfileMutationSettled: Mock<() => Promise<void>>
 }
 
 type TaskDouble = EventEmitter & {
@@ -116,6 +117,7 @@ function createProvider(taskId = "task-1"): ProviderDouble {
 	provider.getCurrentTask = vi.fn().mockReturnValue(undefined)
 	provider.getState = vi.fn().mockResolvedValue({ customModes: [] })
 	provider.handleModeSwitch = vi.fn().mockResolvedValue(undefined)
+	provider.awaitProfileMutationSettled = vi.fn().mockResolvedValue(undefined)
 	provider.viewLaunched = true
 	provider.dispose = vi.fn().mockResolvedValue(undefined)
 	provider.isDisposed = false
@@ -539,6 +541,34 @@ describe("API task controls - per-view review fixes", () => {
 		expect(outputChannel.appendLine).toHaveBeenCalledWith(
 			"[API#selectTaskFollowupSuggestion] mode switch failed for task task-failing-switch: persist failed",
 		)
+	})
+
+	it("holds the follow-up answer until the profile mutation settles after a timed-out switch", async () => {
+		const task = createTask("task-settling-switch")
+		api = new API(outputChannel, asClineProvider(sidebarProvider), makeUnusedTabFactory(), undefined, true)
+		let releaseSettle: () => void = () => {}
+		const settled = new Promise<void>((resolve) => {
+			releaseSettle = resolve
+		})
+		sidebarProvider.handleModeSwitch.mockRejectedValueOnce(new Error("Provider profile mutation timed out"))
+		sidebarProvider.awaitProfileMutationSettled.mockReturnValueOnce(settled)
+		sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+		const selecting = api.selectTaskFollowupSuggestion({
+			taskId: task.taskId,
+			answer: "After settle",
+			mode: "architect",
+		})
+		// Flush microtasks so the flow reaches the failed switch and the settle await.
+		for (let i = 0; i < 8; i++) {
+			await Promise.resolve()
+		}
+		expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+
+		releaseSettle()
+		await expect(selecting).resolves.toBe(true)
+		expect(sidebarProvider.awaitProfileMutationSettled).toHaveBeenCalledOnce()
+		expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "After settle")
 	})
 
 	it("wires a provider's task events exactly once when the same provider is reused for a new tab", async () => {

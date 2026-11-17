@@ -663,6 +663,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				this.log(
 					`[API#selectTaskFollowupSuggestion] mode switch failed for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
 				)
+				// The switch can time out while the mutation it queued is still running, so the
+				// answer waits for that mutation to settle rather than deliver over a mode write that can still land.
+				await entry.provider.awaitProfileMutationSettled()
 			}
 		}
 
