@@ -225,6 +225,17 @@ describe("ClineProvider - Sticky Mode", () => {
 
 	beforeEach(async () => {
 		vi.clearAllMocks()
+		// vi.clearAllMocks clears call records but leaves implementations in place, so a test
+		// that answers getModeBySlug with undefined - the deleted-mode scenario below does - hands
+		// its not-found answer to every later suite once the mode setter consults the function.
+		// Re-apply the module mock's own default before each test instead.
+		const modesModule = vi.mocked(await import("../../../shared/modes"))
+		modesModule.getModeBySlug.mockReturnValue({
+			slug: "code",
+			name: "Code Mode",
+			roleDefinition: "You are a code assistant",
+			groups: ["read", "edit"],
+		})
 
 		if (!TelemetryService.hasInstance()) {
 			TelemetryService.createInstance([])
@@ -1301,11 +1312,34 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Clear previous calls
 			vi.mocked(mockContext.globalState.update).mockClear()
 
-			// Try to switch to invalid mode - it will actually switch
+			// The module mock answers every slug, and this slug is what the row is about, so narrow
+			// it here: the durable write now consults getModeBySlug and has to find nothing.
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const defaultGetModeBySlug = modesModule.getModeBySlug.getMockImplementation()
+			modesModule.getModeBySlug.mockReturnValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const sharedModeBefore = provider.getValue("mode")
+			const pinnedModeBefore = provider["viewLocalState"].mode
+			const taskModeBefore = mockTask["_taskMode"]
+
 			await provider.handleModeSwitch("invalid-mode" as any)
 
-			// The mode WILL be updated to invalid-mode (this is the actual behavior)
-			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "invalid-mode")
+			if (defaultGetModeBySlug) {
+				modesModule.getModeBySlug.mockImplementation(defaultGetModeBySlug)
+			}
+
+			// The setter refuses the slug ahead of both persistence layers, so the shared write
+			// and the per-view pin stay exactly where they were and the log names the refusal.
+			// The task-level writes land before the durable write and are only compensated when
+			// that write throws, so the in-memory mode of the task on the stack does move; that
+			// split is pinned here rather than described away.
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "invalid-mode")
+			expect(provider.getValue("mode")).toBe(sharedModeBefore)
+			expect(provider["viewLocalState"].mode).toBe(pinnedModeBefore)
+			expect(mockTask["_taskMode"]).not.toBe(taskModeBefore)
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining('[ClineProvider#setValue] Ignoring invalid mode "invalid-mode"'),
+			)
 		})
 
 		it("should handle errors during mode switch gracefully", async () => {

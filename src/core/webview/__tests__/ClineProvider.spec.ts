@@ -4567,6 +4567,94 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should refuse an unknown or non-string mode in setValue before either persistence layer is written", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const sharedWrite = vi.spyOn(provider.contextProxy, "setValue")
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const originalMode = modesModule.getModeBySlug("code")
+			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
+				slug === "refactor" ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			try {
+				await provider.setValue("mode", "refactor")
+				expect(mockContext.globalState.get("mode")).toBe("refactor")
+				expect(provider["viewLocalState"].mode).toBe("refactor")
+				// Object.assign keeps the non-string mode a single structural value rather than a
+				// double assertion; it must not reach either layer either.
+				const nonStringMode = Object.assign({} as RooCodeSettings, { mode: 42 }).mode
+				const writesBeforeRefusals = sharedWrite.mock.calls.length
+				await provider.setValue("mode", "bogus-mode")
+				await provider.setValue("mode", nonStringMode)
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining('[ClineProvider#setValue] Ignoring invalid mode "bogus-mode"'),
+				)
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining('[ClineProvider#setValue] Ignoring invalid mode "42"'),
+				)
+				// The shared write count is the ordering proof: the guard returned before
+				// contextProxy.setValue ran, and the per-view pin is only ever written after that
+				// call, so an unchanged pin plus an unchanged call count puts it ahead of both.
+				expect(sharedWrite.mock.calls.length).toBe(writesBeforeRefusals)
+				expect(mockContext.globalState.get("mode")).toBe("refactor")
+				expect(provider["viewLocalState"].mode).toBe("refactor")
+			} finally {
+				modesModule.getModeBySlug.mockReturnValue(originalMode)
+			}
+			await provider.dispose()
+		})
+
+		it("should write modes through setValue that the guard is meant to accept", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			// A slug the custom modes manager reports is a registered mode even though it is not
+			// built in, so the guard has to accept what the manager knows at call time.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([
+				{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+			])
+			const modesModule = vi.mocked(await import("../../../shared/modes"))
+			const originalMode = modesModule.getModeBySlug("code")
+			modesModule.getModeBySlug.mockImplementation(
+				((slug: string, customModes?: { slug: string }[]) =>
+					customModes?.find((mode: { slug: string }) => mode.slug === slug) ??
+					(slug === "architect" || slug === "reviewer"
+						? { slug }
+						: undefined)) as typeof modesModule.getModeBySlug,
+			)
+			try {
+				await provider.setValue("mode", "architect")
+				expect(mockContext.globalState.get("mode")).toBe("architect")
+				expect(provider["viewLocalState"].mode).toBe("architect")
+				await provider.setValue("mode", "reviewer")
+				expect(mockContext.globalState.get("mode")).toBe("reviewer")
+				expect(provider["viewLocalState"].mode).toBe("reviewer")
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "reviewer"'))
+				// Clearing the mode is not a slug: an undefined value still reaches both layers.
+				await provider.setValue("mode", undefined)
+				expect(provider.getValue("mode")).toBeUndefined()
+				expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+				// An unrelated single-value mutation is untouched by the mode guard.
+				await provider.setValue("writeDelayMs", 500)
+				expect(mockContext.globalState.get("writeDelayMs")).toBe(500)
+			} finally {
+				modesModule.getModeBySlug.mockReturnValue(originalMode)
+			}
+			await provider.dispose()
+		})
+
 		it("should apply setValue mutations to global state and keep or clear the right buffer fields", async () => {
 			const provider = new ClineProvider(
 				mockContext,

@@ -5377,6 +5377,24 @@ export class ClineProvider
 	}
 
 	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+		// A mode slug is the one value this setter cannot invent: setValues refuses an unknown or
+		// non-string mode because a new Task would read it back from getState() and persist it into
+		// task history, and this single-value path feeds the same two layers - the shared store
+		// below and the per-view pin written after it - so the established check runs here first,
+		// before either write, against the built-in modes and the modes the manager knows at call
+		// time. The single-value setter carries no companion customModes payload, so a slug that
+		// is not registered yet is refused rather than trusted. An undefined value is a clear and
+		// not a slug, and every other key reaches both layers exactly as before.
+		if (key === "mode" && value !== undefined) {
+			const modeSlug: unknown = value
+			if (
+				typeof modeSlug !== "string" ||
+				!getModeBySlug(modeSlug, await this.customModesManager.getCustomModes())
+			) {
+				this.log(`[ClineProvider#setValue] Ignoring invalid mode "${String(modeSlug)}"`)
+				return
+			}
+		}
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 		await this.contextProxy.setValue(key, value)
 		try {
