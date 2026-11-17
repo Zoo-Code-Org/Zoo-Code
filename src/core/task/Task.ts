@@ -2676,7 +2676,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// A timed-out switch keeps its run-to-completion mutation queued and can still
 						// change this task's mode and profile. Wait for it to settle before delivering
 						// the message, or message processing runs against state the switch moves later.
-						await provider.awaitProfileMutationSettled?.()
+						// The wait must answer to cancellation as well: an abort during it leaves the queued
+						// mutation free to move this task after the message was already handed to processing.
+						const settleWait = provider.awaitProfileMutationSettled?.()
+						if (settleWait) {
+							// A sentinel resolution rather than a rejection keeps the never-settling mutation from
+							// surfacing as an unhandled rejection once the abort has won the race.
+							const generationAtEntry = this.cancellationGeneration
+							const abortWatch = new Promise<"aborted">((resolve) => {
+								const noteAbort = () => {
+									resolve("aborted")
+								}
+								if (this.abortPromise || this.cancellationGeneration !== generationAtEntry) {
+									resolve("aborted")
+									return
+								}
+								this.once(RooCodeEventName.TaskAborted, noteAbort)
+								// The abort can land between the check above and the subscription, in which case the
+								// event has already fired and would never wake this wait. Close that window.
+								if (this.abortPromise || this.cancellationGeneration !== generationAtEntry) {
+									this.off(RooCodeEventName.TaskAborted, noteAbort)
+									resolve("aborted")
+								}
+							})
+							if ((await Promise.race([settleWait, abortWatch])) === "aborted") {
+								console.error(
+									`[Task#submitUserMessage] Cancelled while waiting for the profile mutation to settle (taskId=${this.taskId}): the message is not delivered because the queued switch may still move this task.`,
+								)
+								return
+							}
+						}
 					}
 				}
 

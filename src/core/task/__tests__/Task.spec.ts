@@ -4309,6 +4309,54 @@ describe("Cline", () => {
 				consoleErrorSpy.mockRestore()
 			})
 
+			it("does not deliver the message when the task is cancelled while the mutation settles", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const switchError = new Error("profile mutation still queued")
+				vi.spyOn(mockProvider, "handleModeSwitch").mockRejectedValue(switchError)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				// The queued run-to-completion mutation never settles on its own here, so the only way
+				// out of the settlement wait is the cancellation itself. A resolved mock would let the
+				// delivery slip past the assertion, so settlement stays deferred until after the abort.
+				let releaseSettle!: () => void
+				const settlePending = new Promise<void>((resolve) => {
+					releaseSettle = resolve
+				})
+				const settleSpy = vi.fn(() => settlePending)
+				Object.assign(mockProvider, { awaitProfileMutationSettled: settleSpy })
+				const responseOrder: string[] = []
+				handleResponseSpy.mockImplementation(() => {
+					responseOrder.push("delivered")
+				})
+
+				const submitting = task.submitUserMessage("not delivered", undefined, "code")
+				// Flush microtasks until the submission reaches the deferred settlement wait.
+				for (let turn = 0; turn < 50 && settleSpy.mock.calls.length === 0; turn++) {
+					await Promise.resolve()
+				}
+				expect(settleSpy).toHaveBeenCalledOnce()
+
+				const aborted = task.abortTask()
+				// The submission must come back on its own once the task is cancelled, rather than
+				// staying pending on a mutation that may still move this task.
+				await submitting
+				expect(responseOrder).toEqual([])
+				expect(handleResponseSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Cancelled while waiting for the profile mutation to settle"),
+				)
+
+				releaseSettle()
+				await aborted
+				consoleErrorSpy.mockRestore()
+			})
+
 			it("warns when the mode switch resolves without applying the requested mode", async () => {
 				vi.spyOn(mockProvider, "getState").mockResolvedValue(
 					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),
