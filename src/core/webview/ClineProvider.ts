@@ -544,6 +544,12 @@ export class ClineProvider
 	 * when running in parallel (multi-tab) mode.
 	 */
 	private viewLocalState: Partial<ExtensionState> = {}
+	/**
+	 * How many times a write or a clear has touched the buffer's mode field. A value copy cannot
+	 * tell a clear during an async window from a buffer that never held the field - both read
+	 * undefined - so the load compares this counter across its window instead.
+	 */
+	private viewLocalModeMutations = 0
 
 	/**
 	 * View ids evicted from the durable viewStates map by this instance's writes
@@ -1211,6 +1217,9 @@ export class ClineProvider
 			// mutation paths update viewLocalState in place, so a shallow copy is
 			// what makes fields mutated during the load window observable below.
 			const preLoadBuffer = { ...this.viewLocalState }
+			// Counted alongside the value copy: a clear of a field this buffer never held leaves both
+			// sides undefined, so only the counter can report that the field was touched mid-load.
+			const modeMutationsBeforeLoad = this.viewLocalModeMutations
 
 			if (persisted?.mode) {
 				// A persisted mode may reference a custom mode that was deleted after it was
@@ -1267,7 +1276,10 @@ export class ClineProvider
 				delete mergedState.apiConfiguration
 			}
 
-			if (!Object.is(preLoadBuffer.mode, postLoadBuffer.mode)) {
+			if (
+				!Object.is(preLoadBuffer.mode, postLoadBuffer.mode) ||
+				modeMutationsBeforeLoad !== this.viewLocalModeMutations
+			) {
 				if (postLoadBuffer.mode === undefined) {
 					delete mergedState.mode
 				} else {
@@ -5706,10 +5718,13 @@ export class ClineProvider
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
 			// a new Task would read it from getState() and persist it into task history.
-			if (
-				typeof sanitizedValues.mode !== "string" ||
-				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
-			) {
+			// A createTask configuration supplies the definition of a brand-new mode together with its
+			// slug, and createTask registers those definitions only after this method returns, at rows
+			// 6463-6471 of this file. The payload's own definitions therefore count as known here:
+			// validating against the manager alone drops the slug now and re-accepts it seconds later.
+			const payloadCustomModes = Array.isArray(sanitizedValues.customModes) ? sanitizedValues.customModes : []
+			const knownModes = [...(await this.customModesManager.getCustomModes()), ...payloadCustomModes]
+			if (typeof sanitizedValues.mode !== "string" || !getModeBySlug(sanitizedValues.mode, knownModes)) {
 				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
 				delete sanitizedValues.mode
 			}
@@ -5748,6 +5763,7 @@ export class ClineProvider
 	 */
 	private _updateViewLocalStateFromMutation(values: Partial<RooCodeSettings> & Partial<ExtensionState>): void {
 		if ("mode" in values) {
+			this.viewLocalModeMutations++
 			const val = values.mode
 			if (val === undefined || val === null) {
 				delete this.viewLocalState.mode
