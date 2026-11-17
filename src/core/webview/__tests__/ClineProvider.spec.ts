@@ -6740,6 +6740,7 @@ describe("ClineProvider", () => {
 					const resolution = {
 						pinned: provider.pinnedProfileName,
 						cachedId: provider["localModeConfigIds"].get("code"),
+						hasEntry: provider["localModeConfigIds"].has("code"),
 						shared: sharedModeConfigId,
 					}
 					// The scenario reports what the mode resolves to afterwards; the assertions
@@ -6762,11 +6763,13 @@ describe("ClineProvider", () => {
 					pinned: present.pinned,
 					local: present.cachedId,
 					shared: present.shared,
+					hasEntry: present.hasEntry,
 				})
 				.toEqual({
 					shape: "this window chose the prior profile",
 					pinned: "prior-profile",
 					local: "prior-id",
+					hasEntry: true,
 					shared: "prior-id",
 				})
 			// The absent shape restores absence: the entry the failed write added is
@@ -6778,13 +6781,325 @@ describe("ClineProvider", () => {
 					pinned: absent.pinned,
 					local: absent.cachedId,
 					shared: absent.shared,
+					hasEntry: absent.hasEntry,
 				})
 				.toEqual({
 					shape: "this window had no local choice",
 					pinned: "prior-profile",
+					hasEntry: false,
 					shared: "prior-id",
 				})
 		})
+		it("restores a sibling view and its running handler when a save fails after the sibling refresh", async () => {
+			// The acting window saves and activates the profile a sibling view is pinned to. Every
+			// activation write lands, the sibling refresh lands, and the final state post is the write
+			// that fails - the shape the finding names. Each shape below returns what the sibling
+			// resolves to afterwards, so the scenario reports state rather than call counts.
+			const priorProfile: ProviderSettingsEntry = {
+				name: "prior-profile",
+				id: "prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const savedProfile: ProviderSettingsEntry = {
+				name: "saved-profile",
+				id: "saved-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// Three different providers so every measurement says which settings it holds: the
+			// sibling's own overlay, the shared store it follows without one, and the settings the
+			// failing save tried to publish.
+			const savedSettings: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				apiKey: "saved-key",
+				openAiBaseUrl: "https://saved.example",
+			}
+			const siblingPrior: ProviderSettings = {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sibling-prior-key",
+			}
+			const sharedStorePrior: ProviderSettings = {
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "shared-store-key",
+			}
+			const taskPrior: ProviderSettings = {
+				apiProvider: providerIdentifiers.openai,
+				apiKey: "task-prior-key",
+			}
+			const runScenario = async (
+				shape:
+					| "pinned view whose task follows the saved profile"
+					| "pinned view whose task follows another profile"
+					| "pinned view with no overlay of its own"
+					| "pinned view disposed before the rollback ran"
+					| "pinned view whose buffer write fails on the rollback"
+					| "pinned view with no conversation of its own",
+			) => {
+				const provider = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"sidebar",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				const sibling = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"editor",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				await provider.contextProxy.setValue("listApiConfigMeta", [priorProfile, savedProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+				await provider.contextProxy.setValue("mode", "code")
+				const taskFollowsSaved =
+					shape === "pinned view whose task follows the saved profile" ||
+					shape === "pinned view disposed before the rollback ran" ||
+					shape === "pinned view whose buffer write fails on the rollback" ||
+					shape === "pinned view with no overlay of its own"
+				// The durable pin is seeded through the same queue every viewStates write uses, so the
+				// rollback has a real entry to restore and the measurement is not comparing two blanks.
+				await sibling.saveViewState("currentApiConfigName", "saved-profile")
+				if (shape !== "pinned view with no overlay of its own") {
+					sibling["viewLocalState"].apiConfiguration = siblingPrior
+				}
+				const siblingLogs: string[] = []
+				const siblingTask = {
+					apiConfiguration: taskPrior,
+					taskId: "sibling-task",
+					taskApiConfigName: taskFollowsSaved ? "saved-profile" : "other-profile",
+					setTaskApiConfigName: vi.fn(),
+					updateApiConfiguration: vi.fn().mockImplementation(function (
+						this: { apiConfiguration: ProviderSettings },
+						next: ProviderSettings,
+					) {
+						this.apiConfiguration = next
+					}),
+				}
+				// Direct double: the rollback only reads these fields, and a full Task double would bury
+				// which of the sibling surfaces moved. The disposed shape carries no conversation,
+				// so the rollback has to read the task optionally instead of assuming one is there.
+				if (
+					shape === "pinned view disposed before the rollback ran" ||
+					shape === "pinned view with no conversation of its own"
+				) {
+					vi.spyOn(sibling, "getCurrentTask").mockReturnValue(undefined)
+				} else {
+					vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+						siblingTask as unknown as ReturnType<typeof sibling.getCurrentTask>,
+					)
+				}
+				vi.spyOn(sibling.contextProxy, "getProviderSettings").mockReturnValue(sharedStorePrior)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorProfile, savedProfile])
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+					if ("name" in params && params.name === "saved-profile") {
+						return { ...savedProfile, ...savedSettings }
+					}
+					return { ...priorProfile, apiKey: "prior-secret" }
+				})
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("prior-profile")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("saved-id")
+				// The shared mode mapping is the control: the compensation already restores it, so a
+				// difference in the sibling surfaces cannot be blamed on the mapping.
+				let sharedModeConfigId: string | undefined = "prior-id"
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(
+					async () => sharedModeConfigId,
+				)
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(async (_mode, id) => {
+					sharedModeConfigId = id
+				})
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				// The acting window has no running conversation, so its own handler and its task sticky
+				// name are not in play: this scenario is about the sibling the refresh rewrote.
+				vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+					// The refresh has landed by the time the acting view posts, so disposing here
+					// puts a sibling into disposal between the write that landed and the
+					// rollback that has to decide what to do with it.
+					if (shape === "pinned view disposed before the rollback ran") {
+						await sibling.dispose()
+					}
+					if (shape === "pinned view whose buffer write fails on the rollback") {
+						// Only the rollback reaches these two: the refresh already wrote this buffer and
+						// posted this view before this post ran, so the write that has to fail is the one
+						// the compensation makes.
+						sibling["log"] = (message: string) => {
+							siblingLogs.push(message)
+						}
+						sibling["_saveViewLocalStateFromMutation"] = async () => {
+							throw new Error("buffer write refused")
+						}
+					}
+					throw new Error("webview is gone")
+				})
+				const durableBefore = provider["getPersistedViewStates"]({ fresh: true })[sibling["viewId"]]
+				try {
+					await expect(
+						provider["persistProviderProfile"]("saved-profile", savedSettings, true),
+					).rejects.toThrow("webview is gone")
+					const overlay = sibling["viewLocalState"].apiConfiguration
+					const durableAfter = provider["getPersistedViewStates"]({ fresh: true })[sibling["viewId"]]
+					return {
+						shape,
+						pin: sibling.pinnedProfileName,
+						overlayProvider: overlay?.apiProvider,
+						overlayKey: overlay ? (overlay as { apiKey?: string }).apiKey : undefined,
+						taskProvider: siblingTask.apiConfiguration.apiProvider,
+						taskKey: (siblingTask.apiConfiguration as { apiKey?: string }).apiKey,
+						sticky: siblingTask.taskApiConfigName,
+						handlerRebuilds: siblingTask.updateApiConfiguration.mock.calls.length,
+						durablePinBefore: durableBefore?.currentApiConfigName,
+						durablePinAfter: durableAfter?.currentApiConfigName,
+						sharedSelection: provider.contextProxy.getValues().currentApiConfigName,
+						sharedMapping: sharedModeConfigId,
+						actingTask: provider.getCurrentTask() === undefined ? "none" : "present",
+						logged: siblingLogs.some((message) => message.includes("rollback failed for a sibling buffer")),
+					}
+				} finally {
+					await provider.dispose()
+					if (!sibling["_disposed"]) {
+						await sibling.dispose()
+					}
+				}
+			}
+			const measurements: Awaited<ReturnType<typeof runScenario>>[] = []
+			measurements.push(await runScenario("pinned view whose task follows the saved profile"))
+			measurements.push(await runScenario("pinned view whose task follows another profile"))
+			measurements.push(await runScenario("pinned view with no overlay of its own"))
+			measurements.push(await runScenario("pinned view disposed before the rollback ran"))
+			measurements.push(await runScenario("pinned view whose buffer write fails on the rollback"))
+			measurements.push(await runScenario("pinned view with no conversation of its own"))
+			measurements.forEach((measured) => {
+				console.log("SIBLING_ROLLBACK " + JSON.stringify(measured))
+			})
+			const [savedView, otherView, noOverlayView, disposedView, bufferFailView, noTaskView] = measurements
+			// The handler count is asserted because rebuilding a handler from the settings it already
+			// ran cannot be seen in the resolved state: it is the only way to tell a rollback that
+			// leaves a task alone from one that rewrites it. Everything else is state.
+			expect
+				.soft({
+					shape: savedView.shape,
+					pin: savedView.pin,
+					overlayProvider: savedView.overlayProvider,
+					overlayKey: savedView.overlayKey,
+					taskProvider: savedView.taskProvider,
+					taskKey: savedView.taskKey,
+					sticky: savedView.sticky,
+					handlerRebuilds: savedView.handlerRebuilds,
+					durablePinAfter: savedView.durablePinAfter,
+					sharedMapping: savedView.sharedMapping,
+				})
+				.toEqual({
+					shape: "pinned view whose task follows the saved profile",
+					pin: "saved-profile",
+					overlayProvider: providerIdentifiers.anthropic,
+					overlayKey: "sibling-prior-key",
+					taskProvider: providerIdentifiers.anthropic,
+					taskKey: "sibling-prior-key",
+					sticky: "saved-profile",
+					handlerRebuilds: 2,
+					durablePinAfter: "saved-profile",
+					sharedMapping: "prior-id",
+				})
+			expect
+				.soft({
+					shape: otherView.shape,
+					overlayProvider: otherView.overlayProvider,
+					taskProvider: otherView.taskProvider,
+					taskKey: otherView.taskKey,
+					sticky: otherView.sticky,
+					handlerRebuilds: otherView.handlerRebuilds,
+				})
+				.toEqual({
+					shape: "pinned view whose task follows another profile",
+					overlayProvider: providerIdentifiers.anthropic,
+					taskProvider: providerIdentifiers.openai,
+					taskKey: "task-prior-key",
+					sticky: "other-profile",
+					handlerRebuilds: 0,
+				})
+			expect
+				.soft({
+					shape: noOverlayView.shape,
+					overlayProvider: noOverlayView.overlayProvider,
+					taskProvider: noOverlayView.taskProvider,
+					taskKey: noOverlayView.taskKey,
+					handlerRebuilds: noOverlayView.handlerRebuilds,
+				})
+				.toEqual({
+					shape: "pinned view with no overlay of its own",
+					overlayProvider: undefined,
+					taskProvider: providerIdentifiers.openrouter,
+					taskKey: "shared-store-key",
+					handlerRebuilds: 2,
+				})
+			// The sibling is disposed by the acting view failing post, after the refresh landed
+			// its write, and its conversation went with it, so no rebuild is owed to it at all.
+			// A view that has begun disposal owns an orphaned viewStates key: writing through
+			// it recreates state no live view reads.
+			expect
+				.soft({
+					shape: disposedView.shape,
+					overlayProvider: disposedView.overlayProvider,
+					overlayKey: disposedView.overlayKey,
+					taskProvider: disposedView.taskProvider,
+					handlerRebuilds: disposedView.handlerRebuilds,
+				})
+				.toEqual({
+					shape: "pinned view disposed before the rollback ran",
+					overlayProvider: providerIdentifiers.openai,
+					overlayKey: "saved-key",
+					taskProvider: providerIdentifiers.openai,
+					handlerRebuilds: 0,
+				})
+
+			// The buffer write itself can fail. When it does, the rollback says so and leaves
+			// the conversation where it stands: moving a running task onto settings its own view
+			// no longer holds is the split this compensation exists to avoid.
+			expect
+				.soft({
+					shape: bufferFailView.shape,
+					overlayProvider: bufferFailView.overlayProvider,
+					overlayKey: bufferFailView.overlayKey,
+					taskProvider: bufferFailView.taskProvider,
+					taskKey: bufferFailView.taskKey,
+					handlerRebuilds: bufferFailView.handlerRebuilds,
+					logged: bufferFailView.logged,
+				})
+				.toEqual({
+					shape: "pinned view whose buffer write fails on the rollback",
+					overlayProvider: providerIdentifiers.openai,
+					overlayKey: "saved-key",
+					taskProvider: providerIdentifiers.openai,
+					taskKey: "saved-key",
+					handlerRebuilds: 1,
+					logged: true,
+				})
+
+			// A pinned view can hold no conversation at all: the rollback still restores its
+			// buffer and reads the task optionally, so a missing conversation is not a reason to
+			// throw and strand the rest of the compensation.
+			expect
+				.soft({
+					shape: noTaskView.shape,
+					pin: noTaskView.pin,
+					overlayProvider: noTaskView.overlayProvider,
+					overlayKey: noTaskView.overlayKey,
+					handlerRebuilds: noTaskView.handlerRebuilds,
+					logged: noTaskView.logged,
+					durablePinAfter: noTaskView.durablePinAfter,
+				})
+				.toEqual({
+					shape: "pinned view with no conversation of its own",
+					pin: "saved-profile",
+					overlayProvider: providerIdentifiers.anthropic,
+					overlayKey: "sibling-prior-key",
+					handlerRebuilds: 0,
+					logged: false,
+					durablePinAfter: "saved-profile",
+				})
+		})
+
 		it("does not undo a newer shared write when the per-view write fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

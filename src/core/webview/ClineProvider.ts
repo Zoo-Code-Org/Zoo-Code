@@ -300,6 +300,16 @@ type ProfileActivationSnapshot = {
 	viewStates: Record<string, PersistedViewState>
 }
 
+/**
+ * What one live view's buffer held before a profile save overwrote it. The refresh
+ * takes these before it writes and hands them back so the caller can put the buffer
+ * back when a later failure rolls the save back.
+ */
+type SiblingRefreshSnapshot = {
+	instance: ClineProvider
+	previousOverlay: ProviderSettings | undefined
+}
+
 type ProviderManagerSnapshot = {
 	previousRecord: ProviderSettingsWithId | undefined
 	recordExisted: boolean | undefined
@@ -3590,6 +3600,10 @@ export class ClineProvider
 		// opened with. The activation below overwrites it and getModeConfigId prefers it
 		// over the shared map, so the compensation needs the value from before the write.
 		let priorLocalModeConfigId: string | undefined
+		// What each sibling view held before this save's refresh overwrote it. Declared
+		// outside the write group for the same reason as the mapping above: the catch has to
+		// see what landed, and only the refresh itself knows what each view held first.
+		let refreshedSiblings: SiblingRefreshSnapshot[] = []
 		try {
 			if (activate) {
 				const { mode } = await this.getState()
@@ -3645,7 +3659,7 @@ export class ClineProvider
 				// Other live views may have buffered this profile's settings earlier;
 				// refresh them so their getState() cannot report the updated profile's
 				// name with stale settings.
-				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+				refreshedSiblings = await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 
 				// Change the provider for the current task.
 				// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -3663,7 +3677,7 @@ export class ClineProvider
 				if (this.pinnedProfileName === name) {
 					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
 				}
-				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+				refreshedSiblings = await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 				// Rebuild only after the sibling refresh landed, as the activating branch above does:
 				// a rebuilt task handler is not one of the durable stores the compensation can put back,
 				// so rebuilding before a write that can still fail leaves the running task sending
@@ -3716,6 +3730,9 @@ export class ClineProvider
 				}
 			}
 			await this._restoreProfileActivationState(preWriteSnapshot)
+			// Last: the shared stores and this window's own buffer are back, so a sibling that
+			// follows the shared store can be pointed at the settings that came back with them.
+			await this._restoreRefreshedSiblings(refreshedSiblings, name)
 			throw error
 		}
 	}
@@ -4478,11 +4495,15 @@ export class ClineProvider
 	 * whose buffer loaded the profile earlier keeps shadowing the stale
 	 * settings in its getState() until its own next mutation. The originating
 	 * view refreshes its buffer at the mutation site itself.
+	 *
+	 * Returns what each sibling buffer held before this refresh overwrote it, so the
+	 * caller can undo a refresh that landed here and was then rolled back by a failure
+	 * further along its own write group.
 	 */
 	private async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
-	): Promise<void> {
+	): Promise<SiblingRefreshSnapshot[]> {
 		const affected = ClineProvider.getAllInstances().filter(
 			// Direct private access: compile-time safe across sibling instances. A sibling that has
 			// begun disposal must not be written to - see the note in the loop below.
@@ -4490,7 +4511,7 @@ export class ClineProvider
 		)
 
 		if (affected.length === 0) {
-			return
+			return []
 		}
 
 		// Snapshot every affected view BEFORE any write starts: a failure in one sibling has to
@@ -4574,6 +4595,50 @@ export class ClineProvider
 			}
 			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === name) {
 				snapshot.instance.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+			}
+		}
+
+		return snapshots
+	}
+
+	/**
+	 * Put back what a landed sibling refresh overwrote when this window's save fails
+	 * later. The refresh restores its own siblings when one of *its* writes fails; these
+	 * snapshots are how the upsert reaches the siblings whose refresh landed and were
+	 * then rolled back by a failure the refresh could not see. A view that has begun
+	 * disposal is left where it stands - its viewStates key is already orphaned, so
+	 * writing through it recreates state no live view reads, the same rule the refresh
+	 * applies to its own partial failure. A conversation's handler is rebuilt only when
+	 * that conversation runs under the saved profile and only after its view's buffer
+	 * came back: a view pinned without a buffer of its own follows the shared store, so
+	 * once the store is rolled back its running conversation follows the store again
+	 * rather than the settings the failed save tried to publish.
+	 */
+	private async _restoreRefreshedSiblings(
+		snapshots: SiblingRefreshSnapshot[],
+		writtenProfileName: string,
+	): Promise<void> {
+		for (const snapshot of snapshots) {
+			if (snapshot.instance._disposed) {
+				continue
+			}
+			try {
+				await snapshot.instance._saveViewLocalStateFromMutation({
+					apiConfiguration: snapshot.previousOverlay,
+				})
+			} catch (restoreError) {
+				snapshot.instance.log(
+					`[ClineProvider] profile-activation rollback failed for a sibling buffer: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
+				// The buffer did not come back, so the conversation must not be moved onto
+				// settings its own view is no longer holding.
+				continue
+			}
+			if (snapshot.instance.getCurrentTask()?.taskApiConfigName === writtenProfileName) {
+				snapshot.instance.updateTaskApiHandlerIfNeeded(
+					snapshot.previousOverlay ?? snapshot.instance.contextProxy.getProviderSettings(),
+					{ forceRebuild: true },
+				)
 			}
 		}
 	}
