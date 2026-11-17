@@ -231,10 +231,21 @@ export async function undoEscapedPublish(
 	if (actualBytes === undefined || !actualBytes.equals(expectedBytes)) {
 		return
 	}
-	// Re-stat immediately before the unlink: a peer may have replaced the file between
-	// the read and the delete, and unlinking it would remove that peer's content.
+	// Re-stat immediately before the unlink: a peer may have replaced the file between the
+	// read and the delete, and unlinking it would remove that peer's content. Device, inode
+	// and length do not prove the bytes are still the ones the read above verified: a peer
+	// that writes through the same name keeps the inode, and a payload of the same length
+	// keeps the size. The two timestamps are what say whether anything wrote through the
+	// name since that read, so this guard compares what the record above already compares.
 	const after = await fs.stat(publishedPath, { bigint: true }).catch(() => undefined)
-	if (!after || after.dev !== before.dev || after.ino !== before.ino || after.size !== before.size) {
+	if (
+		!after ||
+		after.dev !== before.dev ||
+		after.ino !== before.ino ||
+		after.size !== before.size ||
+		after.mtimeMs !== before.mtimeMs ||
+		after.ctimeMs !== before.ctimeMs
+	) {
 		return
 	}
 	await fs.unlink(publishedPath).catch(() => {})

@@ -3,7 +3,7 @@ import { Writable } from "stream"
 import * as path from "path"
 import * as os from "os"
 
-import { ConfinedPathEscapeError, safeWriteJson, undoEscapedPublish } from "../safeWriteJson"
+import { ConfinedPathEscapeError, type PublishedIdentity, safeWriteJson, undoEscapedPublish } from "../safeWriteJson"
 
 // Capture actual implementations before the vi.mock factory runs,
 // so they are never wrapped by vi.fn() — avoids infinite recursion when
@@ -1530,6 +1530,157 @@ describe("safeWriteJson", () => {
 		await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
 
 		expect(fsSyncActual.existsSync(escaped)).toBe(true)
+	})
+
+	// The lookup immediately before the unlink is the last thing standing between this undo and a
+	// peer's content. Device, inode and length are all that lookup compared, and a peer that writes
+	// through the same name changes none of them: it keeps the inode, and a payload of the same
+	// length keeps the size. The rows below script only the second lookup - the one the guard runs
+	// after the verified read - and move one field of it at a time, so the clause that has to catch
+	// that field is the clause the row prices. The last row runs the whole guard against a real
+	// in-place rewrite instead of a scripted field, which is the event the ask describes.
+	const scriptUndoSecondLookup = (field: "dev" | "ino" | "size" | "mtimeMs" | "ctimeMs", bump: bigint): void => {
+		let lookedUp = 0
+		vi.mocked(fs.stat).mockImplementation(async (target: unknown) => {
+			lookedUp++
+			// The scripted lookup is a real bigint Stats with exactly one field moved, so the only
+			// thing the guard can react to here is the clause that reads that field.
+			const real = fsSyncActual.statSync(String(target), { bigint: true })
+			if (lookedUp === 2) {
+				real[field] = real[field] + bump
+			}
+			return real
+		})
+	}
+
+	// Every row here needs the pre-read guard to pass, so the recorded identity is taken from the
+	// file as it stands and the only thing that changes is the scripted lookup.
+	const undoRowFixture = (name: string, ours: string): { escaped: string; recorded: PublishedIdentity } => {
+		const outside = path.join(tempDir, name)
+		fsSyncActual.mkdirSync(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		fsSyncActual.writeFileSync(escaped, ours)
+		const landed = fsSyncActual.statSync(escaped, { bigint: true })
+		return {
+			escaped,
+			recorded: {
+				dev: landed.dev,
+				ino: landed.ino,
+				size: landed.size,
+				mtimeMs: landed.mtimeMs,
+				ctimeMs: landed.ctimeMs,
+			},
+		}
+	}
+
+	test("leaves the file alone when the lookup before the unlink reports a different device", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-dev", ours)
+		try {
+			scriptUndoSecondLookup("dev", 1n)
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	test("leaves the file alone when the lookup before the unlink reports a different inode", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-ino", ours)
+		try {
+			scriptUndoSecondLookup("ino", 1n)
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	test("leaves the file alone when the lookup before the unlink reports a different length", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-size", ours)
+		try {
+			scriptUndoSecondLookup("size", 1n)
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	test("leaves the file alone when the lookup before the unlink reports newer modification times", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-mtime", ours)
+		try {
+			scriptUndoSecondLookup("mtimeMs", 1n)
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	test("leaves the file alone when the lookup before the unlink reports newer change times", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-ctime", ours)
+		try {
+			scriptUndoSecondLookup("ctimeMs", 1n)
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	test("leaves the file alone when the lookup before the unlink cannot complete", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const { escaped, recorded } = undoRowFixture("undo-last-look-fails", ours)
+		let lookedUp = 0
+		try {
+			vi.mocked(fs.stat).mockImplementation(async (target: unknown, options: unknown) => {
+				lookedUp++
+				if (lookedUp === 2) {
+					throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+				}
+				return await fsPromisesActuals.stat!(
+					target as Parameters<typeof fs.stat>[0],
+					options as Parameters<typeof fs.stat>[1],
+				)
+			})
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+		}
+	})
+
+	// The ask's own event: a peer writes through the escaped name after this undo has verified the
+	// bytes and before it deletes. The payload is the same length, so device, inode and length all
+	// still match afterwards - only the timestamps say that anything happened in between.
+	test("leaves a peer's in-place rewrite alone when it lands between the read and the unlink", async () => {
+		const ours = JSON.stringify({ ours: true })
+		const peers = JSON.stringify({ peer: true })
+		expect(Buffer.byteLength(peers)).toBe(Buffer.byteLength(ours))
+		const { escaped, recorded } = undoRowFixture("undo-rewrite-window", ours)
+		try {
+			vi.mocked(fs.readFile).mockImplementationOnce(async () => {
+				const read = await fs.readFile(escaped)
+				fsSyncActual.writeFileSync(escaped, peers)
+				return read
+			})
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(fsSyncActual.existsSync(escaped)).toBe(true)
+			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ peer: true })
+		} finally {
+			vi.mocked(fs.readFile).mockRestore()
+		}
 	})
 
 	// The undo is an undo of a publish. When the failure lands before the commit rename there is

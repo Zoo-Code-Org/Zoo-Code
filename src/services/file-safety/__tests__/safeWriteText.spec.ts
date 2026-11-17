@@ -1647,7 +1647,7 @@ describe("backup removal on the failure path", () => {
 	// the failure path now makes the same two attempts as step 6, so the count below is 2 and
 	// not 1, and the reporting half is unchanged - the caller still gets the error this write
 	// earned, not a cleanup error.
-	it("makes one unlink attempt and reports the durability failure, not the leftover backup path", async () => {
+	it("makes two unlink attempts and reports the durability failure, not the leftover backup path", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		const dirPath = path.dirname(targetPath)
 		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
