@@ -1,7 +1,16 @@
 // @ts-expect-error Vitest is provided by the test runner at runtime.
 import { describe, it, expect } from "vitest"
 
-import { normalizeString, unescapeHtmlEntities, stripAnsi, truncateTerminalOutput, truncateFileOutput } from "../text-normalization"
+import {
+	normalizeString,
+	unescapeHtmlEntities,
+	stripAnsi,
+	truncateTerminalOutput,
+	truncateFileOutput,
+	extractSemanticSkeleton,
+	ADAPTIVE_FULL_READ_THRESHOLD,
+	SLIDING_WINDOW_PREVIEW_LIMIT,
+} from "../text-normalization"
 
 describe("Text normalization utilities", () => {
 	describe("normalizeString", () => {
@@ -153,6 +162,19 @@ describe("Text normalization utilities", () => {
 			expect(result).toContain("line 10")
 			expect(result).toContain("[...6 intermediate lines omitted for context conservation...]")
 		})
+
+		it("pins critical compiler/test diagnostics when errors occur in the middle slice (Solution 3)", () => {
+			const lines = Array.from({ length: 120 }, (_, i) => `Step ${i + 1}: running task...`)
+			lines[60] = "FAILED: AssertionError: expected false to be true at OrderService.spec.ts:145"
+			lines[61] = "  --> src/core/orders/OrderService.ts:88:12"
+			const text = lines.join("\n")
+			const result = truncateTerminalOutput(text, 40)
+
+			expect(result).toContain("DIAGNOSTIC / ERROR CAPTURE")
+			expect(result).toContain("FAILED: AssertionError: expected false to be true")
+			expect(result).toContain("Step 1: running task...")
+			expect(result).toContain("Step 120: running task...")
+		})
 	})
 
 	describe("truncateFileOutput", () => {
@@ -179,6 +201,38 @@ describe("Text normalization utilities", () => {
 			expect(result.content).toContain("Line 50:")
 			expect(result.content).toContain("Line 451:")
 			expect(result.content).toContain("Line 500:")
+		})
+
+		it("supports adaptive 300-line threshold and 200-line preview window (Solution 1)", () => {
+			expect(ADAPTIVE_FULL_READ_THRESHOLD).toBe(300)
+			expect(SLIDING_WINDOW_PREVIEW_LIMIT).toBe(200)
+
+			const lines = Array.from({ length: 400 }, (_, i) => `// Line ${i + 1}`)
+			const result = truncateFileOutput(lines.join("\n"), SLIDING_WINDOW_PREVIEW_LIMIT, 400)
+
+			expect(result.wasTruncated).toBe(true)
+			expect(result.returnedLines).toBe(200)
+			expect(result.omittedLines).toBe(200)
+			expect(result.content).toContain("first 100 and last 100 lines")
+		})
+
+		it("folds omitted middle block into semantic symbol skeleton (Solution 2)", () => {
+			const lines = Array.from({ length: 450 }, (_, i) => `let local_var_${i} = ${i};`)
+			// Insert declarations in middle block (around lines 150-250)
+			lines[140] = "export class OrderService {"
+			lines[180] = "    async calculateTax(order: Order): Promise<number> {"
+			lines[220] = "    async processPayment(details: Payment): Promise<Receipt> {"
+			lines[260] = "export function formatReceipt(receipt: Receipt): string {"
+
+			const result = truncateFileOutput(lines.join("\n"), 100, 450)
+
+			expect(result.wasTruncated).toBe(true)
+			expect(result.content).toContain("[...SKIPPED 350 LINES: Middle Symbol Skeleton...]")
+			expect(result.content).toContain("• Line 141: export class OrderService")
+			expect(result.content).toContain("• Line 181: async calculateTax(order: Order): Promise<number>")
+			expect(result.content).toContain("• Line 221: async processPayment(details: Payment): Promise<Receipt>")
+			expect(result.content).toContain("• Line 261: export function formatReceipt(receipt: Receipt): string")
+			expect(result.content).toContain("To inspect any implementation, call read_file with offset=<line> and limit=40")
 		})
 	})
 })

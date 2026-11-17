@@ -110,8 +110,15 @@ export function stripAnsi(text: string): string {
 }
 
 /**
+ * Regex matching critical error markers in terminal logs to ensure middle stack traces
+ * are pinned during sliding-window truncation.
+ */
+const DIAGNOSTIC_PATTERN = /(?:error(?:\[E\d+\])?|fail(?:ed|ure)?|exception|traceback|syntaxerror|panicked at|fatal)/i
+
+/**
  * Truncates terminal output to a maximum number of lines, preserving head and tail lines
  * to conserve LLM context window while retaining critical error diagnostics.
+ * If error/panic diagnostics occur in the omitted middle slice, pins that diagnostic block.
  * Robust against Windows CRLF (\r\n) line endings.
  */
 export function truncateTerminalOutput(text: string, maxLines: number = 100): string {
@@ -131,14 +138,47 @@ export function truncateTerminalOutput(text: string, maxLines: number = 100): st
 	const tailCount = maxLines - headCount
 	const omitted = lines.length - maxLines
 
+	// Solution 3: Diagnostic-Aware Scan - check if middle omitted slice holds critical compiler/test errors
+	const middleLines = lines.slice(headCount, lines.length - tailCount)
+	const relErrorIdx = middleLines.findIndex((line) => DIAGNOSTIC_PATTERN.test(line))
+
+	if (relErrorIdx !== -1 && maxLines >= 30) {
+		const errorIdx = headCount + relErrorIdx
+		const headBudget = Math.max(10, Math.floor(maxLines * 0.25))
+		const tailBudget = Math.max(10, Math.floor(maxLines * 0.25))
+		const errorBudget = maxLines - headBudget - tailBudget
+
+		const halfErrorBudget = Math.floor(errorBudget / 2)
+		let errorStart = Math.max(headBudget, errorIdx - halfErrorBudget)
+		let errorEnd = Math.min(lines.length - tailBudget, errorStart + errorBudget)
+		if (errorEnd - errorStart < errorBudget) {
+			errorStart = Math.max(headBudget, errorEnd - errorBudget)
+		}
+
+		const head = lines.slice(0, headBudget).join("\n")
+		const errorBlock = lines.slice(errorStart, errorEnd).join("\n")
+		const tail = lines.slice(-tailBudget).join("\n")
+
+		const gap1 = errorStart - headBudget
+		const gap2 = lines.length - tailBudget - errorEnd
+
+		return `${head}\n\n[...${gap1} lines omitted...]\n[=== DIAGNOSTIC / ERROR CAPTURE: around line ${errorStart + 1} ===]\n${errorBlock}\n\n[...${gap2} lines omitted...]\n${tail}`
+	}
+
 	const head = lines.slice(0, headCount).join("\n")
 	const tail = lines.slice(-tailCount).join("\n")
 
 	return `${head}\n\n[...${omitted} intermediate lines omitted for context conservation...]\n\n${tail}`
 }
 
-/** Default maximum lines returned for file reads before sliding window truncation engages */
-export const MAX_FILE_READ_LINES = 100
+/** Threshold below which files are returned in full without multi-turn pagination penalties (Solution 1) */
+export const ADAPTIVE_FULL_READ_THRESHOLD = 300
+
+/** Default maximum lines returned for file reads when sliding window truncation engages */
+export const SLIDING_WINDOW_PREVIEW_LIMIT = 200
+
+/** Default alias for backward compatibility */
+export const MAX_FILE_READ_LINES = SLIDING_WINDOW_PREVIEW_LIMIT
 
 export interface FileTruncationResult {
 	content: string
@@ -148,13 +188,77 @@ export interface FileTruncationResult {
 }
 
 /**
+ * Polyglot pattern matching structural declarations (functions, classes, interfaces, methods, etc.)
+ */
+const DECLARATION_PATTERN =
+	/^\s*(?:\d+\s*\|\s*)?(?:(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|type|enum|struct|impl|trait|fn|def|func|pub\s+(?:fn|struct|enum))\b|(?:(?:public|private|protected|static|readonly|async|override)\s+)+[a-zA-Z0-9_$]+\s*\([^)]*\)|(?:export\s+)?const\s+[a-zA-Z0-9_$]+\s*=\s*(?:async\s*)?(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>)/
+
+export interface SkeletonSymbol {
+	lineNumber: number
+	signature: string
+}
+
+/**
+ * Solution 2: Semantic Skeleton Folding.
+ * Extracts a lightweight structural symbol skeleton from lines of code.
+ * Enables the LLM to understand what functions/classes exist in an omitted middle block
+ * without paying the token cost of their full implementation bodies.
+ */
+export function extractSemanticSkeleton(
+	lines: string[],
+	startLineNumber: number = 1,
+	maxSymbols: number = 15,
+): { symbols: SkeletonSymbol[]; formattedSkeleton: string | null } {
+	const symbols: SkeletonSymbol[] = []
+
+	for (let i = 0; i < lines.length; i++) {
+		const rawLine = lines[i]
+		if (!rawLine || rawLine.trim() === "") continue
+
+		if (DECLARATION_PATTERN.test(rawLine)) {
+			// Extract line number (from prefix "123 | ..." or computed startLineNumber + i)
+			const linePrefixMatch = rawLine.match(/^\s*(\d+)\s*\|\s*(.*)$/)
+			const lineNum = linePrefixMatch ? parseInt(linePrefixMatch[1], 10) : startLineNumber + i
+			const codePart = linePrefixMatch ? linePrefixMatch[2] : rawLine
+
+			// Clean signature: trim leading whitespace, trailing block openers/colons/braces
+			const cleaned = codePart
+				.trim()
+				.replace(/[\s{;:]+$/, "")
+				.trim()
+
+			if (cleaned.length > 0) {
+				symbols.push({ lineNumber: lineNum, signature: cleaned })
+			}
+		}
+	}
+
+	if (symbols.length === 0) {
+		return { symbols: [], formattedSkeleton: null }
+	}
+
+	const displaySymbols = symbols.slice(0, maxSymbols)
+	const items = displaySymbols.map((s) => `  • Line ${s.lineNumber}: ${s.signature}`).join("\n")
+
+	let overflowNote = ""
+	if (symbols.length > maxSymbols) {
+		overflowNote = `\n  ... and ${symbols.length - maxSymbols} more declarations in omitted block ...`
+	}
+
+	const formattedSkeleton = `[...SKIPPED ${lines.length} LINES: Middle Symbol Skeleton...]\n${items}${overflowNote}\n[To inspect any implementation, call read_file with offset=<line> and limit=40]`
+
+	return { symbols, formattedSkeleton }
+}
+
+/**
  * Truncates file content to a maximum number of lines using a sliding window (head + tail),
  * preventing token blowup while giving the LLM immediate visibility into both the start
  * (imports, types, headers) and end (exports, bottom definitions) of a file.
+ * Integrates Solution 2 (Semantic Skeleton Folding) to eliminate middle-blindness.
  */
 export function truncateFileOutput(
 	content: string,
-	maxLines: number = MAX_FILE_READ_LINES,
+	maxLines: number = SLIDING_WINDOW_PREVIEW_LIMIT,
 	totalLines?: number,
 ): FileTruncationResult {
 	if (!content) return { content, wasTruncated: false, returnedLines: 0, omittedLines: 0 }
@@ -178,7 +282,15 @@ export function truncateFileOutput(
 	const tail = lines.slice(-tailCount).join("\n")
 	const total = totalLines ?? count
 
-	const truncatedContent = `${head}\n\n[...TRUNCATED ${omitted} LINES: Showing first ${headCount} and last ${tailCount} lines of ${total} total lines. To view intermediate code, call read_file with offset and limit...]\n\n${tail}`
+	// Solution 2: Semantic Skeleton Folding for middle omitted block
+	const middleLines = lines.slice(headCount, lines.length - tailCount)
+	const { formattedSkeleton } = extractSemanticSkeleton(middleLines, headCount + 1)
+
+	const omittedBlock =
+		formattedSkeleton ??
+		`[...TRUNCATED ${omitted} LINES: Showing first ${headCount} and last ${tailCount} lines of ${total} total lines. To view intermediate code, call read_file with offset and limit...]`
+
+	const truncatedContent = `${head}\n\n${omittedBlock}\n\n${tail}`
 
 	return {
 		content: truncatedContent,

@@ -24,7 +24,11 @@ import { getReadablePath } from "../../utils/path"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
-import { truncateFileOutput, MAX_FILE_READ_LINES } from "../../utils/text-normalization"
+import {
+	truncateFileOutput,
+	ADAPTIVE_FULL_READ_THRESHOLD,
+	SLIDING_WINDOW_PREVIEW_LIMIT,
+} from "../../utils/text-normalization"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
 import {
@@ -314,10 +318,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 		let output = result.content
 
-		// Sliding-window truncation: if limit was not explicitly specified and the file exceeds the limit,
-		// apply sliding window (head + tail) to protect LLM context window from exponential token consumption.
-		if (entry.limit === undefined && result.totalLines > MAX_FILE_READ_LINES) {
-			const truncated = truncateFileOutput(result.content, MAX_FILE_READ_LINES, result.totalLines)
+		// Solution 1: Adaptive sliding-window truncation.
+		// If limit was omitted, files <= ADAPTIVE_FULL_READ_THRESHOLD (300 lines) are returned in full
+		// to eliminate multi-turn round trip penalties. Files > 300 lines get a 200-line head/tail window.
+		if (entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
+			const truncated = truncateFileOutput(result.content, SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
 			if (truncated.wasTruncated) {
 				output = truncated.content
 			}
@@ -802,8 +807,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
-					if (result.totalLines > MAX_FILE_READ_LINES) {
-						content = truncateFileOutput(content, MAX_FILE_READ_LINES, result.totalLines).content
+					if (result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
+						content = truncateFileOutput(content, SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines).content
 					}
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
