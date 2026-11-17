@@ -1622,4 +1622,195 @@ describe("safeWriteJson", () => {
 			umaskSpy.mockRestore()
 		}
 	})
+	// The identity a confined publish records is what turns the undo's byte comparison from a
+	// guess into a fact: a peer can put this write's exact bytes at the name the escape probe is
+	// shown, and only the inode and the timestamps can say whether the file in front of the undo
+	// is the one this write published. These rows run whole writes, so the record taken after the
+	// commit rename is the record the undo has to work from.
+	test("leaves a peer's same-bytes file at the escaped name when the confined publish recorded its identity", async () => {
+		const scope = path.join(tempDir, "identity-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "mcp.json")
+		const committed = JSON.stringify({ written: "payload" })
+		const escapee = path.join(tempDir, "identity-escapee.json")
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						if (event.stage === "write-complete") {
+							// A peer file holding this write's exact bytes now sits at the spelling the
+							// post-commit probe is about to be shown. Different inode, and this write had
+							// recorded the inode its commit landed.
+							fsSyncActual.writeFileSync(escapee, committed)
+							vi.mocked(fs.realpath).mockImplementationOnce(async () => escapee)
+						}
+					},
+				},
+			),
+		).rejects.toThrow(ConfinedPathEscapeError)
+		expect(fsSyncActual.existsSync(escapee)).toBe(true)
+		expect(JSON.parse(fsSyncActual.readFileSync(escapee, "utf8"))).toEqual({ written: "payload" })
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
+	})
+
+	// Undo only the publish. When the commit had landed the file at the escaped spelling is this
+	// write's own and the undo has to remove it before the escape is reported; when the failure
+	// landed before the commit there is nothing of ours to remove. The two halves are told apart
+	// by a flag set the moment the commit rename returns. The escaped name here is a second name
+	// for the very inode the commit landed, so the identity gate lets the undo act.
+	test("undoes the committed publish at the escaped name before reporting the escape", async () => {
+		const scope = path.join(tempDir, "undo-committed-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "mcp.json")
+		const link = path.join(tempDir, "undo-committed-link.json")
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						if (event.stage === "write-complete") {
+							fsSyncActual.linkSync(target, link)
+							vi.mocked(fs.realpath).mockImplementationOnce(async () => link)
+						}
+					},
+				},
+			),
+		).rejects.toThrow(ConfinedPathEscapeError)
+		expect(fsSyncActual.existsSync(link)).toBe(false)
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
+	})
+
+	// Each field of the recorded identity is a separate way a peer can prove the file under the
+	// escaped name is not this write's. One case per field, each differing in that field only, so
+	// no case can pass because a second field happens to disagree as well.
+	test("leaves the file alone when any single recorded identity field differs", async () => {
+		const outside = path.join(tempDir, "undo-identity-fields")
+		await fs.mkdir(outside, { recursive: true })
+		const escaped = path.join(outside, "mcp.json")
+		const ours = JSON.stringify({ ours: true })
+		for (const field of ["dev", "ino", "size", "mtimeMs", "ctimeMs"] as const) {
+			fsSyncActual.writeFileSync(escaped, ours)
+			const onDisk = fsSyncActual.statSync(escaped, { bigint: true })
+			const recorded = {
+				dev: onDisk.dev,
+				ino: onDisk.ino,
+				size: onDisk.size,
+				mtimeMs: onDisk.mtimeMs,
+				ctimeMs: onDisk.ctimeMs,
+			}
+			recorded[field] = onDisk[field] + 1n
+			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect({ field, kept: fsSyncActual.existsSync(escaped) }).toEqual({ field, kept: true })
+			await fs.unlink(escaped)
+		}
+	})
+
+	// A stat that will not answer costs the undo its strongest record and must not cost the
+	// publish: the log is the only trace left that the identity was unavailable, so it has to name
+	// the published file.
+	test("logs the lost identity record and still publishes when the confined post-commit stat fails", async () => {
+		const scope = path.join(tempDir, "record-fail-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "x.json")
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			await safeWriteJson(
+				target,
+				{ recorded: true },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						if (event.stage === "write-complete") {
+							// The identity record is the first thing this write does with the published
+							// name after the commit, so the failure lands on the record and nowhere else.
+							vi.mocked(fs.stat).mockRejectedValueOnce(
+								Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" }),
+							)
+						}
+					},
+				},
+			)
+			expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ recorded: true })
+			const logged = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(" | ")
+			expect(logged).toContain("Could not record the identity of the published")
+			expect(logged).toContain(path.basename(target))
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
+	// An unconstrained write never takes the identity record, so it has no reason to look at the
+	// published name after the commit at all. This is the side of the record gate that the
+	// confined rows cannot show: the record is scoped to confinement, not run on every publish.
+	test("does not look up an identity it will not use when the write is not confined", async () => {
+		const scope = path.join(tempDir, "unconfined-record-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "plain.json")
+		let statCallsAtCommit = 0
+		await safeWriteJson(
+			target,
+			{ plain: true },
+			{
+				trace: (event) => {
+					if (event.stage === "write-complete") {
+						statCallsAtCommit = vi.mocked(fs.stat).mock.calls.length
+					}
+				},
+			},
+		)
+		const afterCommit = vi
+			.mocked(fs.stat)
+			.mock.calls.slice(statCallsAtCommit)
+			.map((call: unknown[]) => String(call[0]))
+		expect(afterCommit).not.toContain(target)
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ plain: true })
+	})
+
+	// A target whose stat answers ENOENT is the one state _copyTargetMode reports that the caller
+	// acts on: it is the difference between a file this write created getting the mode a new file
+	// would have had and keeping the staged 0o600. The assertion is on the chmod the code asks for,
+	// because the win32 mode bits a stat reports carry only the read-only flag.
+	test("gives a created target the new-file mode when its stat answers ENOENT", async () => {
+		const scope = path.join(tempDir, "absent-target-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "new.json")
+		const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o022)
+		const expectedMode = process.platform === "win32" ? 0o666 : 0o644
+		try {
+			vi.mocked(fs.chmod).mockClear()
+			await safeWriteJson(target, { created: true })
+			const chmodCalls = vi
+				.mocked(fs.chmod)
+				.mock.calls.map((call: unknown[]) => [String(call[0]), Number(call[1])])
+			expect(chmodCalls).toContainEqual([target, expectedMode])
+			expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ created: true })
+		} finally {
+			umaskSpy.mockRestore()
+		}
+	})
+
+	// A stat failure with no code at all is not a mode read this write can explain: it falls
+	// through to the staged file's own mode without logging the could-not-read-mode line, which is
+	// the log the neighbour row pins. Logging it unconditionally would put a claim about the
+	// target's permissions on the record for a failure that named no permission at all.
+	test("does not log a target mode failure that carries no error code", async () => {
+		await fsPromisesActuals.writeFile!(currentTestFilePath, JSON.stringify({ before: true }))
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			vi.mocked(fs.stat).mockImplementationOnce(async () => {
+				throw new Error("a stat that reports no error code")
+			})
+			await safeWriteJson(currentTestFilePath, { after: true })
+			expect(await readFileContent(currentTestFilePath)).toEqual({ after: true })
+			const logged = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(" | ")
+			expect(logged).not.toContain("Could not read the mode of")
+		} finally {
+			consoleErrorSpy.mockRestore()
+		}
+	})
 })

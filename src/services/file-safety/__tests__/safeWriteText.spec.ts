@@ -1785,3 +1785,150 @@ describe("resolveLockKey when the parent directory does not exist yet", () => {
 		await expect(resolveLockKey(target)).rejects.toThrow("EACCES")
 	})
 })
+
+// The two re-checks of a caller-supplied staging name sit between a name that passed
+// validation and an inode nobody authorized: the permission pass and the commit each act on
+// whatever that name denotes at their own moment. These rows isolate one clause of the
+// discriminator at a time - link-ness, file type, dev, ino - so every field of the recorded
+// identity has to earn the refusal on its own rather than ride along behind a field that
+// differs anyway, and they name the stage in the message because an operator triaging a
+// refused publish needs to know which look failed, not merely that one did. The vanished-name
+// rows drive the arm nothing else in this file reaches: the name is gone under a write that
+// is still holding it, and the typed refusal is the only thing that tells a caller so.
+function _identity(over: { dev?: number; ino?: number; isLink?: boolean; isFile?: boolean }): fsSync.Stats {
+	const s = Object.create(fsSync.Stats.prototype) as fsSync.Stats
+	Object.assign(s, {
+		dev: over.dev ?? 1,
+		ino: over.ino ?? 1,
+		isSymbolicLink: () => over.isLink === true,
+		isFile: () => over.isFile !== false,
+	})
+	return s
+}
+
+// Answers fs.lstat for the staging name in the order the SUT asks for it - the validation look
+// first, then the re-checks - and leaves every other lookup (the publish target, the ancestor
+// walk) on the ordinary default double, so the sequence cannot be shifted by an unrelated call.
+// An Error entry throws instead of answering.
+function _stagingLooks(stagingPath: string, looks: (fsSync.Stats | Error)[]): void {
+	// The validation look is answered for the canonical spelling of the name and the re-checks for
+	// the spelling the caller handed us, which on win32 are not the same string, so both are
+	// resolved before they are compared.
+	const wanted = path.resolve(stagingPath)
+	let call = 0
+	vi.mocked(fs.lstat).mockImplementation(async (p) => {
+		if (path.resolve(String(p)) !== wanted) {
+			return _fileStats(false)
+		}
+		const next = looks[Math.min(call, looks.length - 1)]
+		call++
+		if (next instanceof Error) {
+			throw next
+		}
+		return next
+	})
+}
+
+const RECHECK_TARGET = "/tmp/test-dir/target.txt"
+const RECHECK_TEMP = "/tmp/test-dir/custom-temp.tmp"
+
+describe("safeWriteText staging identity re-checks", () => {
+	beforeEach(() => {
+		mockDefaults()
+		vi.mocked(fsSync.writeSync).mockImplementation((...args: unknown[]) =>
+			typeof args[3] === "number" ? args[3] : 0,
+		)
+		vi.mocked(fs.realpath).mockResolvedValue(RECHECK_TARGET)
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+	})
+
+	const refuseBeforeTheModePass = async (): Promise<unknown> =>
+		safeWriteText(RECHECK_TARGET, "", { tempPath: RECHECK_TEMP, platform: "linux" }).catch(
+			(error: unknown) => error,
+		)
+
+	it("only the staging device differs: refuses before the mode pass", async () => {
+		_stagingLooks(RECHECK_TEMP, [_identity({ dev: 1, ino: 1 }), _identity({ dev: 2, ino: 1 })])
+		const error = await refuseBeforeTheModePass()
+		expect(error).toBeInstanceOf(StagingPathError)
+		expect(String(error)).toContain("Staging file changed before the mode and fsync pass")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("only the staging inode differs: refuses before the mode pass", async () => {
+		_stagingLooks(RECHECK_TEMP, [_identity({ dev: 1, ino: 1 }), _identity({ dev: 1, ino: 9 })])
+		const error = await refuseBeforeTheModePass()
+		expect(String(error)).toContain("Staging file changed before the mode and fsync pass")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("the staging name stopped being a regular file: refuses on the file-type clause alone", async () => {
+		_stagingLooks(RECHECK_TEMP, [
+			_identity({ dev: 1, ino: 1, isLink: false, isFile: true }),
+			_identity({ dev: 1, ino: 1, isLink: false, isFile: false }),
+		])
+		const error = await refuseBeforeTheModePass()
+		expect(String(error)).toContain("Staging file changed before the mode and fsync pass")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("the staging name became a link that still reads as a file: refuses on the link clause", async () => {
+		_stagingLooks(RECHECK_TEMP, [
+			_identity({ dev: 1, ino: 1, isLink: false, isFile: true }),
+			_identity({ dev: 1, ino: 1, isLink: true, isFile: true }),
+		])
+		const error = await refuseBeforeTheModePass()
+		expect(String(error)).toContain("Staging file changed before the mode and fsync pass")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+	})
+
+	it("the staging name changes after the mode pass: the refusal names the commit", async () => {
+		_stagingLooks(RECHECK_TEMP, [
+			_identity({ dev: 1, ino: 1 }),
+			_identity({ dev: 1, ino: 1 }),
+			_identity({ dev: 1, ino: 9 }),
+		])
+		const error = await refuseBeforeTheModePass()
+		expect(String(error)).toContain("Staging file changed before the commit")
+		// The permission pass had already run on the inode the validation authorized, which is the
+		// point of the second look: it stops the publish, it does not undo the mode.
+		expect(fsSync.openSync).toHaveBeenCalledWith(RECHECK_TEMP, "r+")
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("the staging name is gone at the mode pass: the refusal says disappeared", async () => {
+		_stagingLooks(RECHECK_TEMP, [
+			_identity({ dev: 1, ino: 1 }),
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		])
+		const error = await refuseBeforeTheModePass()
+		expect(error).toBeInstanceOf(StagingPathError)
+		expect(String(error)).toContain("Staging file disappeared before the mode and fsync pass")
+		expect(fsSync.openSync).not.toHaveBeenCalled()
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("the staging name is gone at the commit: the refusal says disappeared at the commit", async () => {
+		_stagingLooks(RECHECK_TEMP, [
+			_identity({ dev: 1, ino: 1 }),
+			_identity({ dev: 1, ino: 1 }),
+			Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" }),
+		])
+		const error = await refuseBeforeTheModePass()
+		expect(String(error)).toContain("Staging file disappeared before the commit")
+		expect(fsSync.openSync).toHaveBeenCalledWith(RECHECK_TEMP, "r+")
+		expect(fs.rename).not.toHaveBeenCalled()
+	})
+
+	it("a lstat failure that is not ENOENT: the re-check passes the real error through", async () => {
+		const eio = Object.assign(new Error("EIO: i/o error"), { code: "EIO" })
+		_stagingLooks(RECHECK_TEMP, [_identity({ dev: 1, ino: 1 }), eio])
+		const error = await refuseBeforeTheModePass()
+		// A lookup that failed for some other reason says nothing about the staging file's identity,
+		// so it must not be retyped into a StagingPathError: the caller needs the original error.
+		expect(error).toBe(eio)
+	})
+})
