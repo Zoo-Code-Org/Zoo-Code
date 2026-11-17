@@ -528,7 +528,9 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 			taskId,
 			// Task input must not weaken the operator's manual-approval policy.
 			taskConfiguration:
-				configuration && this.requireApproval ? { ...configuration, autoApprovalEnabled: false } : configuration,
+				configuration && this.requireApproval
+					? { ...configuration, autoApprovalEnabled: false }
+					: configuration,
 			...(images !== undefined ? { images } : {}),
 		})
 		return this.waitForTaskCompletion()
