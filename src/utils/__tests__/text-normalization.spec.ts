@@ -1,4 +1,6 @@
-import { normalizeString, unescapeHtmlEntities } from "../text-normalization"
+import { describe, it, expect } from "vitest"
+
+import { normalizeString, unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../text-normalization"
 
 describe("Text normalization utilities", () => {
 	describe("normalizeString", () => {
@@ -99,6 +101,56 @@ describe("Text normalization utilities", () => {
 			const input = "array&#91;0&rsqb; and &lsqb;1&#93;"
 			const expected = "array[0] and [1]"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
+		})
+	})
+
+	describe("stripAnsi", () => {
+		it("removes ANSI color and formatting sequences", () => {
+			const input = "\u001b[31mRed Error\u001b[0m and \u001b[1mBold Text\u001b[0m"
+			expect(stripAnsi(input)).toBe("Red Error and Bold Text")
+		})
+
+		it("handles empty or clean strings", () => {
+			expect(stripAnsi("")).toBe("")
+			expect(stripAnsi("Clean text")).toBe("Clean text")
+		})
+	})
+
+	describe("truncateTerminalOutput", () => {
+		it("leaves output under maxLines unchanged", () => {
+			const text = "line 1\nline 2\nline 3"
+			expect(truncateTerminalOutput(text, 5)).toBe(text)
+		})
+
+		it("truncates output exceeding maxLines preserving head and tail", () => {
+			const lines = Array.from({ length: 20 }, (_, i) => `line ${i + 1}`)
+			const text = lines.join("\n")
+			const result = truncateTerminalOutput(text, 6)
+
+			expect(result).toContain("[...14 intermediate lines omitted for context conservation...]")
+			expect(result.startsWith("line 1\nline 2\nline 3")).toBe(true)
+			expect(result.endsWith("line 18\nline 19\nline 20")).toBe(true)
+		})
+
+		it("strips ANSI while truncating", () => {
+			const lines = Array.from({ length: 10 }, (_, i) => `\u001b[32mline ${i + 1}\u001b[0m`)
+			const text = lines.join("\n")
+			const result = truncateTerminalOutput(text, 4)
+
+			expect(result).not.toContain("\u001b[32m")
+			expect(result).toContain("line 1")
+			expect(result).toContain("line 10")
+		})
+
+		it("handles Windows CRLF line endings cleanly", () => {
+			const lines = Array.from({ length: 10 }, (_, i) => `line ${i + 1}\r\n`)
+			const text = lines.join("")
+			const result = truncateTerminalOutput(text, 4)
+
+			expect(result).not.toContain("\r")
+			expect(result).toContain("line 1")
+			expect(result).toContain("line 10")
+			expect(result).toContain("[...6 intermediate lines omitted for context conservation...]")
 		})
 	})
 })

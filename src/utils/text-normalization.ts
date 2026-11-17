@@ -82,8 +82,9 @@ export function normalizeString(str: string, options: NormalizeOptions = DEFAULT
  * @param text The string containing HTML entities to unescape
  * @returns The unescaped string with HTML entities converted to their literal characters
  */
-export function unescapeHtmlEntities(text: string): string {
-	if (!text) return text
+export function unescapeHtmlEntities(text?: string | null): string {
+	if (text === undefined) return undefined as unknown as string
+	if (!text) return ""
 
 	return text
 		.replace(/&lt;/g, "<")
@@ -97,3 +98,42 @@ export function unescapeHtmlEntities(text: string): string {
 		.replace(/&rsqb;/g, "]")
 		.replace(/&amp;/g, "&")
 }
+
+/**
+ * Strips ANSI escape codes from terminal output to eliminate useless tokens.
+ */
+const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
+
+export function stripAnsi(text: string): string {
+	if (!text) return text
+	return text.replace(ANSI_PATTERN, "")
+}
+
+/**
+ * Truncates terminal output to a maximum number of lines, preserving head and tail lines
+ * to conserve LLM context window while retaining critical error diagnostics.
+ * Robust against Windows CRLF (\r\n) line endings.
+ */
+export function truncateTerminalOutput(text: string, maxLines: number = 100): string {
+	if (!text) return text
+
+	const clean = stripAnsi(text)
+	const lines = clean.split(/\r?\n/)
+	if (lines.length > 0 && lines[lines.length - 1] === "") {
+		lines.pop()
+	}
+
+	if (lines.length <= maxLines || maxLines <= 0) {
+		return clean
+	}
+
+	const headCount = Math.floor(maxLines / 2)
+	const tailCount = maxLines - headCount
+	const omitted = lines.length - maxLines
+
+	const head = lines.slice(0, headCount).join("\n")
+	const tail = lines.slice(-tailCount).join("\n")
+
+	return `${head}\n\n[...${omitted} intermediate lines omitted for context conservation...]\n\n${tail}`
+}
+
