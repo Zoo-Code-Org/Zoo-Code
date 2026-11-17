@@ -4699,7 +4699,7 @@ describe("ClineProvider", () => {
 
 		const manager = provider.providerSettingsManager
 		vi.spyOn(manager, "getModeConfigId").mockResolvedValue("other-window-id")
-		vi.spyOn(manager, "setModeConfig").mockResolvedValue(undefined)
+		vi.spyOn(manager, "setModeConfig").mockResolvedValue(true)
 
 		vi.spyOn(manager, "listConfig").mockResolvedValue([{ name: "local", id: "this-window-id" }])
 
@@ -4890,7 +4890,7 @@ describe("ClineProvider", () => {
 
 		it("prefers an explicit local choice over the snapshot", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ architect: "opened-with-id" })
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(true)
 
 			await provider["setModeConfig"]("architect", "chosen-id")
 
@@ -4909,7 +4909,7 @@ describe("ClineProvider", () => {
 		it("drops local choices and re-reads the mapping when state is reset", async () => {
 			const { t } = await import("../../../i18n")
 			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(t("common:answers.yes") as never)
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(true)
 			vi.spyOn(provider.providerSettingsManager, "resetAllConfigs").mockResolvedValue(undefined)
 			vi.spyOn(provider.contextProxy, "resetAllState").mockResolvedValue(undefined)
 			// The shared custom-modes mock does not implement reset.
