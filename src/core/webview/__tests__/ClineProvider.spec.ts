@@ -6359,6 +6359,391 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("leaves the running handler alone when the deletion fails at the sibling re-pin", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runningProfile: ProviderSettingsEntry = {
+				name: "running-profile",
+				id: "running-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// The global selection names the survivor while this view is still pinned to the profile
+			// being deleted: the deletion re-points this view and rewrites the shared store, and the
+			// conversation follows the profile it actually runs under.
+			await provider.contextProxy.setValue("listApiConfigMeta", [runningProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			provider["viewLocalState"].currentApiConfigName = "running-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "running-key",
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "running-profile"
+						? {
+								name: "running-profile",
+								id: "running-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "running-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("running-id"),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const task = {
+				taskId: "re-pin-fail-task",
+				taskApiConfigName: "running-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "running-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					task.taskApiConfigName = name
+				}),
+			}
+			// Structural double: this path touches only the sticky name and the API handler, so a
+			// minimal task is enough and keeps the assertion on the handler rather than on Task
+			// internals.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			// The failure lands one write short of the end of the compensated group, which is where the
+			// handler rebuild used to sit. Reject once: a standing rejection would fail every later
+			// call of the same method, and vitest turns each unawaited one of those into an unhandled
+			// rejection at teardown.
+			provider["rePinViewLocalStateForDeletedProfile"] = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("sibling re-pin failed"))
+
+			await expect(provider.deleteProviderProfile(runningProfile)).rejects.toThrow("sibling re-pin failed")
+
+			// The strict sticky write had already moved the conversation's name and the
+			// compensation puts it back. A rebuilt handler is not part of that rollback, so it must
+			// never have been rebuilt: a deletion that failed has to leave the conversation on the
+			// profile it actually runs, not on the survivor's provider and credentials.
+			expect(task.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(task.setTaskApiConfigName.mock.calls.at(-1)?.[0]).toBe("running-profile")
+			expect(provider.pinnedProfileName).toBe("running-profile")
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+		})
+
+		it("leaves the running handler alone when the deletion fails at the persisted re-point", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runningProfile: ProviderSettingsEntry = {
+				name: "running-profile",
+				id: "running-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// The global selection names the survivor while this view is still pinned to the profile
+			// being deleted: the deletion re-points this view and rewrites the shared store, and the
+			// conversation follows the profile it actually runs under.
+			await provider.contextProxy.setValue("listApiConfigMeta", [runningProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			provider["viewLocalState"].currentApiConfigName = "running-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "running-key",
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "running-profile"
+						? {
+								name: "running-profile",
+								id: "running-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "running-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("running-id"),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const task = {
+				taskId: "repoint-fail-task",
+				taskApiConfigName: "running-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "running-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					task.taskApiConfigName = name
+				}),
+			}
+			// Structural double: this path touches only the sticky name and the API handler, so a
+			// minimal task is enough and keeps the assertion on the handler rather than on Task
+			// internals.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			// The last write of the group is the persisted re-point of closed views' pins; a rebuild
+			// that landed before it is still not undoable by the compensation below it. Reject once,
+			// for the reason the row above states.
+			provider["repointPersistedViewStates"] = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("persisted re-point failed"))
+
+			await expect(provider.deleteProviderProfile(runningProfile)).rejects.toThrow("persisted re-point failed")
+
+			// Same rule on the group's last write: the name and the pin come back, and the live
+			// handler was never touched.
+			expect(task.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(task.setTaskApiConfigName.mock.calls.at(-1)?.[0]).toBe("running-profile")
+			expect(provider.pinnedProfileName).toBe("running-profile")
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+		})
+
+		it("rebuilds the running handler only after the deletion's last write has landed", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runningProfile: ProviderSettingsEntry = {
+				name: "running-profile",
+				id: "running-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			// The global selection names the survivor while this view is still pinned to the profile
+			// being deleted: the deletion re-points this view and rewrites the shared store, and the
+			// conversation follows the profile it actually runs under.
+			await provider.contextProxy.setValue("listApiConfigMeta", [runningProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			provider["viewLocalState"].currentApiConfigName = "running-profile"
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "running-key",
+			}
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "running-profile"
+						? {
+								name: "running-profile",
+								id: "running-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "running-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("running-id"),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const task = {
+				taskId: "order-task",
+				taskApiConfigName: "running-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "running-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					task.taskApiConfigName = name
+				}),
+			}
+			// Structural double: this path touches only the sticky name and the API handler, so a
+			// minimal task is enough and keeps the assertion on the handler rather than on Task
+			// internals.
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			// Positive control on the same ordering: wrapping the two re-pins and the rebuild
+			// records the sequence without changing what any of them does, so the assertion is about
+			// order and not about a mock standing in for the work.
+			const order: string[] = []
+			const rePin = provider["rePinViewLocalStateForDeletedProfile"]
+			provider["rePinViewLocalStateForDeletedProfile"] = async (
+				deletedProfileName: string,
+				replacementName: string,
+				replacementSettings: ProviderSettings | undefined,
+			) => {
+				order.push("sibling-re-pin")
+				await rePin.call(provider, deletedProfileName, replacementName, replacementSettings)
+			}
+			const rePoint = provider["repointPersistedViewStates"]
+			provider["repointPersistedViewStates"] = async (
+				removedProfileName: string,
+				replacementProfileName: string,
+			) => {
+				order.push("persisted-re-point")
+				await rePoint.call(provider, removedProfileName, replacementProfileName)
+			}
+			const rebuild = provider["updateTaskApiHandlerIfNeeded"]
+			provider["updateTaskApiHandlerIfNeeded"] = (
+				providerSettings: ProviderSettings,
+				options: {
+					forceRebuild?: boolean
+					skipCurrentTaskRebuild?: boolean
+					expectedCurrentTaskId?: string
+				} = {},
+			) => {
+				order.push("handler-rebuild")
+				rebuild.call(provider, providerSettings, options)
+			}
+
+			await provider.deleteProviderProfile(runningProfile)
+
+			// The rebuild is the last step of the group, after both re-pins. The post-commit
+			// completion below the catch rebuilds again from the activated profile, so only the first
+			// rebuild is indexed here.
+			expect([
+				order.indexOf("sibling-re-pin"),
+				order.indexOf("persisted-re-point"),
+				order.indexOf("handler-rebuild"),
+			]).toEqual([0, 1, 2])
+			expect(task.updateApiConfiguration).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "keeper-key" }))
+			// Twice, not once: the deferred rebuild inside the deletion group and the completion
+			// rebuild below the catch. Counting them is what keeps the ordering row above honest:
+			// without the count, dropping the deferred rebuild and leaving only the completion
+			// rebuild would still satisfy the recorded order.
+			expect(task.updateApiConfiguration).toHaveBeenCalledTimes(2)
+			expect(task.setTaskApiConfigName).toHaveBeenCalledWith("keeper-profile")
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+		})
+
+		it("leaves a task that runs another profile alone when the pinned profile is deleted", async () => {
+			// The negative half of the guard the deferral latches on: this view is pinned to the
+			// profile being deleted while its conversation follows a different sticky profile, so
+			// the deletion must neither move that name nor rebuild that handler.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const runningProfile: ProviderSettingsEntry = {
+				name: "running-profile",
+				id: "running-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [runningProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			provider["viewLocalState"].currentApiConfigName = "running-profile"
+			// @ts-ignore - Replace providerSettingsManager with a test double.
+			provider.providerSettingsManager = {
+				getProfile: vi.fn(async ({ name }: { name: string }) =>
+					name === "running-profile"
+						? {
+								name: "running-profile",
+								id: "running-id",
+								apiProvider: providerIdentifiers.openrouter,
+								openRouterApiKey: "running-key",
+							}
+						: {
+								name: "keeper-profile",
+								id: "keeper-id",
+								apiProvider: providerIdentifiers.anthropic,
+								apiKey: "keeper-key",
+							},
+				),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("running-id"),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			}
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const task = {
+				taskId: "other-profile-task",
+				taskApiConfigName: "elsewhere-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter, openRouterApiKey: "running-key" },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn((name: string) => {
+					task.taskApiConfigName = name
+				}),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+
+			await provider.deleteProviderProfile(runningProfile)
+
+			// Measured, not assumed: run against this tree the count came back 1, because the
+			// completion below the catch rebuilds from the activated profile without re-checking the
+			// conversation's sticky name. What the guard owes is that no rebuild and no sticky write
+			// happen inside the deletion group, and that is what the count and the name assert.
+			expect(task.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(task.updateApiConfiguration).toHaveBeenCalledTimes(1)
+			expect(provider.pinnedProfileName).toBe("keeper-profile")
+			await ClineProvider["persistedViewStateWriteQueue"]
+			await provider.dispose()
+		})
+
 		it("restores a sibling view's pin when the deletion fails after re-pinning it", async () => {
 			const provider = new ClineProvider(
 				mockContext,

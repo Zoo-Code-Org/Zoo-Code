@@ -4063,15 +4063,19 @@ export class ClineProvider
 			// follows a different sticky profile is neither switched nor rewritten - and
 			// the sticky name moves to the survivor as well, or a later reload re-resolves
 			// a profile that no longer exists.
+			// Latched here rather than re-read at the rebuild below: the strict sticky write under
+			// this guard moves the conversation's sticky name to the survivor, so after it the name
+			// the task actually ran under is no longer readable from the task itself.
+			let rebuildActingTaskAfterWrites = false
 			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
 				// Strict: a task left naming the deleted profile must fail the deletion so the write
 				// group above is rolled back instead of reporting a successful deletion.
 				// It runs before the rebuild below on purpose: a rebuilt API handler is not part of that
 				// rollback, so a rejected sticky write must not leave this conversation on the survivor's settings.
 				await this.persistStickyProviderProfileToCurrentTask(profileToActivate, { strictPersistence: true })
-				if (survivingSettings) {
-					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
-				}
+				// The rebuild does not run here: it moves to the end of this write group, below the
+				// two re-pins, where every write the catch can roll back has landed.
+				rebuildActingTaskAfterWrites = survivingSettings !== undefined
 			}
 			// Re-pin other live views still buffered on the deleted profile: their
 			// buffer and durable viewStates entry would otherwise keep serving the
@@ -4082,6 +4086,17 @@ export class ClineProvider
 			// naming the deleted profile would rehydrate a missing profile name on
 			// the next load. Re-point those persisted pins to the survivor too.
 			await this.repointPersistedViewStates(profileToDelete.name, profileToActivate)
+
+			// Deferred from the guard above. A rebuilt handler is not one of the durable stores the
+			// compensation puts back, so rebuilding between the strict sticky write and these two
+			// re-pins left a rolled-back deletion with the conversation sending the survivor's
+			// provider and credentials while its pin, its sticky name and the shared stores had all
+			// been put back. This is the ordering this file already states for the profile-save
+			// rebuild and the sibling refresh above follows; the latch keeps the guard's own
+			// decision point, which sits before the sticky write moved the name.
+			if (rebuildActingTaskAfterWrites && survivingSettings) {
+				this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+			}
 		} catch (error) {
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
