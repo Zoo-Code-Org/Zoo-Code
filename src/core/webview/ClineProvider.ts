@@ -1294,9 +1294,18 @@ export class ClineProvider
 			// A mutation recorded inside the load window that left the buffer holding the value
 			// it already held - a clear of an unset field, or a write of the same value - is
 			// invisible to the buffer comparison above, yet it is still a completed mutation
-			// and outranks the persisted values this read. Drop the loaded field in that case.
-			if (this.viewLocalStateMutatedFields.has("mode") && postLoadBuffer.mode === undefined) {
-				delete mergedState.mode
+			// and outranks the persisted values this read. Reapply whatever the buffer holds
+			// for a marked mode: drop the loaded field when the buffer holds nothing, and let
+			// the buffer value win when the write repeated it. Only mode is reapplied this way,
+			// because a profile name arrives together with the settings resolved for it, so
+			// reapplying a marked name without re-resolving that pair would hand createTask a
+			// name and settings from different profiles.
+			if (this.viewLocalStateMutatedFields.has("mode")) {
+				if (postLoadBuffer.mode === undefined) {
+					delete mergedState.mode
+				} else {
+					mergedState.mode = postLoadBuffer.mode
+				}
 			}
 			if (
 				this.viewLocalStateMutatedFields.has("currentApiConfigName") &&

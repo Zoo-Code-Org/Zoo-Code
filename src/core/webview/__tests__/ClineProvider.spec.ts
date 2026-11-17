@@ -5397,6 +5397,47 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should reapply a mode write that repeats the buffered value while the load is in flight", async () => {
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await writer["setViewStateId"]("shared-view")
+			await writer.saveViewState("mode", "code")
+			await writer.saveViewState("currentApiConfigName", "cfg-a")
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const { getProfile: getProfileSpy, resolveProfile } = stallProviderSettingsProfile(provider)
+			// This view chose architect in memory while the durable entry under the stable id
+			// still holds the mode a previous window pinned.
+			provider["viewLocalState"] = { mode: "architect" }
+			await writer.dispose()
+			await provider.contextProxy.setValue(
+				"viewStates",
+				mockContext.globalState.get<RooCodeSettings["viewStates"]>("viewStates"),
+			)
+
+			const load = provider["setViewStateId"]("shared-view")
+			await vi.waitFor(() => expect(getProfileSpy).toHaveBeenCalledTimes(1))
+			// A write of the value the buffer already holds is a completed mutation, so the
+			// older persisted mode this load read must not replace it.
+			await provider.saveViewState("mode", "architect")
+
+			resolveProfile({ name: "cfg-a", apiProvider: providerIdentifiers.openrouter, openRouterModelId: "model-x" })
+			await load
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			await provider.dispose()
+		})
 		it("should reapply an independently mutated profile name when the load settles", async () => {
 			const provider = new ClineProvider(
 				mockContext,
