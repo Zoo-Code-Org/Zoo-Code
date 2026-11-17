@@ -7182,6 +7182,107 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("keeps a task on its own profile when a no-pin delete reactivates an unrelated shared selection", async () => {
+		// Review thread 4503848906: a sidebar with no pin of its own follows the shared
+		// selection, so deleting a profile that is neither that selection nor the profile
+		// the task follows still re-activates the selection for this view (the hand-off the
+		// deletion path documents and measures), but the activation must not move a task
+		// whose sticky profile names a surviving third profile. The counts below price both
+		// halves: the kept shared re-activation, and the task writes the ask objects to.
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const oldProfile: ProviderSettingsEntry = {
+			name: "old-profile",
+			id: "old-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		const sharedProfile: ProviderSettingsEntry = {
+			name: "shared-profile",
+			id: "shared-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const taskProfile: ProviderSettingsEntry = {
+			name: "task-profile",
+			id: "task-profile-id",
+			apiProvider: providerIdentifiers.openrouter,
+		}
+		await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, sharedProfile, taskProfile])
+		// Neither the shared selection nor (below) the task follows the profile being deleted.
+		await provider.contextProxy.setValue("currentApiConfigName", "shared-profile")
+		await provider.contextProxy.setProviderSettings({
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "shared-key",
+		})
+		vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+		const sharedSettings = {
+			name: "shared-profile",
+			id: "shared-id",
+			apiProvider: providerIdentifiers.anthropic,
+		}
+		const activateProfile = vi.fn().mockResolvedValue(sharedSettings)
+		// A structural double is used because this deletion re-activates the shared
+		// selection through the manager, and the double reports the survivor settings.
+		// @ts-ignore - Replace the manager for this deletion only.
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: runManagerSectionInline,
+			activateProfile,
+			listConfig: vi.fn().mockResolvedValue([sharedProfile, taskProfile]),
+			setModeConfig: vi.fn(),
+			deleteConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi
+				.fn()
+				.mockImplementation(async ({ name }: { name: string }) =>
+					name === "shared-profile"
+						? sharedSettings
+						: { name: "task-profile", id: "task-profile-id", apiProvider: providerIdentifiers.openrouter },
+				),
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+				currentApiConfigName: "shared-profile",
+				modeApiConfigs: {},
+			}),
+		}
+		// The task follows a third, surviving profile: its sticky name, its history record
+		// and its handler must be left alone by a deletion that touches neither of them.
+		const ownTask = {
+			taskId: "own-task",
+			taskApiConfigName: "task-profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.openrouter, apiKey: "task-key" },
+			setTaskApiConfigName: vi.fn(),
+			updateApiConfiguration: vi.fn(),
+		}
+		// @ts-ignore - The suite mocks Task, so a structural double is the file idiom here.
+		vi.spyOn(provider, "getCurrentTask").mockReturnValue(ownTask as ReturnType<typeof provider.getCurrentTask>)
+		// getTaskHistoryItem is private; bracket notation is how this file reaches private
+		// state, and the sticky leg needs a record present to have anything to rewrite.
+		provider["getTaskHistoryItem"] = vi.fn().mockReturnValue({ id: "own-task", number: 1 })
+		const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+		const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
+
+		await provider.deleteProviderProfile(oldProfile)
+
+		// Kept effect, priced rather than asserted away: the view still takes the shared
+		// hand-off, so the selection is activated once and the shared store is rewritten once.
+		expect(activateProfile).toHaveBeenCalledTimes(1)
+		expect(activateProfile).toHaveBeenCalledWith({ name: "shared-profile" })
+		expect(setProviderSettingsSpy).toHaveBeenCalledTimes(1)
+		expect(provider.getValues().currentApiConfigName).toBe("shared-profile")
+		// The defect: the activation handed the shared profile to a task that follows
+		// "task-profile", rewriting its sticky name, its history record and its handler.
+		expect(ownTask.setTaskApiConfigName).toHaveBeenCalledTimes(0)
+		expect(updateTaskHistorySpy).toHaveBeenCalledTimes(0)
+		expect(ownTask.updateApiConfiguration).toHaveBeenCalledTimes(0)
+		expect(ownTask.taskApiConfigName).toBe("task-profile")
+		// Wait on the serialized view-state write queue so queued persistence finishes
+		// while the spies are installed and teardown has no pending writes.
+		await ClineProvider["persistedViewStateWriteQueue"]
+		await provider.dispose()
+	})
 	describe("local state isolation", () => {
 		it("should isolate mode state between instances", async () => {
 			const provider1 = new ClineProvider(

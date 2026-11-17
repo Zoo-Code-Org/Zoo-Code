@@ -3818,7 +3818,24 @@ export class ClineProvider
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings
 				// behind in both.
-				await this.activateProviderProfile({ name: profileToActivate })
+				// The activation re-anchors this view, not the conversation inside it. A task
+				// whose sticky profile names a surviving third profile is a bystander of
+				// this deletion and must keep that profile, its history record and its
+				// handler; only a task that follows the deleted profile - or has no sticky
+				// profile of its own and so follows the shared selection being re-activated
+				// here - may be moved onto the replacement.
+				const taskAtDeletion = this.getCurrentTask()
+				const taskFollowsDeletedProfile =
+					taskAtDeletion?.taskApiConfigName === undefined ||
+					taskAtDeletion.taskApiConfigName === profileToDelete.name
+				// A deletion that moves the conversation keeps the plain one-argument activation.
+				if (taskFollowsDeletedProfile) {
+					await this.activateProviderProfile({ name: profileToActivate })
+				} else {
+					// The task follows a surviving profile the deletion does not touch: the
+					// activation re-anchors this view only, and the task keeps its own profile.
+					await this.activateProviderProfile({ name: profileToActivate }, { preserveForeignTask: true })
+				}
 
 				// The return below would otherwise skip the sibling re-pin further down:
 				// the activation's pinned-name refresh only selects siblings pinned to
@@ -4322,10 +4339,13 @@ export class ClineProvider
 		})
 
 		// Update the current task's sticky provider profile, unless this activation is
-		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
+		// being used purely as a non-persisting restoration (e.g., reopening a task from
+		// history), or the caller asked to preserve a task that follows another profile:
+		// rebuilding that task's handler while rewriting its name would leave the
+		// conversation running on one profile and recorded as belonging to another.
 		if (persistTaskHistory) {
 			await this.persistStickyProviderProfileToCurrentTask(name, {
-				skipCurrentTaskRebuild,
+				skipCurrentTaskRebuild: skipCurrentTaskRebuild || foreignTaskFollowed,
 				expectedCurrentTaskId,
 			})
 		}
