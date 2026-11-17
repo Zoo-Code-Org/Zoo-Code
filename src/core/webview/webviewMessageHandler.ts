@@ -2599,8 +2599,15 @@ export const webviewMessageHandler = async (
 		}
 		case "renameApiConfiguration":
 			if (message.values && message.apiConfiguration) {
+				// Whether the shared critical section finished, and under which name it committed:
+				// the catch below cannot re-derive either, because a rejection from the
+				// activation after the section looks the same as a failure inside it.
+				let renameCommitted = false
+				let committedNewName: string | undefined
 				try {
 					const { oldName, newName } = message.values
+					// Two facts the catch below needs and cannot re-derive: whether the
+					// transaction committed, and under which name the rename committed it.
 
 					if (oldName === newName) {
 						break
@@ -2697,12 +2704,23 @@ export const webviewMessageHandler = async (
 							}
 							throw error
 						}
+						renameCommitted = true
+						committedNewName = newName
 					})
 
 					// Re-activate to update the global settings related to the
 					// currently activated provider profile.
 					await provider.activateProviderProfile({ name: newName })
 				} catch (error) {
+					// The ask at this file's line 2690 offers two shapes for a failed rename:
+					// roll it back, or treat it as committed and make the shared selection name a
+					// profile that exists. A rejection from the activation above arrives after the
+					// transaction committed - oldName already deleted, views and tasks already
+					// re-pointed - so this branch takes the second shape: the rename stands and the
+					// shared selection is moved onto the stored name instead of left on the deleted one.
+					if (renameCommitted && committedNewName) {
+						await updateGlobalState("currentApiConfigName", committedNewName)
+					}
 					provider.log(
 						`Error rename api configuration: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`,
 					)

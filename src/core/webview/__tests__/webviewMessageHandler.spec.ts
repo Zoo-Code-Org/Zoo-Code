@@ -3068,6 +3068,64 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 
+	it("leaves the shared selection on a name that still exists when activation fails after the rename commits", async () => {
+		// State the run leaves behind, printed before any choice was made: the rename
+		// deletes oldName inside the shared section and re-points views, so a rejection
+		// from the activation that follows the section happens when oldName is already
+		// gone. The doubles below keep a stored-name set and a shared selection so the
+		// surviving names and the selection can both be read out.
+		const stored = ["old-profile"]
+		let sharedSelection = "old-profile"
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			hasConfig: vi.fn(async () => false),
+			getProfile: vi.fn(async ({ name }: { name: string }) => ({
+				id: "profile-id",
+				apiProvider: providerIdentifiers.anthropic,
+				name,
+			})),
+			saveConfig: vi.fn(async (name: string) => {
+				if (stored.indexOf(name) < 0) {
+					stored.push(name)
+				}
+				return "profile-id"
+			}),
+			deleteConfig: vi.fn(async (name: string) => {
+				const at = stored.indexOf(name)
+				if (at < 0) {
+					throw new Error("no such profile")
+				}
+				stored.splice(at, 1)
+			}),
+		}
+		provider.repointViewLocalStateAfterProfileRename = vi.fn(async () => {})
+		provider.activateProviderProfile = vi.fn(async ({ name }: { name?: string }) => {
+			if (name === "new-profile") {
+				throw new Error("shared settings write rejected")
+			}
+			sharedSelection = name ?? sharedSelection
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The selection the world is left with: whatever the handler last wrote for
+		// currentApiConfigName, or the name it started from when the handler wrote
+		// nothing at all.
+		const selectionWrites = (mockClineProvider.contextProxy.setValue as ReturnType<typeof vi.fn>).mock.calls
+			.filter((call: unknown[]) => call[0] === "currentApiConfigName")
+			.map((call: unknown[]) => String(call[1]))
+		const finalSelection = selectionWrites.length ? selectionWrites[selectionWrites.length - 1] : sharedSelection
+		console.log(
+			"PROBE_STATE stored_names " + JSON.stringify(stored.slice().sort()) + " shared_selection " + finalSelection,
+		)
+		expect(stored.slice().sort()).toEqual(["new-profile"])
+		expect(stored).toContain(finalSelection)
+	})
+
 	it("re-points views with the stored record instead of the raw webview payload", async () => {
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
@@ -4064,7 +4122,7 @@ describe("webviewMessageHandler - ordinary profile writes and the rename transac
 			return webviewMessageHandler(mockClineProvider, {
 				type: "saveApiConfiguration",
 				text: "old-profile",
-				apiConfiguration: { apiProvider: providerIdentifiers.openaiCom },
+				apiConfiguration: { apiProvider: providerIdentifiers.openai },
 			})
 		})()
 		releaseHold()
@@ -4073,6 +4131,6 @@ describe("webviewMessageHandler - ordinary profile writes and the rename transac
 
 		expect(events).toEqual(["renameHasConfig", "renameSave", "renameRepoint", "renameDelete", "ordinaryWrite"])
 		expect(Object.keys(configs).sort()).toEqual(["new-profile", "old-profile"])
-		expect(configs["old-profile"]).toEqual({ apiProvider: providerIdentifiers.openaiCom })
+		expect(configs["old-profile"]).toEqual({ apiProvider: providerIdentifiers.openai })
 	})
 })
