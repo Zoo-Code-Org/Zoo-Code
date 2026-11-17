@@ -102,6 +102,23 @@ describe("production model picker popover", () => {
 		await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument())
 	})
 
+	it("keeps the popover on custom keyboard selection and displays the saved ID", async () => {
+		const user = userEvent.setup()
+		const { rerender } = render(<ApiConfigSelector {...props} quickSettings={<ProfileQuickSettings />} />)
+		await user.click(screen.getByTestId("dropdown-trigger"))
+		const dialog = screen.getByRole("dialog")
+		await user.type(within(dialog).getByRole("textbox"), " custom-new ")
+		await user.keyboard("{ArrowDown}{Enter}")
+		expect(dialog).toBeInTheDocument()
+		expect(within(dialog).getByRole("textbox")).toHaveValue("")
+		mocks.configuration.apiModelId = "custom-new"
+		rerender(<ApiConfigSelector {...props} quickSettings={<ProfileQuickSettings />} />)
+		expect(within(dialog).getByRole("button", { name: "custom-new" })).toHaveAttribute("aria-current", "true")
+		expect(within(dialog).queryByRole("button", { name: "chat:modelSelector.settings" })).not.toBeInTheDocument()
+		await user.click(within(dialog).getByRole("button", { name: "chat:edit" }))
+		expect(mocks.postMessage).toHaveBeenLastCalledWith({ type: "switchTab", tab: "settings" })
+	})
+
 	it("waits for the requested active profile id before mounting new model controls", async () => {
 		const user = userEvent.setup()
 		const { rerender } = render(<ApiConfigSelector {...props} quickSettings={<ProfileQuickSettings />} />)

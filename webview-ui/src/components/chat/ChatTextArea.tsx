@@ -30,6 +30,7 @@ import { ModeSelector } from "./ModeSelector"
 import { ApiConfigSelector } from "./ApiConfigSelector"
 import { ProfileQuickSettings } from "./ProfileQuickSettings"
 import { getReasoningSelection } from "./model-picker"
+import { getPickerSelection } from "./model-picker/customModel"
 import { AutoApproveDropdown } from "./AutoApproveDropdown"
 import { MAX_IMAGES_PER_MESSAGE } from "./constants"
 import ContextMenu from "./ContextMenu"
@@ -128,8 +129,13 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			commands,
 			enterBehavior,
 			lockApiConfigAcrossModes,
+			organizationAllowList,
 		} = useExtensionState()
-		const { id: selectedModelId, info: selectedModelInfo } = useSelectedModel(apiConfiguration)
+		const { id: selectedModelId, info: selectedModelInfo } = getPickerSelection(
+			apiConfiguration,
+			useSelectedModel(apiConfiguration),
+			organizationAllowList,
+		)
 		const { currentEffort: reasoningEffort } = getReasoningSelection(apiConfiguration, selectedModelInfo)
 
 		// Find the ID and display text for the currently selected API configuration.

@@ -39,10 +39,27 @@ describe("unified chat model trigger", () => {
 
 	it.each([
 		{
+			name: "configured custom ID ignores fallback effort",
+			config: { apiProvider: providerIdentifiers.openrouter, openRouterModelId: "deployment-new" },
+			info: { requiredReasoningEffort: true, supportsReasoningEffort: ["low", "high"], reasoningEffort: "high" },
+			effort: undefined,
+		},
+		{
 			name: "required default",
 			config: { apiProvider: providerIdentifiers.openaiNative },
 			info: { requiredReasoningEffort: true, supportsReasoningEffort: ["low", "high"], reasoningEffort: "high" },
 			effort: "high",
+		},
+		{
+			name: "OpenAI custom ID retains manual effort",
+			config: {
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "manual-custom",
+				enableReasoningEffort: true,
+				openAiCustomModelInfo: { contextWindow: 128000, supportsPromptCache: false, reasoningEffort: "xhigh" },
+			},
+			info: {},
+			effort: "xhigh",
 		},
 		{
 			name: "explicit disable",
@@ -95,7 +112,9 @@ describe("unified chat model trigger", () => {
 		mocks.info = { contextWindow: 128000, supportsPromptCache: false, ...info }
 		renderTrigger(config)
 		const trigger = screen.getByTestId("dropdown-trigger")
-		expect(trigger).toHaveTextContent("Work / chosen-model")
+		expect(trigger).toHaveTextContent(
+			`Work / ${"openRouterModelId" in config ? config.openRouterModelId : "openAiModelId" in config ? config.openAiModelId : "chosen-model"}`,
+		)
 		expect(screen.queryByTestId("model-selector-trigger")).not.toBeInTheDocument()
 		const badge = trigger.querySelector('[aria-label="chat:modelPicker.reasoningEffortValue"]')
 		if (effort) expect(badge).toHaveTextContent(`chat:modelPicker.effort.${effort}`)

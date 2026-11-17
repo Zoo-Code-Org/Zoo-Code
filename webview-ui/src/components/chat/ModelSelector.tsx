@@ -1,7 +1,7 @@
 import React from "react"
 import { Fzf } from "fzf"
 import { Check } from "lucide-react"
-import { type ProviderSettings, providerIdentifiers } from "@roo-code/types"
+import { type ProviderSettings } from "@roo-code/types"
 
 import { cn } from "@/lib/utils"
 import { useAppTranslation } from "@/i18n/TranslationContext"
@@ -12,8 +12,7 @@ import { useSelectedModel } from "@/components/ui/hooks/useSelectedModel"
 import { PickerSearchField } from "./PickerSearchField"
 import type { ProfileModelCatalog } from "./model-picker/useProfileModelCatalog"
 import { pickerResultsClassName, handlePickerNavigation } from "./model-picker/pickerNavigation"
-
-const BEDROCK_CUSTOM_ARN_MODEL_ID = "custom-arn"
+import { getCustomModelId, getPickerSelection, isPickerModelAllowed } from "./model-picker/customModel"
 
 interface ModelSelectorProps {
 	apiConfiguration: ProviderSettings
@@ -32,7 +31,11 @@ export const ModelSelector = ({
 	const [searchValue, setSearchValue] = React.useState("")
 	const { t } = useAppTranslation()
 	const { organizationAllowList } = useExtensionState()
-	const { id: selectedModelId } = useSelectedModel(apiConfiguration)
+	const { id: selectedModelId } = getPickerSelection(
+		apiConfiguration,
+		useSelectedModel(apiConfiguration),
+		organizationAllowList,
+	)
 	const { provider, models, isLoading, isError, isUnsupported, refetch } = catalog
 	const filteredModelRecord = React.useMemo(
 		() => filterModels(models, provider, organizationAllowList),
@@ -40,20 +43,26 @@ export const ModelSelector = ({
 	)
 
 	const modelIds = React.useMemo(() => {
-		if (!filteredModelRecord) return []
-		return Object.entries(filteredModelRecord)
+		const ids = Object.entries(filteredModelRecord ?? {})
 			.filter(([id, info]) => {
-				if (
-					provider === providerIdentifiers.bedrock &&
-					(id.startsWith("arn:") || (id === BEDROCK_CUSTOM_ARN_MODEL_ID && !apiConfiguration.awsCustomArn))
-				)
-					return false
+				if (!isPickerModelAllowed(apiConfiguration, id, organizationAllowList)) return false
 				if (id === selectedModelId) return true
 				return !info.deprecated
 			})
 			.map(([id]) => id)
-			.sort((a, b) => a.localeCompare(b))
-	}, [filteredModelRecord, selectedModelId, provider, apiConfiguration.awsCustomArn])
+		if (selectedModelId && !Object.prototype.hasOwnProperty.call(models ?? {}, selectedModelId)) {
+			ids.push(selectedModelId)
+		}
+		return ids.sort((a, b) => a.localeCompare(b))
+	}, [filteredModelRecord, selectedModelId, models, apiConfiguration, organizationAllowList])
+	const customModelId =
+		!disabled && !isLoading && !isError && !isUnsupported && catalog.field
+			? getCustomModelId(searchValue, apiConfiguration, models, organizationAllowList)
+			: undefined
+	const selectModel = (id: string) => {
+		handleSelect(id)
+		setSearchValue("")
+	}
 
 	const searchableItems = React.useMemo(
 		() =>
@@ -70,8 +79,8 @@ export const ModelSelector = ({
 	)
 
 	const filteredModelIds = React.useMemo(() => {
-		if (!searchValue) return modelIds
-		return fzfInstance.find(searchValue).map((result) => result.item.id)
+		if (!searchValue.trim()) return modelIds
+		return fzfInstance.find(searchValue.trim()).map((result) => result.item.id)
 	}, [modelIds, searchValue, fzfInstance])
 
 	return (
@@ -106,7 +115,7 @@ export const ModelSelector = ({
 					<div className="px-3 py-2 text-xs text-vscode-descriptionForeground">
 						{t("chat:modelPicker.modelSettingsHint")}
 					</div>
-				) : filteredModelIds.length === 0 ? (
+				) : filteredModelIds.length === 0 && !customModelId ? (
 					<div role="status" className="px-3 py-2 text-xs text-vscode-descriptionForeground">
 						{t("common:ui.no_results")}
 					</div>
@@ -120,7 +129,7 @@ export const ModelSelector = ({
 									type="button"
 									disabled={disabled}
 									key={modelId}
-									onClick={() => handleSelect(modelId)}
+									onClick={() => selectModel(modelId)}
 									aria-current={isSelected ? "true" : undefined}
 									className={cn(
 										"flex w-full cursor-pointer items-center gap-2 border-none px-3 py-1.5 text-left text-sm text-vscode-foreground hover:bg-vscode-list-hoverBackground focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder disabled:opacity-50",
@@ -138,9 +147,18 @@ export const ModelSelector = ({
 								</button>
 							)
 						})}
+						{customModelId && (
+							<button
+								type="button"
+								data-picker-result
+								onClick={() => selectModel(customModelId)}
+								className="block w-full cursor-pointer border-none bg-transparent px-3 py-1.5 text-left text-sm text-vscode-foreground hover:bg-vscode-list-hoverBackground focus-visible:outline focus-visible:outline-1 focus-visible:outline-vscode-focusBorder">
+								{t("settings:modelPicker.useCustomModel", { modelId: customModelId })}
+							</button>
+						)}
 					</div>
 				)}
-				{!isLoading && (isUnsupported || isError || filteredModelIds.length === 0) && (
+				{!isLoading && (isUnsupported || isError) && (
 					<button
 						type="button"
 						onClick={() => vscode.postMessage({ type: "switchTab", tab: "settings" })}

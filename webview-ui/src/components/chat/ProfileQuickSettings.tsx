@@ -6,11 +6,14 @@ import { createModelPatch, createReasoningPatch, getReasoningSelection, useProfi
 import { ModelSelector } from "./ModelSelector"
 import { ReasoningControls } from "./model-picker/ReasoningControls"
 import { useModelPickerSubmit } from "./model-picker/useModelPickerSubmit"
+import { getPickerSelection } from "./model-picker/customModel"
 
 /** Immediate, partial saves only; the host owns merging and publishing the resulting profile. */
 export function ProfileQuickSettings({ disabled = false }: { disabled?: boolean }) {
-	const { apiConfiguration, currentApiConfigName } = useExtensionState()
-	const { id: modelId, info, isLoading: isSelectionLoading } = useSelectedModel(apiConfiguration)
+	const { apiConfiguration, currentApiConfigName, organizationAllowList } = useExtensionState()
+	const selected = useSelectedModel(apiConfiguration)
+	const { id: modelId, info } = getPickerSelection(apiConfiguration, selected, organizationAllowList)
+	const isSelectionLoading = selected.isLoading
 	const catalog = useProfileModelCatalog(apiConfiguration)
 	const reasoning = getReasoningSelection(apiConfiguration, info)
 	const [pendingModelId, setPendingModelId] = useState<string | null>(null)
@@ -21,7 +24,13 @@ export function ProfileQuickSettings({ disabled = false }: { disabled?: boolean 
 		catalog.provider,
 		disabled || pending || !!isSelectionLoading,
 	)
-	const canSelect = !disabled && !!currentApiConfigName && !!catalog.field && !catalog.isLoading && !catalog.isError
+	const canSelect =
+		!disabled &&
+		!!currentApiConfigName &&
+		!!catalog.field &&
+		!catalog.isLoading &&
+		!catalog.isError &&
+		!catalog.isUnsupported
 
 	return (
 		<div className="flex min-h-0 flex-col">

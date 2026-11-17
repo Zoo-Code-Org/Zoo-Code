@@ -80,8 +80,15 @@ for (const view of ["models", "profiles"] as const) {
 			await expect.poll(() => dialog.evaluate(collectBoundedLayoutFailures)).toEqual([])
 
 			await search.fill("no-such-picker-result-2479")
-			await expect(results).toHaveCount(0)
-			await expect(dialog.getByText("No results found", { exact: true })).toBeVisible()
+			await expect(results).toHaveCount(view === "models" ? 1 : 0)
+			if (view === "models") {
+				await expect(
+					dialog.getByRole("button", { name: "Use custom: no-such-picker-result-2479" }),
+				).toBeVisible()
+				await expect(dialog.getByRole("button", { name: "Model Settings", exact: true })).toHaveCount(0)
+			} else {
+				await expect(dialog.getByText("No results found", { exact: true })).toBeVisible()
+			}
 			await expect.poll(() => geometry(dialog, search)).toEqual(initial)
 			await expect.poll(() => dialog.evaluate(collectBoundedLayoutFailures)).toEqual([])
 
@@ -133,6 +140,25 @@ test("model and effort clicks retain the open picker layout", async ({ mount, pa
 	// Use the shared bridge capture, not console output, to ensure the real controls ran.
 	const messages = await getCapturedVscodeMessages(page)
 	expect(messages.filter(({ type }) => type === "updateProfileModel")).toHaveLength(2)
+})
+
+test("custom model keyboard acceptance clears search without closing the picker", async ({ mount, page }) => {
+	await mount("unified-model-picker")
+	await page.getByTestId("dropdown-trigger").click()
+	const dialog = page.getByRole("dialog")
+	const search = dialog.getByRole("textbox", { name: "Search models" })
+	await search.fill("  deployment-new  ")
+	await search.press("ArrowDown")
+	await expect(dialog.getByRole("button", { name: "Use custom: deployment-new" })).toBeFocused()
+	await page.keyboard.press("Enter")
+	await expect(dialog).toBeVisible()
+	await expect(search).toHaveValue("")
+	const messages = (await getCapturedVscodeMessages(page)).filter(({ type }) => type === "updateProfileModel")
+	expect(messages).toEqual([
+		expect.objectContaining({
+			values: expect.objectContaining({ patch: expect.objectContaining({ apiModelId: "deployment-new" }) }),
+		}),
+	])
 })
 
 test("switching profiles updates the mounted context before model submission", async ({ mount, page }) => {

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 	allowList: undefined as OrganizationAllowList | undefined,
 	profileName: "Work",
 	selectionLoading: false,
+	fallbackId: undefined as string | undefined,
 	postMessage: vi.fn(),
 	setApiConfiguration: vi.fn(),
 	refetch: vi.fn(),
@@ -31,7 +32,7 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
-		id: mocks.configuration.apiModelId ?? mocks.configuration.openAiModelId,
+		id: mocks.fallbackId ?? mocks.configuration.apiModelId ?? mocks.configuration.openAiModelId,
 		info: mocks.info,
 		isLoading: mocks.selectionLoading,
 	}),
@@ -43,6 +44,7 @@ describe("ProfileQuickSettings", () => {
 		vi.clearAllMocks()
 		mocks.profileName = "Work"
 		mocks.selectionLoading = false
+		mocks.fallbackId = undefined
 		mocks.allowList = undefined
 		mocks.configuration = {
 			apiProvider: providerIdentifiers.openaiNative,
@@ -79,7 +81,8 @@ describe("ProfileQuickSettings", () => {
 		expect(screen.queryByRole("button", { name: "model-a" })).not.toBeInTheDocument()
 		await user.clear(screen.getByRole("textbox"))
 		await user.type(screen.getByRole("textbox"), "zzzzzz")
-		expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "settings:modelPicker.useCustomModel" })).toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "chat:modelSelector.settings" })).not.toBeInTheDocument()
 		expect(results).toHaveClass("h-[300px]")
 		await user.click(screen.getByRole("button", { name: "chat:modelPicker.clearSearch" }))
 		expect(screen.getByRole("textbox")).toHaveFocus()
@@ -258,9 +261,11 @@ describe("ProfileQuickSettings", () => {
 				"overflow-y-auto",
 			)
 			if (state === "loading") expect(screen.getByRole("status")).toHaveTextContent("chat:modelSelector.loading")
-			else {
+			else if (state === "error" || state === "unsupported") {
 				await user.click(screen.getByRole("button", { name: "chat:modelSelector.settings" }))
 				expect(mocks.postMessage).toHaveBeenCalledWith({ type: "switchTab", tab: "settings" })
+			} else {
+				expect(screen.queryByRole("button", { name: "chat:modelSelector.settings" })).not.toBeInTheDocument()
 			}
 			if (state === "error") {
 				await user.click(screen.getByRole("button", { name: "chat:retry.title" }))
@@ -285,4 +290,153 @@ describe("ProfileQuickSettings", () => {
 		await user.click(screen.getByRole("button", { name: "chat:modelPicker.effort.low" }))
 		expect(mocks.postMessage).not.toHaveBeenCalled()
 	})
+
+	it.each([
+		{ provider: providerIdentifiers.openaiNative, field: "apiModelId" },
+		{ provider: providerIdentifiers.openai, field: "openAiModelId" },
+		{ provider: providerIdentifiers.openrouter, field: "openRouterModelId" },
+	] as const)(
+		"accepts trimmed custom IDs for $provider and releases pending on configured ID",
+		async ({ provider, field }) => {
+			mocks.configuration = { apiProvider: provider, [field]: "model-a", apiKey: "keep-secret" }
+			mocks.catalog = { ...mocks.catalog, provider, field }
+			// Simulate discovery validating the custom ID back to an unrelated default.
+			mocks.fallbackId = "model-a"
+			const user = userEvent.setup()
+			const { rerender } = render(<ProfileQuickSettings />)
+			await user.type(screen.getByRole("textbox"), "  deployment-new  ")
+			await user.keyboard("{ArrowDown}{Enter}")
+			expect(mocks.postMessage).toHaveBeenCalledTimes(1)
+			expect(mocks.postMessage).toHaveBeenCalledWith({
+				type: "updateProfileModel",
+				text: "Work",
+				values: {
+					expectedProvider: provider,
+					patch: {
+						[field]: "deployment-new",
+						enableReasoningEffort: null,
+						reasoningEffort: null,
+						modelMaxTokens: null,
+						modelMaxThinkingTokens: null,
+						...(provider === providerIdentifiers.openai
+							? { openAiCustomModelInfo: { reasoningEffort: null } }
+							: {}),
+					},
+				},
+			})
+			expect(screen.getByRole("textbox")).toHaveValue("")
+			expect(screen.getByRole("button", { name: "model-a" })).toBeDisabled()
+			mocks.configuration = { ...mocks.configuration, [field]: "deployment-new" }
+			rerender(<ProfileQuickSettings />)
+			expect(screen.getByRole("button", { name: "deployment-new" })).toHaveAttribute("aria-current", "true")
+			expect(screen.getByRole("button", { name: "deployment-new" })).toBeEnabled()
+			expect(screen.getByRole("button", { name: "model-a" })).not.toHaveAttribute("aria-current")
+			if (provider === providerIdentifiers.openai) {
+				await user.click(screen.getByRole("button", { name: "chat:modelPicker.effort.xhigh" }))
+				expect(mocks.postMessage).toHaveBeenLastCalledWith(
+					expect.objectContaining({
+						values: {
+							expectedProvider: provider,
+							patch: {
+								enableReasoningEffort: true,
+								reasoningEffort: null,
+								openAiCustomModelInfo: { reasoningEffort: "xhigh" },
+							},
+						},
+					}),
+				)
+			} else {
+				expect(
+					screen.queryByRole("group", { name: "chat:modelPicker.reasoningEffort" }),
+				).not.toBeInTheDocument()
+			}
+			expect(mocks.setApiConfiguration).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each([null, {}])("shows a saved custom ID with an absent catalog (%s), not the fallback metadata", (models) => {
+		mocks.configuration.apiModelId = "saved-custom"
+		mocks.fallbackId = "model-a"
+		mocks.catalog.models = models
+		render(<ProfileQuickSettings />)
+		expect(screen.getByRole("button", { name: "saved-custom" })).toHaveAttribute("aria-pressed", "true")
+		expect(screen.queryByRole("group", { name: "chat:modelPicker.reasoningEffort" })).not.toBeInTheDocument()
+	})
+
+	it.each(["   ", " model-a ", " retired "])(
+		"does not offer duplicate, blank or deprecated custom input %j",
+		async (input) => {
+			mocks.catalog.models = { ...mocks.catalog.models, retired: { ...mocks.info, deprecated: true } }
+			const user = userEvent.setup()
+			render(<ProfileQuickSettings />)
+			await user.type(screen.getByRole("textbox"), input)
+			expect(
+				screen.queryByRole("button", { name: "settings:modelPicker.useCustomModel" }),
+			).not.toBeInTheDocument()
+			expect(screen.queryByRole("button", { name: "retired" })).not.toBeInTheDocument()
+			expect(screen.queryByRole("button", { name: "chat:modelSelector.settings" })).not.toBeInTheDocument()
+			if (input.trim() === "retired") expect(screen.getByText("common:ui.no_results")).toBeInTheDocument()
+		},
+	)
+
+	it.each(["provider", "model", "allowed", "all"])(
+		"honors organization %s rules for saved and entered custom IDs",
+		async (rule) => {
+			mocks.configuration.apiModelId = "deployment-new"
+			mocks.allowList = {
+				allowAll: false,
+				providers:
+					rule === "provider"
+						? {}
+						: {
+								[providerIdentifiers.openaiNative]: {
+									allowAll: rule === "all",
+									models: rule === "allowed" ? ["deployment-new", "other-new"] : ["model-a"],
+								},
+							},
+			}
+			const user = userEvent.setup()
+			render(<ProfileQuickSettings />)
+			const permitted = rule === "allowed" || rule === "all"
+			expect(!!screen.queryByRole("button", { name: "deployment-new" })).toBe(permitted)
+			await user.type(screen.getByRole("textbox"), "other-new")
+			expect(!!screen.queryByRole("button", { name: "settings:modelPicker.useCustomModel" })).toBe(permitted)
+		},
+	)
+
+	it.each(["arn:arbitrary", " custom-arn "])(
+		"blocks Bedrock custom input %j without configured ARN",
+		async (input) => {
+			mocks.configuration = { apiProvider: providerIdentifiers.bedrock, apiModelId: "model-a" }
+			mocks.catalog.provider = providerIdentifiers.bedrock
+			const user = userEvent.setup()
+			render(<ProfileQuickSettings />)
+			await user.type(screen.getByRole("textbox"), input)
+			expect(
+				screen.queryByRole("button", { name: "settings:modelPicker.useCustomModel" }),
+			).not.toBeInTheDocument()
+			expect(mocks.postMessage).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each(["disabled", "unnamed", "loading", "selectionLoading", "error", "unsupported", "noField"])(
+		"never offers custom input while %s",
+		async (state) => {
+			if (state === "unnamed") mocks.profileName = ""
+			if (state === "selectionLoading") mocks.selectionLoading = true
+			const user = userEvent.setup()
+			const { rerender } = render(<ProfileQuickSettings />)
+			if (state !== "unnamed" && state !== "selectionLoading")
+				await user.type(screen.getByRole("textbox"), "deployment-new")
+			if (state === "loading") mocks.catalog.isLoading = true
+			if (state === "error") mocks.catalog.isError = true
+			if (state === "unsupported") mocks.catalog.isUnsupported = true
+			if (state === "noField") mocks.catalog.field = undefined
+			rerender(<ProfileQuickSettings disabled={state === "disabled"} />)
+			expect(
+				screen.queryByRole("button", { name: "settings:modelPicker.useCustomModel" }),
+			).not.toBeInTheDocument()
+			expect(mocks.postMessage).not.toHaveBeenCalled()
+		},
+	)
 })
