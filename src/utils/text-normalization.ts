@@ -299,4 +299,3 @@ export function truncateFileOutput(
 		omittedLines: omitted,
 	}
 }
-

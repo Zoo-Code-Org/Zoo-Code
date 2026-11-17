@@ -34,7 +34,10 @@ declare module "events" {
 		rawListeners(event: keyof T | (string & {}) | symbol): Function[]
 		listenerCount(event: keyof T | (string & {}) | symbol): number
 		prependListener<K extends keyof T>(event: K | (string & {}) | symbol, listener: (...args: any[]) => any): this
-		prependOnceListener<K extends keyof T>(event: K | (string & {}) | symbol, listener: (...args: any[]) => any): this
+		prependOnceListener<K extends keyof T>(
+			event: K | (string & {}) | symbol,
+			listener: (...args: any[]) => any,
+		): this
 		eventNames(): Array<keyof T | (string & {}) | symbol>
 		[key: string]: any
 	}
@@ -68,7 +71,7 @@ declare module "uuid" {
 
 declare module "@anthropic-ai/sdk" {
 	export class Anthropic {
-		static Messages: any
+		static Messages: any;
 		[key: string]: any
 	}
 	export namespace Anthropic {

@@ -301,9 +301,7 @@ describe("AutoApprovalHandler", () => {
 
 		it("should trigger token limit when tokens exceed allowedMaxTokens", async () => {
 			;(mockState as any).allowedMaxTokens = 50_000
-			const messages: ClineMessage[] = [
-				{ type: "say", say: "api_req_started", text: "{}", ts: 1000 },
-			]
+			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
 
 			// Under token limit
 			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 20_000, totalTokensOut: 10_000 })

@@ -189,14 +189,19 @@ describe("Text normalization utilities", () => {
 		})
 
 		it("truncates large file preserving head and tail with informative marker", () => {
-			const lines = Array.from({ length: 500 }, (_, i) => `// Line ${i + 1}: export const item${i + 1} = ${i + 1};`)
+			const lines = Array.from(
+				{ length: 500 },
+				(_, i) => `// Line ${i + 1}: export const item${i + 1} = ${i + 1};`,
+			)
 			const text = lines.join("\n")
 			const result = truncateFileOutput(text, 100, 500)
 
 			expect(result.wasTruncated).toBe(true)
 			expect(result.returnedLines).toBe(100)
 			expect(result.omittedLines).toBe(400)
-			expect(result.content).toContain("[...TRUNCATED 400 LINES: Showing first 50 and last 50 lines of 500 total lines")
+			expect(result.content).toContain(
+				"[...TRUNCATED 400 LINES: Showing first 50 and last 50 lines of 500 total lines",
+			)
 			expect(result.content).toContain("Line 1:")
 			expect(result.content).toContain("Line 50:")
 			expect(result.content).toContain("Line 451:")
@@ -232,7 +237,9 @@ describe("Text normalization utilities", () => {
 			expect(result.content).toContain("• Line 181: async calculateTax(order: Order): Promise<number>")
 			expect(result.content).toContain("• Line 221: async processPayment(details: Payment): Promise<Receipt>")
 			expect(result.content).toContain("• Line 261: export function formatReceipt(receipt: Receipt): string")
-			expect(result.content).toContain("To inspect any implementation, call read_file with offset=<line> and limit=40")
+			expect(result.content).toContain(
+				"To inspect any implementation, call read_file with offset=<line> and limit=40",
+			)
 		})
 	})
 })
