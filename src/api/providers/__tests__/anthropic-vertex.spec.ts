@@ -8,6 +8,7 @@ import { VERTEX_1M_CONTEXT_MODEL_IDS } from "@roo-code/types"
 
 import { AnthropicVertexHandler } from "../anthropic-vertex"
 import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
+import { calculateApiCostAnthropic } from "../../../shared/cost"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
@@ -1376,6 +1377,28 @@ describe("VertexHandler", () => {
 			expect(model.info.inputPrice).toBe(6.0)
 			expect(model.info.outputPrice).toBe(22.5)
 			expect(model.betas).toContain("context-1m-2025-08-07")
+		})
+
+		it("bills a 1M-context 1h cache write at the tier-derived rate, not the 200K rate", () => {
+			// Review pin: the 1M merge carries the tier's TTL rate, but the vertex
+			// catalog declares no explicit cacheWritesPrice1h, so the effective 1h
+			// rate is derived from the applied input price (2x per the shared
+			// resolver). If the tier merge regressed to the entry-level input price,
+			// the derived 1h rate would drop from 12.0 to 6.0 (50% under-billing).
+			const handler = new AnthropicVertexHandler({
+				apiModelId: "claude-sonnet-4-6",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				vertex1MContext: true,
+			})
+
+			const model = handler.getModel()
+			const { totalCost } = calculateApiCostAnthropic(model.info, 0, 0, 100_000, 0, 100_000)
+
+			// Derived tier 1h rate 12.0: (12.0 / 1_000_000) * 100_000 = 1.2
+			// The entry-derived rate 6.0 would bill 0.6 (50% under).
+			expect(totalCost).toBeCloseTo(1.2, 9)
+			expect(totalCost).not.toBeCloseTo(0.6, 9)
 		})
 
 		it("should enable 1M context for Claude Opus 4.7 when beta flag is set", () => {

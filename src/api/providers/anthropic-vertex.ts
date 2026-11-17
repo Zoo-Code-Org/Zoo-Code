@@ -153,10 +153,6 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 						// does not report it, leaving the split at 0.
 						const cacheWrite1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens
 
-						// Per-TTL breakdown of the write total; absent when the provider
-						// does not report it, leaving the split at 0.
-						const cacheWrite1hTokens = usage.cache_creation?.ephemeral_1h_input_tokens
-
 						// `output_tokens_details.thinking_tokens` decomposes the billed
 						// output into internal reasoning tokens; surfaced for per-turn
 						// thinking telemetry (billing already includes it in output_tokens).
