@@ -91,9 +91,10 @@ import { useSearchIndexRegistry, SearchIndexProvider } from "./useSettingsSearch
 import { nextSaveRequestId } from "./saveRequestId"
 
 /**
- * How long the form waits for the host to answer a save that changes a time or date setting. The host always answers
- * (success or failure), but a write that never settles would otherwise leave Save disabled until the webview reloads.
- * After this the save is treated as failed: the edits stay unsaved and Save works again.
+ * How long the form waits for the host to answer a save whose writes it watches: one that changes a time or date
+ * setting, or one that edits a command list. The host always answers (success or failure), but a write that never
+ * settles would otherwise leave Save disabled until the webview reloads. After this the save is treated as failed: the
+ * edits stay unsaved and Save works again.
  */
 export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 
@@ -509,7 +510,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const isSettingValid = !errorMessage
 
 	// The time and date values are written one at a time on the host, and a write can fail: a save that changes one of
-	// them waits for the host's answer. Every other save behaves as it always did.
+	// them waits for the host's answer, just as a save that edits a command list does. A save that changes neither
+	// display nor command lists asks for no answer, and behaves as it always did.
 	const displayChanged =
 		(cachedState.timeFormat ?? "auto") !== (extensionState.timeFormat ?? "auto") ||
 		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
@@ -521,7 +523,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				lastDisplayedCommandSnapshot.current,
 			) as [string[], string[], boolean]
 
-			const saveId = displayChanged ? nextSaveRequestId() : undefined
+			// The host reports a rejected command-list write in the same answer it gives a failed display-setting
+			// write, so a save carrying either waits for it. Reporting nothing for a list-only save would leave
+			// the dialog unable to tell a stored list from a rejected one, and it would show the rejected edit as
+			// saved.
+			const saveId = displayChanged || commandListsTouched.current ? nextSaveRequestId() : undefined
 			if (saveId) {
 				sentState.current = cachedState
 				submittedListSave.current = {
@@ -643,8 +649,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// edited list's entry from whether that list's own write landed. The lists' ownership of the buffer
 			// does not move at submit. A save releases that hold - and with it the unsaved flag - only once the
 			// refresh shows every submitted write landed: releasing earlier would let the state refresh that
-			// follows a rejected list write overwrite the edit the user is still looking at. A save the host never
-			// answers has no result to wait for, so it clears the hold at submit.
+			// follows a rejected list write overwrite the edit the user is still looking at. A save that carries
+			// neither a watched display setting nor an edited list asks for no answer, so it clears the hold at
+			// submit.
 			if (!saveId) {
 				commandListsTouched.current = false
 				setChangeDetected(false)
