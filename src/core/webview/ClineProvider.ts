@@ -3529,11 +3529,34 @@ export class ClineProvider
 		// the secrets-backed record gone while metadata and view pins still
 		// reference it.
 		let previousRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>> | undefined
+		let recordConfirmedAbsent = false
 		try {
 			previousRecord = await this.providerSettingsManager.getProfile({ name: profileToDelete.name })
 		} catch {
-			// Absent record: the idempotent not-found path below still prunes the
-			// stale list entry, and compensation skips the record restore.
+			// A rejected read is not a confirmed absence. This catch used to assume
+			// one, which let the delete below commit against a record that the
+			// compensation at the end of this method cannot restore without having
+			// read it. Confirm the absence with the manager's own existence read,
+			// hasConfig, the read the manager snapshot above already uses for this
+			// distinction; an existence read that fails confirms nothing.
+			let existsBefore: boolean | undefined
+			try {
+				existsBefore = await this.providerSettingsManager.hasConfig(profileToDelete.name)
+			} catch {
+				existsBefore = undefined
+			}
+			recordConfirmedAbsent = existsBefore === false
+		}
+
+		if (!previousRecord && !recordConfirmedAbsent) {
+			// Review thread 4593061279, printed at line 3522 of the head it was
+			// written against with original_line 3522: the profile exists and only
+			// its record failed to read, so stop before the deletion instead of
+			// stranding the list entry, the selection and the pins on a profile the
+			// compensation cannot put back.
+			throw new Error(
+				`Cannot delete profile '${profileToDelete.name}': its record could not be read, and its absence could not be confirmed`,
+			)
 		}
 		const previousEntries = this.getProviderProfileEntries()
 		const previousSelection = globalSettings.currentApiConfigName

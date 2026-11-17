@@ -4772,6 +4772,120 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("stops before deleting a profile whose record could only fail to be read", async () => {
+			// Review thread 4593061279, printed at ClineProvider.ts line 3522 with
+			// original_line 3522 and unresolved here: the deletion snapshot treated a
+			// rejected getProfile the same as a confirmed absence, so the delete
+			// committed and the compensation, which can only restore a record it read,
+			// left the profile gone while every reference was put back. The store below
+			// is a real map so the assertions read the durable outcome.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			const ids: Record<string, string> = {
+				"doomed-profile": "doomed-id",
+				"survivor-profile": "survivor-id",
+			}
+			const names: Record<string, string> = {
+				"doomed-id": "doomed-profile",
+				"survivor-id": "survivor-profile",
+			}
+			const store = new Map<string, ProviderSettings>([
+				["doomed-profile", { apiProvider: providerIdentifiers.anthropic, apiKey: "doomed-key" }],
+				["survivor-profile", { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }],
+			])
+			const doomedProfile: ProviderSettingsEntry = {
+				name: "doomed-profile",
+				id: "doomed-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const survivorProfile: ProviderSettingsEntry = {
+				name: "survivor-profile",
+				id: "survivor-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+
+			let snapshotReads = 0
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockImplementation((name) =>
+				Promise.resolve(store.has(name)),
+			)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((options) => {
+				// The manager takes either a name or an id, so resolve the id back to a
+				// name before reading the store.
+				const requested = "name" in options ? options.name : (names[options.id] ?? "survivor-profile")
+				if (requested === "doomed-profile" && snapshotReads++ === 0) {
+					// Transient failure: the record exists and is readable on the next read.
+					return Promise.reject(new Error("secrets read failed"))
+				}
+				const settings = store.get(requested)
+				if (!settings) {
+					return Promise.reject(new Error("no record for " + requested))
+				}
+				return Promise.resolve({ name: requested, id: ids[requested], ...settings })
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockImplementation((name) => {
+				store.delete(name)
+				return Promise.resolve()
+			})
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation((name, settings) => {
+				store.set(name, settings)
+				return Promise.resolve(ids[name])
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(() =>
+				Promise.resolve([doomedProfile, survivorProfile]),
+			)
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("doomed-profile")
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "survivor-profile",
+				id: "survivor-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "keeper-key",
+			})
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			await provider.contextProxy.setValue("listApiConfigMeta", [doomedProfile, survivorProfile])
+			await provider.setValue("currentApiConfigName", "doomed-profile")
+
+			// A later metadata write in the deletion group fails once, which is the
+			// trigger for compensation; the compensation's own writes are allowed to run.
+			const realSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let listWrites = 0
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation((...args) => {
+				if (args[0] === "listApiConfigMeta" && listWrites++ === 0) {
+					return Promise.reject(new Error("metadata write failed"))
+				}
+				return realSetValue(...args)
+			})
+
+			let failure: unknown
+			try {
+				await provider.deleteProviderProfile(doomedProfile)
+			} catch (error) {
+				failure = error
+			}
+
+			expect(failure).toBeInstanceOf(Error)
+			expect({
+				recordStillStored: store.has("doomed-profile"),
+				selectionNamesIt: provider.getValues().currentApiConfigName === "doomed-profile",
+				listNamesIt: (provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]).some(
+					(entry) => entry.name === "doomed-profile",
+				),
+			}).toEqual({
+				recordStillStored: true,
+				selectionNamesIt: true,
+				listNamesIt: true,
+			})
+
+			await provider.dispose()
+		})
+
 		it("should sync the view-local buffer when deleting the current profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
