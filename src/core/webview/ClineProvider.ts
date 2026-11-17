@@ -424,9 +424,23 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.96.0-settings-costs-reliability" // v3.96.0 chat settings, provider costs, and reliability
+	public readonly latestAnnouncementId = "nov-2026-v3.98.0-titles-models-reliability" // v3.98.0 task titles, model support, and reliability
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
+
+	/**
+	 * Mode -> profile id choices made by this window. The persisted mode map in
+	 * `providerSettingsManager` is shared by every VS Code window, so reading it
+	 * alone lets another window's profile selection leak into this window's tasks.
+	 */
+	private readonly localModeConfigIds = new Map<string, string>()
+
+	/**
+	 * The shared mode map as it was when this window opened. Modes this window has not changed
+	 * resolve against it, so another window's later selection cannot reach this window's tasks
+	 * (including delegated subtasks).
+	 */
+	private initialModeConfigIds: Promise<Record<string, string>> = Promise.resolve({})
 
 	constructor(
 		readonly context: vscode.ExtensionContext,
@@ -492,7 +506,12 @@ export class ClineProvider
 
 		this._workspaceTracker = new WorkspaceTracker(this)
 
-		this.providerSettingsManager = new ProviderSettingsManager(this.context)
+		this.providerSettingsManager = new ProviderSettingsManager(this.context, (modeConfigIds) => {
+			// Manual and automatic imports replace this provider's previous mode choices.
+			this.localModeConfigIds.clear()
+			this.initialModeConfigIds = Promise.resolve(modeConfigIds)
+		})
+		this.captureInitialModeConfigIds()
 
 		this.customModesManager = new CustomModesManager(this.context, async () => {
 			await this.postStateToWebviewWithoutClineMessages()
@@ -1559,7 +1578,7 @@ export class ClineProvider
 			const lockApiConfigAcrossModes = this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 
 			if (!historyItem.apiConfigName && !lockApiConfigAcrossModes && !skipProfileRestoreFromHistory) {
-				const savedConfigId = await this.providerSettingsManager.getModeConfigId(historyItem.mode)
+				const savedConfigId = await this.getModeConfigId(historyItem.mode)
 				const listApiConfig = await this.providerSettingsManager.listConfig()
 
 				// Update listApiConfigMeta first to ensure UI has latest data.
@@ -1912,12 +1931,6 @@ export class ClineProvider
 
 		const nonce = getNonce()
 
-		// Get the OpenRouter base URL from configuration
-		const { apiConfiguration } = await this.getState()
-		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
-		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
-
 		const stylesUri = getUri(webview, this.contextProxy.extensionUri, [
 			"webview-ui",
 			"build",
@@ -1954,7 +1967,7 @@ export class ClineProvider
 			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:`,
 			`media-src ${webview.cspSource}`,
 			`script-src 'unsafe-eval' ${webview.cspSource} https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
-			`connect-src ${webview.cspSource} ${openRouterDomain} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
+			`connect-src ${webview.cspSource} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
 		]
 
 		return /*html*/ `
@@ -2028,12 +2041,6 @@ export class ClineProvider
 		*/
 		const nonce = getNonce()
 
-		// Get the OpenRouter base URL from configuration
-		const { apiConfiguration } = await this.getState()
-		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
-		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
-
 		// Tip: Install the es6-string-html VS Code extension to enable code highlighting below
 		return /*html*/ `
         <!DOCTYPE html>
@@ -2042,7 +2049,7 @@ export class ClineProvider
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://us.i.posthog.com;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' 'strict-dynamic'; connect-src ${webview.cspSource} https://us.i.posthog.com;">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
 			<link href="${codiconsUri}" rel="stylesheet" />
 			<script nonce="${nonce}">
@@ -2167,7 +2174,7 @@ export class ClineProvider
 		if (signal?.aborted) return
 
 		// Load the saved API config for the new mode if it exists.
-		const savedConfigId = await this.providerSettingsManager.getModeConfigId(newMode)
+		const savedConfigId = await this.getModeConfigId(newMode)
 		const listApiConfig = await this.providerSettingsManager.listConfig()
 
 		if (signal?.aborted) return
@@ -2192,7 +2199,7 @@ export class ClineProvider
 				if (hasActualSettings) {
 					await this.activateProviderProfileUnlocked(
 						{ name: profile.name },
-						targetTask === null ? { skipCurrentTaskRebuild: true } : undefined,
+						{ persistModeConfig: false, skipCurrentTaskRebuild: targetTask === null },
 						signal,
 					)
 				} else {
@@ -2202,14 +2209,14 @@ export class ClineProvider
 				// The task will continue with the current/default configuration.
 			}
 		} else {
-			// If no saved config for this mode, save current config as default.
+			// Keep an unmapped mode's default local; another window may already have saved a shared choice.
 			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
 
 			if (currentApiConfigNameAfter) {
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)
 
 				if (config?.id) {
-					await this.providerSettingsManager.setModeConfig(newMode, config.id)
+					this.localModeConfigIds.set(newMode, config.id)
 				}
 			}
 		}
@@ -2220,6 +2227,28 @@ export class ClineProvider
 	}
 
 	// Provider Profile Management
+
+	private captureInitialModeConfigIds(): void {
+		this.initialModeConfigIds = this.providerSettingsManager.getModeConfigIds().catch((error) => {
+			this.log(`Failed to snapshot mode profile choices: ${error instanceof Error ? error.message : error}`)
+			return {}
+		})
+	}
+
+	private async getModeConfigId(mode: Mode): Promise<string | undefined> {
+		const cachedId = this.localModeConfigIds.get(mode) ?? (await this.initialModeConfigIds)[mode]
+		// An unmapped mode keeps this provider's current profile, even if another window maps it later.
+		if (!cachedId) return undefined
+		if ((await this.providerSettingsManager.listConfig()).some(({ id }) => id === cachedId)) {
+			return cachedId
+		}
+		return this.providerSettingsManager.getModeConfigId(mode)
+	}
+
+	public async setModeConfig(mode: Mode, id: string): Promise<void> {
+		await this.providerSettingsManager.setModeConfig(mode, id)
+		this.localModeConfigIds.set(mode, id)
+	}
 
 	/**
 	 * Updates the current task's API handler.
@@ -2426,7 +2455,7 @@ export class ClineProvider
 			const activationResults = await Promise.allSettled([
 				this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
 				this.updateGlobalState("currentApiConfigName", name),
-				this.providerSettingsManager.setModeConfig(mode, id),
+				this.setModeConfig(mode, id),
 				this.contextProxy.setProviderSettings(providerSettings),
 			])
 			const failedActivation = activationResults.find(
@@ -2551,7 +2580,7 @@ export class ClineProvider
 		const { mode } = await this.getState()
 
 		if (id && persistModeConfig) {
-			await this.providerSettingsManager.setModeConfig(mode, id)
+			await this.setModeConfig(mode, id)
 		}
 
 		// Change the provider for the current task.
@@ -3839,6 +3868,9 @@ export class ClineProvider
 
 		await this.contextProxy.resetAllState()
 		await this.providerSettingsManager.resetAllConfigs()
+		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
+		this.localModeConfigIds.clear()
+		this.captureInitialModeConfigIds()
 		await this.customModesManager.resetCustomModes()
 		await this.removeClineFromStack()
 		await this.postStateToWebview()
@@ -4854,7 +4886,7 @@ export class ClineProvider
 			mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		let savedModeProfile: { name?: string; apiConfiguration: ProviderSettings } | undefined
 		if (mode !== parentMode && !lockApiConfigAcrossModes) {
-			const savedConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
+			const savedConfigId = await this.getModeConfigId(mode as Mode)
 			if (savedConfigId) {
 				try {
 					const {

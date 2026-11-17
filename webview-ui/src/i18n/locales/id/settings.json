@@ -76,7 +76,6 @@
 			"summaryFailedNoFiles": "Impor berhenti sebelum file apa pun disalin.",
 			"summaryCopied": "{{copied}} dari {{total}} file disalin",
 			"detailFailed": "Mulai percobaan impor baru untuk mencoba lagi.",
-			"detailTasksImported_one": "{{count}} dari {{total}} riwayat tugas diimpor.",
 			"detailTasksImported_other": "{{count}} dari {{total}} riwayat tugas diimpor.",
 			"detailPreparing": "Mempersiapkan impor riwayat Roo Code.",
 			"progressAriaLabel": "Progres impor riwayat Roo Code"
@@ -951,7 +950,7 @@
 		"useAzure": "Gunakan Azure",
 		"azureApiVersion": "Atur versi API Azure",
 		"gemini": {
-			"freeRequests": "* Gratis hingga {{count}} permintaan per menit. Setelah itu, penagihan tergantung pada ukuran prompt.",
+			"freeRequests_other": "* Gratis hingga {{count}} permintaan per menit. Setelah itu, penagihan tergantung pada ukuran prompt.",
 			"pricingDetails": "Untuk info lebih lanjut, lihat detail harga.",
 			"billingEstimate": "* Penagihan adalah estimasi - biaya sebenarnya tergantung pada ukuran prompt."
 		}
