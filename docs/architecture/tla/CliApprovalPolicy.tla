@@ -3,40 +3,35 @@
 \* Source: the taskConfiguration argument of runTask. Sink: ClineProvider.createTask, which calls setValues.
 \* Failure: a task configuration turns on autoApprovalEnabled in a host that needs manual approval.
 \* Invariant: NoAutoApprovalWhenManual. The value in stored settings is the sink.
-\* Expected before the run: Clamp holds. None fails in 2 states.
-\* Result: Clamp holds in 1 state. None fails in 2 states (stored becomes TRUE). NonInteractive holds in 2 states.
+\* Run each config on CliApprovalPolicyMC.tla. The MC module holds the sabotage variant.
+\* Expected before the run: the code holds. The sabotage variant fails in 2 states.
+\* Result: the code holds in 1 state. Sabotage fails in 2 states (stored becomes TRUE).
 \* The model has no task count. Each RunTask step sets stored from one input, so one step covers every order.
 \* Not modeled: the other keys, such as alwaysAllowExecute. The master switch autoApprovalEnabled gates them.
 \* Not modeled: the VS Code UI toggle. It does not use runTask.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review: 0 covered, 0 added, 0 gap. The first version was written after the fix. It is not an independent first pass.
+\* Review (PR 2472): 0 covered, 2 added (Init from NonInteractive, sabotage moved to the MC module), 0 gap. The first version was written after the fix. It is not an independent first pass.
 
-CONSTANTS
-    NonInteractive,   \* TRUE when the CLI runs with the nonInteractive option
-    Variant           \* "Clamp" is the code. "None" is the sabotage check.
+CONSTANT NonInteractive   \* TRUE when the CLI runs with the nonInteractive option
 
 VARIABLE stored       \* autoApprovalEnabled in stored settings
 
-\* One task input. "absent" is a configuration without the key. "no config" is no configuration.
-Inputs == {"no config", "absent", "true", "false"}
+\* One task input. "absent" is no key or no configuration. Both keep the stored value.
+Inputs == {"absent", "on", "off"}
 
-Init == stored = FALSE   \* initialSettings: manual host starts with FALSE
+Init == stored = NonInteractive   \* initialSettings: an unattended host starts with TRUE
 
-\* What runTask sends. Clamp rewrites the key to FALSE when the host needs approval.
-Sent(in) ==
-    IF Variant = "Clamp" /\ ~NonInteractive /\ in # "no config"
-    THEN "false"
-    ELSE in
+\* What runTask sends. The clamp rewrites the key to FALSE when the host needs approval.
+\* No configuration is not clamped in the code. A manual host stores FALSE already, so the result is the same.
+Sent(in) == IF NonInteractive THEN in ELSE "off"
 
 \* setValues keeps the stored value when the key is missing.
-Apply(in) ==
-    CASE Sent(in) = "true"  -> TRUE
-      [] Sent(in) = "false" -> FALSE
-      [] OTHER              -> stored
+Next ==
+    \E in \in Inputs :
+        stored' = CASE Sent(in) = "on"  -> TRUE
+                    [] Sent(in) = "off" -> FALSE
+                    [] OTHER            -> stored
 
-RunTask == \E in \in Inputs : stored' = Apply(in)
-
-Next == RunTask
 Spec == Init /\ [][Next]_stored
 
 TypeOK == stored \in BOOLEAN
