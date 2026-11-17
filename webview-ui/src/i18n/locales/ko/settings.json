@@ -535,6 +535,13 @@
 		"codestralBaseUrlDesc": "Codestral 모델의 대체 URL을 설정합니다.",
 		"xaiApiKey": "xAI API 키",
 		"getXaiApiKey": "xAI API 키 받기",
+		"litellmPreserveReasoning": {
+			"label": "추론을 모델에 다시 보내기",
+			"auto": "자동",
+			"on": "켜기",
+			"off": "끄기",
+			"description": "이전 추론을 일반 텍스트로 모델에 다시 보냅니다. 자동은 모델 감지 결과를 따르고, 켜기는 항상 보내며, 끄기는 보내지 않습니다. 추론 생성을 활성화하거나 채팅에서 추론을 숨기는 설정은 아닙니다."
+		},
 		"litellmApiKey": "LiteLLM API 키",
 		"litellmBaseUrl": "LiteLLM 기본 URL",
 		"awsCredentials": "AWS 자격 증명",

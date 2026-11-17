@@ -535,6 +535,13 @@
 		"codestralBaseUrlDesc": "Đặt URL thay thế cho mô hình Codestral.",
 		"xaiApiKey": "Khóa API xAI",
 		"getXaiApiKey": "Lấy khóa API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Gửi lại suy luận cho mô hình",
+			"auto": "Tự động",
+			"on": "Bật",
+			"off": "Tắt",
+			"description": "Gửi lại suy luận trước đó cho mô hình dưới dạng văn bản thuần túy. Tự động tuân theo kết quả nhận diện mô hình; Bật luôn gửi; Tắt không bao giờ gửi. Không bật tính năng tạo suy luận hoặc ẩn suy luận trong cuộc trò chuyện."
+		},
 		"litellmApiKey": "Khóa API LiteLLM",
 		"litellmBaseUrl": "URL cơ sở LiteLLM",
 		"awsCredentials": "Thông tin xác thực AWS",

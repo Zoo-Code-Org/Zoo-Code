@@ -536,6 +536,13 @@
 		"codestralBaseUrlDesc": "Codestral modeli için alternatif URL ayarlayın.",
 		"xaiApiKey": "xAI API Anahtarı",
 		"getXaiApiKey": "xAI API Anahtarı Al",
+		"litellmPreserveReasoning": {
+			"label": "Akıl yürütmeyi modele geri gönder",
+			"auto": "Otomatik",
+			"on": "Açık",
+			"off": "Kapalı",
+			"description": "Önceki akıl yürütmeyi düz metin olarak modele geri gönderir. Otomatik, model algılamasını izler; Açık her zaman gönderir; Kapalı hiçbir zaman göndermez. Akıl yürütme üretimini etkinleştirmez veya sohbetteki akıl yürütmeyi gizlemez."
+		},
 		"litellmApiKey": "LiteLLM API Anahtarı",
 		"litellmBaseUrl": "LiteLLM Temel URL",
 		"awsCredentials": "AWS Kimlik Bilgileri",

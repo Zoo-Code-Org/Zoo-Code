@@ -536,6 +536,13 @@
 		"codestralBaseUrlDesc": "Stel een alternatieve URL in voor het Codestral-model.",
 		"xaiApiKey": "xAI API-sleutel",
 		"getXaiApiKey": "xAI API-sleutel ophalen",
+		"litellmPreserveReasoning": {
+			"label": "Redenering terugsturen naar het model",
+			"auto": "Automatisch",
+			"on": "Aan",
+			"off": "Uit",
+			"description": "Stuur eerdere redeneringen als platte tekst terug naar het model. Automatisch volgt de modeldetectie; Aan stuurt ze altijd terug; Uit stuurt ze nooit terug. Dit schakelt het genereren van redeneringen niet in en verbergt ze niet in de chat."
+		},
 		"litellmApiKey": "LiteLLM API-sleutel",
 		"litellmBaseUrl": "LiteLLM basis-URL",
 		"awsCredentials": "AWS-inloggegevens",

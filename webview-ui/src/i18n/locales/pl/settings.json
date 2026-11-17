@@ -538,6 +538,13 @@
 		"codestralBaseUrlDesc": "Ustaw opcjonalny URL dla modeli Codestral.",
 		"xaiApiKey": "Klucz API xAI",
 		"getXaiApiKey": "Uzyskaj klucz API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Wysyłaj rozumowanie z powrotem do modelu",
+			"auto": "Automatycznie",
+			"on": "Włączone",
+			"off": "Wyłączone",
+			"description": "Wysyłaj wcześniejsze rozumowanie z powrotem do modelu jako zwykły tekst. Automatycznie korzysta z wykrytych właściwości modelu; Włączone zawsze wysyła; Wyłączone nigdy nie wysyła. Nie włącza generowania rozumowania ani nie ukrywa go na czacie."
+		},
 		"litellmApiKey": "Klucz API LiteLLM",
 		"litellmBaseUrl": "URL bazowy LiteLLM",
 		"awsCredentials": "Poświadczenia AWS",

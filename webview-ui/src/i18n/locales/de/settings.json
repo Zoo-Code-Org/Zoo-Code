@@ -536,6 +536,13 @@
 		"codestralBaseUrlDesc": "Legen Sie eine alternative URL für das Codestral-Modell fest.",
 		"xaiApiKey": "xAI API-Schlüssel",
 		"getXaiApiKey": "xAI API-Schlüssel erhalten",
+		"litellmPreserveReasoning": {
+			"label": "Denkprozess an das Modell zurücksenden",
+			"auto": "Automatisch",
+			"on": "Ein",
+			"off": "Aus",
+			"description": "Sendet frühere Denkprozesse als Klartext an das Modell zurück. Automatisch folgt der Modellerkennung; Ein sendet sie immer; Aus sendet sie nie. Aktiviert weder die Erzeugung von Denkprozessen noch blendet es sie im Chat aus."
+		},
 		"litellmApiKey": "LiteLLM API-Schlüssel",
 		"litellmBaseUrl": "LiteLLM Basis-URL",
 		"awsCredentials": "AWS Anmeldedaten",

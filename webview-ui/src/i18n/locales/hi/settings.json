@@ -536,6 +536,13 @@
 		"codestralBaseUrlDesc": "Codestral मॉडल के लिए वैकल्पिक URL सेट करें।",
 		"xaiApiKey": "xAI API कुंजी",
 		"getXaiApiKey": "xAI API कुंजी प्राप्त करें",
+		"litellmPreserveReasoning": {
+			"label": "तर्क को मॉडल को वापस भेजें",
+			"auto": "स्वचालित",
+			"on": "चालू",
+			"off": "बंद",
+			"description": "पिछले तर्क को सादे टेक्स्ट में मॉडल को वापस भेजें। स्वचालित मॉडल की पहचान के अनुसार काम करता है; चालू हमेशा भेजता है; बंद कभी नहीं भेजता। यह तर्क उत्पन्न करना चालू नहीं करता और चैट में तर्क को छिपाता नहीं है।"
+		},
 		"litellmApiKey": "LiteLLM API कुंजी",
 		"litellmBaseUrl": "LiteLLM आधार URL",
 		"awsCredentials": "AWS क्रेडेंशियल्स",

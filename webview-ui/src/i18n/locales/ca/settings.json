@@ -537,6 +537,13 @@
 		"codestralBaseUrlDesc": "Establir una URL alternativa per al model Codestral.",
 		"xaiApiKey": "Clau API de xAI",
 		"getXaiApiKey": "Obtenir clau API de xAI",
+		"litellmPreserveReasoning": {
+			"label": "Torna a enviar el raonament al model",
+			"auto": "Automàtic",
+			"on": "Activat",
+			"off": "Desactivat",
+			"description": "Torna a enviar al model el raonament anterior en text pla. Automàtic segueix la detecció del model; Activat l'envia sempre; Desactivat no l'envia mai. No activa la generació de raonament ni amaga el raonament al xat."
+		},
 		"litellmApiKey": "Clau API de LiteLLM",
 		"litellmBaseUrl": "URL base de LiteLLM",
 		"awsCredentials": "Credencials d'AWS",

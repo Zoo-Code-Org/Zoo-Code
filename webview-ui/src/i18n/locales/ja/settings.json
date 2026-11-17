@@ -535,6 +535,13 @@
 		"codestralBaseUrlDesc": "Codestralモデルの代替URLを設定します。",
 		"xaiApiKey": "xAI APIキー",
 		"getXaiApiKey": "xAI APIキーを取得",
+		"litellmPreserveReasoning": {
+			"label": "推論をモデルに送り返す",
+			"auto": "自動",
+			"on": "オン",
+			"off": "オフ",
+			"description": "以前の推論をプレーンテキストでモデルに送り返します。自動はモデルの検出結果に従い、オンは常に送信し、オフは送信しません。推論の生成を有効にしたり、チャット内の推論を非表示にしたりする設定ではありません。"
+		},
 		"litellmApiKey": "LiteLLM APIキー",
 		"litellmBaseUrl": "LiteLLM ベースURL",
 		"awsCredentials": "AWS認証情報",

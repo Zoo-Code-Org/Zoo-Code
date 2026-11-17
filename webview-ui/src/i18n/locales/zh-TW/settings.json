@@ -562,6 +562,13 @@
 		"codestralBaseUrlDesc": "設定 Codestral 模型的替代 URL。",
 		"xaiApiKey": "xAI API 金鑰",
 		"getXaiApiKey": "取得 xAI API 金鑰",
+		"litellmPreserveReasoning": {
+			"label": "將推理傳回模型",
+			"auto": "自動",
+			"on": "開啟",
+			"off": "關閉",
+			"description": "將先前的純文字推理傳回模型。自動遵循模型偵測結果；開啟時一律傳送；關閉時一律不傳送。此設定不會啟用推理生成，也不會隱藏聊天中的推理。"
+		},
 		"litellmApiKey": "LiteLLM API 金鑰",
 		"litellmBaseUrl": "LiteLLM 基礎 URL",
 		"awsCredentials": "AWS 認證",

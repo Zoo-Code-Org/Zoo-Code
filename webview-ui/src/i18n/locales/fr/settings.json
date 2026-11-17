@@ -537,6 +537,13 @@
 		"codestralBaseUrlDesc": "Définir une URL alternative pour le modèle Codestral.",
 		"xaiApiKey": "Clé API xAI",
 		"getXaiApiKey": "Obtenir la clé API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Renvoyer le raisonnement au modèle",
+			"auto": "Automatique",
+			"on": "Activé",
+			"off": "Désactivé",
+			"description": "Renvoie au modèle le raisonnement précédent en texte brut. Automatique suit la détection du modèle ; Activé le renvoie toujours ; Désactivé ne le renvoie jamais. N'active pas la génération de raisonnement et ne masque pas le raisonnement dans le chat."
+		},
 		"litellmApiKey": "Clé API LiteLLM",
 		"litellmBaseUrl": "URL de base LiteLLM",
 		"awsCredentials": "Identifiants AWS",

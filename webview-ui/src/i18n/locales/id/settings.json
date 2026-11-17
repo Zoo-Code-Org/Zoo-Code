@@ -535,6 +535,13 @@
 		"codestralBaseUrlDesc": "Atur URL alternatif untuk model Codestral.",
 		"xaiApiKey": "xAI API Key",
 		"getXaiApiKey": "Dapatkan xAI API Key",
+		"litellmPreserveReasoning": {
+			"label": "Kirim penalaran kembali ke model",
+			"auto": "Otomatis",
+			"on": "Aktif",
+			"off": "Nonaktif",
+			"description": "Kirim penalaran sebelumnya dalam teks biasa kembali ke model. Otomatis mengikuti deteksi model; Aktif selalu mengirim; Nonaktif tidak pernah mengirim. Tidak mengaktifkan pembuatan penalaran atau menyembunyikan penalaran di chat."
+		},
 		"litellmApiKey": "LiteLLM API Key",
 		"litellmBaseUrl": "LiteLLM Base URL",
 		"awsCredentials": "AWS Credentials",
