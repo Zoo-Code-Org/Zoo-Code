@@ -8537,7 +8537,7 @@ describe("Queued message processing after condense", () => {
 		})
 
 		it.each([
-			{ state: "aborted", apply: (task: Task) => (task.abort = true) },
+			{ state: "aborted", apply: (task: Task) => setAbortLatch(task, true) },
 			{ state: "abandoned", apply: (task: Task) => (task.abandoned = true) },
 		])("does not submit a queued message when the task is $state", async ({ apply }) => {
 			const task = createQueueTask()

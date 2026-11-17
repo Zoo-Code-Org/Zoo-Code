@@ -524,10 +524,10 @@ describe("Task.ask queued message drain", () => {
 
 		// The real `say` guard rejects before `addToClineMessages` runs, so no row
 		// exists and the message must stay reclaimable.
-		access.abort = true
+		setAbortLatch(task, true)
 		await expect(
 			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
-		).rejects.toThrow("aborted")
+		).rejects.toThrow("[RooCode#say] task task-ask-drain.instance-ask-drain aborted")
 		expect(task["clineMessages"]).toHaveLength(rowsBefore)
 		expect(task.messageQueueService.messages.map((message) => message.text)).toEqual(["Row never landed"])
 		// Released, not left claimed: a later consumer can still claim it.
@@ -536,7 +536,7 @@ describe("Task.ask queued message drain", () => {
 
 		// A later reclaim appends exactly one row, because the failed attempt left
 		// no record behind.
-		access.abort = false
+		setAbortLatch(task, false)
 		await expect(
 			task.persistQueuedFeedbackAndAcknowledge(result.queuedMessageId!, result.text, result.images),
 		).resolves.toBe(true)
