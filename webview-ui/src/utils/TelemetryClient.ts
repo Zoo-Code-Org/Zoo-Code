@@ -9,6 +9,11 @@ type CapturedEvent = { eventName: string; properties: Properties }
 // loaded on demand instead of being part of the eager webview bundle.
 let posthogModulePromise: Promise<PostHogClient> | undefined
 let posthogClient: PostHogClient | undefined
+// Whether init() has actually run on the loaded client. posthog-js's reset() logs
+// "You must initialize PostHog before calling posthog.reset" when the client is not
+// loaded yet, and a second init() is a no-op that logs "You have already initialized
+// PostHog!" without re-running its loaded callback, so both calls are gated on this.
+let posthogInitialized = false
 let posthogLoadFailed = false
 
 // Events captured while the PostHog chunk is still in flight. Before this change the
@@ -66,9 +71,12 @@ class TelemetryClient {
 		TelemetryClient.telemetryEnabled = shouldEnable
 
 		if (!shouldEnable) {
-			// Nothing to reset when PostHog was never loaded: reset() before init() only
-			// logged a "must initialize PostHog first" error and cleared nothing.
-			posthogClient?.reset()
+			// reset() is only meaningful once init() has run: before that, posthog-js's
+			// __loaded guard makes it a no-op that logs "You must initialize PostHog
+			// before calling posthog.reset".
+			if (posthogInitialized) {
+				posthogClient?.reset()
+			}
 			pendingEvents.length = 0
 			return
 		}
@@ -89,15 +97,25 @@ class TelemetryClient {
 			return
 		}
 
-		client.reset()
-		client.init(apiKey, {
-			api_host: "https://us.i.posthog.com",
-			persistence: "localStorage",
-			loaded: () => client.identify(distinctId),
-			capture_pageview: false,
-			capture_pageleave: false,
-			autocapture: false,
-		})
+		if (!posthogInitialized) {
+			// First initialization: the freshly imported client has not been initialized,
+			// so a reset() here would only trigger posthog-js's uninitialized warning.
+			client.init(apiKey, {
+				api_host: "https://us.i.posthog.com",
+				persistence: "localStorage",
+				loaded: () => client.identify(distinctId),
+				capture_pageview: false,
+				capture_pageleave: false,
+				autocapture: false,
+			})
+			posthogInitialized = true
+		} else {
+			// Re-enable on an already-initialized client: init() would be a no-op whose
+			// loaded callback never re-fires, so re-assert the identity directly. After
+			// a disable's reset() this re-links the anonymous device id it left behind
+			// back to the user's distinct id.
+			client.identify(distinctId)
+		}
 
 		this.flushPendingEvents(client)
 	}

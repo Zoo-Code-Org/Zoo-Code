@@ -11,6 +11,14 @@ const posthogMocks = vi.hoisted(() => ({
 
 vi.mock("posthog-js", () => ({ default: posthogMocks }))
 
+// Module-level PostHog state (loaded client, init flag, pending queue) lives outside
+// the class, so tests that need a genuinely fresh client reset the module and re-import.
+async function loadFreshTelemetryClient() {
+	vi.resetModules()
+	const module = await import("@src/utils/TelemetryClient")
+	return module.telemetryClient
+}
+
 describe("TelemetryClient", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -84,8 +92,11 @@ describe("TelemetryClient", () => {
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			// Act
-			await telemetryClient.updateTelemetryState("unset", API_KEY, DISTINCT_ID)
+			// Act - a fresh module so this is genuinely the first enable: init state left
+			// by an earlier test would otherwise turn this into a re-enable, which no
+			// longer calls init a second time.
+			const client = await loadFreshTelemetryClient()
+			await client.updateTelemetryState("unset", API_KEY, DISTINCT_ID)
 
 			// Assert
 			expect(posthog.init).toHaveBeenCalledWith(
@@ -123,7 +134,8 @@ describe("TelemetryClient", () => {
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, true)
+			const client = await loadFreshTelemetryClient()
+			await client.updateTelemetryState("enabled", API_KEY, DISTINCT_ID, true)
 
 			expect(posthog.init).toHaveBeenCalledWith(
 				API_KEY,
@@ -141,7 +153,8 @@ describe("TelemetryClient", () => {
 			const API_KEY = "test-api-key"
 			const DISTINCT_ID = "test-user-id"
 
-			await telemetryClient.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
+			const client = await loadFreshTelemetryClient()
+			await client.updateTelemetryState("enabled", API_KEY, DISTINCT_ID)
 
 			expect(posthog.init).toHaveBeenCalled()
 		})
@@ -205,12 +218,6 @@ describe("TelemetryClient", () => {
 	 * module-level state (the loaded client and the pending queue).
 	 */
 	describe("deferred PostHog loading", () => {
-		async function loadFreshTelemetryClient() {
-			vi.resetModules()
-			const module = await import("@src/utils/TelemetryClient")
-			return module.telemetryClient
-		}
-
 		it("does not load PostHog until telemetry is actually enabled", async () => {
 			const client = await loadFreshTelemetryClient()
 
@@ -321,6 +328,47 @@ describe("TelemetryClient", () => {
 			await enabling
 
 			expect(posthog.init).not.toHaveBeenCalled()
+		})
+
+		/**
+		 * posthog-js's reset() logs "You must initialize PostHog before calling
+		 * posthog.reset" when init() has not run yet, and a second init() is a no-op
+		 * whose loaded callback never re-fires. These tests pin the gating: the first
+		 * enable goes straight to init, a re-enable re-asserts the identity with
+		 * identify(), and reset() only runs on the disable path once init has run.
+		 */
+		it("does not call reset before init on the first enable", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+
+			expect(posthog.reset).not.toHaveBeenCalled()
+			expect(posthog.init).toHaveBeenCalledTimes(1)
+		})
+
+		it("re-identifies instead of re-initializing on a second enable", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+
+			expect(posthog.init).toHaveBeenCalledTimes(1)
+			expect(posthog.identify).toHaveBeenCalledWith("test-user")
+			expect(posthog.reset).not.toHaveBeenCalled()
+		})
+
+		it("resets on disable only once init has run", async () => {
+			const client = await loadFreshTelemetryClient()
+
+			// Disable before any enable: nothing was initialized, so reset() must not run.
+			await client.updateTelemetryState("disabled")
+			expect(posthog.reset).not.toHaveBeenCalled()
+
+			// After init, a disable must actually clear the stored identity.
+			await client.updateTelemetryState("enabled", "test-key", "test-user")
+			await client.updateTelemetryState("disabled")
+
+			expect(posthog.reset).toHaveBeenCalledTimes(1)
 		})
 	})
 })
