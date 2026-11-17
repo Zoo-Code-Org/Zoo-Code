@@ -1,11 +1,11 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.clear-approval-buttons.spec.tsx
 
 import React from "react"
-import { renderWithExtensionState, waitFor, act, fireEvent } from "@/utils/test-utils"
+import { renderWithExtensionState, waitFor, act, fireEvent, screen } from "@/utils/test-utils"
 
 import { vscode } from "@src/utils/vscode"
 
-import ChatView, { ChatViewProps } from "../ChatView"
+import ChatView, { ChatViewProps, ChatViewRef } from "../ChatView"
 
 interface ClineMessage {
 	type: "say" | "ask"
@@ -183,6 +183,61 @@ const askOnlyCompletionWithCheckpoint = (): ClineMessage[] => [
 
 describe("ChatView approval button behavior", () => {
 	beforeEach(() => vi.clearAllMocks())
+
+	describe("queued message segments", () => {
+		const streaming = (): ClineMessage[] => [
+			{ type: "say", say: "task", ts: 1, text: "Initial task" },
+			{ type: "say", say: "text", ts: 2, text: "working", partial: true },
+		]
+		const fills = [
+			{
+				label: "generated",
+				fill: () =>
+					window.postMessage({ type: "invoke", invoke: "setChatBoxMessage", text: "ctx @/secret" }, "*"),
+				value: "ctx @/secret",
+				source: "generated",
+			},
+			{
+				label: "typed",
+				fill: () => fireEvent.input(screen.getByRole("textbox"), { target: { value: "use @/ok" } }),
+				value: "use @/ok",
+				source: "user",
+			},
+		] as const
+		const queued = () => vi.mocked(vscode.postMessage).mock.calls.find(([m]) => m.type === "queueMessage")?.[0]
+
+		it.each(fills)("the enqueue button sends $label text with its source", async ({ fill, value, source }) => {
+			renderChatView()
+			await act(async () => hydrateState(streaming()))
+			await act(async () => {
+				fill()
+			})
+			await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(value))
+			await act(async () => {
+				fireEvent.click(await screen.findByRole("button", { name: "chat:enqueueMessage" }))
+			})
+
+			expect(queued()).toMatchObject({ text: value, segments: [{ text: value, source }] })
+		})
+
+		it.each(fills)(
+			"acceptInput during command_output sends $label text with its source",
+			async ({ fill, value, source }) => {
+				const ref = React.createRef<ChatViewRef>()
+				renderWithExtensionState(<ChatView ref={ref} {...defaultProps} />)
+				await act(async () => hydrateState(askMessages("command_output")))
+				await act(async () => {
+					fill()
+				})
+				await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(value))
+				await act(async () => {
+					ref.current!.acceptInput()
+				})
+
+				expect(queued()).toMatchObject({ text: value, segments: [{ text: value, source }] })
+			},
+		)
+	})
 
 	it("shows Run/Deny buttons for a command ask that requires manual approval", async () => {
 		const { queryByText } = renderChatView()

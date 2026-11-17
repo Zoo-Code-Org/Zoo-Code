@@ -15,11 +15,11 @@ import {
 	type ProviderSettings,
 	type Command as SlashCommand,
 	type WebviewMessage,
-	type EditQueuedMessagePayload,
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
 	checkoutDiffPayloadSchema,
+	editQueuedMessagePayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
@@ -4066,9 +4066,10 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "editQueuedMessage": {
-			if (message.payload) {
-				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+			const edit = editQueuedMessagePayloadSchema.safeParse(message.payload)
+			if (edit.success) {
+				const { id, text, images, segments } = edit.data
+				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images, segments)
 			}
 
 			break

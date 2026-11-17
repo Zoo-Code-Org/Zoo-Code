@@ -7,7 +7,12 @@
 \* Expected before the run: the edits hold. A change of two ranges would fail with generated text between them.
 \* Result, MaxLen 2: the code retagger FAILS in 2 states. The Both retagger holds in 2,193 states.
 \* MaxLen 3 and MaxInit 3 give the same verdicts. The fixed run holds in 71,225 states and takes 30 seconds.
-\* Not modeled: a change of two ranges in one event. It fails with either retagger. A textarea cannot send it.
+\* A change of two ranges in one event fails with either retagger. A textarea input event cannot send it.
+\* The queue editor saves only the final text. QueueSave models it: two edits, then one save. See PR 2421 review 2.
+\* Expected before the run: QueueEdit "Batch" (one retag at save, as MessageQueueService did) fails at MaxLen 3.
+\* Result: "Batch" fails in 3 states, even at MaxLen 2 (generated "a", type "a" on both sides, middle "a" turns user).
+\* The review example (trim both ends of "X @/etc/passwd Y") is the same class.
+\* "PerEvent" (the webview retags at each input event and sends the segments) holds. The server only checks them.
 \* Replay: paste "@/x" before generated "@/x", then replace the first typed "@". The generated copy turns user.
 \* The finding is real in applyEdit. The fix runs the diff from both ends and keeps "u" only where both agree.
 \* Property test: mentionSegments.spec.ts, "never tags a generated letter user". It fails on the old code.
@@ -21,16 +26,21 @@
 \* Tests: ChatTextArea.spec.tsx (history input types) and ChatView.clear-approval-buttons.spec.tsx (delete, undo, send).
 \* Cost of AllGenerated: after an undo or redo the user must retype a mention that was in the draft.
 \* Not modeled: normalizeSegments (the text match check), merge, trim and the host expansion.
-\* Configs: MentionOrigin.cfg must pass. Must fail: .Code, .History, .Undo, .Retained.
+\* Tests: QueuedMessages.spec.tsx (per-event tags), MessageQueueService.spec.ts (the server keeps the tags).
+\* Configs: MentionOrigin.cfg must pass. Must fail: .Code, .History, .Undo, .Retained, .Queue.
 \* Cost: each run takes under 10 seconds at MaxLen 2. Agent time is not measured.
-\* Review: 0 covered, 7 added (history restore, per-position form, native undo, one run for both restores,
-\* no guard on the restore letters, navigation state, any undo target; PR 2421), 0 gap.
+\* Review: 0 covered, 8 added (history restore, per-position form, native undo, one run for both restores,
+\* no guard on the restore letters, navigation state, any undo target, queue save; PR 2421), 0 gap.
+\* The queue save was a "not modeled" note in the first version. The second review found it.
+\* ChatView postDraft: one helper reads the segments for each send and clears the draft. No model change.
+\* Null result: the spec has no action for the send sites. The existing ChatView tests and a mutation check cover them.
 \* The first version came after the code and the reviews. It is not an independent first pass.
 \* No review thread named the equal-letter failure. TLC found it.
 
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS Alphabet, MaxLen, MaxInit, Retagger, HistoryRestore, UndoRestore
+CONSTANTS Alphabet, MaxLen, MaxInit, Retagger, HistoryRestore, UndoRestore, QueueEdit
+\* QueueEdit: "Batch" or "PerEvent".
 \* Retagger: "Code" or "Both". HistoryRestore: "Saved" or "AsEdit".
 \* UndoRestore: "AllGenerated", "Retained" or "AsEdit".
 
@@ -128,7 +138,16 @@ UndoAct == \E t \in Seqs(Cell, MaxLen) :
     /\ nav' = FALSE
     /\ UNCHANGED snap
 
-Next == Change \/ Load \/ HistoryRestoreAct \/ UndoAct
+\* The queue editor holds two edits and saves once. "Batch" retags the net change. "PerEvent" retags each edit.
+QueueSave == \E t1 \in Edits(text) : \E t \in Edits(t1) :
+    /\ text' = t
+    /\ tags' = IF QueueEdit = "Batch"
+               THEN Retag(Letters(text), tags, Letters(t), "u")
+               ELSE Retag(Letters(t1), Retag(Letters(text), tags, Letters(t1), "u"), Letters(t), "u")
+    /\ nav' = FALSE
+    /\ UNCHANGED snap
+
+Next == Change \/ Load \/ HistoryRestoreAct \/ UndoAct \/ QueueSave
 
 Spec == Init /\ [][Next]_vars
 

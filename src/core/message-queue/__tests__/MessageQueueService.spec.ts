@@ -79,33 +79,30 @@ describe("MessageQueueService segments", () => {
 		expect(queue.addMessage("ctx mine", undefined, segments)?.segments).toEqual(segments)
 	})
 
-	it("keeps unchanged generated text generated when the user saves without edits", () => {
+	// Mirrors docs/architecture/tla/MentionOrigin.tla, QueueSave. The editor tags each input event.
+	it("keeps the segments the editor sends", () => {
+		const queue = new MessageQueueService()
+		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
+		const segments = [
+			{ text: "ctx @/x", source: "generated" as const },
+			{ text: " mine", source: "user" as const },
+		]
+
+		queue.updateMessage(message.id, "ctx @/x mine", undefined, segments)
+
+		expect(queue.messages[0]?.segments).toEqual(segments)
+	})
+
+	it.each([
+		{ label: "omitted", segments: undefined },
+		{ label: "not a list", segments: "user" },
+		{ label: "a text mismatch", segments: [{ text: "other", source: "user" }] },
+	])("fails closed when the edit segments are $label", ({ segments }) => {
 		const queue = new MessageQueueService()
 		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
 
-		queue.updateMessage(message.id, "ctx @/x")
+		queue.updateMessage(message.id, "@/x", undefined, segments)
 
-		expect(queue.messages[0]?.segments).toEqual([{ text: "ctx @/x", source: "generated" }])
-	})
-
-	it("marks only the appended text as user text", () => {
-		const queue = new MessageQueueService()
-		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
-
-		queue.updateMessage(message.id, "ctx @/x mine")
-
-		expect(queue.messages[0]?.segments).toEqual([
-			{ text: "ctx @/x", source: "generated" },
-			{ text: " mine", source: "user" },
-		])
-	})
-
-	it("treats a message without segments as generated", () => {
-		const queue = new MessageQueueService()
-		const message = queue.addMessage("old @/x")!
-
-		queue.updateMessage(message.id, "old @/x")
-
-		expect(queue.messages[0]?.segments).toEqual([{ text: "old @/x", source: "generated" }])
+		expect(queue.messages[0]?.segments).toEqual([{ text: "@/x", source: "generated" }])
 	})
 })

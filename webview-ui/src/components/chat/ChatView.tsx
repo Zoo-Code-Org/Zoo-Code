@@ -28,6 +28,7 @@ import type {
 	AudioType,
 	SuggestionItem,
 	MentionSegment,
+	ClineAskResponse,
 } from "@roo-code/types"
 import { getCompletionCheckpoint, getSuggestionMode, hasUsableAnswer, isRetiredProvider } from "@roo-code/types"
 
@@ -662,6 +663,25 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	}, [])
 
 	/**
+	 * Sends the chat box as one message and clears it. The only place that reads the segments for a send,
+	 * so a send site cannot pass its own source. A caller passes `segments` only for text it generated.
+	 */
+	const postDraft = useCallback(
+		(
+			message: { type: "queueMessage" } | { type: "askResponse"; askResponse: ClineAskResponse },
+			text: string,
+			images: string[] | undefined,
+			segments: MentionSegment[] = segmentsFor(text),
+		) => {
+			vscode.postMessage({ ...message, text, images: images ?? [], segments })
+			segmentsRef.current = null
+			setInputValue("")
+			setSelectedImages([])
+		},
+		[segmentsFor],
+	)
+
+	/**
 	 * Handles sending messages to the extension
 	 * @param text - The message text to send
 	 * @param images - Array of image data URLs to send with the message
@@ -692,15 +712,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				) {
 					try {
 						console.log("queueMessage", text, images)
-						vscode.postMessage({
-							type: "queueMessage",
-							text,
-							images,
-							segments,
-						})
-						setInputValue("")
-						setSelectedImages([])
-						segmentsRef.current = null
+						postDraft({ type: "queueMessage" }, text, images, segments)
 					} catch (error) {
 						console.error(
 							`Failed to queue message: ${error instanceof Error ? error.message : String(error)}`,
@@ -770,6 +782,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			messageQueue.length,
 			apiConfiguration.apiProvider,
 			segmentsFor,
+			postDraft,
 		], // messagesRef and clineAskRef are stable
 	)
 
@@ -837,17 +850,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const handleEnqueueCurrentMessage = useCallback(() => {
 		const text = inputValue.trim()
 		if (text || selectedImages.length > 0) {
-			vscode.postMessage({
-				type: "queueMessage",
-				text,
-				images: selectedImages,
-				segments: segmentsFor(text),
-			})
-			segmentsRef.current = null
-			setInputValue("")
-			setSelectedImages([])
+			postDraft({ type: "queueMessage" }, text, selectedImages)
 		}
-	}, [inputValue, selectedImages, segmentsFor])
+	}, [inputValue, selectedImages, postDraft])
 
 	// Resets the approval button UI to its hidden/disabled state. Shared by the
 	// manual click handlers and by the backend-driven clearApprovalButtons
@@ -879,17 +884,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "mistake_limit_reached":
 					// Only send text/images if they exist
 					if (trimmedInput || (images && images.length > 0)) {
-						vscode.postMessage({
-							type: "askResponse",
-							askResponse: "yesButtonClicked",
-							text: trimmedInput,
-							images: images,
-							segments: segmentsFor(trimmedInput ?? ""),
-						})
-						// Clear input state after sending
-						segmentsRef.current = null
-						setInputValue("")
-						setSelectedImages([])
+						postDraft({ type: "askResponse", askResponse: "yesButtonClicked" }, trimmedInput ?? "", images)
 					} else {
 						vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
 					}
@@ -907,17 +902,11 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					} else {
 						// Only send text/images if they exist
 						if (trimmedInput || (images && images.length > 0)) {
-							vscode.postMessage({
-								type: "askResponse",
-								askResponse: "yesButtonClicked",
-								text: trimmedInput,
-								images: images,
-								segments: segmentsFor(trimmedInput ?? ""),
-							})
-							// Clear input state after sending
-							segmentsRef.current = null
-							setInputValue("")
-							setSelectedImages([])
+							postDraft(
+								{ type: "askResponse", askResponse: "yesButtonClicked" },
+								trimmedInput ?? "",
+								images,
+							)
 						} else {
 							vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
 						}
@@ -937,7 +926,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons, segmentsFor],
+		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons, postDraft],
 	)
 
 	const handleSecondaryButtonClick = useCallback(
@@ -964,17 +953,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				case "use_mcp_server":
 					// Only send text/images if they exist
 					if (trimmedInput || (images && images.length > 0)) {
-						vscode.postMessage({
-							type: "askResponse",
-							askResponse: "noButtonClicked",
-							text: trimmedInput,
-							images: images,
-							segments: segmentsFor(trimmedInput ?? ""),
-						})
-						// Clear input state after sending
-						segmentsRef.current = null
-						setInputValue("")
-						setSelectedImages([])
+						postDraft({ type: "askResponse", askResponse: "noButtonClicked" }, trimmedInput ?? "", images)
 					} else {
 						// Responds to the API with a "This operation failed" and lets it try again
 						vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })
@@ -986,7 +965,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			}
 			clearApprovalButtons()
 		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons, segmentsFor],
+		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons, postDraft],
 	)
 
 	const { info: model } = useSelectedModel(apiConfiguration)
@@ -1730,15 +1709,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// triggering the primary button action (which would lose the message)
 			if (clineAskRef.current === "command_output" && hasInput) {
 				const text = inputValue.trim()
-				vscode.postMessage({
-					type: "queueMessage",
-					text,
-					images: selectedImages,
-					segments: segmentsFor(text),
-				})
-				segmentsRef.current = null
-				setInputValue("")
-				setSelectedImages([])
+				postDraft({ type: "queueMessage" }, text, selectedImages)
 				return
 			}
 
@@ -1960,11 +1931,16 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						vscode.postMessage({ type: "removeQueuedMessage", text: messageQueue[index].id })
 					}
 				}}
-				onUpdate={(index, newText) => {
+				onUpdate={(index, newText, segments) => {
 					if (messageQueue[index]) {
 						vscode.postMessage({
 							type: "editQueuedMessage",
-							payload: { id: messageQueue[index].id, text: newText, images: messageQueue[index].images },
+							payload: {
+								id: messageQueue[index].id,
+								text: newText,
+								images: messageQueue[index].images,
+								segments,
+							},
 						})
 					}
 				}}

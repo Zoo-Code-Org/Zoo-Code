@@ -190,7 +190,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								// Select all text first
 								textarea.select()
 								programmaticInsertRef.current = true
-								document.execCommand("insertText", false, message.text)
+								if (!document.execCommand("insertText", false, message.text)) {
+									// No input event follows, so the flag would tag the next keystroke generated.
+									programmaticInsertRef.current = false
+									setInputValueProgrammatic(message.text)
+								}
 							} else {
 								setInputValueProgrammatic(message.text)
 							}

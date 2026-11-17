@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from "uuid"
 
 import type { MentionSegment, QueuedMessage } from "@roo-code/types"
 
-import { applyEdit, generatedSegments } from "../../shared/mentionSegments"
+import { normalizeSegments } from "../../shared/mentionSegments"
 
 export interface QueueEvents {
 	stateChanged: [messages: QueuedMessage[]]
@@ -62,15 +62,15 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return true
 	}
 
-	public updateMessage(id: string, text: string, images?: string[]): boolean {
+	public updateMessage(id: string, text: string, images?: string[], segments?: unknown): boolean {
 		const { message } = this.findMessage(id)
 
 		if (!message) {
 			return false
 		}
 
-		// Only the changed text becomes user text. Unchanged generated text stays generated.
-		message.segments = applyEdit(message.segments ?? generatedSegments(message.text), message.text, text)
+		// The editor tags each input event. A diff of the saved text would tag generated text user.
+		message.segments = normalizeSegments(text, segments)
 		message.timestamp = Date.now()
 		message.text = text
 		message.images = images

@@ -2226,7 +2226,7 @@ describe("Task persistence", () => {
 	})
 
 	describe("resumeTaskFromHistory response mentions", () => {
-		const resumeWith = async (response: { text: string; segments?: unknown }) => {
+		const resumeWith = async (response: { text: string; segments?: unknown; images?: string[] }) => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -2300,6 +2300,14 @@ describe("Task persistence", () => {
 				type: "text",
 				text: "<user_message>\nread @/secret\n</user_message>",
 			})
+		})
+
+		it("keeps the images of an empty-text response and expands nothing", async () => {
+			const { processed, parsed } = await resumeWith({ text: "", images: ["data:image/png;base64,AA"] })
+
+			expect(parsed).toEqual([])
+			expect(processed.content.some((block: { type: string }) => block.type === "image")).toBe(true)
+			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
 		})
 
 		it("pushes no response block for an empty response", async () => {

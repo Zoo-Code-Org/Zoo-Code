@@ -546,7 +546,15 @@ export interface UpdateTodoListPayload {
 	todos: any[]
 }
 
-export type EditQueuedMessagePayload = Pick<QueuedMessage, "id" | "text" | "images">
+// Segments stay unknown. normalizeSegments fails closed on a bad list.
+export const editQueuedMessagePayloadSchema = z.object({
+	id: z.string(),
+	text: z.string(),
+	images: z.array(z.string()).optional(),
+	segments: z.unknown().optional(),
+})
+
+export type EditQueuedMessagePayload = z.infer<typeof editQueuedMessagePayloadSchema>
 
 export interface WebviewMessage {
 	type:

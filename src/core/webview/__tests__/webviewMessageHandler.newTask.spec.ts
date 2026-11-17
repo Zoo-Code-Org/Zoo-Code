@@ -58,14 +58,14 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 	let providerAsClineProvider: ClineProvider
 	let currentTask: {
 		handleWebviewAskResponse: ReturnType<typeof vi.fn>
-		messageQueueService: { addMessage: ReturnType<typeof vi.fn> }
+		messageQueueService: { addMessage: ReturnType<typeof vi.fn>; updateMessage: ReturnType<typeof vi.fn> }
 	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		currentTask = {
 			handleWebviewAskResponse: vi.fn(),
-			messageQueueService: { addMessage: vi.fn() },
+			messageQueueService: { addMessage: vi.fn(), updateMessage: vi.fn() },
 		}
 		provider = {
 			createTask: vi.fn().mockResolvedValue({ taskId: "task-1" }),
@@ -156,5 +156,31 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		expect(submitUserMessage).toHaveBeenCalledWith("see @/a.png", expect.anything(), undefined, undefined, [
 			generated("see @/a.png"),
 		])
+	})
+
+	describe("editQueuedMessage", () => {
+		const edit = (payload: unknown) =>
+			webviewMessageHandler(providerAsClineProvider, { type: "editQueuedMessage", payload } as WebviewMessage)
+
+		it("forwards a valid edit with its segments", async () => {
+			await edit({ id: "q1", text, images: ["data:image/png;base64,AA"], segments })
+			expect(currentTask.messageQueueService.updateMessage).toHaveBeenCalledWith(
+				"q1",
+				text,
+				["data:image/png;base64,AA"],
+				segments,
+			)
+		})
+
+		it.each([
+			{ label: "missing", payload: undefined },
+			{ label: "not an object", payload: "q1" },
+			{ label: "missing an id", payload: { text } },
+			{ label: "a non-string text", payload: { id: "q1", text: 1 } },
+			{ label: "a non-list images field", payload: { id: "q1", text, images: "x" } },
+		])("ignores a payload that is $label", async ({ payload }) => {
+			await edit(payload)
+			expect(currentTask.messageQueueService.updateMessage).not.toHaveBeenCalled()
+		})
 	})
 })
