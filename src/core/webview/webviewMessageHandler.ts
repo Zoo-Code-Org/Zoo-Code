@@ -1419,7 +1419,7 @@ export const webviewMessageHandler = async (
 					if (message?.values?.mimoApiKey || unsavedMimoBaseUrl) {
 						// Unsaved form values win over stored config: flush refreshes the cache
 						// with them before the aggregate fetch (same pattern as DeepSeek/Moonshot).
-						await flushModels(mimoOptions, true)
+						await flushModels(mimoOptions, handlerFor(apiConfiguration, providerIdentifiers.mimo), true)
 					}
 
 					candidates.push({

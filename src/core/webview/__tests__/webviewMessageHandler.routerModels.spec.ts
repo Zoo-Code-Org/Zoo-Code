@@ -788,11 +788,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			type: RouterModelsMessageType.requestRouterModels,
 		})
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.mimo,
-			apiKey: "stored-mimo-key",
-			baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: "https://token-plan-sgp.xiaomimimo.com/v1",
+			},
+			expect.anything(),
+		)
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -889,8 +892,8 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			apiKey: "new-mimo-key",
 			baseUrl: "https://token-plan-ams.xiaomimimo.com/v1",
 		}
-		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, true)
-		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions)
+		expect(flushModelsMock).toHaveBeenCalledWith(mimoOptions, expect.anything(), true)
+		expect(getModelsMock).toHaveBeenCalledWith(mimoOptions, expect.anything())
 
 		const response = mockProvider.postMessageToWebview.mock.calls.find(
 			(call) => call[0]?.type === RouterModelsMessageType.routerModels,
@@ -1005,11 +1008,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 		// Empty means unset: the stored China cluster must keep applying instead
 		// of being silently rerouted to the default Singapore endpoint.
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.mimo,
-			apiKey: "stored-mimo-key",
-			baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+			},
+			expect.anything(),
+		)
 
 		// No rejection is posted and no refresh is flushed for the empty value.
 		const errorCall = mockProvider.postMessageToWebview.mock.calls.find(
@@ -1032,11 +1038,14 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 			values: { mimoBaseUrl: "" },
 		})
 
-		expect(getModelsMock).toHaveBeenCalledWith({
-			provider: providerIdentifiers.mimo,
-			apiKey: "stored-mimo-key",
-			baseUrl: undefined,
-		})
+		expect(getModelsMock).toHaveBeenCalledWith(
+			{
+				provider: providerIdentifiers.mimo,
+				apiKey: "stored-mimo-key",
+				baseUrl: undefined,
+			},
+			expect.anything(),
+		)
 	})
 
 	it("posts a Moonshot provider error and keeps an empty aggregate entry when fetch fails", async () => {
