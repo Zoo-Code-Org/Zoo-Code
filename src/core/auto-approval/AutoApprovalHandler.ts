@@ -6,7 +6,7 @@ import { ClineAskResponse } from "../../shared/WebviewMessage"
 export interface AutoApprovalResult {
 	shouldProceed: boolean
 	requiresApproval: boolean
-	approvalType?: "requests" | "cost"
+	approvalType?: "requests" | "cost" | "tokens"
 	approvalCount?: number | string
 }
 
@@ -14,6 +14,7 @@ export class AutoApprovalHandler {
 	private lastResetMessageIndex: number = 0
 	private consecutiveAutoApprovedRequestsCount: number = 0
 	private consecutiveAutoApprovedCost: number = 0
+	private consecutiveAutoApprovedTokens: number = 0
 
 	/**
 	 * Check if auto-approval limits have been reached and handle user approval if needed
@@ -34,7 +35,13 @@ export class AutoApprovalHandler {
 
 		// Check cost limit
 		const costResult = await this.checkCostLimit(state, messages, askForApproval)
-		return costResult
+		if (!costResult.shouldProceed || costResult.requiresApproval) {
+			return costResult
+		}
+
+		// Check token limit (token circuit breaker)
+		const tokenResult = await this.checkTokenLimit(state, messages, askForApproval)
+		return tokenResult
 	}
 
 	/**
@@ -135,21 +142,70 @@ export class AutoApprovalHandler {
 	}
 
 	/**
+	 * Calculate current tokens and check if limit is exceeded (Token Circuit Breaker)
+	 */
+	private async checkTokenLimit(
+		state: GlobalState | undefined,
+		messages: ClineMessage[],
+		askForApproval: (
+			type: ClineAsk,
+			data: string,
+		) => Promise<{ response: ClineAskResponse; text?: string; images?: string[] }>,
+	): Promise<AutoApprovalResult> {
+		const maxTokens = (state as any)?.allowedMaxTokens || Infinity
+
+		// Calculate total tokens from messages after the last reset point
+		const messagesAfterReset = messages.slice(this.lastResetMessageIndex)
+		const metrics = getApiMetrics(messagesAfterReset)
+		this.consecutiveAutoApprovedTokens = (metrics.totalTokensIn || 0) + (metrics.totalTokensOut || 0)
+
+		if (this.consecutiveAutoApprovedTokens > maxTokens) {
+			const { response } = await askForApproval(
+				"auto_approval_max_req_reached",
+				JSON.stringify({ count: maxTokens.toLocaleString(), type: "tokens" }),
+			)
+
+			// If we get past the promise, it means the user approved and did not start a new task
+			if (response === "yesButtonClicked") {
+				// Reset tracking by recording the current message count
+				this.lastResetMessageIndex = messages.length
+				return {
+					shouldProceed: true,
+					requiresApproval: true,
+					approvalType: "tokens",
+					approvalCount: maxTokens.toLocaleString(),
+				}
+			}
+
+			return {
+				shouldProceed: false,
+				requiresApproval: true,
+				approvalType: "tokens",
+				approvalCount: maxTokens.toLocaleString(),
+			}
+		}
+
+		return { shouldProceed: true, requiresApproval: false }
+	}
+
+	/**
 	 * Reset the tracking (typically called when starting a new task)
 	 */
 	resetRequestCount(): void {
 		this.lastResetMessageIndex = 0
 		this.consecutiveAutoApprovedRequestsCount = 0
 		this.consecutiveAutoApprovedCost = 0
+		this.consecutiveAutoApprovedTokens = 0
 	}
 
 	/**
 	 * Get current approval state for debugging/testing
 	 */
-	getApprovalState(): { requestCount: number; currentCost: number } {
+	getApprovalState(): { requestCount: number; currentCost: number; currentTokens: number } {
 		return {
 			requestCount: this.consecutiveAutoApprovedRequestsCount,
 			currentCost: this.consecutiveAutoApprovedCost,
+			currentTokens: this.consecutiveAutoApprovedTokens,
 		}
 	}
 }
