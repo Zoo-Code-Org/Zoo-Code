@@ -1,5 +1,55 @@
 # Zoo Code Changelog
 
+## [3.98.0]
+
+- **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
+- **Expanded model and provider support:** Use GPT-6.1 Terra, fetch the latest Friendli model list, and keep Zoo Gateway first in provider settings.
+- **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
+
+### Automatic Task Titles and Model Controls
+
+- Automatically generate titles for new root tasks (#2333 by @daewoongoh, PR #2398 by @daewoongoh)
+- Add an experimental dynamic thinking-effort toggle (#2079 by @easonLiangWorldedtech, PR #1521 by @easonLiangWorldedtech)
+
+### Expanded Model and Provider Support
+
+- Add GPT-6.1 Terra support (#2380 by @bigyao25, PR #2379 by @bigyao25)
+- Fetch Friendli models from `/v1/models` (#2332 by @Lee-Si-Yoon, PR #2331 by @Lee-Si-Yoon)
+- Pin Zoo Gateway as the first provider in settings (PR #2419 by @taltas)
+
+### Safer, More Responsive Chats and Edits
+
+- Add abort-signal support for OpenAI Native (#404 by @Fuzzillogic, PR #1291 by @easonLiangWorldedtech)
+- Add abort-signal support for Requesty completePrompt and shared helpers (PR #1537 by @easonLiangWorldedtech)
+- Fix: Prevent apply_diff edits outside the workspace from being auto-approved (#2249 by @tvanomr, PR #2343 by @kanchinadd98)
+- Update outside-workspace apply_diff test doubles for guarded writes (PR #2372 by @easonLiangWorldedtech)
+- Fix: Keep UI text in the selected language after a language change (#2185 by @rrewll, PR #2194 by @rrewll)
+- Fix: Correct Marketplace tag tooltip and Clear tags translations (#2369 by @rrewll, PR #2373 by @rrewll)
+- Fix: Refuse ambiguous backup recency during JSON file recovery (PR #2395 by @easonLiangWorldedtech)
+
+### Task State and Internal Infrastructure
+
+- Add an observation registry and Task run-state fields (PR #2384 by @easonLiangWorldedtech)
+- Read abort and abortReason from run-state latches (#1797 by @edelauna, PR #2283 by @edelauna)
+
+### Testing, CI, and Repository Automation
+
+- Correct Turbo cache inputs and document the build cache input contract (#2290 by @edelauna, PR #2324 by @app/zoomote2)
+- Add flaky test detection to Playwright (PR #2358 by @rrewll)
+- Finish CSS transitions after visual theme changes in webview tests (#2326 by @rrewll, PR #2327 by @rrewll)
+
+### Dependencies and Maintenance
+
+- Update AI SDK core and providers (PR #2274 by @app/renovate)
+- Update AI SDKs and providers (PR #2276 by @app/renovate)
+- Update Zustand to v5.0.16 (PR #2275 by @app/renovate)
+- Update @types/katex (PR #2273 by @app/renovate)
+- Update @copilotkit/aimock to v1.47.0 (PR #2277 by @app/renovate)
+
+### Housekeeping
+
+- Merge the previous v3.96.0 release preparation after its publication; this is prior-release housekeeping, not a v3.98.0 feature (PR #2341 by @app/zoomote2)
+
 ## [3.96.0]
 
 - ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.

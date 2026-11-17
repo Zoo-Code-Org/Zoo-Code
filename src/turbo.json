@@ -231,11 +231,27 @@
 		},
 		"bundle": {
 			"dependsOn": ["^build", "@roo-code/vscode-webview#build"],
-			"outputs": ["dist/**"]
+			"outputs": [
+				"dist/**",
+				"README.md",
+				"CHANGELOG.md",
+				"LICENSE",
+				"webview-ui/audio/**",
+				"assets/vscode-material-icons/**"
+			],
+			"inputs": [
+				"$TURBO_DEFAULT$",
+				"$TURBO_ROOT$/README.md",
+				"$TURBO_ROOT$/CHANGELOG.md",
+				"$TURBO_ROOT$/LICENSE",
+				"$TURBO_ROOT$/.env",
+				"$TURBO_ROOT$/webview-ui/audio/**"
+			],
+			"env": ["PKG_RELEASE_CHANNEL", "POSTHOG_API_KEY"]
 		},
 		"vsix": {
 			"dependsOn": ["bundle"],
-			"inputs": ["dist/**"],
+			"inputs": ["$TURBO_DEFAULT$", "dist/**", "README.md", "CHANGELOG.md", "LICENSE"],
 			"outputs": ["../bin/**"]
 		},
 		"watch:bundle": {

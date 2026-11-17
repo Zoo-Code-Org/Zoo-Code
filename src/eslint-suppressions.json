@@ -644,11 +644,6 @@
 			"count": 55
 		}
 	},
-	"core/prompts/sections/__tests__/system-info.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
-		}
-	},
 	"core/prompts/tools/__tests__/filter-tools-for-mode.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 14
@@ -716,12 +711,12 @@
 	},
 	"core/task/__tests__/ask-clear-approval-buttons.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 19
+			"count": 18
 		}
 	},
 	"core/task/__tests__/ask-queued-message-drain.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 18
+			"count": 17
 		}
 	},
 	"core/task/__tests__/flushPendingToolResultsToHistory.spec.ts": {
@@ -921,7 +916,7 @@
 	},
 	"core/webview/__tests__/ClineProvider.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 188
+			"count": 191
 		}
 	},
 	"core/webview/__tests__/ClineProvider.sticky-mode.spec.ts": {

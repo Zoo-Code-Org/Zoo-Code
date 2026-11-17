@@ -568,6 +568,9 @@ vi.mock("../../config/ProviderSettingsManager", async (importOriginal) => {
 					}
 				}),
 				getModeConfigId: vi.fn().mockImplementation(async (mode: string) => gate.modeApiConfigs[mode]),
+				// #2110: the provider snapshots the whole mode -> id mapping in its constructor, so the
+				// double answers that read from the same gate the writes above land in.
+				getModeConfigIds: vi.fn().mockImplementation(async () => ({ ...gate.modeApiConfigs })),
 				getSelectionAndModeConfigs: vi.fn().mockImplementation(async () => ({
 					currentApiConfigName: gate.currentApiConfigName,
 					modeApiConfigs: { ...gate.modeApiConfigs },
@@ -2635,7 +2638,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
+			// #2110 resolves a mode's profile from this window's own mapping, so the scenario seeds
+			// that snapshot rather than the shared map the provider no longer reads here.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "profile-id" })
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
 				name: "mode-profile",
@@ -2646,7 +2651,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "mode-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			// The snapshot entry is validated against the profile listing, so every read below must
+			// report the same profile rather than just the first call.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
 			const activateProfileSpy = vi
 				.spyOn(provider.providerSettingsManager, "activateProfile")
@@ -2667,9 +2674,11 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
+			// #2110 resolves a mode's profile from this window's own mapping, so the scenario seeds
+			// that snapshot rather than the shared map the provider no longer reads here.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "empty-profile-id" })
 			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
 				id: "empty-profile-id",
 				name: "empty-profile",
@@ -2729,7 +2738,9 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const modeChangedSpy = vi.fn()
 			provider.on(RooCodeEventName.ModeChanged, modeChangedSpy)
 			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			// #2110: an architect profile exists for this window, and a task-scoped switch still must
+			// not load it - seeding the window's own mapping is what makes that assertion bite.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "k2-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 			await provider.handleModeSwitch("architect", backgroundTask as unknown as Task)
 			// Task-scoped effects apply to the background task:
@@ -2795,7 +2806,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			}
 			const historySpy = vi.spyOn(historyApi, "getTaskHistoryItem").mockReturnValue(seedItem)
 			const updateSpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([seedItem])
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			// Neither layer maps this mode, so the mode-linked activation stays out of this rollback.
+			provider["initialModeConfigIds"] = Promise.resolve({})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
 
 			await expect(provider.handleModeSwitch("architect", task as unknown as Task)).rejects.toThrow(
@@ -3026,8 +3038,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "k2-key",
 			}
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("k2-profile-id")
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([k2Entry])
+			// #2110: architect is mapped in this window's own snapshot, so a view-scoped switch here
+			// would activate k2-profile; this switch is task-scoped, and must not.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "k2-profile-id" })
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([k2Entry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(k2Settings)
 			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
 

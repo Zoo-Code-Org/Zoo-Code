@@ -244,6 +244,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
 		// the record it wrote: the real manager reads back the stored record, and
@@ -982,6 +984,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			const mockTask = new Task({
 				...defaultTaskOptions,
 				apiConfiguration: {
@@ -1035,6 +1038,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				},
 			})
 			await provider.addClineToStack(mockTask)
+			// #2110 resolves a mode's profile from this window's own snapshot first, so the fixture
+			// supplies the mapping there; the manager stub below is only the fallback the provider
+			// consults when the cached profile no longer validates.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()
@@ -1102,6 +1109,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				},
 			})
 			await provider.addClineToStack(mockTask)
+			// #2110 resolves a mode's profile from this window's own snapshot first, so the fixture
+			// supplies the mapping there; the manager stub below is only the fallback the provider
+			// consults when the cached profile no longer validates.
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			provider["providerSettingsManager"].getModeConfigId = vi.fn().mockResolvedValue("ask-id")
 			provider["providerSettingsManager"].listConfig = vi
 				.fn()

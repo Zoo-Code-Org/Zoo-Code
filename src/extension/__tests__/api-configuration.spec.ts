@@ -91,6 +91,9 @@ describe("API - configuration", () => {
 				setValues,
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -149,6 +152,9 @@ describe("API - configuration", () => {
 				setValues,
 				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				...store,
@@ -199,6 +205,9 @@ describe("API - configuration", () => {
 				setValues,
 				getProviderSettings: vi.fn().mockReturnValue({}),
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -239,6 +248,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -289,6 +301,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -360,6 +375,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -449,6 +467,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -523,6 +544,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -579,6 +603,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -638,6 +665,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue({}),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				...providerSettingsManager,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
@@ -943,6 +973,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1002,6 +1035,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1062,6 +1098,9 @@ describe("API - configuration", () => {
 				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
 				setProviderSettings,
 			},
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1188,6 +1227,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -1240,6 +1282,9 @@ describe("API - configuration", () => {
 				setProviderSettings,
 			},
 			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1310,6 +1355,9 @@ describe("API - configuration", () => {
 				setProviderSettings,
 			},
 			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1422,6 +1470,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances,
 				hasConfig,
@@ -1502,6 +1553,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				hasConfig,
@@ -1572,6 +1626,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				saveConfig,
 				deleteConfig,
@@ -1636,6 +1693,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -1698,6 +1758,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				saveConfig,
@@ -1767,6 +1830,9 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			// #2110 routes the mode mapping through the provider (it also updates this window's local
+			// mode map), so the same double answers both surfaces.
+			setModeConfig,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				hasConfig: profileStore.hasConfig,

@@ -874,8 +874,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			)
 			if (values.modeApiConfigs) {
 				await Promise.all(
+					// Route through the provider's setter (#2110): it writes the shared mode map and this
+					// window's local copy together, so a mode profile saved here becomes the profile this
+					// window resolves that mode to. A manager-only write would leave this window on a stale
+					// local mapping while the shared store has already moved.
 					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-						manager.setModeConfig(mode as Mode, configId),
+						this.sidebarProvider.setModeConfig(mode as Mode, configId),
 					),
 				)
 			}
@@ -1036,7 +1040,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				)
 			}
 			try {
-				await Promise.all(previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId)))
+				await Promise.all(
+					previousModeConfigs.map(async ([mode, configId]) => {
+						if (configId !== undefined) {
+							// The same route as the forward write, so the restore also re-points
+							// this window's local copy instead of leaving it on the mapping that
+							// is being rolled back.
+							await this.sidebarProvider.setModeConfig(mode, configId)
+							return
+						}
+
+						// The provider-level setter has no "unmapped" form: clear the shared
+						// mapping and drop this window's local entry so both mechanisms report
+						// the mode as unmapped again.
+						await manager.setModeConfig(mode, undefined)
+						this.sidebarProvider["localModeConfigIds"]?.delete(mode)
+					}),
+				)
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the mode API config mappings: " +

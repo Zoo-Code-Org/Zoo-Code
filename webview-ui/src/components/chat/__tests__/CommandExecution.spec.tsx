@@ -8,6 +8,7 @@ import i18next from "i18next"
 import { CommandExecution } from "../CommandExecution"
 import { ExtensionStateContext } from "../../../context/ExtensionStateContext"
 import { TooltipProvider } from "@src/components/ui/tooltip"
+import { TranslationContext } from "@src/i18n/TranslationContext"
 import enChat from "../../../i18n/locales/en/chat.json"
 
 // Mock dependencies
@@ -55,8 +56,11 @@ const mockExtensionState = {
 	setDeniedCommands: vi.fn(),
 }
 
+// The status dot renders a tooltip once its label resolves, so the wrapper supplies a TooltipProvider.
 const ExtensionStateWrapper = ({ children }: { children: React.ReactNode }) => (
-	<ExtensionStateContext.Provider value={mockExtensionState as any}>{children}</ExtensionStateContext.Provider>
+	<ExtensionStateContext.Provider value={mockExtensionState as any}>
+		<TooltipProvider>{children}</TooltipProvider>
+	</ExtensionStateContext.Provider>
 )
 
 describe("CommandExecution", () => {
@@ -863,11 +867,13 @@ Output:
 			const user = userEvent.setup()
 
 			render(
-				<TooltipProvider delayDuration={0}>
-					<ExtensionStateWrapper>
-						<CommandExecution executionId="exec-tooltip-exited" text="npm start" />
-					</ExtensionStateWrapper>
-				</TooltipProvider>,
+				<TranslationContext.Provider value={{ t: i18next.getFixedT("en"), language: "en" }}>
+					<TooltipProvider delayDuration={0}>
+						<ExtensionStateWrapper>
+							<CommandExecution executionId="exec-tooltip-exited" text="npm start" />
+						</ExtensionStateWrapper>
+					</TooltipProvider>
+				</TranslationContext.Provider>,
 			)
 
 			await act(async () => {
