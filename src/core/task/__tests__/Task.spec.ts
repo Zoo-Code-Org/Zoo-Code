@@ -4357,6 +4357,60 @@ describe("Cline", () => {
 				consoleErrorSpy.mockRestore()
 			})
 
+			it("does not deliver the message when the task is disposed while the mutation settles", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const switchError = new Error("profile mutation still queued at disposal")
+				vi.spyOn(mockProvider, "handleModeSwitch").mockRejectedValue(switchError)
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse").mockImplementation(() => {})
+				const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+				// Disposal is the case the settlement watch does not answer: requestDispose raises the
+				// cancellation counter but emits no event, disposeOnce then drops every listener, and the
+				// generation checks run only at subscription. Settlement stays deferred until after the
+				// disposal, so the only thing that can release this wait is the disposal itself.
+				let releaseSettle!: () => void
+				const settlePending = new Promise<void>((resolve) => {
+					releaseSettle = resolve
+				})
+				const settleSpy = vi.fn(() => settlePending)
+				Object.assign(mockProvider, { awaitProfileMutationSettled: settleSpy })
+				const responseOrder: string[] = []
+				handleResponseSpy.mockImplementation(() => {
+					responseOrder.push("delivered")
+				})
+
+				const submitting = task.submitUserMessage("disposed mid-settlement", undefined, "code")
+				// Flush microtasks until the submission reaches the deferred settlement wait.
+				for (let turn = 0; turn < 50 && settleSpy.mock.calls.length === 0; turn++) {
+					await Promise.resolve()
+				}
+				expect(settleSpy).toHaveBeenCalledOnce()
+
+				const disposal = task.dispose()
+				// Bound the wait so a submission that never returns reports as this assertion rather
+				// than as the runner timeout: the finding predicts the pending state after a disposal.
+				const outcome = await Promise.race([
+					submitting.then(() => "returned"),
+					new Promise<string>((resolve) => setTimeout(resolve, 500, "still pending")),
+				])
+				await disposal
+
+				expect(outcome).toBe("returned")
+				expect(responseOrder).toEqual([])
+				expect(handleResponseSpy).not.toHaveBeenCalled()
+				expect(consoleErrorSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Cancelled while waiting for the profile mutation to settle"),
+				)
+
+				releaseSettle()
+				consoleErrorSpy.mockRestore()
+			})
+
 			it("warns when the mode switch resolves without applying the requested mode", async () => {
 				vi.spyOn(mockProvider, "getState").mockResolvedValue(
 					Object.assign({} as ProviderState, { mode: "ask", mcpEnabled: false }),

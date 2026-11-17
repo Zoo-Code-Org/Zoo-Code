@@ -159,6 +159,7 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 // Streamed deltas arrive far faster than the webview can usefully re-render a growing message
 // (tables and code fences reflow on nearly every update), so partial updates post at most this often.
 const PARTIAL_MESSAGE_UPDATE_INTERVAL_MS = 120
+
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
 // hung endpoint must not stall streaming, condense, or context-window
@@ -510,6 +511,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 	private abortPromise?: Promise<void>
 	private disposalPromise?: Promise<void>
+	// Settlement waits that a cancellation or disposal must release: a submission parked on
+	// the profile-mutation promise has no other way to learn that the task is going away.
+	private settlementWakes = new Set<() => void>()
 	private diffReversionPromise: Promise<void> = Promise.resolve()
 
 	// Checkpoints
@@ -2678,6 +2682,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// the message, or message processing runs against state the switch moves later.
 						// The wait must answer to cancellation as well: an abort during it leaves the queued
 						// mutation free to move this task after the message was already handed to processing.
+						// Disposal must answer too: a teardown raises the cancellation counter without
+						// emitting an abort, so a submission parked here after one would never come back.
 						const settleWait = provider.awaitProfileMutationSettled?.()
 						if (settleWait) {
 							// A sentinel resolution rather than a rejection keeps the never-settling mutation from
@@ -2692,10 +2698,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									return
 								}
 								this.once(RooCodeEventName.TaskAborted, noteAbort)
+								// Disposal gets its own wake too: requestDispose raises the cancellation counter but
+								// emits no abort event, so registering for TaskAborted alone would park this wait.
+								this.settlementWakes.add(noteAbort)
 								// The abort can land between the check above and the subscription, in which case the
 								// event has already fired and would never wake this wait. Close that window.
 								if (this.abortPromise || this.cancellationGeneration !== generationAtEntry) {
 									this.off(RooCodeEventName.TaskAborted, noteAbort)
+									this.settlementWakes.delete(noteAbort)
 									resolve("aborted")
 								}
 							})
@@ -3694,6 +3704,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// task is gone.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
+		// Wake any submission parked on the profile-mutation settlement watch. Disposal
+		// raises the counter above but emits no abort event, and disposeOnce drops every
+		// listener moments later, so a wait that subscribed only to TaskAborted would stay
+		// pending on a mutation that never settles.
+		for (const wake of this.settlementWakes) wake()
+		this.settlementWakes.clear()
 	}
 
 	private driveRunEvent(event: RunEvent): void {
