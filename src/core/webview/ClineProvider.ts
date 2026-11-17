@@ -2897,7 +2897,14 @@ export class ClineProvider
 			}
 		} else {
 			// Keep an unmapped mode's default local; another window may already have saved a shared choice.
-			const currentApiConfigNameAfter = this.getGlobalState("currentApiConfigName")
+			// The effective selection is asked for here, not the durable global one: thread
+			// PRRT_kwDOSK-bwM61BXE7, printed at line 5138 of the head e7038a8529 and
+			// unread as of the 2026-11-16 read, says a view that pins profile A must not
+			// have the shared selection B saved as an unmapped mode's default, because a
+			// later switch to that mode can activate B. pinnedProfileName is this view's
+			// own pin (line 544), so it wins wherever it is set; the global selection
+			// stays the fallback for a view that pins nothing.
+			const currentApiConfigNameAfter = this.pinnedProfileName ?? this.getGlobalState("currentApiConfigName")
 
 			if (currentApiConfigNameAfter) {
 				const config = listApiConfig.find((c) => c.name === currentApiConfigNameAfter)

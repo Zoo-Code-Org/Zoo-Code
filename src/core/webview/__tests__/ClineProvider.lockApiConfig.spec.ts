@@ -399,4 +399,40 @@ describe("ClineProvider - Lock API Config Across Modes", () => {
 			expect(activateProfileSpy).toHaveBeenCalledWith({ name: "architect-profile" })
 		})
 	})
+
+	describe("handleModeSwitch keeps an unmapped mode's default on the profile the view pins", () => {
+		beforeEach(async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+		})
+
+		it("saves the pinned profile as the unmapped mode's default instead of the shared selection", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({})
+			await mockContext.workspaceState.update("lockApiConfigAcrossModes", false)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "pinned-profile", id: "pinned-id", apiProvider: providerIdentifiers.anthropic },
+				{ name: "shared-profile", id: "shared-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "pinned-profile",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			// The divergence the finding names: this view pins one profile while the
+			// durable shared selection holds another. Bracket access is how this repo
+			// reaches these private members from its own tests.
+			await provider["updateGlobalState"]("currentApiConfigName", "shared-profile")
+			provider["viewLocalState"].currentApiConfigName = "pinned-profile"
+			// The divergence itself is asserted, so the run records the state the
+			// finding describes rather than trusting a console line the reporter may
+			// withhold: this view pins pinned-profile, the durable selection is
+			// shared-profile.
+			expect(provider.pinnedProfileName).toBe("pinned-profile")
+			expect(provider["getGlobalState"]("currentApiConfigName")).toBe("shared-profile")
+
+			await provider.handleModeSwitch("architect")
+
+			const savedDefault = provider["localModeConfigIds"].get("architect")
+			expect(savedDefault).toBe("pinned-id")
+		})
+	})
 })
