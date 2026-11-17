@@ -3734,10 +3734,15 @@ export class ClineProvider
 			// sibling pass uses: only a task that actually runs under the deleted
 			// profile is re-pointed.
 			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+				// The sticky name may only follow the survivor once the survivor's settings resolved.
+				// When the deleted record was already gone and the survivor lookup failed,
+				// profileToActivate names a profile this deletion never read, and rewriting the
+				// task's sticky name to it would pin the running conversation to a profile whose
+				// settings this path does not have (review thread 4594194484).
 				if (survivingSettings) {
 					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+					await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
 				}
-				await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
 			}
 
 			// Closed views keep their durable viewStates entry after disposal: a pin
@@ -6277,6 +6282,13 @@ export class ClineProvider
 			}
 		}
 
+		// A payload that names a provider drives the settings the new task starts with, and that
+		// read is taken here - ahead of the getState() await below - because the await is a
+		// scheduling point: another view's provider write can land inside it, and a read taken
+		// afterwards hands the new task whatever that write just put into the shared store
+		// instead of the settings this payload persisted through setValues (review thread
+		// 4595966639).
+		const payloadProviderSettings = configuration.apiProvider ? this.contextProxy.getProviderSettings() : undefined
 		const {
 			apiConfiguration,
 			enableCheckpoints,
@@ -6293,10 +6305,10 @@ export class ClineProvider
 		// buffer. Only the new task takes the settings the payload wrote; neither buffer is
 		// merged here, so the acting view keeps its snapshot for later reads and other
 		// views keep their overlays. A payload that carries provider keys without naming
-		// a provider keeps the snapshot, because nothing in the call claims precedence.
-		const taskApiConfiguration = configuration.apiProvider
-			? this.contextProxy.getProviderSettings()
-			: apiConfiguration
+		// a provider keeps the snapshot, because nothing in the call claims precedence. The shared
+		// read taken above is this payload's own settings; the await below is where the other
+		// view's write got in.
+		const taskApiConfiguration = payloadProviderSettings ?? apiConfiguration
 		const effectiveApiConfiguration = getEffectiveTaskApiConfiguration(
 			taskApiConfiguration,
 			options.handoffExecutionContext,

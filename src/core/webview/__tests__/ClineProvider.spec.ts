@@ -4627,13 +4627,13 @@ describe("ClineProvider", () => {
 			])
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(
-				((slug: string, customModes?: { slug: string }[]) =>
-					customModes?.find((mode: { slug: string }) => mode.slug === slug) ??
-					(slug === "architect" || slug === "reviewer"
-						? { slug }
-						: undefined)) as typeof modesModule.getModeBySlug,
-			)
+			// Real seam: the guard asks the shipped lookup - src/shared/modes.ts rows 51-59, custom
+			// modes first and built-ins behind them - instead of an inline finder that knows only the
+			// two slugs this test happens to name (review thread 4595150531). vi.importActual skips
+			// this file's mock of the module, so the production predicate runs behind the mock's own
+			// identity, which is what ClineProvider imports.
+			const actualModes = await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
+			modesModule.getModeBySlug.mockImplementation(actualModes.getModeBySlug)
 			try {
 				await provider.setValue("mode", "architect")
 				expect(mockContext.globalState.get("mode")).toBe("architect")
@@ -4977,8 +4977,8 @@ describe("ClineProvider", () => {
 			// original_line 3522 and unresolved here: the deletion snapshot treated a
 			// rejected getProfile the same as a confirmed absence, so the delete
 			// committed and the compensation, which can only restore a record it read,
-			// left the profile gone while every reference was put back. The store below
-			// is a real map so the assertions read the durable outcome.
+			// left the profile gone while every reference was put back. The records below live in
+			// the manager's own secrets-backed store, so the assertions read the durable outcome.
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -4987,18 +4987,6 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			const ids: Record<string, string> = {
-				"doomed-profile": "doomed-id",
-				"survivor-profile": "survivor-id",
-			}
-			const names: Record<string, string> = {
-				"doomed-id": "doomed-profile",
-				"survivor-id": "survivor-profile",
-			}
-			const store = new Map<string, ProviderSettings>([
-				["doomed-profile", { apiProvider: providerIdentifiers.anthropic, apiKey: "doomed-key" }],
-				["survivor-profile", { apiProvider: providerIdentifiers.anthropic, apiKey: "keeper-key" }],
-			])
 			const doomedProfile: ProviderSettingsEntry = {
 				name: "doomed-profile",
 				id: "doomed-id",
@@ -5010,31 +4998,32 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.anthropic,
 			}
 
+			// Real seam: the records go into the manager's own secrets-backed profiles through its
+			// production write, so the existence read this deletion branches on below is the
+			// manager's predicate and not a hand-rolled map (review thread 4593898959). The ids
+			// are the ones the list entries carry, so the manager's id/name pairing matches the
+			// metadata this view advertises.
+			for (const { name, id, apiKey } of [
+				{ name: "doomed-profile", id: "doomed-id", apiKey: "doomed-key" },
+				{ name: "survivor-profile", id: "survivor-id", apiKey: "keeper-key" },
+			]) {
+				await provider.providerSettingsManager.saveConfig(name, {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey,
+					id,
+				})
+			}
+
 			let snapshotReads = 0
-			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockImplementation((name) =>
-				Promise.resolve(store.has(name)),
-			)
+			// Only the fault is planted: the first read of the doomed record rejects and every
+			// other read - by name or by id - is the manager's own.
+			const realGetProfile = provider.providerSettingsManager.getProfile.bind(provider.providerSettingsManager)
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((options) => {
-				// The manager takes either a name or an id, so resolve the id back to a
-				// name before reading the store.
-				const requested = "name" in options ? options.name : (names[options.id] ?? "survivor-profile")
-				if (requested === "doomed-profile" && snapshotReads++ === 0) {
+				if ("name" in options && options.name === "doomed-profile" && snapshotReads++ === 0) {
 					// Transient failure: the record exists and is readable on the next read.
 					return Promise.reject(new Error("secrets read failed"))
 				}
-				const settings = store.get(requested)
-				if (!settings) {
-					return Promise.reject(new Error("no record for " + requested))
-				}
-				return Promise.resolve({ name: requested, id: ids[requested], ...settings })
-			})
-			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockImplementation((name) => {
-				store.delete(name)
-				return Promise.resolve()
-			})
-			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation((name, settings) => {
-				store.set(name, settings)
-				return Promise.resolve(ids[name])
+				return realGetProfile(options)
 			})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockImplementation(() =>
 				Promise.resolve([doomedProfile, survivorProfile]),
@@ -5072,7 +5061,7 @@ describe("ClineProvider", () => {
 
 			expect(failure).toBeInstanceOf(Error)
 			expect({
-				recordStillStored: store.has("doomed-profile"),
+				recordStillStored: await provider.providerSettingsManager.hasConfig("doomed-profile"),
 				selectionNamesIt: provider.getValues().currentApiConfigName === "doomed-profile",
 				listNamesIt: (provider.contextProxy.getValue("listApiConfigMeta") as ProviderSettingsEntry[]).some(
 					(entry) => entry.name === "doomed-profile",
@@ -8078,6 +8067,62 @@ describe("ClineProvider", () => {
 			const created = vi.mocked(Task).mock.calls.at(-1)?.[0]
 			expect(created?.apiConfiguration.apiProvider).toBe(providerIdentifiers.openrouter)
 			expect(created?.apiConfiguration.apiKey).toBe("view-snapshot-key")
+
+			await provider.dispose()
+		})
+		it("takes the payload's provider settings from the read ahead of the state await", async () => {
+			// Review thread 4595966639: createTask awaited getState() and read the shared provider
+			// settings only afterwards, so another view's write can land inside that await and
+			// become the new task's configuration instead of the settings this payload just
+			// persisted. The await is held open here, the competing write is issued while it is
+			// open, and the created task reports which read won.
+			const lateWrite: ProviderSettings = { apiProvider: providerIdentifiers.openai, apiKey: "late-writer-key" }
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "view-snapshot-key",
+			}
+			let openStateRead!: () => void
+			const stateRead = new Promise<void>((resolve) => {
+				openStateRead = resolve
+			})
+			// The planted getState runs the view's own read only after the competing write lands,
+			// so what it hands back is the post-await view of the world: the other view's settings,
+			// not this payload's.
+			const realGetState = provider.getState.bind(provider)
+			vi.spyOn(provider, "getState").mockImplementation(async () => {
+				await stateRead
+				return { ...(await realGetState()), apiConfiguration: lateWrite }
+			})
+
+			const creating = provider.createTask(
+				undefined,
+				undefined,
+				undefined,
+				{ startTask: false },
+				{
+					apiProvider: providerIdentifiers.bedrock,
+					awsRegion: "us-east-1",
+					awsAccessKey: "payload-bedrock-access-key",
+				},
+			)
+			// setValues has returned by the time getState is entered, so the payload's settings are
+			// already the shared settings that the read ahead of the await must take.
+			await vi.waitFor(() => expect(provider.getState).toHaveBeenCalledTimes(1))
+			await provider.contextProxy.setProviderSettings(lateWrite)
+			openStateRead()
+
+			await creating
+
+			const created = vi.mocked(Task).mock.calls.at(-1)?.[0]
+			// The payload's provider is the field that moves: it is what the two reads disagree on,
+			// because a competing provider write renames the shared settings while leaving the
+			// other provider's keys behind.
+			expect(created?.apiConfiguration.apiProvider).toBe(providerIdentifiers.bedrock)
+			expect(created?.apiConfiguration.awsAccessKey).toBe("payload-bedrock-access-key")
+			// The competing write is still what the shared store holds afterwards, so the two rows
+			// above pin the earlier read rather than the value that was current when getState
+			// resolved.
+			expect(provider.contextProxy.getProviderSettings().apiProvider).toBe(providerIdentifiers.openai)
 
 			await provider.dispose()
 		})

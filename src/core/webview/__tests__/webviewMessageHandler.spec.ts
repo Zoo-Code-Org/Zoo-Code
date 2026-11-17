@@ -82,6 +82,7 @@ import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
 import { webviewMessageHandler } from "../webviewMessageHandler"
+import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
 import { experimentDefault } from "../../../shared/experiments"
@@ -4324,18 +4325,19 @@ describe("webviewMessageHandler - ordinary profile writes and the rename transac
 		const holdReleased = new Promise<void>((resolve) => {
 			releaseHold = resolve
 		})
-		// Shared queue double: mirrors ProviderSettingsManager.runExclusiveAcrossInstances,
-		// which chains each critical section onto the previous one for a secrets key,
-		// so a writer that does not take the section runs in the middle of a rename.
-		let tail: Promise<unknown> = Promise.resolve()
-		const runExclusiveAcrossInstances = (cb: () => Promise<unknown>) => {
-			const run = tail.then(cb)
-			tail = run.then(
-				() => {},
-				() => {},
-			)
-			return run
-		}
+		// Real seam: the production cross-instance queue itself, not a local copy of its tail
+		// chaining (review thread 4593787854). The method keys the shared lock on the private
+		// `secretsKey` getter and nothing else, so the host below is a real instance of the class
+		// carrying a spec-only key instead of an extension context: Object.create supplies the
+		// prototype's own method, and the single assertion names what the property descriptor
+		// supplies - a private getter is not part of the class's structural shape, so no
+		// structural object could. The key is this test's own, so its critical sections chain
+		// onto each other and onto no other test's queue.
+		const sharedQueueHost = Object.create(ProviderSettingsManager.prototype, {
+			secretsKey: { value: "webview-message-handler-spec-rename-queue" },
+		}) as ProviderSettingsManager
+		const runExclusiveAcrossInstances = (cb: () => Promise<unknown>) =>
+			sharedQueueHost.runExclusiveAcrossInstances(cb)
 		const configs: Record<string, Record<string, unknown>> = {
 			"old-profile": { id: "old-id", apiProvider: providerIdentifiers.anthropic },
 		}
