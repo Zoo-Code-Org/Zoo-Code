@@ -310,6 +310,32 @@ describe("AnthropicHandler", () => {
 				const body = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 				expect(JSON.stringify(body)).not.toContain("ttl")
 			})
+
+			it("emits no ttl key for a 1h knob on a model without 1h capability", async () => {
+				// Every catalog model now advertises 1h (1h cache writes are GA on all
+				// active Claude models), so the reject path is exercised by resolving a
+				// 5m-only info — the shape a dynamic or stale catalog would produce.
+				// The knob must fail closed here too (ADR-0006 I2), not only in ttl.spec.ts.
+				const staleCatalogHandler = new AnthropicHandler({
+					...mockOptions,
+					promptCacheTtl: "1h",
+				})
+
+				const model = staleCatalogHandler.getModel()
+				vitest.spyOn(staleCatalogHandler, "getModel").mockReturnValue({
+					...model,
+					info: { ...model.info, promptCacheTtlSupport: ["5m"] },
+				})
+
+				await collectStream(staleCatalogHandler.createMessage(systemPrompt, threeTurnMessages()))
+
+				const body = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+				expect(JSON.stringify(body)).not.toContain("ttl")
+
+				const controls = requestCacheControls()
+				expect(controls).toHaveLength(3)
+				expect(controls.every((control) => control.ttl === undefined)).toBe(true)
+			})
 		})
 
 		it("should include 1M context beta header for Claude Sonnet 4.6 when enabled", async () => {

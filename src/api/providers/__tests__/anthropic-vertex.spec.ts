@@ -1109,6 +1109,77 @@ describe("VertexHandler", () => {
 			)
 		})
 
+		it("completePrompt carries ttl 1h on the user marker when the model is capable", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+				promptCacheTtl: "1h",
+			})
+
+			// The Vertex catalog carries no TTL capability yet, so inject one to
+			// exercise the emission path this PR adds.
+			const model = handler.getModel()
+			vitest.spyOn(handler, "getModel").mockReturnValue({
+				...model,
+				info: { ...model.info, promptCacheTtlSupport: ["5m", "1h"] },
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] })
+			const client = handler["client"] as unknown as { messages: { create: unknown } }
+			client.messages.create = mockCreate
+
+			await handler.completePrompt("Test prompt")
+
+			const body = mockCreate.mock.calls[0][0]
+			const controls: Array<Record<string, unknown>> = []
+			const walk = (node: unknown) => {
+				if (Array.isArray(node)) {
+					node.forEach(walk)
+					return
+				}
+				if (node && typeof node === "object") {
+					for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+						if (key === "cache_control" && child && typeof child === "object") {
+							controls.push(child as Record<string, unknown>)
+						}
+						walk(child)
+					}
+				}
+			}
+			walk(JSON.parse(JSON.stringify(body)))
+			expect(controls).toHaveLength(1)
+			expect(controls[0]).toEqual({ type: "ephemeral", ttl: "1h" })
+		})
+
+		it("completePrompt emits the plain ephemeral literal when the knob is unset", async () => {
+			handler = new AnthropicVertexHandler({
+				apiModelId: "claude-3-5-sonnet-v2@20241022",
+				vertexProjectId: "test-project",
+				vertexRegion: "us-central1",
+			})
+
+			const mockCreate = vitest.fn().mockResolvedValue({ content: [{ type: "text", text: "ok" }] })
+			const client = handler["client"] as unknown as { messages: { create: unknown } }
+			client.messages.create = mockCreate
+
+			await handler.completePrompt("Test prompt")
+
+			// Byte-parity with the pre-knob literal (ADR-0006 I3): no ttl key anywhere.
+			expect(JSON.stringify(mockCreate.mock.calls[0][0])).not.toContain("ttl")
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					messages: [
+						{
+							role: "user",
+							content: [{ type: "text", text: "Test prompt", cache_control: { type: "ephemeral" } }],
+						},
+					],
+				}),
+				undefined,
+			)
+		})
+
 		it("should handle API errors for Claude", async () => {
 			handler = new AnthropicVertexHandler({
 				apiModelId: "claude-3-5-sonnet-v2@20241022",
