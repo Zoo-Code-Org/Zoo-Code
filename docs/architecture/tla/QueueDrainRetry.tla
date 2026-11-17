@@ -14,6 +14,7 @@
 \* Result: QueueDrainRetry.cfg (Snap) holds. The None, Flag, Count and Global configs fail (see check.sh).
 \* Review: PR 2421, CodeRabbit thread 1. Round 3 (lost drain) and round 4 (merged drains) were gaps in QueueEditRace.
 \* Round 5 (a surplus retry takes a later message) is the Count failure. All three are one class: a retry count with no owner.
+\* FlagStranded checks NoStranded alone. It fails on the merged drains: two calls, one send (PR 2421, bot comment on this spec).
 \* Round 6 (a released consumer claim is sent before the edited message) is the Global failure.
 \* Not modeled: the message text, the image scan, an edit that never commits and an edit of a late message.
 \* Code check (step 10): MessageQueueService.interleavings.spec.ts runs both invariants on the real service in every order.
@@ -55,9 +56,18 @@ Proc(s, rest, kept) ==
                  THEN Proc(IF Mode = "Snap" THEN SendFrom(s, S) ELSE SendFirst(s), Tail(rest), kept)
             ELSE Proc(s, Tail(rest), Append(kept, S))
 
-\* The ghost snapshot ends when one of its messages is sent, or when all of them are gone.
-Live(S, s) == ~(\E i \in S : s[i] = "sent") /\ (\E i \in S : s[i] \in {"q", "h", "c"})
-Prune(g, s) == SelectSeq(g, LAMBDA S : Live(S, s))
+\* Each send retires one ghost snapshot: the first one that holds the sent message.
+\* A ghost snapshot also ends when all of its messages are gone.
+RECURSIVE Retire(_, _)
+Retire(g, sentNow) ==
+    IF sentNow = {} THEN g
+    ELSE LET i == CHOOSE j \in sentNow : \A m \in sentNow : j <= m
+             ks == {k \in 1..Len(g) : i \in g[k]}
+             k1 == CHOOSE k \in ks : \A m \in ks : k <= m
+         IN Retire(IF ks = {} THEN g ELSE SubSeq(g, 1, k1 - 1) \o SubSeq(g, k1 + 1, Len(g)), sentNow \ {i})
+Gone(S, s) == ~(\E i \in S : s[i] \in {"q", "h", "c"})
+\* old and new are the states before and after the sends.
+Prune(g, old, new) == SelectSeq(Retire(g, {i \in Ids : new[i] = "sent" /\ old[i] # "sent"}), LAMBDA S : ~Gone(S, new))
 
 \* The handler runs after each change of the queue state. s is the state before the retry.
 Settle(s) ==
@@ -88,7 +98,7 @@ End(i, to) ==
     LET r == Settle([st EXCEPT ![i] = to])
     IN /\ st[i] \in {"h", "c"}
        /\ st' = r.st /\ bl' = r.bl /\ blocked' = r.blocked
-       /\ bg' = Prune(bg, r.st)
+       /\ bg' = Prune(bg, [st EXCEPT ![i] = to], r.st)
        /\ UNCHANGED <<U, calls>>
 
 \* A drain call sends the first queued message. If every message is held, the call is blocked.
@@ -96,7 +106,7 @@ Call == /\ calls < MaxCalls
         /\ calls' = calls + 1
         /\ U' = U \cup {i \in Ids : st[i] \in {"q", "h", "c"}}
         /\ IF Queued(st) # {}
-           THEN /\ st' = SendFirst(st) /\ bg' = Prune(bg, SendFirst(st)) /\ UNCHANGED <<bl, blocked>>
+           THEN /\ st' = SendFirst(st) /\ bg' = Prune(bg, st, SendFirst(st)) /\ UNCHANGED <<bl, blocked>>
            ELSE /\ st' = st
                 /\ IF Held(st) = {} THEN UNCHANGED <<bl, blocked, bg>>
                    ELSE /\ bg' = Append(bg, Held(st))

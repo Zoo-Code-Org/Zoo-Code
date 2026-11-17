@@ -24,6 +24,7 @@ class World {
 	seen = new Set<string>()
 	calls = 0
 	ghost: Set<string>[] = []
+	retired = new Set<string>()
 
 	constructor() {
 		for (let i = 0; i < INITIAL; i++) this.ids.push(this.service.addMessage(`m${i}`)!.id)
@@ -91,13 +92,17 @@ class World {
 		}
 	}
 
-	// A snapshot ends when one of its messages is sent or all of them are gone.
+	// Each send retires the first snapshot that holds the sent message. A snapshot also ends when all its messages are gone.
 	violation(): string | undefined {
 		for (const id of this.sent) if (!this.seen.has(id)) return `sent ${id} that no call saw`
 		if (this.sent.size > this.calls) return "more sends than calls"
-		this.ghost = this.ghost.filter(
-			(s) => ![...s].some((id) => this.sent.has(id)) && [...s].some((id) => this.alive(id)),
-		)
+		for (const id of this.sent) {
+			if (this.retired.has(id)) continue
+			this.retired.add(id)
+			const k = this.ghost.findIndex((s) => s.has(id))
+			if (k !== -1) this.ghost.splice(k, 1)
+		}
+		this.ghost = this.ghost.filter((s) => [...s].some((id) => this.alive(id)))
 		for (const s of this.ghost) {
 			const waiting = [...s].some((id) => this.editing.has(id) || this.consumerHeld.has(id))
 			if (!waiting && [...s].some((id) => this.queued(id))) return "a blocked drain left its message queued"
@@ -121,6 +126,7 @@ class World {
 			sorted(this.seen),
 			this.calls,
 			this.ghost.map((s) => sorted(s)),
+			sorted(this.retired),
 		])
 	}
 }
@@ -169,6 +175,21 @@ describe("MessageQueueService drain interleavings", () => {
 		const result = explore()
 		expect(result.failure).toBeUndefined()
 		expect(result.states).toBeGreaterThan(500)
+	})
+
+	it("finds the failure when two blocked drains share one retry", () => {
+		const proto = MessageQueueService.prototype
+		const original = proto.drain
+		proto.drain = function (this: MessageQueueService) {
+			const message = original.call(this)
+			if (!message) this["blockedDrains"] = this["blockedDrains"].slice(0, 1)
+			return message
+		}
+		try {
+			expect(explore().failure?.why).toBe("a blocked drain left its message queued")
+		} finally {
+			proto.drain = original
+		}
 	})
 
 	it("finds the failure when a retry sends the first queued message", () => {

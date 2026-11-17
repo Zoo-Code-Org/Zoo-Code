@@ -9,9 +9,16 @@ meta=$(mktemp -d)
 trap 'rm -rf "$meta"' EXIT
 [ $# -gt 0 ] || { echo "name a spec, or use: all"; exit 2; }
 specs="$*"
-[ "$specs" != all ] || specs=$(ls *.tla | sed 's/\.tla$//')
+all=0
+[ "$specs" != all ] || { all=1; specs=$(ls *.tla | sed 's/\.tla$//'); }
 bad=0
 for spec in $specs; do
+	[ -f "$spec.tla" ] || { echo "WRONG $spec.tla is missing"; bad=1; continue; }
+	if [ ! -f "$spec.cfg" ]; then
+		# A helper module has no configs. Under "all" it is not an error.
+		if [ $all = 1 ] && ! ls "$spec".*.cfg >/dev/null 2>&1; then continue; fi
+		echo "WRONG $spec.cfg is missing"; bad=1; continue
+	fi
 	for cfg in "$spec".cfg "$spec".*.cfg; do
 		[ -f "$cfg" ] || continue
 		want=pass
