@@ -7,7 +7,6 @@ import {
 	stripAnsi,
 	truncateTerminalOutput,
 	truncateFileOutput,
-	extractSemanticSkeleton,
 	ADAPTIVE_FULL_READ_THRESHOLD,
 	SLIDING_WINDOW_PREVIEW_LIMIT,
 } from "../text-normalization"

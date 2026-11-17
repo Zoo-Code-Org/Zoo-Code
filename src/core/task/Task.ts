@@ -1,5 +1,3 @@
-/// <reference path="../../types/modules.d.ts" />
-
 import * as path from "path"
 import * as vscode from "vscode"
 import os from "os"

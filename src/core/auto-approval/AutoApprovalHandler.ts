@@ -152,7 +152,8 @@ export class AutoApprovalHandler {
 			data: string,
 		) => Promise<{ response: ClineAskResponse; text?: string; images?: string[] }>,
 	): Promise<AutoApprovalResult> {
-		const maxTokens = (state as any)?.allowedMaxTokens || Infinity
+		const maxTokens =
+			(state as (GlobalState & { allowedMaxTokens?: number }) | undefined)?.allowedMaxTokens || Infinity
 
 		// Calculate total tokens from messages after the last reset point
 		const messagesAfterReset = messages.slice(this.lastResetMessageIndex)

@@ -1,7 +1,4 @@
-/// <reference path="../../../types/modules.d.ts" />
-
-import { describe, it, expect, beforeEach, vi } from "vitest"
-import type { GlobalState, ClineMessage } from "../../../../packages/types/src"
+import { GlobalState, ClineMessage } from "@roo-code/types"
 
 import { AutoApprovalHandler } from "../AutoApprovalHandler"
 
@@ -300,7 +297,7 @@ describe("AutoApprovalHandler", () => {
 		})
 
 		it("should trigger token limit when tokens exceed allowedMaxTokens", async () => {
-			;(mockState as any).allowedMaxTokens = 50_000
+			;(mockState as GlobalState & { allowedMaxTokens?: number }).allowedMaxTokens = 50_000
 			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
 
 			// Under token limit

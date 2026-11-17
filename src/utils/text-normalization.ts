@@ -102,6 +102,7 @@ export function unescapeHtmlEntities(text?: string | null): string {
 /**
  * Strips ANSI escape codes from terminal output to eliminate useless tokens.
  */
+// eslint-disable-next-line no-control-regex
 const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
 
 export function stripAnsi(text: string): string {
@@ -150,7 +151,7 @@ export function truncateTerminalOutput(text: string, maxLines: number = 100): st
 
 		const halfErrorBudget = Math.floor(errorBudget / 2)
 		let errorStart = Math.max(headBudget, errorIdx - halfErrorBudget)
-		let errorEnd = Math.min(lines.length - tailBudget, errorStart + errorBudget)
+		const errorEnd = Math.min(lines.length - tailBudget, errorStart + errorBudget)
 		if (errorEnd - errorStart < errorBudget) {
 			errorStart = Math.max(headBudget, errorEnd - errorBudget)
 		}

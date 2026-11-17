@@ -17,7 +17,7 @@ import "../../utils/path"
 import type { DcgDecision } from "../../services/destructive-command-guard"
 import type { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
-import { unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../../utils/text-normalization"
+import { unescapeHtmlEntities, truncateTerminalOutput } from "../../utils/text-normalization"
 import { parseCommand } from "../../shared/parse-command"
 import {
 	ExitCodeDetails,
