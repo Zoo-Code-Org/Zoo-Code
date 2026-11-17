@@ -29,7 +29,7 @@ const reply = async (data: ExtensionMessage) => {
 }
 const requestId = () => vi.mocked(vscode.postMessage).mock.calls.at(-1)?.[0].requestId
 const correlatedReply = (openAiModels: string[]) =>
-	reply({ type: "openAiModels", requestId: requestId(), openAiModels })
+	reply({ type: "providerInfo", requestId: requestId(), values: { data: openAiModels } })
 
 describe("OpenAI model discovery", () => {
 	beforeEach(() => {
@@ -41,15 +41,20 @@ describe("OpenAI model discovery", () => {
 		const { result } = renderHook(() => useOpenAiModelCatalog(first, true))
 		await flush()
 		expect(vscode.postMessage).toHaveBeenCalledWith({
-			type: "requestOpenAiModels",
+			type: "requestProviderInfo",
 			requestId: expect.any(String),
-			values: { baseUrl: first.openAiBaseUrl, apiKey: first.openAiApiKey, openAiHeaders: first.openAiHeaders },
+			values: {
+				kind: "openAiModels",
+				baseUrl: first.openAiBaseUrl,
+				apiKey: first.openAiApiKey,
+				headers: first.openAiHeaders,
+			},
 		})
-		await reply({ type: "openAiModels", requestId: "not-ours", openAiModels: ["wrong"] })
-		await reply({ type: "openAiModels", openAiModels: ["legacy-settings"] })
+		await reply({ type: "providerInfo", requestId: "not-ours", values: { data: ["wrong"] } })
+		await reply({ type: "providerInfo", values: { data: ["legacy-settings"] } })
 		await reply({ type: "state", requestId: requestId() })
 		expect(result.current.isLoading).toBe(true)
-		await reply({ type: "openAiModels", requestId: requestId(), openAiModels: ["model", "__proto__"] })
+		await reply({ type: "providerInfo", requestId: requestId(), values: { data: ["model", "__proto__"] } })
 		expect(result.current.models).toHaveProperty("model.contextWindow")
 		expect(Object.hasOwn(result.current.models ?? {}, "__proto__")).toBe(true)
 		expect(result.current.isError).toBe(false)
@@ -65,10 +70,26 @@ describe("OpenAI model discovery", () => {
 		await flush()
 		expect(vscode.postMessage).toHaveBeenCalledTimes(2)
 		expect(result.current.models).toBeNull()
-		await reply({ type: "openAiModels", requestId: oldRequestId, openAiModels: ["first-only"] })
+		await reply({ type: "providerInfo", requestId: oldRequestId, values: { data: ["first-only"] } })
 		expect(result.current.models).toBeNull()
 		await correlatedReply(["second-only"])
 		expect(Object.keys(result.current.models ?? {})).toEqual(["second-only"])
+	})
+
+	it("retains completed discovery for cloned equal headers regardless of insertion order", async () => {
+		const config = { ...first, openAiHeaders: { Authorization: "secret", "X-Account": "one" } }
+		const { result, rerender } = renderHook(({ settings }) => useOpenAiModelCatalog(settings, true), {
+			initialProps: { settings: config },
+		})
+		await correlatedReply(["retained"])
+		const models = result.current.models
+		rerender({ settings: { ...config, openAiHeaders: { "X-Account": "one", Authorization: "secret" } } })
+		expect(result.current.models).toBe(models)
+		expect(result.current.isLoading).toBe(false)
+		expect(vscode.postMessage).toHaveBeenCalledTimes(1)
+		rerender({ settings: { ...config, openAiHeaders: { "X-Account": "two", Authorization: "secret" } } })
+		expect(result.current.models).toBeNull()
+		expect(vscode.postMessage).toHaveBeenCalledTimes(2)
 	})
 
 	it("clears completed results immediately on credential/header changes and retries", async () => {
@@ -87,7 +108,7 @@ describe("OpenAI model discovery", () => {
 		act(() => result.current.refetch())
 		expect(result.current.isLoading).toBe(true)
 		await flush()
-		await reply({ type: "openAiModels", requestId: previousRequestId, openAiModels: ["stale"] })
+		await reply({ type: "providerInfo", requestId: previousRequestId, values: { data: ["stale"] } })
 		expect(result.current.isLoading).toBe(true)
 		await correlatedReply(["retried"])
 		expect(Object.keys(result.current.models ?? {})).toEqual(["retried"])
@@ -127,7 +148,7 @@ describe("OpenAI model discovery", () => {
 		expect(requestId()).not.toBe(firstRequestId)
 		await correlatedReply(["other"])
 		expect(await two).toEqual(["other"])
-		await reply({ type: "openAiModels", requestId: firstRequestId, openAiModels: ["active"] })
+		await reply({ type: "providerInfo", requestId: firstRequestId, values: { data: ["active"] } })
 		expect(await one).toEqual(["active"])
 	})
 
@@ -150,8 +171,8 @@ describe("OpenAI model discovery", () => {
 	)
 
 	it.each([
-		{ type: "openAiModels" },
-		{ type: "openAiModels", error: "Discovery failed", openAiModels: [] },
+		{ type: "providerInfo" },
+		{ type: "providerInfo", error: "Discovery failed", values: { data: [] } },
 	] satisfies ExtensionMessage[])(
 		"reports a correlated invalid/error reply and permits retry: %j",
 		async (response) => {
@@ -176,15 +197,15 @@ describe("OpenAI model discovery", () => {
 			await flush()
 			const timedOutId = requestId()
 			await act(async () => {
-				await vi.advanceTimersByTimeAsync(10_000)
+				await vi.advanceTimersByTimeAsync(20_000)
 			})
 			expect(result.current.isError).toBe(true)
 			expect(remove).toHaveBeenCalledWith("message", expect.any(Function))
 			expect(vi.getTimerCount()).toBe(0)
 			act(() => result.current.refetch())
 			await flush()
-			await reply({ type: "openAiModels", openAiModels: ["ambiguous"] })
-			await reply({ type: "openAiModels", requestId: timedOutId, openAiModels: ["late"] })
+			await reply({ type: "providerInfo", values: { data: ["ambiguous"] } })
+			await reply({ type: "providerInfo", requestId: timedOutId, values: { data: ["late"] } })
 			expect(result.current.models).toBeNull()
 			await correlatedReply(["correlated"])
 			expect(Object.keys(result.current.models ?? {})).toEqual(["correlated"])
@@ -242,10 +263,10 @@ describe("OpenAI model discovery", () => {
 		"rejects malformed model lists: %j",
 		async ({ openAiModels }) => {
 			const discovery = discoverOpenAiModels(first, new AbortController().signal)
-			const assertion = expect(discovery).rejects.toThrow("Invalid model discovery response")
+			const assertion = expect(discovery).rejects.toMatchObject({ name: "ZodError" })
 			window.dispatchEvent(
 				new MessageEvent("message", {
-					data: { type: "openAiModels", requestId: requestId(), openAiModels },
+					data: { type: "providerInfo", requestId: requestId(), values: { data: openAiModels } },
 				}),
 			)
 			await assertion
@@ -256,7 +277,7 @@ describe("OpenAI model discovery", () => {
 		vi.mocked(vscode.postMessage).mockImplementationOnce((message) => {
 			window.dispatchEvent(
 				new MessageEvent("message", {
-					data: { type: "openAiModels", requestId: message.requestId, openAiModels: ["immediate"] },
+					data: { type: "providerInfo", requestId: message.requestId, values: { data: ["immediate"] } },
 				}),
 			)
 		})

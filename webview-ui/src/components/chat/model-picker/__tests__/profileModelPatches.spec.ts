@@ -1,4 +1,6 @@
-import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
+import { providerIdentifiers, retiredProviderIdentifiers, type ProviderSettings } from "@roo-code/types"
+
+import * as providerModelConfig from "@/components/settings/utils/providerModelConfig"
 
 import { createModelPatch } from "../profileModelPatches"
 
@@ -10,6 +12,27 @@ const resets = {
 }
 
 describe("createModelPatch", () => {
+	afterEach(() => vi.restoreAllMocks())
+
+	it.each(Object.values(retiredProviderIdentifiers))("rejects retired provider %s", (apiProvider) => {
+		expect(() => createModelPatch({ apiProvider }, "model")).toThrow("A supported provider is required")
+	})
+
+	it("rejects a provider with no model configuration", () => {
+		vi.spyOn(providerModelConfig, "getProviderModelConfig").mockReturnValue(undefined)
+		expect(() => createModelPatch({}, "model")).toThrow("supported provider")
+	})
+
+	it("preserves non-empty side effect values in partial patches", () => {
+		vi.spyOn(providerModelConfig, "handleModelChangeSideEffects").mockImplementation((_provider, _id, set) => {
+			set("reasoningEffort", "high")
+		})
+		expect(createModelPatch({}, "model")).toEqual({
+			openRouterModelId: "model",
+			enableReasoningEffort: null,
+			reasoningEffort: "high",
+		})
+	})
 	it.each([
 		{ provider: providerIdentifiers.anthropic, field: "apiModelId" },
 		{ provider: providerIdentifiers.openrouter, field: "openRouterModelId" },
@@ -58,7 +81,7 @@ describe("createModelPatch", () => {
 		).toEqual({ apiModelId: "custom-arn", ...resets })
 	})
 
-	it.each(["custom-arn", "arn:aws:bedrock:custom"])(
+	it.each(["custom-arn", "arn:aws:bedrock:custom", "  arn:aws:bedrock:custom  "])(
 		"rejects a Bedrock selection requiring new ARN settings: %s",
 		(id) => {
 			expect(() => createModelPatch({ apiProvider: providerIdentifiers.bedrock }, id)).toThrow("Settings")

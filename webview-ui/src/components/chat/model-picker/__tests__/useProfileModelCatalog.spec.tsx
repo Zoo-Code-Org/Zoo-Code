@@ -2,7 +2,10 @@ import { act, renderHook } from "@testing-library/react"
 
 import {
 	providerIdentifiers,
+	retiredProviderIdentifiers,
 	friendliModels,
+	mainlandZAiModels,
+	internationalZAiModels,
 	type ModelInfo,
 	type ProviderSettings,
 	type RouterModels,
@@ -48,7 +51,11 @@ describe("useProfileModelCatalog", () => {
 			isError: false,
 		})
 		expect(Object.keys(result.current.models ?? {}).length).toBeGreaterThan(0)
-		expect(routerCalls).toHaveBeenLastCalledWith({ provider: providerIdentifiers.anthropic, enabled: false })
+		expect(routerCalls).toHaveBeenLastCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.anthropic, enabled: false }),
+		)
+		act(() => result.current.refetch())
+		expect(router.refetch).not.toHaveBeenCalled()
 		expect(vscode.postMessage).not.toHaveBeenCalled()
 	})
 
@@ -83,7 +90,9 @@ describe("useProfileModelCatalog", () => {
 			useProfileModelCatalog({ apiProvider: providerIdentifiers.friendli }),
 		)
 		expect(result.current.models).toEqual(friendliModels)
-		expect(routerCalls).toHaveBeenLastCalledWith({ provider: providerIdentifiers.friendli, enabled: true })
+		expect(routerCalls).toHaveBeenLastCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.friendli, enabled: true }),
+		)
 		router.data = { friendli: { fetched: info } }
 		rerender()
 		expect(result.current.models).toEqual({ fetched: info })
@@ -92,15 +101,64 @@ describe("useProfileModelCatalog", () => {
 		expect(result.current.models).toEqual(friendliModels)
 	})
 
+	it("keeps valid Friendli fallback selectable when router discovery fails", () => {
+		router.isError = true
+		const { result } = renderHook(() => useProfileModelCatalog({ apiProvider: providerIdentifiers.friendli }))
+		expect(result.current.models).toEqual(friendliModels)
+		expect(result.current.isError).toBe(false)
+		expect(result.current.fallbackMessage).toBeUndefined()
+	})
+
 	it("uses the configured Z.ai API line", () => {
-		const { result } = renderHook(() =>
-			useProfileModelCatalog({ apiProvider: providerIdentifiers.zai, zaiApiLine: "china_api" }),
+		const { result, rerender } = renderHook(
+			({ zaiApiLine }: Pick<ProviderSettings, "zaiApiLine">) =>
+				useProfileModelCatalog({ apiProvider: providerIdentifiers.zai, zaiApiLine }),
+			{ initialProps: { zaiApiLine: "china_api" } },
 		)
-		expect(result.current.models).not.toBeNull()
+		expect(result.current.models).toEqual(mainlandZAiModels)
+		expect(result.current.models?.["glm-4.5"].inputPrice).toBe(0.29)
 		expect(result.current.field).toBe("apiModelId")
+		rerender({ zaiApiLine: "international_api" })
+		expect(result.current.models).toEqual(internationalZAiModels)
+		expect(result.current.models?.["glm-4.5"].inputPrice).toBe(0.6)
+	})
+
+	it("keeps an available router catalog selectable despite a background error", () => {
+		router.isError = true
+		router.data = { requesty: { available: info } }
+		const { result } = renderHook(() => useProfileModelCatalog({ apiProvider: providerIdentifiers.requesty }))
+		expect(result.current.isError).toBe(false)
+		expect(result.current.models).toEqual({ available: info })
+	})
+
+	it("refetches OpenAI discovery and returns its catalog", async () => {
+		const { result } = renderHook(() =>
+			useProfileModelCatalog({
+				apiProvider: providerIdentifiers.openai,
+				openAiBaseUrl: "https://openai.test/v1",
+				openAiApiKey: "secret",
+			}),
+		)
+		expect(result.current.isLoading).toBe(true)
+		await act(async () => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "providerInfo",
+						requestId: vi.mocked(vscode.postMessage).mock.calls.at(-1)?.[0].requestId,
+						values: { data: ["discovered"] },
+					},
+				}),
+			)
+		})
+		expect(result.current.models).toHaveProperty("discovered")
+		act(() => result.current.refetch())
+		expect(result.current.models).toBeNull()
+		expect(vscode.postMessage).toHaveBeenCalledTimes(2)
 	})
 
 	it.each([
+		retiredProviderIdentifiers.roo,
 		providerIdentifiers.ollama,
 		providerIdentifiers.lmstudio,
 		providerIdentifiers.vscodeLm,

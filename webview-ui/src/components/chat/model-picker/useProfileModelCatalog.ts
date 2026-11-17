@@ -46,9 +46,8 @@ export function useProfileModelCatalog(apiConfiguration: ProviderSettings): Prof
 	const isOpenAi = provider === providerIdentifiers.openai && !isUnsupported
 	const isStatic = !!provider && isStaticModelProvider(provider)
 	const fetchRouter = !isUnsupported && !isOpenAi && (!isStatic || provider === providerIdentifiers.friendli)
-	const router = useRouterModels({ provider, enabled: fetchRouter })
+	const router = useRouterModels({ provider, enabled: fetchRouter, apiConfiguration })
 	const openAi = useOpenAiModelCatalog(apiConfiguration, isOpenAi)
-	const isError = !isUnsupported && (isOpenAi ? openAi.isError : fetchRouter && router.isError)
 	const models =
 		isUnsupported || !provider
 			? null
@@ -57,6 +56,8 @@ export function useProfileModelCatalog(apiConfiguration: ProviderSettings): Prof
 				: isStatic
 					? getStaticModelsForProvider(provider, undefined, apiConfiguration, router.data)
 					: ((router.data as Partial<Record<ProviderName, ModelRecord>> | undefined)?.[provider] ?? null)
+
+	const isError = !isUnsupported && (isOpenAi ? openAi.isError : fetchRouter && router.isError && !models)
 
 	return {
 		provider,

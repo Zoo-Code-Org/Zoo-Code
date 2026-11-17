@@ -4,6 +4,7 @@ import type { ProviderInfoKind, ProviderInfoParams, ProviderInfoResultMap, Webvi
 
 import type { ClineProvider } from "./ClineProvider"
 import { getOpenRouterModelEndpoints } from "../../api/providers/fetchers/openrouter"
+import { getOpenAiModels } from "../../api/providers/openai"
 import { toRequestyServiceUrl } from "../../shared/utils/requesty"
 
 const FETCH_TIMEOUT_MS = 10_000
@@ -119,6 +120,7 @@ async function getRequestyKeyInfo({ apiKey, baseUrl }: ProviderInfoParams) {
 }
 
 const fetchers: { [K in ProviderInfoKind]: (params: ProviderInfoParams) => Promise<ProviderInfoResultMap[K]> } = {
+	openAiModels: ({ baseUrl, apiKey, headers }) => getOpenAiModels(baseUrl, apiKey, headers, { throwOnError: true }),
 	openRouterKeyInfo: getOpenRouterKeyInfo,
 	openRouterModelProviders: getOpenRouterModelProviders,
 	requestyKeyInfo: getRequestyKeyInfo,
@@ -132,6 +134,7 @@ const providerInfoParamsSchema = z.object({
 	apiKey: z.string().optional(),
 	baseUrl: z.string().optional(),
 	modelId: z.string().optional(),
+	headers: z.record(z.string(), z.string()).optional(),
 })
 
 /**

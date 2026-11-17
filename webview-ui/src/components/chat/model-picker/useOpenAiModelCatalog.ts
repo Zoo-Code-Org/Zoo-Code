@@ -6,18 +6,24 @@ import { discoverOpenAiModels, type OpenAiDiscoverySettings } from "./openAiMode
 
 type DiscoveryState = {
 	identity: OpenAiDiscoverySettings
-	attempt: number
 	models: ModelRecord | null
-	isError: boolean
 }
 
 export function useOpenAiModelCatalog(settings: OpenAiDiscoverySettings, enabled: boolean) {
 	const { openAiBaseUrl, openAiApiKey, openAiHeaders } = settings
-	const identity = useMemo(
-		() => ({ openAiBaseUrl, openAiApiKey, openAiHeaders, enabled }),
-		[openAiBaseUrl, openAiApiKey, openAiHeaders, enabled],
-	)
+	// Content identity stays local; credentials must never become query keys.
+	const headers = JSON.stringify(Object.entries(openAiHeaders ?? {}).sort(([a], [b]) => a.localeCompare(b)))
 	const [attempt, setAttempt] = useState(0)
+	const identity = useMemo(
+		() => ({
+			openAiBaseUrl,
+			openAiApiKey,
+			openAiHeaders: Object.fromEntries(JSON.parse(headers) as [string, string][]),
+			enabled,
+			attempt,
+		}),
+		[openAiBaseUrl, openAiApiKey, headers, enabled, attempt],
+	)
 	const [state, setState] = useState<DiscoveryState>()
 	const refetch = useCallback(() => setAttempt((value) => value + 1), [])
 	// Discovery, unlike inference, has no default base URL or API key. Missing values
@@ -32,24 +38,22 @@ export function useOpenAiModelCatalog(settings: OpenAiDiscoverySettings, enabled
 				if (controller.signal.aborted) return
 				setState({
 					identity,
-					attempt,
 					models: Object.fromEntries(ids.map((id) => [id, { ...openAiModelInfoSaneDefaults }])),
-					isError: false,
 				})
 			},
 			() => {
-				if (!controller.signal.aborted) setState({ identity, attempt, models: null, isError: true })
+				if (!controller.signal.aborted) setState({ identity, models: null })
 			},
 		)
 		return () => controller.abort()
-	}, [identity, attempt, canDiscover])
+	}, [identity, canDiscover])
 
 	// Hide the previous profile's result synchronously, before effect cleanup runs.
-	const current = canDiscover && state?.identity === identity && state.attempt === attempt ? state : undefined
+	const current = canDiscover && state?.identity === identity ? state : undefined
 	return {
 		models: current?.models ?? null,
 		isLoading: canDiscover && !current,
-		isError: (enabled && !canDiscover) || (current?.isError ?? false),
+		isError: (enabled && !canDiscover) || current?.models === null,
 		refetch,
 	}
 }

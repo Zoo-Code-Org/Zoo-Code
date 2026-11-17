@@ -28,6 +28,7 @@ import {
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
+	providerSettingsSchema,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
@@ -1178,7 +1179,11 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case RouterModelsMessageType.requestRouterModels: {
-			const { apiConfiguration } = await provider.getState()
+			// A scoped picker request owns its configuration, even if the active profile changes
+			// while discovery is in flight. Do not merge absent credentials from global state.
+			const apiConfiguration = message.apiConfiguration
+				? providerSettingsSchema.parse(message.apiConfiguration)
+				: (await provider.getState()).apiConfiguration
 
 			// Optional single provider filter from webview
 			const requestedProvider = message?.values?.provider
@@ -1482,6 +1487,7 @@ export const webviewMessageHandler = async (
 
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
+				requestId: message.requestId,
 				routerModels,
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
@@ -1577,46 +1583,18 @@ export const webviewMessageHandler = async (
 			})
 			break
 		}
-		case OpenAiModelsMessageType.requestOpenAiModels: {
-			const correlation = message.requestId !== undefined ? { requestId: message.requestId } : {}
-			if (!message.values?.baseUrl || !message.values?.apiKey) {
-				// Legacy clients expect no response until both values are configured.
-				if (message.requestId !== undefined) {
-					await provider.postMessageToWebview({
-						type: OpenAiModelsMessageType.openAiModels,
-						...correlation,
-						openAiModels: [],
-						error: "Configure an OpenAI-compatible base URL and API key in Settings.",
-					})
-				}
-				break
+		case OpenAiModelsMessageType.requestOpenAiModels:
+			if (message?.values?.baseUrl && message?.values?.apiKey) {
+				const openAiModels = await getOpenAiModels(
+					message?.values?.baseUrl,
+					message?.values?.apiKey,
+					message?.values?.openAiHeaders,
+				)
+
+				await provider.postMessageToWebview({ type: OpenAiModelsMessageType.openAiModels, openAiModels })
 			}
 
-			let openAiModels: string[]
-			try {
-				openAiModels = await getOpenAiModels(
-					message.values.baseUrl,
-					message.values.apiKey,
-					message.values.openAiHeaders,
-				)
-			} catch (error) {
-				if (message.requestId === undefined) throw error
-				// Do not echo fetch errors: they may contain credentials or headers.
-				await provider.postMessageToWebview({
-					type: OpenAiModelsMessageType.openAiModels,
-					...correlation,
-					openAiModels: [],
-					error: "Model discovery failed; configure this model in Settings.",
-				})
-				break
-			}
-			await provider.postMessageToWebview({
-				type: OpenAiModelsMessageType.openAiModels,
-				...correlation,
-				openAiModels,
-			})
 			break
-		}
 		case VsCodeLmModelsMessageType.githubCopilotSignIn:
 		case VsCodeLmModelsMessageType.githubCopilotReconnect: {
 			// Plain sign-in and Reconnect run as separate attempts, so an older one can finish after a newer one.

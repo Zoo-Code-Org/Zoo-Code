@@ -6,6 +6,45 @@ const base: ModelInfo = { contextWindow: 128_000, supportsPromptCache: false }
 const config: ProviderSettings = { apiProvider: providerIdentifiers.openaiNative }
 
 describe("getReasoningSelection", () => {
+	it("accepts Gemini boolean effort capabilities without treating them as an array restriction", () => {
+		expect(
+			getReasoningSelection(
+				{ apiProvider: providerIdentifiers.gemini, reasoningEffort: "minimal", enableReasoningEffort: false },
+				{
+					...base,
+					supportsReasoningEffort: true,
+				},
+			),
+		).toMatchObject({ currentEffort: "minimal", reasoningEnabled: true })
+	})
+	it.each([
+		{ stored: "high", defaultEffort: "low", current: "high" },
+		{ stored: undefined, defaultEffort: "high", current: "high" },
+		{ stored: "medium", defaultEffort: "high", current: "high" },
+		{ stored: "disable", defaultEffort: "high", current: undefined },
+		{ stored: "none", defaultEffort: "high", current: undefined },
+		{ stored: "xhigh", defaultEffort: "high", current: undefined },
+		{ stored: undefined, defaultEffort: undefined, current: undefined },
+		{ stored: "medium", defaultEffort: undefined, current: undefined },
+	] satisfies {
+		stored: ReasoningOption | undefined
+		defaultEffort: ModelInfo["reasoningEffort"]
+		current: ReasoningOption | undefined
+	}[])(
+		"matches Gemini thinkingLevel runtime for $stored / $defaultEffort despite a false flag",
+		({ stored, defaultEffort, current }) => {
+			const selection = getReasoningSelection(
+				{ apiProvider: providerIdentifiers.gemini, reasoningEffort: stored, enableReasoningEffort: false },
+				{
+					...base,
+					supportsReasoningEffort: ["low", "high"],
+					reasoningEffort: defaultEffort,
+				},
+			)
+			expect(selection.currentEffort).toBe(current)
+			expect(selection.reasoningEnabled).toBe(current !== undefined)
+		},
+	)
 	it.each([
 		{
 			name: "optional boolean",

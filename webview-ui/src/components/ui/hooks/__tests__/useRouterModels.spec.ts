@@ -16,6 +16,59 @@ vi.mock("@src/utils/vscode", () => ({
 }))
 
 describe("fetchRouterModels", () => {
+	test("correlates simultaneous scoped requests for the same provider independently", async () => {
+		const first = fetchRouterModels(providerIdentifiers.litellm, undefined, { litellmApiKey: "a-secret" })
+		const firstId = vi.mocked(vscode.postMessage).mock.calls.at(-1)?.[0].requestId
+		const second = fetchRouterModels(providerIdentifiers.litellm, undefined, { litellmApiKey: "b-secret" })
+		const secondId = vi.mocked(vscode.postMessage).mock.calls.at(-1)?.[0].requestId
+		const settled = vi.fn()
+		void second.then(settled)
+		const send = (requestId: string | undefined, model: string) =>
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: {
+						type: "routerModels",
+						requestId,
+						values: { provider: providerIdentifiers.litellm },
+						routerModels: { litellm: { [model]: {} } },
+					},
+				}),
+			)
+		send(firstId, "a-only")
+		await expect(first).resolves.toEqual({ litellm: { "a-only": {} } })
+		expect(settled).not.toHaveBeenCalled()
+		send(secondId, "b-only")
+		await expect(second).resolves.toEqual({ litellm: { "b-only": {} } })
+	})
+
+	test("ignores correlated scoped replies for a generic aggregate request", async () => {
+		const promise = fetchRouterModels()
+		expect(vscode.postMessage).toHaveBeenLastCalledWith({ type: "requestRouterModels" })
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "state" } }))
+		window.dispatchEvent(
+			new MessageEvent("message", { data: { type: "routerModels", requestId: "scoped", routerModels: {} } }),
+		)
+		window.dispatchEvent(
+			new MessageEvent("message", { data: { type: "routerModels", routerModels: { openrouter: {} } } }),
+		)
+		await expect(promise).resolves.toEqual({ openrouter: {} })
+	})
+
+	test("rejects a matching reply without a catalog", async () => {
+		const promise = fetchRouterModels(providerIdentifiers.litellm)
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data: { type: "routerModels", values: { provider: providerIdentifiers.poe } },
+			}),
+		)
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data: { type: "routerModels", values: { provider: providerIdentifiers.litellm } },
+			}),
+		)
+		await expect(promise).rejects.toThrow("No router models")
+	})
+
 	afterEach(() => {
 		vi.restoreAllMocks()
 		vi.useRealTimers()
@@ -93,6 +146,22 @@ describe("fetchRouterModels", () => {
 })
 
 describe("useRouterModels", () => {
+	test("preserves the generic aggregate query key and disabled option", () => {
+		const client = createTestQueryClient()
+		const wrapper = ({ children }: React.PropsWithChildren) =>
+			React.createElement(QueryClientProvider, { client }, children)
+		const { result, unmount } = renderHook(() => useRouterModels({ enabled: false }), { wrapper })
+		expect(result.current.fetchStatus).toBe("idle")
+		expect(
+			client
+				.getQueryCache()
+				.getAll()
+				.map(({ queryKey }) => queryKey),
+		).toEqual([["routerModels", "all"]])
+		unmount()
+		client.clear()
+	})
+
 	afterEach(() => {
 		vi.restoreAllMocks()
 	})

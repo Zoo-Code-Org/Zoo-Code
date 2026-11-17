@@ -21,7 +21,7 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
-		id: "model-a",
+		id: mocks.configuration.apiModelId,
 		info: {
 			contextWindow: 1000,
 			supportsPromptCache: false,
@@ -66,7 +66,7 @@ describe("production model picker popover", () => {
 
 	it("keeps open for model and effort selection, then dismisses on outside click", async () => {
 		const user = userEvent.setup()
-		render(
+		const { rerender } = render(
 			<>
 				<button>Outside</button>
 				<ApiConfigSelector {...props} quickSettings={<ProfileQuickSettings />} />
@@ -79,6 +79,14 @@ describe("production model picker popover", () => {
 		expect(screen.getByRole("dialog")).toBeInTheDocument()
 		expect(mocks.postMessage).toHaveBeenLastCalledWith(
 			expect.objectContaining({ type: "updateProfileModel", text: "Work" }),
+		)
+		expect(within(dialog).getByRole("button", { name: "chat:modelPicker.effort.low" })).toBeDisabled()
+		mocks.configuration = { ...mocks.configuration, apiModelId: "model-b" }
+		rerender(
+			<>
+				<button>Outside</button>
+				<ApiConfigSelector {...props} quickSettings={<ProfileQuickSettings />} />
+			</>,
 		)
 		await user.click(within(dialog).getByRole("button", { name: "chat:modelPicker.effort.low" }))
 		expect(screen.getByRole("dialog")).toBeInTheDocument()
@@ -102,9 +110,9 @@ describe("production model picker popover", () => {
 		const profiles = screen.getByRole("button", { name: "Personal" }).closest(".h-\\[300px\\]")
 		expect(profiles).toHaveClass("h-[300px]", "shrink-0", "overflow-y-auto")
 		await user.type(screen.getByRole("textbox"), "zzzzz")
-		expect(screen.getByText("common:ui.no_results").parentElement).toHaveClass("h-[300px]")
+		expect(screen.getByText("common:ui.no_results")).toHaveClass("h-[300px]")
 		await user.click(screen.getByRole("button", { name: "chat:modelPicker.clearSearch" }))
-		await user.keyboard("{ArrowDown}{End}{Enter}")
+		await user.keyboard("{Tab}{End}{Enter}")
 		expect(props.onChange).toHaveBeenCalledWith("personal")
 		expect(screen.getByRole("dialog")).toBeInTheDocument()
 		expect(screen.getByRole("status")).toHaveClass("h-[300px]", "shrink-0", "overflow-y-auto")
@@ -114,7 +122,7 @@ describe("production model picker popover", () => {
 		expect(screen.queryByRole("button", { name: "model-b" })).not.toBeInTheDocument()
 		await user.keyboard("{Escape}")
 		await user.click(screen.getByTestId("dropdown-trigger"))
-		expect(screen.queryByRole("button", { name: "model-b" })).not.toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "model-b" })).toBeEnabled()
 		mocks.profileName = "Personal"
 		rerender(
 			<ApiConfigSelector

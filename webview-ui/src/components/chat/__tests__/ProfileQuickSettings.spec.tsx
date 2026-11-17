@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
 	catalog: {} as ProfileModelCatalog,
 	allowList: undefined as OrganizationAllowList | undefined,
 	profileName: "Work",
+	selectionLoading: false,
 	postMessage: vi.fn(),
 	setApiConfiguration: vi.fn(),
 	refetch: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock("@/components/ui/hooks/useSelectedModel", () => ({
 	useSelectedModel: () => ({
 		id: mocks.configuration.apiModelId ?? mocks.configuration.openAiModelId,
 		info: mocks.info,
+		isLoading: mocks.selectionLoading,
 	}),
 }))
 vi.mock("../model-picker/useProfileModelCatalog", () => ({ useProfileModelCatalog: () => mocks.catalog }))
@@ -40,6 +42,7 @@ describe("ProfileQuickSettings", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mocks.profileName = "Work"
+		mocks.selectionLoading = false
 		mocks.allowList = undefined
 		mocks.configuration = {
 			apiProvider: providerIdentifiers.openaiNative,
@@ -83,9 +86,9 @@ describe("ProfileQuickSettings", () => {
 		expect(screen.getByRole("button", { name: "model-a" })).toBeInTheDocument()
 	})
 
-	it("sends independent model and effort patches, never snapshots or optimistic state", async () => {
+	it("blocks stale effort until host confirms the new model, without optimistic state", async () => {
 		const user = userEvent.setup()
-		render(<ProfileQuickSettings />)
+		const { rerender } = render(<ProfileQuickSettings />)
 		await user.click(screen.getByRole("button", { name: "Friendly Beta" }))
 		expect(mocks.postMessage).toHaveBeenLastCalledWith({
 			type: "updateProfileModel",
@@ -101,6 +104,29 @@ describe("ProfileQuickSettings", () => {
 				},
 			},
 		})
+		const effort = screen.getByRole("button", { name: "chat:modelPicker.effort.low" })
+		expect(effort).toBeDisabled()
+		// Reverse selection cannot race the pending request: all model results are disabled too.
+		const previousModel = screen.getByRole("button", { name: "model-a" })
+		const pendingModel = screen.getByRole("button", { name: "Friendly Beta" })
+		expect(previousModel).toBeDisabled()
+		expect(pendingModel).toBeDisabled()
+		await user.click(previousModel)
+		await user.click(pendingModel)
+		await user.click(effort)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(1)
+		// An unrelated state post must not make the old model's controls actionable.
+		mocks.configuration = { ...mocks.configuration, apiKey: "rotated" }
+		rerender(<ProfileQuickSettings />)
+		expect(effort).toBeDisabled()
+		expect(previousModel).toBeDisabled()
+		mocks.configuration = { ...mocks.configuration, apiModelId: "model-b" }
+		rerender(<ProfileQuickSettings />)
+		expect(effort).toBeEnabled()
+		expect(previousModel).toBeEnabled()
+		expect(pendingModel).toBeEnabled()
+		await user.click(pendingModel)
+		expect(mocks.postMessage).toHaveBeenCalledTimes(1)
 		await user.click(screen.getByRole("button", { name: "chat:modelPicker.effort.low" }))
 		expect(mocks.postMessage).toHaveBeenLastCalledWith({
 			type: "updateProfileModel",
@@ -114,12 +140,39 @@ describe("ProfileQuickSettings", () => {
 		expect(screen.queryByRole("button", { name: "chat:modelPicker.off" })).not.toBeInTheDocument()
 	})
 
+	it("keeps stale model controls disabled until the picker remounts after rejection", async () => {
+		const user = userEvent.setup()
+		const { unmount } = render(<ProfileQuickSettings />)
+		await user.click(screen.getByRole("button", { name: "Friendly Beta" }))
+		expect(screen.getByRole("button", { name: "model-a" })).toBeDisabled()
+		expect(screen.getByRole("button", { name: "chat:modelPicker.effort.low" })).toBeDisabled()
+		unmount()
+		render(<ProfileQuickSettings />)
+		expect(screen.getByRole("button", { name: "model-a" })).toBeEnabled()
+		expect(screen.getByRole("button", { name: "chat:modelPicker.effort.low" })).toBeEnabled()
+	})
+
 	it("does not reset reasoning when the already selected model is clicked", async () => {
 		const user = userEvent.setup()
 		render(<ProfileQuickSettings />)
 		await user.click(screen.getByRole("button", { name: "model-a" }))
 		expect(mocks.postMessage).not.toHaveBeenCalled()
+		expect(screen.getByRole("button", { name: "Friendly Beta" })).toBeEnabled()
+		expect(screen.getByRole("button", { name: "chat:modelPicker.effort.low" })).toBeEnabled()
 		expect(screen.getByRole("textbox")).toBeInTheDocument()
+	})
+
+	it("blocks model and effort writes until the selected model metadata resolves", async () => {
+		mocks.selectionLoading = true
+		const user = userEvent.setup()
+		const { rerender } = render(<ProfileQuickSettings />)
+		await user.click(screen.getByRole("button", { name: "Friendly Beta" }))
+		await user.click(screen.getByRole("button", { name: "chat:modelPicker.effort.low" }))
+		expect(mocks.postMessage).not.toHaveBeenCalled()
+		mocks.selectionLoading = false
+		rerender(<ProfileQuickSettings />)
+		await user.click(screen.getByRole("button", { name: "Friendly Beta" }))
+		expect(mocks.postMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "updateProfileModel" }))
 	})
 
 	it("selects via keyboard from search and keeps the controls mounted", async () => {

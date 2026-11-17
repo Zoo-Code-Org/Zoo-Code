@@ -103,7 +103,7 @@ describe("ApiConfigSelector", () => {
 		)
 		fireEvent.click(screen.getByTestId("toggle-popover"))
 		expect(screen.getByText("Model settings panel")).toBeInTheDocument()
-		expect(screen.queryByText("Config 2")).not.toBeInTheDocument()
+		expect(screen.getByText("Config 2")).not.toBeVisible()
 		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.selectProfile" }))
 		expect(screen.queryByText("Model settings panel")).not.toBeInTheDocument()
 		fireEvent.mouseEnter(screen.getByText("Config 2"))
@@ -124,6 +124,19 @@ describe("ApiConfigSelector", () => {
 		expect(screen.queryByText("chat:modelPicker.loadingProfile")).not.toBeInTheDocument()
 	})
 
+	test("recovers a rejected profile switch by closing and reopening without exposing stale settings", () => {
+		render(<ApiConfigSelector {...defaultProps} quickSettings={<button>Old model settings</button>} />)
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.selectProfile" }))
+		fireEvent.click(screen.getByText("Config 2"))
+		expect(screen.getByText("chat:modelPicker.loadingProfile")).toBeInTheDocument()
+		expect(screen.queryByRole("button", { name: "Old model settings" })).not.toBeInTheDocument()
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		expect(screen.queryByText("chat:modelPicker.loadingProfile")).not.toBeInTheDocument()
+		expect(screen.getByRole("button", { name: "Old model settings" })).toBeEnabled()
+	})
+
 	test("can return from profile selection without changing the active profile", () => {
 		render(<ApiConfigSelector {...defaultProps} quickSettings={<div>Model settings panel</div>} />)
 		const header = screen.getByRole("button", { name: "chat:modelPicker.selectProfile" })
@@ -131,6 +144,27 @@ describe("ApiConfigSelector", () => {
 		fireEvent.click(header)
 		expect(screen.getByText("Model settings panel")).toBeInTheDocument()
 		expect(mockOnChange).not.toHaveBeenCalled()
+	})
+
+	test("reselects the active profile without waiting for a host update", () => {
+		render(<ApiConfigSelector {...defaultProps} quickSettings={<button>Model settings</button>} />)
+		fireEvent.click(screen.getByTestId("toggle-popover"))
+		fireEvent.click(screen.getByRole("button", { name: "chat:modelPicker.selectProfile" }))
+		fireEvent.click(screen.getByRole("button", { name: "Config 1 claude-3-opus-20240229" }))
+		expect(mockOnChange).toHaveBeenCalledTimes(1)
+		expect(mockOnChange).toHaveBeenCalledWith("config1")
+		expect(screen.getByRole("button", { name: "Model settings" })).toBeEnabled()
+		expect(screen.queryByText("chat:modelPicker.loadingProfile")).not.toBeInTheDocument()
+		expect(screen.getByTestId("popover-root")).toHaveAttribute("data-open", "true")
+	})
+
+	test("renders and invokes the locked profile control", () => {
+		render(<ApiConfigSelector {...defaultProps} lockApiConfigAcrossModes />)
+		const unlock = screen.getByRole("button", { name: "chat:unlockApiConfigAcrossModes" })
+		expect(unlock).toHaveClass("text-vscode-focusBorder")
+		expect(unlock.querySelector(".codicon-lock")).toBeInTheDocument()
+		fireEvent.click(unlock)
+		expect(defaultProps.onToggleLockApiConfig).toHaveBeenCalledTimes(1)
 	})
 
 	test("keeps the picker open after interacting with model settings", () => {

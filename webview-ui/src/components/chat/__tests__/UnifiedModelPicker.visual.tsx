@@ -1,4 +1,5 @@
 import type { Locator } from "@playwright/test"
+import { providerIdentifiers } from "@roo-code/types"
 
 import { expect, test } from "../../../../playwright/coverage-fixture"
 import {
@@ -22,7 +23,7 @@ async function geometry(dialog: Locator, search: Locator) {
 	const picker = await dialog.boundingBox()
 	const input = await search.boundingBox()
 	// Both production views use the same fixed-height results viewport.
-	const results = await dialog.locator(".h-\\[300px\\]").boundingBox()
+	const results = await dialog.locator(".h-\\[300px\\]:visible").boundingBox()
 	expect(picker).not.toBeNull()
 	expect(input).not.toBeNull()
 	expect(results).not.toBeNull()
@@ -67,7 +68,7 @@ for (const view of ["models", "profiles"] as const) {
 				await dialog.getByRole("button", { name: "Choose profile", exact: true }).click()
 			}
 			const search = dialog.getByRole("textbox")
-			const results = dialog.locator("[data-picker-result]")
+			const results = dialog.locator("[data-picker-result]:visible")
 			await expect(results.first()).toBeVisible()
 			await expect.poll(async () => (await geometry(dialog, search)).resultsHeight).toBe(300)
 			const initial = await geometry(dialog, search)
@@ -116,16 +117,48 @@ test("model and effort clicks retain the open picker layout", async ({ mount, pa
 	await search.fill("gpt-5.1-codex-max")
 	await expect.poll(async () => (await geometry(dialog, search)).resultsHeight).toBe(300)
 	const initial = await geometry(dialog, search)
-	await dialog.getByRole("button", { name: "gpt-5.1-codex-max", exact: true }).click()
-	await expect(dialog).toBeVisible()
-	await expect.poll(() => geometry(dialog, search)).toEqual(initial)
 	await dialog
 		.getByRole("group", { name: "Reasoning effort" })
 		.getByRole("button", { name: "Low", exact: true })
 		.click()
 	await expect(dialog).toBeVisible()
 	await expect.poll(() => geometry(dialog, search)).toEqual(initial)
+	await dialog.getByRole("button", { name: "gpt-5.1-codex-max", exact: true }).click()
+	await expect(dialog).toBeVisible()
+	await expect.poll(() => geometry(dialog, search)).toEqual(initial)
+	await expect(
+		dialog.getByRole("group", { name: "Reasoning effort" }).getByRole("button", { name: "Low", exact: true }),
+	).toBeDisabled()
+
 	// Use the shared bridge capture, not console output, to ensure the real controls ran.
 	const messages = await getCapturedVscodeMessages(page)
 	expect(messages.filter(({ type }) => type === "updateProfileModel")).toHaveLength(2)
+})
+
+test("switching profiles updates the mounted context before model submission", async ({ mount, page }) => {
+	await mount("unified-model-picker")
+	await page.getByTestId("dropdown-trigger").click()
+	const dialog = page.getByRole("dialog")
+	await dialog.getByRole("button", { name: "Choose profile", exact: true }).click()
+	await dialog.getByRole("button", { name: "Personal gpt-5-mini", exact: true }).click()
+	await expect(dialog).toBeVisible()
+	await expect(page.getByTestId("dropdown-trigger")).toContainText("Personal / gpt-5-mini")
+	const models = dialog.getByRole("group", { name: "Models from the current provider" })
+	await expect(models.getByRole("button", { name: "gpt-5-mini", exact: true })).toHaveAttribute(
+		"aria-pressed",
+		"true",
+	)
+	await expect(models.getByRole("button", { name: "gpt-5", exact: true })).toHaveAttribute("aria-pressed", "false")
+	await dialog.getByRole("textbox", { name: "Search models" }).fill("gpt-5.1-codex-max")
+	await models.getByRole("button", { name: "gpt-5.1-codex-max", exact: true }).click()
+	const messages = (await getCapturedVscodeMessages(page)).filter(({ type }) => type === "updateProfileModel")
+	expect(messages).toEqual([
+		expect.objectContaining({
+			text: "Personal",
+			values: expect.objectContaining({
+				expectedProvider: providerIdentifiers.openaiNative,
+				patch: expect.objectContaining({ apiModelId: "gpt-5.1-codex-max" }),
+			}),
+		}),
+	])
 })

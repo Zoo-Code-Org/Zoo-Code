@@ -119,6 +119,68 @@ describe("requestProviderInfo", () => {
 		expectCleanedUp(add, remove)
 	})
 
+	it("does not send or allocate resources for a pre-aborted request", async () => {
+		const [add, remove] = spyOnListeners()
+		const controller = new AbortController()
+		controller.abort()
+		await expect(requestProviderInfo("openAiModels", {}, controller.signal)).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(add).not.toHaveBeenCalled()
+		expect(remove).not.toHaveBeenCalled()
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it("aborts only its own request, cleans up, and ignores late replies", async () => {
+		const [add, remove] = spyOnListeners()
+		const controller = new AbortController()
+		const removeAbort = vi.spyOn(controller.signal, "removeEventListener")
+		const { sent } = stubHost(() => null)
+		const aborted = requestProviderInfo("openAiModels", {}, controller.signal)
+		const assertion = expect(aborted).rejects.toMatchObject({ name: "AbortError" })
+		controller.abort()
+		await assertion
+		expectCleanedUp(add, remove)
+		expect(removeAbort).toHaveBeenCalledWith("abort", expect.any(Function))
+		const fresh = requestProviderInfo("openAiModels", {})
+		const settled = vi.fn()
+		void fresh.then(settled)
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data: { type: "providerInfo", requestId: sent[0]?.requestId, values: { data: ["late"] } },
+			}),
+		)
+		await Promise.resolve()
+		expect(settled).not.toHaveBeenCalled()
+		window.dispatchEvent(
+			new MessageEvent("message", {
+				data: { type: "providerInfo", requestId: sent[1]?.requestId, values: { data: ["fresh"] } },
+			}),
+		)
+		await expect(fresh).resolves.toEqual(["fresh"])
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
+	it.each(["success", "error", "timeout", "transport"])("removes the abort listener after %s", async (outcome) => {
+		spyOnListeners()
+		const controller = new AbortController()
+		const addAbort = vi.spyOn(controller.signal, "addEventListener")
+		const removeAbort = vi.spyOn(controller.signal, "removeEventListener")
+		stubHost(() => (outcome === "success" ? { data: [] } : outcome === "error" ? { error: "failed" } : null))
+		if (outcome === "transport")
+			vi.mocked(vscode.postMessage).mockImplementationOnce(() => {
+				throw new Error("transport")
+			})
+		const promise = requestProviderInfo("openAiModels", {}, controller.signal)
+		const assertion =
+			outcome === "success" ? expect(promise).resolves.toEqual([]) : expect(promise).rejects.toThrow()
+		if (outcome === "timeout") await vi.advanceTimersByTimeAsync(20_000)
+		await assertion
+		expect(removeAbort).toHaveBeenCalledWith("abort", addAbort.mock.calls[0]?.[1])
+		expect(vi.getTimerCount()).toBe(0)
+	})
+
 	it("ignores replies for other request ids and rejects on timeout", async () => {
 		const [add, remove] = spyOnListeners()
 		stubHost(() => null)

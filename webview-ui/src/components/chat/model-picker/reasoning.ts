@@ -47,6 +47,18 @@ export function getReasoningSelection(config: ProviderSettings, modelInfo?: Mode
 
 	const stored = manual ? config.openAiCustomModelInfo?.reasoningEffort : config.reasoningEffort
 	const declaredDefault = manual ? undefined : modelInfo?.reasoningEffort
+	// Match getGeminiReasoning: thinking levels ignore the legacy enable flag,
+	// reject non-level efforts, and use the model default for unsupported levels.
+	if (config.apiProvider === providerIdentifiers.gemini) {
+		const levels: readonly ReasoningOption[] = ["minimal", "low", "medium", "high"]
+		const selected = stored ?? declaredDefault
+		const effective =
+			selected && levels.includes(selected) && Array.isArray(supports) && !supports.includes(selected)
+				? declaredDefault
+				: selected
+		const currentEffort = effective && levels.includes(effective) ? effective : undefined
+		return { supportedOptions, currentEffort, reasoningEnabled: currentEffort !== undefined }
+	}
 	const defaultEffort = declaredDefault ?? (manual ? "low" : required ? "medium" : "disable")
 	const fallback = supportedOptions.includes(defaultEffort) ? defaultEffort : supportedOptions[0]
 	// A false flag must not display an enabled effort; unset still follows model defaults.

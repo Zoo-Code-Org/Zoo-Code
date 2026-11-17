@@ -173,6 +173,7 @@ export const ApiConfigSelector = ({
 			open={open}
 			onOpenChange={(nextOpen) => {
 				setOpen(nextOpen)
+				if (nextOpen) setPendingProfileId(null)
 				if (!nextOpen) {
 					setShowProfiles(false)
 					setSearchValue("")
@@ -234,71 +235,67 @@ export const ApiConfigSelector = ({
 							/>
 						</button>
 					)}
-					<div className="flex min-h-0 flex-col overflow-y-auto" onKeyDown={handlePickerNavigation}>
-						{!isProfileView &&
-							(pendingProfileId && pendingProfileId !== value ? (
+					{!isProfileView &&
+						(pendingProfileId && pendingProfileId !== value ? (
+							<div
+								role="status"
+								className={cn(pickerResultsClassName, "p-3 text-xs text-vscode-descriptionForeground")}>
+								{t("chat:modelPicker.loadingProfile")}
+							</div>
+						) : (
+							quickSettings
+						))}
+					{isProfileView && (quickSettings || listApiConfigMeta.length > 6) && (
+						<PickerSearchField
+							label={t("common:ui.search_placeholder")}
+							value={searchValue}
+							onChange={setSearchValue}
+							disabled={disabled}
+						/>
+					)}
+					{isProfileView && !quickSettings && listApiConfigMeta.length <= 6 && (
+						<div className="p-3 border-b border-vscode-dropdown-border">
+							<p className="text-xs text-vscode-descriptionForeground m-0">
+								{t("prompts:apiConfiguration.select")}
+							</p>
+						</div>
+					)}
+					{/* Config list - single scroll container */}
+					{filteredConfigs.length === 0 && searchValue ? (
+						<div
+							hidden={!isProfileView}
+							className={cn(
+								pickerResultsClassName,
+								"py-2 px-3 text-xs text-vscode-descriptionForeground",
+							)}>
+							{t("common:ui.no_results")}
+						</div>
+					) : (
+						<div
+							hidden={!isProfileView}
+							className={pickerResultsClassName}
+							onKeyDown={handlePickerNavigation}>
+							{/* Pinned configs - sticky header */}
+							{pinnedConfigs.length > 0 && (
 								<div
-									role="status"
 									className={cn(
-										pickerResultsClassName,
-										"p-3 text-xs text-vscode-descriptionForeground",
-									)}>
-									{t("chat:modelPicker.loadingProfile")}
-								</div>
-							) : (
-								quickSettings
-							))}
-						{isProfileView && (
-							<>
-								{/* Search input or info blurb */}
-								{quickSettings || listApiConfigMeta.length > 6 ? (
-									<PickerSearchField
-										label={t("common:ui.search_placeholder")}
-										value={searchValue}
-										onChange={setSearchValue}
-										disabled={disabled}
-									/>
-								) : (
-									<div className="p-3 border-b border-vscode-dropdown-border">
-										<p className="text-xs text-vscode-descriptionForeground m-0">
-											{t("prompts:apiConfiguration.select")}
-										</p>
-									</div>
-								)}
-
-								{/* Config list - single scroll container */}
-								<div className={pickerResultsClassName}>
-									{filteredConfigs.length === 0 ? (
-										<div className="px-3 py-2 text-xs text-vscode-descriptionForeground">
-											{t("common:ui.no_results")}
-										</div>
-									) : (
-										<div>
-											{/* Pinned configs - sticky header */}
-											{pinnedConfigs.length > 0 && (
-												<div
-													className={cn(
-														"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
-														unpinnedConfigs.length > 0 &&
-															"border-b border-vscode-dropdown-foreground/10",
-													)}
-													aria-label="Pinned configurations">
-													{pinnedConfigs.map((config) => renderConfigItem(config, true))}
-												</div>
-											)}
-
-											{/* Unpinned configs */}
-											{unpinnedConfigs.length > 0 && (
-												<div className="py-1" aria-label="All configurations">
-													{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
-												</div>
-											)}
-										</div>
+										"sticky top-0 z-10 bg-vscode-dropdown-background py-1",
+										unpinnedConfigs.length > 0 && "border-b border-vscode-dropdown-foreground/10",
 									)}
+									aria-label="Pinned configurations">
+									{pinnedConfigs.map((config) => renderConfigItem(config, true))}
 								</div>
-							</>
-						)}
-					</div>
+							)}
+
+							{/* Unpinned configs */}
+							{unpinnedConfigs.length > 0 && (
+								<div className="py-1" aria-label="All configurations">
+									{unpinnedConfigs.map((config) => renderConfigItem(config, false))}
+								</div>
+							)}
+						</div>
+					)}
+
 					{/* Bottom bar with buttons on left and title on right */}
 					<div className="flex shrink-0 flex-row items-center justify-between px-2 py-2 border-t border-vscode-dropdown-border">
 						<div className="flex flex-row gap-1">
