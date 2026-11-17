@@ -2966,21 +2966,20 @@ describe("zooCodeSignOut", () => {
 		;(mockClineProvider as any).providerSettingsManager = {
 			// Pass-through double for the cross-instance exclusion this writer now takes.
 			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => cb(),
+			hasConfig: vi.fn().mockResolvedValue(true),
 			listConfig: vi.fn().mockResolvedValue([
 				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
 				{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway },
 			]),
-			getProfile: vi
-				.fn()
-				.mockResolvedValueOnce({
-					apiProvider: providerIdentifiers.zooGateway,
-					zooSessionToken: "token-active",
-					zooGatewayModelId: "anthropic/claude-sonnet-4",
-				})
-				.mockResolvedValueOnce({
-					apiProvider: providerIdentifiers.zooGateway,
-					zooSessionToken: "token-backup",
-				}),
+			getProfile: vi.fn(async ({ name }: { name: string }) =>
+				name === "Backup Zoo"
+					? { apiProvider: providerIdentifiers.zooGateway, zooSessionToken: "token-backup" }
+					: {
+							apiProvider: providerIdentifiers.zooGateway,
+							zooSessionToken: "token-active",
+							zooGatewayModelId: "anthropic/claude-sonnet-4",
+						},
+			),
 			saveConfig,
 		}
 		;(mockClineProvider as any).upsertProviderProfile = upsertProviderProfile
@@ -3027,6 +3026,123 @@ describe("zooCodeSignOut", () => {
 			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
 			true,
 		)
+	})
+})
+
+// Own describe for the persisted-only sign-out write and the cross-instance
+// exclusion it takes. Typed widening rather than a cast: the spec-wide provider
+// double declares only the members most tests drive, and these tests drive the
+// manager surface. The doubles are installed wholesale and put back after each
+// test so no implementation leaks into a later suite.
+describe("webviewMessageHandler - zooCodeSignOut persisted-only write", () => {
+	const provider = mockClineProvider as unknown as {
+		providerSettingsManager: {
+			listConfig: ReturnType<typeof vi.fn>
+			getProfile: ReturnType<typeof vi.fn>
+			saveConfig: ReturnType<typeof vi.fn>
+			hasConfig: ReturnType<typeof vi.fn>
+			runExclusiveAcrossInstances: ReturnType<typeof vi.fn>
+		}
+		contextProxy: {
+			getProviderSettings: ReturnType<typeof vi.fn>
+			getValues: ReturnType<typeof vi.fn>
+		}
+		upsertProviderProfile: ReturnType<typeof vi.fn>
+	}
+	const originals = {
+		providerSettingsManager: provider.providerSettingsManager,
+		contextProxy: provider.contextProxy,
+		upsertProviderProfile: provider.upsertProviderProfile,
+	}
+	afterEach(() => {
+		provider.providerSettingsManager = originals.providerSettingsManager
+		provider.contextProxy = originals.contextProxy
+		provider.upsertProviderProfile = originals.upsertProviderProfile
+	})
+	// The record the handler reads outside the exclusion, and the one the store
+	// holds once the exclusion is held: a rename on another view is modelled by the
+	// second read returning a different record under the same name.
+	const readOutsideExclusion = {
+		apiProvider: providerIdentifiers.zooGateway,
+		zooSessionToken: "token-backup",
+		zooGatewayModelId: "model-before",
+	}
+	const wire = (readInsideExclusion: () => Promise<unknown>, nameStillPresent: boolean) => {
+		const order: string[] = []
+		provider.upsertProviderProfile = vi.fn().mockResolvedValue(undefined)
+		provider.contextProxy = {
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "some-other-profile" }),
+		}
+		provider.providerSettingsManager = {
+			listConfig: vi
+				.fn()
+				.mockResolvedValue([{ name: "Backup Zoo", apiProvider: providerIdentifiers.zooGateway }]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce(readOutsideExclusion)
+				.mockImplementation(async () => {
+					order.push("readInsideExclusion")
+					return readInsideExclusion()
+				}),
+			hasConfig: vi.fn(async () => {
+				order.push("hasConfig")
+				return nameStillPresent
+			}),
+			runExclusiveAcrossInstances: vi.fn(async (callback: () => Promise<unknown>) => {
+				order.push("exclusionEntered")
+				return callback()
+			}),
+			saveConfig: vi.fn(async (_name: string, value: Record<string, unknown>) => {
+				order.push(`write:${String(value.zooGatewayModelId)}`)
+			}),
+		}
+		return order
+	}
+
+	it("re-reads the persisted-only profile inside the exclusion so the write carries the current record", async () => {
+		const order = wire(
+			async () => ({
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "token-backup",
+				zooGatewayModelId: "model-after",
+			}),
+			true,
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+		expect(order).toEqual(["exclusionEntered", "hasConfig", "readInsideExclusion", "write:model-after"])
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith(
+			"Backup Zoo",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+		)
+	})
+
+	it("skips the persisted-only write when the name is renamed away before the exclusion is held", async () => {
+		const order = wire(
+			async () => ({
+				apiProvider: providerIdentifiers.zooGateway,
+				zooSessionToken: "token-backup",
+				zooGatewayModelId: "model-after",
+			}),
+			false,
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+		expect(order).toEqual(["exclusionEntered", "hasConfig"])
+		expect(provider.providerSettingsManager.hasConfig).toHaveBeenCalledWith("Backup Zoo")
+		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
+	})
+
+	it("skips the persisted-only write when the re-read shows the token was already cleared", async () => {
+		const order = wire(
+			async () => ({
+				apiProvider: providerIdentifiers.zooGateway,
+				zooGatewayModelId: "model-after",
+			}),
+			true,
+		)
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+		expect(order).toEqual(["exclusionEntered", "hasConfig", "readInsideExclusion"])
+		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
 	})
 })
 

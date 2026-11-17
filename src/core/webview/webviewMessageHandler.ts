@@ -3453,8 +3453,23 @@ export const webviewMessageHandler = async (
 								// Same exclusion as the rename, taken at the point this write enters:
 								// a persisted-only profile rewrite is an ordinary profile write, and a
 								// rename in flight on another view must not interleave with it.
+								// The record above was read before this exclusion was held, so a rename
+								// or a token clear on another view can supersede it in between; re-read
+								// under the same exclusion the write takes, and skip when the name is gone
+								// or its token is already gone, so this write never resurrects a superseded
+								// snapshot.
 								await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
-									await provider.providerSettingsManager.saveConfig(entry.name, cleanedProfile)
+									if (!(await provider.providerSettingsManager.hasConfig(entry.name))) {
+										return
+									}
+									const currentProfile = await provider.providerSettingsManager.getProfile({
+										name: entry.name,
+									})
+									if (!currentProfile.zooSessionToken) {
+										return
+									}
+									const { zooSessionToken: _supersededToken, ...currentCleaned } = currentProfile
+									await provider.providerSettingsManager.saveConfig(entry.name, currentCleaned)
 								})
 								provider.log(`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile`)
 							}
