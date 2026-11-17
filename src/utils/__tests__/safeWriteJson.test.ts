@@ -1606,17 +1606,20 @@ describe("safeWriteJson", () => {
 	// code path had handed the same file to the umask.
 	test("widens a target this write created to the default mode after the publish", async () => {
 		const target = path.join(tempDir, "brand-new-shared.json")
-		const previousUmask = process.umask(0o022)
 		// The mode a fresh file would have carried before the staged-file rewrite: the umask's
 		// answer on POSIX, and on win32 - where the mode bits only express the read-only
-		// attribute - a writable file, which is what the same code path produced there.
+		// attribute - a writable file, which is what the same code path produced there. The
+		// mask is stubbed here, never set: node refuses to change process.umask() inside a
+		// worker thread and Stryker runs this row in one, so setting it made the mutation
+		// gate's initial test run die before a single mutant was tested.
+		const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o022)
 		const expectedMode = process.platform === "win32" ? 0o666 : 0o644
 		try {
 			vi.mocked(fs.chmod).mockClear()
 			await safeWriteJson(target, { shared: true })
 			expect(fs.chmod).toHaveBeenCalledWith(target, expectedMode)
 		} finally {
-			process.umask(previousUmask)
+			umaskSpy.mockRestore()
 		}
 	})
 })
