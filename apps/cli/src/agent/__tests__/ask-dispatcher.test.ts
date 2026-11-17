@@ -1,5 +1,7 @@
+import { PassThrough } from "stream"
 import type { ClineAsk } from "@roo-code/types"
-import { AskDispatcher, toDisplayText } from "../ask-dispatcher.js"
+import { AskDispatcher } from "../ask-dispatcher.js"
+import { toDisplayText } from "@/lib/utils/display-text.js"
 import { OutputManager } from "../output-manager.js"
 import { PromptManager } from "../prompt-manager.js"
 
@@ -124,6 +126,95 @@ describe("command approval display", () => {
 		expect(printed).toBe(expected)
 		expect(sendMessage).toHaveBeenCalledExactlyOnceWith(yes)
 		expect(result).toEqual(approved)
+	})
+
+	const protectedHead = `\n[Tool Request] ${shown} [PROTECTED CONFIGURATION FILE]\n⚠️  WARNING: This tool wants to modify a protected configuration file.\n    Protected files include .rooignore, .roo/*, and other sensitive config files.\n`
+	const longText = "x".repeat(201)
+	const longJson = { v: "y".repeat(200) }
+	it.each([
+		["protected tool", { tool: evil, isProtected: true, path: "p" }, `${protectedHead}  "path": "p"\n`],
+		["missing tool name", { path: "p" }, `\n[Tool Request] "unknown"\n  "path": "p"\n`],
+		[
+			"non-string values",
+			{ tool: "t", n: 5, o: { a: 1 } },
+			String.raw`${"\n"}[Tool Request] "t"${"\n"}  "n": "5"${"\n"}  "o": "{\"a\":1}"${"\n"}`,
+		],
+		[
+			"long values",
+			{ tool: "t", s: longText, j: longJson },
+			`\n[Tool Request] "t"\n  "s": "${"x".repeat(200)}..."\n  "j": "${JSON.stringify(longJson).slice(0, 200).replaceAll('"', '\\"')}..."\n`,
+		],
+		["exact 200 chars", { tool: "t", s: "x".repeat(200) }, `\n[Tool Request] "t"\n  "s": "${"x".repeat(200)}"\n`],
+	])("renders tool request: %s", async (_name, tool, expected) => {
+		const { printed } = await run("tool", JSON.stringify(tool))
+
+		expect(printed).toBe(expected)
+	})
+
+	it("prints Unknown error for an empty api error", async () => {
+		const { printed } = await run("api_req_failed", "")
+
+		expect(printed).toBe(`\n[api request failed]\n  Error: Unknown error\n`)
+	})
+
+	it.each([
+		[
+			"timeout",
+			(m: PromptManager) =>
+				vi.spyOn(m, "promptWithTimeout").mockResolvedValue({ value: "", timedOut: true, cancelled: false }),
+			true,
+		],
+		[
+			"rejected input",
+			(m: PromptManager) => vi.spyOn(m, "promptForInput").mockRejectedValue(new Error("closed")),
+			false,
+		],
+	])("prints (empty) for a followup default on %s", async (_name, arrange, nonInteractive) => {
+		const { printed } = await run("followup", JSON.stringify({ question: "q" }), arrange, nonInteractive)
+
+		expect(printed).toBe(`\n[question] "q"\n[Using default: (empty)]\n`)
+	})
+
+	// Review 2 finding 1 (PR 2473). Sinks of CommandApprovalDisplay.tla: unknownNonInteractive, promptTimeout, apiErrorStderr.
+	it("escapes text of an unknown ask in non-interactive mode", async () => {
+		const { printed } = await run("unknown_ask", evil, () => {}, true)
+
+		expect(printed).toBe(`\n[unknown_ask] ${shown}\n`)
+	})
+
+	it("escapes the default shown when a prompt times out", async () => {
+		vi.useFakeTimers()
+		const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true)
+		const prompt = new PromptManager({
+			// The prompt uses only on/off/resume/pause/isRaw, which PassThrough provides.
+			stdin: new PassThrough() as unknown as NodeJS.ReadStream,
+			stdout: process.stdout,
+		})
+		const pending = prompt.promptWithTimeout("? ", 10, evil)
+		await vi.advanceTimersByTimeAsync(10)
+		await pending
+		vi.useRealTimers()
+
+		expect(stdout.mock.calls.map(([c]) => String(c)).join("")).toContain(`[Timeout - using default: ${shown}]\n`)
+	})
+
+	it("escapes the api error written to stderr when exitOnError is set", async () => {
+		vi.spyOn(process.stdout, "write").mockReturnValue(true)
+		const error = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.spyOn(process, "exit").mockImplementation((() => {
+			throw new Error("exit")
+		}) as () => never)
+		const dispatcher = new AskDispatcher({
+			outputManager: new OutputManager(),
+			promptManager: new PromptManager(),
+			sendMessage: vi.fn(),
+			exitOnError: true,
+		})
+
+		const result = await dispatcher.handleAsk({ ts: 1, type: "ask", ask: "api_req_failed", text: evil })
+
+		expect(result.error?.message).toBe("exit")
+		expect(error).toHaveBeenCalledExactlyOnceWith(`[CLI] API request failed: ${shown}`)
 	})
 
 	const suggestions = JSON.stringify({ question: evil, suggest: [{ answer: evil, mode: evil }] })

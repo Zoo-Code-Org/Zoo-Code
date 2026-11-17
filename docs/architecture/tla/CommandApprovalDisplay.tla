@@ -1,12 +1,13 @@
 ---- MODULE CommandApprovalDisplay ----
-\* Models toDisplayText (apps/cli/src/agent/ask-dispatcher.ts). It escapes untrusted text in every AskDispatcher output line.
+\* Models toDisplayText (apps/cli/src/lib/utils/display-text.ts). It escapes untrusted text in every AskDispatcher output line.
 \* Source: text from the model. Prompt injection can shape it. Sink: outputManager.output in each handler.
 \* Failure: a raw control, format, invisible or line-break character changes what the user sees.
 \* Invariant: NoRawUnsafeChar. A char is a class. Only the class and the escape set are modeled.
 \* Variants are in CommandApprovalDisplayMC.tla. Raw is the old code. Json is JSON.stringify only.
-\* NoIgnorable and NoLookalike each leave out one class. Fixed escapes all classes.
+\* NoIgnorable and NoLookalike each leave out one class. Fixed escapes all classes at all sinks.
+\* Sinks leaves three sinks raw. It is the code before the review 1 fix.
 \* Run: java -cp <jar> tlc2.TLC -metadir <dir> -config <Spec[.Variant].cfg> CommandApprovalDisplayMC.tla
-\* Expect: Raw, Json, NoIgnorable and NoLookalike fail. Fixed holds.
+\* Expect: Raw, Json, NoIgnorable, NoLookalike and Sinks fail. Fixed holds.
 \* Result, MaxLen 2: Raw fails on a newline. Json fails on DEL. NoIgnorable fails on U+034F. NoLookalike fails on U+00A0. Fixed holds in 111 states.
 \* Replay: Json alone prints DEL, U+2028 and U+E0001 raw in real code.
 \* Tests: ask-dispatcher.test.ts has a sweep of all code points and per-ask output tests. Both fail if the helper is weakened.
@@ -16,10 +17,14 @@
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
 \* Review (PR 2473): 1 covered (U+2800 is class sp), 2 added (U+034F, space lookalikes), 3 gap (deny paths, followup paths, assertion strength).
 \* Review: 1 finding on the spec files (MC module).
+\* Review 2 (PR 2473, 3 findings): 1 added (sinks: unknownNonInteractive, promptTimeout, apiErrorStderr), 1 gap (test strength: the model has no mutants; 6 sabotage edits now fail the tests), 1 gap (PR text).
+\* Expected before the Sinks run: the first spec cannot see an unescaped sink, so it misses finding 1. Result: confirmed. Sinks fails on a newline. Fixed holds in 111 states.
+\* Not modeled: whether a new print call exists. A sink list is a manual census. Finding 1 needed a grep, not TLC.
 
 EXTENDS Naturals, Sequences
 
-CONSTANTS Esc, Inputs   \* Esc: classes the code escapes. Inputs: texts to check. The MC module sets both.
+CONSTANTS Esc, Inputs   \* Esc: classes the code escapes. Inputs: texts to check.
+CONSTANTS Sinks, EscSinks   \* Sinks: places that print model text. EscSinks: sinks that call toDisplayText. The MC module sets all four.
 
 VARIABLE in
 
@@ -29,7 +34,8 @@ VARIABLE in
 Alphabet == {"a", "nl", "del", "c1", "fmt", "ls", "astral", "ign", "sp", "bs"}
 Unsafe == Alphabet \ {"a", "bs"}
 
-Shown(s) == [p \in 1..Len(s) |-> IF s[p] \in Esc THEN <<"esc", s[p]>> ELSE <<"raw", s[p]>>]
+\* A sink that does not call toDisplayText prints every char raw.
+Shown(k, s) == [p \in 1..Len(s) |-> IF k \in EscSinks /\ s[p] \in Esc THEN <<"esc", s[p]>> ELSE <<"raw", s[p]>>]
 
 TypeOK == in \in Inputs
 
@@ -38,6 +44,6 @@ Next == UNCHANGED in
 Spec == Init /\ [][Next]_in
 
 \* Safety: no unsafe char reaches the terminal unescaped.
-NoRawUnsafeChar == \A p \in 1..Len(in) : Shown(in)[p][1] = "raw" => Shown(in)[p][2] \notin Unsafe
+NoRawUnsafeChar == \A k \in Sinks : \A p \in 1..Len(in) : Shown(k, in)[p][1] = "raw" => Shown(k, in)[p][2] \notin Unsafe
 
 ====

@@ -5,6 +5,10 @@ EXTENDS CommandApprovalDisplay
 MaxLen == 2
 MCInputs == UNION {[1..n -> Alphabet] : n \in 0..MaxLen}
 
+\* Sinks: "ask" is every AskDispatcher handler that already escapes. The other three are review findings 1 (PR 2473).
+AllSinks == {"ask", "unknownNonInteractive", "promptTimeout", "apiErrorStderr"}
+OldSinks == {"ask"}   \* Code before this fix. The other three printed raw.
+
 JsonEsc == {"nl", "bs"}                         \* JSON.stringify
 RegexEsc == {"del", "c1", "fmt", "ls", "astral"}  \* The Cc, Cf, U+2028 and U+2029 regex
 Ignorable == {"ign"}                            \* Default_Ignorable_Code_Point
