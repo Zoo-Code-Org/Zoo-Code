@@ -30,8 +30,10 @@ const envelope = (data: unknown): string => JSON.stringify({ type: "message", da
 
 // node-ipc rewrites non-pipe socket paths on Windows before listening, so a
 // client must apply the same rewrite to reach the socket the server created.
-export const resolveSocketPath = (socketPath: string): string => {
-	if (process.platform !== "win32" || socketPath.startsWith("\\\\.\\pipe\\")) return socketPath
+// The platform parameter is a test seam; production callers pass only the
+// path, so the win32 rewrite stays unit-testable on a non-Windows CI host.
+export const resolveSocketPath = (socketPath: string, platform: string = process.platform): string => {
+	if (platform !== "win32" || socketPath.startsWith("\\\\.\\pipe\\")) return socketPath
 	return `\\\\.\\pipe\\${socketPath.replace(/^\//, "").replace(/\//g, "-")}`
 }
 

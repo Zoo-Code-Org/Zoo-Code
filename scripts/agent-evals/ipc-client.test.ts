@@ -95,6 +95,66 @@ const ACK_FRAME =
 		},
 	}) + DELIMITER
 
+// Same envelope as ACK_FRAME but with a caller-chosen origin, so tests can
+// forge frames the extension would never legitimately send to the client.
+const ackFrameWithOrigin = (origin: IpcOrigin): string =>
+	JSON.stringify({
+		type: "message",
+		data: {
+			type: IpcMessageType.Ack,
+			origin,
+			data: { clientId: "client-1", pid: process.pid, ppid: process.ppid },
+		},
+	}) + DELIMITER
+
+// Same envelope as the peer's task-event frame but with a caller-chosen origin.
+const taskEventFrameWithOrigin = (origin: IpcOrigin): string =>
+	JSON.stringify({
+		type: "message",
+		data: {
+			type: IpcMessageType.TaskEvent,
+			origin,
+			data: {
+				eventName: RooCodeEventName.TaskStarted,
+				payload: ["task-1"],
+				taskId: 1,
+			} satisfies TaskEvent,
+		},
+	}) + DELIMITER
+
+// A peer that writes exactly the given frames on connect — nothing else, so a
+// test can control whether an ack ever arrives — records what the client sends
+// back, and keeps the connection open until the test closes it.
+const startStaticFramesPeer =
+	(frames: string[]) =>
+	async (socketPath: string): Promise<{ received: unknown[]; close: () => Promise<void> }> => {
+		const received: unknown[] = []
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			let pending = ""
+			socket.on("data", (chunk: string) => {
+				pending += chunk
+				const frames = pending.split(DELIMITER)
+				pending = frames.pop() ?? ""
+				for (const frame of frames) {
+					if (frame.length === 0) continue
+					received.push((JSON.parse(frame) as { data: unknown }).data)
+				}
+			})
+			for (const frame of frames) socket.write(frame)
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		return {
+			received,
+			close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+		}
+	}
+
 // A schema-valid TaskEvent frame padded to an exact UTF-8 byte length by growing
 // the payload string, so a test can sit precisely on the ceiling boundary. The
 // padding is ASCII, so byte length and code-unit length coincide.
@@ -297,6 +357,124 @@ describe("eval ipc client", () => {
 			assert.equal(mapped, "\\\\.\\pipe\\tmp-agent-evals-ipc.sock")
 		} else {
 			assert.equal(mapped, "/tmp/agent-evals/ipc.sock")
+		}
+	})
+
+	it("rewrites a filesystem socket path to a named pipe when the platform is win32", () => {
+		// Platform-independent unit coverage of the win32 branch, which the
+		// default-parameter call above can only exercise on a Windows host.
+		assert.equal(resolveSocketPath("/tmp/a/b.sock", "win32"), "\\\\.\\pipe\\tmp-a-b.sock")
+	})
+
+	it("passes an already-prefixed named pipe through unchanged on win32", () => {
+		const pipe = "\\\\.\\pipe\\agent-evals-test"
+		assert.equal(resolveSocketPath(pipe, "win32"), pipe)
+	})
+
+	it("leaves a filesystem path unchanged when the platform is not win32", () => {
+		const unixPath = "/tmp/agent-evals/ipc.sock"
+		assert.equal(resolveSocketPath(unixPath, "linux"), unixPath)
+		assert.equal(resolveSocketPath(unixPath, "darwin"), unixPath)
+	})
+
+	it("does not send a command before the ack assigns a client id", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "pre-ack-guard")
+		const logs: unknown[][] = []
+		// The peer accepts the connection but sends no ack of its own, so the
+		// client never gets a client id and the guard must hold.
+		const peer = await startStaticFramesPeer([])(socketPath)
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args))
+
+		try {
+			await waitFor(() => client.isConnected)
+			assert.equal(client.clientId, undefined)
+			assert.equal(client.isReady, false)
+
+			client.sendCommand({ commandName: TaskCommandName.CloseTask })
+			await new Promise((resolve) => setTimeout(resolve, 60))
+
+			assert.equal(peer.received.length, 0, "nothing may reach the peer before the ack")
+			assert.equal(
+				logs.some((entry) => String(entry[0]).includes("no client id yet")),
+				true,
+				"the guard must log why the command was dropped",
+			)
+		} finally {
+			client.disconnect()
+			await peer.close()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("does not send a message after disconnect", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "post-disconnect-guard")
+		const peer = await startPeer(socketPath)
+		peer.received.length = 0
+		const client = new EvalIpcClient(socketPath, () => {})
+
+		try {
+			await waitFor(() => client.isReady)
+			client.disconnect()
+			// The close callback races the teardown; wait until the client itself
+			// reports the session as gone before asserting on the wire.
+			await waitFor(() => !client.isConnected)
+
+			client.sendMessage({
+				type: IpcMessageType.TaskCommand,
+				origin: IpcOrigin.Client,
+				clientId: "client-1",
+				data: { commandName: TaskCommandName.CloseTask },
+			})
+			await new Promise((resolve) => setTimeout(resolve, 60))
+
+			assert.equal(peer.received.length, 0, "nothing may reach the peer after disconnect")
+		} finally {
+			client.disconnect()
+			await peer.close()
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+
+	it("ignores client-origin ack and task-event frames and still accepts a server-origin task event", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "origin-filter")
+		const events: TaskEvent[] = []
+		const acks: unknown[] = []
+		// node:test has no it.each; the same data-driven shape is expressed as
+		// one test over the two client-origin frames the filter must drop.
+		const forgedFrames = [
+			{ name: "Ack", frame: ackFrameWithOrigin(IpcOrigin.Client) },
+			{ name: "TaskEvent", frame: taskEventFrameWithOrigin(IpcOrigin.Client) },
+		] as const
+
+		const peer = await startStaticFramesPeer([
+			...forgedFrames.map((entry) => entry.frame),
+			taskEventFrameWithOrigin(IpcOrigin.Server),
+		])(socketPath)
+
+		const client = new EvalIpcClient(socketPath, () => {})
+		client.on(IpcMessageType.Ack, (data) => acks.push(data))
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			// The server-origin task event is the positive control: once it has
+			// been dispatched, the forged frames have already been scanned and
+			// must not have produced anything. The assertion is deliberately at
+			// the dispatch level only: the schema and the origin filter are two
+			// defense layers that both reject these frames today, and the test
+			// pins the observable contract, not which layer fires.
+			await waitFor(() => events.length > 0, 10_000)
+
+			assert.equal(acks.length, 0, "a client-origin ack must never assign a client id")
+			assert.equal(client.clientId, undefined, "no client id may come from a forged ack")
+			assert.equal(events.length, 1, "exactly the server-origin task event is dispatched")
+			assert.equal(events[0]?.eventName, RooCodeEventName.TaskStarted)
+		} finally {
+			client.disconnect()
+			await peer.close()
+			await fs.rm(dir, { recursive: true, force: true })
 		}
 	})
 
@@ -687,6 +865,64 @@ describe("eval ipc client", () => {
 		assert.equal(pastCeiling.drops, 1, "one byte past the ceiling drops the connection")
 		assert.equal(pastCeiling.events, 0, "the frame past the ceiling is never dispatched")
 		assert.equal(pastCeiling.connected, false, "the connection is dropped")
+	})
+
+	it("accumulates split writes toward the ceiling, not just each chunk alone", async () => {
+		const dir = await socketDir()
+		const socketPath = socketPathIn(dir, "ceiling-split-writes")
+		const logs: unknown[][] = []
+		const events: TaskEvent[] = []
+		const ceiling = 1024
+		// The oversized frame is delivered as two writes with a pause between
+		// them, so the client's incremental byte counter is what must trip the
+		// ceiling: each chunk alone is under it, and only the accumulated frame
+		// crosses. A ceiling check that drops `this._bufferBytes +` measures the
+		// tail segment alone and would let this frame through.
+		const oversized = taskEventFrameOfBytes(ceiling + 1) + DELIMITER
+		let releaseSecondHalf = () => {}
+		const secondHalfGate = new Promise<void>((resolve) => {
+			releaseSecondHalf = resolve
+		})
+
+		const server = net.createServer((socket) => {
+			socket.on("error", () => {})
+			socket.write(ACK_FRAME)
+
+			// The first write stays just under the ceiling, so it must be the
+			// buffered accumulation, not this chunk alone, that exceeds it.
+			const firstHalf = oversized.slice(0, ceiling - 16)
+			socket.write(firstHalf)
+			void secondHalfGate.then(() => socket.write(oversized.slice(firstHalf.length)))
+		})
+
+		await new Promise<void>((resolve, reject) => {
+			server.once("error", reject)
+			server.listen(resolveSocketPath(socketPath), resolve)
+		})
+
+		const client = new EvalIpcClient(socketPath, (...args) => logs.push(args), { maxFrameBytes: ceiling })
+		client.on(IpcMessageType.TaskEvent, (event) => events.push(event as TaskEvent))
+
+		try {
+			await waitFor(() => client.isConnected)
+			// The first half alone is a legal partial frame: nothing logged yet.
+			await new Promise((resolve) => setTimeout(resolve, 60))
+			assert.equal(ceilingLogs(logs).length, 0, "the first half alone is under the ceiling")
+
+			// Releasing the gate sends the rest of the frame plus the delimiter.
+			// The accumulated frame is now past the ceiling and must drop.
+			releaseSecondHalf()
+			await waitFor(() => !client.isConnected && ceilingLogs(logs).length > 0, 10_000)
+
+			assert.equal(ceilingLogs(logs).length, 1, "the accumulated frame must trip the ceiling")
+			assert.equal(events.length, 0, "the assembled oversized frame is never dispatched")
+			assert.equal(client.isConnected, false, "the connection is dropped")
+		} finally {
+			releaseSecondHalf()
+			client.disconnect()
+			await new Promise<void>((resolve) => server.close(() => resolve()))
+			await fs.rm(dir, { recursive: true, force: true })
+		}
 	})
 
 	it("counts a delimited frame's multibyte content in bytes, not characters", async () => {
