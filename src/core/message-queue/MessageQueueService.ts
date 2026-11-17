@@ -83,6 +83,10 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return token
 	}
 
+	public hasPendingEdit(): boolean {
+		return this.editTokens.size > 0
+	}
+
 	/** Sets text, segments and images together for the newest edit, then lets the message go. */
 	public commitEdit(id: string, token: number, text: string, images?: string[], segments?: unknown): boolean {
 		const { message } = this.findMessage(id)

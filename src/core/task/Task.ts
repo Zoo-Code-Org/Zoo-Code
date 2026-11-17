@@ -526,6 +526,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
+	// A drain found the queue held by an edit. The handler retries it when the edit ends.
+	private drainBlockedByEdit = false
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -836,6 +838,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.messageQueueService = new MessageQueueService()
 
 		this.messageQueueStateChangedHandler = () => {
+			if (this.drainBlockedByEdit && !this.messageQueueService.hasPendingEdit()) {
+				this.drainBlockedByEdit = false
+				this.processQueuedMessages()
+			}
 			this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
 			this.emit(RooCodeEventName.QueuedMessagesUpdated, this.taskId, this.messageQueueService.messages)
 			void this.providerRef
@@ -6599,6 +6605,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							(err) => console.error(`[Task] Failed to submit queued message:`, err),
 						)
 					}, 0)
+				} else if (this.messageQueueService.hasPendingEdit()) {
+					this.drainBlockedByEdit = true
 				}
 			}
 		} catch (e) {

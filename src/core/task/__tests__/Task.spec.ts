@@ -8285,6 +8285,52 @@ describe("Queued message processing after condense", () => {
 		expect(task.messageQueueService.isEmpty()).toBe(true)
 	})
 
+	it("retries a drain that an edit blocked, once the edit commits", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const id = queue.addMessage("old")!.id
+		const token = queue.beginEdit(id)!
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		vi.runAllTimers()
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		queue.commitEdit(id, token, "edited", ["data:b"], [{ text: "edited", source: "user" }])
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy).toHaveBeenCalledWith("edited", ["data:b"], undefined, undefined, [
+			{ text: "edited", source: "user" },
+		])
+		expect(queue.isEmpty()).toBe(true)
+	})
+
+	it("does not retry a drain that no edit blocked", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.addMessage("later")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy).not.toHaveBeenCalled()
+	})
+
 	it("does not cross-drain queues between separate tasks", async () => {
 		const providerA = createProvider()
 		const providerB = createProvider()
