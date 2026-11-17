@@ -526,8 +526,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Message Queue Service
 	public readonly messageQueueService: MessageQueueService
 	private messageQueueStateChangedHandler: (() => void) | undefined
-	// Each drain that found every queued message held by an edit keeps the held ids. See QueueDrainRetry.tla.
-	private blockedDrains: string[][] = []
 
 	// Streaming
 	isWaitingForFirstChunk = false
@@ -838,7 +836,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.messageQueueService = new MessageQueueService()
 
 		this.messageQueueStateChangedHandler = () => {
-			this.serveBlockedDrains()
 			this.emit(RooCodeEventName.TaskUserMessage, this.taskId)
 			this.emit(RooCodeEventName.QueuedMessagesUpdated, this.taskId, this.messageQueueService.messages)
 			void this.providerRef
@@ -850,6 +847,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
+		this.messageQueueService.on("drained", (queued) => this.submitQueuedMessage(queued))
 
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
@@ -6585,6 +6583,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._messageManager
 	}
 
+	private submitQueuedMessage(queued: QueuedMessage): void {
+		setTimeout(() => {
+			this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.segments).catch((err) =>
+				console.error(`[Task] Failed to submit queued message:`, err),
+			)
+		}, 0)
+	}
+
 	/**
 	 * Process any queued messages by dequeuing and submitting them.
 	 * This ensures that queued user messages are sent when appropriate,
@@ -6592,35 +6598,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 *
 	 * @param context - Context string for logging (e.g., the calling tool name)
 	 */
-	/** A blocked drain sends one message when one of its held messages is queued. It ends when all are gone. */
-	private serveBlockedDrains(): void {
-		const pending = this.blockedDrains
-		this.blockedDrains = []
-		for (const ids of pending) {
-			const states = ids.map((id) => this.messageQueueService.status(id))
-			if (states.includes("queued")) {
-				this.processQueuedMessages()
-			} else if (states.includes("held")) {
-				this.blockedDrains.push(ids)
-			}
-		}
-	}
-
 	public processQueuedMessages(): void {
 		try {
 			if (!this.messageQueueService.isEmpty()) {
-				const queued = this.messageQueueService.dequeueMessage()
+				const queued = this.messageQueueService.drain()
 				if (queued) {
-					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.segments).catch(
-							(err) => console.error(`[Task] Failed to submit queued message:`, err),
-						)
-					}, 0)
-				} else {
-					const held = this.messageQueueService.editingIds()
-					if (held.length > 0) {
-						this.blockedDrains.push(held)
-					}
+					this.submitQueuedMessage(queued)
 				}
 			}
 		} catch (e) {

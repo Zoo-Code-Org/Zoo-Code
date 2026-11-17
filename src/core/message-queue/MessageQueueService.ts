@@ -8,6 +8,8 @@ import { normalizeSegments } from "../../shared/mentionSegments"
 
 export interface QueueEvents {
 	stateChanged: [messages: QueuedMessage[]]
+	/** A blocked drain found a message. The consumer sends it. */
+	drained: [message: QueuedMessage]
 }
 
 export class MessageQueueService extends EventEmitter<QueueEvents> {
@@ -15,6 +17,8 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	private claimedMessageIds = new Set<string>()
 	private editTokens = new Map<string, number>()
 	private editSeq = 0
+	// Each blocked drain keeps the ids that edits held. See docs/architecture/tla/QueueDrainRetry.tla.
+	private blockedDrains: string[][] = []
 
 	constructor() {
 		super()
@@ -62,6 +66,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		this.claimedMessageIds.delete(id)
 		this.editTokens.delete(id)
 		this.emit("stateChanged", this._messages)
+		this.serveBlockedDrains()
 		return true
 	}
 
@@ -83,18 +88,6 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return token
 	}
 
-	public editingIds(): string[] {
-		return [...this.editTokens.keys()]
-	}
-
-	/** "held" means a claim or an edit holds the message. */
-	public status(id: string): "gone" | "held" | "queued" {
-		if (!this.findMessage(id).message) {
-			return "gone"
-		}
-		return this.claimedMessageIds.has(id) ? "held" : "queued"
-	}
-
 	/** Sets text, segments and images together for the newest edit, then lets the message go. */
 	public commitEdit(id: string, token: number, text: string, images?: string[], segments?: unknown): boolean {
 		const { message } = this.findMessage(id)
@@ -111,6 +104,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		this.editTokens.delete(id)
 		this.claimedMessageIds.delete(id)
 		this.emit("stateChanged", this._messages)
+		this.serveBlockedDrains()
 		return true
 	}
 
@@ -122,6 +116,38 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		const [message] = this._messages.splice(index, 1)
 		this.emit("stateChanged", this._messages)
 		return message
+	}
+
+	/**
+	 * One drain call. It returns the next message. If edits hold every message, the call waits.
+	 * The "drained" event then sends one of the held messages when its edit ends.
+	 */
+	public drain(): QueuedMessage | undefined {
+		const message = this.dequeueMessage()
+		if (!message && this.editTokens.size > 0) {
+			this.blockedDrains.push([...this.editTokens.keys()])
+		}
+		return message
+	}
+
+	// A blocked drain sends one message of its own ids. It ends when all of them are gone.
+	private serveBlockedDrains(): void {
+		const pending = this.blockedDrains
+		this.blockedDrains = []
+		for (const ids of pending) {
+			const live = this._messages.filter((message) => ids.includes(message.id))
+			if (live.length === 0) {
+				continue
+			}
+			const next = live.find((message) => !this.claimedMessageIds.has(message.id))
+			if (!next) {
+				this.blockedDrains.push(ids)
+				continue
+			}
+			this._messages.splice(this._messages.indexOf(next), 1)
+			this.emit("stateChanged", this._messages)
+			this.emit("drained", next)
+		}
 	}
 
 	public claimNextMessage(): QueuedMessage | undefined {
@@ -137,7 +163,11 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	 * Durable consumers must use removeMessage() only after their persistence write succeeds.
 	 */
 	public releaseMessage(messageId: string): boolean {
-		return this.claimedMessageIds.delete(messageId)
+		const released = this.claimedMessageIds.delete(messageId)
+		if (released) {
+			this.serveBlockedDrains()
+		}
+		return released
 	}
 
 	public get messages(): QueuedMessage[] {
@@ -165,6 +195,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		this._messages = []
 		this.claimedMessageIds.clear()
 		this.editTokens.clear()
+		this.blockedDrains = []
 		this.removeAllListeners()
 	}
 }
