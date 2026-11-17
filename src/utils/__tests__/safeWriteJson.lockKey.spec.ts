@@ -97,15 +97,19 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		// The lock key is the key every other writer to this file uses, so the caller
 		// queued behind the peer instead of failing before the lock.
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
-		// The extra resolves are the post-lock passes: the publish target is re-resolved,
-		// the lock key is re-derived, and every derivation canonicalizes through realpath,
-		// including the final stability check, and the captured-target check, which derives the key of the
-		// target this write actually captured - a resolution of that path plus its canonicalized parent - and
-		// requires it to be the key held. All of them run after the lock was taken, so
-		// they do not change the lock the caller queued behind. The two trailing lstat
-		// calls belonged to the delegation flow's staging-path checks; the replacement
-		// protocol stages the temp itself and checks no identity beside it, so they are
-		// gone with the delegation.
+		// Every entry below is one call of fs.promises.realpath: the array is filled by the
+		// mocked realpath itself, so the count is a syscall count and not an assignment count.
+		// Before commit 94b10969c1 this array held 10 entries; 94b10969c1 added 2 of the 12, spent
+		// by the captured-target check, which derives the key of the publish target this write
+		// actually captured - one realpath of that path and one realpath of its canonicalized
+		// parent - and requires it to equal the key held. Both run after the lock was taken, so
+		// they do not change the lock the caller queued behind; they are the price of binding the
+		// publish to the lock, and they are paid on every locked or confined write. The rest of
+		// the entries are the pre-lock walk, the post-lock re-resolution, the re-derived key, the
+		// final stability check and the scope-root derivations, each of which canonicalizes
+		// through realpath. The two trailing lstat calls belonged to the delegation flow's
+		// staging-path checks; the replacement protocol stages the temp itself and checks no
+		// identity beside it, so they are gone with the delegation.
 		expect(order).toEqual([
 			"resolve-failed",
 			"lstat",
