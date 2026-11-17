@@ -47,6 +47,16 @@ vi.mock("crypto", async (importOriginal) => {
 	return { ...actual, pbkdf2Sync: vi.fn(actual.pbkdf2Sync) }
 })
 
+// Mock all the model fetchers
+vi.mock("../litellm")
+vi.mock("../openrouter")
+vi.mock("../requesty")
+vi.mock("../kenari")
+vi.mock("../nanogpt")
+vi.mock("../moonshot")
+vi.mock("../mimo")
+vi.mock("../zoo-gateway")
+
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
 	ContextProxy: {
@@ -88,6 +98,9 @@ const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, auth
 const IOINTELLIGENCE_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
+// MiMo is url+key scoped and not auth scoped: the same credentials always yield the
+// same catalog, so results are cacheable on disk.
+
 const MIMO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
 const openRouterHandler = makeHandler(OPENROUTER_SCOPE, vi.fn())
@@ -301,7 +314,7 @@ describe("getModels with new GetModelsOptions", () => {
 
 	it("dispatches MiMo through the handler's fetchModels with the same options", async () => {
 		const mockModels = {
-			"mimo-v2-omni": {
+			"mimo-v2.6-pro": {
 				maxTokens: 16384,
 				contextWindow: 262144,
 				supportsPromptCache: false,
@@ -1274,16 +1287,16 @@ describe("cache digest derivation memoization", () => {
 		"memo/model": { maxTokens: 4096, contextWindow: 200_000, supportsPromptCache: false },
 	}
 
-	let handler: ApiHandler
-
 	beforeEach(() => {
 		vi.clearAllMocks()
-		handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
 		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
 		mockCache.get.mockReturnValue(undefined)
 	})
 
 	it("reuses the derived digest across repeated calls with the same key", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
 		await getModels({ provider: memoProvider, apiKey: "memo-repeat-key" }, handler)
 		const afterFirst = mockPbkdf2Sync.mock.calls.length
 		expect(afterFirst).toBeGreaterThan(0)
@@ -1296,6 +1309,8 @@ describe("cache digest derivation memoization", () => {
 	})
 
 	it("derives a fresh digest for each distinct key", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
 		await getModels({ provider: memoProvider, apiKey: "memo-distinct-a" }, handler)
 		const afterA = mockPbkdf2Sync.mock.calls.length
 		expect(afterA).toBeGreaterThan(0)
@@ -1305,6 +1320,8 @@ describe("cache digest derivation memoization", () => {
 	})
 
 	it("bounds the memo and recomputes inputs that fell out of the FIFO window", async () => {
+		const handler = makeHandler(REQUESTY_SCOPE, vi.fn().mockResolvedValue(memoModels))
+
 		// Each call introduces two memo inputs (the raw key and its compound cache key),
 		// so 12 distinct keys overflow the 16-entry cap: the earliest pairs are evicted
 		// while the most recent ones are retained.
@@ -1351,11 +1368,12 @@ describe("NanoGPT key-scoped cache isolation", () => {
 
 describe("MiMo url+key-scoped cache isolation", () => {
 	// MiMo is both URL-scoped and key-scoped (MimoHandler.getModelCacheScope), so
+
 	// distinct base URLs and distinct API keys must never collapse into a shared cache
 	// identity. Mirrors the NanoGPT key-scoped isolation test above, extended across the
 	// url dimension that NanoGPT (key-scoped only) does not exercise.
 	const mimoModels = {
-		"mimo-v2-omni": { maxTokens: 16384, contextWindow: 262144, supportsPromptCache: false },
+		"mimo-v2.6-pro": { maxTokens: 16384, contextWindow: 262144, supportsPromptCache: false },
 	}
 
 	let handler: ApiHandler

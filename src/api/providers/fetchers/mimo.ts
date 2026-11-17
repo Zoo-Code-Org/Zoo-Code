@@ -1,5 +1,5 @@
 import type { ModelRecord } from "@roo-code/types"
-import { mimoModels } from "@roo-code/types"
+import { getMimoModelInfo } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 
@@ -8,6 +8,13 @@ import { DEFAULT_HEADERS } from "../constants"
 // builds, so discovery excludes them from the catalog.
 const NON_TEXT_MODEL_ID = /-(asr|tts)(-|$)/i
 
+// Ceilings on what a provider response can add to the catalog. The response is
+// remote input: without a cap, a hostile or broken endpoint could inflate the
+// cached catalog (and every webview model picker that renders it) without
+// bound. Both limits are far above any plausible MiMo catalog size.
+export const MAX_MIMO_MODEL_ENTRIES = 1000
+export const MAX_MIMO_MODEL_ID_LENGTH = 256
+
 // Default cluster (Singapore), used whenever the caller leaves mimoBaseUrl
 // unset or empty. Exported so the chat-completion handler resolves the exact
 // same fallback instead of drifting a second literal.
@@ -15,14 +22,20 @@ export const MIMO_DEFAULT_BASE_URL = "https://token-plan-sgp.xiaomimimo.com/v1"
 
 // Network-boundary allowlist: the same four Xiaomi MiMo endpoints the persisted
 // settings schema validates `mimoBaseUrl` against via a zod union of literals
-// (packages/types/src/provider-settings/mimo.ts). The definition itself is not
+// (packages/types/src/providers/mimo.ts). The definition itself is not
 // re-exported through the @roo-code/types public entry points, so the literals
 // are mirrored here; __tests__/mimo.spec.ts cross-checks this exported set
 // against providerSettingsSchema so the two sources cannot silently drift. The
 // fetcher also receives unsaved webview values that bypass the schema entirely,
 // and MimoHandler (src/api/providers/mimo.ts) re-enforces this same set before
-// it builds its OpenAI chat-completion client, so this exact-match gate is what
-// guarantees the bearer key never leaves a Xiaomi origin on any path.
+// it builds its OpenAI chat-completion client.
+//
+// The gate alone only pins the URL each path is BUILT with, so both paths also
+// pin redirect:"error" on their requests: the fetcher below, and the SDK client
+// in MimoHandler. Without that, an allowlisted origin answering a 3xx would
+// re-scope the bearer key and the request body to an origin this set never
+// vetted. Together the allowlist plus the redirect policy are what keep the key
+// on a Xiaomi origin on every path.
 export const ALLOWED_BASE_URLS: ReadonlySet<string> = new Set([
 	"https://api.xiaomimimo.com/v1",
 	"https://token-plan-cn.xiaomimimo.com/v1",
@@ -135,8 +148,19 @@ export async function getMimoModels(
 
 	// Use null-prototype object to prevent prototype pollution
 	const models: ModelRecord = Object.create(null)
+	let entryCount = 0
 
 	for (const model of data.data) {
+		// Stop at the entry ceiling rather than truncating silently at the end:
+		// a response this large is not a catalog, so the excess is dropped here
+		// with one log line instead of growing the cache past the bound.
+		if (entryCount >= MAX_MIMO_MODEL_ENTRIES) {
+			console.error("[getMimoModels] Model list exceeded the entry cap; the remainder was dropped:", {
+				cap: MAX_MIMO_MODEL_ENTRIES,
+			})
+			break
+		}
+
 		// Skip non-record elements so a single malformed entry cannot abort
 		// the whole catalog.
 		if (typeof model !== "object" || model === null) continue
@@ -144,11 +168,24 @@ export async function getMimoModels(
 		const modelId = typeof model.id === "string" && model.id ? model.id : null
 		if (!modelId || NON_TEXT_MODEL_ID.test(modelId)) continue
 
-		const knownSpecs = mimoModels[modelId as keyof typeof mimoModels]
+		// An over-long ID is dropped instead of truncated: a truncated ID would
+		// name a model the provider does not serve, and the length cap keeps the
+		// cached catalog and the pickers that render it bounded.
+		if (modelId.length > MAX_MIMO_MODEL_ID_LENGTH) continue
+
+		// Prototype-safe: IDs come straight from the provider's response, so an ID
+		// such as `constructor` must fall through to the family defaults below
+		// instead of resolving to an inherited Object.prototype member.
+		const knownSpecs = getMimoModelInfo(modelId)
 
 		if (knownSpecs) {
 			models[modelId] = { ...knownSpecs }
 		} else {
+			// Unknown IDs get MiMo-family defaults on purpose: the /models response
+			// carries no pricing or limits, the static map is the only price source
+			// (so a remote entry can never set a cost), and a model Xiaomi adds
+			// ahead of a static-map update stays usable instead of resolving to an
+			// empty spec. Known IDs above keep their static spec untouched.
 			models[modelId] = {
 				maxTokens: 16_000,
 				contextWindow: 262_144,
@@ -158,6 +195,8 @@ export async function getMimoModels(
 				description: `MiMo model: ${modelId}`,
 			}
 		}
+
+		entryCount++
 	}
 
 	return models

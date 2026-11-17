@@ -24,6 +24,7 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		const requestId = crypto.randomUUID()
 
 		const cleanup = () => {
+			clearTimeout(timeout)
 			signal?.removeEventListener("abort", onAbort)
 			if (typeof window !== "undefined") {
 				window.removeEventListener("message", handler)
@@ -31,7 +32,6 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 		}
 
 		const onAbort = () => {
-			clearTimeout(timeout)
 			cleanup()
 			reject(new DOMException("Router models request aborted", "AbortError"))
 		}
@@ -63,6 +63,10 @@ export const fetchRouterModels = async (provider?: string, signal?: AbortSignal)
 			}
 		}
 
+		// React Query cancels the queryFn when the consuming component unmounts or
+		// the query is removed. Honour that signal so the window listener and the
+		// timeout do not outlive the request (and a stale response can never
+		// resolve a disposed query).
 		if (signal?.aborted) {
 			onAbort()
 			return

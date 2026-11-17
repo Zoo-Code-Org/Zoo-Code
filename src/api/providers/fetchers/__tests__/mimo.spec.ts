@@ -1,6 +1,8 @@
+import { z } from "zod"
+
 import { mimoModels, providerSettingsSchema } from "@roo-code/types"
 
-import { getMimoModels, ALLOWED_BASE_URLS } from "../mimo"
+import { getMimoModels, ALLOWED_BASE_URLS, MAX_MIMO_MODEL_ENTRIES, MAX_MIMO_MODEL_ID_LENGTH } from "../mimo"
 
 describe("getMimoModels", () => {
 	const originalFetch = globalThis.fetch
@@ -39,10 +41,11 @@ describe("getMimoModels", () => {
 			description: "MiMo model: mimo-v3-future",
 		})
 
-		// mimo-v2.5-pro is still served today, but this mock response omits it
-		// (post-EOL world): a model absent from the API response must stay absent
-		// from the result, guarding against a wholesale-static-map regression.
-		expect(models["mimo-v2.5-pro"]).toBeUndefined()
+		// A model that IS in the static catalog but absent from the API response must
+		// stay absent from the result: a mutation that returned the static map
+		// wholesale would surface it here. (mimo-v2.6-pro-ultraspeed is the current
+		// catalog entry this response omits.)
+		expect(models["mimo-v2.6-pro-ultraspeed"]).toBeUndefined()
 	})
 
 	it("provides MiMo-family defaults for unknown model IDs without pricing", async () => {
@@ -64,6 +67,31 @@ describe("getMimoModels", () => {
 			description: "MiMo model: mimo-v3-future",
 		})
 	})
+
+	// Regression: IDs come straight from the provider's /models response, so an ID
+	// that names an Object.prototype member resolved the inherited member instead of
+	// a curated spec and emitted `{}` -- a model with no metadata at all. The family
+	// defaults are what an unknown ID must get.
+	it.each(["constructor", "toString", "valueOf", "__proto__"])(
+		"gives the prototype-key ID %s MiMo-family defaults instead of inherited metadata",
+		async (prototypeKey) => {
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ data: [{ id: prototypeKey }] }),
+			}) as unknown as typeof fetch
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(models[prototypeKey]).toEqual({
+				maxTokens: 16_000,
+				contextWindow: 262_144,
+				supportsImages: false,
+				supportsPromptCache: false,
+				preserveReasoning: true,
+				description: `MiMo model: ${prototypeKey}`,
+			})
+		},
+	)
 
 	it("keeps the static spec authoritative for known IDs while still surfacing API-only models", async () => {
 		// Negative precedence: the /models payload may carry fields that conflict
@@ -378,14 +406,31 @@ describe("getMimoModels", () => {
 
 	it("keeps the fetcher allowlist in sync with the persisted settings schema", () => {
 		// The fetcher mirrors the zod literal union from
-		// packages/types/src/provider-settings/mimo.ts because the definition is
-		// not re-exported publicly. If the schema ever rejects one of the fetcher's
-		// URLs, the two sources have drifted and this test must fail.
+		// packages/types/src/providers/mimo.ts because the definition is
+		// not re-exported publicly. Enumerating the union's literals and asserting
+		// set equality in BOTH directions is what makes drift fail here: a
+		// one-directional "every allowlisted URL parses" check still passes when a
+		// fifth literal is added to the schema without an allowlist entry, and the
+		// fetcher would then reject a URL the settings form accepts.
 		const mimoBaseUrlField = providerSettingsSchema.shape.mimoBaseUrl
 
-		for (const allowedUrl of ALLOWED_BASE_URLS) {
-			expect(mimoBaseUrlField.safeParse(allowedUrl).success).toBe(true)
+		// The field is `.optional()`, so unwrap before reaching the union. Read the
+		// members off the runtime shape rather than the declared type: the declared
+		// type is already the literal union, so a narrowing check on it collapses to
+		// `never` and cannot guard a future change to a non-union schema.
+		const union = mimoBaseUrlField.unwrap() as unknown
+		if (!(union instanceof z.ZodUnion)) {
+			throw new Error("Expected mimoBaseUrl to be a zod union")
 		}
+
+		const schemaUrls = union.options.map((option) => {
+			if (!(option instanceof z.ZodLiteral)) {
+				throw new Error("Expected every mimoBaseUrl union member to be a zod literal")
+			}
+			return option.value as string
+		})
+
+		expect([...schemaUrls].sort()).toEqual([...ALLOWED_BASE_URLS].sort())
 		expect(mimoBaseUrlField.safeParse("https://attacker.example/v1").success).toBe(false)
 	})
 
@@ -433,6 +478,62 @@ describe("getMimoModels", () => {
 			"https://token-plan-cn.xiaomimimo.com/v1/models",
 			expect.any(Object),
 		)
+	})
+
+	describe("response size caps", () => {
+		// The model list is remote input: without a ceiling a hostile or broken
+		// endpoint inflates the cached catalog and every picker that renders it.
+		const respondWith = (data: unknown[]) => {
+			globalThis.fetch = vi.fn().mockResolvedValue({
+				ok: true,
+				json: vi.fn().mockResolvedValue({ data }),
+			}) as unknown as typeof fetch
+		}
+
+		it("caps the catalog at the entry limit", async () => {
+			respondWith(
+				Array.from({ length: MAX_MIMO_MODEL_ENTRIES + 50 }, (_, index) => ({ id: `mimo-model-${index}` })),
+			)
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toHaveLength(MAX_MIMO_MODEL_ENTRIES)
+			// The cap keeps the first entries in response order, so a truncated
+			// catalog is still a prefix of what the endpoint served.
+			expect(models["mimo-model-0"]).toBeDefined()
+			expect(models[`mimo-model-${MAX_MIMO_MODEL_ENTRIES - 1}`]).toBeDefined()
+			expect(models[`mimo-model-${MAX_MIMO_MODEL_ENTRIES}`]).toBeUndefined()
+		})
+
+		it("keeps every entry when the list is exactly at the cap", async () => {
+			respondWith(Array.from({ length: MAX_MIMO_MODEL_ENTRIES }, (_, index) => ({ id: `mimo-model-${index}` })))
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toHaveLength(MAX_MIMO_MODEL_ENTRIES)
+		})
+
+		it("drops an over-long model ID instead of truncating it", async () => {
+			const longId = "m" + "x".repeat(MAX_MIMO_MODEL_ID_LENGTH)
+			respondWith([{ id: longId }, { id: "mimo-v2.6-pro" }])
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toEqual(["mimo-v2.6-pro"])
+			// Truncating would invent an ID the provider does not serve, so no
+			// shortened variant may appear either.
+			expect(models[longId.slice(0, MAX_MIMO_MODEL_ID_LENGTH)]).toBeUndefined()
+		})
+
+		it("keeps an ID exactly at the length limit", async () => {
+			const maxLengthId = "m" + "x".repeat(MAX_MIMO_MODEL_ID_LENGTH - 1)
+			expect(maxLengthId).toHaveLength(MAX_MIMO_MODEL_ID_LENGTH)
+			respondWith([{ id: maxLengthId }])
+
+			const models = await getMimoModels("https://token-plan-sgp.xiaomimimo.com/v1", "mock-key")
+
+			expect(Object.keys(models)).toEqual([maxLengthId])
+		})
 	})
 
 	it("passes the caller's abort signal to the request", async () => {

@@ -13,6 +13,7 @@ import {
 	minimaxModels,
 	mimoModels,
 	mimoDefaultModelId,
+	getMimoModelInfo,
 	geminiModels,
 	mistralModels,
 	openAiModelInfoSaneDefaults,
@@ -58,13 +59,19 @@ import { useVsCodeLmModels, type VsCodeLmModels } from "./useVsCodeLmModels"
 /**
  * Helper to get a validated model ID for dynamic providers.
  * Returns the configured model ID if it exists in the available models, otherwise returns the default.
+ *
+ * Uses an own-property check rather than a truthy read: router catalogs carry model
+ * IDs straight from provider responses, so a configured ID such as `constructor`
+ * would otherwise be "found" via Object.prototype and kept as a valid selection.
  */
 function getValidatedModelId(
 	configuredId: string | undefined,
 	availableModels: ModelRecord | undefined,
 	defaultModelId: string,
 ): string {
-	return configuredId && availableModels?.[configuredId] ? configuredId : defaultModelId
+	return configuredId && availableModels && Object.hasOwn(availableModels, configuredId)
+		? configuredId
+		: defaultModelId
 }
 
 /**
@@ -75,9 +82,7 @@ function getValidatedModelId(
  * static entries.
  */
 type StaticCatalogDynamicProvider =
-	| typeof providerIdentifiers.deepseek
-	| typeof providerIdentifiers.moonshot
-	| typeof providerIdentifiers.mimo
+	typeof providerIdentifiers.deepseek | typeof providerIdentifiers.moonshot | typeof providerIdentifiers.mimo
 
 const isStaticCatalogDynamicProvider = (provider: ProviderName): provider is StaticCatalogDynamicProvider =>
 	provider === providerIdentifiers.deepseek ||
@@ -116,7 +121,7 @@ function getStaticCatalogSelection(
 		}
 		case providerIdentifiers.mimo: {
 			const id = configuredId || mimoDefaultModelId
-			return { id, info: mimoModels[id as keyof typeof mimoModels] }
+			return { id, info: getMimoModelInfo(id) }
 		}
 	}
 }
@@ -456,13 +461,33 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.mimo: {
-			const availableModels = routerModels[providerIdentifiers.mimo]
-				? { ...mimoModels, ...routerModels[providerIdentifiers.mimo] }
-				: mimoModels
-			const id = getValidatedModelId(apiConfiguration.apiModelId, availableModels, defaultModelId)
-			const routerInfo = routerModels[providerIdentifiers.mimo]?.[id]
-			const staticInfo = mimoModels[id as keyof typeof mimoModels]
-			return { id, info: routerInfo ?? staticInfo }
+			const routerCatalog = routerModels[providerIdentifiers.mimo]
+			const availableModels = routerCatalog ? { ...mimoModels, ...routerCatalog } : mimoModels
+			const configuredId = apiConfiguration.apiModelId
+			// A settled-but-empty router catalog carries no information about which
+			// IDs exist: the provider answered, but listed nothing. Validating the
+			// saved ID against the static catalog alone would reset a router-only
+			// selection to the default and leak that default into ApiOptions'
+			// apiModelId sync effect, so preserve it here, mirroring the unsettled
+			// path. Prototype-safe on both sides: an ID naming an Object.prototype
+			// member has no own entry in either catalog, so it must still fall back
+			// to the static spec instead of being preserved as a phantom selection.
+			const settledEmptyCatalog = !!routerCatalog && Object.keys(routerCatalog).length === 0
+			if (
+				settledEmptyCatalog &&
+				configuredId &&
+				!Object.hasOwn(mimoModels, configuredId) &&
+				!Object.hasOwn(Object.prototype, configuredId)
+			) {
+				return { id: configuredId, info: undefined }
+			}
+			const id = getValidatedModelId(configuredId, availableModels, defaultModelId)
+			// Prototype-safe on both sides: the router catalog carries IDs straight
+			// from the provider's /models response, so `catalog["constructor"]`
+			// would otherwise resolve to an inherited member and surface as a model
+			// with no metadata instead of falling back to the static spec.
+			const routerInfo = routerCatalog && Object.hasOwn(routerCatalog, id) ? routerCatalog[id] : undefined
+			return { id, info: routerInfo ?? getMimoModelInfo(id) }
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"

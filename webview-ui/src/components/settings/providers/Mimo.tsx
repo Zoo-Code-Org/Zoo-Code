@@ -157,19 +157,27 @@ export const Mimo = ({ apiConfiguration, setApiConfigurationField }: MimoProps) 
 					{t("settings:providers.refreshModels.label")}
 				</div>
 			</Button>
-			{refreshStatus === RefreshStatus.Loading && (
-				<div className="text-sm text-vscode-descriptionForeground">
-					{t("settings:providers.refreshModels.loading")}
-				</div>
-			)}
-			{refreshStatus === RefreshStatus.Success && (
-				<div className="text-sm text-vscode-foreground">{t("settings:providers.refreshModels.success")}</div>
-			)}
-			{refreshStatus === RefreshStatus.Error && (
-				<div className="text-sm text-vscode-errorForeground">
-					{refreshError || t("settings:providers.refreshModels.error")}
-				</div>
-			)}
+			{/* One persistent live region: screen readers only announce content that
+			    changes inside an element that is already in the accessibility tree,
+			    so the conditional status divs mount into this wrapper instead of
+			    appearing and disappearing as the region itself. */}
+			<div role="status" aria-live="polite">
+				{refreshStatus === RefreshStatus.Loading && (
+					<div className="text-sm text-vscode-descriptionForeground">
+						{t("settings:providers.refreshModels.loading")}
+					</div>
+				)}
+				{refreshStatus === RefreshStatus.Success && (
+					<div className="text-sm text-vscode-foreground">
+						{t("settings:providers.refreshModels.success")}
+					</div>
+				)}
+				{refreshStatus === RefreshStatus.Error && (
+					<div className="text-sm text-vscode-errorForeground">
+						{refreshError || t("settings:providers.refreshModels.error")}
+					</div>
+				)}
+			</div>
 		</>
 	)
 }

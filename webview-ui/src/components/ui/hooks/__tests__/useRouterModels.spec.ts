@@ -112,14 +112,18 @@ describe("fetchRouterModels", () => {
 	test("rejects at once without adding a listener when the signal is already aborted", async () => {
 		vi.useFakeTimers()
 		const addSpy = vi.spyOn(window, "addEventListener")
+
 		const controller = new AbortController()
 		controller.abort()
+		postMessageMock.mockClear()
 
 		await expect(fetchRouterModels(providerIdentifiers.mimo, controller.signal)).rejects.toMatchObject({
 			name: "AbortError",
 		})
 		expect(addSpy.mock.calls.find((args) => args[0] === "message")?.[1]).toBeUndefined()
 		expect(vi.getTimerCount()).toBe(0)
+		// The already-aborted signal must not even post the request.
+		expect(postMessageMock).not.toHaveBeenCalled()
 	})
 
 	test("on timeout, rejects and removes the same message listener", async () => {

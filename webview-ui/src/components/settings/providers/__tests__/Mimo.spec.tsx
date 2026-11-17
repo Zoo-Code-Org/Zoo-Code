@@ -1,7 +1,14 @@
 // npx vitest src/components/settings/providers/__tests__/Mimo.spec.tsx
 
-import { render, screen, fireEvent, waitFor, act } from "@/utils/test-utils"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import {
+	render,
+	screen,
+	fireEvent,
+	waitFor,
+	act,
+	renderWithExtensionState,
+	createTestQueryClient,
+} from "@/utils/test-utils"
 import { allRouterModelsProvider, providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 
 import { Mimo } from "../Mimo"
@@ -168,16 +175,15 @@ describe("Mimo Component", () => {
 	})
 
 	it("invalidates only the MiMo and shared router-model caches after a successful refresh", async () => {
-		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+		const queryClient = createTestQueryClient()
 		const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries")
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<Mimo
-					apiConfiguration={createDefaultApiConfiguration({ mimoApiKey: "test-key" })}
-					setApiConfigurationField={mockSetApiConfigurationField}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<Mimo
+				apiConfiguration={createDefaultApiConfiguration({ mimoApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+			{ queryClient },
 		)
 
 		fireEvent.click(findRefreshButton()!)
@@ -311,6 +317,37 @@ describe("Mimo Component", () => {
 				},
 			}),
 		)
+	})
+
+	it("keeps one persistent polite live region mounted across status changes", async () => {
+		// Screen readers only announce content that changes inside an element already
+		// present in the accessibility tree. When each status div mounts and unmounts
+		// as the region itself, the announcement is lost, so the wrapper has to stay
+		// mounted and only its children change.
+		render(
+			<Mimo
+				apiConfiguration={createDefaultApiConfiguration({ mimoApiKey: "test-key" })}
+				setApiConfigurationField={mockSetApiConfigurationField}
+			/>,
+		)
+
+		const liveRegion = screen.getByRole("status")
+		expect(liveRegion).toHaveAttribute("aria-live", "polite")
+		expect(liveRegion).toBeEmptyDOMElement()
+
+		fireEvent.click(findRefreshButton()!)
+
+		expect(screen.getByRole("status")).toBe(liveRegion)
+		expect(liveRegion).toHaveTextContent("settings:providers.refreshModels.loading")
+
+		act(() => {
+			window.dispatchEvent(new MessageEvent("message", { data: { type: "routerModels" } }))
+		})
+
+		await waitFor(() => {
+			expect(liveRegion).toHaveTextContent("settings:providers.refreshModels.success")
+		})
+		expect(screen.getByRole("status")).toBe(liveRegion)
 	})
 
 	it("shows 'Get MiMo API Key' link when no API key is set", () => {
