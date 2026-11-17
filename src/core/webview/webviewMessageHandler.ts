@@ -963,6 +963,32 @@ export const webviewMessageHandler = async (
 						if (!value) {
 							continue
 						}
+					} else if (key === "currentApiConfigName") {
+						// A name-only write moves this view's pin and leaves behind the overlay it hydrated
+						// from the profile it was pinned to: getState reads viewLocalState.apiConfiguration as a
+						// complete snapshot rather than a patch over the shared store, so the view keeps running
+						// the previous profile's settings under the new name. Pair the write the way the launch
+						// repair does above - read the selected record and seed the overlay with that record
+						// without its name, before the pin write at the end of this loop. A record that cannot be
+						// read clears the overlay instead, so the failure leaves the shared settings in place
+						// rather than some other profile's. The seed is in-memory only (_persistViewLocalStateFrom
+						// Mutation carries mode and currentApiConfigName), so the durable write stays the pin.
+						const pinnedName = typeof value === "string" ? value : undefined
+						if (pinnedName) {
+							try {
+								const { name: _seedProfileName, ...seedProfile } =
+									await provider.providerSettingsManager.getProfile({ name: pinnedName })
+								await provider.saveViewState("apiConfiguration", seedProfile as ProviderSettings)
+							} catch (error) {
+								provider.log(
+									`[updateSettings] Unable to resolve API profile '${pinnedName}'; cleared this view's settings overlay instead of keeping the previous profile's: ${error instanceof Error ? error.message : String(error)}`,
+								)
+								await provider.saveViewState("apiConfiguration", undefined)
+							}
+						} else {
+							// The pin is being cleared, so nothing should keep serving settings under no name.
+							await provider.saveViewState("apiConfiguration", undefined)
+						}
 					}
 
 					// Route through provider.setValue so view-local buffer/pin sync stays

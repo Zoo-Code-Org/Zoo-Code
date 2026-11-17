@@ -2190,6 +2190,93 @@ describe("webviewMessageHandler - mcpEnabled", () => {
 	})
 })
 
+describe("webviewMessageHandler - updateSettings profile pin", () => {
+	// The seed and the generic write both land on this module-level double, so snapshot the
+	// originals at collection time and put them back after each row: a mockImplementation left
+	// in place would leak into the suites that run after this one.
+	const originals = {
+		saveViewState: mockClineProvider.saveViewState,
+		setValue: mockClineProvider.setValue,
+		providerSettingsManager: (mockClineProvider as unknown as { providerSettingsManager: unknown })
+			.providerSettingsManager,
+	}
+
+	afterEach(() => {
+		const view = mockClineProvider as unknown as Record<string, unknown>
+		view.saveViewState = originals.saveViewState
+		view.setValue = originals.setValue
+		view.providerSettingsManager = originals.providerSettingsManager
+	})
+
+	it("pairs the selected profile's settings with a name-only updateSettings write", async () => {
+		// Review thread 4506513968, printed at ClineProvider.ts line 5528 with original_line 5288:
+		// an updateSettings payload carrying only currentApiConfigName moved this view's pin and
+		// left the previously hydrated profile's settings serving it, because getState treats the
+		// view's overlay as a complete snapshot rather than a patch over the shared store. The
+		// record below carries settings that differ from anything the view could have kept.
+		const view = mockClineProvider as unknown as {
+			providerSettingsManager: { getProfile: ReturnType<typeof vi.fn> }
+		}
+		view.providerSettingsManager = {
+			getProfile: vi.fn().mockResolvedValue({
+				name: "profile-b",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "model-b",
+			}),
+		}
+		const order: string[] = []
+		vi.mocked(mockClineProvider.saveViewState).mockImplementation(async (...args: unknown[]) => {
+			order.push(`seed:${String(args[0])}`)
+		})
+		vi.mocked(mockClineProvider.setValue).mockImplementation(async (key: string, value: unknown) => {
+			order.push(`write:${key}`)
+			await mockClineProvider.contextProxy.setValue(
+				key as keyof RooCodeSettings,
+				value as RooCodeSettings[keyof RooCodeSettings],
+			)
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { currentApiConfigName: "profile-b" },
+		})
+
+		// The selected record is read, and what reaches the overlay is the record without its
+		// name - the shape loadViewState and the launch repair already seed with.
+		expect(view.providerSettingsManager.getProfile).toHaveBeenCalledWith({ name: "profile-b" })
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", {
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "model-b",
+		})
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "profile-b")
+		// Order is the finding: a pin that lands before its settings do leaves the view naming one
+		// profile while running another.
+		expect(order).toEqual(["seed:apiConfiguration", "write:currentApiConfigName"])
+	})
+
+	it("clears the overlay instead of serving a stale one when the selected record cannot be read", async () => {
+		const view = mockClineProvider as unknown as {
+			providerSettingsManager: { getProfile: ReturnType<typeof vi.fn> }
+		}
+		view.providerSettingsManager = {
+			getProfile: vi.fn().mockRejectedValue(new Error("secrets read failed")),
+		}
+		const logSpy = vi.mocked(mockClineProvider.log)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { currentApiConfigName: "profile-b" },
+		})
+
+		expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Unable to resolve API profile 'profile-b'"))
+		// An unreadable record must not leave the previous profile's settings under the new name:
+		// the overlay is cleared, which is what an unresolvable pin already means elsewhere.
+		expect(mockClineProvider.saveViewState).toHaveBeenCalledWith("apiConfiguration", undefined)
+		// The pin itself still lands, so the selection is not silently dropped.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("currentApiConfigName", "profile-b")
+	})
+})
+
 describe("webviewMessageHandler - destructiveCommandGuardEnabled", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
