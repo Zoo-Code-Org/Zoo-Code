@@ -19,6 +19,7 @@ import { ApiStream } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 import { filterNonAnthropicBlocks } from "../transform/anthropic-filter"
 import { getAnthropicProviderReasoning } from "../transform/reasoning"
+import { cacheControl, resolveCacheTtl } from "../transform/caching/ttl"
 
 import { BaseProvider } from "./base-provider"
 import { bridgeExternalAbortSignal, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
@@ -32,7 +33,7 @@ import {
 // Pre-sorted list of known Anthropic model IDs (lowercased) by length (descending) for case-insensitive substring matching.
 const ANTHROPIC_MODEL_IDS_SORTED_LOWER = (Object.keys(anthropicModels) as AnthropicModelId[])
 	.map((id) => id.toLowerCase())
-	.sort((a, b) => b.length - a.length) as string[]
+	.sort((a, b) => b.length - a.length)
 
 // Original-case mapping: lowercase key → original AnthropicModelId for lookup.
 const ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL = Object.fromEntries(
@@ -64,7 +65,6 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
 		let stream: AnthropicStream<Anthropic.Messages.RawMessageStreamEvent>
-		const cacheControl: CacheControlEphemeral = { type: "ephemeral" }
 		const {
 			id: modelId,
 			betas = ["fine-grained-tool-streaming-2025-05-14"],
@@ -78,6 +78,11 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			reasoningBudget,
 			settings: this.options,
 		})
+
+		// One TTL for the whole request (ADR-0006 I4): every marker below reuses
+		// this single object, so a mixed-TTL request is unrepresentable.
+		const cacheTtl = resolveCacheTtl(this.options, info)
+		const marker: CacheControlEphemeral = cacheControl(cacheTtl)
 
 		// Filter out non-Anthropic blocks (reasoning, thoughtSignature, etc.) before sending to the API
 		const sanitizedMessages = filterNonAnthropicBlocks(messages)
@@ -169,17 +174,17 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 						temperature,
 						thinking,
 						// Setting cache breakpoint for system prompt so new tasks can reuse it.
-						system: [{ text: systemPrompt, type: "text", cache_control: cacheControl }],
+						system: [{ text: systemPrompt, type: "text", cache_control: marker }],
 						messages: sanitizedMessages.map((message, index) => {
 							if (index === lastUserMsgIndex || index === secondLastMsgUserIndex) {
 								return {
 									...message,
 									content:
 										typeof message.content === "string"
-											? [{ type: "text", text: message.content, cache_control: cacheControl }]
+											? [{ type: "text", text: message.content, cache_control: marker }]
 											: message.content.map((content, contentIndex) =>
 													contentIndex === message.content.length - 1
-														? { ...content, cache_control: cacheControl }
+														? { ...content, cache_control: marker }
 														: content,
 												),
 								}
@@ -414,7 +419,7 @@ export class AnthropicHandler extends BaseProvider implements SingleCompletionHa
 			return anthropicModels[anthropicDefaultModelId]
 		}
 
-		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower] as AnthropicModelId
+		const originalId = ANTHROPIC_MODEL_ID_LOWER_TO_ORIGINAL[matchedLower]
 		return anthropicModels[originalId]
 	}
 

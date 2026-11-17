@@ -1,9 +1,12 @@
 import { config } from "@roo-code/config-eslint/base"
 import {
+	abortSubstringSelector,
 	apiProviderHygieneConfig,
 	apiProviderTestSelectors,
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 } from "@roo-code/config-eslint/api-provider-hygiene"
+import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
@@ -27,6 +30,8 @@ const testPathTraversalSelectors = [
 	},
 ]
 
+const i18nDotKeyConfig = createI18nDotKeyConfig(`${import.meta.dirname}/i18n/locales/en`)
+
 // Test-utils rollout guardrail: lanes converted to the shared reset helper
 // stay converted. Use clearAllMocks from test-utils/reset.
 const testResetHelperSelector = {
@@ -40,7 +45,19 @@ const testResetHelperSelector = {
 export default [
 	...config,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	i18nDotKeyConfig,
 	apiProviderHygieneConfig,
+	{
+		// A later block replaces no-restricted-syntax for the same files, so repeat the i18n selectors.
+		...apiProviderHygieneConfig,
+		rules: {
+			"no-restricted-syntax": [
+				"error",
+				...apiProviderHygieneConfig.rules["no-restricted-syntax"].slice(1),
+				...getI18nDotKeySelectors(i18nDotKeyConfig),
+			],
+		},
+	},
 	{
 		rules: {
 			"prefer-const": ["error", { destructuring: "all" }],
@@ -51,6 +68,7 @@ export default [
 			"@typescript-eslint/ban-ts-comment": "off",
 		},
 	},
+	apiSpecSleepConfig,
 	apiSpecTsIgnoreConfig,
 	{
 		// A Stryker directive gives a short reason. Put longer rationale in the test or a code comment.
@@ -95,6 +113,21 @@ export default [
 		},
 	},
 	{
+		// Ratchet: flag type assertions (`as X`, `!`) that do not change the type.
+		// They hide type errors once an SDK type narrows. Tests are not covered yet.
+		files: ["api/**/*.ts"],
+		ignores: ["api/**/__tests__/**"],
+		languageOptions: {
+			parserOptions: {
+				project: true,
+				tsconfigRootDir: import.meta.dirname,
+			},
+		},
+		rules: {
+			"@typescript-eslint/no-unnecessary-type-assertion": "error",
+		},
+	},
+	{
 		// Tests inside __tests__/ directories must not traverse 3+ levels above
 		// the test file. That escapes the src/ package root and makes Turbo
 		// invisible to cache changes in those files.
@@ -108,7 +141,21 @@ export default [
 			"**/services/__tests__/workflow-self-listen.test.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors],
+			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, abortSubstringSelector],
+		},
+	},
+	{
+		// The four workflow tests ignored above are exempt from the path-traversal selectors
+		// because they read root-level config. That exception was never about abort
+		// assertions, so re-apply the abort rule for exactly those files.
+		files: [
+			"**/services/__tests__/pr-review-state-workflow.test.ts",
+			"**/services/__tests__/stale-pr-clock-workflow.test.ts",
+			"**/services/__tests__/fork-review-followup-workflow.test.ts",
+			"**/services/__tests__/workflow-self-listen.test.ts",
+		],
+		rules: {
+			"no-restricted-syntax": ["error", abortSubstringSelector],
 		},
 	},
 	{
@@ -129,7 +176,12 @@ export default [
 			"integrations/terminal/**/__tests__/**/*.ts",
 		],
 		rules: {
-			"no-restricted-syntax": ["error", ...testPathTraversalSelectors, testResetHelperSelector],
+			"no-restricted-syntax": [
+				"error",
+				...testPathTraversalSelectors,
+				abortSubstringSelector,
+				testResetHelperSelector,
+			],
 		},
 	},
 	{

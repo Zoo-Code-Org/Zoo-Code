@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest"
+import { createHash } from "crypto"
 import { OpenAiNativeHandler } from "../openai-native"
 import { OpenAiServiceTier, openAiNativeModels, type ModelInfo } from "@roo-code/types"
 import type { ApiStreamUsageChunk } from "../../transform/stream"
@@ -495,7 +496,9 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			const longTaskId = "t".repeat(80)
 			const body = buildRequestBody("gpt-5.1", longTaskId)
 			expect(body.prompt_cache_key).toHaveLength(64)
-			expect(body.prompt_cache_key).toBe(longTaskId.slice(0, 64))
+			// A hash, not a slice: truncation would collapse ids that share a prefix.
+			expect(body.prompt_cache_key).toBe(createHash("sha256").update(longTaskId).digest("hex"))
+			expect(body.prompt_cache_key).not.toBe(longTaskId.slice(0, 64))
 		})
 
 		it("should keep prompt_cache_retention alongside the key for 24h models", () => {
@@ -760,6 +763,31 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 			// 12h writes: (25.0 / 1_000_000) * 50_000 = 1.25
 			// Total: 0.5 + 1.25 = 1.75
 			expect(result.totalCost).toBeCloseTo(1.75, 6)
+		})
+
+		it("should clamp a negative 12h split at zero instead of emitting a negative count", () => {
+			// A misbehaving gateway can report a negative ttl_12h_tokens. Math.min alone
+			// leaves it negative, so the negative count reaches the Task accumulator and
+			// the webview. Shared costing clamps, but the emitted chunk must not lie.
+			const model = getGpt6AstraModel()
+			const usage = {
+				input_tokens: 100_000,
+				output_tokens: 0,
+				input_tokens_details: {
+					cache_write_tokens: 100_000,
+					cache_write_tokens_details: {
+						ttl_12h_tokens: -40_000,
+					},
+				},
+			}
+
+			const result = normalizeUsage(handler, usage, model)
+
+			// A zero split is indistinguishable from "no split", so the field stays unset.
+			expect(result.cacheWrite12hTokens).toBeUndefined()
+			expect(result.cacheWrite12hTokens ?? 0).toBeGreaterThanOrEqual(0)
+			// All 100k writes bill at the 30m rate: (12.5 / 1_000_000) * 100_000 = 1.25
+			expect(result.totalCost).toBeCloseTo(1.25, 6)
 		})
 	})
 })

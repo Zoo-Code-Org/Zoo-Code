@@ -260,6 +260,108 @@ describe("VertexHandler", () => {
 			)
 		})
 
+		describe("prompt cache TTL", () => {
+			const minimalStream = asyncStreamFrom([
+				{
+					type: "message_start",
+					message: { usage: { input_tokens: 10, output_tokens: 0 } },
+				},
+			])
+
+			const requestBody = (mockCreate: ReturnType<typeof vitest.fn>) =>
+				mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+
+			// The handler's client is private; reach it once here rather than casting at
+			// each call site. `messages.create` is replaced with a plain vitest mock.
+			const stubCreate = (mockCreate: ReturnType<typeof vitest.fn>) => {
+				const client = handler["client"] as unknown as { messages: { create: unknown } }
+				client.messages.create = mockCreate
+			}
+
+			const cacheControlsIn = (body: unknown) => {
+				const found: Array<Record<string, unknown>> = []
+				const walk = (node: unknown) => {
+					if (Array.isArray(node)) {
+						node.forEach(walk)
+						return
+					}
+					if (node && typeof node === "object") {
+						for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+							if (key === "cache_control" && child && typeof child === "object") {
+								found.push(child as Record<string, unknown>)
+							}
+							walk(child)
+						}
+					}
+				}
+				walk(JSON.parse(JSON.stringify(body)))
+				return found
+			}
+
+			it("emits no ttl key when the knob is unset", async () => {
+				handler = new AnthropicVertexHandler({
+					apiModelId: "claude-3-5-sonnet-v2@20241022",
+					vertexProjectId: "test-project",
+					vertexRegion: "us-central1",
+				})
+
+				const mockCreate = vitest.fn().mockResolvedValue(minimalStream)
+				stubCreate(mockCreate)
+
+				await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+				expect(cacheControlsIn(body).every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("carries ttl 1h on the system prompt and every user marker when the model is capable", async () => {
+				handler = new AnthropicVertexHandler({
+					apiModelId: "claude-3-5-sonnet-v2@20241022",
+					vertexProjectId: "test-project",
+					vertexRegion: "us-central1",
+					promptCacheTtl: "1h",
+				})
+
+				// The Vertex catalog carries no TTL capability yet, so inject one to
+				// exercise the emission path this PR adds.
+				const model = handler.getModel()
+				vitest.spyOn(handler, "getModel").mockReturnValue({
+					...model,
+					info: { ...model.info, promptCacheTtlSupport: ["5m", "1h"] },
+				})
+
+				const mockCreate = vitest.fn().mockResolvedValue(minimalStream)
+				stubCreate(mockCreate)
+
+				await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+				// System + the user marker the vertex transform emits.
+				const controls = cacheControlsIn(requestBody(mockCreate))
+				expect(controls.length).toBeGreaterThanOrEqual(2)
+				expect(controls.every((control) => control.ttl === "1h")).toBe(true)
+			})
+
+			it("fails closed when the Vertex catalog advertises no TTL capability", async () => {
+				handler = new AnthropicVertexHandler({
+					apiModelId: "claude-3-5-sonnet-v2@20241022",
+					vertexProjectId: "test-project",
+					vertexRegion: "us-central1",
+					promptCacheTtl: "1h",
+				})
+
+				expect(handler.getModel().info.promptCacheTtlSupport).toBeUndefined()
+
+				const mockCreate = vitest.fn().mockResolvedValue(minimalStream)
+				stubCreate(mockCreate)
+
+				await collectStream(handler.createMessage(systemPrompt, mockMessages))
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+			})
+		})
+
 		it("should handle multiple content blocks with line breaks for Claude", async () => {
 			handler = new AnthropicVertexHandler({
 				apiModelId: "claude-3-5-sonnet-v2@20241022",

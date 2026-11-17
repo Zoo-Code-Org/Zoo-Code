@@ -26,9 +26,9 @@
 	"clearSelection": "清除选择",
 	"deleteSelected": "删除选中项",
 	"deleteTasks": "删除任务",
-	"confirmDeleteTasks": "确认删除 {{count}} 项任务？",
+	"confirmDeleteTasks_other": "确认删除 {{count}} 项任务？",
 	"deleteTasksWarning": "删除后将无法恢复，请谨慎操作。",
-	"deleteItems": "删除 {{count}} 项",
+	"deleteItems_other": "删除 {{count}} 项",
 	"workspace": {
 		"prefix": "工作区:",
 		"current": "当前",
@@ -43,10 +43,9 @@
 		"mostRelevant": "最相关"
 	},
 	"viewAllHistory": "查看全部",
-	"subtasks_one": "{{count}} 子任务",
 	"subtasks_other": "{{count}} 子任务",
 	"subtaskTag": "子任务",
-	"deleteWithSubtasks": "这也将删除 {{count}} 个子任务。您确定吗？",
+	"deleteWithSubtasks_other": "这也将删除 {{count}} 个子任务。您确定吗？",
 	"expandSubtasks": "展开子任务",
 	"collapseSubtasks": "收起子任务",
 	"delegatedTag": "等待子任务",

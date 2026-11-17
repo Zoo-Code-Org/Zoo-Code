@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeBadge } from "@vscode/webview-ui-toolkit/react"
 import { ListChevronsDownUp } from "lucide-react"
 
@@ -16,7 +16,7 @@ interface CondensationResultRowProps {
  * Shows token reduction, cost, and an expandable summary section.
  */
 export function CondensationResultRow({ data }: CondensationResultRowProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 
 	const { cost, prevContextTokens, newContextTokens, summary } = data

@@ -1,8 +1,20 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://docs.anthropic.com/en/docs/about-claude/models
 // https://platform.claude.com/docs/en/about-claude/pricing
 
+// Every entry here is an Anthropic-hosted Claude model, and 1h cache writes are GA
+// on all active Claude models, so each one advertises both TTL classes. The 5m class
+// is the vendor default and is never emitted explicitly (ADR-0006 I3).
 export type AnthropicModelId = keyof typeof anthropicModels
 export const anthropicDefaultModelId: AnthropicModelId = "claude-sonnet-4-5"
 export const ANTHROPIC_API_PROTOCOL = "anthropic"
@@ -13,6 +25,7 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -36,6 +49,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 2.0, // $2 per million input tokens (introductory pricing through Aug 31, 2026)
 		outputPrice: 10.0, // $10 per million output tokens (introductory pricing through Aug 31, 2026)
 		cacheWritesPrice: 2.5, // $2.50 per million tokens (introductory pricing through Aug 31, 2026)
@@ -56,6 +70,7 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -79,6 +94,7 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -102,6 +118,7 @@ export const anthropicModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -125,6 +142,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -143,6 +161,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required, same as 4.7)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens (regular tier)
 		outputPrice: 25.0, // $25 per million output tokens (regular tier)
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -162,6 +181,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -181,6 +201,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 4.0, // $4 per million input tokens
 		outputPrice: 20.0, // $20 per million output tokens
 		cacheWritesPrice: 5.0, // $5 per million tokens
@@ -197,6 +218,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		// Standard pricing (prompts of 100,000 tokens or fewer) from Anthropic's
 		// pricing page. Prompts over 100,000 tokens bill at tiered rates
 		// ($0.50 in / $2.50 out / $0.625 5m cache write / $0.05 cache read per
@@ -222,6 +244,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 10.0, // $10 per million input tokens
 		outputPrice: 50.0, // $50 per million output tokens
 		cacheWritesPrice: 12.5, // $12.50 per million tokens (5-minute cache)
@@ -240,6 +263,7 @@ export const anthropicModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 10.0, // $10 per million input tokens
 		outputPrice: 50.0, // $50 per million output tokens
 		cacheWritesPrice: 12.5, // $12.50 per million tokens
@@ -258,6 +282,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 5.0, // $5 per million input tokens
 		outputPrice: 25.0, // $25 per million output tokens
 		cacheWritesPrice: 6.25, // $6.25 per million tokens
@@ -270,6 +295,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0, // $15 per million input tokens
 		outputPrice: 75.0, // $75 per million output tokens
 		cacheWritesPrice: 18.75, // $18.75 per million tokens
@@ -282,6 +308,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0, // $15 per million input tokens
 		outputPrice: 75.0, // $75 per million output tokens
 		cacheWritesPrice: 18.75, // $18.75 per million tokens
@@ -294,6 +321,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -307,6 +335,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -318,6 +347,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 3.0, // $3 per million input tokens
 		outputPrice: 15.0, // $15 per million output tokens
 		cacheWritesPrice: 3.75, // $3.75 per million tokens
@@ -329,6 +359,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: false,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25,
@@ -340,6 +371,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 15.0,
 		outputPrice: 75.0,
 		cacheWritesPrice: 18.75,
@@ -351,6 +383,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 0.25,
 		outputPrice: 1.25,
 		cacheWritesPrice: 0.3,
@@ -362,6 +395,7 @@ export const anthropicModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		inputPrice: 1.0,
 		outputPrice: 5.0,
 		cacheWritesPrice: 1.25,
@@ -374,3 +408,17 @@ export const anthropicModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export const ANTHROPIC_DEFAULT_MAX_TOKENS = 8192
+
+export const anthropicProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.anthropic,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => anthropicDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		apiKey: z.string().optional(),
+		anthropicBaseUrl: z.string().optional(),
+		anthropicUseAuthToken: z.boolean().optional(),
+		anthropicBeta1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+	},
+})
