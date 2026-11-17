@@ -3660,6 +3660,23 @@ export class ClineProvider
 				await this._saveViewLocalStateFromMutation({ apiConfiguration: undefined })
 			}
 
+			// The deleting view's own task must follow the deletion on this same
+			// commit. The re-pin pass at the end of this method filters this instance
+			// out of the only task-handler rebuild and sticky-name update (review
+			// thread 4593061285, written against original_line 3952, where that filter
+			// excludes the provider doing the deleting), so without this the view's pin
+			// and overlay name the survivor while its running conversation keeps the
+			// deleted profile's handler and name, and getStateToPostToWebview prefers
+			// the task's own values over this view's replacement state. Same guard the
+			// sibling pass uses: only a task that actually runs under the deleted
+			// profile is re-pointed.
+			if (this.getCurrentTask()?.taskApiConfigName === profileToDelete.name) {
+				if (survivingSettings) {
+					this.updateTaskApiHandlerIfNeeded(survivingSettings, { forceRebuild: true })
+				}
+				await this.persistStickyProviderProfileToCurrentTask(profileToActivate)
+			}
+
 			// Closed views keep their durable viewStates entry after disposal: a pin
 			// naming the deleted profile would rehydrate a missing profile name on
 			// the next load. Re-point those persisted pins to the survivor too.
