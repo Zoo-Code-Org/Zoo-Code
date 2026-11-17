@@ -5305,6 +5305,24 @@ describe("updateSettings with the display settings", () => {
 			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
 		})
 
+		it("reports a failed save when a command-list write fails and the state refresh fails too", async () => {
+			// The refresh failure is caught on its own; this pins that it cannot mask the write failure in the ack.
+			const config = makeWorkspaceConfiguration({})
+			config.inspect = vi.fn().mockReturnValue({})
+			config.update = vi.fn().mockRejectedValue(new Error("disk on fire"))
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			vi.mocked(mockClineProvider.postStateToWebview).mockRejectedValueOnce(new Error("webview gone"))
+
+			await expect(saveAs({ deniedCommands: ["aws"] })).resolves.toBeUndefined()
+
+			expect(results()).toEqual([{ type: "settingsSaveResult", requestId: "save-1", success: false }])
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: disk on fire")
+			expect(mockClineProvider.log).toHaveBeenCalledWith(
+				"[updateSettings] Could not refresh the webview state: webview gone",
+			)
+			expect(mockClineProvider.contextProxy.setValue).not.toHaveBeenCalled()
+		})
+
 		it("still reports a stored save when a command-list write succeeds", async () => {
 			// The accept-path counterpart: the failure flag must not stick for a
 			// save whose command-list writes all succeeded.
