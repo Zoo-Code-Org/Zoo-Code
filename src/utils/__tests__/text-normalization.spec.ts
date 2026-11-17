@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest"
 
-import { normalizeString, unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../text-normalization"
+import { normalizeString, unescapeHtmlEntities, stripAnsi, truncateTerminalOutput, truncateFileOutput } from "../text-normalization"
 
 describe("Text normalization utilities", () => {
 	describe("normalizeString", () => {
@@ -151,6 +151,33 @@ describe("Text normalization utilities", () => {
 			expect(result).toContain("line 1")
 			expect(result).toContain("line 10")
 			expect(result).toContain("[...6 intermediate lines omitted for context conservation...]")
+		})
+	})
+
+	describe("truncateFileOutput", () => {
+		it("returns small file unchanged without truncation", () => {
+			const text = "export const a = 1;\nexport const b = 2;"
+			const result = truncateFileOutput(text, 100)
+
+			expect(result.wasTruncated).toBe(false)
+			expect(result.content).toBe(text)
+			expect(result.returnedLines).toBe(2)
+			expect(result.omittedLines).toBe(0)
+		})
+
+		it("truncates large file preserving head and tail with informative marker", () => {
+			const lines = Array.from({ length: 500 }, (_, i) => `// Line ${i + 1}: export const item${i + 1} = ${i + 1};`)
+			const text = lines.join("\n")
+			const result = truncateFileOutput(text, 100, 500)
+
+			expect(result.wasTruncated).toBe(true)
+			expect(result.returnedLines).toBe(100)
+			expect(result.omittedLines).toBe(400)
+			expect(result.content).toContain("[...TRUNCATED 400 LINES: Showing first 50 and last 50 lines of 500 total lines")
+			expect(result.content).toContain("Line 1:")
+			expect(result.content).toContain("Line 50:")
+			expect(result.content).toContain("Line 451:")
+			expect(result.content).toContain("Line 500:")
 		})
 	})
 })

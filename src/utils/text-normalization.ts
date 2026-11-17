@@ -137,3 +137,54 @@ export function truncateTerminalOutput(text: string, maxLines: number = 100): st
 	return `${head}\n\n[...${omitted} intermediate lines omitted for context conservation...]\n\n${tail}`
 }
 
+/** Default maximum lines returned for file reads before sliding window truncation engages */
+export const MAX_FILE_READ_LINES = 100
+
+export interface FileTruncationResult {
+	content: string
+	wasTruncated: boolean
+	returnedLines: number
+	omittedLines: number
+}
+
+/**
+ * Truncates file content to a maximum number of lines using a sliding window (head + tail),
+ * preventing token blowup while giving the LLM immediate visibility into both the start
+ * (imports, types, headers) and end (exports, bottom definitions) of a file.
+ */
+export function truncateFileOutput(
+	content: string,
+	maxLines: number = MAX_FILE_READ_LINES,
+	totalLines?: number,
+): FileTruncationResult {
+	if (!content) return { content, wasTruncated: false, returnedLines: 0, omittedLines: 0 }
+
+	const lines = content.split(/\r?\n/)
+	if (lines.length > 0 && lines[lines.length - 1] === "") {
+		lines.pop()
+	}
+
+	const count = lines.length
+
+	if (count <= maxLines || maxLines <= 0) {
+		return { content, wasTruncated: false, returnedLines: count, omittedLines: 0 }
+	}
+
+	const headCount = Math.floor(maxLines / 2)
+	const tailCount = maxLines - headCount
+	const omitted = count - maxLines
+
+	const head = lines.slice(0, headCount).join("\n")
+	const tail = lines.slice(-tailCount).join("\n")
+	const total = totalLines ?? count
+
+	const truncatedContent = `${head}\n\n[...TRUNCATED ${omitted} LINES: Showing first ${headCount} and last ${tailCount} lines of ${total} total lines. To view intermediate code, call read_file with offset and limit...]\n\n${tail}`
+
+	return {
+		content: truncatedContent,
+		wasTruncated: true,
+		returnedLines: maxLines,
+		omittedLines: omitted,
+	}
+}
+
