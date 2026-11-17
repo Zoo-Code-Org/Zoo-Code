@@ -10,6 +10,7 @@ describe("command approval display", () => {
 		["echo \u{e0001}", '"echo \\udb40\\udc01"'],
 		["./safe\u034f", '"./safe\\u034f"'],
 		["echo a\u00a0b\u3000c", '"echo a\\u00a0b\\u3000c"'],
+		["./safe\u2800--dry-run", '"./safe\\u2800--dry-run"'],
 		["echo hello", '"echo hello"'],
 		["echo 危険", '"echo 危険"'],
 		["echo dangerous\r\x1b[2Kecho safe", '"echo dangerous\\r\\u001b[2Kecho safe"'],
@@ -61,9 +62,9 @@ describe("command approval display", () => {
 
 	// Invariant of docs/architecture/tla/CommandApprovalDisplay.tla: NoRawUnsafeChar.
 	// Allowlist: letters, marks, numbers, punctuation, symbols and U+0020. Unassigned and private-use
-	// chars draw as one glyph. Default-ignorable chars and space lookalikes such as U+00A0 are not allowed.
+	// chars draw as one glyph. Default-ignorable chars and space lookalikes such as U+00A0 and U+2800 are not allowed.
 	it("leaves only visible characters raw for every code point", () => {
-		const visible = /^(?!\p{Default_Ignorable_Code_Point})[\p{L}\p{M}\p{N}\p{P}\p{S} \p{Cn}\p{Co}]$/u
+		const visible = /^(?!\p{Default_Ignorable_Code_Point}|\u2800)[\p{L}\p{M}\p{N}\p{P}\p{S} \p{Cn}\p{Co}]$/u
 		const leaks: string[] = []
 		for (let cp = 0; cp <= 0x10ffff; cp++) {
 			if (cp >= 0xd800 && cp <= 0xdfff) continue // JSON.stringify escapes lone surrogates
