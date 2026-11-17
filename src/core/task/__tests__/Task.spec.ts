@@ -8312,6 +8312,31 @@ describe("Queued message processing after condense", () => {
 		expect(queue.isEmpty()).toBe(true)
 	})
 
+	it("retries each drain that edits blocked, one per held message", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const first = queue.addMessage("one")!.id
+		const second = queue.addMessage("two")!.id
+		const tokens = [queue.beginEdit(first)!, queue.beginEdit(second)!]
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		task.processQueuedMessages()
+		queue.commitEdit(first, tokens[0], "one edited")
+		queue.commitEdit(second, tokens[1], "two edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["one edited", "two edited"])
+		expect(queue.isEmpty()).toBe(true)
+	})
+
 	it("does not retry a drain that no edit blocked", async () => {
 		const task = new Task({
 			provider: createProvider(),
