@@ -7659,6 +7659,135 @@ describe("ClineProvider", () => {
 			expect(provider.getValues().mode).toBe("architect")
 		})
 
+		it("rolls both mode layers back when profile activation fails before custom-mode registration", async () => {
+			await provider.setValues({ mode: "code" })
+			await provider.saveViewState("mode", "architect")
+			// The ask's scenario is a payload naming a profile that does not exist. The activation
+			// stub below stands in for the rejection setProviderProfile raises, and the row below
+			// asserts the rejection is this planted error object, so a reader can tell the failure
+			// under test is the one planted here and not a casualty of the surrounding setup.
+			const activationFailure = new Error("profile activation down")
+			const activateSpy = vi.spyOn(provider, "activateProviderProfile").mockRejectedValue(activationFailure)
+			const updateCustomMode = vi.fn().mockResolvedValue(undefined)
+			provider["customModesManager"].updateCustomMode = updateCustomMode
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						currentApiConfigName: "missing-profile",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toBe(activationFailure)
+
+			expect(activateSpy).toHaveBeenCalledTimes(1)
+			expect(activateSpy).toHaveBeenCalledWith({ name: "missing-profile" })
+			// Never called: the payload died in profile activation, so the failure sits in the
+			// stretch that runs ahead of the registration loop, which is the window the fix widens.
+			expect(updateCustomMode).not.toHaveBeenCalled()
+
+			// Each layer returns to its own prior selection: the shared store keeps code, the
+			// view keeps its architect pin, rather than both holding the payload's reviewer.
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+		})
+
+		it("leaves an unset view mode pin unset when profile activation fails before custom-mode registration", async () => {
+			await provider.setValues({ mode: "architect" })
+			// setValues mirrors the payload into the view buffer; drop it so this row models a
+			// view that never pinned a mode of its own.
+			delete provider["viewLocalState"].mode
+			const activationFailure = new Error("profile activation down")
+			vi.spyOn(provider, "activateProviderProfile").mockRejectedValue(activationFailure)
+			provider["customModesManager"].updateCustomMode = vi.fn().mockResolvedValue(undefined)
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						currentApiConfigName: "missing-profile",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toBe(activationFailure)
+
+			expect(provider["customModesManager"].updateCustomMode).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("mode")).toBe("architect")
+			// An unset pin stays unset instead of becoming an explicit copy of the shared value.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+		})
+
+		it("does not restore either mode layer when a failure follows successful custom-mode registration", async () => {
+			await provider.setValues({ mode: "code" })
+			await provider.saveViewState("mode", "architect")
+			const updateCustomMode = vi.fn().mockResolvedValue(undefined)
+			provider["customModesManager"].updateCustomMode = updateCustomMode
+			// The ask leaves restoration alone once registration succeeds, so the failure here
+			// lands after the loop, on the task-configuration read.
+			vi.spyOn(provider, "getState").mockRejectedValue(new Error("state read down"))
+
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "reviewer",
+						customModes: [
+							{ slug: "reviewer", name: "Reviewer", roleDefinition: "Reviews code", groups: [] },
+						],
+					},
+				),
+			).rejects.toThrow("state read down")
+
+			expect(updateCustomMode).toHaveBeenCalledTimes(1)
+			expect(provider.contextProxy.getValue("mode")).toBe("reviewer")
+			expect(provider["viewLocalState"].mode).toBe("reviewer")
+		})
+
+		it("restores the view pin and rewrites an unchanged shared mode when activation fails before registration", async () => {
+			await provider.setValues({ mode: "code" })
+			await provider.saveViewState("mode", "architect")
+			const activationFailure = new Error("profile activation down")
+			vi.spyOn(provider, "activateProviderProfile").mockRejectedValue(activationFailure)
+			provider["customModesManager"].updateCustomMode = vi.fn().mockResolvedValue(undefined)
+
+			// The payload's mode equals the shared prior value, so the shared layer gains nothing
+			// new from the rollback while the per-view layer does: the pin comes back from
+			// reviewer to architect. The shared layer is re-served its own prior value, which is
+			// an added same-value write on a path that previously ran no restore at all.
+			await expect(
+				provider.createTask(
+					undefined,
+					undefined,
+					undefined,
+					{},
+					{
+						mode: "code",
+						currentApiConfigName: "missing-profile",
+						customModes: [{ slug: "code", name: "Code", roleDefinition: "Writes code", groups: [] }],
+					},
+				),
+			).rejects.toBe(activationFailure)
+
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider.getValues().mode).toBe("architect")
+		})
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,

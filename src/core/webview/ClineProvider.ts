@@ -5403,6 +5403,32 @@ export class ClineProvider
 			)
 		}
 	}
+	/**
+	 * Rolls both mode selection layers back to their own prior values. The shared store and
+	 * the per-view pin are separate durable writes, so each is awaited and logged on its own:
+	 * a failed shared restore must not conceal a restored pin, and a layer whose prior value
+	 * was unset goes back to unset rather than to a copy of the other layer.
+	 */
+	private async _restoreModeSelection(
+		previousMode: RooCodeSettings["mode"],
+		previousViewMode: RooCodeSettings["mode"],
+		failureStage: string,
+	): Promise<void> {
+		try {
+			await this.contextProxy.setValue("mode", previousMode)
+		} catch (rollbackError) {
+			this.log(
+				`[ClineProvider#createTask] Failed to restore the shared mode ${failureStage}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+			)
+		}
+		try {
+			await this.saveViewState("mode", previousViewMode)
+		} catch (rollbackError) {
+			this.log(
+				`[ClineProvider#createTask] Failed to restore the view mode pin ${failureStage}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+			)
+		}
+	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
 		return this.contextProxy.getValue(key)
@@ -6105,39 +6131,54 @@ export class ClineProvider
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
-			// Capture both selection layers a registration failure must roll back to:
-			// setValues below persists the payload's mode to the shared store AND the
-			// per-view record while the payload's custom modes are still unregistered.
-			// The pin is read defensively because createTask is also driven through
+			// Capture both selection layers that a failure ahead of, or inside, custom-mode
+			// registration must roll back to: setValues below persists the payload's mode to the
+			// shared store AND the per-view record while the payload's custom modes are still
+			// unregistered. The pin is read defensively because createTask is also driven through
 			// structural provider doubles that carry no view-local buffer.
 			const previousMode = this.contextProxy.getValue("mode")
 			const previousViewMode = this.viewLocalState?.mode
-			await this.setValues(configuration)
+			try {
+				await this.setValues(configuration)
 
-			if (configuration.allowedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("allowedCommands", configuration.allowedCommands, vscode.ConfigurationTarget.Global)
-			}
+				if (configuration.allowedCommands) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update("allowedCommands", configuration.allowedCommands, vscode.ConfigurationTarget.Global)
+				}
 
-			if (configuration.deniedCommands) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update("deniedCommands", configuration.deniedCommands, vscode.ConfigurationTarget.Global)
-			}
+				if (configuration.deniedCommands) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update("deniedCommands", configuration.deniedCommands, vscode.ConfigurationTarget.Global)
+				}
 
-			if (configuration.commandExecutionTimeout !== undefined) {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update(
-						"commandExecutionTimeout",
-						configuration.commandExecutionTimeout,
-						vscode.ConfigurationTarget.Global,
-					)
-			}
+				if (configuration.commandExecutionTimeout !== undefined) {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update(
+							"commandExecutionTimeout",
+							configuration.commandExecutionTimeout,
+							vscode.ConfigurationTarget.Global,
+						)
+				}
 
-			if (configuration.currentApiConfigName) {
-				await this.setProviderProfile(configuration.currentApiConfigName)
+				if (configuration.currentApiConfigName) {
+					await this.setProviderProfile(configuration.currentApiConfigName)
+				}
+			} catch (error) {
+				// A failure ahead of registration - a named profile that does not exist is one, which
+				// setProviderProfile raises above - leaves both mode layers holding the slug the payload
+				// brought, so each layer rolls back to its own prior value before the original failure
+				// surfaces. The registration loop below keeps its own handler, which is why this window
+				// closes there rather than at the end of the method: a mode that became usable must stay
+				// selected when a later step fails.
+				await this._restoreModeSelection(
+					previousMode,
+					previousViewMode,
+					"after the profile selection failed before custom-mode registration",
+				)
+				throw error
 			}
 
 			// Register custom modes so the CustomModesManager knows about them.
@@ -6156,20 +6197,11 @@ export class ClineProvider
 					// before the failure surfaces. Each restore is awaited on its own and
 					// logged on failure, never swallowed; the original failure is what
 					// callers see.
-					try {
-						await this.contextProxy.setValue("mode", previousMode)
-					} catch (rollbackError) {
-						this.log(
-							`[ClineProvider#createTask] Failed to restore the shared mode after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-						)
-					}
-					try {
-						await this.saveViewState("mode", previousViewMode)
-					} catch (rollbackError) {
-						this.log(
-							`[ClineProvider#createTask] Failed to restore the view mode pin after custom-mode registration failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
-						)
-					}
+					await this._restoreModeSelection(
+						previousMode,
+						previousViewMode,
+						"after custom-mode registration failed",
+					)
 					throw error
 				}
 			}
