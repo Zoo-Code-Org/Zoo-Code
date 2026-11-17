@@ -1,6 +1,10 @@
 {
 	"compilerOptions": {
-		"types": ["vitest/globals", "node"],
+		"baseUrl": ".",
+		"paths": {
+			"@roo-code/*": ["../packages/*/src", "../packages/*"]
+		},
+		"typeRoots": ["./types", "./node_modules/@types"],
 		"esModuleInterop": true,
 		"experimentalDecorators": true,
 		"forceConsistentCasingInFileNames": true,
@@ -22,7 +26,7 @@
 		"useDefineForClassFields": true,
 		"useUnknownInCatchVariables": false
 	},
-	"include": ["."],
+	"include": [".", "types/**/*.d.ts", "**/*.d.ts"],
 	"exclude": ["**/.stryker-tmp", "node_modules"],
 	"watchOptions": {
 		"watchFile": "useFsEvents",

@@ -1,13 +1,16 @@
 {
-	"extends": "@roo-code/config-typescript/base.json",
+	"extends": "./packages/config-typescript/base.json",
 	"compilerOptions": {
 		"module": "esnext",
 		"moduleResolution": "Bundler",
+		"baseUrl": ".",
+		"paths": {
+			"@roo-code/*": ["packages/*/src", "packages/*"]
+		},
 		// Scripts import src code. Match the src package settings so the root check does not report src errors.
 		"noUncheckedIndexedAccess": false,
-		"types": ["node"],
 		"useUnknownInCatchVariables": false
 	},
 	"exclude": ["node_modules"],
-	"include": ["scripts/*.ts", "src/types/global-agent.d.ts"]
+	"include": ["scripts/*.ts", "src/types/*.d.ts"]
 }

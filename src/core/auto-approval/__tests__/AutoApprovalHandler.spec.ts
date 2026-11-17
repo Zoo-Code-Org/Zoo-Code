@@ -1,3 +1,5 @@
+/// <reference path="../../../types/modules.d.ts" />
+
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import type { GlobalState, ClineMessage } from "../../../../packages/types/src"
 
