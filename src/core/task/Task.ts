@@ -3452,11 +3452,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Unexpected: No existing API conversation history")
 			}
 
-			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
-
 			// Only user segments expand.
 			const expanded = responseText ? this.userInputContent(responseText, segments) : Promise.resolve([])
-			const newUserContent = expanded.then((content) => {
+			const newUserContent = expanded.then(async (content) => {
+				// Write the history after the expansion. A cancel or an error during the expansion keeps the old history.
+				await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
 				const blocks: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent, ...content]
 
 				if (responseImages && responseImages.length > 0) {

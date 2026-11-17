@@ -2313,6 +2313,45 @@ describe("Task persistence", () => {
 			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
 		})
 
+		it("writes the history only after the expansion ends, and not when it fails", async () => {
+			const text = "read @/allowed please"
+			const segments = [{ text, source: "user" }]
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resume-order",
+					number: 1,
+					ts: Date.now(),
+					task: "t",
+					tokensIn: 1,
+					tokensOut: 1,
+					totalCost: 0,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiate = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			const overwrite = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", text, segments } as never)
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: [{ type: "text", text: "Hi" }] }])
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({ id: "resume-order", status: "interrupted" })
+
+			let finish: (value: never[]) => void = () => {}
+			vi.spyOn(task, "userInputContent").mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			expect(overwrite).not.toHaveBeenCalled()
+			finish([])
+			await initiate.mock.calls[0][0]
+			expect(overwrite).toHaveBeenCalledTimes(1)
+
+			overwrite.mockClear()
+			vi.spyOn(task, "userInputContent").mockRejectedValueOnce(new Error("state"))
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await expect(initiate.mock.calls[1][0]).rejects.toThrow("state")
+			expect(overwrite).not.toHaveBeenCalled()
+		})
+
 		it("pushes no response block for an empty response", async () => {
 			const { processed, parsed } = await resumeWith({ text: "" })
 
