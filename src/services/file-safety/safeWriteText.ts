@@ -888,16 +888,36 @@ export async function safeWriteText(
 			// after it the published content. Either way the copy has served its purpose
 			// and must not be left beside the target where no caller can find it.
 			const leftoverBackupPath = backupPath
-			await fs.unlink(leftoverBackupPath).catch((cleanupError: unknown) => {
-				// The copy is on disk and this call was the only thing that knew its name, so a
-				// failed removal is not swallowed whole: the path is named, with the reason. The
-				// error the caller receives stays the error this write earned - a cleanup failure
-				// must not replace it - and the copy it left behind is now findable.
+			// The same two attempts step 6 makes on the success path: a transient handle - an antivirus
+			// scanner or an indexer holding the copy that was just renamed out of the way - blocks the
+			// first unlink on Windows and clears on the second. One attempt here reported a copy as left
+			// behind whenever the blocker was momentary, and ENOENT on the first attempt already is the
+			// outcome the removal wanted: the copy is gone, there is nothing to retry and nothing to
+			// report, which is how step 6 reads it too.
+			let leftoverCleanupError: unknown = null
+			for (let attempt = 0; attempt < 2; attempt++) {
+				try {
+					await fs.unlink(leftoverBackupPath)
+					leftoverCleanupError = null
+					break
+				} catch (cleanupError: unknown) {
+					if (getErrorCode(cleanupError) === "ENOENT") {
+						leftoverCleanupError = null
+						break
+					}
+					leftoverCleanupError = cleanupError
+				}
+			}
+			if (leftoverCleanupError !== null) {
+				// The copy is on disk and this call was the only thing that knew its name, so a failed
+				// removal is not swallowed whole: the path is named, with the reason the last attempt
+				// gave. The error the caller receives stays the error this write earned - a cleanup
+				// failure must not replace it - and the copy it left behind is now findable.
 				console.error(
 					`safeWriteText left the superseded backup copy at ${leftoverBackupPath} after the write failed; removing it failed:`,
-					cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+					leftoverCleanupError instanceof Error ? leftoverCleanupError.message : String(leftoverCleanupError),
 				)
-			})
+			}
 			backupPath = null
 		}
 		if (!stagingCommitted) {

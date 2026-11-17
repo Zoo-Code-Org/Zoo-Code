@@ -1639,12 +1639,14 @@ describe("cleanup before a rollback failure is reported", () => {
 
 describe("backup removal on the failure path", () => {
 	beforeEach(() => mockDefaults())
-	// Thread 4525471043 on the CodeRabbit review of PR 2383. After the commit rename the
-	// failure path removes the backup copy with one unlink whose error is swallowed, while
-	// step 6 on the success path makes two attempts and reports a leftover as
-	// OrphanedPublishedBackupError. This test pins what the failure path does today and
-	// names the gap instead of fixing it: reporting the leftover would change which error
-	// the caller sees, and this round changes no source on this path.
+	// Thread 4525471043 on the CodeRabbit review of PR 2383 pinned what the failure path did
+	// then: one unlink whose error was swallowed, while step 6 on the success path made two
+	// attempts and reported a leftover as OrphanedPublishedBackupError. It named the gap
+	// instead of fixing it, on the ground that reporting the leftover would change which
+	// error the caller sees. Thread 4505599198 closed the attempt half of that gap in leg 515:
+	// the failure path now makes the same two attempts as step 6, so the count below is 2 and
+	// not 1, and the reporting half is unchanged - the caller still gets the error this write
+	// earned, not a cleanup error.
 	it("makes one unlink attempt and reports the durability failure, not the leftover backup path", async () => {
 		const targetPath = "/tmp/test-dir/target.txt"
 		const dirPath = path.dirname(targetPath)
@@ -1673,8 +1675,9 @@ describe("backup removal on the failure path", () => {
 		// The durability failure is what the caller learns, and nothing in it names the copy
 		// this path failed to remove.
 		expect((error as Error).message).not.toContain("safeWriteText.bak_")
-		expect(backupUnlinks).toHaveLength(1)
+		expect(backupUnlinks).toHaveLength(2)
 		expect(backupUnlinks[0]).toContain("safeWriteText.bak_")
+		expect(backupUnlinks[1]).toContain("safeWriteText.bak_")
 	})
 
 	it("names the leftover backup copy when the failure-path removal fails", async () => {
@@ -1698,13 +1701,95 @@ describe("backup removal on the failure path", () => {
 		const backupUnlinks = vi
 			.mocked(fs.unlink)
 			.mock.calls.filter((call: unknown[]) => String(call[0]).includes(".bak_"))
-		expect(backupUnlinks.length).toBe(1)
+		// 2 and not 1 since leg 515 (thread 4505599198): the removal is retried, and a leftover
+		// is named only when both attempts fail.
+		expect(backupUnlinks.length).toBe(2)
 		// The commit error stays the error the caller sees; what changes is that the copy this
 		// call left on disk is named where a person can go and remove it.
 		expect(consoleErrorSpy).toHaveBeenCalledWith(
 			expect.stringContaining("safeWriteText.bak_"),
 			"EPERM: backup removal failed",
 		)
+		consoleErrorSpy.mockRestore()
+	})
+
+	it("retries the failure-path backup removal when the first attempt is blocked, and clears on the retry", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+		const commitError = Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		vi.mocked(fs.rename).mockRejectedValue(commitError)
+		// Thread 4505599198. A transient handle - an antivirus scanner or an indexer holding
+		// the just-renamed copy - blocks the first unlink on Windows and clears on the second,
+		// which is why step 6 on the success path makes two attempts. One attempt here reported a
+		// copy as left behind when a retry would have removed it, so the failure path now makes
+		// the same two attempts and stays silent when the second one succeeds.
+		const backupAttempts: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			const asString = String(p)
+			if (asString.includes(".bak_")) {
+				backupAttempts.push(asString)
+				if (backupAttempts.length === 1) {
+					throw Object.assign(new Error("EPERM: backup removal failed"), { code: "EPERM" })
+				}
+			}
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toBe(commitError)
+
+		expect(backupAttempts.length).toBe(2)
+		expect(consoleErrorSpy).not.toHaveBeenCalled()
+		consoleErrorSpy.mockRestore()
+	})
+
+	it("stops the failure-path retry when the first attempt reports the copy as already gone", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+		const commitError = Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		vi.mocked(fs.rename).mockRejectedValue(commitError)
+		// ENOENT is the outcome the removal wanted: the copy is not there, so there is nothing
+		// to retry and nothing to report. Step 6 treats it the same way.
+		const enoent = Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+		const backupAttempts: string[] = []
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes(".bak_")) {
+				backupAttempts.push(String(p))
+				throw enoent
+			}
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toBe(commitError)
+
+		expect(backupAttempts.length).toBe(1)
+		expect(consoleErrorSpy).not.toHaveBeenCalled()
+		consoleErrorSpy.mockRestore()
+	})
+
+	it("names the leftover copy from the last failed attempt even when the blocker carries no code", async () => {
+		const targetPath = "/tmp/test-dir/target.txt"
+		vi.mocked(fs.realpath).mockResolvedValue(targetPath)
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		vi.mocked(fsSync.openSync).mockReturnValue(7)
+		const commitError = Object.assign(new Error("commit rename refused"), { code: "EBUSY" })
+		vi.mocked(fs.rename).mockRejectedValue(commitError)
+		// Both attempts fail with a value that is not an Error, which is what a non-Node
+		// blocker can throw: the path still has to be named, with whatever the last attempt
+		// reported, and the commit error stays the error the caller receives.
+		let attempts = 0
+		vi.mocked(fs.unlink).mockImplementation(async (p: unknown) => {
+			if (String(p).includes(".bak_")) {
+				attempts++
+				throw "scanner said no"
+			}
+		})
+
+		await expect(safeWriteText(targetPath, "data", { backup: true, platform: "linux" })).rejects.toBe(commitError)
+
+		expect(attempts).toBe(2)
+		expect(consoleErrorSpy).toHaveBeenCalledWith(expect.stringContaining("safeWriteText.bak_"), "scanner said no")
 		consoleErrorSpy.mockRestore()
 	})
 })
