@@ -6275,8 +6275,20 @@ export class ClineProvider
 			organizationAllowList,
 			diffFuzzyThreshold,
 		} = await this.getState()
+		// A payload that names a provider must drive the task it creates. getState above
+		// returns the acting view's own snapshot whenever that buffer holds one, and that
+		// snapshot shadows the flat settings the setValues call just persisted for this same
+		// payload: review thread 4506517300, printed at line 5586 with original_line 5304,
+		// sits on the comment that deliberately keeps those flat keys out of the per-view
+		// buffer. Only the new task takes the settings the payload wrote; neither buffer is
+		// merged here, so the acting view keeps its snapshot for later reads and other
+		// views keep their overlays. A payload that carries provider keys without naming
+		// a provider keeps the snapshot, because nothing in the call claims precedence.
+		const taskApiConfiguration = configuration.apiProvider
+			? this.contextProxy.getProviderSettings()
+			: apiConfiguration
 		const effectiveApiConfiguration = getEffectiveTaskApiConfiguration(
-			apiConfiguration,
+			taskApiConfiguration,
 			options.handoffExecutionContext,
 		)
 
@@ -6293,7 +6305,7 @@ export class ClineProvider
 
 		const task = new Task({
 			provider: this,
-			apiConfiguration,
+			apiConfiguration: taskApiConfiguration,
 			enableCheckpoints,
 			checkpointTimeout,
 			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,

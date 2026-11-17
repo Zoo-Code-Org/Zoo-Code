@@ -8029,6 +8029,58 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValue("mode")).toBe("code")
 			expect(provider.getValues().mode).toBe("architect")
 		})
+		it("gives a task created from flat provider settings the payload provider instead of the acting view snapshot", async () => {
+			// The acting view holds an OpenRouter snapshot of its own while the payload
+			// brings flat Bedrock settings, which setValues persists as shared settings.
+			// Review thread 4506517300 reports that the created task then keeps the view
+			// snapshot. This row pins the payload-winning direction and the next row pins
+			// the opposite direction so the snapshot is not simply discarded.
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "view-snapshot-key",
+			}
+
+			await provider.createTask(
+				undefined,
+				undefined,
+				undefined,
+				{ startTask: false },
+				{
+					apiProvider: providerIdentifiers.bedrock,
+					awsRegion: "us-east-1",
+					awsAccessKey: "payload-bedrock-access-key",
+				},
+			)
+
+			// The beforeEach above clears mocks, so the newest Task construction belongs to
+			// this call. TaskOptions.apiConfiguration is the member createTask hands the
+			// task; src/core/task/Task.ts declares it at line 253 of that interface.
+			const created = vi.mocked(Task).mock.calls.at(-1)?.[0]
+			expect(created?.apiConfiguration.apiProvider).toBe(providerIdentifiers.bedrock)
+			expect(created?.apiConfiguration.awsRegion).toBe("us-east-1")
+			expect(created?.apiConfiguration.awsAccessKey).toBe("payload-bedrock-access-key")
+			// The payload reached shared state and neither buffer was merged, so this view
+			// keeps its own snapshot for every later getState: the ask asks for both.
+			expect(provider.getValues().apiProvider).toBe(providerIdentifiers.bedrock)
+			expect(provider["viewLocalState"].apiConfiguration?.apiProvider).toBe(providerIdentifiers.openrouter)
+
+			await provider.dispose()
+		})
+
+		it("keeps the acting view snapshot for a created task when the payload names no provider", async () => {
+			provider["viewLocalState"].apiConfiguration = {
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "view-snapshot-key",
+			}
+
+			await provider.createTask(undefined, undefined, undefined, { startTask: false }, { mode: "code" })
+
+			const created = vi.mocked(Task).mock.calls.at(-1)?.[0]
+			expect(created?.apiConfiguration.apiProvider).toBe(providerIdentifiers.openrouter)
+			expect(created?.apiConfiguration.apiKey).toBe("view-snapshot-key")
+
+			await provider.dispose()
+		})
 		it("should sanitize raw viewStateId before using it as persisted viewStates key", async () => {
 			const provider = new ClineProvider(
 				mockContext,
