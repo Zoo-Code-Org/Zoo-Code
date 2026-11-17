@@ -87,6 +87,20 @@ export interface AskHandleResult {
 // AskDispatcher Class
 // =============================================================================
 
+/**
+ * Quote untrusted text for one terminal line. JSON escapes C0 controls, backslash and quote.
+ * The regex also escapes C1, format, default-ignorable and line-break characters, as UTF-16 units.
+ * Model: docs/architecture/tla/CommandApprovalDisplay.tla.
+ */
+export function toDisplayText(text: string): string {
+	return JSON.stringify(text).replace(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/gu, (character) =>
+		character
+			.split("")
+			.map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
+			.join(""),
+	)
+}
+
 export class AskDispatcher {
 	private outputManager: OutputManager
 	private promptManager: PromptManager
@@ -299,14 +313,14 @@ export class AskDispatcher {
 			// Use raw text if not JSON
 		}
 
-		this.outputManager.output("\n[question]", question)
+		this.outputManager.output("\n[question]", toDisplayText(question))
 
 		if (suggestions.length > 0) {
 			this.outputManager.output("\nSuggested answers:")
 			suggestions.forEach((suggestion, index) => {
 				const suggestionText = suggestion.answer || String(suggestion)
-				const modeHint = suggestion.mode ? ` (mode: ${suggestion.mode})` : ""
-				this.outputManager.output(`  ${index + 1}. ${suggestionText}${modeHint}`)
+				const modeHint = suggestion.mode ? ` (mode: ${toDisplayText(String(suggestion.mode))})` : ""
+				this.outputManager.output(`  ${index + 1}. ${toDisplayText(suggestionText)}${modeHint}`)
 			})
 			this.outputManager.output("")
 		}
@@ -329,7 +343,9 @@ export class AskDispatcher {
 			responseText = this.resolveNumberedSuggestion(responseText, suggestions)
 
 			if (result.timedOut || result.cancelled) {
-				this.outputManager.output(`[Using default: ${defaultAnswer || "(empty)"}]`)
+				this.outputManager.output(
+					`[Using default: ${defaultAnswer ? toDisplayText(defaultAnswer) : "(empty)"}]`,
+				)
 			}
 
 			this.sendFollowupResponse(responseText)
@@ -350,7 +366,7 @@ export class AskDispatcher {
 			this.sendFollowupResponse(responseText)
 			return { handled: true, response: "messageResponse" }
 		} catch {
-			this.outputManager.output(`[Using default: ${defaultAnswer || "(empty)"}]`)
+			this.outputManager.output(`[Using default: ${defaultAnswer ? toDisplayText(defaultAnswer) : "(empty)"}]`)
 			this.sendFollowupResponse(defaultAnswer)
 			return { handled: true, response: "messageResponse" }
 		}
@@ -361,15 +377,7 @@ export class AskDispatcher {
 	 */
 	private async handleCommandApproval(ts: number, text: string): Promise<AskHandleResult> {
 		this.outputManager.output("\n[command request]")
-		// JSON escapes C0 controls and backslashes; also expose C1 and invisible
-		// formatting characters so command text cannot control the approval display.
-		const displayCommand = JSON.stringify(text).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, (character) =>
-			character
-				.split("")
-				.map((unit) => `\\u${unit.charCodeAt(0).toString(16).padStart(4, "0")}`)
-				.join(""),
-		)
-		this.outputManager.output(`  Command: ${text ? displayCommand : "(no command specified)"}`)
+		this.outputManager.output(`  Command: ${text ? toDisplayText(text) : "(no command specified)"}`)
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.nonInteractive) {
@@ -405,13 +413,13 @@ export class AskDispatcher {
 		const isProtected = toolInfo.isProtected === true
 
 		if (isProtected) {
-			this.outputManager.output(`\n[Tool Request] ${toolName} [PROTECTED CONFIGURATION FILE]`)
+			this.outputManager.output(`\n[Tool Request] ${toDisplayText(toolName)} [PROTECTED CONFIGURATION FILE]`)
 			this.outputManager.output(`⚠️  WARNING: This tool wants to modify a protected configuration file.`)
 			this.outputManager.output(
 				`    Protected files include .rooignore, .roo/*, and other sensitive config files.`,
 			)
 		} else {
-			this.outputManager.output(`\n[Tool Request] ${toolName}`)
+			this.outputManager.output(`\n[Tool Request] ${toDisplayText(toolName)}`)
 		}
 
 		// Display tool details
@@ -428,7 +436,7 @@ export class AskDispatcher {
 				displayValue = String(value)
 			}
 
-			this.outputManager.output(`  ${key}: ${displayValue}`)
+			this.outputManager.output(`  ${toDisplayText(key)}: ${toDisplayText(displayValue)}`)
 		}
 
 		this.outputManager.markDisplayed(ts, text || "", false)
@@ -471,12 +479,12 @@ export class AskDispatcher {
 		}
 
 		this.outputManager.output("\n[mcp request]")
-		this.outputManager.output(`  Server: ${serverName}`)
+		this.outputManager.output(`  Server: ${toDisplayText(serverName)}`)
 		if (toolName) {
-			this.outputManager.output(`  Tool: ${toolName}`)
+			this.outputManager.output(`  Tool: ${toDisplayText(toolName)}`)
 		}
 		if (resourceUri) {
-			this.outputManager.output(`  Resource: ${resourceUri}`)
+			this.outputManager.output(`  Resource: ${toDisplayText(resourceUri)}`)
 		}
 		this.outputManager.markDisplayed(ts, text || "", false)
 
@@ -501,7 +509,7 @@ export class AskDispatcher {
 	 */
 	private async handleApiFailedRetry(ts: number, text: string): Promise<AskHandleResult> {
 		this.outputManager.output("\n[api request failed]")
-		this.outputManager.output(`  Error: ${text || "Unknown error"}`)
+		this.outputManager.output(`  Error: ${text ? toDisplayText(text) : "Unknown error"}`)
 		this.outputManager.markDisplayed(ts, text || "", false)
 
 		if (this.exitOnError) {
@@ -532,7 +540,7 @@ export class AskDispatcher {
 	private async handleMistakeLimitReached(ts: number, text: string): Promise<AskHandleResult> {
 		this.outputManager.output("\n[mistake limit reached]")
 		if (text) {
-			this.outputManager.output(`  Details: ${text}`)
+			this.outputManager.output(`  Details: ${toDisplayText(text)}`)
 		}
 		this.outputManager.markDisplayed(ts, text || "", false)
 
@@ -559,7 +567,7 @@ export class AskDispatcher {
 	private async handleAutoApprovalMaxReached(ts: number, text: string): Promise<AskHandleResult> {
 		this.outputManager.output("\n[auto-approval limit reached]")
 		if (text) {
-			this.outputManager.output(`  Details: ${text}`)
+			this.outputManager.output(`  Details: ${toDisplayText(text)}`)
 		}
 		this.outputManager.markDisplayed(ts, text || "", false)
 
@@ -587,7 +595,7 @@ export class AskDispatcher {
 		const isCompleted = ask === "resume_completed_task"
 		this.outputManager.output(`\n[Resume ${isCompleted ? "Completed " : ""}Task]`)
 		if (text) {
-			this.outputManager.output(`  ${text}`)
+			this.outputManager.output(`  ${toDisplayText(text)}`)
 		}
 		this.outputManager.markDisplayed(ts, text || "", false)
 
@@ -615,7 +623,7 @@ export class AskDispatcher {
 	private async handleGenericApproval(ts: number, ask: ClineAsk, text: string): Promise<AskHandleResult> {
 		this.outputManager.output(`\n[${ask}]`)
 		if (text) {
-			this.outputManager.output(`  ${text}`)
+			this.outputManager.output(`  ${toDisplayText(text)}`)
 		}
 		this.outputManager.markDisplayed(ts, text || "", false)
 
@@ -663,7 +671,7 @@ export class AskDispatcher {
 			const selectedSuggestion = suggestions[num - 1]
 			if (selectedSuggestion) {
 				const selected = selectedSuggestion.answer || String(selectedSuggestion)
-				this.outputManager.output(`Selected: ${selected}`)
+				this.outputManager.output(`Selected: ${toDisplayText(selected)}`)
 				return selected
 			}
 		}
