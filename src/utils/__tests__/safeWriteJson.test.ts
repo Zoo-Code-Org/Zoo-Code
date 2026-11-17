@@ -12,6 +12,10 @@ const fsPromisesActuals = vi.hoisted(() => ({
 	rename: undefined as (typeof import("fs/promises"))["rename"] | undefined,
 	unlink: undefined as (typeof import("fs/promises"))["unlink"] | undefined,
 	writeFile: undefined as (typeof import("fs/promises"))["writeFile"] | undefined,
+	// Rows that arm a failure on one path hand every other lookup back to the real filesystem,
+	// so the two methods they stand in for are held too.
+	stat: undefined as (typeof import("fs/promises"))["stat"] | undefined,
+	chmod: undefined as (typeof import("fs/promises"))["chmod"] | undefined,
 }))
 
 vi.mock("fs/promises", async () => {
@@ -19,6 +23,8 @@ vi.mock("fs/promises", async () => {
 	fsPromisesActuals.rename = actual.rename
 	fsPromisesActuals.unlink = actual.unlink
 	fsPromisesActuals.writeFile = actual.writeFile
+	fsPromisesActuals.stat = actual.stat
+	fsPromisesActuals.chmod = actual.chmod
 	// Start with all actual implementations.
 	const mockedFs = {
 		...actual,
@@ -1812,5 +1818,124 @@ describe("safeWriteJson", () => {
 		} finally {
 			consoleErrorSpy.mockRestore()
 		}
+	})
+
+	// The widening on line 556 is the difference between a file this write created and a file it
+	// replaced: the first gets the mode a new file would have had, the second keeps the mode
+	// _copyTargetMode copied onto the staged bytes. A write onto a target that was already there
+	// must therefore touch no permission on the published name at all, which is the half of the
+	// gate the created-target rows cannot show.
+	test("leaves a target that was already there without a permission change of its own", async () => {
+		const scope = path.join(tempDir, "existing-mode-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "already.json")
+		await fs.writeFile(target, JSON.stringify({ before: true }))
+		const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o022)
+		try {
+			vi.mocked(fs.chmod).mockClear()
+			await safeWriteJson(target, { after: true })
+			const chmodded = vi.mocked(fs.chmod).mock.calls.map((call: unknown[]) => String(call[0]))
+			expect(chmodded).not.toContain(target)
+			expect(chmodded.length).toBeGreaterThan(0)
+			expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ after: true })
+		} finally {
+			umaskSpy.mockRestore()
+		}
+	})
+
+	// A stat that answers ENOTDIR is the other spelling of "there is no mode to inherit": the
+	// target's ancestor turned into a file between the check and the commit, so nothing is
+	// published yet and the staged 0o600 is still the right floor while the bytes are only ours.
+	// The row arms the failure on the target's own lookup and leaves every other lookup with the
+	// real filesystem, because the recovery pass and the lock look at the same spelling first.
+	test("treats a target whose lookup answers ENOTDIR as one this write created", async () => {
+		const scope = path.join(tempDir, "enotdir-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "new-after-enotdir.json")
+		const umaskSpy = vi.spyOn(process, "umask").mockReturnValue(0o022)
+		const expectedMode = process.platform === "win32" ? 0o666 : 0o644
+		let failed = false
+		try {
+			vi.mocked(fs.chmod).mockClear()
+			vi.mocked(fs.stat).mockImplementation(async (path: unknown) => {
+				if (!failed && String(path) === target) {
+					failed = true
+					throw Object.assign(new Error("ENOTDIR: not a directory"), { code: "ENOTDIR" })
+				}
+				return await fsPromisesActuals.stat!(path as Parameters<typeof fs.stat>[0])
+			})
+			await safeWriteJson(target, { created: true })
+			const chmodCalls = vi
+				.mocked(fs.chmod)
+				.mock.calls.map((call: unknown[]) => [String(call[0]), Number(call[1])])
+			expect(failed).toBe(true)
+			expect(chmodCalls).toContainEqual([target, expectedMode])
+			expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ created: true })
+		} finally {
+			vi.mocked(fs.stat).mockRestore()
+			umaskSpy.mockRestore()
+		}
+	})
+
+	// The widening is best effort: when it fails the content is still published and durable, and
+	// the only trace left is the log that names the file and the mode this write could not apply.
+	// That log is the row's subject, because a silent permission miss would leave a reader
+	// believing a new file carried the creation mask's mode.
+	test("logs the mode it could not apply and still publishes when the widening chmod fails", async () => {
+		const scope = path.join(tempDir, "widen-fail-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "widened.json")
+		const expectedMode = process.platform === "win32" ? 0o666 : 0o644
+		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+		try {
+			vi.mocked(fs.chmod).mockImplementation(async (path: unknown, mode: unknown) => {
+				if (String(path) === target) {
+					throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+				}
+				return await fsPromisesActuals.chmod!(path as Parameters<typeof fs.chmod>[0], Number(mode))
+			})
+			await safeWriteJson(target, { widened: true })
+			expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ widened: true })
+			const logged = consoleErrorSpy.mock.calls.map((call: unknown[]) => String(call[0])).join(" | ")
+			expect(logged).toContain("but could not apply the mode a new file would have had")
+			expect(logged).toContain("(" + expectedMode.toString(8) + ")")
+			expect(logged).toContain(path.basename(target))
+		} finally {
+			vi.mocked(fs.chmod).mockRestore()
+			consoleErrorSpy.mockRestore()
+		}
+	})
+
+	// The outer teardown re-check needs its own row. The post-commit re-check at the publish site
+	// undoes an escaped publish on the spot; the catch further down runs when the escape surfaces
+	// there instead - here because the trace hook reports the failure right after the commit - and
+	// there the undo is conditional on the commit having landed, because a pre-commit failure has
+	// published nothing and a byte-identical file at the escaped name belongs to somebody else.
+	test("undoes the committed publish when the escape surfaces in the teardown re-check", async () => {
+		const scope = path.join(tempDir, "teardown-undo-scope")
+		await fs.mkdir(scope)
+		const target = path.join(scope, "mcp.json")
+		const link = path.join(tempDir, "teardown-undo-link.json")
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: scope,
+					trace: (event) => {
+						if (event.stage === "write-complete") {
+							// A second name for the inode the commit landed on, and the spelling the
+							// teardown re-check is about to resolve. The hook then fails the write itself,
+							// so the escape verdict comes from the teardown and not from the publish site.
+							fsSyncActual.linkSync(target, link)
+							vi.mocked(fs.realpath).mockImplementationOnce(async () => link)
+							throw new Error("a hook that fails the write after the commit landed")
+						}
+					},
+				},
+			),
+		).rejects.toThrow(ConfinedPathEscapeError)
+		expect(fsSyncActual.existsSync(link)).toBe(false)
+		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
 	})
 })
