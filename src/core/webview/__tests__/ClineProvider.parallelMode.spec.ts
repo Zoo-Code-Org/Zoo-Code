@@ -2,7 +2,12 @@
 
 import * as vscode from "vscode"
 
-import { type ProviderSettingsWithId, type RooCodeSettings, providerIdentifiers } from "@roo-code/types"
+import {
+	type ModeConfig,
+	type ProviderSettingsWithId,
+	type RooCodeSettings,
+	providerIdentifiers,
+} from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
@@ -393,8 +398,8 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 			groups: ["read", "edit"],
 		},
 		{
-			slug: "debugger",
-			name: "Debugger Mode",
+			slug: "debug",
+			name: "Debug Mode",
 			roleDefinition: "You are a debugger",
 			groups: ["read", "edit"],
 		},
@@ -408,11 +413,6 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	return {
 		...actual,
 		modes,
-		// Resolve against the mocked mode list above (not the real module modes) so the
-		// lookup matches exactly what the tests set up.
-		getModeBySlug: vi.fn().mockImplementation((slug: string) => {
-			return modes.find((m) => m.slug === slug) ?? null
-		}),
 		defaultModeSlug: "code",
 	}
 })
@@ -1011,52 +1011,126 @@ describe("ClineProvider - Parallel Mode Support", () => {
 		})
 	})
 
-	describe("MCP initialization is disposal-aware", () => {
-		it("does not attach or register a hub that resolves after the provider was disposed", async () => {
-			// Typed double: ClineProvider only ever touches these three hub members, and the
-			// real McpHub constructor starts server connections, so it cannot be built here.
-			const registerClient = vi.fn()
-			const unregisterClient = vi.fn()
-			const hub = {
-				registerClient,
-				unregisterClient,
-				getAllServers: vi.fn().mockReturnValue([]),
-			} as unknown as McpHub
-			let resolveHub: ((value: McpHub) => void) | undefined
-			const pendingHub = new Promise<McpHub>((resolve) => {
-				resolveHub = resolve
+	// The suite mocks CustomModesManager at row 526 so getCustomModes() answers an empty
+	// list; the helper arms that read with exactly what the public setter was handed, which
+	// keeps the mode's entry point production while the store stays a double.
+	function customModesWrittenThroughTheSetter(provider: ClineProvider, sink: ModeConfig[]) {
+		const setter = vi.spyOn(provider.customModesManager, "updateCustomMode")
+		setter.mockImplementation(async (slug: string, config: ModeConfig) => {
+			sink.push(config)
+		})
+		vi.spyOn(provider.customModesManager, "getCustomModes").mockImplementation(async () => [...sink])
+		return setter
+	}
+
+	describe("persisted mode restore resolves through the production lookup", () => {
+		const auditMode: ModeConfig = {
+			slug: "audit",
+			name: "Audit Mode",
+			roleDefinition: "You audit the diff before it lands",
+			groups: ["read"],
+		}
+
+		it("accepts a persisted custom mode that the public setter registered", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const registered: ModeConfig[] = []
+			const setter = customModesWrittenThroughTheSetter(provider, registered)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider["setViewStateId"]("stable-custom-mode-view")
+			await provider.customModesManager.updateCustomMode(auditMode.slug, auditMode)
+			await provider.saveViewState("mode", auditMode.slug)
+			// The save leaves the slug in this view's own buffer. Clearing the buffer is what
+			// makes the assertion below satisfiable only by the load, not by the write that
+			// preceded it.
+			provider["viewLocalState"] = {}
+
+			await provider["loadViewState"]()
+
+			expect(setter).toHaveBeenCalledWith(auditMode.slug, auditMode)
+			expect(registered.map((mode) => mode.slug)).toEqual([auditMode.slug])
+			expect(provider["viewLocalState"].mode).toBe(auditMode.slug)
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Ignoring unknown persisted mode"))
+
+			await provider.dispose()
+		})
+
+		it("drops a persisted custom mode that no setter registered", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			customModesWrittenThroughTheSetter(provider, [])
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider["setViewStateId"]("stable-unregistered-mode-view")
+			await provider.saveViewState("mode", auditMode.slug)
+			provider["viewLocalState"] = {}
+
+			await provider["loadViewState"]()
+
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring unknown persisted mode"))
+
+			await provider.dispose()
+		})
+
+		describe("MCP initialization is disposal-aware", () => {
+			it("does not attach or register a hub that resolves after the provider was disposed", async () => {
+				// Typed double: ClineProvider only ever touches these three hub members, and the
+				// real McpHub constructor starts server connections, so it cannot be built here.
+				const registerClient = vi.fn()
+				const unregisterClient = vi.fn()
+				const hub = {
+					registerClient,
+					unregisterClient,
+					getAllServers: vi.fn().mockReturnValue([]),
+				} as unknown as McpHub
+				let resolveHub: ((value: McpHub) => void) | undefined
+				const pendingHub = new Promise<McpHub>((resolve) => {
+					resolveHub = resolve
+				})
+				// Spied locally so this test can hold the hub pending. The file-level vi.mock of
+				// McpServerManager (line 472) is the module ClineProvider imports, so the spy lands
+				// on the same module the provider resolves against.
+				const getInstanceSpy = vi.spyOn(McpServerManager, "getInstance").mockReturnValue(pendingHub)
+
+				try {
+					const provider = new ClineProvider(
+						mockContext,
+						mockOutputChannel,
+						"editor",
+						new ContextProxy(mockContext),
+						new WebviewFocusTracker(),
+					)
+
+					// The hub is still pending, so nothing may be attached yet.
+					expect(provider.getMcpHub()).toBeUndefined()
+
+					await provider.dispose()
+
+					// The hub lands after teardown, once the provider is already gone from
+					// McpServerManager.providers: attaching it here would register a client that
+					// nothing can ever unregister.
+					resolveHub?.(hub)
+					await new Promise((resolve) => setTimeout(resolve, 0))
+
+					expect(registerClient).not.toHaveBeenCalled()
+					expect(unregisterClient).not.toHaveBeenCalled()
+					expect(provider.getMcpHub()).toBeUndefined()
+				} finally {
+					getInstanceSpy.mockRestore()
+				}
 			})
-			// Spied locally so this test can hold the hub pending. The file-level vi.mock of
-			// McpServerManager (line 472) is the module ClineProvider imports, so the spy lands
-			// on the same module the provider resolves against.
-			const getInstanceSpy = vi.spyOn(McpServerManager, "getInstance").mockReturnValue(pendingHub)
-
-			try {
-				const provider = new ClineProvider(
-					mockContext,
-					mockOutputChannel,
-					"editor",
-					new ContextProxy(mockContext),
-					new WebviewFocusTracker(),
-				)
-
-				// The hub is still pending, so nothing may be attached yet.
-				expect(provider.getMcpHub()).toBeUndefined()
-
-				await provider.dispose()
-
-				// The hub lands after teardown, once the provider is already gone from
-				// McpServerManager.providers: attaching it here would register a client that
-				// nothing can ever unregister.
-				resolveHub?.(hub)
-				await new Promise((resolve) => setTimeout(resolve, 0))
-
-				expect(registerClient).not.toHaveBeenCalled()
-				expect(unregisterClient).not.toHaveBeenCalled()
-				expect(provider.getMcpHub()).toBeUndefined()
-			} finally {
-				getInstanceSpy.mockRestore()
-			}
 		})
 	})
 })
