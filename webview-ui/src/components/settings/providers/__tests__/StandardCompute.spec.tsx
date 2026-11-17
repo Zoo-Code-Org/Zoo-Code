@@ -84,6 +84,7 @@ describe("StandardCompute", () => {
 			"moonshotai/kimi-k3": { contextWindow: 128000, maxTokens: 8192, supportsPromptCache: false },
 		},
 		"kimi-code": {},
+		friendli: {},
 		ollama: {},
 		lmstudio: {},
 	}

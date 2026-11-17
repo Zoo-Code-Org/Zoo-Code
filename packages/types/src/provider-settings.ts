@@ -103,6 +103,7 @@ export const dynamicProviders = [
 	providerIdentifiers.ioIntelligence,
 	providerIdentifiers.standardCompute,
 	providerIdentifiers.kimiCode,
+	providerIdentifiers.friendli,
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]

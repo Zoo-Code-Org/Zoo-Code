@@ -116,6 +116,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.ioIntelligence,
 			providerIdentifiers.standardCompute,
 			providerIdentifiers.kimiCode,
+			providerIdentifiers.friendli,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
 		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])

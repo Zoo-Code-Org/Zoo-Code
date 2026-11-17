@@ -923,6 +923,10 @@
 			"refreshSuccess": "Tools succesvol vernieuwd",
 			"refreshError": "Fout bij vernieuwen van tools",
 			"toolParameters": "Parameters"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamisch denkwerk",
+			"description": "Bereidt het set_thinking_effort-gereedschap voor op latere ondersteuning: deze instelling slaat alleen de voorkeur op, het gedrag per verzoek volgt in later werk. (experimenteel)"
 		}
 	},
 	"temperature": {
@@ -953,7 +957,8 @@
 		"useAzure": "Azure gebruiken",
 		"azureApiVersion": "Azure API-versie instellen",
 		"gemini": {
-			"freeRequests": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
+			"freeRequests_one": "* Gratis tot {{count}} verzoek per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
+			"freeRequests_other": "* Gratis tot {{count}} verzoeken per minuut. Daarna is de prijs afhankelijk van de promptgrootte.",
 			"pricingDetails": "Zie prijsdetails voor meer info.",
 			"billingEstimate": "* Facturering is een schatting - de exacte kosten hangen af van de promptgrootte."
 		}

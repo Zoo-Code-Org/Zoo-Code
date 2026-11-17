@@ -4,22 +4,7 @@ import {
 	type OrganizationAllowList,
 	type RouterModels,
 } from "@roo-code/types"
-
-// Mock i18next to return translation keys with interpolated values
-vi.mock("i18next", () => ({
-	default: {
-		t: (key: string, options?: Record<string, string>) => {
-			if (options) {
-				let result = key
-				Object.entries(options).forEach(([k, v]) => {
-					result += ` ${k}=${v}`
-				})
-				return result
-			}
-			return key
-		},
-	},
-}))
+import type { TFunction } from "i18next"
 
 import {
 	formatOpenAiExtraBodyValidationError,
@@ -28,6 +13,18 @@ import {
 	validateApiConfigurationExcludingModelErrors,
 	validateBedrockArn,
 } from "../validate"
+
+// Returns translation keys with interpolated values appended.
+const t = ((key: string, options?: Record<string, string>) => {
+	if (options) {
+		let result = key
+		Object.entries(options).forEach(([k, v]) => {
+			result += ` ${k}=${v}`
+		})
+		return result
+	}
+	return key
+}) as unknown as TFunction
 
 describe("Model Validation Functions", () => {
 	const mockRouterModels: RouterModels = {
@@ -64,6 +61,7 @@ describe("Model Validation Functions", () => {
 		nanogpt: {},
 		"zoo-gateway": {},
 		"kimi-code": {},
+		friendli: {},
 		moonshot: {},
 	}
 
@@ -89,7 +87,7 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "valid-model",
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBeUndefined()
 		})
 
@@ -99,7 +97,7 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "invalid-model",
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toContain("settings:validation.modelAvailability")
 		})
 
@@ -109,7 +107,7 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "another-valid-model",
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, restrictiveOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, restrictiveOrganization)
 			expect(result).toContain("model")
 		})
 
@@ -119,7 +117,7 @@ describe("Model Validation Functions", () => {
 				openAiModelId: "gpt-4",
 			}
 
-			const result = getModelValidationError(config, undefined, allowAllOrganization)
+			const result = getModelValidationError(config, t, undefined, allowAllOrganization)
 			expect(result).toBeUndefined()
 		})
 
@@ -153,7 +151,7 @@ describe("Model Validation Functions", () => {
 				},
 			}
 
-			const result = getModelValidationError(config, undefined, organizationAllowList)
+			const result = getModelValidationError(config, t, undefined, organizationAllowList)
 
 			expect(result).toContain("settings:validation.modelNotAllowed")
 			expect(result).toContain("model=blocked-model")
@@ -165,7 +163,7 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "",
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
 		})
 
@@ -175,14 +173,14 @@ describe("Model Validation Functions", () => {
 				// openRouterModelId is undefined
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
 		})
 	})
 
 	describe("validateApiConfiguration for GitHub Copilot", () => {
 		const validate = (vsCodeLmModelSelector: ProviderSettings["vsCodeLmModelSelector"]) =>
-			validateApiConfiguration({ apiProvider: providerIdentifiers.githubCopilot, vsCodeLmModelSelector })
+			validateApiConfiguration({ apiProvider: providerIdentifiers.githubCopilot, vsCodeLmModelSelector }, t)
 
 		it.each([
 			["a model id", { vendor: "copilot", id: "gpt-x" }],
@@ -208,7 +206,12 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "valid-model",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 
@@ -219,7 +222,12 @@ describe("Model Validation Functions", () => {
 				// Missing openRouterApiKey
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBe("settings:validation.apiKey")
 		})
 
@@ -230,7 +238,12 @@ describe("Model Validation Functions", () => {
 				openRouterModelId: "invalid-model", // This should be ignored
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined() // Should not return model validation error
 		})
 
@@ -243,6 +256,7 @@ describe("Model Validation Functions", () => {
 
 			const result = validateApiConfigurationExcludingModelErrors(
 				config,
+				t,
 				mockRouterModels,
 				restrictiveOrganization,
 			)
@@ -259,7 +273,7 @@ describe("Model Validation Functions", () => {
 			}
 
 			expect(
-				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+				validateApiConfigurationExcludingModelErrors(config, t, mockRouterModels, allowAllOrganization),
 			).toBeUndefined()
 		})
 
@@ -280,9 +294,9 @@ describe("Model Validation Functions", () => {
 				openAiExtraBody,
 			}
 
-			expect(validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)).toBe(
-				expectedError,
-			)
+			expect(
+				validateApiConfigurationExcludingModelErrors(config, t, mockRouterModels, allowAllOrganization),
+			).toBe(expectedError)
 		})
 	})
 
@@ -298,9 +312,9 @@ describe("Model Validation Functions", () => {
 		it("accepts a valid Extra Body object through both validation entry points", () => {
 			const config = createConfig(JSON.stringify({ metadata: { completion_window: "balanced" } }))
 
-			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
+			expect(validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization)).toBeUndefined()
 			expect(
-				validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization),
+				validateApiConfigurationExcludingModelErrors(config, t, mockRouterModels, allowAllOrganization),
 			).toBeUndefined()
 		})
 
@@ -325,14 +339,14 @@ describe("Model Validation Functions", () => {
 		])("rejects %s with the localized error", (_name, openAiExtraBody, expectedError) => {
 			const config = createConfig(openAiExtraBody)
 
-			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(expectedError)
+			expect(validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization)).toBe(expectedError)
 		})
 
 		it("returns required-field errors before Extra Body errors", () => {
 			const config = createConfig("not json")
 			config.openAiApiKey = undefined
 
-			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBe(
+			expect(validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization)).toBe(
 				"settings:validation.openAi",
 			)
 		})
@@ -365,7 +379,7 @@ describe("Model Validation Functions", () => {
 				openAiExtraBody: "not json",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels, allowAllOrganization)).toBeUndefined()
+			expect(validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization)).toBeUndefined()
 		})
 	})
 
@@ -377,7 +391,12 @@ describe("Model Validation Functions", () => {
 				// Missing opencodeGoApiKey
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBe("settings:validation.apiKey")
 		})
 
@@ -388,7 +407,12 @@ describe("Model Validation Functions", () => {
 				opencodeGoModelId: "glm-5.1",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 
@@ -399,7 +423,7 @@ describe("Model Validation Functions", () => {
 				// Missing opencodeGoModelId
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
 		})
 	})
@@ -411,7 +435,12 @@ describe("Model Validation Functions", () => {
 				// Missing kenariApiKey
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBe("settings:validation.apiKey")
 		})
 
@@ -422,7 +451,12 @@ describe("Model Validation Functions", () => {
 				kenariModelId: "glm-5.1",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 
@@ -433,7 +467,7 @@ describe("Model Validation Functions", () => {
 				// Missing kenariModelId
 			}
 
-			const result = getModelValidationError(config, mockRouterModels, allowAllOrganization)
+			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
 		})
 	})
@@ -445,7 +479,7 @@ describe("Model Validation Functions", () => {
 				ioIntelligenceModelId: "zai-org/GLM-4.6",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBe("settings:validation.apiKey")
 		})
 
 		it("accepts an IO Intelligence API key and selected model", () => {
@@ -455,7 +489,7 @@ describe("Model Validation Functions", () => {
 				ioIntelligenceModelId: "zai-org/GLM-4.6",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBeUndefined()
 		})
 	})
 
@@ -487,7 +521,7 @@ describe("Model Validation Functions", () => {
 				nanoGptModelId: "openai/model",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.apiKey")
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBe("settings:validation.apiKey")
 		})
 
 		it("returns a modelId error when the NanoGPT model is missing", () => {
@@ -496,7 +530,7 @@ describe("Model Validation Functions", () => {
 				nanoGptApiKey: "valid-key",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels)).toBe("settings:validation.modelId")
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBe("settings:validation.modelId")
 		})
 
 		it("accepts a NanoGPT API key and selected model", () => {
@@ -506,7 +540,7 @@ describe("Model Validation Functions", () => {
 				nanoGptModelId: "openai/model",
 			}
 
-			expect(validateApiConfiguration(config, mockRouterModels)).toBeUndefined()
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBeUndefined()
 		})
 	})
 
@@ -518,7 +552,12 @@ describe("Model Validation Functions", () => {
 				// Missing friendliApiKey
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBe("settings:validation.apiKey")
 		})
 
@@ -529,8 +568,33 @@ describe("Model Validation Functions", () => {
 				apiModelId: "zai-org/GLM-5.2",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
+		})
+
+		// The live catalog is authoritative: a static-only ID it no longer serves is flagged,
+		// while an empty catalog (failed fetch) keeps the static fallback valid.
+		it.each([
+			{
+				label: "a loaded catalog without the ID",
+				catalog: { "zai-org/GLM-5.2": {}, "zai-org/GLM-5.1": {} },
+				flagged: true,
+			},
+			{ label: "an empty catalog", catalog: {}, flagged: false },
+		])("handles a static-only Friendli ID with $label", ({ catalog, flagged }) => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "deepseek-ai/DeepSeek-V3.2",
+			}
+			const routerModels = { ...mockRouterModels, friendli: catalog } as RouterModels
+
+			const result = getModelValidationError(config, t, routerModels, allowAllOrganization)
+			expect(result?.startsWith("settings:validation.modelAvailability") ?? false).toBe(flagged)
 		})
 	})
 
@@ -542,7 +606,7 @@ describe("Model Validation Functions", () => {
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
-				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, false)
+				const result = validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization, false)
 				expect(result).toBe("settings:validation.zooGatewaySignIn")
 			})
 
@@ -552,7 +616,7 @@ describe("Model Validation Functions", () => {
 					zooGatewayModelId: "anthropic/claude-sonnet-4",
 				}
 
-				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, true)
+				const result = validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization, true)
 				expect(result).toBeUndefined()
 			})
 
@@ -563,7 +627,7 @@ describe("Model Validation Functions", () => {
 					zooSessionToken: "zoo_ext_test_token",
 				}
 
-				const result = validateApiConfiguration(config, mockRouterModels, allowAllOrganization, false)
+				const result = validateApiConfiguration(config, t, mockRouterModels, allowAllOrganization, false)
 				expect(result).toBeUndefined()
 			})
 		})
@@ -580,6 +644,7 @@ describe("Model Validation Functions", () => {
 
 				const result = validateApiConfigurationExcludingModelErrors(
 					config,
+					t,
 					mockRouterModels,
 					allowAllOrganization,
 				)
@@ -595,6 +660,7 @@ describe("Model Validation Functions", () => {
 
 				const result = validateApiConfigurationExcludingModelErrors(
 					config,
+					t,
 					mockRouterModels,
 					allowAllOrganization,
 				)
@@ -616,6 +682,7 @@ describe("Model Validation Functions", () => {
 
 				const result = validateApiConfigurationExcludingModelErrors(
 					config,
+					t,
 					mockRouterModels,
 					orgWithoutZooGateway,
 				)
@@ -631,7 +698,12 @@ describe("Model Validation Functions", () => {
 				kimiCodeAuthMethod: "oauth",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 
@@ -640,7 +712,12 @@ describe("Model Validation Functions", () => {
 				apiProvider: providerIdentifiers.kimiCode,
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 
@@ -650,7 +727,12 @@ describe("Model Validation Functions", () => {
 				kimiCodeAuthMethod: "api-key",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBe("settings:validation.apiKey")
 		})
 
@@ -661,7 +743,12 @@ describe("Model Validation Functions", () => {
 				kimiCodeApiKey: "valid-key",
 			}
 
-			const result = validateApiConfigurationExcludingModelErrors(config, mockRouterModels, allowAllOrganization)
+			const result = validateApiConfigurationExcludingModelErrors(
+				config,
+				t,
+				mockRouterModels,
+				allowAllOrganization,
+			)
 			expect(result).toBeUndefined()
 		})
 	})
@@ -672,6 +759,7 @@ describe("validateBedrockArn", () => {
 		it("accepts standard AWS Bedrock ARNs", () => {
 			const result = validateBedrockArn(
 				"arn:aws:bedrock:us-west-2:123456789012:inference-profile/us.anthropic.claude-3-5-sonnet-v2",
+				t,
 			)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("us-west-2")
@@ -681,6 +769,7 @@ describe("validateBedrockArn", () => {
 		it("accepts AWS GovCloud ARNs", () => {
 			const result = validateBedrockArn(
 				"arn:aws-us-gov:bedrock:us-gov-west-1:123456789012:inference-profile/model",
+				t,
 			)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("us-gov-west-1")
@@ -688,14 +777,14 @@ describe("validateBedrockArn", () => {
 		})
 
 		it("accepts AWS China ARNs", () => {
-			const result = validateBedrockArn("arn:aws-cn:bedrock:cn-north-1:123456789012:inference-profile/model")
+			const result = validateBedrockArn("arn:aws-cn:bedrock:cn-north-1:123456789012:inference-profile/model", t)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("cn-north-1")
 			expect(result.errorMessage).toBeUndefined()
 		})
 
 		it("accepts SageMaker ARNs", () => {
-			const result = validateBedrockArn("arn:aws:sagemaker:us-east-1:123456789012:endpoint/my-endpoint")
+			const result = validateBedrockArn("arn:aws:sagemaker:us-east-1:123456789012:endpoint/my-endpoint", t)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("us-east-1")
 			expect(result.errorMessage).toBeUndefined()
@@ -703,7 +792,7 @@ describe("validateBedrockArn", () => {
 
 		it("accepts non-standard ARN formats without validation errors", () => {
 			// Users are advanced - trust their input
-			const result = validateBedrockArn("arn:custom:service:region:account:resource")
+			const result = validateBedrockArn("arn:custom:service:region:account:resource", t)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("region")
 			expect(result.errorMessage).toBeUndefined()
@@ -711,7 +800,7 @@ describe("validateBedrockArn", () => {
 
 		it("accepts completely custom ARN strings", () => {
 			// Even unusual formats should be accepted
-			const result = validateBedrockArn("some-custom-arn-format")
+			const result = validateBedrockArn("some-custom-arn-format", t)
 			expect(result.isValid).toBe(true)
 			// May not be able to extract region from non-standard format
 			expect(result.errorMessage).toBeUndefined()
@@ -722,6 +811,7 @@ describe("validateBedrockArn", () => {
 		it("shows warning when ARN region differs from provided region", () => {
 			const result = validateBedrockArn(
 				"arn:aws:bedrock:us-west-2:123456789012:inference-profile/model",
+				t,
 				"us-east-1",
 			)
 			expect(result.isValid).toBe(true) // Still valid, just a warning
@@ -733,6 +823,7 @@ describe("validateBedrockArn", () => {
 		it("shows no warning when ARN region matches provided region", () => {
 			const result = validateBedrockArn(
 				"arn:aws:bedrock:us-west-2:123456789012:inference-profile/model",
+				t,
 				"us-west-2",
 			)
 			expect(result.isValid).toBe(true)
@@ -741,14 +832,14 @@ describe("validateBedrockArn", () => {
 		})
 
 		it("shows no warning when no region is provided to check against", () => {
-			const result = validateBedrockArn("arn:aws:bedrock:us-west-2:123456789012:inference-profile/model")
+			const result = validateBedrockArn("arn:aws:bedrock:us-west-2:123456789012:inference-profile/model", t)
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBe("us-west-2")
 			expect(result.errorMessage).toBeUndefined()
 		})
 
 		it("shows no warning when region cannot be extracted from ARN", () => {
-			const result = validateBedrockArn("non-arn-format", "us-east-1")
+			const result = validateBedrockArn("non-arn-format", t, "us-east-1")
 			expect(result.isValid).toBe(true)
 			expect(result.arnRegion).toBeUndefined()
 			expect(result.errorMessage).toBeUndefined()

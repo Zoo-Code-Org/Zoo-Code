@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Möchtest du wirklich alle Zustände und geheimen Speicher in der Erweiterung zurücksetzen? Dies kann nicht rückgängig gemacht werden.",
-		"delete_config_profile": "Möchtest du dieses Konfigurationsprofil wirklich löschen?"
+		"delete_config_profile": "Möchtest du dieses Konfigurationsprofil wirklich löschen?",
+		"requesty_deep_link": "Requesty-Zugangsdaten aus einem externen Link aktivieren?",
+		"requesty_deep_link_detail": "Dies ersetzt den aktiven Anbieter. Nachfolgende Anfragen können deine Konversations- und Arbeitsbereichsinhalte senden an:\n{{url}}\n\nFahre nur fort, wenn du diese Zugangsdaten angefordert hast und diesem Ziel vertraust."
 	},
 	"errors": {
 		"invalid_data_uri": "Ungültiges Daten-URI-Format",
@@ -148,7 +150,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Ja"
+		"yes": "Ja",
+		"activate_requesty": "Requesty aktivieren"
 	},
 	"buttons": {
 		"learn_more": "Mehr erfahren"

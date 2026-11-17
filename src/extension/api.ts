@@ -657,7 +657,7 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		if (values.modeApiConfigs) {
 			await Promise.all(
 				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.providerSettingsManager.setModeConfig(mode as Mode, configId),
+					this.sidebarProvider.setModeConfig(mode as Mode, configId),
 				),
 			)
 		}

@@ -89,6 +89,13 @@
 			"includeTaskHistory": "Incluir histórico de tarefas como contexto",
 			"includeTaskHistoryDescription": "Quando habilitado, as últimas 10 mensagens da conversa atual serão incluídas como contexto ao aprimorar prompts, ajudando a gerar sugestões mais relevantes e conscientes do contexto."
 		},
+		"taskTitle": {
+			"enabled": "Gerar títulos de tarefa automaticamente",
+			"enabledDescription": "Resume em segundo plano o primeiro prompt de cada nova tarefa em um título curto. As solicitações de título não são incluídas no custo da tarefa. Perfis do GitHub Copilot e do VS Code LM consomem sua cota.",
+			"apiConfiguration": "Configuração de API",
+			"useTaskConfig": "Usar a configuração de API da tarefa",
+			"apiConfigDescription": "Recomenda-se um perfil leve, sem raciocínio. Se você escolher outro perfil, o início do seu prompt será enviado a esse provedor."
+		},
 		"types": {
 			"ENHANCE": {
 				"label": "Aprimorar Prompt",
@@ -129,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar Nova Tarefa",
 				"description": "Inicie uma nova tarefa com a entrada fornecida. Disponível na paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título da tarefa",
+				"description": "Gera em segundo plano um título curto para novas tarefas. Ele aparece no histórico e no cabeçalho da tarefa. Configure abaixo."
 			}
 		}
 	},

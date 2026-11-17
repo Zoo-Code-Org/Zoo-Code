@@ -84,6 +84,7 @@ describe("IOIntelligence", () => {
 		},
 		"standard-compute": {},
 		"kimi-code": {},
+		friendli: {},
 		ollama: {},
 		lmstudio: {},
 	}

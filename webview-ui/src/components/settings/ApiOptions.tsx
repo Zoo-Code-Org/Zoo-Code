@@ -309,11 +309,12 @@ const ApiOptions = ({
 
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
+			t,
 			routerModels,
 			organizationAllowList,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
+	}, [apiConfiguration, t, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {
@@ -379,8 +380,8 @@ const ApiOptions = ({
 	)
 
 	const modelValidationError = useMemo(() => {
-		return getModelValidationError(apiConfiguration, routerModels, organizationAllowList)
-	}, [apiConfiguration, routerModels, organizationAllowList])
+		return getModelValidationError(apiConfiguration, t, routerModels, organizationAllowList)
+	}, [apiConfiguration, t, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
 		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)
@@ -434,6 +435,12 @@ const ApiOptions = ({
 				const [openRouterOption] = options.splice(openRouterIndex, 1)
 				options.unshift(openRouterOption)
 			}
+		}
+
+		const zooGatewayIndex = options.findIndex((opt) => opt.value === providerIdentifiers.zooGateway)
+		if (zooGatewayIndex > 0) {
+			const [zooGatewayOption] = options.splice(zooGatewayIndex, 1)
+			options.unshift(zooGatewayOption)
 		}
 
 		return options
@@ -789,6 +796,7 @@ const ApiOptions = ({
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
 									apiConfiguration,
+									routerModels,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}

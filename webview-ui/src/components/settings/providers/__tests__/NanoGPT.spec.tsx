@@ -106,6 +106,7 @@ describe("NanoGPT", () => {
 		"io-intelligence": {},
 		"standard-compute": {},
 		"kimi-code": {},
+		friendli: {},
 		ollama: {},
 		lmstudio: {},
 	}

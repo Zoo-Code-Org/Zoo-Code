@@ -76,7 +76,6 @@
 			"summaryFailedNoFiles": "ファイルがコピーされる前にインポートが停止しました。",
 			"summaryCopied": "{{total}} 件中 {{copied}} 件のファイルをコピー済み",
 			"detailFailed": "新しいインポートを開始して再試行してください。",
-			"detailTasksImported_one": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
 			"detailTasksImported_other": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
 			"detailPreparing": "Roo Code の履歴インポートを準備中です。",
 			"progressAriaLabel": "Roo Code の履歴インポートの進行状況"
@@ -923,6 +922,10 @@
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
 			"toolParameters": "パラメーター"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "ダイナミック思考強度",
+			"description": "set_thinking_effort ツールを将来のサポートに備えて準備します。この設定は選好を保存するだけで、リクエストごとの動作は後続の作業で提供されます。（実験的機能）"
 		}
 	},
 	"temperature": {
@@ -953,7 +956,7 @@
 		"useAzure": "Azureを使用",
 		"azureApiVersion": "Azure APIバージョンを設定",
 		"gemini": {
-			"freeRequests": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
+			"freeRequests_other": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
 			"pricingDetails": "詳細は価格情報をご覧ください。",
 			"billingEstimate": "* 課金は見積もりです - 正確な費用はプロンプトのサイズによって異なります。"
 		}

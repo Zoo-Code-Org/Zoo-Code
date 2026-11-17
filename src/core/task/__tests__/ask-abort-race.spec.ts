@@ -48,7 +48,10 @@ describe("Task.ask abort during the auto-approval await", () => {
 		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task["lastMessageTs"]).toBeUndefined()
 	})
@@ -66,7 +69,10 @@ describe("Task.ask abort during the auto-approval await", () => {
 		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task["lastMessageTs"]).toBeUndefined()
 	})
@@ -87,7 +93,10 @@ describe("Task.ask abort during the auto-approval await", () => {
 		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["clineMessages"]).toEqual([original])
 		expect(task["saveClineMessages"]).not.toHaveBeenCalled()
 		expect(task["updateClineMessage"]).not.toHaveBeenCalled()
@@ -106,7 +115,10 @@ describe("Task.ask abort during the auto-approval await", () => {
 		setAbortLatch(task, true)
 		gate.release()
 
-		await expect(askPromise).rejects.toThrow(/aborted/)
+		await expect(askPromise).rejects.toMatchObject({
+			name: "Error",
+			message: `[RooCode#ask] task ${task.taskId}.${task.instanceId} aborted`,
+		})
 		expect(task["addToClineMessages"]).not.toHaveBeenCalled()
 		expect(task.messageQueueService.claimNextMessage()?.text).toBe("queued feedback")
 	})
