@@ -26,6 +26,7 @@ import { ApiStreamChunk } from "../transform/stream"
 import { convertToR1Format } from "../transform/r1-format"
 import { addCacheBreakpoints as addAnthropicCacheBreakpoints } from "../transform/caching/anthropic"
 import { addCacheBreakpoints as addGeminiCacheBreakpoints } from "../transform/caching/gemini"
+import { resolveCacheTtl } from "../transform/caching/ttl"
 import type { OpenRouterReasoningParams } from "../transform/reasoning"
 import { getModelParams } from "../transform/model-params"
 
@@ -306,9 +307,12 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
 		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
 			if (modelId.startsWith("google")) {
+				// Gemini markers keep their default TTL: ADR-0006 scopes the knob to
+				// Anthropic-shaped markers only, and Gemini has no 1h class.
 				addGeminiCacheBreakpoints(systemPrompt, openAiMessages)
 			} else {
-				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages)
+				// Capability comes from the resolved ModelInfo, never from the id.
+				addAnthropicCacheBreakpoints(systemPrompt, openAiMessages, resolveCacheTtl(this.options, model.info))
 			}
 		}
 

@@ -14,4 +14,4 @@ export function allowNetConnect(host?: string | RegExp) {
 }
 
 // Global mocks that many tests expect.
-global.structuredClone = global.structuredClone || ((obj: any) => JSON.parse(JSON.stringify(obj)))
+global.structuredClone = global.structuredClone || (<T>(obj: T): T => JSON.parse(JSON.stringify(obj)) as T)

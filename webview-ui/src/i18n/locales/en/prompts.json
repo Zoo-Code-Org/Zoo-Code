@@ -1,6 +1,4 @@
 {
-	"title": "Modes",
-	"done": "Done",
 	"modes": {
 		"title": "Modes",
 		"createNewMode": "Create new mode",
@@ -52,9 +50,7 @@
 		"loadFromFile": "Custom instructions specific to {{mode}} mode can also be loaded from the <span>.roo/rules-{{slug}}/</span> folder in your workspace or from the global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} and .clinerules-{{slug}} are deprecated and will stop working soon)."
 	},
 	"exportMode": {
-		"title": "Export Mode",
-		"description": "Export this mode with rules from the .roo/rules-{{slug}}/ folder combined into a shareable YAML file. The original files remain unchanged.",
-		"exporting": "Exporting..."
+		"title": "Export Mode"
 	},
 	"importMode": {
 		"selectLevel": "Choose where to import this mode:",
@@ -80,7 +76,6 @@
 		"title": "System Prompt ({{modeName}} mode)"
 	},
 	"supportPrompts": {
-		"title": "Support Prompts",
 		"resetPrompt": "Reset {{promptType}} prompt to default",
 		"prompt": "Prompt",
 		"enhance": {
@@ -93,10 +88,12 @@
 			"includeTaskHistory": "Include task history as context",
 			"includeTaskHistoryDescription": "When enabled, the last 10 messages from the current conversation will be included as context when enhancing prompts, helping to generate more relevant and context-aware suggestions."
 		},
-		"condense": {
-			"apiConfiguration": "API Configuration for Context Condensing",
-			"apiConfigDescription": "Select which API configuration to use for context condensing operations. Leave unselected to use the current active configuration.",
-			"useCurrentConfig": "Use currently selected API configuration"
+		"taskTitle": {
+			"enabled": "Generate task titles automatically",
+			"enabledDescription": "Summarizes the first prompt of each new task into a short title in the background. Title requests are not included in the task cost. GitHub Copilot and VS Code LM profiles consume your quota.",
+			"apiConfiguration": "API Configuration",
+			"useTaskConfig": "Same as the task",
+			"apiConfigDescription": "A lightweight, non-reasoning profile is recommended. If you select a different profile, the beginning of your prompt is sent to that provider."
 		},
 		"types": {
 			"ENHANCE": {
@@ -138,6 +135,10 @@
 			"NEW_TASK": {
 				"label": "Start New Task",
 				"description": "Start a new task with user input. Available in the Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Task Title",
+				"description": "Generate a short title for new tasks in the background. Shown in history and the task header. Configure it below."
 			}
 		}
 	},
@@ -195,7 +196,6 @@
 		"title": "Delete Mode",
 		"message": "Are you sure you want to delete the mode \"{{modeName}}\"?",
 		"rulesFolder": "This mode has a rules folder at {{folderPath}} that will also be deleted.",
-		"descriptionNoRules": "Are you sure you want to delete this custom mode?",
 		"confirm": "Delete",
 		"cancel": "Cancel"
 	}

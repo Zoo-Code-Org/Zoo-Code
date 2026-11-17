@@ -12,9 +12,9 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	}),
 }))
 
-const renderEditor = (title?: string) => {
+const renderEditor = (title?: string, autoTitle?: string) => {
 	const onDone = vi.fn()
-	render(<TaskTitleEditor item={{ id: "task-1", task: "Original prompt", title }} onDone={onDone} />)
+	render(<TaskTitleEditor item={{ id: "task-1", task: "Original prompt", title, autoTitle }} onDone={onDone} />)
 	return { input: screen.getByTestId("task-title-input"), onDone }
 }
 
@@ -138,5 +138,35 @@ describe("TaskTitleEditor", () => {
 
 		expect(vscode.postMessage).not.toHaveBeenCalled()
 		expect(onDone).toHaveBeenCalled()
+	})
+
+	it.each([
+		["the generated title when there is no custom title", undefined, "Generated name", "Generated name"],
+		["the custom title over the generated title", "Custom", "Generated name", "Custom"],
+	])("starts with %s", (_label, title, autoTitle, expected) => {
+		const { input } = renderEditor(title, autoTitle)
+
+		expect(input).toHaveValue(expected)
+	})
+
+	it("does nothing when saving the generated title unchanged", () => {
+		const { input, onDone } = renderEditor(undefined, "Generated name")
+
+		submit(input, "  Generated   name ")
+
+		expect(vscode.postMessage).not.toHaveBeenCalled()
+		expect(onDone).toHaveBeenCalled()
+	})
+
+	it("saves an edited generated title as a custom title", () => {
+		const { input } = renderEditor(undefined, "Generated name")
+
+		submit(input, "Edited name")
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({
+			type: "renameTaskWithId",
+			taskId: "task-1",
+			text: "Edited name",
+		})
 	})
 })

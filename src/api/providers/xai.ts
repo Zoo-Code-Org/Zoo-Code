@@ -1,5 +1,6 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
+import { v7 as uuidv7 } from "uuid"
 
 import { type XAIModelId, xaiDefaultModelId, xaiModels, ApiProviderError } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -26,10 +27,16 @@ import { isMcpTool } from "../../utils/mcp-name"
 
 const XAI_DEFAULT_TEMPERATURE = 0
 
+// Conservative length guard for `prompt_cache_key`: OpenAI's documented cap is 64
+// chars; xAI does not document a bound for this field, so we apply the same cap.
+// Task ids are uuid v7 (36 chars), so this never truncates in practice.
+const XAI_MAX_PROMPT_CACHE_KEY_LENGTH = 64
+
 export class XAIHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
 	private readonly providerName = "xAI"
+	private readonly sessionId: string = uuidv7()
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -43,6 +50,38 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			defaultHeaders: DEFAULT_HEADERS,
 			timeout: this.timeoutMs,
 		})
+	}
+
+	/**
+	 * Cache routing affinity key for the Responses API.
+	 *
+	 * xAI's prompt cache lives on individual servers, so every turn of one
+	 * conversation has to reach the same server to reuse it. For the Responses API
+	 * the documented lever is the body field `prompt_cache_key`; the
+	 * `x-grok-conv-id` header is the Chat Completions / gRPC equivalent and is not
+	 * read on this path.
+	 *
+	 * The task id is the longest-lived identifier available here: `Task.taskId` is
+	 * assigned once and restored from history on resume, so it survives restarts
+	 * and provider switches, which a per-handler session id does not. The handler
+	 * session id is the fallback for callers that send no task id, and is the sole
+	 * key for `completePrompt`, which carries no task metadata at all.
+	 *
+	 * Returns undefined (never an empty string) when there is nothing to key on or
+	 * when the model does not support prompt caching, so the field is omitted
+	 * rather than sent blank.
+	 */
+	private getPromptCacheKey(model: ReturnType<XAIHandler["getModel"]>, taskId?: string): string | undefined {
+		if (!model.info.supportsPromptCache) {
+			return undefined
+		}
+
+		const key = taskId || this.sessionId
+		if (!key) {
+			return undefined
+		}
+
+		return key.length > XAI_MAX_PROMPT_CACHE_KEY_LENGTH ? key.slice(0, XAI_MAX_PROMPT_CACHE_KEY_LENGTH) : key
 	}
 
 	override getModel() {
@@ -60,6 +99,61 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			defaultTemperature: XAI_DEFAULT_TEMPERATURE,
 		})
 		return { id, info, ...params }
+	}
+
+	/**
+	 * Map a Chat Completions tool choice to the Responses API shape so TypeScript
+	 * validates the provider payload (the APIs use different object forms for the
+	 * named-tool choices: Chat Completions nests the name under `function`/`custom`,
+	 * Responses API puts it at the top level). String options (auto/required/none)
+	 * are identical in both APIs and pass through unchanged. `allowed_tools`
+	 * entries keep their allowlist mode, but Chat Completions function references
+	 * ({ type: "function", function: { name } }) are flattened to the Responses
+	 * API shape ({ type: "function", name }); other entry types pass through
+	 * unchanged.
+	 */
+	private mapToolChoice(
+		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
+	): OpenAI.Responses.ResponseCreateParamsStreaming["tool_choice"] {
+		if (typeof toolChoice === "string") {
+			return toolChoice
+		}
+		switch (toolChoice.type) {
+			case "function":
+				return { type: "function", name: toolChoice.function.name }
+			case "custom":
+				return { type: "custom", name: toolChoice.custom.name }
+			case "allowed_tools":
+				return {
+					type: "allowed_tools",
+					mode: toolChoice.allowed_tools.mode,
+					tools: toolChoice.allowed_tools.tools.map((entry) => {
+						// Chat Completions allowlist entries nest the function reference
+						// ({ type: "function", function: { name } }); the Responses API
+						// expects the name at the top level ({ type: "function", name }).
+						// The Chat Completions type allows open records, so a function
+						// entry can arrive malformed (missing or non-string name).
+						// Forwarding it unchanged would send the nested Chat Completions
+						// shape to the Responses API, which cannot express that allowlist
+						// entry, and how xAI handles the malformed payload is unspecified;
+						// reject it at the boundary instead.
+						if (entry["type"] === "function") {
+							const functionRef = entry["function"]
+							const name =
+								functionRef != null && typeof functionRef === "object"
+									? (functionRef as Record<string, unknown>)["name"]
+									: undefined
+							if (typeof name !== "string") {
+								throw new Error(
+									'xAI: allowed_tools entry of type "function" is missing a valid function name',
+								)
+							}
+							return { type: "function", name }
+						}
+						return entry
+					}),
+				}
+		}
 	}
 
 	/**
@@ -101,18 +195,11 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 		// Convert directly from Anthropic format to Responses API input format
 		const input = convertToResponsesApiInput(messages)
 		const responseTools = this.mapResponseTools(metadata?.tools)
-
-		// Bridge the external abort signal from request metadata into a per-request
-		// controller so the SDK call is cancelled when the owning request is aborted
-		// (or when the signal is already aborted). Without an external signal the
-		// client-level timeout configured in the constructor remains the only
-		// cancellation mechanism, preserving the existing behavior.
-		const externalAbortSignal = metadata?.abortSignal
-		const { signal: abortSignal, dispose: removeExternalAbortListener } =
-			bridgeExternalAbortSignal(externalAbortSignal)
+		const toolChoice = metadata?.tool_choice
+		const parallelToolCalls = metadata?.parallelToolCalls
 
 		// Build request options
-		const requestBody: Record<string, any> = {
+		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
 			model: model.id,
 			instructions: systemPrompt,
 			input: input,
@@ -121,19 +208,22 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			include: ["reasoning.encrypted_content"],
 		}
 
-		if (model.maxTokens) {
-			requestBody.max_output_tokens = model.maxTokens
+		// Route every turn of this task to the server holding its cache.
+		const promptCacheKey = this.getPromptCacheKey(model, metadata?.taskId)
+		if (promptCacheKey) {
+			requestBody.prompt_cache_key = promptCacheKey
 		}
 
-		if (model.temperature !== undefined) {
-			requestBody.temperature = model.temperature
-		}
+		// Model params are always resolved by getModel(); send them unconditionally.
+		requestBody.max_output_tokens = model.maxTokens
+		requestBody.temperature = model.temperature
 
 		if (responseTools) {
 			requestBody.tools = responseTools
-			// Cast tool_choice since metadata uses Chat Completions types but Responses API has its own type
-			requestBody.tool_choice = (metadata?.tool_choice ?? "auto") as any
-			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+			// Metadata carries a Chat Completions tool choice; the Responses API
+			// uses its own shape, so map it explicitly instead of casting.
+			requestBody.tool_choice = this.mapToolChoice(toolChoice === undefined ? "auto" : toolChoice)
+			requestBody.parallel_tool_calls = parallelToolCalls ?? true
 		}
 
 		// Pass reasoning effort for models that support it (e.g., grok-4.5, grok-3-mini).
@@ -143,11 +233,19 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 			requestBody.reasoning = { effort: model.reasoning.reasoning_effort }
 		}
 
+		// Bridge the external abort signal only after every throw-prone part of the request
+		// construction (notably mapToolChoice, which rejects malformed allowed_tools entries)
+		// has run: the bridge's cleanup covers the request below, not construction failures,
+		// so registering earlier would leak a listener on metadata.abortSignal.
+		const externalAbortSignal = metadata?.abortSignal
+		const { signal: abortSignal, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+
 		try {
 			let stream: AsyncIterable<any>
 			try {
 				stream = (await this.client.responses.create(
-					{ ...requestBody, stream: true } as any,
+					requestBody,
 					abortSignal ? { signal: abortSignal } : undefined,
 				)) as unknown as AsyncIterable<any>
 			} catch (error) {
@@ -202,11 +300,15 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 				requestOptions.timeout = toSdkTimeoutMs(timeoutMs)
 			}
 
+			const promptCacheKey = this.getPromptCacheKey(model)
 			const response = await this.client.responses.create(
 				{
 					model: model.id,
 					input: [{ role: "user", content: [{ type: "input_text", text: prompt }] }],
 					store: false,
+					// A completion is its own cache scope: no task metadata exists on
+					// this path, so the handler session id is the whole key.
+					...(promptCacheKey ? { prompt_cache_key: promptCacheKey } : {}),
 				},
 				Object.keys(requestOptions).length > 0 ? requestOptions : undefined,
 			)

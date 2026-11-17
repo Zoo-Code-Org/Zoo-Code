@@ -9,6 +9,8 @@ import { type ModelInfo, type ModelRecord, litellmDefaultModelId, litellmDefault
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
+import { withSettleGuard } from "../../../test-utils/settle-guard"
+import { flushMacrotasks } from "../../../test-utils/timers"
 
 // Mock vscode first to avoid import errors
 vi.mock("vscode", () => ({
@@ -1571,7 +1573,7 @@ describe("LiteLLMHandler", () => {
 			const completion = handler
 				.completePrompt("test prompt", { abortSignal: controller.signal })
 				.catch((e: unknown) => e)
-			await new Promise((resolve) => setTimeout(resolve, 10))
+			await flushMacrotasks()
 			controller.abort()
 
 			const error = await completion
@@ -1789,13 +1791,7 @@ describe("LiteLLMHandler", () => {
 
 			// Bound the wait so a broken abort bridge fails this test fast (and fails
 			// the Stryker mutant) instead of hanging until the runner timeout.
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("abort propagation deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
@@ -1869,13 +1865,7 @@ describe("LiteLLMHandler", () => {
 
 			// Bound the wait so a broken discovery race fails this test fast
 			// (and fails the Stryker mutant) instead of hanging.
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
@@ -1961,13 +1951,7 @@ describe("LiteLLMHandler", () => {
 			await discoveryStarted
 			controller.abort()
 
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
@@ -2027,7 +2011,7 @@ describe("LiteLLMHandler", () => {
 			// an erroneous early settlement (e.g. the abort leaking into the
 			// sibling) settles `sibling` in a microtask, so an assertion
 			// right after attaching the callback could never observe it.
-			await new Promise<void>((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 			expect(siblingSettled).toBe(false)
 
 			// ...and settles normally once the shared discovery resolves.
@@ -2057,13 +2041,7 @@ describe("LiteLLMHandler", () => {
 			await discoveryStarted
 			controller.abort()
 
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("discovery abort deadline exceeded")), 3000)
-				collector.then((result) => {
-					clearTimeout(deadline)
-					resolve(result)
-				})
-			})
+			const error = await withSettleGuard(collector, 3000)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("AbortError")
 			expect((error as Error).message).toBe("The LiteLLM request was aborted")
@@ -2076,19 +2054,13 @@ describe("LiteLLMHandler", () => {
 			// instead of the abort contract error.
 			vi.mocked(getModels).mockImplementationOnce(() => new Promise<ModelRecord>(() => {}))
 
-			const error = await new Promise<unknown>((resolve) => {
-				const deadline = setTimeout(() => resolve(new Error("timeout deadline exceeded")), 3000)
+			const error = await withSettleGuard(
 				handler.completePrompt("test prompt", { timeoutMs: 50 }).then(
-					() => {
-						clearTimeout(deadline)
-						resolve(new Error("completePrompt unexpectedly resolved"))
-					},
-					(e) => {
-						clearTimeout(deadline)
-						resolve(e)
-					},
-				)
-			})
+					() => new Error("completePrompt unexpectedly resolved"),
+					(e: unknown) => e,
+				),
+				3000,
+			)
 			expect(error).toBeInstanceOf(Error)
 			expect((error as Error).name).toBe("TimeoutError")
 			expect((error as Error).message).toBe("The LiteLLM model discovery timed out")
@@ -2103,6 +2075,7 @@ describe("LiteLLMHandler", () => {
 				vi.mocked(getModels).mockImplementationOnce(
 					() =>
 						new Promise<ModelRecord>((resolve) => {
+							// eslint-disable-next-line no-restricted-globals -- vi.useFakeTimers drives this timer
 							setTimeout(() => resolve({ [litellmDefaultModelId]: litellmDefaultModelInfo }), 50)
 						}),
 				)

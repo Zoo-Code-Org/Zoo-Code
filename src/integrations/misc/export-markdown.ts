@@ -14,6 +14,7 @@ interface ThoughtSignatureBlock {
 export type ExtendedContentBlock =
 	| Anthropic.Messages.ContentBlockParam
 	| Anthropic.Messages.ToolReferenceBlockParam
+	| Anthropic.Messages.BrowserStateBlockParam
 	| ReasoningBlock
 	| ThoughtSignatureBlock
 
@@ -73,6 +74,8 @@ export function formatContentBlockToMarkdown(block: ExtendedContentBlock): strin
 			return `[Search Result]`
 		case "tool_reference":
 			return `[Tool Reference]`
+		case "browser_state":
+			return `[Browser State]`
 		case "tool_use": {
 			let input: string
 			if (typeof block.input === "object" && block.input !== null) {

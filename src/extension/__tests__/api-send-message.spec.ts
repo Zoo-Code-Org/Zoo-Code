@@ -12,8 +12,8 @@ describe("API - SendMessage Command", () => {
 	let api: API
 	let mockOutputChannel: vscode.OutputChannel
 	let mockProvider: ClineProvider
-	let mockPostMessageToWebview: ReturnType<typeof vi.fn<(...args: any[]) => any>>
-	let mockLog: ReturnType<typeof vi.fn<(...args: any[]) => void>>
+	let mockPostMessageToWebview: ReturnType<typeof vi.fn<(message: unknown) => Promise<void>>>
+	let mockLog: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>
 
 	beforeEach(() => {
 		// Setup mocks
@@ -21,7 +21,7 @@ describe("API - SendMessage Command", () => {
 			appendLine: vi.fn(),
 		} as unknown as vscode.OutputChannel
 
-		mockPostMessageToWebview = vi.fn<(...args: any[]) => any>().mockResolvedValue(undefined)
+		mockPostMessageToWebview = vi.fn<(message: unknown) => Promise<void>>().mockResolvedValue(undefined)
 
 		mockProvider = {
 			context: {} as vscode.ExtensionContext,
@@ -32,12 +32,12 @@ describe("API - SendMessage Command", () => {
 			viewLaunched: true,
 		} as unknown as ClineProvider
 
-		mockLog = vi.fn<(...args: any[]) => void>()
+		mockLog = vi.fn<(...args: unknown[]) => void>()
 
 		// Create API instance with logging enabled for testing
 		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
 		// Override the log method to use our mock
-		;(api as any).log = mockLog
+		Object.assign(api, { log: mockLog })
 	})
 
 	it("should handle SendMessage command with text only", async () => {
