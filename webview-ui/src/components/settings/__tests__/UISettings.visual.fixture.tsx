@@ -14,7 +14,7 @@ interface UIState {
 	autoCloseZooOpenedNewFiles?: boolean
 }
 
-export function UISettingsStory() {
+export function UISettingsStory({ initialState }: Pick<React.ComponentProps<typeof AppProviders>, "initialState">) {
 	const [state, setState] = useState<UIState>({
 		reasoningBlockCollapsed: true,
 		enterBehavior: "send",
@@ -42,7 +42,7 @@ export function UISettingsStory() {
 	}
 
 	return (
-		<AppProviders>
+		<AppProviders initialState={initialState}>
 			<div
 				data-testid="ui-settings-story"
 				className="w-[488px] max-w-full rounded-lg border border-vscode-panel-border bg-vscode-editor-background p-4 text-vscode-editor-foreground">

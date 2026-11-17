@@ -275,8 +275,9 @@ export async function summarizeConversation(options: SummarizeConversationOption
 
 	const response: SummarizeResponse = { messages, cost: 0, summary: "" }
 
-	// Get messages to summarize (all messages since the last summary, if any)
-	const messagesToSummarize = getMessagesSinceLastSummary(messages)
+	// Get effective history to summarize (all messages since the last summary, if any)
+	const effectiveHistory = getEffectiveApiHistory(messages)
+	const messagesToSummarize = getMessagesSinceLastSummary(effectiveHistory)
 
 	if (messagesToSummarize.length <= 1) {
 		const error =

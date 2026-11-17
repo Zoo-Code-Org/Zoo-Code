@@ -29,6 +29,17 @@ import type {
 import { RouterProvider } from "./router-provider"
 import { getLiteLLMModels } from "./fetchers/litellm"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import {
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	mergeAbortSignals,
+	rejectOnAbort,
+	throwIfAborted,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
 
 /**
  * LiteLLM provider handler
@@ -149,7 +160,33 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		throwIfAborted(metadata?.abortSignal)
+
+		// Model discovery is shared single-flight (RouterProvider.fetchModel):
+		// concurrent callers join one in-flight fetch, so the fetch itself
+		// carries no request signal — one caller's abort would reject other
+		// requests' shared discovery. Cancellation during discovery is a
+		// rejectOnAbort race: this request settles promptly with AbortError
+		// while the shared fetch keeps running.
+		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
+		try {
+			if (metadata?.abortSignal) {
+				model = await rejectOnAbort(this.fetchModel(), metadata.abortSignal, "LiteLLM")
+			} else {
+				model = await this.fetchModel()
+			}
+		} catch (error) {
+			// An abort landing while discovery fails must still surface as the
+			// standard AbortError, not the fetcher's generic model-fetch error.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
+			throw error
+		}
+		const { id: modelId, info } = model
 
 		// Models that require reasoning_content to be echoed back during tool-call
 		// continuations (see LITELLM_PRESERVE_REASONING_MODEL_IDS) need convertToR1Format:
@@ -283,29 +320,48 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestHeaders["X-Zoo-Session-ID"] = metadata.taskId
 		}
 
+		// The request-local controller is the provider-owned abort handle; the
+		// request signal merges it with the external Task signal (AbortSignal.any
+		// inside RequestConfigBuilder), so external aborts cancel the in-flight
+		// request without manual listener management.
+		const requestBuilder = new RequestConfigBuilder<{ signal?: AbortSignal }>()
+		requestBuilder.addMergedSignal(new AbortController(), metadata)
+		const requestSignal = requestBuilder.getOption("signal")
+
 		try {
 			const { data: completion } = await this.client.chat.completions
-				.create(requestOptions, { headers: requestHeaders })
+				.create(requestOptions, { headers: requestHeaders, signal: requestSignal })
 				.withResponse()
 
 			let lastUsage
 
 			for await (const chunk of completion) {
+				// Stop consuming buffered chunks once the request is aborted (the
+				// OpenAI SDK iterator may keep delivering buffered content after
+				// abort, and swallows the mid-stream AbortError).
+				if (requestSignal?.aborted) {
+					break
+				}
+
 				const delta = chunk.choices[0]?.delta
 				const usage = chunk.usage as LiteLLMUsage
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
+					// No pre-yield guard: this is the first yield of the iteration —
+					// the top-of-loop check runs without a suspension point before it.
 					yield { type: "reasoning", text: reasoningText }
 				}
 
 				if (delta?.content) {
+					throwIfAborted(requestSignal)
 					yield { type: "text", text: delta.content }
 				}
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
+						throwIfAborted(requestSignal)
 						yield {
 							type: "tool_call_partial",
 							index: toolCall.index,
@@ -320,6 +376,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 					lastUsage = usage
 				}
 			}
+
+			// An aborted request must surface as an AbortError, not as a normal
+			// stream completion: the top-of-loop break (or a swallowed mid-stream
+			// abort) ends the loop without throwing otherwise.
+			throwIfAborted(requestSignal)
 
 			if (lastUsage) {
 				// Extract cache-related information if available
@@ -355,6 +416,11 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				yield usageData
 			}
 		} catch (error) {
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, metadata?.abortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM streaming error: ${error.message}`)
 			}
@@ -362,12 +428,78 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Fast-fail if the request was already aborted before building, so an
+		// already-aborted request fails with AbortError before provider model
+		// discovery (getModels/refreshModels) begins.
+		const callerAbortSignal = options?.abortSignal
+		throwIfAborted(callerAbortSignal)
+
+		// A single deadline spans model discovery and the completion request:
+		// discovery consumes part of the configured timeout, so the SDK call
+		// must receive only the remaining budget, not the full timeoutMs.
+		// timeoutMs <= 0 means no per-request timeout and no deadline.
+		const timeoutMs = getRequestTimeoutMs(options?.timeoutMs)
+		const deadline = timeoutMs !== undefined ? Date.now() + timeoutMs : undefined
+
+		// Per the abort-signal series contract, the merged signal (external
+		// abort + per-request timeout, timeoutMs <= 0 disabling the timeout)
+		// also bounds model discovery: a stalled cold-cache fetch must settle
+		// promptly when the caller cancels or the timeout elapses.
+		const discoverySignal = mergeAbortSignalAndTimeout(options?.abortSignal, timeoutMs)
+
+		// Model discovery is shared single-flight (RouterProvider.fetchModel):
+		// concurrent callers join one in-flight fetch, so the fetch itself
+		// carries no request signal — one caller's abort would reject other
+		// requests' shared discovery. Cancellation during discovery is a
+		// rejectOnAbort race: this request settles promptly while the shared
+		// fetch keeps running.
+		let model: Awaited<ReturnType<LiteLLMHandler["fetchModel"]>>
+		try {
+			if (discoverySignal) {
+				model = await rejectOnAbort(this.fetchModel(), discoverySignal, "LiteLLM")
+			} else {
+				model = await this.fetchModel()
+			}
+		} catch (error) {
+			// An abort landing while discovery fails must still surface as the
+			// standard AbortError, not the fetcher's generic model-fetch error.
+			if (isRequestAborted(error, discoverySignal)) {
+				if (discoverySignal?.aborted) {
+					// Our merged signal fired: a caller stop surfaces as the
+					// standard AbortError, while the per-request timeout
+					// elapsing during discovery is a timeout — it must not be
+					// misreported as a user cancellation.
+					throw callerAbortSignal?.aborted
+						? createAbortError("LiteLLM")
+						: createTimeoutError("LiteLLM", "model discovery")
+				}
+				// The signal never aborted: the fetcher itself failed with an
+				// AbortError-shaped error; normalize to the standard AbortError.
+				throw createAbortError("LiteLLM")
+			}
+			throw error
+		}
+		const { id: modelId, info } = model
 
 		// Check if this is a GPT-5 model that requires max_completion_tokens instead of max_tokens
 		const usesMaxCompletionTokens = this.isGpt5(modelId) || info.requiresResponsesApi
 		const reasoningEffort = this.getReasoningEffort(info)
+
+		// The absolute deadline is enforced THROUGH the SDK call, not just as a
+		// per-attempt timeout: the SDK's `timeout` option bounds one attempt,
+		// and its default two retries each add a backoff sleep that is not
+		// signal-aware (a 30ms budget otherwise elapsed ~1.5s across three
+		// attempts). The deadline signal merged with the caller's signal aborts
+		// in-flight attempts and makes the SDK's next attempt short-circuit at
+		// its pre-flight `signal.aborted` check, and the rejectOnAbort race
+		// below settles the caller at the deadline even while the SDK is
+		// mid-retry-sleep. Retries stay enabled within the remaining budget.
+		const remainingMs =
+			deadline !== undefined && Number.isFinite(deadline) ? toSdkTimeoutMs(deadline - Date.now()) : undefined
+		// The shared helper applies the series' timeout semantics (cap at 2^31-1 ms,
+		// finite positive only) instead of handing a raw delay to AbortSignal.timeout.
+		const deadlineSignal = mergeAbortSignalAndTimeout(undefined, remainingMs)
 
 		try {
 			const requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
@@ -389,9 +521,48 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				requestOptions.max_tokens = info.maxTokens
 			}
 
-			const response = await this.client.chat.completions.create(requestOptions)
+			// Build request options with abortSignal and/or timeout. Per the
+			// abort-signal series contract, timeoutMs <= 0 means 'no per-request
+			// timeout': the option is omitted entirely, because the OpenAI SDK treats
+			// a timeout of 0 as an immediate timeout.
+			const createOptions: OpenAI.RequestOptions = {}
+			// mergeAbortSignals returns the caller's signal directly when no deadline
+			// exists, so one expression covers all four caller/deadline combinations.
+			const requestSignal = callerAbortSignal
+				? mergeAbortSignals(callerAbortSignal, deadlineSignal)
+				: deadlineSignal
+			if (requestSignal) {
+				createOptions.signal = requestSignal
+			}
+			if (remainingMs !== undefined) {
+				// Only the remaining budget reaches the SDK: model discovery has
+				// already consumed part of the configured timeout.
+				createOptions.timeout = remainingMs
+			}
+
+			const request = this.client.chat.completions.create(
+				requestOptions,
+				Object.keys(createOptions).length > 0 ? createOptions : undefined,
+			)
+			// Race the merged signal, not just the deadline: the SDK's retry backoff
+			// sleep is not signal-aware, so a caller cancellation during a retry
+			// wait must settle immediately instead of waiting the sleep out. The
+			// catch above keeps deadline expiry classified as a timeout first.
+			const response = requestSignal ? await rejectOnAbort(request, requestSignal, "LiteLLM") : await request
 			return response.choices[0]?.message.content || ""
 		} catch (error) {
+			// Deadline expiry is distinct from caller cancellation: the SDK reports
+			// the deadline as an abort-shaped error (APIUserAbortError), so check
+			// the deadline first — with the caller still running it must surface as
+			// a timeout, never masquerade as the cancellation AbortError.
+			if (deadlineSignal?.aborted && !callerAbortSignal?.aborted) {
+				throw createTimeoutError("LiteLLM", "completion request")
+			}
+			// Aborted request: covers both the external signal and SDK-native
+			// abort errors that may surface before the signal flag propagates.
+			if (isRequestAborted(error, callerAbortSignal)) {
+				throw createAbortError("LiteLLM")
+			}
 			if (error instanceof Error) {
 				throw new Error(`LiteLLM completion error: ${error.message}`)
 			}

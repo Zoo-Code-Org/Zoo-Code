@@ -3,7 +3,20 @@ import * as fsSync from "fs"
 import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
+import { getErrorCode } from "./errorCode"
 import { acquireFileLock } from "./fileLock"
+import { recoverInterruptedReplacement } from "./jsonFileRecovery"
+
+/**
+ * Stages reported through the optional `trace` callback. They mark the
+ * replacement-protocol steps that matter when diagnosing interrupted or
+ * failing writes: the recovery pass, the temp-file write, the backup rename
+ * of the EPERM fallback, the commit rename, and completion.
+ */
+export type SafeWriteJsonTraceStage =
+	"recover" | "write-start" | "backup-rename" | "replacement-rename" | "write-complete"
+
+export type SafeWriteJsonTrace = (event: { stage: SafeWriteJsonTraceStage; detail?: string }) => void
 
 /**
  * Options for safeWriteJson function
@@ -37,24 +50,39 @@ export interface SafeWriteJsonOptions {
 	 * rename it guards.
 	 */
 	preCommit?: () => void
+
+	/**
+	 * When provided, receives one event per replacement-protocol step (see
+	 * SafeWriteJsonTraceStage). Callers such as the task-message save use it
+	 * to emit diagnostic trace lines; it never influences the write itself.
+	 */
+	trace?: SafeWriteJsonTrace
+}
+
+function createTempFilePath(absoluteFilePath: string, kind: "new" | "bak"): string {
+	return path.join(
+		path.dirname(absoluteFilePath),
+		`.${path.basename(absoluteFilePath)}.${kind}_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
+	)
 }
 
 /**
  * Safely writes JSON data to a file.
  * - Creates parent directories if they don't exist
  * - Uses 'proper-lockfile' for inter-process advisory locking to prevent concurrent writes to the same path.
- * - Writes to a temporary file first.
- * - If the target file exists, it's backed up before being replaced.
+ * - Recovers an interrupted previous write before touching the file: restores an orphaned backup when the canonical path is absent, and removes leftover temp files.
+ * - Writes to a temporary file first, then commits it with a single atomic rename, so the committed target stays readable through an interrupted write.
+ * - When a single rename over the target fails with EPERM (a reader holds the file open on Windows), falls back to backing the target up before replacing it.
  * - Attempts to roll back and clean up in case of errors.
  * - Supports pretty-printing with indentation while maintaining streaming efficiency.
  *
  * @param {string} filePath - The absolute path to the target file.
- * @param {any} data - The data to serialize to JSON and write.
+ * @param {unknown} data - The data to serialize to JSON and write.
  * @param {SafeWriteJsonOptions} options - Optional configuration for JSON formatting.
  * @returns {Promise<void>}
  */
 
-async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJsonOptions): Promise<void> {
+async function safeWriteJson(filePath: string, data: unknown, options?: SafeWriteJsonOptions): Promise<void> {
 	const absoluteFilePath = path.resolve(filePath)
 	let releaseLock = async () => {} // Initialized to a no-op
 
@@ -68,7 +96,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 
 		// Verify directory exists after creation attempt
 		await fs.access(dirPath)
-	} catch (dirError: any) {
+	} catch (dirError: unknown) {
 		console.error(`Failed to create or access directory for ${absoluteFilePath}:`, dirError)
 		throw dirError
 	}
@@ -87,6 +115,18 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 	let actualTempBackupFilePath: string | null = null
 
 	try {
+		// Heal any state an interrupted previous write left behind: an absent
+		// canonical path with an orphaned backup, or leftover replacement
+		// files. Runs first so a merge callback reads the restored content.
+		const recovery = await recoverInterruptedReplacement(absoluteFilePath).catch((error: unknown) => {
+			const code = getErrorCode(error) ?? "unknown"
+			options?.trace?.({ stage: "recover", detail: `failed:${code}` })
+			throw error
+		})
+		if (recovery.foundLeftovers) {
+			options?.trace?.({ stage: "recover", detail: recovery.restoredFrom ?? "cleaned-leftovers" })
+		}
+
 		// If a merge callback was provided, read the current file under the lock
 		// and let the caller merge before we write. Must be inside try/finally
 		// so a throwing merge still releases the lock.
@@ -95,8 +135,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			try {
 				existing = JSON.parse(await fs.readFile(absoluteFilePath, "utf8"))
 			} catch (error: unknown) {
-				const code =
-					error && typeof error === "object" && "code" in error ? (error as { code: string }).code : undefined
+				const code = getErrorCode(error)
 				if (!(error instanceof SyntaxError) && code !== "ENOENT") {
 					throw error
 				}
@@ -104,46 +143,51 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			data = options.merge(existing, data)
 		}
 
-		// Step 1: Write data to a new temporary file.
-		actualTempNewFilePath = path.join(
-			path.dirname(absoluteFilePath),
-			`.${path.basename(absoluteFilePath)}.new_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-		)
+		// Step 1: Write data to a new temporary file and flush it to storage,
+		// making a best-effort flush before committing the replacement.
+		options?.trace?.({ stage: "write-start" })
+		actualTempNewFilePath = createTempFilePath(absoluteFilePath, "new")
 
 		await _streamDataToFile(actualTempNewFilePath, data, options?.prettyPrint)
+		await _flushFileToDisk(actualTempNewFilePath)
 
-		// Step 2: Check if the target file exists. If so, rename it to a backup path.
+		// Step 2: Commit the replacement with a single atomic rename. The
+		// committed target stays in place until this rename lands, so a
+		// process exit before or during the commit can no longer leave the
+		// canonical path absent.
 		try {
-			// Check for target file existence
-			await fs.access(absoluteFilePath)
-			// Target exists, create a backup path and rename.
-			actualTempBackupFilePath = path.join(
-				path.dirname(absoluteFilePath),
-				`.${path.basename(absoluteFilePath)}.bak_${Date.now()}_${Math.random().toString(36).substring(2)}.tmp`,
-			)
-			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-		} catch (accessError: any) {
-			// Explicitly type accessError
-			if (accessError.code !== "ENOENT") {
-				// An error other than "file not found" occurred during access check.
-				throw accessError
+			options?.trace?.({ stage: "replacement-rename" })
+			await fs.rename(actualTempNewFilePath, absoluteFilePath)
+		} catch (renameError: unknown) {
+			if (getErrorCode(renameError) !== "EPERM") {
+				throw renameError
 			}
-			// Target file does not exist, so no backup is made. actualTempBackupFilePath remains null.
-		}
 
-		// Step 3: Rename the new temporary file to the target file path.
-		// This is the main "commit" step. `preCommit` runs immediately before it
-		// with no await in between, so a caller can abort with nothing committed
-		// (the backup restore in the catch below puts the original back).
-		options?.preCommit?.()
-		await fs.rename(actualTempNewFilePath, absoluteFilePath)
+			// A single rename over a file that a reader holds open fails with
+			// EPERM on Windows, so fall back to the two-step replacement:
+			// rename the target to a backup, then the replacement into place.
+			// The rollback in the catch below restores the backup when the
+			// second rename fails, and the recovery pass at the start of the
+			// next write repairs a crash between the two renames.
+			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
+			actualTempBackupFilePath = createTempFilePath(absoluteFilePath, "bak")
+			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
+			// `preCommit` runs immediately before the fallback's replacement
+			// rename with no await in between, so a caller can abort with
+			// nothing committed (the backup restore in the catch below puts
+			// the original back).
+			options?.preCommit?.()
+			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
+			await fs.rename(actualTempNewFilePath, absoluteFilePath)
+		}
 
 		// If we reach here, the new file is successfully in place.
 		// The original actualTempNewFilePath is now the main file, so we shouldn't try to clean it up as "temp".
 		// Mark as "used" or "committed"
 		actualTempNewFilePath = null
+		options?.trace?.({ stage: "write-complete" })
 
-		// Step 4: If a backup was created, attempt to delete it.
+		// Step 3: If a backup was created, attempt to delete it.
 		if (actualTempBackupFilePath) {
 			try {
 				await fs.unlink(actualTempBackupFilePath)
@@ -191,9 +235,10 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
 			}
 		}
 
-		// A backup still set here means the rollback rename failed, so it holds the
-		// only copy of the original file. Never unlink it: report the path so the
-		// data is recoverable by hand instead of being destroyed by cleanup.
+		// A failed rollback leaves the backup as the only committed copy.
+		// Preserve it for recovery by a later writer: never unlink it, report
+		// the path so the data is recoverable by hand instead of being
+		// destroyed by cleanup.
 		if (actualTempBackupFilePath) {
 			console.error(`[Catch] Keeping backup ${actualTempBackupFilePath}: rollback failed, original not restored`)
 		}
@@ -218,7 +263,7 @@ async function safeWriteJson(filePath: string, data: any, options?: SafeWriteJso
  * @param prettyPrint Whether to format the JSON with indentation.
  * @returns Promise<void>
  */
-async function _streamDataToFile(targetPath: string, data: any, prettyPrint = false): Promise<void> {
+async function _streamDataToFile(targetPath: string, data: unknown, prettyPrint = false): Promise<void> {
 	// Stream data to avoid high memory usage for large JSON objects.
 	const fileWriteStream = fsSync.createWriteStream(targetPath, { encoding: "utf8" })
 
@@ -237,6 +282,25 @@ async function _streamDataToFile(targetPath: string, data: any, prettyPrint = fa
 		fileWriteStream.on("finish", resolve)
 		stringifyStream.pipe(fileWriteStream)
 	})
+}
+
+/**
+ * Flushes a fully written temp file to storage before it is committed.
+ * Best effort: durability against power loss is a bonus here, process-crash
+ * safety comes from the rename protocol itself, and a filesystem that
+ * refuses fsync must not block the write.
+ */
+async function _flushFileToDisk(targetPath: string): Promise<void> {
+	try {
+		const handle = await fs.open(targetPath, "r+")
+		try {
+			await handle.sync()
+		} finally {
+			await handle.close()
+		}
+	} catch (flushError) {
+		console.error(`Failed to flush ${targetPath} to storage before commit:`, flushError)
+	}
 }
 
 export { safeWriteJson }
