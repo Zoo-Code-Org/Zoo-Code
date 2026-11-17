@@ -350,8 +350,8 @@ function sharedStoreCarriesProfileRecord(store: ProviderSettings, record: Record
  * ordinary "the save failed and nothing changed" outcome the caller's `undefined` would suggest.
  */
 class ProfileActivationInconsistentError extends Error {
-	constructor(message: string) {
-		super(message)
+	constructor(message: string, options?: ErrorOptions) {
+		super(message, options)
 		this.name = "ProfileActivationInconsistentError"
 	}
 }
@@ -3180,16 +3180,20 @@ export class ClineProvider
 
 	/**
 	 * Compensate the profile activation writes after one of them failed. Every
-	 * restore is awaited independently and logged: one failed restore must not
-	 * strand the others. The caller rethrows the original failure.
+	 * restore is awaited independently and logged, and every failure is named in the
+	 * list this returns: one failed restore must not strand the others, and the
+	 * caller cannot tell a complete rollback from a partial one without being told.
+	 * Each restore here undoes a write this group made, so each one is required.
 	 */
-	private async _restoreProfileActivationState(snapshot: ProfileActivationSnapshot): Promise<void> {
+	private async _restoreProfileActivationState(snapshot: ProfileActivationSnapshot): Promise<string[]> {
+		const restoreFailures: string[] = []
 		try {
 			await this.updateGlobalState("listApiConfigMeta", snapshot.listApiConfigMeta)
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the profile list: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(`the profile list: ${error instanceof Error ? error.message : String(error)}`)
 		}
 		try {
 			// Restore the shared selection through the ContextProxy directly:
@@ -3201,12 +3205,18 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the current profile selection: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(
+				`the current profile selection: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
 		try {
 			await this.contextProxy.setProviderSettings(snapshot.providerSettings)
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the shared provider settings: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			restoreFailures.push(
+				`the shared provider settings: ${error instanceof Error ? error.message : String(error)}`,
 			)
 		}
 		try {
@@ -3221,6 +3231,7 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the view-local overlay: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(`the view-local overlay: ${error instanceof Error ? error.message : String(error)}`)
 		}
 		try {
 			// Restore the siblings the activation's pruning evicted, last, so it
@@ -3248,7 +3259,29 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the durable viewStates map: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(
+				`the durable viewStates map: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
+		return restoreFailures
+	}
+
+	/**
+	 * Name the compensation failure for a caller: the durable writes this mutation landed
+	 * are still in place in some store, so the stores no longer agree with each other.
+	 * The failure the caller would have seen is named in the message because the caller is
+	 * no longer looking at it.
+	 */
+	private _incompleteRollbackError(
+		context: string,
+		restoreFailures: string[],
+		original: unknown,
+	): ProfileActivationInconsistentError {
+		const originalMessage = original instanceof Error ? original.message : String(original)
+		return new ProfileActivationInconsistentError(
+			`${context} failed after its durable writes landed and the rollback was incomplete (${restoreFailures.join("; ")}); the persisted profile stores may now disagree. Original failure: ${originalMessage}`,
+			{ cause: original instanceof Error ? original : undefined },
+		)
 	}
 
 	/**
@@ -3325,11 +3358,17 @@ export class ClineProvider
 	 * landed. A record the mutation created is deleted; a deletion that refuses
 	 * (last remaining configuration) is logged and leaves the record behind.
 	 */
+	/**
+	 * Every failure this restore makes is named in the returned list, for the same reason
+	 * as the activation restores: a caller that rethrows the mutation failure cannot
+	 * otherwise tell whether the record came back or stayed on what the failed save wrote.
+	 */
 	private async _restoreProviderManagerRecord(
 		name: string,
 		snapshot: ProviderManagerSnapshot,
 		written?: ProviderSettings,
-	): Promise<void> {
+	): Promise<string[]> {
+		const restoreFailures: string[] = []
 		try {
 			if (snapshot.recordExisted === true && snapshot.previousRecord) {
 				if (written && !(await this._managerRecordStillHolds(name, written))) {
@@ -3338,7 +3377,8 @@ export class ClineProvider
 					this.log(
 						`[ClineProvider] skipping the provider-manager record rollback for '${name}': the stored record was superseded`,
 					)
-					return
+					// A deliberate skip is not a failure: a newer save owns that record now.
+					return []
 				}
 				await this.providerSettingsManager.saveConfig(name, snapshot.previousRecord)
 			} else if (snapshot.recordExisted === false) {
@@ -3359,7 +3399,11 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-mutation rollback failed for the provider-manager record: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(
+				`the provider-manager record: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
+		return restoreFailures
 	}
 
 	/**
@@ -3397,9 +3441,11 @@ export class ClineProvider
 	}
 
 	/**
-	 * Restore the manager-owned current selection captured by a prior snapshot.
+	 * Restore the manager-owned current selection captured by a prior snapshot. A restore
+	 * that fails is named in the returned list for the caller to weigh.
 	 */
-	private async _restoreProviderManagerSelection(snapshot: ProviderManagerSnapshot): Promise<void> {
+	private async _restoreProviderManagerSelection(snapshot: ProviderManagerSnapshot): Promise<string[]> {
+		const restoreFailures: string[] = []
 		try {
 			if (snapshot.previousCurrentProfileName) {
 				await this.providerSettingsManager.activateProfile({ name: snapshot.previousCurrentProfileName })
@@ -3408,7 +3454,11 @@ export class ClineProvider
 			this.log(
 				`[ClineProvider] profile-mutation rollback failed for the provider-manager selection: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			restoreFailures.push(
+				`the provider-manager selection: ${error instanceof Error ? error.message : String(error)}`,
+			)
 		}
+		return restoreFailures
 	}
 
 	async upsertProviderProfile(
@@ -3563,7 +3613,10 @@ export class ClineProvider
 			// rejection may still have landed the record: route through the
 			// manager-record rollback (which deletes a landed record and spends the
 			// create claim) instead of escaping the group with the claim leaked.
-			await this._restoreProviderManagerRecord(name, managerSnapshot)
+			const recordRestoreFailures = await this._restoreProviderManagerRecord(name, managerSnapshot)
+			if (recordRestoreFailures.length > 0) {
+				throw this._incompleteRollbackError("persistProviderProfile", recordRestoreFailures, error)
+			}
 			throw error
 		}
 
@@ -3587,10 +3640,14 @@ export class ClineProvider
 			// Fail closed: compensate the landed manager record and fail the
 			// group so raw webview data cannot reach shared writes, sibling
 			// overlays, or task configuration.
-			await this._restoreProviderManagerRecord(name, managerSnapshot)
-			throw new Error(
+			const readBackRestoreFailures = await this._restoreProviderManagerRecord(name, managerSnapshot)
+			const readBackFailure = new Error(
 				`Provider profile '${name}' could not be read back after save: ${error instanceof Error ? error.message : String(error)}`,
 			)
+			if (readBackRestoreFailures.length > 0) {
+				throw this._incompleteRollbackError("persistProviderProfile", readBackRestoreFailures, readBackFailure)
+			}
+			throw readBackFailure
 		}
 
 		let activationMode: Mode | undefined
@@ -3702,20 +3759,26 @@ export class ClineProvider
 			}
 			return id
 		} catch (error) {
+			const restoreFailures: string[] = []
 			// Compensate every write that may have landed, each restore awaited
 			// on its own so one failure cannot strand the rest: the manager
 			// record and selection first (the manager store is the source of
 			// truth that the profile list and the shared settings are derived
 			// from), then the mode mapping in both stores, then the shared and per-view state.
 			// The original failure is re-thrown for the caller.
-			await this._restoreProviderManagerRecord(name, managerSnapshot, normalizedSettings)
-			await this._restoreProviderManagerSelection(managerSnapshot)
+			restoreFailures.push(
+				...(await this._restoreProviderManagerRecord(name, managerSnapshot, normalizedSettings)),
+			)
+			restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSnapshot)))
 			if (activationMode !== undefined) {
 				try {
 					await this.providerSettingsManager.setModeConfig(activationMode, priorModeConfigId as string)
 				} catch (restoreError) {
 					this.log(
 						`[ClineProvider] profile-activation rollback failed for the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+					)
+					restoreFailures.push(
+						`the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 					)
 				}
 				// Restoring the shared map does not reach this window's own map, and
@@ -3729,10 +3792,16 @@ export class ClineProvider
 					this.localModeConfigIds.set(activationMode, priorLocalModeConfigId)
 				}
 			}
-			await this._restoreProfileActivationState(preWriteSnapshot)
+			restoreFailures.push(...(await this._restoreProfileActivationState(preWriteSnapshot)))
 			// Last: the shared stores and this window's own buffer are back, so a sibling that
 			// follows the shared store can be pointed at the settings that came back with them.
-			await this._restoreRefreshedSiblings(refreshedSiblings, name)
+			restoreFailures.push(...(await this._restoreRefreshedSiblings(refreshedSiblings, name)))
+			if (restoreFailures.length > 0) {
+				// The compensation itself was incomplete: the original failure alone would read as
+				// "the save failed and nothing changed" while some stores still hold what this
+				// save wrote. The caller has to be told the stores disagree.
+				throw this._incompleteRollbackError("persistProviderProfile", restoreFailures, error)
+			}
 			throw error
 		}
 	}
@@ -4413,8 +4482,12 @@ export class ClineProvider
 			} catch (error) {
 				// Compensate every write that may have landed before the failure,
 				// including the manager selection written by activateProfile.
-				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
-				await this._restoreProfileActivationState(activationSnapshot)
+				const restoreFailures: string[] = []
+				restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSelectionSnapshot)))
+				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+				if (restoreFailures.length > 0) {
+					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
+				}
 				throw error
 			}
 
@@ -4425,8 +4498,12 @@ export class ClineProvider
 			try {
 				await this.refreshViewLocalStateForUpdatedProfile(name, providerSettings)
 			} catch (error) {
-				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
-				await this._restoreProfileActivationState(activationSnapshot)
+				const restoreFailures: string[] = []
+				restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSelectionSnapshot)))
+				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+				if (restoreFailures.length > 0) {
+					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
+				}
 				throw error
 			}
 		}
@@ -4440,6 +4517,7 @@ export class ClineProvider
 			try {
 				await this.setModeConfig(mode, id)
 			} catch (error) {
+				const restoreFailures: string[] = []
 				if (previousModeConfigId) {
 					try {
 						await this.setModeConfig(mode, previousModeConfigId)
@@ -4449,14 +4527,20 @@ export class ClineProvider
 								restoreError instanceof Error ? restoreError.message : String(restoreError)
 							}`,
 						)
+						restoreFailures.push(
+							`the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						)
 					}
 				}
-				await this._restoreProviderManagerSelection(managerSelectionSnapshot)
+				restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSelectionSnapshot)))
 				if (activationSnapshot) {
 					// The activation is already applied at this point: selection, profile list and shared
 					// settings have all moved. A caller that receives an error must not end up with a
 					// profile that is activated but bound to no mode.
-					await this._restoreProfileActivationState(activationSnapshot)
+					restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+				}
+				if (restoreFailures.length > 0) {
+					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
 				}
 				throw error
 			}
@@ -4612,12 +4696,15 @@ export class ClineProvider
 	 * that conversation runs under the saved profile and only after its view's buffer
 	 * came back: a view pinned without a buffer of its own follows the shared store, so
 	 * once the store is rolled back its running conversation follows the store again
-	 * rather than the settings the failed save tried to publish.
+	 * rather than the settings the failed save tried to publish. A buffer that did not come
+	 * back is named in the returned list, so the caller can tell a complete rollback from
+	 * one that left a sibling on the settings the failed save wrote.
 	 */
 	private async _restoreRefreshedSiblings(
 		snapshots: SiblingRefreshSnapshot[],
 		writtenProfileName: string,
-	): Promise<void> {
+	): Promise<string[]> {
+		const restoreFailures: string[] = []
 		for (const snapshot of snapshots) {
 			if (snapshot.instance._disposed) {
 				continue
@@ -4630,6 +4717,9 @@ export class ClineProvider
 				snapshot.instance.log(
 					`[ClineProvider] profile-activation rollback failed for a sibling buffer: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
+				restoreFailures.push(
+					`view ${snapshot.instance.viewId} buffer: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+				)
 				// The buffer did not come back, so the conversation must not be moved onto
 				// settings its own view is no longer holding.
 				continue
@@ -4641,6 +4731,7 @@ export class ClineProvider
 				)
 			}
 		}
+		return restoreFailures
 	}
 
 	/**

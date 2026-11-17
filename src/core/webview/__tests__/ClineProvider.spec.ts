@@ -5651,7 +5651,7 @@ describe("ClineProvider", () => {
 
 			await expect(
 				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
 			expect(restored["sibling-view"]).toBeUndefined()
@@ -6933,10 +6933,13 @@ describe("ClineProvider", () => {
 					throw new Error("webview is gone")
 				})
 				const durableBefore = provider["getPersistedViewStates"]({ fresh: true })[sibling["viewId"]]
+				let thrown: unknown
 				try {
-					await expect(
-						provider["persistProviderProfile"]("saved-profile", savedSettings, true),
-					).rejects.toThrow("webview is gone")
+					await provider["persistProviderProfile"]("saved-profile", savedSettings, true)
+				} catch (error) {
+					thrown = error
+				}
+				try {
 					const overlay = sibling["viewLocalState"].apiConfiguration
 					const durableAfter = provider["getPersistedViewStates"]({ fresh: true })[sibling["viewId"]]
 					return {
@@ -6954,6 +6957,11 @@ describe("ClineProvider", () => {
 						sharedMapping: sharedModeConfigId,
 						actingTask: provider.getCurrentTask() === undefined ? "none" : "present",
 						logged: siblingLogs.some((message) => message.includes("rollback failed for a sibling buffer")),
+						errorName: thrown instanceof Error ? thrown.name : "none",
+						namedOriginal:
+							thrown instanceof Error
+								? thrown.message.includes("Original failure: webview is gone")
+								: false,
 					}
 				} finally {
 					await provider.dispose()
@@ -7065,6 +7073,8 @@ describe("ClineProvider", () => {
 					taskKey: bufferFailView.taskKey,
 					handlerRebuilds: bufferFailView.handlerRebuilds,
 					logged: bufferFailView.logged,
+					errorName: bufferFailView.errorName,
+					namedOriginal: bufferFailView.namedOriginal,
 				})
 				.toEqual({
 					shape: "pinned view whose buffer write fails on the rollback",
@@ -7074,6 +7084,8 @@ describe("ClineProvider", () => {
 					taskKey: "saved-key",
 					handlerRebuilds: 1,
 					logged: true,
+					errorName: "ProfileActivationInconsistentError",
+					namedOriginal: true,
 				})
 
 			// A pinned view can hold no conversation at all: the rollback still restores its
@@ -7098,6 +7110,615 @@ describe("ClineProvider", () => {
 					logged: false,
 					durablePinAfter: "saved-profile",
 				})
+			// The control across the sibling shapes: when every restore lands the caller still gets the
+			// plain failure, so the inconsistency error is not a new default.
+			expect
+				.soft({
+					savedErrorName: savedView.errorName,
+					otherErrorName: otherView.errorName,
+					noOverlayErrorName: noOverlayView.errorName,
+					disposedErrorName: disposedView.errorName,
+					noTaskErrorName: noTaskView.errorName,
+				})
+				.toEqual({
+					savedErrorName: "Error",
+					otherErrorName: "Error",
+					noOverlayErrorName: "Error",
+					disposedErrorName: "Error",
+					noTaskErrorName: "Error",
+				})
+		})
+
+		it("surfaces an incomplete activation rollback to the upsert caller", async () => {
+			// The ask is from the caller side: a save whose compensation could not finish leaves some
+			// store holding what the failed save wrote, while rethrowing only the original failure reads
+			// as a save that failed and changed nothing. The doubles perform the real store write except
+			// on the refused call, so the shapes differ by the failure and not by the double.
+			const priorProfile: ProviderSettingsEntry = {
+				name: "surface-prior-profile",
+				id: "surface-prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const activatedProfile: ProviderSettingsEntry = {
+				name: "surface-activated-profile",
+				id: "surface-activated-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const runScenario = async (failingRestore: "none" | "settings" | "mapping") => {
+				const provider = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"sidebar",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				provider["viewLocalState"].mode = "code"
+				await provider.contextProxy.setValue("mode", "code")
+				await provider.contextProxy.setProviderSettings({
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "prior-key",
+				})
+				await provider.contextProxy.setValue("listApiConfigMeta", [priorProfile, activatedProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "surface-prior-profile")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+					priorProfile,
+					activatedProfile,
+				])
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+					if ("name" in params && params.name === "surface-activated-profile") {
+						return { ...activatedProfile, apiKey: "activated-secret" }
+					}
+					return { ...priorProfile, apiKey: "prior-key" }
+				})
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(
+					"surface-prior-profile",
+				)
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("activated-id")
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("prior-id")
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				let modeWrites = 0
+				let sharedMapping = "prior-id"
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(async (modeArg, id) => {
+					if (modeArg !== "code") {
+						throw new Error("unexpected mode " + String(modeArg))
+					}
+					modeWrites += 1
+					if (failingRestore === "mapping" && modeWrites === 2) {
+						throw new Error("mapping store closed")
+					}
+					sharedMapping = id
+				})
+				let posts = 0
+				vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+					posts += 1
+					if (posts === 1) {
+						throw new Error("webview is gone")
+					}
+				})
+				// The first settings write below is the activation own and the second is the compensation
+				// own: only a compensation write is ever refused here, and the scenario names which one.
+				const realSettingsWrite = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+				let settingsWrites = 0
+				vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+					settingsWrites += 1
+					if (failingRestore === "settings" && settingsWrites === 2) {
+						throw new Error("settings store closed")
+					}
+					return realSettingsWrite(settings)
+				})
+				const outcome: { resolved?: string | undefined; error?: unknown } = {}
+				try {
+					outcome.resolved = await provider.upsertProviderProfile(
+						"surface-activated-profile",
+						{ apiProvider: providerIdentifiers.anthropic, apiKey: "activated-secret" },
+						true,
+					)
+				} catch (error) {
+					outcome.error = error
+				}
+				const values = provider.contextProxy.getValues()
+				return {
+					posts,
+					settingsWrites,
+					modeWrites,
+					resolved: outcome.resolved,
+					errorName: outcome.error instanceof Error ? outcome.error.name : "none",
+					errorMessage: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+					sharedSelection: values.currentApiConfigName,
+					sharedProvider: values.apiProvider,
+					sharedMapping,
+				}
+			}
+			const landed = await runScenario("none")
+			const settingsGap = await runScenario("settings")
+			const mappingGap = await runScenario("mapping")
+			console.log("ROLLBACK_SURFACE " + JSON.stringify(landed))
+			console.log("ROLLBACK_SURFACE " + JSON.stringify(settingsGap))
+			console.log("ROLLBACK_SURFACE " + JSON.stringify(mappingGap))
+			// The control first: when every restore lands the caller still gets the swallow that upsert
+			// performs for an ordinary failure, so the inconsistency error is not a new default.
+			expect
+				.soft({
+					settingsWrites: landed.settingsWrites,
+					modeWrites: landed.modeWrites,
+					resolved: landed.resolved,
+					errorName: landed.errorName,
+					sharedSelection: landed.sharedSelection,
+					sharedProvider: landed.sharedProvider,
+					sharedMapping: landed.sharedMapping,
+				})
+				.toEqual({
+					settingsWrites: 2,
+					modeWrites: 2,
+					resolved: undefined,
+					errorName: "none",
+					sharedSelection: "surface-prior-profile",
+					sharedProvider: providerIdentifiers.openrouter,
+					sharedMapping: "prior-id",
+				})
+			// The store the rollback was refused still holds the settings the failed save wrote while the
+			// shared selection is back on the prior profile: the persisted stores really do disagree, and
+			// that is the state the caller has to be told about.
+			expect
+				.soft({
+					settingsWrites: settingsGap.settingsWrites,
+					resolved: settingsGap.resolved,
+					errorName: settingsGap.errorName,
+					sharedSelection: settingsGap.sharedSelection,
+					sharedProvider: settingsGap.sharedProvider,
+				})
+				.toEqual({
+					settingsWrites: 2,
+					resolved: undefined,
+					errorName: "ProfileActivationInconsistentError",
+					sharedSelection: "surface-prior-profile",
+					sharedProvider: providerIdentifiers.anthropic,
+				})
+			expect(settingsGap.errorMessage).toMatch(
+				/rollback was incomplete[\s\S]*the shared provider settings[\s\S]*Original failure: webview is gone/,
+			)
+			expect
+				.soft({
+					modeWrites: mappingGap.modeWrites,
+					errorName: mappingGap.errorName,
+					sharedSelection: mappingGap.sharedSelection,
+					sharedMapping: mappingGap.sharedMapping,
+				})
+				.toEqual({
+					modeWrites: 2,
+					errorName: "ProfileActivationInconsistentError",
+					sharedSelection: "surface-prior-profile",
+					sharedMapping: "activated-id",
+				})
+			expect(mappingGap.errorMessage).toMatch(
+				/rollback was incomplete[\s\S]*the mode mapping[\s\S]*Original failure: webview is gone/,
+			)
+		})
+
+		it("surfaces a refused provider-manager record rollback to the upsert caller", async () => {
+			// The provider-manager record is the store the profile list and the shared settings are derived
+			// from, and its own rollback has the gap the finding names: a delete that fails was logged and
+			// nothing above it could see it. The profile here did not exist before the save, so the
+			// compensation owns a delete of the record the save landed.
+			const priorProfile: ProviderSettingsEntry = {
+				name: "record-prior-profile",
+				id: "record-prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const runScenario = async (recordRestoreFails: boolean) => {
+				const provider = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"sidebar",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				provider["viewLocalState"].mode = "code"
+				await provider.contextProxy.setValue("mode", "code")
+				await provider.contextProxy.setProviderSettings({
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "prior-key",
+				})
+				await provider.contextProxy.setValue("listApiConfigMeta", [priorProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "record-prior-profile")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorProfile])
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				// hasConfig answers false, so the mutation claims the create and the compensation owns a
+				// delete rather than replaying an earlier record.
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(false)
+				let recordWrites = 0
+				let deletes = 0
+				let recordExists = false
+				let storedApiKey = "prior-key"
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async (nameArg, config) => {
+					if (nameArg !== "record-activated-profile") {
+						throw new Error("unexpected record name " + nameArg)
+					}
+					recordWrites += 1
+					if (recordRestoreFails && recordWrites === 2) {
+						throw new Error("record store closed")
+					}
+					storedApiKey = String(config.apiKey ?? "none")
+					recordExists = true
+					return "record-activated-id"
+				})
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+					return {
+						name: "record-activated-profile",
+						id: "record-activated-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: storedApiKey,
+					}
+				})
+				vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockImplementation(async () => {
+					deletes += 1
+					if (recordRestoreFails) {
+						throw new Error("record store closed")
+					}
+					recordExists = false
+				})
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue(
+					"record-prior-profile",
+				)
+				let posts = 0
+				vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+					posts += 1
+					if (posts === 1) {
+						throw new Error("webview is gone")
+					}
+				})
+				const outcome: { resolved?: string | undefined; error?: unknown } = {}
+				try {
+					outcome.resolved = await provider.upsertProviderProfile(
+						"record-activated-profile",
+						{ apiProvider: providerIdentifiers.anthropic, apiKey: "activated-secret" },
+						true,
+					)
+				} catch (error) {
+					outcome.error = error
+				}
+				return {
+					recordWrites,
+					deletes,
+					recordExists,
+					storedApiKey,
+					resolved: outcome.resolved,
+					errorName: outcome.error instanceof Error ? outcome.error.name : "none",
+					errorMessage: outcome.error instanceof Error ? outcome.error.message : String(outcome.error),
+					sharedSelection: provider.contextProxy.getValues().currentApiConfigName,
+				}
+			}
+			const landed = await runScenario(false)
+			const recordGap = await runScenario(true)
+			console.log("ROLLBACK_SURFACE_RECORD " + JSON.stringify(landed))
+			console.log("ROLLBACK_SURFACE_RECORD " + JSON.stringify(recordGap))
+			expect
+				.soft({
+					recordWrites: landed.recordWrites,
+					deletes: landed.deletes,
+					recordExists: landed.recordExists,
+					storedApiKey: landed.storedApiKey,
+					resolved: landed.resolved,
+					errorName: landed.errorName,
+				})
+				.toEqual({
+					recordWrites: 1,
+					deletes: 1,
+					recordExists: false,
+					storedApiKey: "activated-secret",
+					resolved: undefined,
+					errorName: "none",
+				})
+			// The record the failed save landed is still in the manager store holding the settings that save
+			// wrote while the shared selection is back on the prior profile: that is the split the caller has
+			// to hear about, and a log line alone did not report it.
+			expect
+				.soft({
+					recordWrites: recordGap.recordWrites,
+					deletes: recordGap.deletes,
+					recordExists: recordGap.recordExists,
+					storedApiKey: recordGap.storedApiKey,
+					resolved: recordGap.resolved,
+					errorName: recordGap.errorName,
+					sharedSelection: recordGap.sharedSelection,
+				})
+				.toEqual({
+					recordWrites: 1,
+					deletes: 1,
+					recordExists: true,
+					storedApiKey: "activated-secret",
+					resolved: undefined,
+					errorName: "ProfileActivationInconsistentError",
+					sharedSelection: "record-prior-profile",
+				})
+			expect(recordGap.errorMessage).toMatch(
+				/rollback was incomplete[\s\S]*the provider-manager record[\s\S]*Original failure: webview is gone/,
+			)
+		})
+
+		it("surfaces a refused activation rollback from the activation path", async () => {
+			// The activation group compensates the manager selection that activateProfile wrote. When that
+			// restore is refused the caller was told only that a settings write failed, while the manager
+			// store still has the profile activated and every copy of that choice is back on the prior
+			// profile: the source of truth and its copies disagree.
+			const activatedProfile: ProviderSettingsEntry = {
+				name: "activation-path-profile",
+				id: "activation-path-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const runScenario = async (selectionRestoreFails: boolean) => {
+				const provider = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"sidebar",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				provider["viewLocalState"].mode = "code"
+				await provider.contextProxy.setValue("mode", "code")
+				await provider.contextProxy.setProviderSettings({
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "prior-key",
+				})
+				await provider.contextProxy.setValue("listApiConfigMeta", [activatedProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "activation-prior-profile")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([activatedProfile])
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("prior-id")
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				let currentProfile = "activation-prior-profile"
+				let activations = 0
+				vi.spyOn(provider.providerSettingsManager, "activateProfile").mockImplementation(async (args) => {
+					activations += 1
+					if (selectionRestoreFails && activations === 2) {
+						throw new Error("selection store closed")
+					}
+					currentProfile = "name" in args ? args.name : "activation-path-profile"
+					return {
+						name: currentProfile,
+						id: "activation-path-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "activated-secret",
+					}
+				})
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockImplementation(
+					async () => currentProfile,
+				)
+				// The activation group own write is the first settings write below and it is the one that
+				// fails here; the compensation write, second, performs the real store write.
+				const realSettingsWrite = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+				let settingsWrites = 0
+				vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+					settingsWrites += 1
+					if (settingsWrites === 1) {
+						throw new Error("activation write refused")
+					}
+					return realSettingsWrite(settings)
+				})
+				let error: unknown
+				try {
+					await provider.activateProviderProfile({ name: "activation-path-profile" })
+				} catch (activationError) {
+					error = activationError
+				}
+				const values = provider.contextProxy.getValues()
+				return {
+					activations,
+					settingsWrites,
+					currentProfile,
+					errorName: error instanceof Error ? error.name : "none",
+					errorMessage: error instanceof Error ? error.message : String(error),
+					sharedSelection: values.currentApiConfigName,
+					sharedProvider: values.apiProvider,
+				}
+			}
+			const landed = await runScenario(false)
+			const selectionGap = await runScenario(true)
+			console.log("ROLLBACK_SURFACE_ACTIVATION " + JSON.stringify(landed))
+			console.log("ROLLBACK_SURFACE_ACTIVATION " + JSON.stringify(selectionGap))
+			expect
+				.soft({
+					activations: landed.activations,
+					settingsWrites: landed.settingsWrites,
+					currentProfile: landed.currentProfile,
+					sharedSelection: landed.sharedSelection,
+					sharedProvider: landed.sharedProvider,
+					errorName: landed.errorName,
+				})
+				.toEqual({
+					activations: 2,
+					settingsWrites: 2,
+					currentProfile: "activation-prior-profile",
+					sharedSelection: "activation-prior-profile",
+					sharedProvider: providerIdentifiers.openrouter,
+					errorName: "Error",
+				})
+			expect(landed.errorMessage).toContain("activation write refused")
+			// The manager store still has the activated profile selected while every copy of that choice has
+			// been rolled back: the caller gets the inconsistency instead of the settings failure alone.
+			expect
+				.soft({
+					activations: selectionGap.activations,
+					settingsWrites: selectionGap.settingsWrites,
+					currentProfile: selectionGap.currentProfile,
+					sharedSelection: selectionGap.sharedSelection,
+					errorName: selectionGap.errorName,
+				})
+				.toEqual({
+					activations: 2,
+					settingsWrites: 2,
+					currentProfile: "activation-path-profile",
+					sharedSelection: "activation-prior-profile",
+					errorName: "ProfileActivationInconsistentError",
+				})
+			expect(selectionGap.errorMessage).toMatch(
+				/rollback was incomplete[\s\S]*the provider-manager selection[\s\S]*Original failure: activation write refused/,
+			)
+		})
+
+		it("names every restore it could not land when the whole compensation is refused", async () => {
+			// The message is the product: a caller told that the stores disagree has to learn which
+			// stores the compensation could not put back. Every store below performs its real write
+			// first and refuses only a write that arrives after the save itself failed, so the refusal
+			// names the compensation and not the forward write.
+			const priorProfile: ProviderSettingsEntry = {
+				name: "whole-prior-profile",
+				id: "whole-prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const activatedProfile: ProviderSettingsEntry = {
+				name: "whole-activated-profile",
+				id: "whole-activated-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			provider["viewLocalState"].mode = "code"
+			await provider.contextProxy.setValue("mode", "code")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "prior-key",
+			})
+			await provider.contextProxy.setValue("listApiConfigMeta", [priorProfile, activatedProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "whole-prior-profile")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([priorProfile, activatedProfile])
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "whole-activated-profile") {
+					return { ...activatedProfile, apiKey: "activated-secret" }
+				}
+				return { ...priorProfile, apiKey: "prior-key" }
+			})
+			vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("whole-prior-profile")
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("activated-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("whole-prior-id")
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// A write that arrives once the save has already failed is a compensation write: every
+			// store below refuses exactly those, so the rollback has nothing to put back anywhere.
+			let compensating = false
+			let posts = 0
+			vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+				posts += 1
+				if (posts === 1) {
+					compensating = true
+					throw new Error("webview is gone")
+				}
+			})
+			const realUpdateGlobalState = provider["updateGlobalState"].bind(provider)
+			let listWrites = 0
+			// @ts-ignore - Spy on the private profile-list write so it can be refused after
+			// the save failed; vitest's method-name type only lists the public members.
+			vi.spyOn(provider, "updateGlobalState").mockImplementation(async (key, value) => {
+				if (String(key) === "listApiConfigMeta") {
+					listWrites += 1
+					if (compensating) {
+						throw new Error("profile list store closed")
+					}
+				}
+				return realUpdateGlobalState(key, value)
+			})
+			const realSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let selectionWrites = 0
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (String(key) === "currentApiConfigName") {
+					selectionWrites += 1
+					if (compensating) {
+						throw new Error("selection store closed")
+					}
+				}
+				return realSetValue(key, value)
+			})
+			const realSettingsWrite = provider.contextProxy.setProviderSettings.bind(provider.contextProxy)
+			let settingsWrites = 0
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async (settings) => {
+				settingsWrites += 1
+				if (compensating) {
+					throw new Error("settings store closed")
+				}
+				return realSettingsWrite(settings)
+			})
+			const realSaveViewLocal = provider["_saveViewLocalStateFromMutation"].bind(provider)
+			let viewLocalWrites = 0
+			// @ts-ignore - Spy on the private per-view restore so it can be refused after the save
+			// failed; vitest's method-name type only lists the public members.
+			vi.spyOn(provider, "_saveViewLocalStateFromMutation").mockImplementation(async (mutation) => {
+				viewLocalWrites += 1
+				if (compensating) {
+					throw new Error("view overlay store closed")
+				}
+				return realSaveViewLocal(mutation)
+			})
+			let modeWrites = 0
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(async (modeArg, _id) => {
+				if (modeArg !== "code") {
+					throw new Error("unexpected mode " + String(modeArg))
+				}
+				modeWrites += 1
+				if (compensating) {
+					throw new Error("mapping store closed")
+				}
+			})
+			let resolved: string | undefined
+			let thrown: unknown
+			try {
+				resolved = await provider.upsertProviderProfile(
+					"whole-activated-profile",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "activated-secret" },
+					true,
+				)
+			} catch (error) {
+				thrown = error
+			}
+			const errorName = thrown instanceof Error ? thrown.name : "none"
+			const message = thrown instanceof Error ? thrown.message : ""
+			const causeMessage =
+				thrown instanceof Error && thrown.cause instanceof Error ? thrown.cause.message : "none"
+			const wantedLabels = [
+				"the mode mapping",
+				"the profile list",
+				"the current profile selection",
+				"the shared provider settings",
+				"the view-local overlay",
+			]
+			const labels = wantedLabels.filter((label) => message.includes(label))
+			const measured = {
+				posts,
+				listWrites,
+				selectionWrites,
+				settingsWrites,
+				viewLocalWrites,
+				modeWrites,
+				resolved,
+				errorName,
+				namedOriginal: message.includes("Original failure: webview is gone"),
+				causeMessage,
+				missingLabels: wantedLabels.filter((label) => !message.includes(label)),
+			}
+			console.log("ROLLBACK_SURFACE_ALL " + JSON.stringify(measured))
+			const asserted = {
+				posts: measured.posts,
+				errorName: measured.errorName,
+				namedOriginal: measured.namedOriginal,
+				causeMessage: measured.causeMessage,
+				missingLabels: measured.missingLabels,
+			}
+			expect.soft(asserted).toEqual({
+				posts: 1,
+				errorName: "ProfileActivationInconsistentError",
+				namedOriginal: true,
+				causeMessage: "webview is gone",
+				missingLabels: [],
+			})
+			expect(labels).toEqual(wantedLabels)
 		})
 
 		it("does not undo a newer shared write when the per-view write fails", async () => {
@@ -9036,7 +9657,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
 					true,
 				),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			// The shared selection returns to the shared pre-operation value and the view keeps
 			// the pin it had, rather than inheriting the shared one.
@@ -9105,7 +9726,7 @@ describe("ClineProvider", () => {
 					{ apiProvider: providerIdentifiers.anthropic, apiKey: "new-b" },
 					true,
 				),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			// Both sibling buffers are back on their pre-refresh overlays: a refresh that landed
 			// for one sibling cannot survive the rollback triggered by another's failure.
@@ -9465,11 +10086,11 @@ describe("ClineProvider", () => {
 			const setProviderSettingsSpy = vi.spyOn(provider.contextProxy, "setProviderSettings")
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			// The outer upsert catch converts the failure into an undefined id (the
-			// user sees the error toast); the compensation must still have run.
+			// A landed write's own rollback failed too, so the caller no longer gets the
+			// undefined id: it gets the inconsistency error. The compensation still ran.
 			await expect(
 				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.openai }, true),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			// Every write that landed is compensated: the mode mapping returns to its
 			// prior id, and the selection, list, and shared settings are restored.
@@ -10103,10 +10724,10 @@ describe("ClineProvider", () => {
 			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			// The outer upsert catch converts the failure into an undefined id.
+			// A landed write's own rollback failed too, so the caller gets the inconsistency error.
 			await expect(
 				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			// The rollback restores the exact pre-activation map: the sibling the
 			// pruning evicted is back with its original metadata.
@@ -10153,10 +10774,10 @@ describe("ClineProvider", () => {
 			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			// The outer upsert catch converts the failure into an undefined id.
+			// A landed write's own rollback failed too, so the caller gets the inconsistency error.
 			await expect(
 				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			// The rollback restores what the activation pruned without erasing the
 			// sibling's newer entry.
@@ -10210,10 +10831,10 @@ describe("ClineProvider", () => {
 			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 
-			// The outer upsert catch converts the failure into an undefined id.
+			// A landed write's own rollback failed too, so the caller gets the inconsistency error.
 			await expect(
 				provider.upsertProviderProfile("new-profile", { apiProvider: providerIdentifiers.anthropic }, true),
-			).resolves.toBeUndefined()
+			).rejects.toThrow(/rollback was incomplete[\s\S]*Original failure: /)
 
 			const restored = provider.contextProxy.getValue("viewStates") as Record<string, unknown>
 			// The rollback must not treat the sibling's clear as activation pruning.
@@ -10899,7 +11520,7 @@ describe("ClineProvider", () => {
 
 		// Characterization test for the semantics that made #1078's throttle a no-op in practice:
 		// flushing right after a leading-edge post has no pending trailing invocation to run, so it
-		// only cancels the trailing timer — and the next call then hits the leading edge again.
+		// only cancels the trailing timer ??and the next call then hits the leading edge again.
 		// Callers on a hot path (see Task#addToClineMessages) must therefore not flush per message.
 		test("flushing after every post defeats coalescing entirely", async () => {
 			const postStateSpy = vi.spyOn(provider, "postStateToWebviewWithoutTaskHistory").mockResolvedValue(undefined)
@@ -11033,7 +11654,7 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).not.toHaveBeenCalled()
 	})
 
-	test("dispose is idempotent — second call is a no-op", async () => {
+	test("dispose is idempotent ??second call is a no-op", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
 		await provider.dispose()
@@ -11804,7 +12425,7 @@ describe("ClineProvider", () => {
 
 	test("writeDelayMs defaults to DEFAULT_WRITE_DELAY_MS", async () => {
 		// Mock globalState.get to return undefined for writeDelayMs (typed reassignment,
-		// same pattern as the customModePrompts test below — Memento.get has no mock type)
+		// same pattern as the customModePrompts test below ??Memento.get has no mock type)
 		mockContext.globalState.get = vi.fn((key: string) => {
 			return key === "writeDelayMs" ? undefined : null
 		})
@@ -11847,7 +12468,7 @@ describe("ClineProvider", () => {
 
 	test("getState applies fallback defaults for write, diff, and terminal settings", async () => {
 		// Mock globalState.get to return undefined for the fallback settings
-		// (typed reassignment — Memento.get has no mock type, same pattern as the
+		// (typed reassignment ??Memento.get has no mock type, same pattern as the
 		// writeDelayMs default test above)
 		mockContext.globalState.get = vi.fn((key: string) => {
 			if (
