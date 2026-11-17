@@ -1877,7 +1877,6 @@ export class ClineProvider
 		await cleanupStep("taskHistoryStore", () => this.taskHistoryStore.dispose())
 		await cleanupStep("taskTitleService", () => this.taskTitleService.dispose())
 
-
 		this.log("Disposed all disposables")
 		// The releases themselves live in dispose's finally, not here: the body used to duplicate
 		// all four after this log, so every dispose ran the broker release, the listener removal
