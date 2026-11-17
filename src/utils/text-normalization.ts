@@ -177,9 +177,6 @@ export const ADAPTIVE_FULL_READ_THRESHOLD = 300
 /** Default maximum lines returned for file reads when sliding window truncation engages */
 export const SLIDING_WINDOW_PREVIEW_LIMIT = 200
 
-/** Default alias for backward compatibility */
-export const MAX_FILE_READ_LINES = SLIDING_WINDOW_PREVIEW_LIMIT
-
 export interface FileTruncationResult {
 	content: string
 	wasTruncated: boolean

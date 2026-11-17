@@ -1,5 +1,5 @@
 {
-	"extends": "./packages/config-typescript/base.json",
+	"extends": "@roo-code/config-typescript/base.json",
 	"compilerOptions": {
 		"module": "esnext",
 		"moduleResolution": "Bundler",
