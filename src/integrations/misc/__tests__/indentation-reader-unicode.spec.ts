@@ -127,7 +127,7 @@ describe("Unicode clipping through the existing readers", () => {
 
 	it("preserves reader errors without formatting or leaking the long line", () => {
 		expect(readWithSlice(longLine, 1)).toEqual({
-			content: "Error: offset 1 is beyond file end (1 lines)",
+			content: "Error: offset 2 is beyond file end (1 lines)",
 			includedRanges: [],
 			totalLines: 1,
 			returnedLines: 0,

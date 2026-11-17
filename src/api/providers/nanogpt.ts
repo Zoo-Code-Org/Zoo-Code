@@ -9,7 +9,6 @@ import {
 	providerIdentifiers,
 	type ModelInfo,
 	type ModelRecord,
-	type NanoGptRoutingPreference,
 	type ReasoningEffortExtended,
 } from "@roo-code/types"
 
@@ -115,10 +114,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	private getRequestModelId(canonicalModelId: string): string {
-		return applyNanoGptRoutingPreference(
-			canonicalModelId,
-			this.options.nanoGptRoutingPreference as NanoGptRoutingPreference | undefined,
-		)
+		return applyNanoGptRoutingPreference(canonicalModelId, this.options.nanoGptRoutingPreference)
 	}
 
 	private createSafeError(operation: string, error: unknown): Error {

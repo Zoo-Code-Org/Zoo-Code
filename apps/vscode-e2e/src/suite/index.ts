@@ -27,6 +27,9 @@ export async function run() {
 		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 		openRouterModelId: "openai/gpt-4.1",
 		...(aimockUrl && { openRouterBaseUrl: `${aimockUrl}/v1` }),
+		// Title requests embed the task prompt, so they match prompt-substring fixtures and
+		// consume their sequenceIndex slots ahead of the task's own requests.
+		taskTitleGenerationEnabled: false,
 	})
 
 	await vscode.commands.executeCommand("zoo-code.SidebarProvider.focus")

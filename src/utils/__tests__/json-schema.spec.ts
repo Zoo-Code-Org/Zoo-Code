@@ -179,9 +179,9 @@ describe("normalizeToolSchema", () => {
 	})
 
 	it("should handle null or non-object input", () => {
-		expect(normalizeToolSchema(null as any)).toBeNull()
-		expect(normalizeToolSchema("string" as any)).toBe("string")
-		expect(normalizeToolSchema(123 as any)).toBe(123)
+		expect(normalizeToolSchema(null)).toBeNull()
+		expect(normalizeToolSchema("string")).toBe("string")
+		expect(normalizeToolSchema(123)).toBe(123)
 	})
 
 	it("should force additionalProperties to false for object types even when set to a schema", () => {

@@ -46,11 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.92.0 में नया क्या है
+## v3.98.0 में नया क्या है
 
-- ✨ **तेज़ model चयन और बेहतर model support:** Chat composer से model बदलें। Amazon Bedrock पर Claude Haiku 5.5 इस्तेमाल करें, OpenRouter पर Kimi K3 की ज़्यादा सटीक capabilities पाएं और Vercel AI Gateway पर Gemini 4 Argon की सुधारी गई limits इस्तेमाल करें।
-- 🧭 **ज़्यादा भरोसेमंद terminal, editing, chat और remote workflows:** अपनी पसंद के अनुसार command output को default रूप से collapse करें, editing failures को ज़्यादा स्पष्ट रूप में देखें, reasoning और API rows को visible रखें और remote workspaces में startup तथा proxy issues से बचें।
-- 🔌 **विस्तारित MCP marketplace:** MCP marketplace के ज़रिए Zoo Code को AnySearch, Mailtea और Tradehand से connect करें।
+- 🎟️ आगामी Zoo Pass सब्सक्रिप्शन का प्रीव्यू देखें। 2 सप्ताह मुफ़्त एक्सेस; सीमित स्थान
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **अपने आप टास्क टाइटल और बेहतर मॉडल नियंत्रण:** नए रूट टास्क के टाइटल अपने आप बनाएँ और डायनामिक थिंकिंग-एफर्ट की प्रायोगिक सेटिंग आज़माएँ।
+- 🔌 **ज़्यादा मॉडल और प्रोवाइडर सपोर्ट:** GPT-6.1 Terra इस्तेमाल करें और Friendli की नवीनतम मॉडल सूची पाएँ।
+- 🛡️ **ज़्यादा सुरक्षित और तेज़ प्रतिक्रिया वाले चैट और एडिट:** OpenAI Native और Requesty रिक्वेस्ट को साफ़ तरीके से रद्द करें, वर्कस्पेस के बाहर के diffs के अनजाने ऑटो-अप्रूवल से बचाएँ, UI भाषा बदलने पर एकरूपता बनाए रखें, और JSON बैकअप रिकवरी में अस्पष्टता से बचें।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

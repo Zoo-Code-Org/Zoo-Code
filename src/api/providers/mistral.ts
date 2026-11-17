@@ -50,6 +50,40 @@ type MistralTool = {
 	}
 }
 
+// The pinned @mistralai/mistralai (1.15.1) has no typed field for
+// `prompt_tokens_details`; its `UsageInfo$inboundSchema` collects unknown keys
+// into `additionalProperties`, so the documented cache-read count survives the
+// SDK parse but only there. Mistral bills these tokens at 10% of the input
+// price, and `prompt_tokens` already includes them, so the count is reported as
+// `cacheReadTokens` and never added to `inputTokens`.
+//
+// The `cachedTokens <= promptTokens` subset guard mirrors the OpenAI sibling
+// that reads the identical nested wire field (src/api/providers/openai.ts:304-313,
+// `reportedCacheReadTokens <= inputTokens`): a malformed upstream value larger
+// than the prompt total is dropped instead of billing reads at 0.1x and
+// surfacing as cacheReads > tokensIn.
+function readCachedPromptTokens(
+	usage: { additionalProperties?: { [key: string]: unknown } },
+	promptTokens: number,
+): number | undefined {
+	const details = usage.additionalProperties?.["prompt_tokens_details"]
+	if (typeof details !== "object" || details === null) {
+		return undefined
+	}
+
+	const cachedTokens = (details as { cached_tokens?: unknown }).cached_tokens
+	if (
+		typeof cachedTokens !== "number" ||
+		!Number.isInteger(cachedTokens) ||
+		cachedTokens <= 0 ||
+		cachedTokens > promptTokens
+	) {
+		return undefined
+	}
+
+	return cachedTokens
+}
+
 export class MistralHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: Mistral
@@ -179,10 +213,12 @@ export class MistralHandler extends BaseProvider implements SingleCompletionHand
 
 				if (event.data.usage) {
 					throwIfAborted(requestSignal)
+					const promptTokens = event.data.usage.promptTokens || 0
 					yield {
 						type: "usage",
-						inputTokens: event.data.usage.promptTokens || 0,
+						inputTokens: promptTokens,
 						outputTokens: event.data.usage.completionTokens || 0,
+						cacheReadTokens: readCachedPromptTokens(event.data.usage, promptTokens),
 					}
 				}
 			}

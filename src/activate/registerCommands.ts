@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { createDiagnosticsReport } from "../services/diagnostics"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -76,13 +77,10 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // lifecycle alongside the command registration, so it's intentionally
 // excluded from this map.
 //
-// Callback shape mirrors VS Code's own `commands.registerCommand` signature
-// (`(...args: any[]) => any`), with the return narrowed to `unknown` so
-// callers must inspect before using. `any[]` for args is unavoidable: the
-// callbacks here are heterogeneous (`importSettings` takes an optional
-// `filePath?: string`, others take none) and VS Code dispatches positional
-// args dynamically.
-type CommandCallback = (...args: any[]) => unknown
+// `never[]` deliberately lets callbacks with different parameters share one map
+// type while rejecting direct calls with arguments. VS Code dispatches positional
+// arguments dynamically; `unknown` requires callers to inspect returned values.
+type CommandCallback = (...args: never[]) => unknown
 const getCommandsMap = ({
 	context,
 	outputChannel,
@@ -172,6 +170,12 @@ const getCommandsMap = ({
 			filePath,
 		)
 	},
+	createDiagnosticsReport: () =>
+		createDiagnosticsReport({
+			context,
+			outputChannel,
+			providers: ClineProvider.getAllInstances(),
+		}),
 	focusInput: async () => {
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
@@ -183,6 +187,9 @@ const getCommandsMap = ({
 		} catch (error) {
 			outputChannel.appendLine(`Error focusing input: ${error}`)
 		}
+	},
+	retryWebviewRecovery: async () => {
+		await (ClineProvider.getVisibleInstance() ?? provider).retryWebviewRecovery()
 	},
 	focusPanel: async () => {
 		try {
@@ -295,7 +302,8 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	// Handle panel closing events.
 	newPanel.onDidDispose(
 		() => {
-			setPanel(undefined, "tab")
+			// A recovery may already have installed a replacement panel.
+			if (tabPanel === newPanel) setPanel(undefined, "tab")
 		},
 		null,
 		context.subscriptions, // Also register dispose listener

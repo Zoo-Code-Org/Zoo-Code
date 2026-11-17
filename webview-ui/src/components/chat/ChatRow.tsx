@@ -1,6 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSize } from "react-use"
-import { useTranslation, Trans } from "react-i18next"
+import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import deepEqual from "fast-deep-equal"
 import { VSCodeBadge } from "@vscode/webview-ui-toolkit/react"
 
@@ -38,6 +39,7 @@ import WarningRow from "./WarningRow"
 import McpResourceRow from "../mcp/McpResourceRow"
 
 import { Mention } from "./Mention"
+import { isShowableTimestamp, MessageTimestamp } from "./MessageTimestamp"
 import { CheckpointSaved } from "./checkpoints/CheckpointSaved"
 import { FollowUpSuggest } from "./FollowUpSuggest"
 import { BatchFilePermission } from "./BatchFilePermission"
@@ -220,7 +222,7 @@ export const ChatRowContent = ({
 	completionCheckpoint,
 	onJumpToPreviousCheckpoint,
 }: ChatRowContentProps) => {
-	const { t, i18n } = useTranslation()
+	const { t } = useAppTranslation()
 
 	const {
 		mcpServers,
@@ -231,6 +233,8 @@ export const ChatRowContent = ({
 		clineMessages,
 		currentTaskItem,
 		enableCheckpoints,
+		timeFormat,
+		dateFormat,
 	} = useExtensionState()
 	const { info: model } = useSelectedModel(apiConfiguration)
 	const [isEditing, setIsEditing] = useState(false)
@@ -596,12 +600,14 @@ export const ChatRowContent = ({
 						<span style={{ fontWeight: "bold" }}>
 							{tool.path ? (
 								<Trans
+									t={t}
 									i18nKey="chat:codebaseSearch.wantsToSearchWithPath"
 									components={{ code: <code></code> }}
 									values={{ query: tool.query, path: tool.path }}
 								/>
 							) : (
 								<Trans
+									t={t}
 									i18nKey="chat:codebaseSearch.wantsToSearch"
 									components={{ code: <code></code> }}
 									values={{ query: tool.query }}
@@ -815,6 +821,7 @@ export const ChatRowContent = ({
 							<span style={{ fontWeight: "bold" }}>
 								{message.type === "ask" ? (
 									<Trans
+										t={t}
 										i18nKey={
 											tool.isOutsideWorkspace
 												? "chat:directoryOperations.wantsToSearchOutsideWorkspace"
@@ -825,6 +832,7 @@ export const ChatRowContent = ({
 									/>
 								) : (
 									<Trans
+										t={t}
 										i18nKey={
 											tool.isOutsideWorkspace
 												? "chat:directoryOperations.didSearchOutsideWorkspace"
@@ -857,12 +865,14 @@ export const ChatRowContent = ({
 									<>
 										{tool.reason ? (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.wantsToSwitchWithReason"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode, reason: tool.reason }}
 											/>
 										) : (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.wantsToSwitch"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode }}
@@ -873,12 +883,14 @@ export const ChatRowContent = ({
 									<>
 										{tool.reason ? (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.didSwitchWithReason"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode, reason: tool.reason }}
 											/>
 										) : (
 											<Trans
+												t={t}
 												i18nKey="chat:modes.didSwitch"
 												components={{ code: <code className="font-medium">{tool.mode}</code> }}
 												values={{ mode: tool.mode }}
@@ -905,6 +917,7 @@ export const ChatRowContent = ({
 							<Split className="size-4" />
 							<span style={{ fontWeight: "bold" }}>
 								<Trans
+									t={t}
 									i18nKey="chat:subtasks.wantsToCreate"
 									components={{ code: <code>{tool.mode}</code> }}
 									values={{ mode: tool.mode }}
@@ -1154,8 +1167,9 @@ export const ChatRowContent = ({
 						if (!isNaN(potentialCode) && potentialCode >= 400) {
 							code = potentialCode
 							const stringForError = `chat:apiRequest.errorMessage.${code}`
-							if (i18n.exists(stringForError)) {
-								body = t(stringForError)
+							const errorMessage = t(stringForError, { defaultValue: "" })
+							if (errorMessage) {
+								body = errorMessage
 								// Fill this out in upcoming PRs
 								// Do not remove this
 								// switch(code) {
@@ -1248,6 +1262,13 @@ export const ChatRowContent = ({
 									</div>
 								)}
 							</div>
+							{/* When the reply was sent. Held back while it streams, so the line does not appear and
+							    shift as the text grows. */}
+							{!message.partial && isShowableTimestamp(message.ts) && (
+								<div className="ml-6 mt-1">
+									<MessageTimestamp ts={message.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+								</div>
+							)}
 						</div>
 					)
 				case "user_feedback":
@@ -1323,6 +1344,12 @@ export const ChatRowContent = ({
 									<Thumbnails images={message.images} style={{ marginTop: "8px" }} />
 								)}
 							</div>
+							{/* When the message was sent. Hidden while editing: the edit box replaces the bubble. */}
+							{!isEditing && isShowableTimestamp(message.ts) && (
+								<div className="ml-6 mt-1">
+									<MessageTimestamp ts={message.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+								</div>
+							)}
 						</div>
 					)
 				case "user_feedback_diff":
@@ -1384,6 +1411,12 @@ export const ChatRowContent = ({
 									<SeeNewChangesButtons key={completionCheckpoint.ts} />
 								) : null}
 							</div>
+							{/* When the final result was sent. Held back while it streams, like other replies. */}
+							{!message.partial && isShowableTimestamp(message.ts) && (
+								<div className="ml-6 mt-1">
+									<MessageTimestamp ts={message.ts} timeFormat={timeFormat} dateFormat={dateFormat} />
+								</div>
+							)}
 						</div>
 					)
 				case "shell_integration_warning":

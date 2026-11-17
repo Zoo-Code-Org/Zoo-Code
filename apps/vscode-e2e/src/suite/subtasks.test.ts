@@ -93,10 +93,11 @@ const waitForAimockRequestContaining = async (
 // suite becomes flaky again on slow CI runners, widen this value first.
 const SUBTASK_API_HANG_DRAIN_GRACE_MS = 500
 
-// aimock does not observe client disconnects: after the API-hang child request is cancelled,
-// the mock keeps the delayed stream pending server-side until the fixture's ttft has fully
-// elapsed, then flushes the remaining chunks to the dead socket. A streamed request opened by
-// the next test can interleave with that late flush, so wait out the remainder of the delayed
+// aimock 1.47.0 stops and journals a reply when the client disconnects. Before that, the mock
+// kept the delayed stream pending server-side until the fixture's ttft had fully elapsed, then
+// flushed the remaining chunks to the dead socket. A streamed request opened by the next test
+// could interleave with that late flush. This wait is a conservative guard kept until an e2e
+// run shows it is not needed: wait out the remainder of the delayed
 // window before the next test runs. The deadline is anchored to the journal timestamp of the
 // request this test created (never earlier traffic), and bounded by one latency window plus
 // grace, so it cannot hide a genuine hang.
