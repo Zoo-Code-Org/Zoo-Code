@@ -8140,6 +8140,253 @@ describe("ClineProvider", () => {
 			await writer.dispose()
 		})
 
+		// Mechanical setup for the three rows below: two views in one host, one of them pinned to a
+		// profile the other is about to activate with no buffered overlay of its own - the shape the
+		// activation snapshots. `midRead` runs inside the read of that sibling's pinned profile, so a
+		// row can place the sibling's own newer choice exactly where the interleaving belongs.
+		const setupStaleOverlayScenario = async (
+			viewStateId: string,
+			midRead: (viewer: ClineProvider) => Promise<void>,
+		): Promise<{ viewer: ClineProvider; writer: ClineProvider }> => {
+			const targetProfile: ProviderSettingsEntry = {
+				name: "target-profile",
+				id: "target-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const newerProfile: ProviderSettingsEntry = {
+				name: "newer-profile",
+				id: "newer-id",
+				apiProvider: providerIdentifiers.bedrock,
+			}
+			const profileList = [targetProfile, keeperProfile, newerProfile]
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const viewer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await viewer["setViewStateId"](viewStateId)
+			await writer.contextProxy.setValue("listApiConfigMeta", profileList)
+			await writer.contextProxy.setValue("currentApiConfigName", "keeper-profile")
+			viewer["viewLocalState"].currentApiConfigName = "keeper-profile"
+			vi.spyOn(writer.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("keeper-profile")
+			vi.spyOn(writer.providerSettingsManager, "activateProfile").mockImplementation(
+				async (args) =>
+					profileList.find((profile) => profile.name === ("name" in args ? args.name : "")) ?? targetProfile,
+			)
+			vi.spyOn(writer.providerSettingsManager, "listConfig").mockResolvedValue(profileList)
+			vi.spyOn(writer.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+				const readName = "name" in args ? args.name : ""
+				if (readName === "keeper-profile") {
+					await midRead(viewer)
+					return {
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "keeper-key",
+					}
+				}
+				const entry = profileList.find((profile) => profile.name === readName)
+				return {
+					name: entry?.name ?? "target-profile",
+					id: entry?.id ?? "target-id",
+					apiProvider: entry?.apiProvider ?? providerIdentifiers.anthropic,
+					apiKey: entry?.name === "newer-profile" ? "newer-key" : "target-key",
+				}
+			})
+			return { viewer, writer }
+		}
+
+		it("does not install a sibling's resolved settings under the pin that sibling moved to mid-resolve", async () => {
+			// The reviewer's interleaving, measured against this head: the activation reads the profile
+			// a sibling view is pinned to, and the sibling chooses another profile before that read
+			// returns. The mutation queue is per-instance, so the sibling's own choice is not held
+			// behind this mutation, and the settings handed back describe the pin the read started on,
+			// not the one the view now names.
+			const { viewer, writer } = await setupStaleOverlayScenario("mid-resolve-pin-view", async (sibling) => {
+				await sibling["_saveViewLocalStateFromMutation"]({ currentApiConfigName: "newer-profile" })
+			})
+			const viewerPostSpy = vi.spyOn(viewer, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(writer, "postStateToWebview").mockResolvedValue(undefined)
+
+			try {
+				await writer.activateProviderProfile({ name: "target-profile" })
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				// The sibling's own newer choice is what stands, and it carries no overlay, so its
+				// getState() resolves the profile it picked instead of running on the provider and
+				// credentials that belonged to the pin it had already left.
+				expect(viewer.pinnedProfileName).toBe("newer-profile")
+				expect(viewer["viewLocalState"].apiConfiguration).toBeUndefined()
+				// Zero posts: the only post this sibling would have received is the one that would have
+				// shipped the stale settings, and it never ran.
+				expect(viewerPostSpy).toHaveBeenCalledTimes(0)
+				expect(writer.getValues().currentApiConfigName).toBe("target-profile")
+			} finally {
+				await viewer.dispose()
+				await writer.dispose()
+			}
+		})
+
+		it("installs a sibling's own settings and posts it when its pin does not move during the resolve", async () => {
+			// Control for the row above: the snapshot is not being disabled, only the write that would
+			// land behind a newer choice. With no interleaving the overlay must still be installed and
+			// the view still posted exactly once.
+			const { viewer, writer } = await setupStaleOverlayScenario("settled-pin-view", async () => {})
+			const viewerPostSpy = vi.spyOn(viewer, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(writer, "postStateToWebview").mockResolvedValue(undefined)
+
+			try {
+				await writer.activateProviderProfile({ name: "target-profile" })
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				expect(viewer.pinnedProfileName).toBe("keeper-profile")
+				// The overlay carries the whole resolved record minus its name, which is the
+				// shape a sibling runs on under its pin.
+				expect(viewer["viewLocalState"].apiConfiguration).toEqual({
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "keeper-key",
+				})
+				expect(viewerPostSpy).toHaveBeenCalledTimes(1)
+			} finally {
+				await viewer.dispose()
+				await writer.dispose()
+			}
+		})
+
+		it("leaves the overlay unset when a sibling clears its pin while its settings are being resolved", async () => {
+			// A cleared pin is a newer operation too: the view has stopped naming any profile of its
+			// own, so the settings read for the pin it dropped must not become a per-view override it
+			// no longer asked for.
+			const { viewer, writer } = await setupStaleOverlayScenario("cleared-pin-view", async (sibling) => {
+				await sibling["_saveViewLocalStateFromMutation"]({ currentApiConfigName: undefined })
+			})
+			const viewerPostSpy = vi.spyOn(viewer, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(writer, "postStateToWebview").mockResolvedValue(undefined)
+
+			try {
+				await writer.activateProviderProfile({ name: "target-profile" })
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				expect(viewer.pinnedProfileName).toBeUndefined()
+				expect(viewer["viewLocalState"].apiConfiguration).toBeUndefined()
+				expect(viewerPostSpy).toHaveBeenCalledTimes(0)
+			} finally {
+				await viewer.dispose()
+				await writer.dispose()
+			}
+		})
+
+		it("leaves a selection another view moved during the compensation out of the activation rollback", async () => {
+			// Both views share one ContextProxy, as every view in the extension host does, so a write
+			// from the sibling lands in the same selection store this activation is restoring. The
+			// rollback gives back what this group overwrote; a selection another view moved while the
+			// group was failing is not something this group ever wrote.
+			const sharedProxy = new ContextProxy(mockContext)
+			const writer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			const viewer = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				sharedProxy,
+				new WebviewFocusTracker(),
+			)
+			await writer["setViewStateId"]("midcompensation-actor")
+			await viewer["setViewStateId"]("midcompensation-view")
+			try {
+				const targetProfile: ProviderSettingsEntry = {
+					name: "target-profile",
+					id: "target-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const thirdProfile: ProviderSettingsEntry = {
+					name: "third-profile",
+					id: "third-id",
+					apiProvider: providerIdentifiers.openai,
+				}
+				const profileList = [targetProfile, keeperProfile, thirdProfile]
+				await writer.contextProxy.setValue("listApiConfigMeta", profileList)
+				// This view shows the profile that is about to be activated away from, so the rollback
+				// has a prior value of its own to give back for both the shared selection and this pin.
+				await writer.setValue("currentApiConfigName", "keeper-profile")
+				viewer["viewLocalState"].currentApiConfigName = "keeper-profile"
+				vi.spyOn(viewer, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(writer, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(writer.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("keeper-profile")
+				let movedSelection = false
+				vi.spyOn(writer.providerSettingsManager, "activateProfile").mockImplementation(async (args) => {
+					const readName = "name" in args ? args.name : ""
+					if (readName === "keeper-profile" && !movedSelection) {
+						// The interleaving: the group has already failed and this is the compensation
+						// putting the provider-manager selection back. While that restore runs, the sibling
+						// moves the shared selection onto a profile this activation never named.
+						movedSelection = true
+						await viewer.contextProxy.setValue("currentApiConfigName", "third-profile")
+					}
+					return profileList.find((profile) => profile.name === readName) ?? targetProfile
+				})
+				vi.spyOn(writer.providerSettingsManager, "listConfig").mockResolvedValue(profileList)
+				vi.spyOn(writer.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+					const readName = "name" in args ? args.name : ""
+					const entry = profileList.find((profile) => profile.name === readName) ?? targetProfile
+					return {
+						name: entry.name,
+						id: entry.id,
+						apiProvider: entry.apiProvider,
+						apiKey: entry.name + "-key",
+					}
+				})
+				const sharedSettingsWrite = vi
+					.spyOn(writer.contextProxy, "setProviderSettings")
+					.mockImplementationOnce(async () => {
+						throw new Error("shared settings write down")
+					})
+
+				await expect(writer.activateProviderProfile({ name: "target-profile" })).rejects.toThrow(
+					"shared settings write down",
+				)
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				// The newer choice stands: the compensation restores this group's own values and leaves
+				// a selection it never wrote alone.
+				expect(writer.contextProxy.getValue("currentApiConfigName")).toBe("third-profile")
+				// This view's own pin *was* moved by this mutation, so the rollback still takes it back.
+				expect(writer.pinnedProfileName).toBe("keeper-profile")
+				// Two calls, pinned: this mutation's own settings write (the one that failed) and the
+				// compensation putting the prior settings back. The sibling-refresh row above pins the
+				// same pair for the same group shape.
+				expect(sharedSettingsWrite).toHaveBeenCalledTimes(2)
+			} finally {
+				await viewer.dispose()
+				await writer.dispose()
+			}
+		})
+
 		it("re-pins another live view and persists the replacement in its durable view state when its profile is deleted", async () => {
 			const viewer = new ClineProvider(
 				mockContext,
@@ -10538,7 +10785,7 @@ describe("ClineProvider", () => {
 			const snapshot = provider["_snapshotProfileActivationState"]()
 			// The activation moved the shared selection; a later write failed.
 			await provider.setValue("currentApiConfigName", "profile-c")
-			await provider["_restoreProfileActivationState"](snapshot)
+			await provider["_restoreProfileActivationState"](snapshot, "profile-c")
 
 			// The shared selection returns to its prior value...
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("profile-b")
@@ -10562,7 +10809,7 @@ describe("ClineProvider", () => {
 			// An unrelated key legitimately changes while the activation group is in
 			// flight.
 			await provider.contextProxy.setValue("customInstructions", "written during activation")
-			await provider["_restoreProfileActivationState"](snapshot)
+			await provider["_restoreProfileActivationState"](snapshot, undefined)
 			// The rollback restores provider settings only; it must not replay the
 			// whole global-state copy over keys that moved in the meantime.
 			expect(provider.contextProxy.getValue("customInstructions")).toBe("written during activation")

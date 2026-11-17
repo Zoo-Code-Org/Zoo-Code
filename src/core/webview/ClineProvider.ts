@@ -3183,9 +3183,19 @@ export class ClineProvider
 	 * restore is awaited independently and logged, and every failure is named in the
 	 * list this returns: one failed restore must not strand the others, and the
 	 * caller cannot tell a complete rollback from a partial one without being told.
-	 * Each restore here undoes a write this group made, so each one is required.
+	 * Each restore here undoes a write this group made, so each one is required. The two
+	 * selection restores compare before writing: a selection that neither this group wrote nor
+	 * the snapshot held came from another view after the operation began, and this rollback
+	 * has no claim on it.
+	 *
+	 * @param writtenSelectionName the selection this group's own write put in place, or
+	 * undefined when it wrote none; used only to tell this group's value from a newer one
+	 * another view wrote.
 	 */
-	private async _restoreProfileActivationState(snapshot: ProfileActivationSnapshot): Promise<string[]> {
+	private async _restoreProfileActivationState(
+		snapshot: ProfileActivationSnapshot,
+		writtenSelectionName: string | undefined,
+	): Promise<string[]> {
 		const restoreFailures: string[] = []
 		try {
 			await this.updateGlobalState("listApiConfigMeta", snapshot.listApiConfigMeta)
@@ -3199,8 +3209,15 @@ export class ClineProvider
 			// Restore the shared selection through the ContextProxy directly:
 			// this.setValue would also write the shared value into this view's pin
 			// and its durable viewStates entry, replacing the view's own selection
-			// with another view's choice.
-			await this.contextProxy.setValue("currentApiConfigName", snapshot.currentApiConfigName)
+			// with another view's choice. Compare before writing, and re-read the store instead of
+			// trusting what this group wrote: a selection that is neither the value this group wrote
+			// nor the value the snapshot held came from another view after this operation began, and
+			// restoring over it would replace that view's newer choice with the value this rollback
+			// began with. Same comparison the deletion's pin rollback already makes.
+			const sharedSelectionNow = this.contextProxy.getValue("currentApiConfigName")
+			if (sharedSelectionNow === writtenSelectionName || sharedSelectionNow === snapshot.currentApiConfigName) {
+				await this.contextProxy.setValue("currentApiConfigName", snapshot.currentApiConfigName)
+			}
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the current profile selection: ${error instanceof Error ? error.message : String(error)}`,
@@ -3222,11 +3239,19 @@ export class ClineProvider
 		try {
 			// Restore this view's own pin and overlay together: an absent pin stays
 			// absent (undefined deletes the entry) instead of materializing a pin
-			// from the shared value.
-			await this._saveViewLocalStateFromMutation({
-				currentApiConfigName: snapshot.viewCurrentApiConfigName,
-				apiConfiguration: snapshot.viewApiConfiguration,
-			})
+			// from the shared value. Same compare-before-restore as the shared selection above,
+			// run through this view's own buffer: a pin this mutation never wrote is a newer choice
+			// made after the operation began, and the overlay that belongs with it is not the one this
+			// snapshot holds.
+			if (
+				this.pinnedProfileName === writtenSelectionName ||
+				this.pinnedProfileName === snapshot.viewCurrentApiConfigName
+			) {
+				await this._saveViewLocalStateFromMutation({
+					currentApiConfigName: snapshot.viewCurrentApiConfigName,
+					apiConfiguration: snapshot.viewApiConfiguration,
+				})
+			}
 		} catch (error) {
 			this.log(
 				`[ClineProvider] profile-activation rollback failed for the view-local overlay: ${error instanceof Error ? error.message : String(error)}`,
@@ -3792,7 +3817,9 @@ export class ClineProvider
 					this.localModeConfigIds.set(activationMode, priorLocalModeConfigId)
 				}
 			}
-			restoreFailures.push(...(await this._restoreProfileActivationState(preWriteSnapshot)))
+			restoreFailures.push(
+				...(await this._restoreProfileActivationState(preWriteSnapshot, activate ? name : undefined)),
+			)
 			// Last: the shared stores and this window's own buffer are back, so a sibling that
 			// follows the shared store can be pointed at the settings that came back with them.
 			restoreFailures.push(...(await this._restoreRefreshedSiblings(refreshedSiblings, name)))
@@ -4383,6 +4410,17 @@ export class ClineProvider
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
+					// The read above awaited, and the mutation queue is per-instance, so this sibling may have
+					// moved its own selection while its settings were being resolved. A pin that no longer
+					// matches the profile this read started on is newer than the settings handed back, and
+					// installing them would put the older profile's provider and credentials under the pin the
+					// view now names - the same wrong pairing the unresolvable-pin case below refuses to guess
+					// at. Leaving the overlay unset is that case's answer too: a view with no overlay resolves
+					// the profile it actually pins. There is no await between this check and the write below,
+					// so the comparison is against the pin as it stands when the install lands.
+					if (instance.pinnedProfileName !== pinName) {
+						return
+					}
 					// Direct private access: compile-time safe across sibling instances.
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 					await instance.postStateToWebview()
@@ -4484,7 +4522,7 @@ export class ClineProvider
 				// including the manager selection written by activateProfile.
 				const restoreFailures: string[] = []
 				restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSelectionSnapshot)))
-				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot, name)))
 				if (restoreFailures.length > 0) {
 					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
 				}
@@ -4500,7 +4538,7 @@ export class ClineProvider
 			} catch (error) {
 				const restoreFailures: string[] = []
 				restoreFailures.push(...(await this._restoreProviderManagerSelection(managerSelectionSnapshot)))
-				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+				restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot, name)))
 				if (restoreFailures.length > 0) {
 					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
 				}
@@ -4537,7 +4575,7 @@ export class ClineProvider
 					// The activation is already applied at this point: selection, profile list and shared
 					// settings have all moved. A caller that receives an error must not end up with a
 					// profile that is activated but bound to no mode.
-					restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot)))
+					restoreFailures.push(...(await this._restoreProfileActivationState(activationSnapshot, name)))
 				}
 				if (restoreFailures.length > 0) {
 					throw this._incompleteRollbackError("activateProviderProfile", restoreFailures, error)
