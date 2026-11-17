@@ -3,6 +3,7 @@ import * as vscode from "vscode"
 import { CodeActionId, CodeActionName } from "@roo-code/types"
 
 import { getCodeActionCommand } from "../utils/commands"
+import type { DiagnosticData } from "../integrations/editor/EditorUtils"
 import { EditorUtils } from "../integrations/editor/EditorUtils"
 import type { WebviewFocusTracker } from "../core/webview/WebviewFocusTracker"
 import { resolveChatProvider } from "./resolveChatProvider"
@@ -23,17 +24,23 @@ const registerCodeAction = (
 	let userInput: string | undefined
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand(getCodeActionCommand(command), async (...args: any[]) => {
+		vscode.commands.registerCommand(getCodeActionCommand(command), async (...args: unknown[]) => {
 			// Handle both code action and direct command cases.
 			let filePath: string
 			let selectedText: string
 			let startLine: number | undefined
 			let endLine: number | undefined
-			let diagnostics: any[] | undefined
+			let diagnostics: DiagnosticData[] | undefined
 
 			if (args.length > 1) {
 				// Called from code action.
-				;[filePath, selectedText, startLine, endLine, diagnostics] = args
+				;[filePath, selectedText, startLine, endLine, diagnostics] = args as [
+					string,
+					string,
+					number?,
+					number?,
+					DiagnosticData[]?,
+				]
 			} else {
 				// Called directly from command palette.
 				const context = EditorUtils.getEditorContext()

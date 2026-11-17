@@ -1,6 +1,4 @@
 {
-	"title": "Modos",
-	"done": "Concluído",
 	"modes": {
 		"title": "Modos",
 		"createNewMode": "Criar novo modo",
@@ -53,9 +51,7 @@
 	},
 	"exportMode": {
 		"title": "Exportar modo",
-		"description": "Exporte este modo para um arquivo YAML com todas as regras incluídas para compartilhar facilmente com outros.",
-		"export": "Exportar modo",
-		"exporting": "Exportando..."
+		"export": "Exportar modo"
 	},
 	"importMode": {
 		"selectLevel": "Escolha onde importar este modo:",
@@ -81,7 +77,6 @@
 		"title": "Prompt do sistema (modo {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompts de suporte",
 		"resetPrompt": "Restaurar prompt {{promptType}} para padrão",
 		"prompt": "Prompt",
 		"enhance": {
@@ -94,10 +89,12 @@
 			"includeTaskHistory": "Incluir histórico de tarefas como contexto",
 			"includeTaskHistoryDescription": "Quando habilitado, as últimas 10 mensagens da conversa atual serão incluídas como contexto ao aprimorar prompts, ajudando a gerar sugestões mais relevantes e conscientes do contexto."
 		},
-		"condense": {
-			"apiConfiguration": "Configuração da API para condensação de contexto",
-			"apiConfigDescription": "Selecione qual configuração de API usar para operações de condensação de contexto. Deixe desmarcado para usar a configuração ativa atual.",
-			"useCurrentConfig": "Usar a configuração de API selecionada no momento"
+		"taskTitle": {
+			"enabled": "Gerar títulos de tarefa automaticamente",
+			"enabledDescription": "Resume em segundo plano o primeiro prompt de cada nova tarefa em um título curto. As solicitações de título não são incluídas no custo da tarefa. Perfis do GitHub Copilot e do VS Code LM consomem sua cota.",
+			"apiConfiguration": "Configuração de API",
+			"useTaskConfig": "Usar a configuração de API da tarefa",
+			"apiConfigDescription": "Recomenda-se um perfil leve, sem raciocínio. Se você escolher outro perfil, o início do seu prompt será enviado a esse provedor."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +136,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar Nova Tarefa",
 				"description": "Inicie uma nova tarefa com a entrada fornecida. Disponível na paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título da tarefa",
+				"description": "Gera em segundo plano um título curto para novas tarefas. Ele aparece no histórico e no cabeçalho da tarefa. Configure abaixo."
 			}
 		}
 	},
@@ -196,7 +197,6 @@
 		"title": "Excluir Modo",
 		"message": "Tem certeza de que deseja excluir o modo \"{{modeName}}\"?",
 		"rulesFolder": "Este modo tem uma pasta de regras em {{folderPath}} que também será excluída.",
-		"descriptionNoRules": "Tem certeza de que deseja excluir este modo personalizado?",
 		"confirm": "Excluir",
 		"cancel": "Cancelar"
 	}

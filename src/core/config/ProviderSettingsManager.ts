@@ -80,7 +80,10 @@ export class ProviderSettingsManager {
 
 	private readonly context: ExtensionContext
 
-	constructor(context: ExtensionContext) {
+	constructor(
+		context: ExtensionContext,
+		private readonly onImport?: (modeConfigIds: Record<string, string>) => void,
+	) {
 		this.context = context
 
 		// TODO: We really shouldn't have async methods in the constructor.
@@ -639,10 +642,10 @@ export class ProviderSettingsManager {
 	}
 
 	/**
-	 * Get every per-mode config binding. Callers that mirror this map into `ContextProxy` read it
-	 * here rather than recomputing it, so the two stores cannot drift.
+	 * Get a copy of the persisted mode -> API config ID map. The map is shared by every VS Code
+	 * window, so callers that need a stable view must keep their own copy.
 	 */
-	public async getModeApiConfigs(): Promise<Record<string, string>> {
+	public async getModeConfigIds(): Promise<Record<string, string>> {
 		try {
 			return await this.lock(async () => {
 				const { modeApiConfigs } = await this.load()
@@ -651,6 +654,14 @@ export class ProviderSettingsManager {
 		} catch (error) {
 			throw new Error(`Failed to get mode configs: ${error}`)
 		}
+	}
+
+	/**
+	 * Get every per-mode config binding. Callers that mirror this map into `ContextProxy` read it
+	 * here rather than recomputing it, so the two stores cannot drift.
+	 */
+	public async getModeApiConfigs(): Promise<Record<string, string>> {
+		return this.getModeConfigIds()
 	}
 
 	public async export() {
@@ -717,7 +728,10 @@ export class ProviderSettingsManager {
 
 	public async import(providerProfiles: ProviderProfiles) {
 		try {
-			return await this.lock(() => this.store(providerProfiles))
+			await this.lock(async () => {
+				await this.store(providerProfiles)
+				this.onImport?.({ ...providerProfiles.modeApiConfigs })
+			})
 		} catch (error) {
 			throw new Error(`Failed to import provider profiles: ${error}`)
 		}

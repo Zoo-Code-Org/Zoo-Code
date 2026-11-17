@@ -1,5 +1,4 @@
 {
-	"unknownError": "不明なエラー",
 	"authenticationFailed": "埋め込みの作成に失敗しました：認証に失敗しました。APIキーを確認してください。",
 	"failedWithStatus": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "{{attempts}}回試行しましたが、埋め込みの作成に失敗しました：{{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "無効なエンベッダー構成です。設定を確認してください。",
 		"serviceUnavailable": "エンベッダーサービスは利用できません。実行中でアクセス可能であることを確認してください。",
 		"invalidEndpoint": "無効なAPIエンドポイントです。URL構成を確認してください。",
-		"invalidEmbedderConfig": "無効なエンベッダー構成です。設定を確認してください。",
-		"invalidApiKey": "無効なAPIキーです。APIキー構成を確認してください。",
-		"invalidBaseUrl": "無効なベースURLです。URL構成を確認してください。",
-		"invalidModel": "無効なモデルです。モデル構成を確認してください。",
 		"invalidResponse": "エンベッダーサービスからの無効な応答です。設定を確認してください。",
 		"apiKeyRequired": "このエンベッダーにはAPIキーが必要です。",
 		"baseUrlRequired": "このエンベッダーにはベースURLが必要です"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "エンベッダー作成のためのOpenAI設定がありません",
 		"ollamaConfigMissing": "エンベッダー作成のためのOllama設定がありません",
-		"openAiCompatibleConfigMissing": "エンベッダー作成のためのOpenAI互換設定がありません",
 		"geminiConfigMissing": "エンベッダー作成のためのGemini設定がありません",
 		"mistralConfigMissing": "エンベッダー作成のためのMistral設定がありません",
 		"openRouterConfigMissing": "エンベッダー作成のためのOpenRouter設定がありません",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "インデックス作成に失敗しました：コードブロックが正常にインデックス化されませんでした。これは通常、エンベッダーの設定問題を示しています。",
-		"indexingFailedCritical": "インデックス作成に失敗しました：処理するファイルが見つかったにもかかわらず、コードブロックが正常にインデックス化されませんでした。これは重大なエンベッダーの障害を示しています。",
 		"fileWatcherStarted": "ファイルウォッチャーが開始されました。",
 		"fileWatcherStopped": "ファイルウォッチャーが停止されました。",
 		"failedDuringInitialScan": "初期スキャン中に失敗しました：{{errorMessage}}",

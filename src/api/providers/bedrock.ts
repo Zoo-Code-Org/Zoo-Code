@@ -1295,6 +1295,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				inputPrice: tier?.inputPrice ?? modelConfig.info.inputPrice,
 				outputPrice: tier?.outputPrice ?? modelConfig.info.outputPrice,
 				cacheWritesPrice: tier?.cacheWritesPrice ?? modelConfig.info.cacheWritesPrice,
+				// Carry the tier's own TTL rate; the entry-level one was derived from the
+				// 200K input price and would halve a 1M-context 1h write.
+				cacheWritesPrice1h: tier?.cacheWritesPrice1h ?? modelConfig.info.cacheWritesPrice1h,
+				cacheWritesPrice12h: tier?.cacheWritesPrice12h ?? modelConfig.info.cacheWritesPrice12h,
 				cacheReadsPrice: tier?.cacheReadsPrice ?? modelConfig.info.cacheReadsPrice,
 			}
 		}

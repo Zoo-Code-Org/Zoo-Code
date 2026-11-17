@@ -1,4 +1,4 @@
-import { providerIdentifiers, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
+import { getModelId, type ProviderSettings, type OrganizationAllowList } from "@roo-code/types"
 
 export class ProfileValidator {
 	public static isProfileAllowed(profile: ProviderSettings, allowList: OrganizationAllowList): boolean {
@@ -14,7 +14,7 @@ export class ProfileValidator {
 			return false
 		}
 
-		const modelId = this.getModelIdFromProfile(profile)
+		const modelId = getModelId(profile)
 
 		if (!modelId) {
 			return allowList.providers[profile.apiProvider]?.allowAll === true
@@ -47,45 +47,5 @@ export class ProfileValidator {
 		}
 
 		return providerAllowList.models?.includes(modelId) ?? false
-	}
-
-	private static getModelIdFromProfile(profile: ProviderSettings): string | undefined {
-		switch (profile.apiProvider) {
-			case providerIdentifiers.openai:
-				return profile.openAiModelId
-			case providerIdentifiers.anthropic:
-			case providerIdentifiers.openaiNative:
-			case providerIdentifiers.bedrock:
-			case providerIdentifiers.vertex:
-			case providerIdentifiers.gemini:
-			case providerIdentifiers.mistral:
-			case providerIdentifiers.deepseek:
-			case providerIdentifiers.xai:
-			case providerIdentifiers.sambanova:
-			case providerIdentifiers.fireworks:
-			case providerIdentifiers.friendli:
-				return profile.apiModelId
-			case providerIdentifiers.litellm:
-				return profile.litellmModelId
-			case providerIdentifiers.lmstudio:
-				return profile.lmStudioModelId
-			case providerIdentifiers.vscodeLm:
-			case providerIdentifiers.githubCopilot:
-				// We probably need something more flexible for this one, if we need to really support it here.
-				return profile.vsCodeLmModelSelector?.id
-			case providerIdentifiers.openrouter:
-				return profile.openRouterModelId
-			case providerIdentifiers.ollama:
-				return profile.ollamaModelId
-			case providerIdentifiers.requesty:
-				return profile.requestyModelId
-			case providerIdentifiers.ioIntelligence:
-				return profile.ioIntelligenceModelId
-			case providerIdentifiers.unbound:
-				return profile.unboundModelId
-			case providerIdentifiers.fakeAi:
-			default:
-				return undefined
-		}
 	}
 }

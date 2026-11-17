@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (lignes {{start}}-{{end}})",
-		"definitionsOnly": " (définitions uniquement)",
-		"maxLines": " (max {{max}} lignes)",
 		"imageTooLarge": "Le fichier image est trop volumineux ({{size}} MB). La taille maximale autorisée est {{max}} MB.",
 		"imageWithSize": "Fichier image ({{size}} Ko)"
 	},
@@ -11,20 +8,12 @@
 	"unknownToolError": "Zoo a tenté d'utiliser un outil inconnu : \"{{toolName}}\". Nouvelle tentative...",
 	"missingToolParameter": "Zoo a tenté d'utiliser {{toolName}} sans valeur pour le paramètre requis '{{paramName}}'. Nouvelle tentative...",
 	"missingToolParameterWithPath": "Zoo a tenté d'utiliser {{toolName}} pour '{{relPath}}' sans valeur pour le paramètre requis '{{paramName}}'. Nouvelle tentative...",
-	"codebaseSearch": {
-		"approval": "Recherche de '{{query}}' dans la base de code..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard a bloqué cette commande.",
 			"blockedWithReason": "Destructive Command Guard a bloqué cette commande. Message de DCG : {{reason}}",
 			"blockedWithRule": "Destructive Command Guard a bloqué cette commande. (Règle : {{ruleId}})",
 			"blockedWithReasonAndRule": "Destructive Command Guard a bloqué cette commande. Message de DCG : {{reason}} (Règle : {{ruleId}})"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "Impossible de créer une nouvelle tâche en raison de restrictions de politique."
 		}
 	},
 	"generateImage": {
@@ -34,9 +23,6 @@
 		"noImageGenerated": "Aucune image n'a été générée dans la réponse",
 		"invalidImageData": "Données d'image non valides dans la réponse",
 		"invalidImageFormat": "Format d'image non valide reçu",
-		"unknownError": "Une erreur inconnue s'est produite",
-		"roo": {
-			"authRequired": "L'authentification Zoo Code Cloud est requise pour la génération d'images. Veuillez vous connecter à Zoo Code Cloud."
-		}
+		"unknownError": "Une erreur inconnue s'est produite"
 	}
 }

@@ -20,9 +20,9 @@ interface ModelState {
 	phase: Phase[] // Task.assistantMessageContent partial flag plus tool_result presence
 	stream: "open" | "complete" // Task.didCompleteReadingStream
 	index: number // Task.currentStreamingContentIndex
-	lock: boolean // Task.presentAssistantMessageLocked
+	lock: boolean // Task.dispatchState !== DispatchState.IDLE
 	owner: number
-	pending: boolean // Task.presentAssistantMessageHasPendingUpdates
+	pending: boolean // Task.pendingWork !== null
 	latch: boolean // Task.userMessageContentReady
 	abort: boolean
 	threw: boolean

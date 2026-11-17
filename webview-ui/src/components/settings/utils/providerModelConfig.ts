@@ -1,4 +1,4 @@
-import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
+import type { ProviderName, ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 import {
 	providerIdentifiers,
 	anthropicDefaultModelId,
@@ -16,7 +16,6 @@ import {
 	xaiDefaultModelId,
 	sambaNovaDefaultModelId,
 	internationalZAiDefaultModelId,
-	mainlandZAiDefaultModelId,
 	fireworksDefaultModelId,
 	friendliDefaultModelId,
 	minimaxDefaultModelId,
@@ -32,8 +31,8 @@ import {
 	ioIntelligenceDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
-	zaiApiLineConfigs,
 	getZAiModels,
+	getProviderDefaultModelId,
 } from "@roo-code/types"
 
 import { MODELS_BY_PROVIDER } from "../constants"
@@ -99,10 +98,9 @@ export const getProviderServiceConfig = (provider: ProviderName): ProviderServic
 }
 
 export const getDefaultModelIdForProvider = (provider: ProviderName, apiConfiguration?: ProviderSettings): string => {
-	// Handle Z.ai's China/International entrypoint distinction
-	if (provider === providerIdentifiers.zai && apiConfiguration) {
-		const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-		return zaiApiLineConfigs[apiLine].isChina ? mainlandZAiDefaultModelId : internationalZAiDefaultModelId
+	// Z.ai's default depends on the configured China/International API line.
+	if (provider === providerIdentifiers.zai) {
+		return getProviderDefaultModelId(provider, apiConfiguration ?? {})
 	}
 
 	return PROVIDER_DEFAULT_MODEL_IDS[provider] ?? ""
@@ -185,7 +183,18 @@ export const getStaticModelsForProvider = (
 	provider: ProviderName,
 	customArnLabel?: string,
 	apiConfiguration?: ProviderSettings,
+	routerModels?: RouterModels,
 ): Record<string, ModelInfo> => {
+	// Friendli's static list is only a fallback for its fetched /v1/models list.
+	const friendliRouterModels = routerModels?.friendli
+	if (
+		provider === providerIdentifiers.friendli &&
+		friendliRouterModels &&
+		Object.keys(friendliRouterModels).length > 0
+	) {
+		return friendliRouterModels
+	}
+
 	if (provider === providerIdentifiers.zai) {
 		return getZAiModels(apiConfiguration?.zaiApiLine)
 	}

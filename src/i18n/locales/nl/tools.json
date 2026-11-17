@@ -1,8 +1,5 @@
 {
 	"readFile": {
-		"linesRange": " (regels {{start}}-{{end}})",
-		"definitionsOnly": " (alleen definities)",
-		"maxLines": " (max {{max}} regels)",
 		"imageTooLarge": "Afbeeldingsbestand is te groot ({{size}} MB). De maximaal toegestane grootte is {{max}} MB.",
 		"imageWithSize": "Afbeeldingsbestand ({{size}} KB)"
 	},
@@ -11,20 +8,12 @@
 	"unknownToolError": "Zoo probeerde een onbekende tool te gebruiken: \"{{toolName}}\". Opnieuw proberen...",
 	"missingToolParameter": "Zoo probeerde {{toolName}} te gebruiken zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
 	"missingToolParameterWithPath": "Zoo probeerde {{toolName}} te gebruiken voor '{{relPath}}' zonder waarde voor de vereiste parameter '{{paramName}}'. Opnieuw proberen...",
-	"codebaseSearch": {
-		"approval": "Zoeken naar '{{query}}' in codebase..."
-	},
 	"executeCommand": {
 		"destructiveCommandGuard": {
 			"blocked": "Destructive Command Guard heeft deze opdracht geblokkeerd.",
 			"blockedWithReason": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}}",
 			"blockedWithRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. (Regel: {{ruleId}})",
 			"blockedWithReasonAndRule": "Destructive Command Guard heeft deze opdracht geblokkeerd. Bericht van DCG: {{reason}} (Regel: {{ruleId}})"
-		}
-	},
-	"newTask": {
-		"errors": {
-			"policy_restriction": "Kan geen nieuwe taak aanmaken vanwege beleidsbeperkingen."
 		}
 	},
 	"generateImage": {
@@ -34,9 +23,6 @@
 		"noImageGenerated": "Er is geen afbeelding gegenereerd in het antwoord",
 		"invalidImageData": "Ongeldige afbeeldingsgegevens in het antwoord",
 		"invalidImageFormat": "Ongeldig afbeeldingsformaat ontvangen",
-		"unknownError": "Er is een onbekende fout opgetreden",
-		"roo": {
-			"authRequired": "Zoo Code Cloud-authenticatie is vereist voor het genereren van afbeeldingen. Log in bij Zoo Code Cloud."
-		}
+		"unknownError": "Er is een onbekende fout opgetreden"
 	}
 }

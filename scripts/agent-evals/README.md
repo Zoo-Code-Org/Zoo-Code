@@ -30,6 +30,11 @@ Execution limits are enforced, not decorative. The controller applies the
 activation, task start, task run, usage drain, and teardown step limits, and
 the trace records the measured durations.
 
+Two launch options are off by default. `testsPath` adds `--extensionTestsPath`
+to the VS Code launch; that module's `run()` must never settle, because VS Code
+exits once it does. `holdBeforeTeardownMs` holds the finished task on screen
+for that window after the completion message, before teardown starts.
+
 ## Structured trace
 
 Each run writes `trace.json` with `traceSchemaVersion: 1`. The trace is
