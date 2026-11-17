@@ -6,7 +6,10 @@ import { OutputManager } from "../output-manager.js"
 import { PromptManager } from "../prompt-manager.js"
 
 describe("command approval display", () => {
-	afterEach(() => vi.restoreAllMocks())
+	afterEach(() => {
+		vi.useRealTimers()
+		vi.restoreAllMocks()
+	})
 
 	it.each([
 		["echo \u{e0001}", '"echo \\udb40\\udc01"'],
@@ -182,7 +185,10 @@ describe("command approval display", () => {
 		expect(printed).toBe(`\n[unknown_ask] ${shown}\n`)
 	})
 
-	it("escapes the default shown when a prompt times out", async () => {
+	it.each([
+		["model text", evil, shown],
+		["empty default", "", "(empty)"],
+	])("shows the %s when a prompt times out", async (_name, defaultValue, expected) => {
 		vi.useFakeTimers()
 		const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true)
 		const prompt = new PromptManager({
@@ -190,15 +196,17 @@ describe("command approval display", () => {
 			stdin: new PassThrough() as unknown as NodeJS.ReadStream,
 			stdout: process.stdout,
 		})
-		const pending = prompt.promptWithTimeout("? ", 10, evil)
+		const pending = prompt.promptWithTimeout("? ", 10, defaultValue)
 		await vi.advanceTimersByTimeAsync(10)
 		await pending
-		vi.useRealTimers()
 
-		expect(stdout.mock.calls.map(([c]) => String(c)).join("")).toContain(`[Timeout - using default: ${shown}]\n`)
+		expect(stdout.mock.calls.map(([c]) => String(c)).join("")).toContain(`[Timeout - using default: ${expected}]\n`)
 	})
 
-	it("escapes the api error written to stderr when exitOnError is set", async () => {
+	it.each([
+		["model text", evil, shown],
+		["empty text", "", "Unknown error"],
+	])("writes the api error to stderr when exitOnError is set: %s", async (_name, text, expected) => {
 		vi.spyOn(process.stdout, "write").mockReturnValue(true)
 		const error = vi.spyOn(console, "error").mockImplementation(() => {})
 		vi.spyOn(process, "exit").mockImplementation((() => {
@@ -211,10 +219,10 @@ describe("command approval display", () => {
 			exitOnError: true,
 		})
 
-		const result = await dispatcher.handleAsk({ ts: 1, type: "ask", ask: "api_req_failed", text: evil })
+		const result = await dispatcher.handleAsk({ ts: 1, type: "ask", ask: "api_req_failed", text })
 
 		expect(result.error?.message).toBe("exit")
-		expect(error).toHaveBeenCalledExactlyOnceWith(`[CLI] API request failed: ${shown}`)
+		expect(error).toHaveBeenCalledExactlyOnceWith(`[CLI] API request failed: ${expected}`)
 	})
 
 	const suggestions = JSON.stringify({ question: evil, suggest: [{ answer: evil, mode: evil }] })
