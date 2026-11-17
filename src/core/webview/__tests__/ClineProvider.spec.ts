@@ -3,6 +3,7 @@
 import fs from "fs"
 import fsPromises from "fs/promises"
 import * as path from "path"
+import { EventEmitter } from "events"
 import { TaskRegistry } from "../../task/TaskRegistry"
 
 import Anthropic from "@anthropic-ai/sdk"
@@ -23,6 +24,7 @@ import {
 	DEFAULT_DIFF_FUZZY_THRESHOLD,
 	DEFAULT_WRITE_DELAY_MS,
 	providerIdentifiers,
+	RooCodeEventName,
 	openAiModelInfoSaneDefaults,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -3952,6 +3954,64 @@ describe("ClineProvider", () => {
 			clearAllPendingEditOperations.mockRestore()
 		})
 
+		it("drains every task when a TaskUnfocused listener throws during eviction", async () => {
+			// The Task mock at the top of this file has no EventEmitter methods, so the listener
+			// lives on a real emitter whose emit the task double hands to removeClineFromStack().
+			// A listener that throws then escapes task.emit(TaskUnfocused) the way Node documents
+			// it: after the task is already off the registry, skipping the abort, the listener
+			// teardown and drainTaskDisposal() for that task, and skipping every task below it in
+			// the drain loop. The disposal step itself is left unstubbed so the failure travels
+			// the real teardown path. Stack doubles follow the fully-wired cleanup test above.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			const bus = new EventEmitter()
+			bus.on(RooCodeEventName.TaskUnfocused, () => {
+				throw new Error("listener boom")
+			})
+			const throwerDispose = vi.fn().mockResolvedValue(undefined)
+			const thrower = {
+				taskId: "eviction-throw-listener",
+				instanceId: 1,
+				emit: (event: string) => bus.emit(event),
+				abortTask: vi.fn().mockResolvedValue(undefined),
+				dispose: throwerDispose,
+			} as unknown as Task
+			const sibling = {
+				taskId: "eviction-throw-sibling",
+				instanceId: 1,
+				emit: vi.fn(),
+				abortTask: vi.fn().mockResolvedValue(undefined),
+				dispose: vi.fn().mockResolvedValue(undefined),
+			} as unknown as Task
+
+			// Pushed last so the thrower is the current task the eviction branch reaches first,
+			// with the sibling sitting below it in the drain loop.
+			provider["taskRegistry"].push(sibling)
+			provider["taskRegistry"].push(thrower)
+
+			// The teardown still rejects with the listener error: making it resilient does not turn
+			// the throw into a silent success.
+			await expect(provider.dispose()).rejects.toThrow("listener boom")
+
+			// Both tasks reach their own cleanup: the one whose eviction threw, and the one that
+			// sat behind it in the stack.
+			expect(throwerDispose).toHaveBeenCalledTimes(1)
+			expect(sibling.dispose).toHaveBeenCalledTimes(1)
+			expect(provider["taskRegistry"].length).toBe(0)
+			// The failure is still reported once by the cleanup step, so making the teardown
+			// resilient does not turn the throw into a silent success.
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				"Provider cleanup step 'tasks' failed: listener boom",
+			)
+
+			bus.removeAllListeners(RooCodeEventName.TaskUnfocused)
+		})
 		it("completes disposal when the optional manager instances are absent", async () => {
 			// The constructor always initializes the manager instances, so the skip branches
 			// of the optional call sites in dispose() are unreachable otherwise: null them

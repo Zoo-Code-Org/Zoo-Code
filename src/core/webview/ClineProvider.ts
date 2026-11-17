@@ -1810,15 +1810,49 @@ export class ClineProvider
 		// so an active delegated child is marked interrupted before the extension shuts down,
 		// rather than being left persisted as "active" across the reload.
 		await cleanupStep("tasks", async () => {
+			// A TaskUnfocused listener that throws makes task.emit() throw inside
+			// removeClineFromStack() after the task is already off the registry: the abort, the
+			// listener teardown and drainTaskDisposal() were all skipped for that task, and so
+			// was every task below it in this loop, which is how a closed view could leave a
+			// task holding requests and resources. Each task is evicted and drained on its own
+			// now, so one eviction failure cannot strand the rest. The first failure is kept and
+			// rethrown below, so cleanupStep() still reports this step exactly once.
+			let evictionError: unknown
+			const recordEvictionFailure = (task: Task, error: unknown) => {
+				if (evictionError === undefined) {
+					evictionError = error
+				}
+				this.log(
+					`[ClineProvider#dispose] eviction failed for ${task.taskId}: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
 			if (this.taskRegistry.length > 0) {
 				const task = this.taskRegistry.current!
-				await this.evictCurrentTask()
+				try {
+					await this.evictCurrentTask()
+				} catch (error) {
+					recordEvictionFailure(task, error)
+				}
 				await this.drainTaskDisposal(task)
 			}
 			while (this.taskRegistry.length > 0) {
 				const task = this.taskRegistry.current!
-				await this.removeClineFromStack()
+				try {
+					await this.removeClineFromStack()
+				} catch (error) {
+					recordEvictionFailure(task, error)
+				}
 				await this.drainTaskDisposal(task)
+				// Progress guard: an eviction that failed without removing its task would spin
+				// here forever now that its error no longer ends the loop.
+				if (this.taskRegistry.current === task) {
+					this.taskRegistry.remove(task.taskId)
+				}
+			}
+
+			if (evictionError !== undefined) {
+				throw evictionError
 			}
 			this.log("Cleared all tasks")
 		})
