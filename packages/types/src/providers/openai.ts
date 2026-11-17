@@ -23,7 +23,71 @@ export type OpenAiNativeModelId = keyof typeof openAiNativeModels
 export const OPENAI_API_PROTOCOL = "openai"
 export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-sol"
 
+const gpt62NativeModelInfo = {
+	maxTokens: 128_000,
+	contextWindow: 1_050_000,
+	includedTools: ["apply_patch"],
+	excludedTools: ["apply_diff", "write_to_file"],
+	supportsImages: true,
+	supportsPromptCache: true,
+	supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+	requiredReasoningEffort: true,
+	reasoningEffort: "medium",
+	supportsVerbosity: true,
+	supportsTemperature: false,
+	longContextPricing: {
+		thresholdTokens: 272_000,
+		inputPriceMultiplier: 2,
+		outputPriceMultiplier: 1.5,
+		cacheWritesPriceMultiplier: 2,
+		cacheReadsPriceMultiplier: 2,
+		appliesToServiceTiers: ["default", "priority"],
+	},
+} as const satisfies ModelInfo
+
 export const openAiNativeModels = {
+	// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+	"gpt-6.2-sol": {
+		...gpt62NativeModelInfo,
+		inputPrice: 2,
+		outputPrice: 10,
+		cacheReadsPrice: 0.1,
+		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5,
+		tiers: [
+			{
+				name: "priority",
+				contextWindow: gpt62NativeModelInfo.contextWindow,
+				inputPrice: 4,
+				outputPrice: 20,
+				cacheReadsPrice: 0.2,
+				cacheWritesPrice: 5,
+				cacheWritesPrice12h: 10,
+			},
+		],
+		description: "GPT-6.2 Sol for everyday coding and agent workflows",
+	},
+	// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+	"gpt-6.2-astra": {
+		...gpt62NativeModelInfo,
+		inputPrice: 8,
+		outputPrice: 40,
+		cacheReadsPrice: 0.4,
+		cacheWritesPrice: 10,
+		cacheWritesPrice12h: 20,
+		tiers: [
+			{
+				name: "priority",
+				contextWindow: gpt62NativeModelInfo.contextWindow,
+				inputPrice: 16,
+				outputPrice: 80,
+				cacheReadsPrice: 0.8,
+				cacheWritesPrice: 20,
+				cacheWritesPrice12h: 40,
+			},
+		],
+		description: "GPT-6.2 Astra for complex software engineering and professional work",
+	},
 	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
 	"gpt-6.1-terra": {
 		maxTokens: 128000,

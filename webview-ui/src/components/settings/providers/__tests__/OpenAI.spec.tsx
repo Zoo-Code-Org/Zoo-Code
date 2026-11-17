@@ -1,6 +1,12 @@
 import React from "react"
 
-import { OpenAiServiceTier, providerIdentifiers, type ModelInfo, type ProviderSettings } from "@roo-code/types"
+import {
+	openAiNativeModels,
+	OpenAiServiceTier,
+	providerIdentifiers,
+	type ModelInfo,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { fireEvent, render, screen } from "@/utils/test-utils"
 
@@ -15,16 +21,28 @@ vi.mock("vscrui", () => ({
 }))
 
 vi.mock("@src/components/ui", () => ({
-	Select: ({ children, value, onValueChange }: any) => (
-		<select aria-label="Service tier" value={value} onChange={(event) => onValueChange(event.target.value)}>
+	Select: ({
+		children,
+		value,
+		onValueChange,
+	}: React.PropsWithChildren<{ value: string; onValueChange: (value: string) => void }>) => (
+		<select
+			aria-label="Service tier"
+			data-controlled-value={value}
+			value={value}
+			onChange={(event) => onValueChange(event.target.value)}>
 			{children}
 		</select>
 	),
-	SelectContent: ({ children }: any) => <>{children}</>,
-	SelectItem: ({ children, value }: any) => <option value={value}>{children}</option>,
+	SelectContent: ({ children }: React.PropsWithChildren) => <>{children}</>,
+	SelectItem: ({ children, value }: React.PropsWithChildren<{ value: string }>) => (
+		<option value={value}>{children}</option>
+	),
 	SelectTrigger: () => null,
 	SelectValue: () => null,
-	StandardTooltip: ({ children, content }: any) => <span title={content}>{children}</span>,
+	StandardTooltip: ({ children, content }: React.PropsWithChildren<{ content: string }>) => (
+		<span title={content}>{children}</span>
+	),
 }))
 
 const baseModelInfo: ModelInfo = {
@@ -33,6 +51,24 @@ const baseModelInfo: ModelInfo = {
 }
 
 describe("OpenAI service tier selector", () => {
+	it.each([
+		{ savedTier: OpenAiServiceTier.Flex, displayedTier: OpenAiServiceTier.Default },
+		{ savedTier: OpenAiServiceTier.Priority, displayedTier: OpenAiServiceTier.Priority },
+	])("displays $displayedTier after switching to GPT-6.2 with $savedTier saved", ({ savedTier, displayedTier }) => {
+		const setApiConfigurationField = vi.fn()
+		const props = {
+			apiConfiguration: { openAiNativeApiKey: "test-api-key", openAiNativeServiceTier: savedTier },
+			setApiConfigurationField,
+		}
+		const { rerender } = render(<OpenAI {...props} selectedModelInfo={openAiNativeModels["gpt-6.1-sol"]} />)
+		const selector = screen.getByRole("combobox", { name: "Service tier" })
+		expect(selector).toHaveAttribute("data-controlled-value", savedTier)
+
+		rerender(<OpenAI {...props} selectedModelInfo={openAiNativeModels["gpt-6.2-sol"]} />)
+		expect(selector).toHaveAttribute("data-controlled-value", displayedTier)
+		expect(setApiConfigurationField).not.toHaveBeenCalled()
+	})
+
 	it("shows supported service tiers and persists the selected tier", () => {
 		const setApiConfigurationField = vi.fn()
 		const selectedModelInfo: ModelInfo = {
