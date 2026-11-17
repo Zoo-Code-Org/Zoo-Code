@@ -13,6 +13,7 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	TelemetryEventName,
 	type ClineMessage,
 	type GlobalState,
 	type HistoryItem,
@@ -21,6 +22,7 @@ import {
 	type ModelInfo,
 	type TaskLike,
 } from "@roo-code/types"
+import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { MODEL_FETCH_TIMEOUT_MS, Task } from "../Task"
@@ -8033,11 +8035,12 @@ describe("Cline", () => {
 			expect(saveSpy).toHaveBeenCalled()
 		})
 
-		it("skips the webview post and logs when the partial-merge save fails", async () => {
+		it("emits the update ungated but skips the webview post when the partial-merge save fails", async () => {
 			// saveClineMessages' contract (Task.ts:1757-1764) makes the boolean
 			// authoritative for durable state: a false result leaves the on-disk
-			// record stale, so the webview-only post must be skipped the way
-			// finalizePartialToolAsk does it (Task.ts:2998-3007).
+			// record stale, so the webview-only post must be skipped. IPC/CLI
+			// consumers never reload from disk, so the Message "updated" emit
+			// stays ungated even when the save fails (PR #1708 review thread).
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -8045,8 +8048,17 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
-			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockResolvedValue(undefined)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// IPC/CLI consumers observe the in-memory truth via the Message event.
+			const messageListener = vi.fn()
+			task.on(RooCodeEventName.Message, messageListener)
+			// Force the cloud path observable: isEnabled() is statically false in
+			// tests and the singleton getter throws without an instance. The
+			// double assertion is the only way to hand the getter a structural
+			// stub; only captureEvent is reached on this path.
+			const captureEvent = vi.fn()
+			vi.spyOn(CloudService, "isEnabled").mockReturnValue(true)
+			vi.spyOn(CloudService, "instance", "get").mockReturnValue({ captureEvent } as unknown as CloudService)
 
 			await task.say("reasoning", "Thinking ab", undefined, true)
 			const originalSnapshotTs = task.clineMessages[0].ts
@@ -8062,12 +8074,25 @@ describe("Cline", () => {
 			// Only the merge's save fails; the earlier append save already succeeded.
 			saveSpy.mockClear()
 			saveSpy.mockResolvedValue(false)
-			updateSpy.mockClear()
+			messageListener.mockClear()
+			captureEvent.mockClear()
+			vi.mocked(mockProvider.postMessageToWebview).mockClear()
 
 			await task.say("reasoning", "Thinking about it", undefined, true)
+			// The emit runs fire-and-forget; flush a macrotask so it settles.
+			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			expect(saveSpy).toHaveBeenCalledTimes(1)
-			expect(updateSpy).not.toHaveBeenCalled()
+			const mergedSnapshot = requireDefined(
+				task.clineMessages.find((m) => m.type === "say" && m.say === "reasoning"),
+			)
+			// The ungated Message emit fired for IPC/CLI consumers...
+			expect(messageListener).toHaveBeenCalledWith({ action: "updated", message: mergedSnapshot })
+			// ...but a still-partial row is never cloud-captured (the partial
+			// filter inside the emit path is preserved), and the webview-only
+			// post stayed gated on the failed save.
+			expect(captureEvent).not.toHaveBeenCalled()
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#say] saveClineMessages failed; skipping webview update")
 			// The in-memory merge still happened: only the webview post is gated.
 			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
@@ -8077,7 +8102,7 @@ describe("Cline", () => {
 			consoleErrorSpy.mockRestore()
 		})
 
-		it("skips the webview post and logs when the complete-merge save fails", async () => {
+		it("emits the update ungated but skips the webview post when the complete-merge save fails", async () => {
 			const task = new Task({
 				provider: mockProvider,
 				apiConfiguration: mockApiConfig,
@@ -8085,8 +8110,17 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const saveSpy = vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
-			const updateSpy = vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockResolvedValue(undefined)
 			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// IPC/CLI consumers observe the in-memory truth via the Message event.
+			const messageListener = vi.fn()
+			task.on(RooCodeEventName.Message, messageListener)
+			// Force the cloud path observable: isEnabled() is statically false in
+			// tests and the singleton getter throws without an instance. The
+			// double assertion is the only way to hand the getter a structural
+			// stub; only captureEvent is reached on this path.
+			const captureEvent = vi.fn()
+			vi.spyOn(CloudService, "isEnabled").mockReturnValue(true)
+			vi.spyOn(CloudService, "instance", "get").mockReturnValue({ captureEvent } as unknown as CloudService)
 
 			await task.say("reasoning", "Thinking ab", undefined, true)
 			const originalSnapshotTs = task.clineMessages[0].ts
@@ -8100,12 +8134,28 @@ describe("Cline", () => {
 
 			saveSpy.mockClear()
 			saveSpy.mockResolvedValue(false)
-			updateSpy.mockClear()
+			messageListener.mockClear()
+			captureEvent.mockClear()
+			vi.mocked(mockProvider.postMessageToWebview).mockClear()
 
 			await task.say("reasoning", "Thinking about it.", undefined, false)
+			// The emit runs fire-and-forget; flush a macrotask so it settles.
+			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			expect(saveSpy).toHaveBeenCalledTimes(1)
-			expect(updateSpy).not.toHaveBeenCalled()
+			const completedSnapshot = requireDefined(
+				task.clineMessages.find((m) => m.type === "say" && m.say === "reasoning"),
+			)
+			// The ungated Message emit fired for IPC/CLI consumers...
+			expect(messageListener).toHaveBeenCalledWith({ action: "updated", message: completedSnapshot })
+			// ...the completed row was cloud-captured (ts-keyed, so no double
+			// report on the next successful save)...
+			expect(captureEvent).toHaveBeenCalledWith({
+				event: TelemetryEventName.TASK_MESSAGE,
+				properties: { taskId: task.taskId, message: completedSnapshot },
+			})
+			// ...but the webview-only post stayed gated on the failed save.
+			expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
 			expect(consoleErrorSpy).toHaveBeenCalledWith("[Task#say] saveClineMessages failed; skipping webview update")
 			const reasoningMessages = task.clineMessages.filter((m) => m.type === "say" && m.say === "reasoning")
 			expect(reasoningMessages).toHaveLength(1)

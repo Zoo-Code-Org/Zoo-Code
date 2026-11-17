@@ -1732,12 +1732,29 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	/**
-	 * Updates a Cline message in the webview and emits an event.
-	 * Non-partial messages are synced to cloud telemetry if not already synced.
+	 * Posts a message update to the webview only.
+	 *
+	 * The webview renders the durable on-disk state, so callers must gate
+	 * this post on a successful `saveClineMessages()`: posting an update the
+	 * disk does not back would let a reload restore stale content over it.
 	 */
-	private async updateClineMessage(message: ClineMessage) {
+	private async postMessageUpdated(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+	}
+
+	/**
+	 * Emits the Message "updated" event to IPC/CLI consumers and syncs the
+	 * message to cloud telemetry when it is complete and not already synced.
+	 *
+	 * Unlike `postMessageUpdated` this is intentionally NOT gated on
+	 * persistence: IPC/CLI consumers read the in-memory task state directly
+	 * and never reload from disk, so suppressing the emit on a failed save
+	 * would leave their view of the in-memory truth stale. Cloud capture is
+	 * ts-keyed (`cloudSyncedMessageTimestamps`), so a later successful save
+	 * re-running this path cannot double-report the same message.
+	 */
+	private async emitMessageUpdated(message: ClineMessage) {
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
 		// Check if we should sync to cloud and haven't already synced this message
@@ -1752,6 +1769,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Track that this message has been synced to cloud
 			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
+	}
+
+	/**
+	 * Updates a Cline message in the webview and emits an event.
+	 * Non-partial messages are synced to cloud telemetry if not already synced.
+	 */
+	private async updateClineMessage(message: ClineMessage) {
+		await this.postMessageUpdated(message)
+		await this.emitMessageUpdated(message)
 	}
 
 	/**
@@ -2844,18 +2870,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// persist the merged delta before the webview update — the
 						// same save-then-post pattern as the complete-merge branch.
 						const saved = await this.saveClineMessages()
-						if (!saved) {
+						if (saved) {
+							// Fire-and-forget: see updateClineMessage call above for the
+							// rationale on the .catch arm.
+							this.updateClineMessage(staleSnapshot).catch((error) => {
+								console.error("[Task#say] updateClineMessage failed:", error)
+							})
+						} else {
 							// The persistence write failed: the on-disk record still carries
-							// the pre-merge snapshot while the in-memory message is updated.
-							// Skip the webview-only post so the two views do not diverge (a
-							// reload would restore the stale text). The next saveClineMessages()
-							// call re-persists the full message array and repairs the disk record.
+							// the pre-merge snapshot while the in-memory message is updated,
+							// so the webview-only post is skipped (a reload would restore
+							// the stale text; the next saveClineMessages() call re-persists
+							// the full message array and repairs the disk record). IPC/CLI
+							// consumers never reload from disk, so the Message "updated"
+							// emit and the cloud capture stay ungated: suppressing them
+							// would leave their view of the in-memory truth stale.
+							this.emitMessageUpdated(staleSnapshot).catch((error) => {
+								console.error("[Task#say] emitMessageUpdated failed:", error)
+							})
 							console.error("[Task#say] saveClineMessages failed; skipping webview update")
-							return
 						}
-						this.updateClineMessage(staleSnapshot).catch((error) => {
-							console.error("[Task#say] updateClineMessage failed:", error)
-						})
 					} else {
 						const sayTs = Date.now()
 
@@ -2922,18 +2956,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// and post like normal to persist to disk.
 						const saved = await this.saveClineMessages()
 
-						if (!saved) {
+						if (saved) {
+							// Fire-and-forget: see updateClineMessage call above for the
+							// rationale on the .catch arm.
+							this.updateClineMessage(staleSnapshot).catch((error) => {
+								console.error("[Task#say] updateClineMessage failed:", error)
+							})
+						} else {
 							// Same durable-state gate as the partial-merge branch above: the
-							// on-disk record still carries the partial snapshot, so posting the
-							// completed row would let a reload restore a spinner over a
-							// finished message. The next saveClineMessages() repairs the disk.
+							// on-disk record still carries the partial snapshot, so the
+							// webview-only post is skipped (a reload would restore a spinner
+							// over a finished message; the next saveClineMessages() repairs
+							// the disk). IPC/CLI consumers never reload from disk, so the
+							// Message "updated" emit and the cloud capture stay ungated.
+							this.emitMessageUpdated(staleSnapshot).catch((error) => {
+								console.error("[Task#say] emitMessageUpdated failed:", error)
+							})
 							console.error("[Task#say] saveClineMessages failed; skipping webview update")
-							return
 						}
-
-						this.updateClineMessage(staleSnapshot).catch((error) => {
-							console.error("[Task#say] updateClineMessage failed:", error)
-						})
 					} else {
 						const sayTs = Date.now()
 
