@@ -16,6 +16,8 @@ const fsPromisesActuals = vi.hoisted(() => ({
 	// so the two methods they stand in for are held too.
 	stat: undefined as (typeof import("fs/promises"))["stat"] | undefined,
 	chmod: undefined as (typeof import("fs/promises"))["chmod"] | undefined,
+	// The alias-flip rows script fs.realpath, so they hand the unscripted looks back to the real filesystem through the same holder.
+	realpath: undefined as (typeof import("fs/promises"))["realpath"] | undefined,
 }))
 
 vi.mock("fs/promises", async () => {
@@ -25,6 +27,7 @@ vi.mock("fs/promises", async () => {
 	fsPromisesActuals.writeFile = actual.writeFile
 	fsPromisesActuals.stat = actual.stat
 	fsPromisesActuals.chmod = actual.chmod
+	fsPromisesActuals.realpath = actual.realpath
 	// Start with all actual implementations.
 	const mockedFs = {
 		...actual,
@@ -1937,5 +1940,55 @@ describe("safeWriteJson", () => {
 		).rejects.toThrow(ConfinedPathEscapeError)
 		expect(fsSyncActual.existsSync(link)).toBe(false)
 		expect(JSON.parse(fsSyncActual.readFileSync(target, "utf8"))).toEqual({ written: "payload" })
+	})
+
+	it("refuses to publish a captured target whose own key is not the key it holds", async () => {
+		// The kept-changing check compares two derivations of the path the caller named, so an alias that moves to
+		// a different referent and back while the lock is held passes both of them: the pre-lock key, the
+		// re-derivation and the last check all report the alias's own key, while the publish target resolved in
+		// between still names the other file. The write would then rename onto a file whose lock it never took.
+		const aliasPath = path.join(tempDir, "alias-spelling.json")
+		const referentPath = path.join(tempDir, "referent.json")
+		await fs.writeFile(aliasPath, JSON.stringify({ heldByAlias: true }), "utf8")
+		await fs.writeFile(referentPath, JSON.stringify({ heldByReferent: true }), "utf8")
+		type RealpathFn = (typeof fs)["realpath"]
+		const realpathMock = vi.mocked(fs.realpath)
+		const delegate = realpathMock.getMockImplementation() as RealpathFn | undefined
+		const handBack = async (args: Parameters<RealpathFn>): Promise<string> =>
+			String(delegate ? await delegate(...args) : await fsPromisesActuals.realpath!(...args))
+		let aliasLooks = 0
+		realpathMock.mockImplementation(async (...args: Parameters<RealpathFn>) => {
+			if (args[0] === aliasPath) {
+				aliasLooks += 1
+				// Look 3 is the publish-target resolution under the lock: the alias names the referent for that
+				// one look and is back to its own spelling for every look before it and after it.
+				if (aliasLooks === 3) {
+					return referentPath
+				}
+			}
+			return handBack(args)
+		})
+		try {
+			await expect(safeWriteJson(aliasPath, { written: true })).rejects.toThrow(
+				/captured target .* is not locked under/,
+			)
+		} finally {
+			realpathMock.mockImplementation(
+				delegate ??
+					(async (lookup: Parameters<RealpathFn>[0]) => String(await fsPromisesActuals.realpath!(lookup))),
+			)
+		}
+		expect(JSON.parse(fsSyncActual.readFileSync(aliasPath, "utf8"))).toEqual({ heldByAlias: true })
+		expect(JSON.parse(fsSyncActual.readFileSync(referentPath, "utf8"))).toEqual({ heldByReferent: true })
+		expect(fsSyncActual.readdirSync(tempDir).filter((name: string) => name.includes(".tmp"))).toEqual([])
+	})
+
+	it("publishes a target whose key is the key the write holds", async () => {
+		// The refusal above has to be a refusal of one shape and not of every write: an ordinary target that
+		// resolves to the same key the lock was taken under still publishes.
+		const plainPath = path.join(tempDir, "plain-target.json")
+		await fs.writeFile(plainPath, JSON.stringify({ before: true }), "utf8")
+		await safeWriteJson(plainPath, { after: true })
+		expect(JSON.parse(fsSyncActual.readFileSync(plainPath, "utf8"))).toEqual({ after: true })
 	})
 })

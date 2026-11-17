@@ -99,7 +99,9 @@ describe("safeWriteJson lock key under a peer commit", () => {
 		expect(mockedAcquireFileLock).toHaveBeenCalledWith(referent)
 		// The extra resolves are the post-lock passes: the publish target is re-resolved,
 		// the lock key is re-derived, and every derivation canonicalizes through realpath,
-		// including the final stability check. All of them run after the lock was taken, so
+		// including the final stability check, and the captured-target check, which derives the key of the
+		// target this write actually captured - a resolution of that path plus its canonicalized parent - and
+		// requires it to be the key held. All of them run after the lock was taken, so
 		// they do not change the lock the caller queued behind. The two trailing lstat
 		// calls belonged to the delegation flow's staging-path checks; the replacement
 		// protocol stages the temp itself and checks no identity beside it, so they are
@@ -110,6 +112,8 @@ describe("safeWriteJson lock key under a peer commit", () => {
 			"resolve",
 			"resolve",
 			"lock",
+			"resolve",
+			"resolve",
 			"resolve",
 			"resolve",
 			"resolve",

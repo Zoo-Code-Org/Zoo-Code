@@ -437,6 +437,19 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			)
 		}
 
+		// The check above compares two derivations of the path the caller named, so it cannot see an alias that
+		// moves to a different referent and back while the lock is held: the pre-lock key, the re-derivation and
+		// this last look at the spelling all agree on the alias's own key, while the publish target resolved in
+		// between still names the other file. Deriving the key of the target actually captured, and requiring it
+		// to be the key this write holds, is what stops the commit rename from landing on a file whose lock was
+		// never taken. It runs before the recovery pass below, which takes resolvedTargetPath and would otherwise
+		// restore an orphaned backup beside the wrong file, and before anything is staged beside it.
+		if ((await resolveLockKey(resolvedTargetPath)) !== lockKey) {
+			throw new Error(
+				`safeWriteJson: refusing to publish ${absoluteFilePath}: the captured target ${resolvedTargetPath} is not locked under ${lockKey}`,
+			)
+		}
+
 		// Confinement, if the caller declared a scope. Both sides are canonicalized the
 		// same way: the publish target is resolved through symlinks, and a target that
 		// does not exist yet still carries the alias components of the path it was
