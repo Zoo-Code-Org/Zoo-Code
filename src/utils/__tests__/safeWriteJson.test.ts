@@ -1459,18 +1459,122 @@ describe("safeWriteJson", () => {
 		// peer's file; the byte comparison must leave it in place.
 		fsSyncActual.writeFileSync(escaped, JSON.stringify({ peer: true }))
 
-		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ ours: true })))
+		expect(await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ ours: true })))).toBe(false)
 
 		expect(fsSyncActual.existsSync(escaped)).toBe(true)
 		expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ peer: true })
 
-		// The bytes are still ours: the escaped publish is undone.
-		await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ peer: true })))
+		// The bytes are still ours: the escaped publish is undone, and the undo says so.
+		expect(await undoEscapedPublish(escaped, Buffer.from(JSON.stringify({ peer: true })))).toBe(true)
 		expect(fsSyncActual.existsSync(escaped)).toBe(false)
 
-		// A missing file and an unreadable byte record are both no-ops, never a throw.
-		await undoEscapedPublish(escaped, Buffer.from("{}"))
-		await undoEscapedPublish(path.join(outside, "absent.json"), undefined)
+		// A missing file and an unreadable byte record are both no-ops, never a throw, and
+		// both answer that this write removed nothing.
+		expect(await undoEscapedPublish(escaped, Buffer.from("{}"))).toBe(false)
+		expect(await undoEscapedPublish(path.join(outside, "absent.json"), undefined)).toBe(false)
+	})
+
+	test("restores the outside file an escaped commit displaced", async () => {
+		const projectDir = path.join(tempDir, "displaced-project")
+		const ancestor = path.join(projectDir, "settings")
+		await fs.mkdir(ancestor, { recursive: true })
+		const target = path.join(ancestor, "mcp.json")
+		await fs.writeFile(target, JSON.stringify({ inside: true }))
+		// The swapped-in directory already holds a file at the target name. The commit rename
+		// displaces it, and the escape undo has to give that file back instead of leaving the
+		// outside name empty - which is what an unlink of bytes that are ours does here.
+		const swappedIn = path.join(tempDir, "displaced-elsewhere", "settings")
+		await fs.mkdir(swappedIn, { recursive: true })
+		const outsideFile = path.join(swappedIn, "mcp.json")
+		fsSyncActual.writeFileSync(outsideFile, JSON.stringify({ outside: "original" }))
+
+		await expect(
+			safeWriteJson(
+				target,
+				{ written: "payload" },
+				{
+					confineTo: projectDir,
+					merge: () => {
+						swapAncestorAfterTheCheck(ancestor, swappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+
+		expect(fsSyncActual.existsSync(outsideFile)).toBe(true)
+		expect(JSON.parse(fsSyncActual.readFileSync(outsideFile, "utf8"))).toEqual({ outside: "original" })
+
+		// Nothing sits at the outside name in the second half of the window: the undo has nothing
+		// to put back, and it must not report a restore failure for a file this write never
+		// displaced. Without this half the guard that skips the restore is a row no test reads.
+		const bareProject = path.join(tempDir, "bare-project")
+		const bareAncestor = path.join(bareProject, "settings")
+		await fs.mkdir(bareAncestor, { recursive: true })
+		const bareTarget = path.join(bareAncestor, "mcp.json")
+		await fs.writeFile(bareTarget, JSON.stringify({ inside: true }))
+		const bareSwappedIn = path.join(tempDir, "bare-elsewhere", "settings")
+		await fs.mkdir(bareSwappedIn, { recursive: true })
+
+		const logged: string[] = []
+		const spy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+			logged.push(String(args[0]))
+		})
+		await expect(
+			safeWriteJson(
+				bareTarget,
+				{ written: "payload" },
+				{
+					confineTo: bareProject,
+					merge: () => {
+						swapAncestorAfterTheCheck(bareAncestor, bareSwappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+		spy.mockRestore()
+
+		expect(fsSyncActual.existsSync(path.join(bareSwappedIn, "mcp.json"))).toBe(false)
+		expect(logged.some((line: string) => line.includes("Could not restore"))).toBe(false)
+
+		// The third half: the outside file is there to put back and the write that puts it back
+		// fails. The escape is still the error, the name stays empty, and the failed restore is
+		// named in the log rather than swallowed.
+		const failProject = path.join(tempDir, "fail-project")
+		const failAncestor = path.join(failProject, "settings")
+		await fs.mkdir(failAncestor, { recursive: true })
+		const failTarget = path.join(failAncestor, "mcp.json")
+		await fs.writeFile(failTarget, JSON.stringify({ inside: true }))
+		const failSwappedIn = path.join(tempDir, "fail-elsewhere", "settings")
+		await fs.mkdir(failSwappedIn, { recursive: true })
+		fsSyncActual.writeFileSync(path.join(failSwappedIn, "mcp.json"), JSON.stringify({ outside: "original" }))
+
+		const failLogged: string[] = []
+		const failSpy = vi.spyOn(console, "error").mockImplementation((...args: unknown[]) => {
+			failLogged.push(String(args[0]))
+		})
+		vi.mocked(fs.writeFile).mockImplementationOnce(async () => {
+			throw Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+		})
+		await expect(
+			safeWriteJson(
+				failTarget,
+				{ written: "payload" },
+				{
+					confineTo: failProject,
+					merge: () => {
+						swapAncestorAfterTheCheck(failAncestor, failSwappedIn)
+						return { written: "payload" }
+					},
+				},
+			),
+		).rejects.toBeInstanceOf(ConfinedPathEscapeError)
+		vi.mocked(fs.writeFile).mockRestore()
+		failSpy.mockRestore()
+
+		expect(fsSyncActual.existsSync(path.join(failSwappedIn, "mcp.json"))).toBe(false)
+		expect(failLogged.some((line: string) => line.includes("Could not restore"))).toBe(true)
 	})
 	// The byte record alone cannot tell this write's file from a peer's that happens to hold the
 	// same JSON, and it cannot see a peer that rewrote the file in place: after either event the
@@ -1493,20 +1597,21 @@ describe("safeWriteJson", () => {
 			ctimeMs: peer.ctimeMs,
 		}
 
-		await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+		expect(await undoEscapedPublish(escaped, Buffer.from(ours), recorded)).toBe(false)
 
 		expect(fsSyncActual.existsSync(escaped)).toBe(true)
 		expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ ours: true })
 
 		// The identity on disk is the one the publish recorded: the undo runs.
 		const landed = fsSyncActual.statSync(escaped, { bigint: true })
-		await undoEscapedPublish(escaped, Buffer.from(ours), {
+		const removedByMatchingIdentity = await undoEscapedPublish(escaped, Buffer.from(ours), {
 			dev: landed.dev,
 			ino: landed.ino,
 			size: landed.size,
 			mtimeMs: landed.mtimeMs,
 			ctimeMs: landed.ctimeMs,
 		})
+		expect(removedByMatchingIdentity).toBe(true)
 		expect(fsSyncActual.existsSync(escaped)).toBe(false)
 	})
 
@@ -1675,7 +1780,7 @@ describe("safeWriteJson", () => {
 				fsSyncActual.writeFileSync(escaped, peers)
 				return read
 			})
-			await undoEscapedPublish(escaped, Buffer.from(ours), recorded)
+			expect(await undoEscapedPublish(escaped, Buffer.from(ours), recorded)).toBe(false)
 			expect(fsSyncActual.existsSync(escaped)).toBe(true)
 			expect(JSON.parse(fsSyncActual.readFileSync(escaped, "utf8"))).toEqual({ peer: true })
 		} finally {

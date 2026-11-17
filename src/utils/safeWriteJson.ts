@@ -198,19 +198,22 @@ function _declaredScopeRoot(confineTo: string | undefined, requestedPath: string
  * identity it landed with, that identity is what must still be there: a byte record cannot
  * tell this write's file from a peer's that happens to hold the same JSON, and a peer that
  * rewrote the file in place keeps both the name and the length.
+ *
+ * Reports whether it removed this write's file, so the caller can tell a name it may put
+ * something back on from a name that now carries a peer's file.
  * @internal Exported for the escape-undo regression tests.
  */
 export async function undoEscapedPublish(
 	publishedPath: string,
 	expectedBytes: Buffer | undefined,
 	recordedIdentity?: PublishedIdentity,
-): Promise<void> {
+): Promise<boolean> {
 	if (expectedBytes === undefined) {
-		return
+		return false
 	}
 	const before = await fs.stat(publishedPath, { bigint: true }).catch(() => undefined)
 	if (!before) {
-		return
+		return false
 	}
 	// When the publish left an identity record, the file at the escaped name has to be that
 	// file: same inode, same length, same timestamps. A peer that replaced the publish with
@@ -225,11 +228,11 @@ export async function undoEscapedPublish(
 			before.mtimeMs !== recordedIdentity.mtimeMs ||
 			before.ctimeMs !== recordedIdentity.ctimeMs)
 	) {
-		return
+		return false
 	}
 	const actualBytes = await fs.readFile(publishedPath).catch(() => undefined)
 	if (actualBytes === undefined || !actualBytes.equals(expectedBytes)) {
-		return
+		return false
 	}
 	// Re-stat immediately before the unlink: a peer may have replaced the file between the
 	// read and the delete, and unlinking it would remove that peer's content. Device, inode
@@ -246,9 +249,27 @@ export async function undoEscapedPublish(
 		after.mtimeMs !== before.mtimeMs ||
 		after.ctimeMs !== before.ctimeMs
 	) {
-		return
+		return false
 	}
 	await fs.unlink(publishedPath).catch(() => {})
+	return true
+}
+
+/**
+ * Puts back the file a confined commit rename displaced, when there is one to put back.
+ * Best effort like the other permission and cleanup steps here: the escape is reported to
+ * the caller whether or not the displaced content could be written again, and a failure is
+ * named rather than swallowed.
+ */
+async function _restoreDisplacedTarget(publishedPath: string, displacedBytes: Buffer | undefined): Promise<void> {
+	if (displacedBytes === undefined) {
+		return
+	}
+	try {
+		await fs.writeFile(publishedPath, displacedBytes)
+	} catch (restoreError: unknown) {
+		console.error(`Could not restore the file the escaped publish displaced at ${publishedPath}:`, restoreError)
+	}
 }
 
 /**
@@ -388,6 +409,7 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// Declared before the protected block so the catch can name the bytes an escaped
 	// publish left behind; the assignment below stays where our copy put it.
 	let stagedBytes: Buffer | undefined
+	let displacedBytes: Buffer | undefined
 
 	// Set once the commit rename has landed; the rollback below may only restore the
 	// backup while the committed replacement has not been published yet.
@@ -525,6 +547,14 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// the bytes would leave the undo unable to verify (and remove) an escaped file.
 		if (confinementRoot !== undefined) {
 			stagedBytes = await fs.readFile(actualTempNewFilePath)
+			// The commit rename below replaces whatever file sits at the publish target. If that name
+			// is later found outside the declared scope, the undo removes this write's file and the
+			// file the rename displaced is gone with it, so its bytes are read here - before the
+			// rename - and put back by the undo. A name that is absent or unreadable reads as
+			// nothing to restore, which costs the restore and not the write. The copy is held in
+			// memory for the length of a confined write, which is the cost of not widening the
+			// publish into the two-step rename the EPERM fallback below already knows.
+			displacedBytes = await fs.readFile(resolvedTargetPath).catch(() => undefined)
 		}
 
 		// CWE-732: the commit rename below lands the staged file onto the target, so the
@@ -622,7 +652,14 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			} catch (escapeError) {
 				// Undo only the file this write published, never a same-named file a peer
 				// placed there after the commit, nor a peer's rewrite of that name.
-				await undoEscapedPublish(publishedPath, stagedBytes, publishedIdentity)
+				const removedOurs = await undoEscapedPublish(publishedPath, stagedBytes, publishedIdentity)
+				// Our bytes are off the escaped name now, so the file the commit rename displaced goes
+				// back onto it: an escaped write cannot leave a preexisting outside target absent. When
+				// the undo left a peer's file in place, removedOurs is false and nothing is written,
+				// because that content is the peer's and not this write's to restore.
+				if (removedOurs) {
+					await _restoreDisplacedTarget(publishedPath, displacedBytes)
+				}
 				throw escapeError
 			}
 		}
@@ -664,6 +701,9 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 					// that was already sitting there is somebody else's file: removing it would
 					// delete a file this write never wrote.
 					if (committedBeforeTeardown) {
+						// No restore here. An escape that reached this teardown already passed through the
+						// post-commit re-check above, which undid and restored on its own way out; this second
+						// undo is the guard for a failure that landed elsewhere, and its answer is no.
 						await undoEscapedPublish(publishedPath, stagedBytes, publishedIdentity)
 					}
 					// The escape is the error the caller learns, but it must not be reported with
