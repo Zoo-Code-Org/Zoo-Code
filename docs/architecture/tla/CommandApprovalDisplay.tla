@@ -1,36 +1,33 @@
 ---- MODULE CommandApprovalDisplay ----
-\* Models toDisplayText (apps/cli/src/agent/ask-dispatcher.ts). Callers: every untrusted text line in AskDispatcher.
-\* Sink: outputManager.output in each handler.
-\* Source: the command text from the model. Another actor can shape it (prompt injection).
-\* Failure: a raw control, format, or line-break character in the prompt text changes what the user sees.
-\* Invariant: NoRawUnsafeChar. Each char is a class. Only the class and the escape rule are modeled.
-\* Settings: CommandApprovalDisplayMC.tla holds the bounds and the variants. Variants: Raw is the code before the fix. Json is JSON.stringify alone. NoIgnorable is JSON plus the Cc and Cf regex. Fixed adds Default_Ignorable_Code_Point.
-\* Run: java -cp <jar> tlc2.TLC -metadir <dir> -config CommandApprovalDisplay.Json.cfg CommandApprovalDisplayMC.tla
-\* Expect: Raw fails at once. Json fails on DEL, C1, format, U+2028 and astral format chars. Fixed holds.
-\* Result, MaxLen 2: Raw fails with a newline. Json fails with DEL. Fixed holds in 91 states. All matched Expect.
-\* Replay: Json alone prints DEL, U+2028 and U+E0001 raw in real code. The property test fails with the regex removed.
-\* Property tests: ask-dispatcher.test.ts, the random command test and "escapes untrusted text of ask". Both pass.
-\* Sabotage: with the helper as identity, 18 of 19 tests fail.
-\* Not modeled: how the terminal draws a char. Backslash and quote ambiguity (a unit test covers it).
-\* Sinks: the helper now guards the command, question, suggestion, tool, MCP, error, detail, resume and generic lines.
-\* Not guarded: the ask label [${ask}]. It is a ClineAsk value, not model text.
+\* Models toDisplayText (apps/cli/src/agent/ask-dispatcher.ts). It escapes untrusted text in every AskDispatcher output line.
+\* Source: text from the model. Prompt injection can shape it. Sink: outputManager.output in each handler.
+\* Failure: a raw control, format, invisible or line-break character changes what the user sees.
+\* Invariant: NoRawUnsafeChar. A char is a class. Only the class and the escape set are modeled.
+\* Variants are in CommandApprovalDisplayMC.tla. Raw is the old code. Json is JSON.stringify only.
+\* NoIgnorable and NoLookalike each leave out one class. Fixed escapes all classes.
+\* Run: java -cp <jar> tlc2.TLC -metadir <dir> -config <Spec[.Variant].cfg> CommandApprovalDisplayMC.tla
+\* Expect: Raw, Json, NoIgnorable and NoLookalike fail. Fixed holds.
+\* Result, MaxLen 2: Raw fails on a newline. Json fails on DEL. NoIgnorable fails on U+034F. NoLookalike fails on U+00A0. Fixed holds in 111 states.
+\* Replay: Json alone prints DEL, U+2028 and U+E0001 raw in real code.
+\* Tests: ask-dispatcher.test.ts has a sweep of all code points and per-ask output tests. Both fail if the helper is weakened.
+\* Finding: the invariant reduces to "Unsafe is inside Esc". The spec found U+034F only after review named it. Null result.
+\* Sweep: it showed 16 raw space lookalikes. They were added as class sp.
+\* Not modeled: terminal drawing, prompt flow, the [${ask}] label (not model text), backslash ambiguity (a unit test covers it).
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review: 0 covered, 2 added (bot threads on U+034F and on the MC module, PR 2473), 0 gap. The bot also asked for deny-path tests. The spec has no accept or reject step, so that is a gap.
-\* Result after the thread, MaxLen 2: NoIgnorable fails with U+034F. Fixed holds.
+\* Review (PR 2473): 0 covered, 2 added (U+034F, space lookalikes), 3 gap (deny paths, followup paths, assertion strength).
+\* Review: 1 finding on the spec files (MC module).
 
 EXTENDS Naturals, Sequences
 
-CONSTANTS Esc, Inputs   \* Esc: classes the code escapes. Inputs: texts to check. CommandApprovalDisplayMC sets both.
+CONSTANTS Esc, Inputs   \* Esc: classes the code escapes. Inputs: texts to check. The MC module sets both.
 
 VARIABLE in
 
-\* nl: C0 control. del, c1: other Cc. fmt: Cf. ls: U+2028. astral: Cf above U+FFFF. bs: backslash or quote.
-Alphabet == {"a", "nl", "del", "c1", "fmt", "ls", "astral", "ign", "bs"}
-Unsafe == {"nl", "del", "c1", "fmt", "ls", "astral", "ign"}
-JsonEsc == {"nl", "bs"}
-RegexEsc == {"del", "c1", "fmt", "ls", "astral"}
-Ignorable == {"ign"}   \* Default_Ignorable_Code_Point outside Cc and Cf, for example U+034F.
-
+\* nl: C0 control. del, c1: other Cc. fmt: Cf. ls: U+2028. astral: Cf above U+FFFF.
+\* ign: default-ignorable outside Cc and Cf, such as U+034F. sp: space lookalike, such as U+00A0.
+\* bs: backslash or quote.
+Alphabet == {"a", "nl", "del", "c1", "fmt", "ls", "astral", "ign", "sp", "bs"}
+Unsafe == Alphabet \ {"a", "bs"}
 
 Shown(s) == [p \in 1..Len(s) |-> IF s[p] \in Esc THEN <<"esc", s[p]>> ELSE <<"raw", s[p]>>]
 

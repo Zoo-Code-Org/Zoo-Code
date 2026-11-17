@@ -1,5 +1,5 @@
 import type { ClineAsk } from "@roo-code/types"
-import { AskDispatcher } from "../ask-dispatcher.js"
+import { AskDispatcher, toDisplayText } from "../ask-dispatcher.js"
 import { OutputManager } from "../output-manager.js"
 import { PromptManager } from "../prompt-manager.js"
 
@@ -9,6 +9,7 @@ describe("command approval display", () => {
 	it.each([
 		["echo \u{e0001}", '"echo \\udb40\\udc01"'],
 		["./safe\u034f", '"./safe\\u034f"'],
+		["echo a\u00a0b\u3000c", '"echo a\\u00a0b\\u3000c"'],
 		["echo hello", '"echo hello"'],
 		["echo 危険", '"echo 危険"'],
 		["echo dangerous\r\x1b[2Kecho safe", '"echo dangerous\\r\\u001b[2Kecho safe"'],
@@ -59,45 +60,17 @@ describe("command approval display", () => {
 	})
 
 	// Invariant of docs/architecture/tla/CommandApprovalDisplay.tla: NoRawUnsafeChar.
-	it("never prints a raw control, format or line-break character", async () => {
-		const pool = [
-			"a",
-			" ",
-			"\\",
-			'"',
-			"\n",
-			"\r",
-			"\x1b",
-			"\x7f",
-			"\x9b",
-			"\u200b",
-			"\u202e",
-			"\u2028",
-			"\u{e0001}",
-			"危",
-		]
-		let seed = 1
-		const next = () => (seed = (seed * 1103515245 + 12345) % 2 ** 31)
-		for (let run = 0; run < 200; run++) {
-			const command = Array.from({ length: next() % 8 }, () => pool[next() % pool.length]).join("")
-			const stdout = vi.spyOn(process.stdout, "write").mockReturnValue(true)
-			const promptManager = new PromptManager()
-			vi.spyOn(promptManager, "promptForYesNo").mockResolvedValue(true)
-			const dispatcher = new AskDispatcher({
-				outputManager: new OutputManager(),
-				promptManager,
-				sendMessage: vi.fn(),
-			})
-
-			await dispatcher.handleAsk({ ts: 1, type: "ask", ask: "command", text: command })
-
-			const line = stdout.mock.calls
-				.map(([text]) => text)
-				.join("")
-				.split("\n[command request]\n")[1]
-			expect(line?.slice(0, -1)).not.toMatch(/[\p{Cc}\p{Cf}\p{Default_Ignorable_Code_Point}\u2028\u2029]/u)
-			stdout.mockRestore()
+	// Allowlist: letters, marks, numbers, punctuation, symbols and U+0020. Unassigned and private-use
+	// chars draw as one glyph. Default-ignorable chars and space lookalikes such as U+00A0 are not allowed.
+	it("leaves only visible characters raw for every code point", () => {
+		const visible = /^(?!\p{Default_Ignorable_Code_Point})[\p{L}\p{M}\p{N}\p{P}\p{S} \p{Cn}\p{Co}]$/u
+		const leaks: string[] = []
+		for (let cp = 0; cp <= 0x10ffff; cp++) {
+			if (cp >= 0xd800 && cp <= 0xdfff) continue // JSON.stringify escapes lone surrogates
+			const shown = toDisplayText(String.fromCodePoint(cp)).slice(1, -1)
+			if (!shown.startsWith("\\") && !visible.test(shown)) leaks.push(cp.toString(16))
 		}
+		expect(leaks).toEqual([])
 	})
 
 	const evil = "x\x1b[2K\r\x9b\u202e\u2028\u034f"
