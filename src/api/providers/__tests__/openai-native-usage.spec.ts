@@ -1,9 +1,8 @@
 import { describe, it, expect, beforeEach } from "vitest"
 import { createHash } from "crypto"
 import { OpenAiNativeHandler } from "../openai-native"
-import { OpenAiServiceTier, openAiNativeModels, SERVICE_TIER_KEY, type ModelInfo } from "@roo-code/types"
+import { OpenAiServiceTier, openAiNativeModels, type ModelInfo } from "@roo-code/types"
 import type { ApiStreamUsageChunk } from "../../transform/stream"
-import { collectStream } from "../../../test-utils/stream"
 
 describe("OpenAiNativeHandler - normalizeUsage", () => {
 	let handler: OpenAiNativeHandler
@@ -510,46 +509,6 @@ describe("OpenAiNativeHandler - normalizeUsage", () => {
 	})
 
 	describe("cost calculation", () => {
-		it.each([
-			// Fast costs $4/$20 per million input/output, or $8/$30 above 272K input.
-			{ requested: OpenAiServiceTier.Default, reported: "fast", inputTokens: 272_000, cost: 1.108 },
-			{ requested: OpenAiServiceTier.Default, reported: "fast", inputTokens: 300_000, cost: 2.43 },
-			{
-				requested: OpenAiServiceTier.Priority,
-				reported: OpenAiServiceTier.Priority,
-				inputTokens: 300_000,
-				cost: 2.43,
-			},
-			// A downgraded request and an omitted, unsupported Flex selection both use Standard pricing.
-			{
-				requested: OpenAiServiceTier.Priority,
-				reported: OpenAiServiceTier.Default,
-				inputTokens: 300_000,
-				cost: 1.215,
-			},
-			{ requested: OpenAiServiceTier.Flex, reported: undefined, inputTokens: 300_000, cost: 1.215 },
-			// An unpriced tier reported by OpenAI takes precedence over the requested Fast tier.
-			{ requested: OpenAiServiceTier.Priority, reported: "scale", inputTokens: 100_000, cost: 0.21 },
-		])(
-			"bills GPT-6.2 Sol for $inputTokens input tokens with $requested selected and $reported reported",
-			async ({ requested, reported, inputTokens, cost }) => {
-				const handler = new OpenAiNativeHandler({
-					apiModelId: "gpt-6.2-sol",
-					openAiNativeApiKey: "test-key",
-					openAiNativeServiceTier: requested,
-				})
-				const event = {
-					type: "response.completed",
-					response: {
-						[SERVICE_TIER_KEY]: reported,
-						usage: { input_tokens: inputTokens, output_tokens: 1_000 },
-					},
-				}
-				const chunks = await collectStream(handler["processEvent"](event, handler.getModel()))
-				expect(chunks).toEqual([expect.objectContaining({ type: "usage", totalCost: expect.closeTo(cost, 6) })])
-			},
-		)
-
 		it.each([
 			{ tier: OpenAiServiceTier.Default, expectedCost: 4.525 },
 			{ tier: OpenAiServiceTier.Flex, expectedCost: 2.2625 },

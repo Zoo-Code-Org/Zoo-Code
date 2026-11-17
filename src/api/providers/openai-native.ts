@@ -14,7 +14,6 @@ import {
 	type VerbosityLevel,
 	type ReasoningEffortExtended,
 	OpenAiServiceTier,
-	serviceTierSchema,
 	SERVICE_TIER_KEY,
 	type ServiceTier,
 	ApiProviderError,
@@ -67,7 +66,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	// Tracks tool call IDs emitted via streaming partial events to prevent done-event duplicates.
 	private streamedToolCallIds = new Set<string>()
 	// Resolved service tier from Responses API (actual tier used by OpenAI)
-	private lastServiceTier: string | undefined
+	private lastServiceTier: ServiceTier | undefined
 	// Complete response output array (includes reasoning items with encrypted_content)
 	private lastResponseOutput: any[] | undefined
 	// Last top-level response id from Responses API (for troubleshooting)
@@ -172,11 +171,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		// Task accumulator and the webview as a negative count.
 		const cacheWrite12hTokens = Math.max(0, Math.min(writes12hFromDetails, cacheWriteTokens))
 
-		// OpenAI can report Fast as "fast" or "priority". Use the request tier only if the response omitted it.
-		const reportedTier = this.lastServiceTier === "fast" ? OpenAiServiceTier.Priority : this.lastServiceTier
-		const effectiveTier = reportedTier
-			? serviceTierSchema.safeParse(reportedTier).data
-			: this.getAllowedServiceTier(model)
+		// Resolve effective tier: prefer actual tier from response; otherwise requested tier
+		const effectiveTier = this.lastServiceTier || this.options.openAiNativeServiceTier || undefined
 		const effectiveInfo = this.applyServiceTierPricing(model.info, effectiveTier)
 
 		// Pass total input tokens directly to calculateApiCostOpenAI
@@ -973,8 +969,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 							const parsed = JSON.parse(data)
 
 							// Capture resolved service tier if present
-							if (typeof parsed.response?.[SERVICE_TIER_KEY] === "string") {
-								this.lastServiceTier = parsed.response[SERVICE_TIER_KEY]
+							if (parsed.response?.[SERVICE_TIER_KEY]) {
+								this.lastServiceTier = parsed.response[SERVICE_TIER_KEY] as ServiceTier
 							}
 							// Capture complete output array (includes reasoning items with encrypted_content)
 							if (parsed.response?.output && Array.isArray(parsed.response.output)) {
@@ -1430,8 +1426,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	 */
 	private async *processEvent(event: any, model: OpenAiNativeModel): ApiStream {
 		// Capture resolved service tier when available
-		if (typeof event?.response?.[SERVICE_TIER_KEY] === "string") {
-			this.lastServiceTier = event.response[SERVICE_TIER_KEY]
+		if (event?.response?.[SERVICE_TIER_KEY]) {
+			this.lastServiceTier = event.response[SERVICE_TIER_KEY] as ServiceTier
 		}
 		// Capture complete output array (includes reasoning items with encrypted_content)
 		if (event?.response?.output && Array.isArray(event.response.output)) {

@@ -81,9 +81,6 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 					(t) => t === OpenAiServiceTier.Flex || t === OpenAiServiceTier.Priority,
 				)
 				if (allowedTiers.length === 0) return null
-				const selectedTier =
-					allowedTiers.find((tier) => tier === apiConfiguration.openAiNativeServiceTier) ??
-					OpenAiServiceTier.Default
 
 				return (
 					<div className="flex flex-col gap-1 mt-2" data-testid="openai-service-tier">
@@ -95,7 +92,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 						</div>
 
 						<Select
-							value={selectedTier}
+							value={apiConfiguration.openAiNativeServiceTier || OpenAiServiceTier.Default}
 							onValueChange={(value) =>
 								setApiConfigurationField(
 									"openAiNativeServiceTier",
