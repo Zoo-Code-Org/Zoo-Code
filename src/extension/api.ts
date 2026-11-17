@@ -1165,10 +1165,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				}
 			},
 		)
+		// saveConfig normalizes before it stores: it drops the keys the profile schema does
+		// not know and can rewrite legacy fields, so the record that lands can name a provider the
+		// payload never mentioned - an apiModelId and apiKey pair with no apiProvider derives one.
+		// The configuration write below is what every consumer of the shared copy reads, so it must
+		// carry the settings that actually landed rather than the pair the caller typed. The mode and
+		// profile-pin keys are not part of the record, so they stay exactly as the payload wrote them.
+		const forwardSettings: RooCodeSettings = { ...forwardValues, ...savedSettings }
 		try {
 			await this.sidebarProvider.setValues(
-				// Only the keys this call owns travel forward; see the filter comment above.
-				forwardValues,
+				// Only the keys this call owns travel forward, read from what landed; see the filter
+				// comment above and the normalization comment here.
+				forwardSettings,
 				// The settings that landed, not the payload: saveConfig normalizes before it stores,
 				// so a sibling overlay built from the payload could select a provider the saved
 				// record no longer carries.
@@ -1266,7 +1274,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// then, so replaying it would roll another view change back into this one. That subsumes the
 			// host-owned viewStates map and the pass-through taskHistory key: neither is replayed unless
 			// this call own payload carried it.
-			const writtenKeys = new Set(Object.keys(forwardValues))
+			// The keys this call wrote forward are the landed ones, so the replay below covers
+			// exactly what the successful write put in place.
+			const writtenKeys = new Set(Object.keys(forwardSettings))
 			const replayValues: RooCodeSettings = Object.fromEntries(
 				Object.entries(snapshotValues).filter(([key]) => writtenKeys.has(key)),
 			)

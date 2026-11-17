@@ -334,4 +334,55 @@ describe("API.setConfiguration", () => {
 		expect(provider.customModesManager.deleteCustomMode).toHaveBeenCalledWith(reviewerMode.slug)
 		expect(provider.postStateToWebview).not.toHaveBeenCalled()
 	})
+
+	it("forwards the settings that landed when the store derives a provider the payload omitted", async () => {
+		const { provider, api } = setConfigurationHarness({
+			manager: {
+				// saveConfig normalizes before it stores. Given a model id and a key with no
+				// provider, the record that lands names the provider it derived, and the read-back
+				// inside the critical section reports exactly that record rather than the payload.
+				getProfile: vi.fn().mockResolvedValue({
+					name: "default",
+					id: "default-id",
+					apiProvider: providerIdentifiers.openai,
+					apiModelId: "gpt-4.1",
+					apiKey: "sk-test-key",
+				}),
+			},
+		})
+
+		await api.setConfiguration({
+			apiModelId: "gpt-4.1",
+			apiKey: "sk-test-key",
+			currentApiConfigName: "default",
+		})
+
+		// The save still receives the payload: the store owns normalization, so this call
+		// keeps handing it what the caller wrote.
+		expect(provider.providerSettingsManager.saveConfig).toHaveBeenCalledWith("default", {
+			apiModelId: "gpt-4.1",
+			apiKey: "sk-test-key",
+			currentApiConfigName: "default",
+		})
+		// The configuration write must name the provider the record carries. A copy of the
+		// payload alone leaves the store on a pair with no provider while every reader that
+		// goes through the record sees the one the store derived.
+		expect(provider.setValues).toHaveBeenCalledWith(
+			{
+				apiProvider: providerIdentifiers.openai,
+				apiModelId: "gpt-4.1",
+				apiKey: "sk-test-key",
+				currentApiConfigName: "default",
+			},
+			{
+				savedProfileName: "default",
+				savedProfileSettings: {
+					apiProvider: providerIdentifiers.openai,
+					apiModelId: "gpt-4.1",
+					apiKey: "sk-test-key",
+				},
+			},
+		)
+		expect(provider.setValues).toHaveBeenCalledTimes(1)
+	})
 })
