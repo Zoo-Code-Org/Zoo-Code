@@ -4636,6 +4636,117 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("runs the remaining reset cleanup when the persisted view-state clear fails", async () => {
+			const { t } = await import("../../../i18n")
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The modal answer is a string label; the last-typed vscode overload expects a
+			// MessageItem. A double assertion is the last-resort cast here (AGENTS.md): the
+			// production path compares the answer against the string label directly, so the
+			// runtime value must stay a string and cannot be a structural MessageItem double.
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
+				t("common:answers.yes") as unknown as vscode.MessageItem,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider.contextProxy, "resetAllState").mockResolvedValue(undefined)
+			const configsReset = vi
+				.spyOn(provider.providerSettingsManager, "resetAllConfigs")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({})
+			// The shared custom-modes mock does not implement reset.
+			const modesReset = vi.fn().mockResolvedValue(undefined)
+			Object.assign(provider.customModesManager, { resetCustomModes: modesReset })
+			const abortTask = vi.fn().mockResolvedValue(undefined)
+			// Members of this double are declared on Task: taskId at Task.ts 291,
+			// instanceId at 297 and abortTask at 3654, and emit is inherited from the
+			// typed EventEmitter that Task extends at Task.ts 290. The cast is the last
+			// resort here because the reset path only touches those four members.
+			const doomedTask = { taskId: "reset-task", instanceId: "reset-instance", emit: vi.fn(), abortTask }
+			Object.assign(provider, { taskRegistry: new TaskRegistry() })
+			provider["taskRegistry"].push(doomedTask as unknown as Task)
+			const logLines: string[] = []
+			vi.spyOn(provider, "log").mockImplementation((message: string) => {
+				logLines.push(message)
+			})
+			await provider["setViewStateId"]("reset-failure-view")
+			await provider.saveViewState("mode", "architect")
+			// Installed after the setup write landed, so the only durable viewStates attempts
+			// below are the reset clear at ClineProvider.ts 5530 and the cache-restoring
+			// write its own catch issues at 5531.
+			const attempts: string[] = []
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				attempts.push(String(key))
+				if (key === "viewStates") {
+					return Promise.reject(new Error("durable clear rejected"))
+				}
+				return Promise.resolve()
+			})
+			await provider.resetState()
+			// The durable clear failed, so this view's entry stays stored; what must not be
+			// lost is the rest of the reset: the running task is aborted and dropped from
+			// the stack, stored profiles and custom modes are removed, and the failure is
+			// reported. Review thread 4506513984.
+			expect(provider["taskRegistry"].getById("reset-task")).toBeUndefined()
+			expect(abortTask).toHaveBeenCalledWith(true)
+			expect(configsReset).toHaveBeenCalledOnce()
+			expect(modesReset).toHaveBeenCalledOnce()
+			expect(logLines.filter((line: string) => line.includes("durable clear rejected")).length).toBe(1)
+			expect(attempts.filter((key: string) => key === "viewStates").length).toBe(2)
+			await provider.dispose()
+		})
+
+		it("keeps the reset cleanup unreported when the persisted view-state clear lands", async () => {
+			const { t } = await import("../../../i18n")
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
+				t("common:answers.yes") as unknown as vscode.MessageItem,
+			)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider.contextProxy, "resetAllState").mockResolvedValue(undefined)
+			const configsReset = vi
+				.spyOn(provider.providerSettingsManager, "resetAllConfigs")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({})
+			const modesReset = vi.fn().mockResolvedValue(undefined)
+			Object.assign(provider.customModesManager, { resetCustomModes: modesReset })
+			const abortTask = vi.fn().mockResolvedValue(undefined)
+			const landedTask = { taskId: "reset-task", instanceId: "reset-instance", emit: vi.fn(), abortTask }
+			Object.assign(provider, { taskRegistry: new TaskRegistry() })
+			provider["taskRegistry"].push(landedTask as unknown as Task)
+			const logLines: string[] = []
+			vi.spyOn(provider, "log").mockImplementation((message: string) => {
+				logLines.push(message)
+			})
+			await provider["setViewStateId"]("reset-landed-view")
+			await provider.saveViewState("mode", "architect")
+			const attempts: string[] = []
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				attempts.push(String(key))
+				return Promise.resolve()
+			})
+			await provider.resetState()
+			// Same cleanup as the failing case, with nothing rejected: the control keeps
+			// the new reporting honest, since a landed clear must not be reported.
+			expect(provider["taskRegistry"].getById("reset-task")).toBeUndefined()
+			expect(abortTask).toHaveBeenCalledWith(true)
+			expect(configsReset).toHaveBeenCalledOnce()
+			expect(modesReset).toHaveBeenCalledOnce()
+			expect(logLines.filter((line: string) => line.includes("persisted state during reset")).length).toBe(0)
+			expect(attempts.filter((key: string) => key === "viewStates").length).toBe(1)
+			await provider.dispose()
+		})
+
 		it("should roll back the shared write when setValue per-view persistence fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

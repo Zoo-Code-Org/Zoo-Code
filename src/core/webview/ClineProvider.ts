@@ -5522,7 +5522,18 @@ export class ClineProvider
 
 		// Clear this view's persisted entry too, so the reset selections are not
 		// re-applied from the durable viewStates pin after a reload.
-		await this.clearPersistedViewState()
+		// Review thread 4506513984 (original_line 5368): the clear above already compensates
+		// for its own rejected write, so the reset must not stop here. Profile removal,
+		// custom-mode reset and task removal below still have to run, and the failure is
+		// reported through the log channel the cloud-logout catch already uses.
+		try {
+			await this.clearPersistedViewState()
+		} catch (error) {
+			this.log(
+				`Failed to clear this view's persisted state during reset: ${error instanceof Error ? error.message : String(error)}`,
+			)
+			// Continue with reset even if the durable clear fails.
+		}
 
 		await this.providerSettingsManager.resetAllConfigs()
 		// Cached choices point at profiles that no longer exist; re-read the reset mapping.
