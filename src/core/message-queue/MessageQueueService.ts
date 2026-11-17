@@ -78,6 +78,22 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return true
 	}
 
+	/**
+	 * Sets the images that an edit resolved. A later edit or a drain wins, so a stale resolve changes nothing.
+	 * See docs/architecture/tla/QueueEditRace.tla.
+	 */
+	public updateMessageImages(id: string, expectedText: string, images: string[]): boolean {
+		const { message } = this.findMessage(id)
+
+		if (!message || message.text !== expectedText) {
+			return false
+		}
+
+		message.images = images
+		this.emit("stateChanged", this._messages)
+		return true
+	}
+
 	public dequeueMessage(): QueuedMessage | undefined {
 		const index = this._messages.findIndex((message) => !this.claimedMessageIds.has(message.id))
 		if (index === -1) {

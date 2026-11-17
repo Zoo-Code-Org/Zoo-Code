@@ -105,4 +105,32 @@ describe("MessageQueueService segments", () => {
 
 		expect(queue.messages[0]?.segments).toEqual([{ text: "@/x", source: "generated" }])
 	})
+
+	// Mirrors docs/architecture/tla/QueueEditRace.tla, the guard on the late image resolve.
+	describe("updateMessageImages", () => {
+		it("sets the images when the text is unchanged", () => {
+			const queue = new MessageQueueService()
+			const message = queue.addMessage("see @/a.png")!
+
+			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(true)
+			expect(queue.messages[0]?.images).toEqual(["data:a"])
+		})
+
+		it("changes nothing when a later edit replaced the text", () => {
+			const queue = new MessageQueueService()
+			const message = queue.addMessage("see @/a.png")!
+			queue.updateMessage(message.id, "see @/b.png")
+
+			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(false)
+			expect(queue.messages[0]?.images).toBeUndefined()
+		})
+
+		it("returns false when a drain removed the message", () => {
+			const queue = new MessageQueueService()
+			const message = queue.addMessage("see @/a.png")!
+			queue.dequeueMessage()
+
+			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(false)
+		})
+	})
 })

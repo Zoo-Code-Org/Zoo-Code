@@ -58,14 +58,22 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 	let providerAsClineProvider: ClineProvider
 	let currentTask: {
 		handleWebviewAskResponse: ReturnType<typeof vi.fn>
-		messageQueueService: { addMessage: ReturnType<typeof vi.fn>; updateMessage: ReturnType<typeof vi.fn> }
+		messageQueueService: {
+			addMessage: ReturnType<typeof vi.fn>
+			updateMessage: ReturnType<typeof vi.fn>
+			updateMessageImages: ReturnType<typeof vi.fn>
+		}
 	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 		currentTask = {
 			handleWebviewAskResponse: vi.fn(),
-			messageQueueService: { addMessage: vi.fn(), updateMessage: vi.fn() },
+			messageQueueService: {
+				addMessage: vi.fn(),
+				updateMessage: vi.fn(() => true),
+				updateMessageImages: vi.fn(),
+			},
 		}
 		provider = {
 			createTask: vi.fn().mockResolvedValue({ taskId: "task-1" }),
@@ -178,6 +186,29 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		])("scans only user text for images in an edit with a $label", async ({ segs, scanned }) => {
 			await edit({ id: "q1", text: "see @/a.png", segments: segs })
 			expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: scanned }))
+		})
+
+		// Mirrors docs/architecture/tla/QueueEditRace.tla, mode SyncGuarded.
+		it("updates the text before the image scan ends, then attaches the images for that text", async () => {
+			let finish: (value: { text: string; images: string[] }) => void = () => {}
+			resolveImageMentions.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+			const pending = edit({ id: "q1", text, segments })
+
+			await vi.waitFor(() => expect(resolveImageMentions).toHaveBeenCalled())
+			expect(currentTask.messageQueueService.updateMessage).toHaveBeenCalledTimes(1)
+			expect(currentTask.messageQueueService.updateMessageImages).not.toHaveBeenCalled()
+
+			finish({ text: "", images: ["data:b"] })
+			await pending
+			expect(currentTask.messageQueueService.updateMessageImages).toHaveBeenCalledWith("q1", text, ["data:b"])
+		})
+
+		it("scans nothing when the message has left the queue", async () => {
+			currentTask.messageQueueService.updateMessage.mockReturnValueOnce(false)
+			resolveImageMentions.mockClear()
+			await edit({ id: "q1", text, segments })
+			expect(resolveImageMentions).not.toHaveBeenCalled()
+			expect(currentTask.messageQueueService.updateMessageImages).not.toHaveBeenCalled()
 		})
 
 		it.each([

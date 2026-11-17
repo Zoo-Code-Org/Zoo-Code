@@ -100,6 +100,7 @@ export async function resolveImageMentions({
 
 	const imageMemoryTracker = new ImageMemoryTracker()
 	const newImages: string[] = []
+	const seenPaths = new Set<string>()
 
 	for (const mention of imageMentions) {
 		if (existingImages.length + newImages.length >= MAX_IMAGES_PER_MESSAGE) {
@@ -108,6 +109,11 @@ export async function resolveImageMentions({
 
 		const relPath = unescapeSpaces(mention.slice(1))
 		const absPath = path.resolve(cwd, relPath)
+		// A repeated path is read once. Check it before the validation and the read.
+		if (seenPaths.has(absPath)) {
+			continue
+		}
+		seenPaths.add(absPath)
 		if (!isPathWithinCwd(absPath, cwd)) {
 			continue
 		}

@@ -254,6 +254,21 @@ describe("resolveImageMentions", () => {
 		expect(result.images).toEqual([...existing, url("b.png")])
 	})
 
+	it("should validate and read a repeated mention path once", async () => {
+		const dataUrl = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`
+		mockReadImageAsDataUrl.mockResolvedValue({ dataUrl, buffer: Buffer.from("png-bytes") })
+
+		const result = await resolveImageMentions({
+			text: Array.from({ length: 50 }, () => "@/a.png").join(" "),
+			images: [],
+			cwd: "/workspace",
+		})
+
+		expect(mockReadImageAsDataUrl).toHaveBeenCalledTimes(1)
+		expect(mockValidateImage).toHaveBeenCalledTimes(1)
+		expect(result.images).toEqual([dataUrl])
+	})
+
 	it("should skip images when supportsImages is false", async () => {
 		const dataUrl = `data:image/png;base64,${Buffer.from("png-bytes").toString("base64")}`
 		mockReadImageAsDataUrl.mockResolvedValue({ dataUrl, buffer: Buffer.from("png-bytes") })

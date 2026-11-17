@@ -4069,9 +4069,16 @@ export const webviewMessageHandler = async (
 			const edit = editQueuedMessagePayloadSchema.safeParse(message.payload)
 			if (edit.success) {
 				const { id, text, segments: given } = edit.data
-				const segments = segmentsOf(edit.data)
-				const { images } = await resolveIncomingImages({ text, images: edit.data.images, segments })
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images, given)
+				const queue = provider.getCurrentTask()?.messageQueueService
+				// Update the text first. A drain during the image scan then sends the edited text.
+				if (queue?.updateMessage(id, text, edit.data.images, given)) {
+					const { images } = await resolveIncomingImages({
+						text,
+						images: edit.data.images,
+						segments: segmentsOf(edit.data),
+					})
+					queue.updateMessageImages(id, text, images)
+				}
 			}
 
 			break
