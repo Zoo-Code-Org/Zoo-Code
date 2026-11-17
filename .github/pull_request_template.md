@@ -40,6 +40,7 @@ Write the steps that test your changes. This helps reviewers check your work.
 - [ ] **Self-Review**: I reviewed my own code with care.
 - [ ] **Writing Style**: The PR title and description use Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions.
 - [ ] **Testing**: New and/or updated tests have been added to cover my changes (if applicable).
+- [ ] **Test Helpers** (test changes only): Shared test helpers (`src/test-utils/`, `@/utils/test-utils`) are used only for mechanical duplication; test intent and scenario-specific mocks remain visible.
 - [ ] **Visual Snapshot** (UI changes only): If a user would notice this change at a glance (layout, theme tokens, brand elements, empty/error states), I added or updated a `*.visual.tsx` snapshot in `webview-ui/`. See `webview-ui/AGENTS.md` → "When a UI change needs a snapshot".
 - [ ] **Documentation Impact**: I checked if my changes need documentation updates (see "Documentation Updates" section below).
 - [ ] **Contribution Guidelines**: I read and agree to the [Contributor Guidelines](/CONTRIBUTING.md).

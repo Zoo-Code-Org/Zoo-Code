@@ -13,8 +13,9 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useEvent } from "react-use"
-import debounce from "debounce"
 import type { VirtuosoHandle } from "react-virtuoso"
+
+import { leadingEdgeDebounce } from "@src/utils/leadingEdgeDebounce"
 
 const HYDRATION_WINDOW_MS = 600
 const HYDRATION_RETRY_WINDOW_MS = 160
@@ -147,10 +148,9 @@ export function useScrollLifecycle({
 
 	const scrollToBottomSmooth = useMemo(
 		() =>
-			debounce(
+			leadingEdgeDebounce(
 				() => virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end", behavior: "smooth" }),
 				10,
-				{ immediate: true },
 			),
 		[virtuosoRef],
 	)

@@ -47,11 +47,13 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.94.0
+## Nouveautés de la v3.98.0
 
-- ✨ **Prise en charge plus large des modèles et fournisseurs :** Utilise Claude Haiku 5.5 via Anthropic, envoie des images aux modèles VS Code LM compatibles, ajuste la température pour les modèles OpenCode Go Responses et annule les requêtes proprement chez plus de fournisseurs.
-- 🔐 **MCP OAuth plus flexible :** Configure des paramètres statiques de client OAuth, utilise des chemins de callback personnalisés, découvre les détails d'authentification dans `WWW-Authenticate` et vois les échecs de callback avant de réessayer.
-- 🧭 **Chats et longues sessions plus fluides :** Renomme les tâches dans l'historique, glisse des fichiers dans le chat sans maintenir Shift, réduis la mémoire conservée pendant les longues sessions et garde stables les liens de sous-tâches et les webviews remplacés.
+- 🎟️ Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Titres de tâches automatiques et contrôle plus précis des modèles :** Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.
+- 🔌 **Prise en charge étendue des modèles et fournisseurs :** Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.
+- 🛡️ **Chats et modifications plus sûrs et réactifs :** Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

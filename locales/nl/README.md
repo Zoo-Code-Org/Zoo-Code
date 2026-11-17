@@ -47,11 +47,13 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.94.0
+## Nieuw in v3.98.0
 
-- ✨ **Bredere model- en providerondersteuning:** Gebruik Claude Haiku 5.5 via Anthropic, stuur afbeeldingen naar compatibele VS Code LM-modellen, pas de temperatuur aan voor OpenCode Go Responses-modellen en annuleer verzoeken netjes bij meer providers.
-- 🔐 **Flexibeler MCP OAuth:** Configureer statische OAuth-clientinstellingen, gebruik aangepaste callback-paden, ontdek authenticatiedetails uit `WWW-Authenticate` en zie callback-fouten voordat je het opnieuw probeert.
-- 🧭 **Vloeiendere chats en lange sessies:** Hernoem taken in de geschiedenis, sleep bestanden in de chat zonder Shift ingedrukt te houden, verminder het geheugen dat tijdens lange sessies wordt vastgehouden en houd subtaaklinks en vervangen webviews stabiel.
+- 🎟️ Bekijk een voorbeeld van het komende Zoo Pass-abonnement. 2 weken gratis toegang; beperkte plaatsen
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Automatische taaktitels en fijnere modelregeling:** Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.
+- 🔌 **Uitgebreidere ondersteuning voor modellen en providers:** Gebruik GPT-6.1 Terra en haal de nieuwste Friendli-modellenlijst op.
+- 🛡️ **Veiligere, responsievere chats en bewerkingen:** Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups.
 
 ## Wat kan Zoo Code voor JOU doen?
 

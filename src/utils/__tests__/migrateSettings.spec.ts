@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 
 import { migrateSettings } from "../migrateSettings"
+import { makeExtensionContext, makeUri } from "../../test-utils/vscode"
 
 // Mock vscode module
 vi.mock("vscode", () => ({
@@ -25,14 +26,14 @@ vi.mock("../fs", () => ({
 
 // Mock yaml module
 vi.mock("yaml", () => ({
-	parse: vi.fn((content) => JSON.parse(content)),
-	stringify: vi.fn((obj) => JSON.stringify(obj, null, 2)),
+	parse: vi.fn((content: string): unknown => JSON.parse(content)),
+	stringify: vi.fn((value: unknown) => JSON.stringify(value, null, 2)),
 }))
 
 describe("migrateSettings", () => {
-	let mockContext: any
-	let mockOutputChannel: any
-	let mockGlobalState: Map<string, any>
+	let mockContext: vscode.ExtensionContext
+	let mockOutputChannel: vscode.OutputChannel
+	let mockGlobalState: Map<string, unknown>
 
 	beforeEach(() => {
 		// Reset all mocks
@@ -41,23 +42,28 @@ describe("migrateSettings", () => {
 		// Create a mock global state
 		mockGlobalState = new Map()
 
-		// Create mock output channel
-		mockOutputChannel = {
-			appendLine: vi.fn(),
+		// Double provides only appendLine, the sole OutputChannel member the migration calls.
+		mockOutputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+
+		function globalStateGet<T>(key: string): T | undefined
+		function globalStateGet<T>(key: string, defaultValue: T): T
+		function globalStateGet<T>(key: string, defaultValue?: T): T | undefined {
+			const value: unknown = mockGlobalState.get(key)
+			return (value === undefined ? defaultValue : value) as T | undefined
 		}
 
 		// Create mock context
-		mockContext = {
+		mockContext = makeExtensionContext({
 			globalState: {
-				get: vi.fn((key: string) => mockGlobalState.get(key)),
-				update: vi.fn(async (key: string, value: any) => {
+				get: globalStateGet,
+				update: vi.fn(async (key: string, value: unknown) => {
 					mockGlobalState.set(key, value)
 				}),
+				keys: vi.fn(() => [...mockGlobalState.keys()]),
+				setKeysForSync: vi.fn(),
 			},
-			globalStorageUri: {
-				fsPath: "/mock/storage/path",
-			},
-		}
+			globalStorageUri: makeUri("/mock/storage/path"),
+		})
 	})
 
 	afterEach(() => {

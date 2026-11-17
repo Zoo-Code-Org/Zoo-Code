@@ -47,11 +47,13 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.94.0
+## Novità in v3.98.0
 
-- ✨ **Supporto di modelli e provider più ampio:** Usa Claude Haiku 5.5 tramite Anthropic, invia immagini ai modelli VS Code LM compatibili, regola la temperatura per i modelli OpenCode Go Responses e annulla le richieste in modo pulito su più provider.
-- 🔐 **OAuth MCP più flessibile:** Configura impostazioni statiche del client OAuth, usa percorsi di callback personalizzati, scopri i dettagli di autenticazione da `WWW-Authenticate` e individua gli errori di callback prima di riprovare.
-- 🧭 **Chat più fluide e sessioni lunghe:** Rinomina le attività nella cronologia, trascina i file nella chat senza tenere premuto Shift, riduci la memoria mantenuta durante le sessioni lunghe e mantieni stabili i link dei sottotask e i webview sostituiti.
+- 🎟️ Prova il prossimo abbonamento Zoo Pass. 2 settimane di accesso gratuito; posti limitati
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Titoli delle attività automatici e controllo dei modelli più preciso:** Genera automaticamente titoli per le nuove attività radice e prova l’impostazione sperimentale per lo sforzo di ragionamento dinamico.
+- 🔌 **Supporto ampliato per modelli e provider:** Usa GPT-6.1 Terra e recupera l’elenco più recente dei modelli Friendli.
+- 🛡️ **Chat e modifiche più sicure e reattive:** Annulla correttamente le richieste OpenAI Native e Requesty, evita l’approvazione automatica accidentale dei diff esterni al workspace, cambia lingua all’interfaccia in modo coerente ed evita recuperi ambigui dei backup JSON.
 
 ## Cosa può fare Zoo Code per TE?
 

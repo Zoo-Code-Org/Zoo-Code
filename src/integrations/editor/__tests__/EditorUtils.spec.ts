@@ -1,8 +1,17 @@
 // npx vitest src/integrations/editor/__tests__/EditorUtils.spec.ts
 
+import type { Mock } from "vitest"
 import * as vscode from "vscode"
 
 import { EditorUtils } from "../EditorUtils"
+
+import { makeUri } from "../../../test-utils/vscode"
+
+// TextDocument double provides getText/lineAt mocks plus lineCount and uri.fsPath.
+type MockTextDocument = vscode.TextDocument & {
+	getText: Mock<(range: vscode.Range) => string>
+	lineAt: Mock<(line: number) => Pick<vscode.TextLine, "text" | "lineNumber">>
+}
 
 // Use simple classes to simulate VSCode's Range and Position behavior.
 vi.mock("vscode", () => {
@@ -35,15 +44,15 @@ vi.mock("vscode", () => {
 })
 
 describe("EditorUtils", () => {
-	let mockDocument: any
+	let mockDocument: MockTextDocument
 
 	beforeEach(() => {
 		mockDocument = {
-			getText: vi.fn(),
+			getText: vi.fn((_range: vscode.Range) => ""),
 			lineAt: vi.fn(),
 			lineCount: 10,
-			uri: { fsPath: "/test/file.ts" },
-		}
+			uri: makeUri("/test/file.ts"),
+		} as unknown as MockTextDocument
 	})
 
 	describe("getEffectiveRange", () => {
@@ -76,7 +85,7 @@ describe("EditorUtils", () => {
 			mockDocument.lineAt.mockImplementation((line: number) => {
 				return { text: `Line ${line} text`, lineNumber: line }
 			})
-			mockDocument.getText.mockImplementation((range: any) => {
+			mockDocument.getText.mockImplementation((range) => {
 				// If the range is exactly the empty initial selection, return an empty string.
 				if (
 					range.start.line === initialRange.start.line &&
@@ -124,12 +133,11 @@ describe("EditorUtils", () => {
 
 	describe("getFilePath", () => {
 		it("should return relative path when in workspace", () => {
-			const mockWorkspaceFolder = {
-				uri: { fsPath: "/test" },
+			vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue({
+				uri: makeUri("/test"),
 				name: "test",
 				index: 0,
-			}
-			vi.mocked(vscode.workspace.getWorkspaceFolder).mockReturnValue(mockWorkspaceFolder as any)
+			})
 
 			const result = EditorUtils.getFilePath(mockDocument)
 

@@ -47,11 +47,13 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.94.0'daki Yenilikler
+## v3.98.0'daki Yenilikler
 
-- ✨ **Daha geniş model ve sağlayıcı desteği:** Claude Haiku 5.5'i Anthropic üzerinden kullan, uyumlu VS Code LM modellerine görsel gönder, OpenCode Go Responses modelleri için temperature değerini ayarla ve istekleri daha fazla sağlayıcıda temiz şekilde iptal et.
-- 🔐 **Daha esnek MCP OAuth:** Statik OAuth istemci ayarlarını yapılandır, özel geri çağırma yolları kullan, kimlik doğrulama ayrıntılarını `WWW-Authenticate` üzerinden keşfet ve yeniden denemeden önce geri çağırma hatalarını gör.
-- 🧭 **Daha akıcı sohbetler ve uzun oturumlar:** Geçmişteki görevleri yeniden adlandır, dosyaları Shift tuşuna basmadan sohbete sürükle, uzun oturumlarda tutulan belleği azalt ve alt görev bağlantılarını ve değiştirilen webview'ları stabil tut.
+- 🎟️ Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Otomatik görev başlıkları ve daha hassas model kontrolü:** Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.
+- 🔌 **Genişletilmiş model ve sağlayıcı desteği:** GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.
+- 🛡️ **Daha güvenli ve duyarlı sohbetler ile düzenlemeler:** OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

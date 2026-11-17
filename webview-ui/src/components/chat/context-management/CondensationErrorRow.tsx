@@ -1,4 +1,4 @@
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface CondensationErrorRowProps {
 	errorText?: string
@@ -9,7 +9,7 @@ interface CondensationErrorRowProps {
  * Shows a warning icon with the error header and optional error details.
  */
 export function CondensationErrorRow({ errorText }: CondensationErrorRowProps) {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	return (
 		<div className="flex flex-col gap-1">

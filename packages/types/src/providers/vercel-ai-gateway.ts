@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // https://ai-gateway.vercel.sh/v1/
 export const vercelAiGatewayDefaultModelId = "anthropic/claude-sonnet-4"
@@ -122,3 +126,17 @@ export const vercelAiGatewayDefaultModelInfo: ModelInfo = {
 }
 
 export const VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE = 0.7
+
+export const VERCEL_AI_GATEWAY_MODEL_ID_FIELD = "vercelAiGatewayModelId"
+
+export const vercelAiGatewayProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.vercelAiGateway,
+	modelIdKey: VERCEL_AI_GATEWAY_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(VERCEL_AI_GATEWAY_MODEL_ID_FIELD),
+	getDefaultModelId: () => vercelAiGatewayDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		vercelAiGatewayApiKey: z.string().optional(),
+		[VERCEL_AI_GATEWAY_MODEL_ID_FIELD]: z.string().optional(),
+	},
+})
