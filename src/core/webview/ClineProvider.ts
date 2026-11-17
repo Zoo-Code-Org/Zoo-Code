@@ -3585,6 +3585,11 @@ export class ClineProvider
 
 		let activationMode: Mode | undefined
 		let priorModeConfigId: string | undefined
+		// The provider-local mapping is a second store: what this window chose for the mode,
+		// or absent when this window never chose one and resolved through the mapping it
+		// opened with. The activation below overwrites it and getModeConfigId prefers it
+		// over the shared map, so the compensation needs the value from before the write.
+		let priorLocalModeConfigId: string | undefined
 		try {
 			if (activate) {
 				const { mode } = await this.getState()
@@ -3611,6 +3616,11 @@ export class ClineProvider
 					// Best-effort snapshot: when the prior mapping cannot be read the
 					// compensation restores the mapping as absent.
 				}
+				// Snapshot this window's own choice for the mode beside the shared one: an
+				// absent entry is a value too, because a window that never chose a profile for
+				// the mode resolves it through the mapping it opened with, and the rollback
+				// only gives that back by removing what the write below adds.
+				priorLocalModeConfigId = this.localModeConfigIds.get(mode)
 				// `allSettled` so the compensation below never races a write still in flight.
 				const activationResults = await Promise.allSettled([
 					this.updateGlobalState("listApiConfigMeta", await this.providerSettingsManager.listConfig()),
@@ -3682,7 +3692,7 @@ export class ClineProvider
 			// on its own so one failure cannot strand the rest: the manager
 			// record and selection first (the manager store is the source of
 			// truth that the profile list and the shared settings are derived
-			// from), then the mode mapping, then the shared and per-view state.
+			// from), then the mode mapping in both stores, then the shared and per-view state.
 			// The original failure is re-thrown for the caller.
 			await this._restoreProviderManagerRecord(name, managerSnapshot, normalizedSettings)
 			await this._restoreProviderManagerSelection(managerSnapshot)
@@ -3693,6 +3703,16 @@ export class ClineProvider
 					this.log(
 						`[ClineProvider] profile-activation rollback failed for the mode mapping: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 					)
+				}
+				// Restoring the shared map does not reach this window's own map, and
+				// getModeConfigId reads that map first, so an entry left here lets a later
+				// mode switch activate the profile this failed upsert wrote even though the
+				// shared mapping names the prior profile again. Put back the choice this
+				// window actually had, absent included.
+				if (priorLocalModeConfigId === undefined) {
+					this.localModeConfigIds.delete(activationMode)
+				} else {
+					this.localModeConfigIds.set(activationMode, priorLocalModeConfigId)
 				}
 			}
 			await this._restoreProfileActivationState(preWriteSnapshot)

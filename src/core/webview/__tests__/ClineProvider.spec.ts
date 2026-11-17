@@ -6658,6 +6658,133 @@ describe("ClineProvider", () => {
 			expect(saveSpy).toHaveBeenCalledTimes(1)
 			await provider.dispose()
 		})
+		it("restores this window's mode mapping when an activating save fails after the mode write", async () => {
+			// The two profiles of the upsert: the window is pinned to the prior one, and the
+			// save being applied activates the other. Both exist in the profile list, so a
+			// cached id for either one still resolves to a real profile afterwards.
+			const priorProfile: ProviderSettingsEntry = {
+				name: "prior-profile",
+				id: "prior-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const activatedProfile: ProviderSettingsEntry = {
+				name: "activated-profile",
+				id: "activated-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const runScenario = async (localMappingPresent: boolean) => {
+				const provider = new ClineProvider(
+					mockContext,
+					mockOutputChannel,
+					"sidebar",
+					new ContextProxy(mockContext),
+					new WebviewFocusTracker(),
+				)
+				provider["viewLocalState"].mode = "code"
+				provider["viewLocalState"].currentApiConfigName = "prior-profile"
+				if (localMappingPresent) {
+					provider["localModeConfigIds"].set("code", "prior-id")
+				} else {
+					// The absent case: this window never chose a profile for the mode, so the
+					// mapping it opened with is what the mode must resolve to again.
+					provider["initialModeConfigIds"] = Promise.resolve({ code: "prior-id" })
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [priorProfile, activatedProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "prior-profile")
+				await provider.contextProxy.setValue("mode", "code")
+				vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+					priorProfile,
+					activatedProfile,
+				])
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+					if ("name" in params && params.name === "activated-profile") {
+						return { ...activatedProfile, apiKey: "activated-secret" }
+					}
+					return { ...priorProfile, apiKey: "prior-secret" }
+				})
+				vi.spyOn(provider.providerSettingsManager, "getCurrentProfileName").mockResolvedValue("prior-profile")
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("activated-id")
+				// The shared mapping starts on the prior profile, which is what the rollback of
+				// the mode write is expected to put back.
+				let sharedModeConfigId: string | undefined = "prior-id"
+				vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(
+					async () => sharedModeConfigId,
+				)
+				vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(async (_mode, id) => {
+					sharedModeConfigId = id
+				})
+				vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+				// The activation writes all land; the final state post is the write that fails.
+				let switchStarted = false
+				vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+					if (!switchStarted) {
+						throw new Error("webview is gone")
+					}
+				})
+				try {
+					await expect(
+						provider["persistProviderProfile"](
+							"activated-profile",
+							{ apiProvider: providerIdentifiers.anthropic, apiKey: "activated-secret" },
+							true,
+						),
+					).rejects.toThrow("webview is gone")
+					// The compensation already puts the shared mapping back; this is the control that
+					// shows the two stores are separate before the local one is restored too.
+					expect(sharedModeConfigId).toBe("prior-id")
+					switchStarted = true
+					// A later mode switch through the public entry point is what reads the mapping.
+					await provider.handleModeSwitch("architect")
+					await provider.handleModeSwitch("code")
+					const resolution = {
+						pinned: provider.pinnedProfileName,
+						cachedId: provider["localModeConfigIds"].get("code"),
+						shared: sharedModeConfigId,
+					}
+					// The scenario reports what the mode resolves to afterwards; the assertions
+					// run below so both shapes of the mapping are reported in one run.
+					return resolution
+				} finally {
+					await provider.dispose()
+				}
+			}
+			// The window had chosen the prior profile for the mode itself: the rolled-back save
+			// must not leave this window resolving the failed profile for that mode.
+			const present = await runScenario(true)
+			const absent = await runScenario(false)
+			// The switch resolution is the assertion: what the mode names afterwards, not
+			// how many methods the rollback called. Soft assertions so a run reports both
+			// shapes of the mapping instead of stopping at the first one.
+			expect
+				.soft({
+					shape: "this window chose the prior profile",
+					pinned: present.pinned,
+					local: present.cachedId,
+					shared: present.shared,
+				})
+				.toEqual({
+					shape: "this window chose the prior profile",
+					pinned: "prior-profile",
+					local: "prior-id",
+					shared: "prior-id",
+				})
+			// The absent shape restores absence: the entry the failed write added is
+			// removed, so the mode resolves through the mapping the window opened with
+			// instead of keeping the id of the profile whose save rolled back.
+			expect
+				.soft({
+					shape: "this window had no local choice",
+					pinned: absent.pinned,
+					local: absent.cachedId,
+					shared: absent.shared,
+				})
+				.toEqual({
+					shape: "this window had no local choice",
+					pinned: "prior-profile",
+					shared: "prior-id",
+				})
+		})
 		it("does not undo a newer shared write when the per-view write fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,
