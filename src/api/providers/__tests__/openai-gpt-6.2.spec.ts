@@ -11,6 +11,13 @@ vi.mock("openai", async () => {
 	return mockOpenAiResponsesClient(create)
 })
 
+const reasoningCases = [
+	{ selected: "low", native: "low", codex: "low" },
+	{ selected: "max", native: "max", codex: "max" },
+	{ selected: "none", native: "medium", codex: "low" },
+	{ selected: undefined, native: "medium", codex: "low" },
+] as const
+
 describe.each(["gpt-6.2-sol", "gpt-6.2-astra"])("%s tool requests", (apiModelId) => {
 	beforeEach(() => {
 		create.mockReset().mockImplementation(() =>
@@ -39,27 +46,35 @@ describe.each(["gpt-6.2-sol", "gpt-6.2-astra"])("%s tool requests", (apiModelId)
 		return create.mock.calls[0]
 	}
 
-	it("sends tools through native Responses and replaces an unsupported effort", async () => {
-		const handler = new OpenAiNativeHandler({ apiModelId, openAiNativeApiKey: "test-key", reasoningEffort: "none" })
+	it.each(reasoningCases)("Native sends effort $native for selection $selected", async ({ selected, native }) => {
+		const handler = new OpenAiNativeHandler({
+			apiModelId,
+			openAiNativeApiKey: "test-key",
+			reasoningEffort: selected,
+		})
 		const [body] = await requestTool(handler)
 		expect(body).toMatchObject({
 			model: apiModelId,
 			max_output_tokens: 128_000,
-			reasoning: { effort: "medium" },
+			reasoning: { effort: native },
 			tools: [{ type: "function", name: "list_files", strict: true }],
 		})
 		expect(body).not.toHaveProperty("temperature")
 	})
 
-	it("sends subscription tools and the session header through Responses Lite", async () => {
+	it.each(reasoningCases)("Codex sends effort $codex for selection $selected", async ({ selected, codex }) => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("test-account")
-		const handler = new OpenAiCodexHandler({ apiModelId, openAiCodexServiceTier: "priority" })
+		const handler = new OpenAiCodexHandler({
+			apiModelId,
+			openAiCodexServiceTier: "priority",
+			reasoningEffort: selected,
+		})
 		const [body, options] = await requestTool(handler)
 		expect(body).toMatchObject({
 			model: apiModelId,
 			service_tier: "priority",
-			reasoning: { effort: "low", context: "all_turns" },
+			reasoning: { effort: codex, context: "all_turns" },
 			input: expect.arrayContaining([
 				expect.objectContaining({
 					type: "additional_tools",
