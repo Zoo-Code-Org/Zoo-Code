@@ -625,6 +625,41 @@ describe("OpenRouterHandler", () => {
 			}
 		})
 
+		it("adds cache control for an allowlisted id even when the catalog is empty", async () => {
+			// The allowlist arm must stand on its own: with an empty catalog there
+			// is no live capability evidence, so a mutant that required the catalog
+			// record (`||` → `&&`) would strand every allowlisted id whenever the
+			// catalog fetch fails or degrades. `anthropic/claude-sonnet-4` is in
+			// OPEN_ROUTER_PROMPT_CACHING_MODELS and absent from the emptied catalog,
+			// so only the allowlist arm can produce the breakpoint asserted below.
+			vitest.mocked(getModels).mockResolvedValueOnce({})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterModelId: "anthropic/claude-sonnet-4",
+				}),
+			)
+			const stub = stubChatCompletions()
+
+			try {
+				await handler.createMessage("test system", [{ role: "user", content: "test message" }]).next()
+
+				expect(stub.requestParams()).toMatchObject({
+					messages: expect.arrayContaining([
+						expect.objectContaining({
+							role: "system",
+							content: expect.arrayContaining([
+								expect.objectContaining({ cache_control: { type: "ephemeral" } }),
+							]),
+						}),
+					]),
+				})
+			} finally {
+				stub.restore()
+			}
+		})
+
 		it("reads the cache capability from the model record when a provider is pinned", async () => {
 			// getModel() substitutes the pinned endpoint's record, whose
 			// `supportsPromptCache` comes from that one endpoint's pricing. The gate
