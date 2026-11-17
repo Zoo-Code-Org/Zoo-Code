@@ -2500,7 +2500,7 @@ describe("Task persistence", () => {
 				expect(recordSpy).toHaveBeenCalledWith(child.taskId)
 
 				// Cancellation silences the beat without waiting for disposal.
-				child.abort = true
+				child.requestAbort(false)
 				recordSpy.mockClear()
 				await vi.advanceTimersByTimeAsync(120_000)
 				expect(recordSpy).not.toHaveBeenCalled()
@@ -2665,7 +2665,7 @@ describe("Task persistence", () => {
 			vi.useFakeTimers()
 			try {
 				// The user cancelled: the catch returns without rethrowing.
-				child.abortReason = "user_cancelled"
+				child.setAbortReason("user_cancelled")
 
 				await expect(child.run()).resolves.toBeUndefined()
 

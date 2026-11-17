@@ -476,7 +476,7 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 
 	it.each(["EACCES", "EIO", "ELOCKED", "missing"])("handles failed startup recovery: %s", async (code) => {
 		const item = makeItem({ id: "recovery-failure", status: "active" })
-		await seedItems([item])
+		await seedItems(tmpDir, [item])
 		await store.initialize()
 		store.dispose()
 		const target = path.join(tmpDir, "tasks", item.id, GlobalFileNames.historyItem)

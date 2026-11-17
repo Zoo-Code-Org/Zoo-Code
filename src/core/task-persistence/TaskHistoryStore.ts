@@ -1199,7 +1199,11 @@ export class TaskHistoryStore {
 		const intentPath = await this.getDelegationRepairIntentPath()
 		let parsed: unknown
 		try {
-			parsed = JSON.parse(await readFileWithMissingRetry(intentPath)) as unknown
+			// Plain read, not readFileWithMissingRetry: the intent journal is a
+			// best-effort record whose absence is the normal no-op path, and the
+			// recovery retry would acquire the advisory lock — incompatible with
+			// the fake-timer clock the reconciliation tests run under.
+			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
 		} catch (error) {
 			if (this.isFileNotFoundError(error)) {
 				return null

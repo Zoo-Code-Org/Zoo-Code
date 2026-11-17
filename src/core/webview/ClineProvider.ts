@@ -1691,7 +1691,11 @@ export class ClineProvider
 				const oldTask = this.taskRegistry.current
 
 				// The current task may have changed or been removed during the awaits above; never touch it.
-				if (oldTask !== currentTask) {
+				// A different task became current → discard this rehydration so it cannot evict
+				// or abort the newer session. An EMPTY registry is the concurrent-eviction case:
+				// nothing exists to abort and the caller still expects a task, so fall through
+				// to the `if (oldTask)` guard below (which skips the teardown) and continue.
+				if (oldTask && oldTask !== currentTask) {
 					removeTaskEventListeners(this.taskEventListeners, task)
 					await task.abortTask(true).catch(() => {})
 					// This path never reaches a scheduled run, so roll back the eager

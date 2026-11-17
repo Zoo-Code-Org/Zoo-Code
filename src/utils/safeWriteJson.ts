@@ -154,7 +154,10 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 		// Step 2: Commit the replacement with a single atomic rename. The
 		// committed target stays in place until this rename lands, so a
 		// process exit before or during the commit can no longer leave the
-		// canonical path absent.
+		// canonical path absent. `preCommit` runs immediately before the
+		// commit rename with no await in between, so a caller can abort with
+		// nothing committed and the previous file restored.
+		options?.preCommit?.()
 		try {
 			options?.trace?.({ stage: "replacement-rename" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
@@ -172,11 +175,6 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 			options?.trace?.({ stage: "backup-rename", detail: "eperm-fallback" })
 			actualTempBackupFilePath = createTempFilePath(absoluteFilePath, "bak")
 			await fs.rename(absoluteFilePath, actualTempBackupFilePath)
-			// `preCommit` runs immediately before the fallback's replacement
-			// rename with no await in between, so a caller can abort with
-			// nothing committed (the backup restore in the catch below puts
-			// the original back).
-			options?.preCommit?.()
 			options?.trace?.({ stage: "replacement-rename", detail: "eperm-fallback" })
 			await fs.rename(actualTempNewFilePath, absoluteFilePath)
 		}
