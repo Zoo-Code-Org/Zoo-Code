@@ -6166,6 +6166,35 @@ describe("ClineProvider", () => {
 			expect(rawDelete).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.delete_api_config")
 		})
+
+		test("yImTg: a stale listApiConfigMeta cache does not block deleting a manager-held profile", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+			const messageHandler = mockWebviewView.webview.onDidReceiveMessage.mock.calls[0][0]
+
+			// The webview's mirror predates the profile: `getProviderProfileEntry` alone would
+			// report the delete as failed even though the manager still holds the profile.
+			await provider.contextProxy.setValue("listApiConfigMeta", [])
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				"answers.yes" as unknown as vscode.MessageItem,
+			)
+
+			const deleteProviderProfile = vi.spyOn(provider, "deleteProviderProfile").mockResolvedValue(undefined)
+			const getProfile = vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "manager-config",
+				id: "manager-id",
+				apiProvider: providerIdentifiers.anthropic,
+			} as ProviderSettingsEntry & { name: string })
+
+			await messageHandler({ type: "deleteApiConfiguration", text: "manager-config" })
+
+			// The manager-backed fallback resolved the entry, so the delete proceeds instead of
+			// surfacing `errors.delete_api_config`.
+			expect(getProfile).toHaveBeenCalledWith({ name: "manager-config" })
+			expect(deleteProviderProfile).toHaveBeenCalledWith(
+				expect.objectContaining({ name: "manager-config", id: "manager-id" }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("deleteProviderProfile", () => {
@@ -7753,6 +7782,120 @@ describe("ClineProvider", () => {
 			} finally {
 				vi.useRealTimers()
 			}
+		})
+
+		// --- Deferred follow-up regressions (PR #2266 review threads) ---
+
+		test("yImTS: a successful restore rebinds the surviving task to the restored profile", async () => {
+			mockProviderSettingsManager()
+
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other-model",
+				},
+			})
+			mockTask.updateApiConfiguration = vi.fn()
+			await provider.addClineToStack(mockTask)
+
+			await provider.contextProxy.setValue("taskHistory", [
+				{
+					id: mockTask.taskId,
+					ts: Date.now(),
+					task: "Test task",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+			])
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+
+			// Fail the replacement activation so the rollback restores the deleted profile.
+			vi.mocked(provider.providerSettingsManager.activateProfile).mockRejectedValueOnce(
+				new Error("Failed to activate profile: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// The restore left the task running on the replacement's handler: the rollback must
+			// rebuild it from the restored slice and persist the sticky profile name, exactly
+			// like a user activation does.
+			expect(mockTask.updateApiConfiguration).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "current-key",
+				}),
+			)
+			expect(mockTask.setTaskApiConfigName).toHaveBeenCalledWith("current-config")
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: mockTask.taskId,
+					apiConfigName: "current-config",
+				}),
+			)
+		})
+
+		test("yImTc: the failed-restore fallback rebinds the surviving task to the fallback profile", async () => {
+			const { managerState } = mockProviderSettingsManager()
+
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "current-key",
+				},
+			})
+			mockTask.updateApiConfiguration = vi.fn()
+			await provider.addClineToStack(mockTask)
+
+			await provider.contextProxy.setValue("taskHistory", [
+				{
+					id: mockTask.taskId,
+					ts: Date.now(),
+					task: "Test task",
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				},
+			])
+			const updateTaskHistorySpy = vi.spyOn(provider, "updateTaskHistory").mockResolvedValue([])
+
+			// The replacement activation fails, and the restore fails before it can re-save the
+			// profile, so the fallback runs and activates the surviving OpenRouter profile.
+			vi.mocked(provider.providerSettingsManager.activateProfile)
+				.mockRejectedValueOnce(new Error("Failed to activate profile: storage error"))
+				.mockImplementationOnce(async (params: { name: string } | { id: string }) => {
+					const resolvedName = "name" in params ? params.name : otherProfile.name
+					managerState.currentApiConfigName = resolvedName
+					return { ...otherProfile, openRouterModelId: "other-model" }
+				})
+			vi.mocked(provider.providerSettingsManager.saveConfigIfAbsent).mockRejectedValueOnce(
+				new Error("Failed to restore profile: storage error"),
+			)
+
+			await expect(provider.deleteProviderProfile(currentProfile)).rejects.toThrow(
+				"Failed to activate profile: storage error",
+			)
+
+			// The fallback selection is now live, so the task must run against it.
+			expect(mockTask.updateApiConfiguration).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "other-model",
+				}),
+			)
+			expect(mockTask.setTaskApiConfigName).toHaveBeenCalledWith("other-config")
+			expect(updateTaskHistorySpy).toHaveBeenCalledWith(
+				expect.objectContaining({
+					id: mockTask.taskId,
+					apiConfigName: "other-config",
+				}),
+			)
 		})
 	})
 })

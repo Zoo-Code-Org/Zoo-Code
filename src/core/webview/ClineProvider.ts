@@ -3012,6 +3012,16 @@ export class ClineProvider
 		if (signal.aborted) return false
 
 		await this.contextProxy.setValues(previousContextValues)
+
+		// The rollback owns the current selection only while nothing re-selected a profile
+		// during the restore's writes; the surviving task must not be re-bound to a profile
+		// someone else just activated. When it does own it, the task's handler and sticky
+		// profile must follow the restored slice, matching what a user activation does.
+		if (this.contextProxy.getValues().currentApiConfigName === name) {
+			this.updateTaskApiHandlerIfNeeded(settings, { forceRebuild: true })
+			await this.persistStickyProviderProfileToCurrentTask(name)
+		}
+
 		return true
 	}
 
@@ -3065,6 +3075,12 @@ export class ClineProvider
 					currentApiConfigName: fallback,
 					listApiConfigMeta: remainingProfiles,
 				})
+
+				// The fallback selection is now the live profile, so the surviving task must run
+				// against it: rebuild the handler from the fallback's settings and persist the
+				// sticky profile name, the same way a user activation rebinds the current task.
+				this.updateTaskApiHandlerIfNeeded(fallbackSettings, { forceRebuild: true })
+				await this.persistStickyProviderProfileToCurrentTask(fallback)
 			}
 			// The purge may have dropped mode bindings the restore could not re-apply; re-apply
 			// them now so the manager's map matches the pre-delete state again. The check and the

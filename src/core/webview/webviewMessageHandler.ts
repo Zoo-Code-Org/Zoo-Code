@@ -2587,7 +2587,17 @@ export const webviewMessageHandler = async (
 				// fails (the webview then listed a profile the manager no longer had). The queued
 				// path also purges the deleted profile's own secrets, which the raw call never did
 				// on the inactive branch.
-				const entry = provider.getProviderProfileEntry(oldName)
+				// `getProviderProfileEntry` reads the ContextProxy mirror, which a queued delete or
+				// a webview that has not refreshed can leave stale. The manager is authoritative:
+				// a profile it still holds must stay deletable, so fall back to its entry before
+				// reporting the delete as failed. An id-less manager profile falls through to the
+				// mirror too: the delete policy keys on `id`, and a stale mirror entry is the only
+				// source that may still carry one.
+				const entry =
+					(await provider.providerSettingsManager
+						.getProfile({ name: oldName })
+						.then((profile) => (profile.id ? { name: oldName, id: profile.id } : undefined))
+						.catch(() => undefined)) ?? provider.getProviderProfileEntry(oldName)
 
 				if (!entry) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
