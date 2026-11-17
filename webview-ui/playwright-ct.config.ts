@@ -65,4 +65,6 @@ export default defineConfig({
 		url: galleryUrl,
 		reuseExistingServer: !process.env.CI,
 	},
+	retries: 2,
+	failOnFlakyTests: true,
 })

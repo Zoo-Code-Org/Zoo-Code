@@ -19,7 +19,9 @@ describe("getModeSelection with empty promptComponent", () => {
 		const debugMode = modes.find((m) => m.slug === "debug")!
 
 		// Test with null promptComponent
-		const result = getModeSelection("debug", null as any, [])
+		// Exercise the legacy null value, which the implementation treats like an empty component.
+		const nullPromptComponent = null as unknown as PromptComponent
+		const result = getModeSelection("debug", nullPromptComponent, [])
 
 		// Should use built-in mode values
 		expect(result.roleDefinition).toBe(debugMode.roleDefinition)

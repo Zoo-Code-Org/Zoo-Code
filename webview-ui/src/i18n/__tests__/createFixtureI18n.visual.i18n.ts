@@ -1,0 +1,44 @@
+import i18next, { type i18n } from "i18next"
+
+import type { TranslationContextValue } from "../TranslationContext"
+
+/**
+ * An i18next instance for a visual fixture that serves exactly `translations`, keyed `"ns:dotted.key"`.
+ * Missing keys render as the qualified key.
+ */
+function createFixtureI18n(translations: Record<string, string>): i18n {
+	const resources: Record<string, Record<string, unknown>> = {}
+
+	for (const [qualifiedKey, value] of Object.entries(translations)) {
+		const [ns, key] = qualifiedKey.split(":")
+		const path = key.split(".")
+		let node = (resources[ns] ??= {})
+
+		for (const segment of path.slice(0, -1)) {
+			node = (node[segment] ??= {}) as Record<string, unknown>
+		}
+
+		node[path[path.length - 1]] = value
+	}
+
+	const instance = i18next.createInstance()
+
+	// Inline resources and `initAsync: false` make the instance ready before the fixture renders.
+	void instance.init({
+		lng: "en",
+		resources: { en: resources },
+		ns: Object.keys(resources),
+		initAsync: false,
+		appendNamespaceToMissingKey: true,
+		interpolation: { escapeValue: false },
+	})
+
+	return instance
+}
+
+/** A `TranslationContext` value for a visual fixture, translating with `createFixtureI18n(translations)`. */
+export function createFixtureTranslation(translations: Record<string, string>): TranslationContextValue {
+	const instance = createFixtureI18n(translations)
+
+	return { t: instance.getFixedT("en"), language: "en" }
+}

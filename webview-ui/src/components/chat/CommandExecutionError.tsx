@@ -1,10 +1,11 @@
 import { useCallback } from "react"
-import { useTranslation, Trans } from "react-i18next"
+import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { buildDocLink } from "../../utils/docLinks"
 
 export const CommandExecutionError = () => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 
 	const onClick = useCallback((e: React.MouseEvent<HTMLAnchorElement>) => {
 		e.preventDefault()
@@ -22,6 +23,7 @@ export const CommandExecutionError = () => {
 				</div>
 				<div>
 					<Trans
+						t={t}
 						i18nKey="chat:shellIntegration.description"
 						components={{
 							settingsLink: <VSCodeLink href="#" onClick={onClick} className="inline" />,

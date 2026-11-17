@@ -641,7 +641,7 @@ export const CodeIndexPopover: React.FC<CodeIndexPopoverProps> = ({
 							<h4 className="m-0 pb-2 flex-1">{t("settings:codeIndex.title")}</h4>
 						</div>
 						<p className="my-0 pr-4 text-sm w-full">
-							<Trans i18nKey="settings:codeIndex.description">
+							<Trans t={t} i18nKey="settings:codeIndex.description">
 								<VSCodeLink
 									href={buildDocLink("features/experimental/codebase-indexing", "settings")}
 									style={{ display: "inline" }}
