@@ -42,13 +42,35 @@ export const apiProviderHygieneSelectors = [
 	},
 ]
 
+// Hand-built AbortError values drift from the shared contract (name, message). Use createAbortError.
+export const abortErrorSelectors = [
+	{
+		selector: "AssignmentExpression[left.property.name='name'][right.value='AbortError']",
+		message: "Use createAbortError from providers/utils/abort-signal instead of building an AbortError by hand.",
+	},
+	{
+		selector: "NewExpression[callee.name='DOMException'][arguments.1.value='AbortError']",
+		message: "Use createAbortError from providers/utils/abort-signal instead of building an AbortError by hand.",
+	},
+]
+
 export const apiProviderHygieneConfig = {
 	files: ["api/**/*.ts"],
 	// The helper module owns the shared names. Tests build their own fixtures.
 	ignores: ["api/providers/utils/abort-signal.ts", "**/__tests__/**", "**/*.test.ts", "**/*.spec.ts"],
 	rules: {
-		"no-restricted-syntax": ["error", ...apiProviderHygieneSelectors],
+		"no-restricted-syntax": ["error", ...apiProviderHygieneSelectors, ...abortErrorSelectors],
 	},
+}
+
+// Shared by every spec lane, not only src/api: an abort assertion must not pass on a raw SDK error.
+export const abortSubstringSelector = {
+	selector:
+		// Strings contain literal punctuation; only regex source can contain anchors, wildcards,
+		// optional suffix groups, or word boundaries around the generic abort wording.
+		"CallExpression[callee.property.name=/^toThrow(Error)?$/]:not([callee.object.property.name='not']):matches([arguments.0.value=/^(the )?(request )?(was )?abort(ed)?[.]*$/i], [arguments.0.regex.pattern=/^[$^]?(?:\\.\\*)?(the )?(request )?(was )?abort(ed)?(?:\\(\\?:(?:ed|ion|al)\\)\\??)?(?:\\\\b)?(?:\\.\\*)?[\\\\.$]*$/i])",
+	message:
+		"A bare 'abort' substring also matches a raw SDK error. Assert the AbortError name and the full provider message.",
 }
 
 // Spec files under src/api. A loop of expects in one test stops at the first failing case and hides the rest.
@@ -58,4 +80,32 @@ export const apiProviderTestSelectors = [
 		message:
 			"Use it.each for repeated cases. A loop of expects in one test stops at the first failing case and does not name it.",
 	},
+	abortSubstringSelector,
 ]
+
+// A new @ts-ignore in a provider spec hides a private-member access. Use bracket notation or a typed double.
+// Ratchet: files that still hold one are listed here. Remove a file from the list when it is clean.
+export const apiSpecTsIgnoreConfig = {
+	files: ["api/**/__tests__/**/*.spec.ts"],
+	ignores: ["api/providers/__tests__/gemini-handler.spec.ts", "api/providers/__tests__/vscode-lm.spec.ts"],
+	rules: {
+		"@typescript-eslint/ban-ts-comment": ["error", { "ts-ignore": true }],
+	},
+}
+
+// A fixed sleep in a provider spec either flakes or hides a missing await. Poll with vi.waitFor on the
+// observable condition. This uses no-restricted-globals, not no-restricted-syntax, because later config
+// blocks replace no-restricted-syntax for the same files.
+export const apiSpecSleepConfig = {
+	files: ["api/**/__tests__/**/*.spec.ts"],
+	rules: {
+		"no-restricted-globals": [
+			"error",
+			{
+				name: "setTimeout",
+				message:
+					"Poll with vi.waitFor on the observable condition. A fixed sleep either flakes or hides a missing await.",
+			},
+		],
+	},
+}

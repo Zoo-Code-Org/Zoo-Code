@@ -1529,6 +1529,42 @@ items:
             key: KAGI_SUMMARIZER_ENGINE
             placeholder: cecil
             optional: true
+    - id: keenable
+      name: Keenable
+      description:
+          Web search and page fetch for AI agents over MCP. Search the web and read pages as clean markdown. No account
+          or API key is needed. An optional API key raises the rate limits.
+      author: Keenable
+      url: https://github.com/keenableai/keenable-mcp
+      tags:
+          - web-search
+          - search-engine
+          - content-extraction
+          - research
+      content:
+          - name: Remote Server
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.keenable.ai/mcp-public",
+                  "headers": {
+                    "X-Keenable-Title": "Zoo Code"
+                  }
+                }
+          - name: Remote Server (API Key)
+            content: |
+                {
+                  "type": "streamable-http",
+                  "url": "https://api.keenable.ai/mcp-public",
+                  "headers": {
+                    "X-Keenable-Title": "Zoo Code",
+                    "X-API-Key": "{{KEENABLE_API_KEY}}"
+                  }
+                }
+            parameters:
+                - name: Keenable API Key
+                  key: KEENABLE_API_KEY
+                  placeholder: your_keenable_api_key
     - id: laravel-boost
       name: Laravel Boost
       description:

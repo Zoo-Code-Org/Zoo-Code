@@ -46,11 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.92.0
+## Yang Baru di v3.98.0
 
-- ✨ **Pilihan model lebih cepat dan dukungan model lebih kuat:** Ganti model dari kolom penulisan chat. Gunakan Claude Haiku 5.5 di Amazon Bedrock, dapatkan kapabilitas Kimi K3 yang lebih akurat di OpenRouter, dan gunakan batas Gemini 4 Argon yang telah diperbaiki di Vercel AI Gateway.
-- 🧭 **Alur kerja terminal, pengeditan, chat, dan remote yang lebih andal:** Atur output perintah agar diciutkan secara default jika kamu mau, dapatkan kegagalan pengeditan yang lebih jelas, pertahankan baris reasoning dan API tetap terlihat, serta hindari masalah startup dan proxy di workspace remote.
-- 🔌 **Marketplace MCP yang diperluas:** Hubungkan Zoo Code ke AnySearch, Mailtea, dan Tradehand melalui marketplace MCP.
+- 🎟️ Pratinjau langganan Zoo Pass yang akan datang. Akses gratis 2 minggu; tempat terbatas
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Judul tugas otomatis dan kontrol model yang lebih detail:** Buat judul untuk tugas root baru secara otomatis dan coba setelan eksperimental dynamic thinking-effort.
+- 🔌 **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra dan ambil daftar model Friendli terbaru.
+- 🛡️ **Obrolan dan edit yang lebih aman serta responsif:** Batalkan permintaan OpenAI Native dan Requesty dengan bersih, lindungi diff di luar workspace dari persetujuan otomatis yang tidak disengaja, ganti bahasa UI secara konsisten, dan hindari pemulihan backup JSON yang ambigu.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

@@ -147,6 +147,9 @@ export type TaskEvents = {
 	[RooCodeEventName.TaskPaused]: [taskId: string]
 	[RooCodeEventName.TaskUnpaused]: [taskId: string]
 	[RooCodeEventName.TaskSpawned]: [taskId: string]
+	[RooCodeEventName.TaskDelegated]: [childTaskId: string]
+	[RooCodeEventName.TaskDelegationCompleted]: [childTaskId: string, summary: string]
+	[RooCodeEventName.TaskDelegationResumed]: [childTaskId: string]
 
 	// Task Execution
 	[RooCodeEventName.Message]: [{ action: "created" | "updated"; message: ClineMessage }]
