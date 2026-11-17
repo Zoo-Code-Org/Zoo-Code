@@ -4070,14 +4070,18 @@ export const webviewMessageHandler = async (
 			if (edit.success) {
 				const { id, text, segments: given } = edit.data
 				const queue = provider.getCurrentTask()?.messageQueueService
-				// Update the text first. A drain during the image scan then sends the edited text.
-				if (queue?.updateMessage(id, text, edit.data.images, given)) {
-					const { images } = await resolveIncomingImages({
-						text,
-						images: edit.data.images,
-						segments: segmentsOf(edit.data),
-					})
-					queue.updateMessageImages(id, text, images)
+				// The edit holds the message during the image scan, so a drain cannot send the old text.
+				const token = queue?.beginEdit(id)
+				if (queue && token !== undefined) {
+					let images = edit.data.images
+					try {
+						images = (await resolveIncomingImages({ text, images, segments: segmentsOf(edit.data) })).images
+					} catch (error) {
+						provider.log(`[editQueuedMessage] Image scan failed: ${error}`)
+					}
+					queue.commitEdit(id, token, text, images, given)
+				} else {
+					provider.log("[editQueuedMessage] Edit dropped: the message already left the queue.")
 				}
 			}
 

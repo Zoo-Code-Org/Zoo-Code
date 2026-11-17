@@ -53,6 +53,7 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		getCurrentTask: ReturnType<typeof vi.fn>
 		getState: ReturnType<typeof vi.fn>
 		postStateToWebview: ReturnType<typeof vi.fn>
+		log: ReturnType<typeof vi.fn>
 		contextProxy: { globalStorageUri: { fsPath: string } }
 	}
 	let providerAsClineProvider: ClineProvider
@@ -60,8 +61,8 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		handleWebviewAskResponse: ReturnType<typeof vi.fn>
 		messageQueueService: {
 			addMessage: ReturnType<typeof vi.fn>
-			updateMessage: ReturnType<typeof vi.fn>
-			updateMessageImages: ReturnType<typeof vi.fn>
+			beginEdit: ReturnType<typeof vi.fn>
+			commitEdit: ReturnType<typeof vi.fn>
 		}
 	}
 
@@ -71,8 +72,8 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			handleWebviewAskResponse: vi.fn(),
 			messageQueueService: {
 				addMessage: vi.fn(),
-				updateMessage: vi.fn(() => true),
-				updateMessageImages: vi.fn(),
+				beginEdit: vi.fn(() => 7),
+				commitEdit: vi.fn(() => true),
 			},
 		}
 		provider = {
@@ -81,6 +82,7 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			getCurrentTask: vi.fn(() => currentTask),
 			getState: vi.fn().mockResolvedValue({ maxImageFileSize: 5, maxTotalImageSize: 20 }),
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+			log: vi.fn(),
 			contextProxy: { globalStorageUri: { fsPath: "/tmp/storage" } },
 		}
 		providerAsClineProvider = provider as unknown as ClineProvider
@@ -170,12 +172,15 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 		const edit = (payload: unknown) =>
 			webviewMessageHandler(providerAsClineProvider, { type: "editQueuedMessage", payload } as WebviewMessage)
 
-		it("forwards a valid edit with its segments", async () => {
-			await edit({ id: "q1", text, images: ["data:image/png;base64,AA"], segments })
-			expect(currentTask.messageQueueService.updateMessage).toHaveBeenCalledWith(
+		it("commits a valid edit with its segments and the resolved images", async () => {
+			resolveImageMentions.mockResolvedValueOnce({ text: "", images: ["data:resolved"] })
+			await edit({ id: "q1", text, images: ["data:old"], segments })
+			expect(currentTask.messageQueueService.beginEdit).toHaveBeenCalledWith("q1")
+			expect(currentTask.messageQueueService.commitEdit).toHaveBeenCalledWith(
 				"q1",
+				7,
 				text,
-				["data:image/png;base64,AA"],
+				["data:resolved"],
 				segments,
 			)
 		})
@@ -188,27 +193,40 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			expect(resolveImageMentions).toHaveBeenCalledWith(expect.objectContaining({ text: scanned }))
 		})
 
-		// Mirrors docs/architecture/tla/QueueEditRace.tla, mode SyncGuarded.
-		it("updates the text before the image scan ends, then attaches the images for that text", async () => {
+		// Mirrors docs/architecture/tla/QueueEditRace.tla, mode Claim.
+		it("holds the message during the image scan and commits once, after the scan", async () => {
 			let finish: (value: { text: string; images: string[] }) => void = () => {}
 			resolveImageMentions.mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
 			const pending = edit({ id: "q1", text, segments })
 
 			await vi.waitFor(() => expect(resolveImageMentions).toHaveBeenCalled())
-			expect(currentTask.messageQueueService.updateMessage).toHaveBeenCalledTimes(1)
-			expect(currentTask.messageQueueService.updateMessageImages).not.toHaveBeenCalled()
+			expect(currentTask.messageQueueService.beginEdit).toHaveBeenCalledTimes(1)
+			expect(currentTask.messageQueueService.commitEdit).not.toHaveBeenCalled()
 
 			finish({ text: "", images: ["data:b"] })
 			await pending
-			expect(currentTask.messageQueueService.updateMessageImages).toHaveBeenCalledWith("q1", text, ["data:b"])
+			expect(currentTask.messageQueueService.commitEdit).toHaveBeenCalledWith("q1", 7, text, ["data:b"], segments)
 		})
 
-		it("scans nothing when the message has left the queue", async () => {
-			currentTask.messageQueueService.updateMessage.mockReturnValueOnce(false)
+		it("keeps the old images and still commits when the image scan fails", async () => {
+			resolveImageMentions.mockRejectedValueOnce(new Error("disk"))
+			await edit({ id: "q1", text, images: ["data:old"], segments })
+			expect(currentTask.messageQueueService.commitEdit).toHaveBeenCalledWith(
+				"q1",
+				7,
+				text,
+				["data:old"],
+				segments,
+			)
+		})
+
+		it("scans nothing and logs when the message has left the queue", async () => {
+			currentTask.messageQueueService.beginEdit.mockReturnValueOnce(undefined)
 			resolveImageMentions.mockClear()
 			await edit({ id: "q1", text, segments })
 			expect(resolveImageMentions).not.toHaveBeenCalled()
-			expect(currentTask.messageQueueService.updateMessageImages).not.toHaveBeenCalled()
+			expect(currentTask.messageQueueService.commitEdit).not.toHaveBeenCalled()
+			expect(provider.log).toHaveBeenCalledWith(expect.stringContaining("Edit dropped"))
 		})
 
 		it.each([
@@ -219,7 +237,7 @@ describe("webviewMessageHandler mention segment forwarding", () => {
 			{ label: "a non-list images field", payload: { id: "q1", text, images: "x" } },
 		])("ignores a payload that is $label", async ({ payload }) => {
 			await edit(payload)
-			expect(currentTask.messageQueueService.updateMessage).not.toHaveBeenCalled()
+			expect(currentTask.messageQueueService.beginEdit).not.toHaveBeenCalled()
 		})
 	})
 })

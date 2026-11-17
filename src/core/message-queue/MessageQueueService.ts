@@ -13,6 +13,8 @@ export interface QueueEvents {
 export class MessageQueueService extends EventEmitter<QueueEvents> {
 	private _messages: QueuedMessage[]
 	private claimedMessageIds = new Set<string>()
+	private editTokens = new Map<string, number>()
+	private editSeq = 0
 
 	constructor() {
 		super()
@@ -58,14 +60,34 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 
 		this._messages.splice(index, 1)
 		this.claimedMessageIds.delete(id)
+		this.editTokens.delete(id)
 		this.emit("stateChanged", this._messages)
 		return true
 	}
 
-	public updateMessage(id: string, text: string, images?: string[], segments?: unknown): boolean {
+	/**
+	 * An edit holds the message, so a drain skips it until the edit commits. A newer edit replaces an older
+	 * one, and only the newest commits. Returns no token if the message is gone or a consumer holds it.
+	 * See docs/architecture/tla/QueueEditRace.tla.
+	 */
+	public beginEdit(id: string): number | undefined {
 		const { message } = this.findMessage(id)
 
-		if (!message) {
+		if (!message || (this.claimedMessageIds.has(id) && !this.editTokens.has(id))) {
+			return undefined
+		}
+
+		this.claimedMessageIds.add(id)
+		const token = ++this.editSeq
+		this.editTokens.set(id, token)
+		return token
+	}
+
+	/** Sets text, segments and images together for the newest edit, then lets the message go. */
+	public commitEdit(id: string, token: number, text: string, images?: string[], segments?: unknown): boolean {
+		const { message } = this.findMessage(id)
+
+		if (!message || this.editTokens.get(id) !== token) {
 			return false
 		}
 
@@ -74,22 +96,8 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		message.timestamp = Date.now()
 		message.text = text
 		message.images = images
-		this.emit("stateChanged", this._messages)
-		return true
-	}
-
-	/**
-	 * Sets the images that an edit resolved. A later edit or a drain wins, so a stale resolve changes nothing.
-	 * See docs/architecture/tla/QueueEditRace.tla.
-	 */
-	public updateMessageImages(id: string, expectedText: string, images: string[]): boolean {
-		const { message } = this.findMessage(id)
-
-		if (!message || message.text !== expectedText) {
-			return false
-		}
-
-		message.images = images
+		this.editTokens.delete(id)
+		this.claimedMessageIds.delete(id)
 		this.emit("stateChanged", this._messages)
 		return true
 	}
@@ -144,6 +152,7 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	public dispose(): void {
 		this._messages = []
 		this.claimedMessageIds.clear()
+		this.editTokens.clear()
 		this.removeAllListeners()
 	}
 }

@@ -69,6 +69,10 @@ describe("MessageQueueService claims", () => {
 	})
 })
 
+// Runs one whole edit the way the handler does.
+const edit = (queue: MessageQueueService, id: string, text: string, images?: string[], segments?: unknown) =>
+	queue.commitEdit(id, queue.beginEdit(id)!, text, images, segments)
+
 describe("MessageQueueService segments", () => {
 	it("stores the segments with the message", () => {
 		const queue = new MessageQueueService()
@@ -88,7 +92,7 @@ describe("MessageQueueService segments", () => {
 			{ text: " mine", source: "user" as const },
 		]
 
-		queue.updateMessage(message.id, "ctx @/x mine", undefined, segments)
+		edit(queue, message.id, "ctx @/x mine", undefined, segments)
 
 		expect(queue.messages[0]?.segments).toEqual(segments)
 	})
@@ -101,36 +105,90 @@ describe("MessageQueueService segments", () => {
 		const queue = new MessageQueueService()
 		const message = queue.addMessage("ctx @/x", undefined, [{ text: "ctx @/x", source: "generated" }])!
 
-		queue.updateMessage(message.id, "@/x", undefined, segments)
+		edit(queue, message.id, "@/x", undefined, segments)
 
 		expect(queue.messages[0]?.segments).toEqual([{ text: "@/x", source: "generated" }])
 	})
 
-	// Mirrors docs/architecture/tla/QueueEditRace.tla, the guard on the late image resolve.
-	describe("updateMessageImages", () => {
-		it("sets the images when the text is unchanged", () => {
+	// Mirrors docs/architecture/tla/QueueEditRace.tla, mode Claim.
+	describe("edits", () => {
+		const queued = () => {
 			const queue = new MessageQueueService()
-			const message = queue.addMessage("see @/a.png")!
+			const message = queue.addMessage(
+				"see @/a.png",
+				["data:old"],
+				[{ text: "see @/a.png", source: "generated" }],
+			)!
+			return { queue, id: message.id }
+		}
 
-			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(true)
-			expect(queue.messages[0]?.images).toEqual(["data:a"])
+		it("commits text, segments and images together", () => {
+			const { queue, id } = queued()
+			const token = queue.beginEdit(id)!
+			const segments = [{ text: "see @/b.png", source: "user" as const }]
+
+			expect(queue.commitEdit(id, token, "see @/b.png", ["data:b"], segments)).toBe(true)
+			expect(queue.messages[0]).toMatchObject({ text: "see @/b.png", images: ["data:b"], segments })
 		})
 
-		it("changes nothing when a later edit replaced the text", () => {
-			const queue = new MessageQueueService()
-			const message = queue.addMessage("see @/a.png")!
-			queue.updateMessage(message.id, "see @/b.png")
+		it("keeps the message from a drain until the edit commits", () => {
+			const { queue, id } = queued()
+			const token = queue.beginEdit(id)!
 
-			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(false)
-			expect(queue.messages[0]?.images).toBeUndefined()
+			expect(queue.dequeueMessage()).toBeUndefined()
+			expect(queue.hasUnclaimed()).toBe(false)
+
+			queue.commitEdit(id, token, "see @/b.png", [])
+			expect(queue.dequeueMessage()).toMatchObject({ text: "see @/b.png" })
 		})
 
-		it("returns false when a drain removed the message", () => {
-			const queue = new MessageQueueService()
-			const message = queue.addMessage("see @/a.png")!
-			queue.dequeueMessage()
+		it("emits a state change on commit so a waiting consumer sees the message again", () => {
+			const { queue, id } = queued()
+			const token = queue.beginEdit(id)!
+			const changed = vi.fn()
+			queue.on("stateChanged", changed)
 
-			expect(queue.updateMessageImages(message.id, "see @/a.png", ["data:a"])).toBe(false)
+			queue.commitEdit(id, token, "see @/b.png", [])
+			expect(changed).toHaveBeenCalledTimes(1)
+			expect(queue.hasUnclaimed()).toBe(true)
+		})
+
+		it("lets only the newest edit commit, even when the text is the same", () => {
+			const { queue, id } = queued()
+			const first = queue.beginEdit(id)!
+			const second = queue.beginEdit(id)!
+			const asUser = [{ text: "same", source: "user" as const }]
+			const asGenerated = [{ text: "same", source: "generated" as const }]
+
+			expect(queue.commitEdit(id, second, "same", ["data:second"], asGenerated)).toBe(true)
+			expect(queue.commitEdit(id, first, "same", ["data:first"], asUser)).toBe(false)
+			expect(queue.messages[0]).toMatchObject({ images: ["data:second"], segments: asGenerated })
+		})
+
+		it("ignores an older edit that ends first, and holds the message for the newer one", () => {
+			const { queue, id } = queued()
+			const first = queue.beginEdit(id)!
+			queue.beginEdit(id)
+
+			expect(queue.commitEdit(id, first, "late", [])).toBe(false)
+			expect(queue.dequeueMessage()).toBeUndefined()
+		})
+
+		it("gives no token when the message is gone or a consumer holds it", () => {
+			const { queue, id } = queued()
+			queue.claimNextMessage()
+			expect(queue.beginEdit(id)).toBeUndefined()
+
+			queue.removeMessage(id)
+			expect(queue.beginEdit(id)).toBeUndefined()
+		})
+
+		it("fails a commit after the message was removed", () => {
+			const { queue, id } = queued()
+			const token = queue.beginEdit(id)!
+			queue.removeMessage(id)
+
+			expect(queue.commitEdit(id, token, "late", [])).toBe(false)
 		})
 	})
 })
