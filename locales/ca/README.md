@@ -47,11 +47,13 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.94.0
+## Novetats a la v3.98.0
 
-- ✨ **Compatibilitat més àmplia amb models i proveïdors:** Utilitza Claude Haiku 5.5 mitjançant Anthropic, envia imatges a models VS Code LM compatibles, ajusta la temperatura per als models OpenCode Go Responses i cancel·la sol·licituds de forma neta a més proveïdors.
-- 🔐 **MCP OAuth més flexible:** Configura opcions estàtiques de client OAuth, usa rutes de callback personalitzades, descobreix detalls d'autenticació de `WWW-Authenticate` i veu els errors de callback abans de tornar-ho a provar.
-- 🧭 **Xats i sessions llargues més fluides:** Reanomena tasques a l'historial, arrossega fitxers al xat sense mantenir premut Shift, redueix la memòria que es conserva durant les sessions llargues i mantén estables els enllaços de subtasques i els webviews substituïts.
+- 🎟️ Prova la propera subscripció Zoo Pass. 2 setmanes d'accés gratuït; places limitades
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Títols de tasques automàtics i més control dels models:** Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.
+- 🔌 **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra i obtén la llista més recent de models de Friendli.
+- 🛡️ **Xats i edicions més segurs i responsius:** Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON.
 
 ## Què pot fer Zoo Code per TU?
 

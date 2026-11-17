@@ -46,11 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.94.0
+## Yang Baru di v3.98.0
 
-- ✨ **Dukungan model dan provider lebih luas:** Gunakan Claude Haiku 5.5 lewat Anthropic, kirim gambar ke model VS Code LM yang kompatibel, atur temperature untuk model OpenCode Go Responses, dan batalkan permintaan dengan rapi di lebih banyak provider.
-- 🔐 **OAuth MCP lebih fleksibel:** Atur pengaturan klien OAuth statis, gunakan jalur callback khusus, temukan detail autentikasi dari `WWW-Authenticate`, dan lihat kegagalan callback sebelum mencoba ulang.
-- 🧭 **Chat dan sesi panjang yang lebih lancar:** Ubah nama task di riwayat, seret file ke chat tanpa menahan Shift, kurangi memori yang disimpan selama sesi panjang, dan jaga tautan subtask serta webview yang diganti tetap stabil.
+- 🎟️ Pratinjau langganan Zoo Pass yang akan datang. Akses gratis 2 minggu; tempat terbatas
+  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
+- 🏷️ **Judul tugas otomatis dan kontrol model yang lebih detail:** Buat judul untuk tugas root baru secara otomatis dan coba setelan eksperimental dynamic thinking-effort.
+- 🔌 **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra dan ambil daftar model Friendli terbaru.
+- 🛡️ **Obrolan dan edit yang lebih aman serta responsif:** Batalkan permintaan OpenAI Native dan Requesty dengan bersih, lindungi diff di luar workspace dari persetujuan otomatis yang tidak disengaja, ganti bahasa UI secara konsisten, dan hindari pemulihan backup JSON yang ambigu.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

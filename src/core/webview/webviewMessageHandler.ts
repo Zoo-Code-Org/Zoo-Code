@@ -31,6 +31,7 @@ import {
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
+import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
@@ -1213,6 +1214,9 @@ export const webviewMessageHandler = async (
 		case "resetState":
 			await provider.resetState()
 			break
+		case "requestProviderInfo":
+			await handleRequestProviderInfo(provider, message)
+			break
 		case RouterModelsMessageType.flushRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
@@ -1254,6 +1258,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
+						[providerIdentifiers.friendli]: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
@@ -1466,6 +1471,9 @@ export const webviewMessageHandler = async (
 				key: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
 			})
+
+			// Friendli's /models catalog is public.
+			candidates.push({ key: providerIdentifiers.friendli, options: { provider: providerIdentifiers.friendli } })
 
 			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
 				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")

@@ -1,7 +1,7 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import React from "react"
 
-import i18next, * as i18nSetup from "../setup"
+import i18next from "../setup"
 import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 
 // The provider reads the active language from extension state. Tests drive it
@@ -11,7 +11,6 @@ import TranslationProvider, { useAppTranslation } from "../TranslationContext"
 // language later, which is the hole these cases must not paper over. The wrapper records
 // every call the provider makes and hands back the real promise, so awaiting it is awaiting
 // the memoized in-flight load the provider is waiting on.
-const realLoadLanguage = i18nSetup.loadLanguage
 const providerLoads: { calls: Array<{ language: string; promise: Promise<void> }> } = { calls: [] }
 const awaitProviderLoad = async (language: string) => {
 	const started = providerLoads.calls.filter((call) => call.language === language)
@@ -26,12 +25,12 @@ vi.mock("@/context/ExtensionStateContext", () => ({
 }))
 
 const Probe = () => {
-	const { t, i18n } = useAppTranslation()
+	const { t, language } = useAppTranslation()
 
 	return (
 		<div>
 			<span data-testid="error-title">{t("common:errorBoundary.title")}</span>
-			<span data-testid="active-language">{i18n.language}</span>
+			<span data-testid="active-language">{language}</span>
 		</div>
 	)
 }
@@ -52,7 +51,11 @@ describe("TranslationProvider locale loading", () => {
 		// earlier test would mask the fallback path this suite is checking.
 		await i18next.changeLanguage("en")
 		providerLoads.calls = []
-		vi.spyOn(i18nSetup, "loadLanguage").mockImplementation((language: string) => {
+		// The spy needs the module object. A static namespace import of the i18n instance module is
+		// what the i18n-language-switch rule forbids (#2185), so resolve the module here instead.
+		const setup = await import("../setup")
+		const realLoadLanguage = setup.loadLanguage
+		vi.spyOn(setup, "loadLanguage").mockImplementation((language: string) => {
 			const promise = realLoadLanguage(language)
 			providerLoads.calls.push({ language, promise })
 			return promise
@@ -172,6 +175,28 @@ describe("TranslationProvider locale loading", () => {
 			expect(screen.getByTestId("error-title")).toHaveTextContent("Une erreur s'est produite")
 		})
 		expect(screen.getByTestId("active-language")).toHaveTextContent("fr")
+	})
+
+	it("lets a newer request win over an earlier one that is still loading", async () => {
+		const { rerender } = renderProbe("pt-BR")
+
+		// Portuguese is still in flight when English is requested; its late resolution must not switch back.
+		extensionState.language = "en"
+		await act(async () => {
+			rerender(
+				<TranslationProvider>
+					<Probe />
+				</TranslationProvider>,
+			)
+		})
+		// Await the load this suite records through the provider-load wrapper (the harness
+		// routes every provider-initiated load through it), so the ordering below is a
+		// statement about the fetch, not about the clock.
+		await awaitProviderLoad("pt-BR")
+
+		expect(i18next.language).toBe("en")
+		expect(screen.getByTestId("active-language")).toHaveTextContent("en")
+		expect(screen.getByTestId("error-title")).toHaveTextContent("Something went wrong")
 	})
 
 	it("skips the language switch when the provider unmounts before the fetch resolves", async () => {

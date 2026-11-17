@@ -1,6 +1,7 @@
 import { useState, useEffect, FormEvent } from "react"
 import { VSCodeTextArea, VSCodeCheckbox } from "@vscode/webview-ui-toolkit/react"
 
+import { DEFAULT_TASK_TITLE_GENERATION_ENABLED } from "@roo-code/types"
 import { supportPrompt, SupportPromptType } from "@roo/support-prompt"
 
 import { vscode } from "@src/utils/vscode"
@@ -25,6 +26,10 @@ interface PromptsSettingsProps {
 	setCustomSupportPrompts: (prompts: Record<string, string | undefined>) => void
 	includeTaskHistoryInEnhance?: boolean
 	setIncludeTaskHistoryInEnhance?: (value: boolean) => void
+	taskTitleGenerationEnabled?: boolean
+	setTaskTitleGenerationEnabled?: (value: boolean) => void
+	taskTitleApiConfigId?: string
+	setTaskTitleApiConfigId?: (value: string) => void
 }
 
 const PromptsSettings = ({
@@ -32,6 +37,10 @@ const PromptsSettings = ({
 	setCustomSupportPrompts,
 	includeTaskHistoryInEnhance: propsIncludeTaskHistoryInEnhance,
 	setIncludeTaskHistoryInEnhance: propsSetIncludeTaskHistoryInEnhance,
+	taskTitleGenerationEnabled = DEFAULT_TASK_TITLE_GENERATION_ENABLED,
+	setTaskTitleGenerationEnabled,
+	taskTitleApiConfigId,
+	setTaskTitleApiConfigId,
 }: PromptsSettingsProps) => {
 	const { t } = useAppTranslation()
 	const {
@@ -246,6 +255,58 @@ const PromptsSettings = ({
 									<Button variant="primary" onClick={handleTestEnhancement} disabled={isEnhancing}>
 										{t("prompts:supportPrompts.enhance.previewButton")}
 									</Button>
+								</div>
+							</div>
+						</div>
+					)}
+
+					{activeSupportOption === "TASK_TITLE" && (
+						<div className="mt-4 flex flex-col gap-3 pl-3 border-l-2 border-vscode-button-background">
+							<div>
+								<VSCodeCheckbox
+									checked={taskTitleGenerationEnabled}
+									data-testid="task-title-enabled-checkbox"
+									onChange={(e: Event | FormEvent<HTMLElement>) => {
+										const target = ("target" in e ? e.target : null) as HTMLInputElement | null
+										if (target) {
+											setTaskTitleGenerationEnabled?.(target.checked)
+										}
+									}}>
+									<span className="font-medium">{t("prompts:supportPrompts.taskTitle.enabled")}</span>
+								</VSCodeCheckbox>
+								<div className="text-vscode-descriptionForeground text-sm mt-1">
+									{t("prompts:supportPrompts.taskTitle.enabledDescription")}
+								</div>
+							</div>
+
+							<div>
+								<label className="block font-medium mb-1">
+									{t("prompts:supportPrompts.taskTitle.apiConfiguration")}
+								</label>
+								<Select
+									value={taskTitleApiConfigId || "-"}
+									onValueChange={(value) => setTaskTitleApiConfigId?.(value === "-" ? "" : value)}>
+									<SelectTrigger data-testid="task-title-api-config-select" className="w-full">
+										<SelectValue
+											placeholder={t("prompts:supportPrompts.taskTitle.useTaskConfig")}
+										/>
+									</SelectTrigger>
+									<SelectContent>
+										<SelectItem value="-">
+											{t("prompts:supportPrompts.taskTitle.useTaskConfig")}
+										</SelectItem>
+										{(listApiConfigMeta || []).map((config) => (
+											<SelectItem
+												key={config.id}
+												value={config.id}
+												data-testid={`task-title-${config.id}-option`}>
+												{config.name}
+											</SelectItem>
+										))}
+									</SelectContent>
+								</Select>
+								<div className="text-sm text-vscode-descriptionForeground mt-1">
+									{t("prompts:supportPrompts.taskTitle.apiConfigDescription")}
 								</div>
 							</div>
 						</div>

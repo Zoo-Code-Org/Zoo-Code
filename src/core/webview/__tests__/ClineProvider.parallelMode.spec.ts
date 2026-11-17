@@ -550,6 +550,9 @@ vi.mock("../../config/ProviderSettingsManager", () => ({
 				}
 			}),
 			getModeConfigId: vi.fn().mockImplementation(async (mode: string) => gate.modeApiConfigs[mode]),
+			// #2110 snapshots the whole mode -> profile map when a provider (window) starts, so the
+			// double has to answer the bulk read as well as the per-mode one.
+			getModeConfigIds: vi.fn().mockImplementation(async () => ({ ...gate.modeApiConfigs })),
 			getSelectionAndModeConfigs: vi.fn().mockImplementation(async () => ({
 				currentApiConfigName: gate.currentApiConfigName,
 				modeApiConfigs: { ...gate.modeApiConfigs },
@@ -2405,6 +2408,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new WebviewFocusTracker(),
 			)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("profile-id")
+			// #2110 resolves the mode profile from this window's startup snapshot and verifies the
+			// mapped profile against the durable list, so seed the mapping here instead of relying on
+			// the shared per-mode lookup.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "profile-id" })
 			const profileEntry: ProviderSettingsEntry = {
 				id: "profile-id",
 				name: "mode-profile",
@@ -2415,7 +2422,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "mode-profile",
 				apiProvider: providerIdentifiers.openrouter,
 			}
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			// Two reads follow a mapped switch: the accessor's existence check and the switch itself.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce(profileSettings)
 			const activateProfileSpy = vi
 				.spyOn(provider.providerSettingsManager, "activateProfile")
@@ -2437,8 +2445,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new WebviewFocusTracker(),
 			)
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
+			// #2110 resolves the mode profile from this window's startup snapshot and verifies the
+			// mapped profile against the durable list, so seed the mapping here instead of relying on
+			// the shared per-mode lookup.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "empty-profile-id" })
 			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
+			// Two reads follow a mapped switch: the accessor's existence check and the switch itself.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
 				id: "empty-profile-id",
 				name: "empty-profile",
