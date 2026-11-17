@@ -243,6 +243,31 @@ describe("SkillsManager", () => {
 		}
 	})
 
+	it.each(["", "yaml", "YAML", "yml", "YML", "json"])(
+		"accepts data-only %s metadata in skill operations",
+		async (language) => {
+			const metadata =
+				language === "json"
+					? '{"name":"example","description":"Example skill"}'
+					: "name: example\ndescription: Example skill"
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === projectSkillsDir)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === projectSkillsDir ? ["example"] : []))
+			mockStat.mockResolvedValue({ isDirectory: () => true })
+			mockFileExists.mockResolvedValue(true)
+			mockReadFile.mockResolvedValue(`---${language}\n${metadata}\n---\nInstructions`)
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getSkillsMetadata().map((skill) => skill.name)).toEqual(["example"])
+			expect((await skillsManager.getSkillContent("example"))?.instructions).toBe("Instructions")
+			await skillsManager.updateSkillModes("example", "project", ["code"])
+			expect(mockWriteFile).toHaveBeenCalledWith(
+				p(projectSkillsDir, "example", "SKILL.md"),
+				expect.stringContaining("modeSlugs:"),
+				"utf-8",
+			)
+		},
+	)
+
 	describe("discoverSkills", () => {
 		it("should discover skills from global directory", async () => {
 			const pdfSkillDir = p(globalSkillsDir, "pdf-processing")

@@ -9,7 +9,7 @@ describe("parseFrontmatter", () => {
 		})
 	})
 
-	it.each(["javascript", "js", "JavaScript", "JS", " javascript ", "toml"])(
+	it.each(["javascript", "js", "JavaScript", "JS", " javascript ", "toml", "coffee", "__proto__"])(
 		"rejects %s before executing metadata, including with a BOM",
 		(language) => {
 			for (const prefix of ["", "\uFEFF"]) {
@@ -45,6 +45,10 @@ describe("parseFrontmatter", () => {
 			data: { name: "example" },
 			content: "Body",
 		})
+	})
+
+	it("rejects executable YAML tags", () => {
+		expect(() => parseFrontmatter('---\nvalue: !!js/function "function () {}"\n---')).toThrow()
 	})
 
 	it("preserves Markdown without metadata", () => {
