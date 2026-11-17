@@ -5991,6 +5991,56 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps the mode mapping on the profile a successful activation saved", async () => {
+			// Review thread 4593061270, whose node id in my capture is
+			// PRRT_kwDOSK-bwM64MFr-, printed at ClineProvider.ts line 3410 with
+			// original_line 3410 and unresolved: the activation group updated the
+			// manager's mode mapping only, so this provider's own cache kept the
+			// pre-save profile and a later switch back to the mode selected it again.
+			// The assertion below reads what a later switch sees, not how many times a
+			// setter was called.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("y-id")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
+				name: "y-profile",
+				id: "y-id",
+				apiProvider: providerIdentifiers.anthropic,
+			})
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "x-profile", id: "x-id", apiProvider: providerIdentifiers.anthropic },
+				{ name: "y-profile", id: "y-id", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("x-id")
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigIds").mockResolvedValue({ code: "x-id" })
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The opening mapping is code -> x-id, in both caches a switch reads.
+			provider["localModeConfigIds"].set("code", "x-id")
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "x-id" })
+			await provider["updateGlobalState"]("mode", "code")
+			await provider.setValue("currentApiConfigName", "x-profile")
+
+			// Saving and activating y-profile for the current mode.
+			await provider.upsertProviderProfile("y-profile", { apiProvider: providerIdentifiers.anthropic }, true)
+
+			// Switch away and back, which is how a stale mapping surfaces.
+			await provider.handleModeSwitch("architect")
+			await provider.handleModeSwitch("code")
+
+			expect(await provider["getModeConfigId"]("code")).toBe("y-id")
+			expect(provider.getValues().currentApiConfigName).toBe("y-profile")
+
+			await provider.dispose()
+		})
+
 		it("does not delete a newly created record while another create for the same name is in flight", async () => {
 			const providerA = new ClineProvider(
 				mockContext,

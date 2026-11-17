@@ -3414,7 +3414,15 @@ export class ClineProvider
 					// activated profile: a plain global write would leave a stale loaded
 					// currentApiConfigName shadowing the new value in getValues().
 					this.setValue("currentApiConfigName", name),
-					this.providerSettingsManager.setModeConfig(mode, id),
+					// Route through this.setModeConfig rather than the manager call so
+					// this provider's own mode mapping commits with the activation: an
+					// activation that updates only the manager leaves a stale cached id
+					// here, and the next switch back to the mode reads that cache. Review
+					// thread 4593061270 (node PRRT_kwDOSK-bwM64MFr- in my capture), printed
+					// at line 3410 of ebfff264 with original_line 3410 and unresolved, names
+					// the staleness; the expression changed here sits at line 3417 of
+					// this head.
+					this.setModeConfig(mode, id),
 					this.contextProxy.setProviderSettings(normalizedSettings),
 					// setProviderSettings writes the shared store directly, bypassing the
 					// view-local mutation path: clear this view's buffered apiConfiguration
