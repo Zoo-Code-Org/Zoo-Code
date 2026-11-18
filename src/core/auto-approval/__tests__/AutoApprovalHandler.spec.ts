@@ -298,7 +298,9 @@ describe("AutoApprovalHandler", () => {
 
 		it("should trigger token limit when tokens exceed allowedMaxTokens", async () => {
 			mockState.allowedMaxTokens = 50_000
-			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
+			const completedMessage: ClineMessage = { type: "say", say: "api_req_started", text: "{}", ts: 1000 }
+			const currentMessage: ClineMessage = { type: "say", say: "api_req_started", text: "{}", ts: 1500 }
+			const messages: ClineMessage[] = [completedMessage, currentMessage]
 
 			// Under token limit
 			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 20_000, totalTokensOut: 10_000 })
@@ -320,18 +322,52 @@ describe("AutoApprovalHandler", () => {
 			expect(result.requiresApproval).toBe(true)
 			expect(result.approvalType).toBe("tokens")
 
-			// Add messages after approval reset
-			const newMessages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 2000 }]
-			messages.push(...newMessages)
-
-			// Subsequent check below new limit: verifies reset behavior and message slicing
+			// Subsequent check below new limit: verifies reset boundary excludes completedMessage and leaves currentMessage
 			mockAskForApproval.mockClear()
 			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 15_000, totalTokensOut: 5_000 })
 			result = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
 
-			expect(mockGetApiMetrics).toHaveBeenLastCalledWith(newMessages)
+			expect(mockGetApiMetrics).toHaveBeenLastCalledWith([currentMessage])
 			expect(result.shouldProceed).toBe(true)
 			expect(result.requiresApproval).toBe(false)
+			expect(mockAskForApproval).not.toHaveBeenCalled()
+		})
+
+		it("leaves unfinished api_req_started in next token window after approval and counts increased usage", async () => {
+			mockState.allowedMaxTokens = 50_000
+			const completedMessage: ClineMessage = {
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({ tokensIn: 30_000, tokensOut: 25_000, cost: 0.1 }),
+				ts: 1000,
+			}
+			const unfinishedMessage: ClineMessage = {
+				type: "say",
+				say: "api_req_started",
+				text: JSON.stringify({ apiProtocol: "anthropic" }),
+				ts: 2000,
+			}
+			const messages: ClineMessage[] = [completedMessage, unfinishedMessage]
+
+			// Initial check: completed usage exceeds token limit (55k > 50k)
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0.1, totalTokensIn: 30_000, totalTokensOut: 25_000 })
+			mockAskForApproval.mockResolvedValue({ response: "yesButtonClicked" })
+
+			const result = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
+			expect(result.shouldProceed).toBe(true)
+			expect(result.requiresApproval).toBe(true)
+			expect(result.approvalType).toBe("tokens")
+
+			// After approval, the unfinished message's usage increases during execution
+			mockAskForApproval.mockClear()
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0.05, totalTokensIn: 10_000, totalTokensOut: 5_000 })
+
+			const nextResult = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
+
+			// Verifies the slice excludes completedMessage and retains unfinishedMessage in the window
+			expect(mockGetApiMetrics).toHaveBeenLastCalledWith([unfinishedMessage])
+			expect(nextResult.shouldProceed).toBe(true)
+			expect(nextResult.requiresApproval).toBe(false)
 			expect(mockAskForApproval).not.toHaveBeenCalled()
 		})
 

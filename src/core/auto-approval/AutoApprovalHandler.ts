@@ -1,6 +1,7 @@
 import { GlobalState, ClineMessage, ClineAsk } from "@roo-code/types"
 
 import { getApiMetrics } from "../../shared/getApiMetrics"
+import { findLastIndex } from "../../shared/array"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
 export interface AutoApprovalResult {
@@ -167,8 +168,10 @@ export class AutoApprovalHandler {
 
 			// If we get past the promise, it means the user approved and did not start a new task
 			if (response === "yesButtonClicked") {
-				// Reset tracking by recording the current message count
-				this.lastResetMessageIndex = messages.length
+				// Reset tracking: exclude completed, approved usage but leave the current
+				// unfinished api_req_started entry in the next token window.
+				const lastApiReqIndex = findLastIndex(messages, (m) => m.say === "api_req_started")
+				this.lastResetMessageIndex = lastApiReqIndex !== -1 ? lastApiReqIndex : messages.length
 				return {
 					shouldProceed: true,
 					requiresApproval: true,
