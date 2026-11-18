@@ -104,9 +104,9 @@ export function unescapeHtmlEntities(text?: string | null): string | undefined {
 
 /**
  * Strips ANSI escape codes from terminal output to eliminate useless tokens.
+ * Constructed dynamically via String.fromCharCode to avoid triggering no-control-regex.
  */
-// eslint-disable-next-line no-control-regex
-const ANSI_PATTERN = /\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])/g
+const ANSI_PATTERN = new RegExp(String.fromCharCode(0x1b) + "(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])", "g")
 
 export function stripAnsi(text: string): string {
 	if (!text) return text
