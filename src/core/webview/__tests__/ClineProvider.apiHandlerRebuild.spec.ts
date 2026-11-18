@@ -1035,6 +1035,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const pinWrite = new Promise<void>((resolve) => {
 				releasePinWrite = resolve
 			})
+			// Every viewStates write that succeeds for this view, recorded in landing order: the pin's
+			// history is what shows whether a stale restore replayed itself after a newer pin, which the
+			// final-state assertions below cannot see, because the newer pin lands last either way.
+			const pinHistory: string[] = []
 			// Hang only the write that pins this switch's own mode. The history seed above moves the two
 			// switches' writes around in time, so hanging the run's first viewStates write would hang the
 			// newer switch instead and change what the test is about.
@@ -1045,7 +1049,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				if (key === "viewStates" && states?.[provider["viewStateId"]]?.mode === "ask") {
 					await pinWrite
 				}
-				return originalSetValue(key, value)
+				await originalSetValue(key, value)
+				if (key === "viewStates") {
+					pinHistory.push(states?.[provider["viewStateId"]]?.mode ?? "cleared")
+				}
 			})
 
 			try {
@@ -1073,6 +1080,17 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 				const persisted = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
 				expect(persisted["rebuild-sidebar-view"].mode).toBe("debug")
+				// The landing order, not only the final value. This switch does restore its pin - the fence asks the
+				// ownership question before queueing, and nothing had landed on the pin by then - but the serialized
+				// queue puts that restore behind the newer switch's pin, so the trace carries a stale entry after the
+				// newer pin, and the pin ends on debug only because the newer switch writes it again afterwards. The
+				// final-value assertion above reads debug in both orders, which is why the trace is asserted here.
+				// Skipping a restore whose queued slot has been passed by a newer write is issue 2488's, and the
+				// criterion is that this trace stops carrying a stale entry behind the newer pin.
+				const firstNewerPin = pinHistory.indexOf("debug")
+				expect(firstNewerPin).toBeGreaterThanOrEqual(0)
+				expect(pinHistory.slice(firstNewerPin + 1)).toContain("cleared")
+				expect(pinHistory[pinHistory.length - 1]).toBe("debug")
 				expect(provider["viewLocalState"].mode).toBe("debug")
 				expect(provider.contextProxy.getValue("mode")).toBe("debug")
 				expect(task["_taskMode"]).toBe("debug")

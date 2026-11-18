@@ -5312,10 +5312,14 @@ export class ClineProvider
 		return this.contextProxy.getValue(key)
 	}
 
+	// A caller that started before this write may hand its token down to keep ownership across the
+	// awaits below. A standalone write allocates its token at the store write, after the mode
+	// validation, so that an await here cannot leave this call holding an older token than the
+	// value it puts in the store.
 	public async setValue<K extends keyof RooCodeSettings>(
 		key: K,
 		value: RooCodeSettings[K],
-		writeToken = this.beginFieldWrite(),
+		writeToken?: number,
 	): Promise<number> {
 		// Mirror the setValues guard for the single-key write path: the updateSettings
 		// webview handler routes every key through setValue, so an unknown mode must not
@@ -5330,7 +5334,9 @@ export class ClineProvider
 				!getModeBySlug(modeValue, await this.customModesManager.getCustomModes())
 			) {
 				this.log(`[ClineProvider#setValue] Ignoring invalid mode "${String(value)}"`)
-				return writeToken
+				// Nothing was written, so nothing is claimed: echo the caller's token when it had
+				// one, and allocate a fresh one when it had not.
+				return writeToken ?? this.beginFieldWrite()
 			}
 		}
 
@@ -5339,8 +5345,14 @@ export class ClineProvider
 		// would remain persisted without this view's pin.
 		const previousValue = this.contextProxy.getValue(key)
 
+		// The token for a write nobody started is allocated here, beside the store write it stands
+		// for. The validation above can outlast another view's entire write, and a token older than
+		// the value this call leaves in the store is what made a failed pin write skip a rollback it
+		// still owed: the store held this call's value while the registry said somebody else owned it.
+		const token = writeToken ?? this.beginFieldWrite()
+
 		await this.contextProxy.setValue(key, value)
-		this.landFieldWrite([key], writeToken)
+		this.landFieldWrite([key], token)
 
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
@@ -5348,7 +5360,7 @@ export class ClineProvider
 			// The shared write landed and the durable viewStates write did not: put the shared value
 			// back. A rollback that itself fails is logged with both messages and never substituted
 			// for the caller's error, because the caller must see the write it tried to make.
-			if (!this.ownsFieldWrite(key, writeToken)) {
+			if (!this.ownsFieldWrite(key, token)) {
 				// Another write landed on this key while the durable write was in flight: rolling the
 				// value captured above back now would stamp an older value over a newer one.
 				this.log(
@@ -5371,7 +5383,7 @@ export class ClineProvider
 			throw error
 		}
 
-		return writeToken
+		return token
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -5534,13 +5546,32 @@ export class ClineProvider
 				}
 			}
 			// Restore the local overlay from the snapshot: the shared rollback alone would leave
-			// the view pinned to the overrides the failed write tried to apply.
+			// the view pinned to the overrides the failed write tried to apply. The ownership rule
+			// that gates the shared rollback gates this half too, and it has to be asked here rather
+			// than after queueing: the pin restore goes through the serialized view-state queue, so a
+			// restore queued now lands behind a newer write's own pin, and a view left holding an
+			// overlay for a field a newer write owns reads a mode no write backs any more.
 			const restoredOverlay: Partial<RooCodeSettings> = {}
-			for (const [key, snapshot] of Object.entries(localOverlaySnapshot)) {
+			const restorableKeys: ("mode" | "currentApiConfigName")[] = []
+			const leftAloneKeys: ("mode" | "currentApiConfigName")[] = []
+			for (const key of Object.keys(localOverlaySnapshot) as ("mode" | "currentApiConfigName")[]) {
+				const snapshot = localOverlaySnapshot[key]!
+				if (!this.ownsFieldWrite(key, sharedWriteToken)) {
+					leftAloneKeys.push(key)
+					continue
+				}
+				restorableKeys.push(key)
 				;(restoredOverlay as Record<string, unknown>)[key] = snapshot.present ? snapshot.value : undefined
 			}
+			if (leftAloneKeys.length > 0) {
+				this.log(
+					"[ClineProvider#setValues] Leaving the local view override for " +
+						leftAloneKeys.join(", ") +
+						" alone: another write owns it",
+				)
+			}
 			this._updateViewLocalStateFromMutation(restoredOverlay)
-			for (const key of Object.keys(localOverlaySnapshot) as ("mode" | "currentApiConfigName")[]) {
+			for (const key of restorableKeys) {
 				const snapshot = localOverlaySnapshot[key]!
 				try {
 					await this.saveViewState(key, snapshot.present ? (snapshot.value as never) : undefined)

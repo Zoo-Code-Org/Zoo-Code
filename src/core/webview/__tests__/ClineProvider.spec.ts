@@ -4169,6 +4169,9 @@ describe("ClineProvider", () => {
 							name: "work-profile",
 							id: "work-id",
 							apiProvider: providerIdentifiers.openrouter,
+							// The credential an OpenRouter task actually reads is openRouterApiKey, not
+							// apiKey, so the pinned profile carries it and the snapshot below has to keep it.
+							openRouterApiKey: "work-openrouter-key",
 							apiKey: "work-key",
 						}
 					}
@@ -4191,12 +4194,166 @@ describe("ClineProvider", () => {
 				// and credentials instead of reading personal's under work's name.
 				expect(editor["viewLocalState"].apiConfiguration?.apiProvider).toBe(providerIdentifiers.openrouter)
 				expect(editor["viewLocalState"].apiConfiguration?.apiKey).toBe("work-key")
+				// The credential the editor's next task needs: a snapshot that carried only apiKey would
+				// still satisfy the provider assertion and leave the pinned window unable to call OpenRouter.
+				expect(editor["viewLocalState"].apiConfiguration?.openRouterApiKey).toBe("work-openrouter-key")
 				expect(editor["viewLocalState"].currentApiConfigName).toBe("work-profile")
 				// The write itself landed, and the profile-write snapshot left the editor pinned.
 				expect(mockContext.globalState.get("currentApiConfigName")).toBe("personal-profile")
 				expect(mockContext.globalState.get("apiProvider")).toBe(providerIdentifiers.anthropic)
 			} finally {
 				await editor.dispose()
+				await sidebar.dispose()
+			}
+		})
+
+		it("restores a sibling's newer mode when a standalone write fails after its validation awaited", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sidebar["setViewStateId"]("timing-sidebar-view")
+			await sibling["setViewStateId"]("timing-sibling-view")
+			await sidebar.setValues({ mode: "code" })
+			vi.spyOn(sidebar, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(sidebar, "log")
+
+			// The window the finding is about: this write waits inside its custom-mode validation,
+			// which claims nothing on the shared field, while the sibling does its entire write.
+			let enteredValidation!: () => void
+			const validationEntered = new Promise<void>((resolve) => {
+				enteredValidation = resolve
+			})
+			let releaseValidation!: () => void
+			const validation = new Promise<void>((resolve) => {
+				releaseValidation = resolve
+			})
+			const getCustomModesSpy = vi.spyOn(sidebar.customModesManager, "getCustomModes")
+			getCustomModesSpy.mockImplementationOnce(async () => {
+				enteredValidation()
+				await validation
+				return []
+			})
+			// Only this write's own durable viewStates write fails; the rollback and everything else go
+			// through the real store, so the assertions below read a store and not a call log.
+			let failViewWrite = false
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				const states = value as Record<string, { mode?: string } | undefined> | undefined
+				if (key === "viewStates" && failViewWrite && states?.["timing-sidebar-view"]?.mode === "ask") {
+					failViewWrite = false
+					throw new Error("durable viewStates write failed")
+				}
+				await originalUpdate(key, value as string | undefined)
+			})
+			try {
+				const standalone = sidebar.setValue("mode", "ask")
+				await validationEntered
+				await sibling.setValue("mode", "debug")
+				failViewWrite = true
+				releaseValidation()
+				await expect(standalone).rejects.toThrow("durable viewStates write failed")
+
+				// A standalone write now takes its token at the store write, so the validation await above
+				// cannot hand it a token older than the value it leaves in the store. It owns the field it wrote,
+				// and the failed pin write undoes its own ask instead of leaving it behind as a value no write
+				// owns: the store goes back to the mode this window last read, and the skip log below is what the
+				// pre-fix path produced in place of that rollback.
+				expect(mockContext.globalState.get("mode")).toBe("code")
+				expect(sidebar.contextProxy.getValue("mode")).toBe("code")
+				expect(logSpy).not.toHaveBeenCalledWith(
+					expect.stringContaining("Leaving mode at its newer value: another write owns it"),
+				)
+				// What the fence does not do, and cannot do from inside this window: the ask still overwrote the
+				// sibling's debug on the way in, and the rollback restores what this instance cached, which never
+				// learned of the sibling's write. Preserving the sibling's value needs a superseded check before
+				// the write, and telling a sibling about a rollback needs a broadcast - issues 2488 and 1561.
+				expect(sibling.contextProxy.getValue("mode")).toBe("debug")
+			} finally {
+				releaseValidation()
+				mockContext.globalState.update = originalUpdate
+				getCustomModesSpy.mockReset().mockResolvedValue([])
+				await sidebar.dispose()
+				await sibling.dispose()
+			}
+		})
+
+		it("does not queue a failed batch's pin restore behind a newer write's pin in the same view", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sidebar["setViewStateId"]("overlay-gate-sidebar-view")
+			await sidebar.setValues({ mode: "code" })
+			vi.spyOn(sidebar, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(sidebar, "log")
+
+			// Park the batch inside its durable viewStates write, let a newer write from this same view queue its
+			// own pin behind it, then fail the parked write. That is the order the finding describes, and it is
+			// the order in which a failed save used to overwrite a live pin with the value it was rolling back.
+			let releaseStore!: (error: Error) => void
+			const storeGate = new Promise<void>((_resolve, reject) => {
+				releaseStore = reject
+			})
+			// Recorded as key=value for the shared mode so a stalled sequence names the write that is
+			// missing instead of only counting writes.
+			const storeWrites: string[] = []
+			let parkedViewWrite = false
+			let viewWriteParked!: () => void
+			const viewWriteParkedSignal = new Promise<void>((resolve) => {
+				viewWriteParked = resolve
+			})
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				storeWrites.push(key === "mode" ? "mode=" + String(value) : key)
+				const states = value as Record<string, { mode?: string } | undefined> | undefined
+				if (key === "viewStates" && parkedViewWrite && states?.["overlay-gate-sidebar-view"]?.mode === "ask") {
+					viewWriteParked()
+					await storeGate
+				}
+				await originalUpdate(key, value as string | undefined)
+			})
+			try {
+				parkedViewWrite = true
+				const batch = sidebar.setValues({ mode: "ask" })
+				await viewWriteParkedSignal
+				// The newer write starts while the batch is still sitting on its durable write, so its pin goes
+				// into the serialized queue behind the batch's, and its shared mode lands first.
+				const newerWrite = sidebar.setValue("mode", "debug")
+				await vi.waitFor(() => expect(storeWrites).toContain("mode=debug"), { timeout: 4000 })
+				releaseStore(new Error("durable viewStates write failed"))
+				await expect(batch).rejects.toThrow("durable viewStates write failed")
+				await newerWrite
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				// The overlay half of this rollback is gated on the same ownership rule as its shared half, and it
+				// has to be asked before queueing: a pin the restore queues now lands behind the newer write's pin,
+				// which is how a failed save left this view reading and reloading a code that no live write backs.
+				const persisted = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+				expect(persisted["overlay-gate-sidebar-view"].mode).toBe("debug")
+				expect(sidebar["viewLocalState"].mode).toBe("debug")
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Leaving the local view override for mode alone: another write owns it"),
+				)
+				// Control: the shared slot holds the newer write's mode, the value the restore would contradict.
+				expect(mockContext.globalState.get("mode")).toBe("debug")
+			} finally {
+				releaseStore(new Error("test teardown"))
+				mockContext.globalState.update = originalUpdate
 				await sidebar.dispose()
 			}
 		})
@@ -4247,6 +4404,17 @@ describe("ClineProvider", () => {
 				// The shared slot moved, which is what an unpinned view reads once it reloads; the
 				// point of the control is that nothing was materialized in front of it.
 				expect(mockContext.globalState.get("apiProvider")).toBe(providerIdentifiers.anthropic)
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("personal-profile")
+				// And what this window actually reads right now, out of the ContextProxy it owns. Two windows
+				// hold two ContextProxies over the same Memento, and a sibling's write is not broadcast into
+				// the other's cache: the unpinned editor names neither the profile the sidebar left behind nor
+				// the one just saved, because it has never cached either. Its view of these keys comes from its
+				// own defaults until something reloads it. Carrying a settings write to a sibling without a
+				// reload is issue 1561's, and the criterion is that these two assertions flip once a broadcast
+				// exists: until then this control proves the store moved and that nothing was materialized in
+				// front of it, not that the sibling can see the move.
+				expect(editor.getValues().currentApiConfigName).toBeUndefined()
+				expect(editor.getValues().apiProvider).toBeUndefined()
 			} finally {
 				await editor.dispose()
 				await sidebar.dispose()
