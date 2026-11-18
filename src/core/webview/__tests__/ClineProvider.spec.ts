@@ -6947,6 +6947,10 @@ describe("ClineProvider", () => {
 				expect(failingView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
 				expect(slowView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
 			} finally {
+				// Release the gate before tearing either provider down: a failure anywhere above this
+				// point must not leave a post callback waiting on a promise nobody is going to resolve.
+				releaseSlowView()
+				await slowViewSettled
 				await failingView.dispose()
 				await slowView.dispose()
 			}
@@ -7707,6 +7711,67 @@ describe("ClineProvider", () => {
 			// outran it, still paired with the settings it held before the discarded lookup.
 			expect(provider["viewLocalState"].currentApiConfigName).toBe("third-profile")
 			expect(provider["viewLocalState"].apiConfiguration).toBe(settingsBeforeReapply)
+
+			await provider.dispose()
+		})
+
+		it("applies the persisted profile's settings when only the mode moves during the load", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+					apiKey: `${name}-key`,
+				})
+			// getProfile is addressable either by name or by id; this fixture addresses every lookup by
+			// name, so the stub has to narrow the union before it can read the name.
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			// Seed the entry through this instance's proxy so it owns the entry it is about to load.
+			await provider.contextProxy.setValue("viewStates", {
+				"mode-only-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "mode-persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("mode-only-sidebar-view")
+			registrationLookup.mockRestore()
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("mode-persisted-profile")
+
+			let releaseLookup!: (value: PersistedProfile) => void
+			const inFlightLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseLookup = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(() => inFlightLookup)
+			const load = provider["loadViewState"]()
+
+			// Only the mode moves. The pin and the settings buffer stay exactly as the load left them, so
+			// nothing here can put the load on the re-resolve path: that path requires the profile name
+			// itself to have moved inside the load window.
+			await provider.saveViewState("mode", "plan")
+			releaseLookup(profileOf("mode-persisted-profile", providerIdentifiers.anthropic))
+			await load
+
+			expect(provider["viewLocalState"].mode).toBe("plan")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("mode-persisted-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiKey: "mode-persisted-profile-key",
+			})
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Discarding the re-resolved settings"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[loadViewState] Loaded state for viewId"))
 
 			await provider.dispose()
 		})
