@@ -3782,6 +3782,56 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("restores the shared value that was current when its own write began", async () => {
+			// The value a failed write rolls back to is read after the sibling-overlay snapshot awaits, immediately
+			// before this call writes its own key: another view can complete a write to that same key inside that
+			// await, and restoring what was current before the wait would undo the sibling write. The snapshot
+			// supplies the wait here, the per-view record then rejects, and the restore is what the two assertions
+			// below read - the store ends on the sibling value, not on the value from before the wait.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("late-shared-write-view")
+			await provider.contextProxy.setValue("openRouterModelId", "model-old")
+
+			// Bracketed private members of ClineProvider, wrapped rather than stubbed so the real compensation still
+			// runs and only the interleaving is injected.
+			const overlaySnapshot = ClineProvider.prototype["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]
+			provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"] = async (
+				activatedProfileName: string | undefined,
+				options?: { includeSelf?: boolean },
+			) => {
+				// A sibling view finishes its own write of the same key while this call is inside the snapshot.
+				await provider.contextProxy.setValue("openRouterModelId", "model-b")
+				return overlaySnapshot.call(provider, activatedProfileName, options)
+			}
+			const restoreShared = ClineProvider.prototype["_restoreSharedValuesAfterFailedViewWrite"]
+			const restoreSpy = vi.fn((...args: Parameters<typeof restoreShared>) =>
+				restoreShared.call(provider, ...args),
+			)
+			provider["_restoreSharedValuesAfterFailedViewWrite"] = restoreSpy
+			provider["_saveViewLocalStateFromMutation"] = vi
+				.fn()
+				.mockRejectedValueOnce(new Error("per-view record write failed"))
+				.mockResolvedValue(undefined)
+
+			await expect(provider.setValue("openRouterModelId", "model-a")).rejects.toThrow(
+				"per-view record write failed",
+			)
+
+			// The rollback value is the one the shared store held when this call began writing, not the one it held
+			// before the snapshot: replaying the older value would silently undo the sibling's completed write.
+			expect(restoreSpy).toHaveBeenCalledWith({ openRouterModelId: "model-b" }, { openRouterModelId: "model-a" })
+			expect(provider.contextProxy.getValue("openRouterModelId")).toBe("model-b")
+
+			await provider.dispose()
+		})
+
 		it("pins a sibling profile's settings before a single provider key is written", async () => {
 			const providerA = new ClineProvider(
 				mockContext,

@@ -5799,7 +5799,6 @@ export class ClineProvider
 			}
 		}
 
-		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 		const writtenSharedValues = { [key]: value } as RooCodeSettings
 
 		// A provider-key write replaces the shared store that a sibling view's pin falls back onto,
@@ -5810,6 +5809,12 @@ export class ClineProvider
 		if (PROVIDER_SETTINGS_KEYS.some((providerKey) => providerKey in writtenSharedValues)) {
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(undefined)
 		}
+
+		// The value the rollback below restores is read after that snapshot awaits, immediately before
+		// this call writes: another view can complete a write to the same key while this one is inside
+		// the snapshot, and restoring what was current before the wait would undo that write. setValues
+		// takes the same position, capturing before its own write group rather than before the pins.
+		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 
 		try {
 			await this.contextProxy.setValue(key, value)
