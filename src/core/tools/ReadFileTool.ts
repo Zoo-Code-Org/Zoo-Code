@@ -321,7 +321,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		// Solution 1: Adaptive sliding-window truncation.
 		// If limit was omitted, files <= ADAPTIVE_FULL_READ_THRESHOLD (300 lines) are returned in full
 		// to eliminate multi-turn round trip penalties. Files > 300 lines get a 200-line head/tail window.
-		if (entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
+		if (entry.offset === undefined && entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
 			const truncated = truncateFileOutput(result.content, SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
 			if (truncated.wasTruncated) {
 				output = truncated.content
