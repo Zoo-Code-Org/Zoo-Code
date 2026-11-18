@@ -609,6 +609,73 @@ describe("ReadFileTool", () => {
 			expect(callbacks.pushToolResult).not.toHaveBeenCalledWith(expect.stringContaining("Note: File is empty"))
 		})
 
+		describe("adaptive sliding-window truncation vs explicit parameters", () => {
+			it("applies adaptive preview when both offset and limit are omitted on large files", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const lines = Array.from({ length: 400 }, (_, i) => `line ${i + 1}`)
+
+				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
+				mockedReadWithSlice.mockReturnValue({
+					content: lines.map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					returnedLines: 400,
+					totalLines: 400,
+					wasTruncated: false,
+					includedRanges: [[1, 400]],
+				})
+
+				await readFileTool.execute({ path: "large.ts" }, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+			})
+
+			it("does not apply adaptive preview when explicit offset is provided without limit", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const sliceLines = Array.from({ length: 150 }, (_, i) => `${i + 200} | line ${i + 200}`)
+
+				mockedFsReadFile.mockResolvedValue(Buffer.from("lots of content..."))
+				mockedReadWithSlice.mockReturnValue({
+					content: sliceLines.join("\n"),
+					returnedLines: 150,
+					totalLines: 500,
+					wasTruncated: false,
+					includedRanges: [[200, 349]],
+				})
+
+				await readFileTool.execute({ path: "large.ts", offset: 200 }, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toContain("200 | line 200")
+				expect(result).toContain("349 | line 349")
+				expect(result).not.toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+			})
+
+			it("does not apply adaptive preview when explicit limit is provided", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const sliceLines = Array.from({ length: 50 }, (_, i) => `${i + 1} | line ${i + 1}`)
+
+				mockedFsReadFile.mockResolvedValue(Buffer.from("lots of content..."))
+				mockedReadWithSlice.mockReturnValue({
+					content: sliceLines.join("\n"),
+					returnedLines: 50,
+					totalLines: 500,
+					wasTruncated: true,
+					includedRanges: [[1, 50]],
+				})
+
+				await readFileTool.execute({ path: "large.ts", limit: 50 }, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toContain("Showing lines 1-50 of 500 total lines")
+				expect(result).toContain("1 | line 1")
+				expect(result).toContain("50 | line 50")
+				expect(result).not.toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+			})
+		})
+
 		// Integration counterpart to the mocked case above: the real readWithSlice
 		// producer runs against a real file, so the error text and its 1-based
 		// offset are proven end-to-end instead of being asserted against a stub.
