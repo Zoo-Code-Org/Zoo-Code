@@ -79,6 +79,8 @@ import {
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
 	isSecretStateKey,
+	providerSettingsWithIdSchema,
+	discriminatedProviderSettingsWithIdSchema,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -139,6 +141,7 @@ import { ContextProxy } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
+import { downgradeLegacyRooConfig } from "../config/routerRemoval"
 import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
@@ -239,6 +242,36 @@ const PROFILE_MODEL_RESET_ONLY_KEYS: ReadonlySet<string> = new Set([
 	"awsCustomArnBaseModelId",
 	"awsModelContextWindow",
 ])
+
+// Key names only: a profile record carries secrets, and an ownership log must not echo them.
+const differingProfileSettingKeys = (a: Record<string, unknown>, b: Record<string, unknown>): string[] =>
+	Array.from(new Set([...Object.keys(a), ...Object.keys(b)]))
+		.filter((key) => !deepEqual(a[key], b[key]))
+		.sort()
+
+/**
+ * What saveConfig actually stores for a payload: the legacy router downgrade, then the profile schema
+ * parse (passthrough for a retired provider). The stored record therefore legitimately carries keys the
+ * payload never mentioned and legitimately lacks keys the payload supplied, so only the same
+ * normalization on both sides can tell "another view wrote this record" from "saveConfig normalized what
+ * this call wrote". That is why the undo ownership test below compares the re-read record against this
+ * rather than against the caller payload or the record id, and why an unnormable payload means the
+ * record is kept rather than restored or deleted on a guess. Inlined here rather than shared because
+ * the cross-lane rule forbids a new module that three lanes would create at the same path.
+ */
+const normalizedProfileRecord = (payload: ProviderSettings): Record<string, unknown> | undefined => {
+	try {
+		const downgraded = downgradeLegacyRooConfig(payload as Record<string, unknown>).config as ProviderSettingsWithId
+		const parsed =
+			typeof downgraded.apiProvider === "string" && isRetiredProvider(downgraded.apiProvider)
+				? providerSettingsWithIdSchema.passthrough().parse(downgraded)
+				: discriminatedProviderSettingsWithIdSchema.parse(downgraded)
+		const { id: _id, name: _name, ...settings } = parsed as Record<string, unknown>
+		return settings
+	} catch {
+		return undefined
+	}
+}
 
 type GetStateOptions = {
 	includeTaskHistory?: boolean
@@ -1277,6 +1310,11 @@ export class ClineProvider
 					: undefined
 
 			if (reappliedProfileName) {
+				// Snapshot the buffer again before this second lookup. The mutation paths update
+				// viewLocalState in place, so this copy is what makes a mode save or a sibling
+				// profile refresh that lands while the lookup is in flight observable below; the
+				// snapshot comes from the same buffer this assignment would overwrite.
+				const preReapplyBuffer = { ...this.viewLocalState }
 				try {
 					const { name: _name, ...reappliedSettings } = await this.providerSettingsManager.getProfile({
 						name: reappliedProfileName,
@@ -1294,6 +1332,37 @@ export class ClineProvider
 				if (this.viewStateId !== loadedForViewId) {
 					this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
 					return true
+				}
+
+				// Reapply what moved inside the second lookup window, with the same per-key rule the
+				// first window uses: a field cleared during the window stays cleared and a field written
+				// during the window wins over what this lookup resolved. Compared against
+				// preReapplyBuffer rather than against undefined, because that is the buffer the
+				// assignment below would otherwise replace wholesale.
+				const postReapplyBuffer = this.viewLocalState
+
+				if (!Object.is(preReapplyBuffer.mode, postReapplyBuffer.mode)) {
+					if (postReapplyBuffer.mode === undefined) {
+						delete mergedState.mode
+					} else {
+						mergedState.mode = postReapplyBuffer.mode
+					}
+				}
+
+				if (!Object.is(preReapplyBuffer.currentApiConfigName, postReapplyBuffer.currentApiConfigName)) {
+					if (postReapplyBuffer.currentApiConfigName === undefined) {
+						delete mergedState.currentApiConfigName
+					} else {
+						mergedState.currentApiConfigName = postReapplyBuffer.currentApiConfigName
+					}
+				}
+
+				if (!Object.is(preReapplyBuffer.apiConfiguration, postReapplyBuffer.apiConfiguration)) {
+					if (postReapplyBuffer.apiConfiguration === undefined) {
+						delete mergedState.apiConfiguration
+					} else {
+						mergedState.apiConfiguration = postReapplyBuffer.apiConfiguration
+					}
 				}
 			}
 
@@ -3478,6 +3547,82 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Decide whether an undo after a failed post-save read-back is still this call's to perform.
+	 * Re-reads the profile record - the same layer the save wrote - and compares it against what
+	 * this call's save stored, using the repository's deepEqual. saveConfig normalizes, so the
+	 * caller payload is not what landed and only the same normalization can tell a later write
+	 * from saveConfig's own normalization (see normalizedProfileRecord above). A record that
+	 * differs is a record another view wrote after this call: its content is kept and this key's
+	 * undo is skipped, while the rest of the mutation group still fails. A record that cannot be
+	 * re-read is unconfirmed: nothing is written on a guess. The reason names the record key and
+	 * the differing field names, never values, because a profile record carries secrets.
+	 */
+	private async _judgeProfileUndoAfterFailedReadBack(
+		name: string,
+		savedId: string,
+		writtenSettings: ProviderSettings,
+		hadPreviousRecord: boolean,
+	): Promise<{ undoIsMine: boolean; recordPresent: boolean; reason?: string }> {
+		let currentRecord: Awaited<ReturnType<ProviderSettingsManager["getProfile"]>>
+		try {
+			currentRecord = await this.providerSettingsManager.getProfile({ name })
+		} catch (error) {
+			// getProfile wraps absence and a storage read failure in the same plain Error, so
+			// absence is classified with hasConfig, exactly as the pre-save read classifies it.
+			let exists: boolean
+			try {
+				exists = await this.providerSettingsManager.hasConfig(name)
+			} catch {
+				exists = true
+			}
+			if (!exists) {
+				return {
+					undoIsMine: false,
+					recordPresent: false,
+					reason: hadPreviousRecord
+						? `the record '${name}' is gone, so a later writer deleted it and restoring would resurrect that write`
+						: undefined,
+				}
+			}
+			return {
+				undoIsMine: false,
+				recordPresent: true,
+				reason: `the record '${name}' could not be re-read (${error instanceof Error ? error.message : String(error)}), so this call cannot tell whether a later write landed on it`,
+			}
+		}
+
+		const { name: _currentName, id: currentId, ...currentSettings } = currentRecord
+		if (currentId !== savedId) {
+			return {
+				undoIsMine: false,
+				recordPresent: true,
+				reason: `the record '${name}' now carries id '${currentId}', not this call's '${savedId}', so another writer replaced it`,
+			}
+		}
+
+		const expectedSettings = normalizedProfileRecord(writtenSettings)
+		if (!expectedSettings) {
+			return {
+				undoIsMine: false,
+				recordPresent: true,
+				reason: `this call cannot normalize its payload for '${name}' to judge what the record holds`,
+			}
+		}
+
+		if (!deepEqual(currentSettings, expectedSettings)) {
+			return {
+				undoIsMine: false,
+				recordPresent: true,
+				reason: `the record '${name}' now differs from what this call wrote (keys: ${differingProfileSettingKeys(
+					expectedSettings,
+					currentSettings as Record<string, unknown>,
+				).join(", ")})`,
+			}
+		}
+
+		return { undoIsMine: true, recordPresent: true }
+	}
 	private async persistProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
@@ -3542,12 +3687,33 @@ export class ClineProvider
 		} catch (error) {
 			// Fail closed: compensate the landed save (restore the prior record,
 			// or delete a landed create) and fail the group so the raw caller
-			// payload never stands in for the validated stored record.
+			// payload never stands in for the validated stored record. The read-back
+			// that would have proved this call still owns the record is the read that
+			// just failed, and the critical section above is already released, so a
+			// same-name save or delete from another view can land in that window. The
+			// undo therefore re-reads the record and compares it first: an undo of a
+			// record another view wrote would restore over it or delete their create,
+			// and an unreadable record is left alone rather than written on a guess.
 			try {
-				if (previousRecord) {
+				const ownership = await this._judgeProfileUndoAfterFailedReadBack(
+					name,
+					id,
+					providerSettings,
+					previousRecord !== undefined,
+				)
+				if (!ownership.undoIsMine) {
+					if (ownership.reason) {
+						this.log(
+							`[persistProviderProfile] kept the profile record '${name}' after the failed read-back: ` +
+								`${ownership.reason}.`,
+						)
+					}
+				} else if (previousRecord) {
 					const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
 					await this.providerSettingsManager.saveConfig(name, previousSettings)
-				} else {
+				} else if (ownership.recordPresent) {
+					// The landed create is still here and still holds this call's content:
+					// only then is it this call's to remove.
 					await this.providerSettingsManager.deleteConfig(name)
 				}
 			} catch (restoreError) {
@@ -5766,19 +5932,59 @@ export class ClineProvider
 			// Siblings pinned to the profile this payload saves: the shared store now
 			// carries the saved settings; refresh their overlays so they serve the
 			// fresh copy instead of a pre-save snapshot.
+			const savedProfileName = options.savedProfileName
 			// The landed record when the caller reports it: the profile schema can drop keys the
 			// payload carried (a legacy provider is rewritten on the way in), so an overlay built
 			// from the payload could select a provider the saved record no longer holds. The
 			// payload-derived subset stays as the fallback for callers that save through this
 			// method without reporting the stored record.
-			const savedSettings =
-				options.savedProfileSettings ??
+			const reportedSettings = options.savedProfileSettings
+			let savedSettings: ProviderSettings | undefined =
+				reportedSettings ??
 				(Object.fromEntries(
 					PROVIDER_SETTINGS_KEYS.map((key) => [key, sanitizedValues[key]]).filter(
 						([, value]) => value !== undefined,
 					),
 				) as ProviderSettings)
-			await this.refreshViewLocalStateForUpdatedProfile(options.savedProfileName, savedSettings)
+			// This refresh runs outside the manager critical section on purpose, so another view can
+			// save this same profile between the read-back that produced the reported record and the
+			// fan-out below. Re-read the stored record - the same layer the snapshot came from - and
+			// refresh from whichever copy is current: deepEqual says the snapshot is still what the
+			// store holds, any difference is a later write whose content must win here, and a record
+			// that cannot be re-read is unconfirmed, so the overlays keep what they already hold
+			// rather than being written from a value this call cannot confirm. Worth a read only when a
+			// sibling is actually pinned to this profile - the same set the refresh below walks.
+			const siblingPinsThisProfile = ClineProvider.getAllInstances().some(
+				(instance) => instance !== this && instance.pinnedProfileName === savedProfileName,
+			)
+			if (reportedSettings && siblingPinsThisProfile) {
+				try {
+					const {
+						name: _pinnedName,
+						id: _pinnedId,
+						...storedRecord
+					} = await this.providerSettingsManager.getProfile({ name: savedProfileName })
+					const storedSettings = storedRecord as ProviderSettings
+					if (!deepEqual(storedSettings, reportedSettings)) {
+						this.log(
+							`[setValues] refreshing the overlays pinned to '${savedProfileName}' from the stored record ` +
+								`rather than this call's snapshot: the record now differs (keys: ` +
+								`${differingProfileSettingKeys(reportedSettings, storedSettings).join(", ")}).`,
+						)
+						savedSettings = storedSettings
+					}
+				} catch (error) {
+					savedSettings = undefined
+					this.log(
+						`[setValues] skipped refreshing the overlays pinned to '${savedProfileName}': the stored record ` +
+							`could not be re-read (${error instanceof Error ? error.message : String(error)}), so this ` +
+							`call cannot tell which content is current.`,
+					)
+				}
+			}
+			if (savedSettings) {
+				await this.refreshViewLocalStateForUpdatedProfile(savedProfileName, savedSettings)
+			}
 		}
 	}
 

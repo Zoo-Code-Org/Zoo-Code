@@ -480,6 +480,60 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 // that whenever no other view holds the section.
 const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
 
+/**
+ * Script one loadViewState run's profile lookups so a test can mutate the view-local buffer
+ * exactly while a lookup is in flight: each scripted record is returned only after the test
+ * releases that lookup, and started(n) resolves once the nth (1-based) lookup has been issued.
+ * The interference window is then a property of the fixture rather than a timing guess.
+ * stallProviderSettingsProfile above supports a single resolvable lookup, which is not enough
+ * for a load that re-resolves a profile reapplied during the load.
+ */
+function scriptProfileLookupWaits(
+	provider: ClineProvider,
+	records: Array<{ name: string; id: string; apiProvider: string; apiKey: string }>,
+) {
+	const requested: string[] = []
+	const lookups = records.map((record) => {
+		let markEntered: () => void = () => {}
+		let releaseGate: () => void = () => {}
+		const entered = new Promise<void>((resolve) => {
+			markEntered = resolve
+		})
+		const gate = new Promise<void>((resolve) => {
+			releaseGate = resolve
+		})
+		return {
+			record,
+			entered,
+			gate,
+			markEntered: () => markEntered(),
+			release: () => releaseGate(),
+		}
+	})
+	vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+		const index = requested.length
+		requested.push("name" in params ? params.name : params.id)
+		if (index >= lookups.length) {
+			throw new Error(`scriptProfileLookupWaits: unexpected profile lookup ${index + 1} '${requested[index]}'`)
+		}
+		const lookup = lookups[index]
+		lookup.markEntered()
+		await lookup.gate
+		return Object.assign(
+			{} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+			lookup.record,
+		)
+	})
+	return {
+		/** Resolves once the nth (1-based) profile lookup has been issued. */
+		started: (n: number) => lookups[n - 1].entered,
+		/** Lets the nth (1-based) lookup return its scripted record. */
+		release: (n: number) => lookups[n - 1].release(),
+		/** The profile names the double was asked for, in call order. */
+		names: () => [...requested],
+	}
+}
+
 describe("ClineProvider", () => {
 	beforeAll(() => {
 		vi.mocked(Task).mockImplementation(function (options: any) {
@@ -4217,6 +4271,166 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		it("keeps a mode saved while the reapplied-profile lookup is in flight", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Author the per-view entry through the write path so this instance owns it, and pin it
+			// to a profile the load resolves first.
+			await provider.saveViewState("currentApiConfigName", "persisted-profile")
+			const lookups = scriptProfileLookupWaits(provider, [
+				{
+					name: "persisted-profile",
+					id: "persisted-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "persisted-key",
+				},
+				{
+					name: "reapplied-profile",
+					id: "reapplied-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "reapplied-key",
+				},
+			])
+
+			const load = provider["loadViewState"]()
+			await lookups.started(1)
+			// The view switches profile while the first lookup is in flight, which is what makes the
+			// load re-resolve the second profile: the lookup this test interferes with.
+			await provider.setValue("currentApiConfigName", "reapplied-profile")
+			lookups.release(1)
+			await lookups.started(2)
+			// The user picks a different mode while the SECOND lookup is in flight.
+			await provider.saveViewState("mode", "architect")
+			lookups.release(2)
+			await load
+
+			expect(lookups.names()).toEqual(["persisted-profile", "reapplied-profile"])
+			// Both the mode saved inside the second window and the settings that lookup re-resolved
+			// land: the merge tracks what moved instead of replacing the buffer wholesale.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				id: "reapplied-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "reapplied-key",
+			})
+
+			await provider.dispose()
+		})
+
+		it("keeps the settings a sibling view wrote while the reapplied-profile lookup is in flight", async () => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"]("refresh-during-load-view")
+			await sibling.saveViewState("currentApiConfigName", "reapplied-profile")
+			const siblingPostSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("currentApiConfigName", "persisted-profile")
+			// The fan-out posts to the view it refreshed, not to the refreshing one.
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const lookups = scriptProfileLookupWaits(provider, [
+				{
+					name: "persisted-profile",
+					id: "persisted-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "persisted-key",
+				},
+				{
+					name: "reapplied-profile",
+					id: "reapplied-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "reapplied-key",
+				},
+			])
+
+			const load = provider["loadViewState"]()
+			await lookups.started(1)
+			await provider.setValue("currentApiConfigName", "reapplied-profile")
+			lookups.release(1)
+			await lookups.started(2)
+			// A second view pinned to the same profile saves newer settings while this view's second
+			// lookup is in flight: its fan-out writes this view's overlay through the mutation path.
+			await sibling["refreshViewLocalStateForUpdatedProfile"]("reapplied-profile", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sibling-key",
+			})
+			lookups.release(2)
+			await load
+
+			expect(siblingPostSpy).not.toHaveBeenCalled()
+			// The newer overlay written during the window survives the re-resolved settings: the
+			// load cannot serve a profile snapshot that is already stale.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sibling-key",
+			})
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
+
+		it("applies the re-resolved settings when nothing is written during the reapplied lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("currentApiConfigName", "persisted-profile")
+			const lookups = scriptProfileLookupWaits(provider, [
+				{
+					name: "persisted-profile",
+					id: "persisted-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "persisted-key",
+				},
+				{
+					name: "reapplied-profile",
+					id: "reapplied-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "reapplied-key",
+				},
+			])
+
+			const load = provider["loadViewState"]()
+			await lookups.started(1)
+			await provider.setValue("currentApiConfigName", "reapplied-profile")
+			lookups.release(1)
+			await lookups.started(2)
+			lookups.release(2)
+			await load
+
+			// Nothing moved inside the second window, so the reapplied lookup's settings still land:
+			// tracking the buffer must not have turned into keeping whatever the buffer already held.
+			expect(provider["viewLocalState"].apiConfiguration).toEqual({
+				id: "reapplied-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "reapplied-key",
+			})
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await provider.dispose()
+		})
 	})
 
 	describe("persisted view state pruning", () => {
@@ -5801,21 +6015,33 @@ describe("ClineProvider", () => {
 			)
 			// The pre-save snapshot sees the prior record; the post-save read-back
 			// fails: the raw caller payload must never stand in for the validated
-			// stored record.
+			// stored record. Only that read fails - the compensation gets its own
+			// re-read, and it reports the record this call's save stored under this
+			// call's id, which is what confirms the undo as this call's to perform.
 			let saved = false
+			let postSaveReads = 0
 			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockImplementation(async () => {
 				saved = true
 				return "p-id"
 			})
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
-				if (saved) {
+				if (!saved) {
+					return {
+						name: "p",
+						id: "p-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "prior-key",
+					}
+				}
+				postSaveReads += 1
+				if (postSaveReads === 1) {
 					throw new Error("read-back down")
 				}
 				return {
 					name: "p",
 					id: "p-id",
 					apiProvider: providerIdentifiers.anthropic,
-					apiKey: "prior-key",
+					apiKey: "raw-key",
 				}
 			})
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
@@ -5836,6 +6062,224 @@ describe("ClineProvider", () => {
 			// activation write carried the raw payload into the shared store.
 			expect(saveSpy).toHaveBeenLastCalledWith("p", expect.objectContaining({ apiKey: "prior-key" }))
 			expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "p")
+
+			await provider.dispose()
+		})
+
+		it("keeps another view's write when the read-back fails and the record changed underneath", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// One record map behind both views' manager doubles, so the second view's save is a store
+			// change the initiating view's re-read actually observes rather than a fixture guess.
+			const records: Record<string, Record<string, unknown>> = {
+				p: { name: "p", id: "p-id", apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" },
+			}
+			const writeIntoStore = async (name: string, config: Record<string, unknown>): Promise<string> => {
+				const id = String(config.id ?? records[name]?.id ?? "generated-id")
+				records[name] = { ...config, name, id }
+				return id
+			}
+			const readFromStore = (target: ClineProvider) =>
+				vi.spyOn(target.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+					const name = "name" in params ? params.name : params.id
+					const record = records[name]
+					if (!record) {
+						throw new Error(`Config with name '${name}' not found`)
+					}
+					return Object.assign(
+						{} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>,
+						record,
+					)
+				})
+			readFromStore(sibling)
+			vi.spyOn(sibling.providerSettingsManager, "saveConfig").mockImplementation(async (name, config) =>
+				writeIntoStore(name, config as Record<string, unknown>),
+			)
+			const saveSpy = vi
+				.spyOn(provider.providerSettingsManager, "saveConfig")
+				.mockImplementation(async (name, config) => writeIntoStore(name, config as Record<string, unknown>))
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			let reads = 0
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				reads += 1
+				if (reads === 1) {
+					const record = records.p
+					return Object.assign(
+						{} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>,
+						record,
+					)
+				}
+				if (reads === 2) {
+					// The second view saves the same name after this call's save landed and before this
+					// call could re-read: the read-back that would have proved ownership is the read that
+					// fails, so the compensation must judge ownership from its own re-read instead.
+					await sibling.providerSettingsManager.saveConfig("p", {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "sibling-key",
+					})
+					throw new Error("read-back down")
+				}
+				const name = "name" in params ? params.name : params.id
+				const record = records[name]
+				if (!record) {
+					throw new Error(`Config with name '${name}' not found`)
+				}
+				return Object.assign(
+					{} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>,
+					record,
+				)
+			})
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("could not be read back")
+
+			// The second writer's content survives: the undo neither restored the prior record over it
+			// nor deleted it, and the mutation group still failed.
+			expect(records.p).toMatchObject({ apiProvider: providerIdentifiers.anthropic, apiKey: "sibling-key" })
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(deleteSpy).not.toHaveBeenCalled()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("kept the profile record 'p'"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("keys: apiKey"))
+			// The log names fields, never values: a profile record carries secrets.
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("prior-key"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("sibling-key"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("raw-key"))
+
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
+		it("restores the prior record when the re-read confirms this call still owns it", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Same failing read-back as above, but nobody else touched the name: the compensation is
+			// compare-and-set, not an abolition of the undo.
+			const records: Record<string, Record<string, unknown>> = {
+				p: { name: "p", id: "p-id", apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" },
+			}
+			const saveSpy = vi
+				.spyOn(provider.providerSettingsManager, "saveConfig")
+				.mockImplementation(async (name, config) => {
+					const id = String(config.id ?? records[name]?.id ?? "generated-id")
+					records[name] = { ...config, name, id }
+					return id
+				})
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			let reads = 0
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+				reads += 1
+				if (reads === 2) {
+					throw new Error("read-back down")
+				}
+				return Object.assign(
+					{} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>,
+					records.p,
+				)
+			})
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("could not be read back")
+
+			expect(saveSpy).toHaveBeenLastCalledWith("p", expect.objectContaining({ apiKey: "prior-key" }))
+			expect(records.p).toMatchObject({ apiKey: "prior-key" })
+			expect(deleteSpy).not.toHaveBeenCalled()
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("kept the profile record"))
+
+			await provider.dispose()
+		})
+
+		it("leaves the record alone when the compensation cannot re-read it", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Both the read-back and the compensation's own re-read fail while the record still
+			// exists: its content is unconfirmed, so nothing may be written on a guess - not the prior
+			// record restored over a possible later write, and not a delete that could remove one.
+			const records: Record<string, Record<string, unknown>> = {
+				p: { name: "p", id: "p-id", apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" },
+			}
+			const saveSpy = vi
+				.spyOn(provider.providerSettingsManager, "saveConfig")
+				.mockImplementation(async (name, config) => {
+					const id = String(config.id ?? records[name]?.id ?? "generated-id")
+					records[name] = { ...config, name, id }
+					return id
+				})
+			const deleteSpy = vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			let reads = 0
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+				reads += 1
+				if (reads === 1) {
+					return Object.assign(
+						{} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>,
+						records.p,
+					)
+				}
+				throw new Error("profile storage read down")
+			})
+			vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([])
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(
+				provider["persistProviderProfile"](
+					"p",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "raw-key" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow("could not be read back")
+
+			expect(saveSpy).toHaveBeenCalledTimes(1)
+			expect(deleteSpy).not.toHaveBeenCalled()
+			// The landed save stands as written, unconfirmed: the group still fails and the log names
+			// the record key without exposing what it holds.
+			expect(records.p).toMatchObject({ apiKey: "raw-key" })
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("kept the profile record 'p'"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("could not be re-read"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("prior-key"))
 
 			await provider.dispose()
 		})
@@ -7159,6 +7603,182 @@ describe("ClineProvider", () => {
 				apiKey: "fresh-key",
 			})
 			expect(siblingPostSpy).toHaveBeenCalled()
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
+
+		// The three tests below share one thing: the fan-out that refreshes siblings pinned to the
+		// profile a setValues payload saves runs outside the manager critical section, so the record
+		// it reads from can move between the caller's read-back and the refresh itself.
+		const newPinnedSibling = async (viewId: string, apiConfiguration?: Record<string, unknown>) => {
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sibling["setViewStateId"](viewId)
+			await sibling.saveViewState("currentApiConfigName", "saved-profile")
+			if (apiConfiguration) {
+				await sibling.saveViewState("apiConfiguration", apiConfiguration)
+			}
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			return sibling
+		}
+
+		const savedProfileValues = (name: string, apiKey: string) =>
+			Object.assign({} as Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>, {
+				name,
+				id: "saved-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey,
+			})
+
+		it("refreshes pinned siblings from the stored record when another view saves first", async () => {
+			// One record map behind both views' manager doubles, so the fan-out re-read observes exactly
+			// what the second view last wrote instead of a fixture guess.
+			const records: Record<string, Record<string, unknown>> = {
+				"saved-profile": {
+					name: "saved-profile",
+					id: "saved-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "snapshot-key",
+				},
+			}
+			const sibling = await newPinnedSibling("newer-save-view")
+			vi.spyOn(sibling.providerSettingsManager, "saveConfig").mockImplementation(async (name, config) => {
+				const id = String(config.id ?? records[name]?.id ?? "generated-id")
+				records[name] = { ...config, name, id }
+				return id
+			})
+
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// The snapshot the initiating call read back inside its critical section, before the
+			// fan-out ran outside it.
+			let reReads = 0
+			const reReadSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+				reReads += 1
+				if (reReads === 1) {
+					// The second view saves this same profile in the window between that read-back and
+					// this fan-out.
+					await sibling.providerSettingsManager.saveConfig("saved-profile", {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "newer-key",
+					})
+				}
+				return savedProfileValues("saved-profile", String(records["saved-profile"].apiKey))
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.setValues(
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				{
+					savedProfileName: "saved-profile",
+					savedProfileSettings: { apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				},
+			)
+
+			expect(reReadSpy).toHaveBeenCalledTimes(1)
+			// The sibling serves the record the store actually holds now, not the snapshot this call
+			// captured before the second view wrote.
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "newer-key",
+			})
+			expect(sibling["postStateToWebview"]).toHaveBeenCalled()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("the record now differs"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("keys: apiKey"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("saved-profile"))
+			// Field names in the log, never the credential values they name.
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("snapshot-key"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("newer-key"))
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
+
+		it("keeps the reported record for the fan-out when the stored record still matches it", async () => {
+			const sibling = await newPinnedSibling("unchanged-save-view")
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const reReadSpy = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockResolvedValue(savedProfileValues("saved-profile", "snapshot-key"))
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.setValues(
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				{
+					savedProfileName: "saved-profile",
+					savedProfileSettings: { apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				},
+			)
+
+			// The re-read agrees with what this call read back inside its critical section, so the
+			// confirmed snapshot is what the siblings are refreshed from: comparing must not turn into
+			// always re-reading and overwriting the overlay with a second source.
+			expect(reReadSpy).toHaveBeenCalledTimes(1)
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "snapshot-key",
+			})
+			expect(sibling["postStateToWebview"]).toHaveBeenCalled()
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("the record now differs"))
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("skipped refreshing"))
+
+			await sibling.dispose()
+			await provider.dispose()
+		})
+
+		it("leaves pinned siblings on their own overlay when the fan-out cannot re-read the record", async () => {
+			const sibling = await newPinnedSibling("unreadable-save-view", {
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "stale-key",
+			})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockRejectedValue(
+				new Error("profile storage read down"),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+
+			await provider.setValues(
+				{ apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				{
+					savedProfileName: "saved-profile",
+					savedProfileSettings: { apiProvider: providerIdentifiers.anthropic, apiKey: "snapshot-key" },
+				},
+			)
+
+			// The record is unconfirmed, so the sibling keeps the overlay it already holds rather than
+			// being written from a value this call cannot tell is current: a stale overlay is merely
+			// stale, while a wrong one would also rebuild the sibling's running task handler with it.
+			expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "stale-key",
+			})
+			expect(sibling["postStateToWebview"]).not.toHaveBeenCalled()
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("skipped refreshing the overlays pinned to 'saved-profile'"),
+			)
 
 			await sibling.dispose()
 			await provider.dispose()
