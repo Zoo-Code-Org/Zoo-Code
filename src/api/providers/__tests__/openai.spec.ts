@@ -23,6 +23,7 @@ vitest.mock("../utils/timeout-config", () => ({
 const MOCK_TIMEOUT_MS = 300_000
 
 const mockCreate = vitest.fn()
+const mockResponsesCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	const mockConstructor = vitest.fn()
@@ -78,6 +79,22 @@ vitest.mock("openai", () => {
 							])
 						}),
 					},
+				},
+				responses: {
+					create: mockResponsesCreate.mockImplementation(async () =>
+						asyncStreamFrom([
+							{ type: "response.output_text.delta", delta: "Test response" },
+							{
+								type: "response.completed",
+								response: {
+									usage: {
+										input_tokens: 10,
+										output_tokens: 5,
+									},
+								},
+							},
+						]),
+					),
 				},
 			}
 		}),
@@ -2089,6 +2106,132 @@ describe("OpenAiHandler - strict tool schemas", () => {
 		const request = mockCreate.mock.calls[0][0]
 		expect(request.tools[0].function.strict).toBe(false)
 		expect(request.tools[0].function.parameters).toEqual(tools[0].function.parameters)
+	})
+})
+
+describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
+	const systemPrompt = "You are a helpful assistant."
+	const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello" }]
+
+	const baseOptions: ApiHandlerOptions = {
+		openAiApiKey: "test-key",
+		openAiModelId: "my-terra-deployment",
+		openAiBaseUrl: "https://gateway.corp.example/v1",
+		openAiUseResponsesApi: true,
+	}
+
+	const functionTool = {
+		type: "function" as const,
+		function: {
+			name: "read_file",
+			description: "Read a file",
+			parameters: {
+				type: "object",
+				properties: { path: { type: "string" } },
+				required: ["path"],
+			},
+		},
+	}
+
+	beforeEach(() => {
+		mockCreate.mockClear()
+		mockResponsesCreate.mockClear()
+	})
+
+	it("routes createMessage to the Responses API and not Chat Completions", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+		const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+
+		expect(mockResponsesCreate).toHaveBeenCalledOnce()
+		expect(mockCreate).not.toHaveBeenCalled()
+
+		const body = mockResponsesCreate.mock.calls[0][0]
+		expect(body.model).toBe("my-terra-deployment")
+		expect(body.instructions).toBe(systemPrompt)
+		expect(body.stream).toBe(true)
+		expect(body.store).toBe(false)
+		expect(body).not.toHaveProperty("reasoning_effort")
+
+		// The shared Responses stream processor surfaces text and usage chunks.
+		expect(chunks).toContainEqual({ type: "text", text: "Test response" })
+		expect(chunks.some((chunk) => chunk.type === "usage")).toBe(true)
+	})
+
+	it("translates reasoning_effort into reasoning: { effort } and keeps function tools", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions,
+			enableReasoningEffort: true,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+				reasoningEffort: "high",
+			},
+		})
+
+		await collectStream(
+			handler.createMessage(systemPrompt, messages, makeCreateMessageMetadata({ tools: [functionTool] })),
+		)
+
+		expect(mockResponsesCreate).toHaveBeenCalledOnce()
+		const body = mockResponsesCreate.mock.calls[0][0]
+		expect(body.reasoning).toEqual({ effort: "high" })
+		expect(body.include).toEqual(["reasoning.encrypted_content"])
+		// Reasoning and tools are combined on the Responses API path — neither is dropped.
+		expect(body.tools).toEqual([
+			{
+				type: "function",
+				name: "read_file",
+				description: "Read a file",
+				parameters: expect.objectContaining({ type: "object" }),
+				strict: true,
+			},
+		])
+		expect(body.tool_choice).toBeUndefined()
+		expect(body.parallel_tool_calls).toBe(true)
+	})
+
+	it("omits reasoning when reasoning effort is disabled", async () => {
+		const handler = new OpenAiHandler({
+			...baseOptions,
+			enableReasoningEffort: false,
+			openAiCustomModelInfo: { contextWindow: 128_000, supportsPromptCache: false },
+		})
+
+		await collectStream(handler.createMessage(systemPrompt, messages))
+
+		expect(mockResponsesCreate).toHaveBeenCalledOnce()
+		const body = mockResponsesCreate.mock.calls[0][0]
+		expect(body).not.toHaveProperty("reasoning")
+		expect(body).not.toHaveProperty("include")
+	})
+
+	it("passes string tool_choice through unchanged", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+
+		await collectStream(
+			handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ tools: [functionTool], tool_choice: "auto" }),
+			),
+		)
+
+		const body = mockResponsesCreate.mock.calls[0][0]
+		expect(body.tool_choice).toBe("auto")
+	})
+
+	it("keeps Chat Completions as the default when the setting is off", async () => {
+		const handler = new OpenAiHandler({
+			openAiApiKey: "test-key",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://api.openai.com/v1",
+		})
+
+		await collectStream(handler.createMessage(systemPrompt, messages))
+
+		expect(mockCreate).toHaveBeenCalled()
+		expect(mockResponsesCreate).not.toHaveBeenCalled()
 	})
 })
 

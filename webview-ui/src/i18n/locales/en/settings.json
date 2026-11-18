@@ -599,6 +599,8 @@
 		"openAiBaseUrl": "Base URL",
 		"openAiStrictToolSchemas": "Strict tool schemas (strict: true)",
 		"openAiStrictToolSchemasDescription": "Send strict: true with tool schemas to enable strict schema adherence. Disable to use non-strict tool calling.",
+		"openAiUseResponsesApi": "Use Responses API",
+		"openAiUseResponsesApiDescription": "Send requests to the Responses API (/responses) instead of Chat Completions (/chat/completions). Enable this for endpoints that require the Responses API to combine reasoning (reasoning_effort) with tool use, such as Azure OpenAI deployments of GPT-6.1 Terra.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure deployment name",
 		"azureOpenAiDeploymentNameDescription": "Enter the deployment name from Azure AI Studio, not the underlying model name.",

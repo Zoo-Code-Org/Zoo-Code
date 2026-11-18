@@ -21,6 +21,8 @@ import { TagMatcher } from "../../utils/tag-matcher"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
+import { convertToResponsesApiInput } from "../transform/responses-api-input"
+import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
 
@@ -29,6 +31,7 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { bridgeExternalAbortSignal, createAbortError, isRequestAborted } from "./utils/abort-signal"
 
 type OpenAiUsage =
 	| {
@@ -109,6 +112,15 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
+
+		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
+		// OpenAI deployments of reasoning models behind corporate gateways) reject
+		// `reasoning_effort` combined with function tools on /chat/completions and
+		// require /responses instead.
+		if (this.options.openAiUseResponsesApi) {
+			yield* this.handleResponsesApiMessage(modelId, systemPrompt, messages, metadata)
+			return
+		}
 
 		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -296,6 +308,151 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			yield this.processUsageMetrics(response.usage, modelInfo)
+		}
+	}
+
+	/**
+	 * Responses API path (POST {baseURL}/responses), opt-in via the
+	 * `openAiUseResponsesApi` setting.
+	 *
+	 * Some OpenAI-compatible endpoints — notably Azure OpenAI deployments of
+	 * reasoning models such as GPT-6.1 Terra behind corporate API gateways —
+	 * reject `reasoning_effort` combined with function tools on
+	 * /chat/completions and require the Responses API instead. This path keeps
+	 * the provider's custom base URL, custom model/deployment ID, custom
+	 * headers, and custom model info, while translating the request and stream
+	 * through the shared Responses API transforms (the same ones the xAI
+	 * provider uses). Reasoning and tools are both forwarded, never dropped.
+	 */
+	private async *handleResponsesApiMessage(
+		modelId: string,
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): ApiStream {
+		const model = this.getModel()
+		const { info: modelInfo, reasoning } = model
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
+
+		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
+			model: modelId,
+			instructions: systemPrompt,
+			input: convertToResponsesApiInput(messages),
+			stream: true,
+			// Stateless operation: don't store responses server-side.
+			store: false,
+		}
+
+		// The Responses API takes reasoning as `reasoning: { effort }` instead of
+		// the Chat Completions `reasoning_effort` field; translate the resolved
+		// params (which honor the custom model info's reasoningEffort) so
+		// reasoning and function tools can be combined on this endpoint.
+		if (reasoning?.reasoning_effort) {
+			requestBody.reasoning = {
+				effort: reasoning.reasoning_effort,
+			} as OpenAI.Responses.ResponseCreateParamsStreaming["reasoning"]
+			// Only request encrypted reasoning content when reasoning is active.
+			requestBody.include = ["reasoning.encrypted_content"]
+		}
+
+		// Mirror the Chat Completions temperature policy: omit it unless the
+		// model supports it and the user set a custom value, so the server's own
+		// default applies.
+		if (modelInfo.supportsTemperature !== false && this.options.modelTemperature != null) {
+			requestBody.temperature = this.options.modelTemperature
+		}
+
+		// Mirror the Chat Completions max-tokens policy: only cap output when the
+		// user opted in via includeMaxTokens.
+		if (this.options.includeMaxTokens === true && model.maxTokens) {
+			requestBody.max_output_tokens = model.maxTokens
+		}
+
+		// convertToolsForOpenAI already applies the strict/non-strict schema
+		// policy (including the MCP strict exemption); the Responses API only
+		// needs the flattened function shape.
+		const responseTools = this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas)
+			?.filter((tool) => tool?.type === "function")
+			.map((tool) => ({
+				type: "function" as const,
+				name: tool.function.name as string,
+				description: tool.function.description as string | undefined,
+				parameters: tool.function.parameters,
+				strict: (tool.function.strict as boolean | undefined) ?? null,
+			}))
+
+		if (responseTools?.length) {
+			requestBody.tools = responseTools
+			if (metadata?.tool_choice) {
+				requestBody.tool_choice = this.mapToolChoiceForResponsesApi(metadata.tool_choice)
+			}
+			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
+		}
+
+		// Bridge the external abort signal only after every throw-prone part of
+		// request construction has run, so a construction failure cannot leak a
+		// listener on the caller's long-lived signal.
+		const { signal: abortSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
+
+		try {
+			let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
+			try {
+				stream = await this.client.responses.create(
+					requestBody,
+					abortSignal ? { signal: abortSignal } : undefined,
+				)
+			} catch (error) {
+				// Normalize cancellations to the contract error: the OpenAI SDK's
+				// APIUserAbortError carries name "Error" and message "Request was
+				// aborted.", which would otherwise leak a non-conforming shape.
+				if (isRequestAborted(error, abortSignal)) {
+					throw createAbortError(this.providerName)
+				}
+				throw handleOpenAIError(error, this.providerName)
+			}
+
+			try {
+				yield* processResponsesApiStream(stream, createUsageNormalizer())
+			} catch (error) {
+				// An abort landing after responses.create resolved surfaces here as
+				// the SDK's APIUserAbortError thrown from stream iteration.
+				if (isRequestAborted(error, abortSignal)) {
+					throw createAbortError(this.providerName)
+				}
+				throw error
+			}
+		} finally {
+			// Release the listener once the stream is consumed, whether the
+			// request completed, failed, or the generator was closed early.
+			removeExternalAbortListener()
+		}
+	}
+
+	/**
+	 * Maps a Chat Completions tool choice to the Responses API shape. String
+	 * options (auto/required/none) are identical in both APIs; named-tool
+	 * choices nest the name under `function`/`custom` in Chat Completions but
+	 * keep it at the top level in the Responses API. The Chat Completions
+	 * `allowed_tools` shape has no equivalent mapping here and is omitted.
+	 */
+	private mapToolChoiceForResponsesApi(
+		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
+	): OpenAI.Responses.ResponseCreateParamsStreaming["tool_choice"] {
+		if (typeof toolChoice === "string") {
+			return toolChoice
+		}
+		switch (toolChoice.type) {
+			case "function":
+				return { type: "function", name: toolChoice.function.name }
+			case "custom":
+				return { type: "custom", name: toolChoice.custom.name }
+			default:
+				return undefined
 		}
 	}
 
