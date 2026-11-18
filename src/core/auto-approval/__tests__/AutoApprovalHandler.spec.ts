@@ -320,6 +320,34 @@ describe("AutoApprovalHandler", () => {
 			expect(result.requiresApproval).toBe(true)
 			expect(result.approvalType).toBe("tokens")
 		})
+
+		it("should not proceed and not reset token window when user rejects token limit approval", async () => {
+			;(mockState as GlobalState & { allowedMaxTokens?: number }).allowedMaxTokens = 50_000
+			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
+
+			// Exceeds token limit
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 40_000, totalTokensOut: 20_000 })
+			mockAskForApproval.mockResolvedValue({ response: "noButtonClicked" })
+			const result = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
+
+			expect(mockAskForApproval).toHaveBeenCalledWith(
+				"auto_approval_max_req_reached",
+				JSON.stringify({ count: (50_000).toLocaleString(), type: "tokens" }),
+			)
+			expect(result.shouldProceed).toBe(false)
+			expect(result.requiresApproval).toBe(true)
+			expect(result.approvalType).toBe("tokens")
+
+			// Repeat check with same usage: token window was not reset, so it prompts again
+			mockAskForApproval.mockClear()
+			mockAskForApproval.mockResolvedValue({ response: "noButtonClicked" })
+			const repeatResult = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
+
+			expect(mockAskForApproval).toHaveBeenCalledTimes(1)
+			expect(repeatResult.shouldProceed).toBe(false)
+			expect(repeatResult.requiresApproval).toBe(true)
+			expect(mockGetApiMetrics).toHaveBeenLastCalledWith(messages)
+		})
 	})
 
 	describe("resetRequestCount", () => {
