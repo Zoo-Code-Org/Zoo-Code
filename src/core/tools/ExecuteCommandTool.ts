@@ -17,7 +17,7 @@ import "../../utils/path"
 import type { DcgDecision } from "../../services/destructive-command-guard"
 import type { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
-import { unescapeHtmlEntities, truncateTerminalOutput } from "../../utils/text-normalization"
+import { unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../../utils/text-normalization"
 import { parseCommand } from "../../shared/parse-command"
 import {
 	ExitCodeDetails,
@@ -707,7 +707,9 @@ export async function executeCommandInTerminal(
 		}
 
 		const exitStatus = formatExitStatus(exitDetails)
-		const sanitizedResult = truncateTerminalOutput(result)
+		// Inline completed output is retained up to compressTerminalOutput limits (500 lines / 50K chars);
+		// head/tail truncation is reserved for persisted artifacts in formatPersistedOutput.
+		const sanitizedResult = stripAnsi(result)
 
 		return [
 			false,
