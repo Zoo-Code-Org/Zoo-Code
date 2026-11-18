@@ -647,7 +647,16 @@ describe("API task controls - per-view review fixes", () => {
 			} as never)
 			expect(update).toHaveBeenLastCalledWith("viewStates", { "view-a": { mode: "debug" } })
 		})
-		it("refuses zooSessionToken and openAiHeaders on both directions before storage sees them", async () => {
+		const credentialFixtures = [
+			{ key: "zooSessionToken", value: "x" },
+			{ key: "openAiHeaders", value: { Authorization: "Bearer x" } },
+		] as const
+
+		// Each case needs its own doubles. The point of the table is that a failure on one
+		// credential reports itself and leaves the other credential reporting on its own,
+		// which shared doubles would spoil; the helper therefore returns fresh doubles and
+		// installs a fresh API on each call rather than handing back a shared pair.
+		const makeStorageHarness = () => {
 			const get = vi.fn().mockReturnValue("stored")
 			const update = vi.fn().mockResolvedValue(undefined)
 			sidebarProvider.context = {
@@ -659,41 +668,38 @@ describe("API task controls - per-view review fixes", () => {
 				asClineProvider(sidebarProvider),
 				makeTabCreatingFactory(sidebarProvider, outputChannel),
 			)
+			return { get, update }
+		}
 
-			// Both keys are provider-settings keys, so they survive the secret-state
-			// omission that defines GlobalState: the schema guard lets them through and
-			// the credential guard is the only thing standing between them and storage.
-			// Reading them must not reach the mock at all, and writing them must not
-			// persist a value that a later reader would treat as ordinary settings.
-			expect(() => api.getGlobalState("zooSessionToken")).toThrow("credential-bearing key")
-			expect(() => api.getGlobalState("openAiHeaders")).toThrow("credential-bearing key")
-			await expect(api.setGlobalState("zooSessionToken", "x")).rejects.toThrow("credential-bearing key")
-			await expect(api.setGlobalState("openAiHeaders", { Authorization: "Bearer x" })).rejects.toThrow(
-				"credential-bearing key",
-			)
-			expect(get).not.toHaveBeenCalled()
-			expect(update).not.toHaveBeenCalled()
-			// Control on the same mocks: a non-credential key still reaches storage on
-			// both directions, so the four assertions above are about these keys and not
-			// about a surface that rejects everything.
-			expect(api.getGlobalState("mode")).toBe("stored")
-			await api.setGlobalState("mode", "ask")
-			expect(get).toHaveBeenCalledWith("mode")
-			expect(update).toHaveBeenCalledWith("mode", "ask")
-		})
+		it.each(credentialFixtures)(
+			"refuses $key on both directions before storage sees it",
+			async ({ key, value }) => {
+				const { get, update } = makeStorageHarness()
 
-		it("refuses a key outside the settings schema on both directions before storage sees them", async () => {
-			const get = vi.fn().mockReturnValue("stored")
-			const update = vi.fn().mockResolvedValue(undefined)
-			sidebarProvider.context = {
-				extensionMode: vscode.ExtensionMode.Test,
-				globalState: { get, update },
-			}
-			api = new API(
-				outputChannel,
-				asClineProvider(sidebarProvider),
-				makeTabCreatingFactory(sidebarProvider, outputChannel),
-			)
+				// Both fixtures are provider-settings keys, so they survive the secret-state
+				// omission that defines GlobalState, and neither has an entry in the
+				// global-settings shape. The credential check is therefore the only thing that
+				// refuses them by name. With that check removed both calls are still refused,
+				// but by the value-schema guard further down and with different text, so the
+				// assertions below pin rejection by the credential check before value-schema
+				// lookup; the exact wording is what tells those two guards apart, which is why
+				// it is kept rather than relaxed to a shapeless rejection check.
+				expect(() => api.getGlobalState(key)).toThrow("credential-bearing key")
+				await expect(api.setGlobalState(key, value)).rejects.toThrow("credential-bearing key")
+				expect(get).not.toHaveBeenCalled()
+				expect(update).not.toHaveBeenCalled()
+				// Control on the same doubles: a non-credential key still reaches storage on both
+				// directions, so a refusal here is evidence about the key and not about a surface
+				// that rejects everything.
+				expect(api.getGlobalState("mode")).toBe("stored")
+				await api.setGlobalState("mode", "ask")
+				expect(get).toHaveBeenCalledWith("mode")
+				expect(update).toHaveBeenCalledWith("mode", "ask")
+			},
+		)
+
+		it("refuses a key outside the settings schema on both directions before storage sees it", async () => {
+			const { get, update } = makeStorageHarness()
 
 			// The generic constrains typed callers only: a crafted runtime key can be any
 			// string, which is why the key check is a runtime check on GLOBAL_STATE_KEYS.
