@@ -4370,7 +4370,9 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 						pull_requests: (options.associatedPrNumbers ?? []).map((number) => ({ number })),
 						head_branch: options.branch ?? null,
 						head_sha: options.sha ?? null,
-						head_repository: { owner: { login: options.owner ?? "Zoo-Code-Org" } },
+						// owner: null models a payload with no head repository at all.
+						head_repository:
+							options.owner === null ? null : { owner: { login: options.owner ?? "Zoo-Code-Org" } },
 					},
 				},
 			})
@@ -4391,6 +4393,32 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 			expect(branchA).toContain("feature/a")
 			expect(branchB).toContain("feature/b")
 			expect(branchA).not.toBe(branchB)
+		})
+
+		it("includes the head owner in the fallback group", () => {
+			const upstream = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "Zoo-Code-Org" }))
+			const contributor = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "contributor" }))
+
+			expect(upstream).toContain("Zoo-Code-Org:feature/a")
+			expect(contributor).toContain("contributor:feature/a")
+			expect(contributor).not.toBe(upstream)
+		})
+
+		it("uses the unknown owner fallback when the payload carries no head repository", () => {
+			// Review runs report the base repository as head_repository (issue #2133), so
+			// this covers the key expression's fallback rather than a production split.
+			const missingOwner = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null }))
+			const knownOwner = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "Zoo-Code-Org" }))
+
+			expect(missingOwner).toContain("unknown:feature/a")
+			expect(missingOwner).not.toBe(knownOwner)
+		})
+
+		it("still coalesces repeated completions when the owner is unknown", () => {
+			const first = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null, runId: 11 }))
+			const second = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: null, runId: 12 }))
+
+			expect(second).toBe(first)
 		})
 
 		it("coalesces repeated completions for the same target onto one group", () => {
