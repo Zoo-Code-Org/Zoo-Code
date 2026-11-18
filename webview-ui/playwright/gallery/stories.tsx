@@ -320,6 +320,39 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"infer-settings": async () => {
+		const [{ AppProviders }, { Infer }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/providers/Infer"),
+			import("@roo-code/types"),
+		])
+		type ProviderSettings = React.ComponentProps<typeof Infer>["apiConfiguration"]
+
+		function InferSettingsStory() {
+			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
+				apiProvider: providerIdentifiers.infer,
+			})
+			return (
+				<div className="w-full p-4 bg-vscode-editor-background" data-testid="infer-settings-story">
+					<div className="flex flex-col gap-3">
+						<Infer
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={(field, value) =>
+								setApiConfiguration((current) => ({ ...current, [field]: value }))
+							}
+							organizationAllowList={{ allowAll: true, providers: {} }}
+						/>
+					</div>
+				</div>
+			)
+		}
+
+		return (
+			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.infer } }}>
+				<InferSettingsStory />
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
