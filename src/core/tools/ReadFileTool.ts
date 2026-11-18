@@ -322,7 +322,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		// When both offset and limit are omitted, files <= ADAPTIVE_FULL_READ_THRESHOLD (300 lines) are returned in full
 		// to eliminate multi-turn round trip penalties. Files > 300 lines get a 200-line head/tail window.
 		if (entry.offset === undefined && entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
-			const truncated = truncateFileOutput(result.content, SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
+			const truncated = truncateFileOutput(addLineNumbers(content, 1), SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
 			if (truncated.wasTruncated) {
 				output = truncated.content
 			}
@@ -808,7 +808,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
 					if (result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
-						content = truncateFileOutput(content, SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines).content
+						content = truncateFileOutput(addLineNumbers(rawContent, 1), SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines).content
 					}
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`

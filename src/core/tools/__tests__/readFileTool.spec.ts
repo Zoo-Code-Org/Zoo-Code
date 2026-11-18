@@ -674,6 +674,51 @@ describe("ReadFileTool", () => {
 				expect(result).toContain("50 | line 50")
 				expect(result).not.toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
 			})
+
+			it("includes true end of file in adaptive preview when file exceeds default line limit", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const lines = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`)
+
+				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
+				mockedReadWithSlice.mockReturnValue({
+					content: lines.slice(0, 2000).map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					returnedLines: 2000,
+					totalLines: 2500,
+					wasTruncated: true,
+					includedRanges: [[1, 2000]],
+				})
+
+				await readFileTool.execute({ path: "very-large.ts" }, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+				expect(result).toContain("1 | line 1")
+				expect(result).toContain("2500 | line 2500")
+			})
+
+			it("includes true end of file in legacy adaptive preview when file exceeds default line limit", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const lines = Array.from({ length: 2500 }, (_, i) => `line ${i + 1}`)
+
+				mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
+				mockedReadWithSlice.mockReturnValue({
+					content: lines.slice(0, 2000).map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					returnedLines: 2000,
+					totalLines: 2500,
+					wasTruncated: true,
+					includedRanges: [[1, 2000]],
+				})
+
+				await readFileTool.execute({ files: [{ path: "very-large-legacy.ts" }] } as any, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+				expect(result).toContain("1 | line 1")
+				expect(result).toContain("2500 | line 2500")
+			})
 		})
 
 		// Integration counterpart to the mocked case above: the real readWithSlice
