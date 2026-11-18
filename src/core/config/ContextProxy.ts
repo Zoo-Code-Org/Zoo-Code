@@ -67,14 +67,23 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
 	private stateCache: GlobalState
+	// Counted for either store, so a rollback can tell its own write from a newer one of the same value.
+	private stateWriteGenerations = new Map<GlobalStateKey | SecretStateKey, number>()
+
 	private secretCache: SecretState
 	private _isInitialized = false
+	// Raised for the whole duration of a reset and cleared in a finally, so a reset that fails
+	// mid-way cannot leave the store refusing every later secret write; see resetAllState.
+	private resetting = false
 
 	constructor(context: vscode.ExtensionContext) {
 		this.originalContext = context
@@ -413,6 +422,8 @@ export class ContextProxy {
 		// writes that are in flight. An update that throws at once is turned into a rejection, so it is handled the same.
 		const owner = {}
 		this.stateWriteOwner.set(key, owner)
+		const generation = (this.stateWriteGenerations.get(key) ?? 0) + 1
+		this.stateWriteGenerations.set(key, generation)
 		this.stateCache[key] = value
 		const release = () => {
 			if (this.stateWriteOwner.get(key) === owner) this.stateWriteOwner.delete(key)
@@ -429,6 +440,11 @@ export class ContextProxy {
 		})
 	}
 
+	/** Current per-key write generation of either store: a rollback must not clobber a newer write. */
+	public getStateWriteGeneration<K extends GlobalStateKey | SecretStateKey>(key: K): number {
+		return this.stateWriteGenerations.get(key) ?? 0
+	}
+
 	private getAllGlobalState(): GlobalState {
 		return Object.fromEntries(GLOBAL_STATE_KEYS.map((key) => [key, this.getGlobalState(key)]))
 	}
@@ -443,10 +459,20 @@ export class ContextProxy {
 	}
 
 	storeSecret(key: SecretStateKey, value?: string) {
+		// Refused rather than deferred: a deferred secret write would re-store exactly the value the
+		// user asked to erase, and a silently dropped one would lose the save.
+		if (this.resetting) {
+			return Promise.reject(
+				new SettingsWriteError([], [key], new Error("secret writes are refused while state is being reset")),
+			)
+		}
 		// Update cache.
 		const owner = {}
 		this.secretWriteOwner.set(key, owner)
 		this.secretWriteCount.set(key, (this.secretWriteCount.get(key) ?? 0) + 1)
+		// Counted here as well as in updateGlobalState: the guard that rolls back a failed per-view write reads
+		// this map, and a secret it cannot count is a secret whose newer same-valued write it cannot see.
+		this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
 		this.secretCache[key] = value
 
 		// Write directly to context. If the write rejects, the cache is read back from the secret storage while this
@@ -716,17 +742,27 @@ export class ContextProxy {
 	 * @returns A promise that resolves when all reset operations are complete
 	 */
 	public async resetAllState() {
-		// Clear in-memory caches
-		this.stateCache = {}
-		this.secretCache = {}
+		this.resetting = true
+		try {
+			// Clear in-memory caches
+			this.stateCache = {}
+			this.secretCache = {}
+			// A write that started before this reset must not restore its pre-reset value when it
+			// rejects afterwards, so advance every generation the pending writes still hold.
+			for (const key of this.stateWriteGenerations.keys()) {
+				this.stateWriteGenerations.set(key, (this.stateWriteGenerations.get(key) ?? 0) + 1)
+			}
 
-		await Promise.all([
-			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
-			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
-		])
+			await Promise.all([
+				...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
+				...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+				...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
+			])
 
-		await this.initialize()
+			await this.initialize()
+		} finally {
+			this.resetting = false
+		}
 	}
 
 	private static _instance: ContextProxy | null = null
