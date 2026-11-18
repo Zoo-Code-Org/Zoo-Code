@@ -25,19 +25,39 @@ permissions:
 # triggering run id gave every completion its own group, so nothing ever
 # coalesced: the six required checks of one PR all completing at the same head
 # meant six queued dispatches of the same work. GitHub keeps at most one
-# running plus one pending run per group, so keying by the PR the completed run
-# evaluated (or, for fork runs whose pull_requests GitHub leaves empty, by the
-# head SHA, which resolves to the same PR set) collapses a burst into a single
-# dispatch of the freshest state. Two PRs never share a PR number, and two
-# distinct commits never share a head SHA, so an unrelated PR still keeps its
-# own group and its queued dispatch is never superseded. cancel-in-progress
-# stays false: a running dispatch must finish every PR it resolved. The run id
-# stays as the fallback so a payload with neither a PR number nor a head SHA
+# running plus one pending run per group, so keying the group by the target the
+# completed run evaluated collapses a burst into a single dispatch of the
+# freshest state: first by the PR number GitHub associates with the run, then,
+# for fork runs whose pull_requests GitHub leaves empty (issue #2133), by the
+# branch identity the resolver below actually matches on.
+#
+# The fork fallback must include the branch, not just the head SHA. Two fork PRs
+# can carry the same commit on different branches (a cherry-picked stack does
+# exactly that), and the resolver distinguishes them only by head branch: a
+# SHA-only key would put both PRs in one group, so a pending run for the second
+# branch would be superseded by a later completion for the first and its
+# reconciliation would never dispatch. head_branch, together with the head
+# repository owner it belongs to, is the resolver's branch identity, so two
+# branches never share a group. Two distinct branches carrying the same commit
+# do not coalesce, which is the intended correction: they are different PR
+# targets. Repeated completions for one target share branch and SHA and still
+# coalesce.
+#
+# cancel-in-progress stays false: a running dispatch must finish every PR it
+# resolved, so only pending duplicates are dropped. The run id is the last
+# fallback so a payload with neither an associated PR nor a head branch and SHA
 # keeps a unique group instead of every such run colliding on one key.
 concurrency:
     group: >-
-        label-pr-review-state-fork-review-followup-${{ github.event.workflow_run.pull_requests[0].number
-        || github.event.workflow_run.head_sha || github.event.workflow_run.id }}
+        label-pr-review-state-fork-review-followup-${{
+          github.event.workflow_run.pull_requests[0].number ||
+          ((github.event.workflow_run.head_branch && github.event.workflow_run.head_sha) &&
+            format('{0}:{1}@{2}',
+              github.event.workflow_run.head_repository.owner.login || 'unknown',
+              github.event.workflow_run.head_branch,
+              github.event.workflow_run.head_sha)) ||
+          github.event.workflow_run.id
+        }}
     cancel-in-progress: false
 
 jobs:
