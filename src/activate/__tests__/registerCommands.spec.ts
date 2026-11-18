@@ -1768,10 +1768,7 @@ describe("openClineInNewTab", () => {
 				dispose: vi.fn(),
 			}
 
-			mockContext = {
-				subscriptions: [],
-				extensionUri: { path: "/mock/ext" },
-			} as unknown as vscode.ExtensionContext
+			mockContext = makeExtensionContext()
 
 			const mockPanel = {
 				webview: { postMessage: vi.fn() },
@@ -1935,10 +1932,7 @@ describe("openClineInNewTab", () => {
 				dispose: vi.fn(),
 			}
 
-			mockContext = {
-				subscriptions: [],
-				extensionUri: { path: "/mock/ext" },
-			} as unknown as vscode.ExtensionContext
+			mockContext = makeExtensionContext()
 
 			const mockPanel = {
 				webview: { postMessage: vi.fn() },
@@ -1963,9 +1957,11 @@ describe("openClineInNewTab", () => {
 				reveal: vi.fn().mockResolvedValue(undefined),
 			} as unknown as vscode.WebviewPanel
 			setPanel(mockTrackedPanel, "tab")
-			;(ClineProvider.getInstanceForView as Mock).mockReturnValue({ postMessageToWebview: vi.fn() })
+			// The provider that owns the tab tracked before this call.
+			const trackedProvider = { postMessageToWebview: vi.fn() }
+			;(ClineProvider.getInstanceForView as Mock).mockReturnValue(trackedProvider)
 
-			await createClineTabPanel({
+			const freshProvider = await createClineTabPanel({
 				context: mockContext,
 				outputChannel: mockOutputChannel,
 				webviewFocusTracker: new WebviewFocusTracker(),
@@ -1973,6 +1969,11 @@ describe("openClineInNewTab", () => {
 
 			expect(mockTrackedPanel.reveal).not.toHaveBeenCalled()
 			expect(vscode.window.createWebviewPanel).toHaveBeenCalledTimes(1)
+			// The creation must hand back the provider it just constructed for the new
+			// panel: returning the tracked provider would send API.startNewTask({ newTab: true })
+			// to the tab that was already there instead of the fresh one.
+			expect(freshProvider).toBeInstanceOf(ClineProvider)
+			expect(freshProvider).not.toBe(trackedProvider)
 		})
 
 		it("cleans up the tracked refs and disposes the provider when initialization fails", async () => {

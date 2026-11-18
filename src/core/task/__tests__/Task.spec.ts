@@ -4412,7 +4412,7 @@ describe("Cline", () => {
 
 				// The deferred initialization settles after the switch, carrying the
 				// provider's pre-switch mode.
-				releaseState({ mode: "ask" } as unknown as ProviderState)
+				releaseState(providerStateWith({ mode: "ask" }))
 
 				// The explicit selection survives the late initialization.
 				expect(await task.getTaskMode()).toBe("architect")
