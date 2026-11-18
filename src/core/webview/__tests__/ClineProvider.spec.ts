@@ -7141,25 +7141,338 @@ describe("ClineProvider", () => {
 				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow(
 					"to re-point 1 live view(s) after deleting 'old-profile'",
 				)
-				// The pin this call still owns came back.
-				expect(provider["viewLocalState"].currentApiConfigName).toBe("old-profile")
-				// The overlay belongs to the sibling refresh and the task belongs to the switch: a
-				// compensation that cannot tell what the new value means may not overwrite either.
+				// The overlay belongs to the sibling refresh and the task belongs to the switch. The pin
+				// and the overlay are one value rather than two, so a pair this call cannot describe is
+				// left alone in both slots: putting the deleted profile's name back on top of a sibling's
+				// overlay is the incoherence, not the fix.
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
 				expect(provider["viewLocalState"].apiConfiguration).toEqual({
 					apiProvider: providerIdentifiers.anthropic,
 					apiKey: "sibling-refresh",
 				})
+				const stateAfterCompensation = await provider.getState({ includeTaskHistory: false })
+				expect(stateAfterCompensation.currentApiConfigName).toBe("keeper-profile")
+				expect(stateAfterCompensation.apiConfiguration.apiKey).toBe("sibling-refresh")
 				expect(taskA.setTaskApiConfigName).toHaveBeenCalledTimes(1)
 				expect(taskA.updateApiConfiguration).toHaveBeenCalledTimes(1)
 				expect(taskB.setTaskApiConfigName).not.toHaveBeenCalled()
 				expect(taskB.updateApiConfiguration).not.toHaveBeenCalled()
-				// The skipped surfaces are named in the log, because a silent skip is how this class of
-				// bug hides elsewhere in this file.
+				// Both slots of the pair are named in the log, including the one that stayed untouched
+				// on this view's own account, because a silent half-restore is how this class of bug hides
+				// elsewhere in this file.
 				expect(logSpy).toHaveBeenCalledWith(
-					expect.stringContaining("skipped restoring apiConfiguration, task sticky profile and handler"),
+					expect.stringContaining(
+						"skipped restoring currentApiConfigName and apiConfiguration as one pair " +
+							"(apiConfiguration moved), task sticky profile and handler",
+					),
+				)
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+		it("restores the task even when restoring this view's pin and overlay fails", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const saveConfigSpy = vi.fn().mockResolvedValue("old-id")
+			// The compensation writes this view's pin and overlay through this method, and the
+			// rejection has to be injected there. The method is private and has no typed
+			// accessor, so the double assertion is the documented way in for the failure.
+			const proto = ClineProvider.prototype as unknown as {
+				_saveViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+			}
+			const realSaveViewLocalState = proto._saveViewLocalStateFromMutation
+			let viewStateWriteShouldFail = false
+			const saveViewSpy = vi
+				.spyOn(proto, "_saveViewLocalStateFromMutation")
+				.mockImplementation(async (values) => {
+					if (viewStateWriteShouldFail) {
+						throw new Error("view state write down")
+					}
+					return realSaveViewLocalState.call(provider, values)
+				})
+			try {
+				const oldProfile: ProviderSettingsEntry = {
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+				provider["viewLocalState"].currentApiConfigName = "old-profile"
+				provider["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				const stickyProfile: { name: string | undefined } = { name: "old-profile" }
+				const task = {
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "task-key",
+					},
+					// Mirrors the real setter, which writes the field back (see the test above).
+					get taskApiConfigName() {
+						return stickyProfile.name
+					},
+					taskId: "provider-task",
+					setTaskApiConfigName: vi.fn((name: string | undefined) => {
+						stickyProfile.name = name
+					}),
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					task as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				// A live sibling still pins the deleted profile, which is what makes the re-pin fail
+				// closed once the replacement's settings turn out to be unreadable.
+				sibling["viewLocalState"].currentApiConfigName = "old-profile"
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					activateProfile: vi.fn().mockResolvedValue({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}),
+					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+					setModeConfig: vi.fn(),
+					saveConfig: saveConfigSpy,
+					// The deleted record reads fine before the delete; the replacement does not read at
+					// all, which is the shape that fails the sibling re-pin closed after the activation
+					// ran. The arm line below flips the interference just before that failure, so it
+					// lands after the activation completed and before the compensation runs.
+					getProfile: vi.fn().mockImplementation(async (params: { name?: string }) => {
+						if (params.name === "keeper-profile") {
+							viewStateWriteShouldFail = true
+							throw new Error("Failed to get profile: storage read down")
+						}
+						return {
+							name: "old-profile",
+							id: "old-id",
+							apiProvider: providerIdentifiers.openrouter,
+							apiKey: "old-key",
+						}
+					}),
+					// The compensation snapshots the manager gate before committing; this double reports
+					// a gate the deletion never moved, so the gated restore legs stay inert here.
+					getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+						currentApiConfigName: "keeper-profile",
+						modeApiConfigs: {},
+					}),
+				}
+				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow(
+					"to re-point 1 live view(s) after deleting 'old-profile'",
+				)
+				// The view-state restore failed on its own and reports it against its own surface.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"failed to restore this view's pin and overlay after the failed deletion of 'old-profile': view state write down",
+					),
+				)
+				// A failed restore of one surface may not cancel the restore of another: the manager
+				// record, the shared selection and the shared settings are already back on the
+				// deleted profile, so the task has to leave the replacement's handler too.
+				expect(saveConfigSpy).toHaveBeenCalledWith(
+					"old-profile",
+					expect.objectContaining({ apiKey: "old-key", id: "old-id" }),
+				)
+				expect(task.setTaskApiConfigName).toHaveBeenLastCalledWith("old-profile")
+				expect(task.updateApiConfiguration).toHaveBeenLastCalledWith({
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "task-key",
+				})
+				// The pin stays where the rejected write left it rather than being reported as back.
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+				// The task leg neither skipped nor failed, so it is not named in either roll-up.
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("skipped restoring"))
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("failed to restore this view's task"))
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				saveViewSpy.mockRestore()
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+		it("leaves a task focused during the sticky-profile write out of the handler rebuild", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const saveConfigSpy = vi.fn().mockResolvedValue("old-id")
+			try {
+				const oldProfile: ProviderSettingsEntry = {
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+				provider["viewLocalState"].currentApiConfigName = "old-profile"
+				provider["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				const stickyA: { name: string | undefined } = { name: "old-profile" }
+				const taskA = {
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "task-a-key",
+					},
+					// Mirrors the real setter, which writes the field back (see the first test above).
+					get taskApiConfigName() {
+						return stickyA.name
+					},
+					taskId: "task-a",
+					setTaskApiConfigName: vi.fn((name: string | undefined) => {
+						stickyA.name = name
+					}),
+					updateApiConfiguration: vi.fn(),
+				}
+				const taskB = {
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "task-b-key",
+					},
+					taskApiConfigName: "b-profile",
+					taskId: "task-b",
+					setTaskApiConfigName: vi.fn(),
+					updateApiConfiguration: vi.fn(),
+				}
+				let currentTask: typeof taskA | typeof taskB = taskA
+				vi.spyOn(provider, "getCurrentTask").mockImplementation(() => {
+					return currentTask as unknown as ReturnType<typeof provider.getCurrentTask>
+				})
+				// Task A is in the task-history store, so the sticky restore really does await a
+				// persistence write, and that await is where a webview navigation can focus task B.
+				const historyItem = {
+					id: "task-a",
+					task: "test task",
+					ts: 1,
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+				provider["taskHistoryStoreInitialized"] = true
+				let focusSwitchArmed = false
+				vi.spyOn(provider, "updateTaskHistory").mockImplementation(async () => {
+					if (focusSwitchArmed) {
+						focusSwitchArmed = false
+						currentTask = taskB
+					}
+					return []
+				})
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				sibling["viewLocalState"].currentApiConfigName = "old-profile"
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					activateProfile: vi.fn().mockResolvedValue({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}),
+					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+					setModeConfig: vi.fn(),
+					saveConfig: saveConfigSpy,
+					// The deleted record reads fine before the delete; the replacement does not read at
+					// all, which is the shape that fails the sibling re-pin closed after the activation
+					// ran. The arm line below flips the interference just before that failure, so it
+					// lands after the activation completed and before the compensation runs.
+					getProfile: vi.fn().mockImplementation(async (params: { name?: string }) => {
+						if (params.name === "keeper-profile") {
+							focusSwitchArmed = true
+							throw new Error("Failed to get profile: storage read down")
+						}
+						return {
+							name: "old-profile",
+							id: "old-id",
+							apiProvider: providerIdentifiers.openrouter,
+							apiKey: "old-key",
+						}
+					}),
+					// The compensation snapshots the manager gate before committing; this double reports
+					// a gate the deletion never moved, so the gated restore legs stay inert here.
+					getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+						currentApiConfigName: "keeper-profile",
+						modeApiConfigs: {},
+					}),
+				}
+				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow(
+					"to re-point 1 live view(s) after deleting 'old-profile'",
+				)
+				// Task A's sticky profile went back while A was still the focused task.
+				expect(taskA.setTaskApiConfigName).toHaveBeenLastCalledWith("old-profile")
+				// The history write above is an await, and the webview focused task B during it. The
+				// rebuild that follows it is a write like every other one in this path, so it is
+				// re-checked after the await: task B keeps its own handler and its own sticky name
+				// instead of being rebuilt with task A's settings.
+				expect(taskA.updateApiConfiguration).toHaveBeenCalledTimes(1)
+				expect(taskA.updateApiConfiguration).toHaveBeenLastCalledWith({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				})
+				expect(taskB.updateApiConfiguration).not.toHaveBeenCalled()
+				expect(taskB.setTaskApiConfigName).not.toHaveBeenCalled()
+				// The skip is named, and it names only the surface that actually moved.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("skipped restoring task api handler on this view"),
 				)
 				expect(logSpy).not.toHaveBeenCalledWith(
-					expect.stringContaining("skipped restoring currentApiConfigName"),
+					expect.stringContaining("currentApiConfigName and apiConfiguration"),
 				)
 				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {

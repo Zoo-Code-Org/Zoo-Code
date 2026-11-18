@@ -4124,25 +4124,46 @@ export class ClineProvider
 			// after the activation completed would otherwise leave this view pinned to the
 			// replacement with the restored deleted profile's settings underneath it. Same
 			// compare-before-write rule the durable pins follow: write back only while this view and
-			// this task still hold what this call wrote, and name in the log whatever another view or
-			// a task switch moved under us.
+			// this task still hold what this call wrote, name in the log whatever another view or a
+			// task switch moved under us, and give every surface its own error boundary so a failed
+			// restore of one cannot cancel the restore of another.
 			if (activatedReplacement) {
+				const movedKeys: string[] = []
+				// The pin and the overlay are one value rather than two: getState merges the overlay over
+				// the shared store under whatever name this view's buffer holds, and createTask starts
+				// a task from that pair. A name carries no information about the content underneath it,
+				// so the pair goes back together only while BOTH slots still hold what this call wrote.
+				// If either slot moved, the content this view holds now is a pair this call cannot
+				// describe, and both slots are left alone instead of pairing one writer's name with
+				// another writer's settings.
+				const pinMoved = this.viewLocalState.currentApiConfigName !== profileToActivate
+				const overlayMoved = this.viewLocalState.apiConfiguration !== undefined
+				if (!pinMoved && !overlayMoved) {
+					try {
+						await this._saveViewLocalStateFromMutation({
+							currentApiConfigName: previousViewPin,
+							apiConfiguration: previousViewOverlay,
+						})
+					} catch (viewStateRestoreError) {
+						this.log(
+							`[deleteProviderProfile] failed to restore this view's pin and overlay after the failed ` +
+								`deletion of '${profileToDelete.name}': ${viewStateRestoreError instanceof Error ? viewStateRestoreError.message : String(viewStateRestoreError)}`,
+						)
+					}
+				} else {
+					const movedSlots = [
+						pinMoved ? "currentApiConfigName" : null,
+						overlayMoved ? "apiConfiguration" : null,
+					]
+						.filter((key): key is string => key !== null)
+						.join(" and ")
+					movedKeys.push(`currentApiConfigName and apiConfiguration as one pair (${movedSlots} moved)`)
+				}
+				// The task half gets its own boundary: a rejected view-state write above must not leave the
+				// task running on the replacement's handler and sticky profile once the manager record,
+				// the profile list, the shared selection and the shared settings have gone back to the
+				// deleted profile.
 				try {
-					const movedKeys: string[] = []
-					const liveValues: Partial<RooCodeSettings> & Partial<ExtensionState> = {}
-					if (this.viewLocalState.currentApiConfigName === profileToActivate) {
-						liveValues.currentApiConfigName = previousViewPin
-					} else {
-						movedKeys.push("currentApiConfigName")
-					}
-					if (this.viewLocalState.apiConfiguration === undefined) {
-						liveValues.apiConfiguration = previousViewOverlay
-					} else {
-						movedKeys.push("apiConfiguration")
-					}
-					if (Object.keys(liveValues).length > 0) {
-						await this._saveViewLocalStateFromMutation(liveValues)
-					}
 					const taskAfterFailure = this.getCurrentTask()
 					if (
 						taskBeforeActivationId !== undefined &&
@@ -4154,8 +4175,24 @@ export class ClineProvider
 							await this.persistStickyProviderProfileToCurrentTask(previousTaskStickyName, {
 								expectedCurrentTaskId: taskBeforeActivationId,
 							})
-							if (previousTaskSettings) {
-								this.updateTaskApiHandlerIfNeeded(previousTaskSettings, { forceRebuild: true })
+							// That restore awaits task-history persistence, so the webview can focus another task
+							// while it is in flight. The handler rebuild is a write like every other one in this
+							// method: re-read the current task after the await and rebuild only the task this call
+							// moved, instead of rebuilding whatever happens to be current when the await returns.
+							const taskAfterSticky = this.getCurrentTask()
+							if (
+								taskAfterSticky !== null &&
+								taskAfterSticky !== undefined &&
+								taskAfterSticky.taskId === taskBeforeActivationId
+							) {
+								if (previousTaskSettings) {
+									this.updateTaskApiHandlerIfNeeded(previousTaskSettings, {
+										forceRebuild: true,
+										expectedCurrentTaskId: taskBeforeActivationId,
+									})
+								}
+							} else {
+								movedKeys.push("task api handler")
 							}
 						} else {
 							movedKeys.push("task sticky profile and handler")
@@ -4163,17 +4200,17 @@ export class ClineProvider
 					} else if (taskBeforeActivationId !== undefined) {
 						movedKeys.push("task sticky profile and handler")
 					}
-					if (movedKeys.length > 0) {
-						this.log(
-							`[deleteProviderProfile] skipped restoring ${movedKeys.join(", ")} on this view after the failed ` +
-								`deletion of '${profileToDelete.name}': another view or a task switch moved them under us, so ` +
-								`this call cannot tell which content is current.`,
-						)
-					}
-				} catch (restoreError) {
+				} catch (taskRestoreError) {
 					this.log(
-						`[deleteProviderProfile] failed to restore this view's live pin and task after the failed ` +
-							`deletion of '${profileToDelete.name}': ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+						`[deleteProviderProfile] failed to restore this view's task after the failed ` +
+							`deletion of '${profileToDelete.name}': ${taskRestoreError instanceof Error ? taskRestoreError.message : String(taskRestoreError)}`,
+					)
+				}
+				if (movedKeys.length > 0) {
+					this.log(
+						`[deleteProviderProfile] skipped restoring ${movedKeys.join(", ")} on this view after the failed ` +
+							`deletion of '${profileToDelete.name}': another view or a task switch moved them under us, so ` +
+							`this call cannot tell which content is current.`,
 					)
 				}
 			}
