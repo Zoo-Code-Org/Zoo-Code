@@ -41,8 +41,24 @@ on:
     # writes (issue #2046). The privileged follow-up for those runs lives in
     # label-pr-review-state-fork-review-followup.yml: GitHub rejects a workflow
     # that lists itself in workflow_run.workflows (issue #2086).
+    #
+    # A workflow belongs in this list only when its completion can change the
+    # answer for a required status check, because the reconcile below reads
+    # only the required checks from the branch ruleset and never inspects which
+    # workflow completed, its conclusion, or its outputs. "Code QA Roo Code"
+    # publishes check-translations, compile, knip and both platform-unit-test
+    # rows; "E2E Tests (Mocked)" publishes e2e-mock. Those six are the entire
+    # required set on main, so no completion of any other workflow can change a
+    # label this workflow writes.
+    #
+    # "Webview Visual Regression" was in this list but no workflow has that
+    # display name: the visual workflow is "Visual Regression"
+    # (visual-regression.yml), so the entry never matched anything and only
+    # looked like coverage. "CodeQL Advanced" does run, but it publishes none of
+    # the six required checks, so each of its completions started a full
+    # reconciliation that could only recompute the labels already written.
     workflow_run:
-        workflows: ["Code QA Roo Code", "E2E Tests (Mocked)", "Webview Visual Regression", "CodeQL Advanced"]
+        workflows: ["Code QA Roo Code", "E2E Tests (Mocked)"]
         types: [completed]
 
 permissions:
@@ -94,9 +110,22 @@ concurrency:
 jobs:
     resolve:
         name: Zoo Code / resolve PRs to reconcile
+        # Loop guard (self-triggered label writes): the reconciliation writes the
+        # labels it also listens for, so every mutating run used to start one
+        # more run through the labeled/unlabeled pull_request_target events it
+        # caused itself. Reconciliation is idempotent, so a run woken only by
+        # this workflow's own label write would recompute the state it just
+        # wrote and write it again; skipping it breaks that loop. Only label
+        # events authored by github-actions[bot] for a label this workflow
+        # manages are skipped: a human edit to one of those labels, and any
+        # other bot or workflow label write, still reconciles.
         if: >-
-            github.event_name != 'issue_comment' ||
-            (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')
+            (github.event_name != 'issue_comment' ||
+            (github.event.issue.pull_request && github.event.comment.user.login == 'coderabbitai[bot]')) &&
+            !(github.event_name == 'pull_request_target' &&
+            contains(fromJSON('["labeled", "unlabeled"]'), github.event.action) &&
+            github.event.sender.login == 'github-actions[bot]' &&
+            contains(fromJSON('["awaiting-author", "awaiting-coderabbit", "awaiting-ready", "awaiting-maintainer", "awaiting-review", "coderabbit-review-active", "community-approved", "has-conflicts", "stale-inactive", "stale-awaiting-author"]'), github.event.label.name))
         runs-on: ubuntu-latest
         outputs:
             pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}

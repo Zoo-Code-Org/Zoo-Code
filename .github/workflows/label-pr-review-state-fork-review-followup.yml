@@ -20,10 +20,24 @@ permissions:
     actions: write
     pull-requests: read
 
-# Each completed run gets its own group: one run can resolve several PRs, and
-# a shared key would let an unrelated completion supersede queued dispatches.
+# Coalesce by target, not by triggering run (2026-11-18 storm: this workflow
+# started 243 runs in 78 minutes and dispatched 73 of them). Keying per
+# triggering run id gave every completion its own group, so nothing ever
+# coalesced: the six required checks of one PR all completing at the same head
+# meant six queued dispatches of the same work. GitHub keeps at most one
+# running plus one pending run per group, so keying by the PR the completed run
+# evaluated (or, for fork runs whose pull_requests GitHub leaves empty, by the
+# head SHA, which resolves to the same PR set) collapses a burst into a single
+# dispatch of the freshest state. Two PRs never share a PR number, and two
+# distinct commits never share a head SHA, so an unrelated PR still keeps its
+# own group and its queued dispatch is never superseded. cancel-in-progress
+# stays false: a running dispatch must finish every PR it resolved. The run id
+# stays as the fallback so a payload with neither a PR number nor a head SHA
+# keeps a unique group instead of every such run colliding on one key.
 concurrency:
-    group: label-pr-review-state-fork-review-followup-${{ github.event.workflow_run.id }}
+    group: >-
+        label-pr-review-state-fork-review-followup-${{ github.event.workflow_run.pull_requests[0].number
+        || github.event.workflow_run.head_sha || github.event.workflow_run.id }}
     cancel-in-progress: false
 
 jobs:
