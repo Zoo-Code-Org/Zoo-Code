@@ -1144,6 +1144,15 @@ export class ClineProvider
 			// Only a name that moved inside the load window needs a re-resolve: a pin that already
 			// held this value before the load started is stale and the persisted record stays
 			// authoritative for both the name and its settings.
+			// R2 (issue 2488, step 1): this branch resolves settings for a name read from this view's own
+			// buffer and then writes that same buffer, so the copy it compares against is the buffer's own
+			// selection taken before the lookup - not anything the manager reports. A profile or mode the
+			// user picks while the lookup waits is a newer edit on this layer and has to survive.
+			const selectionBeforeReapply = {
+				currentApiConfigName: this.viewLocalState.currentApiConfigName,
+				apiConfiguration: this.viewLocalState.apiConfiguration,
+				mode: this.viewLocalState.mode,
+			}
 			const reappliedProfileName =
 				!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName) &&
 				typeof postLoadBuffer.currentApiConfigName === "string" &&
@@ -1165,6 +1174,23 @@ export class ClineProvider
 						`[loadViewState] Unable to resolve API profile '${reappliedProfileName}' reapplied during the load for viewId ${this.viewId}: ${error instanceof Error ? error.message : String(error)}`,
 					)
 					delete mergedState.apiConfiguration
+				}
+
+				// R3: re-read that same layer before committing to it. The view-id check below only catches a
+				// replaced view; it does not catch a changed selection inside the same view, which is what
+				// can happen while the lookup above awaits. A changed selection means the settings resolved
+				// here are already superseded, so they are dropped and the newer choice stands.
+				if (
+					!deepEqual(selectionBeforeReapply, {
+						currentApiConfigName: this.viewLocalState.currentApiConfigName,
+						apiConfiguration: this.viewLocalState.apiConfiguration,
+						mode: this.viewLocalState.mode,
+					})
+				) {
+					this.log(
+						`[loadViewState] Discarding the re-resolved settings for profile '${reappliedProfileName}': currentApiConfigName, apiConfiguration and mode moved on this view while the lookup was in flight, so the newer selection stands`,
+					)
+					return
 				}
 
 				if (this.viewStateId !== loadedForViewId) {
@@ -3494,11 +3520,32 @@ export class ClineProvider
 		// the replacement id - getModeConfigId prefers the cache whenever that profile exists, which the
 		// record restore above just made true again.
 		const previousLocalModeConfigs = new Map(this.localModeConfigIds)
-		// What the activation below writes into that gate: the replacement’s name, and its id as
-		// the profile list records it (the mode mapping is keyed by id). The restore legs compare
-		// the manager’s current report against these, and only roll back while they still match.
+		// What the activation below writes into the selection half of that gate: the replacement’s name.
+		// The selection restore compares the manager’s current report against this and only rolls back
+		// while it still matches. The mapping half is recorded per key below, because the store re-points
+		// mappings one mode at a time and a sibling window can re-point any one of them.
 		const activatedManagerGateName = profileToActivate
-		const activatedManagerGateId = previousEntries.find((entry) => entry.name === profileToActivate)?.id
+
+		// Compare-and-set bookkeeping for the mode mapping (issue 2488, step 1). Two things have to be
+		// recorded before any compensation runs: which mode mappings this call itself moved, and the
+		// value it left in each one. The compensation may only roll back keys in that set - a mapping a
+		// sibling window pointed at the replacement in the meantime is not ours to clear - and only while
+		// the layer still reports the value this call wrote.
+		const writtenModeConfigs = new Map<string, string | undefined>()
+		const writtenLocalModeConfigs = new Map<string, string | undefined>()
+		const previousManagerModeConfigs = previousManagerGate.modeApiConfigs ?? {}
+		const recordModeWritesAfterGateWrite = async (): Promise<void> => {
+			const writtenGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
+			const writtenManagerModeConfigs = writtenGate.modeApiConfigs ?? {}
+			for (const mode of new Set([
+				...Object.keys(previousManagerModeConfigs),
+				...Object.keys(writtenManagerModeConfigs),
+			])) {
+				if (writtenManagerModeConfigs[mode] !== previousManagerModeConfigs[mode]) {
+					writtenModeConfigs.set(mode, writtenManagerModeConfigs[mode])
+				}
+			}
+		}
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
@@ -3518,6 +3565,21 @@ export class ClineProvider
 				`deleteProviderProfile: settings for '${profileToDelete.name}' were not found; pruning the stale list entry only`,
 			)
 		}
+		// The delete is the first write that can move the manager gate: deleting the profile the store
+		// selects re-points the selection and the mappings onto a surviving profile. Record what it moved
+		// from the store's own report, immediately after it committed.
+		await recordModeWritesAfterGateWrite()
+
+		// This window's cached choice is a second layer, and the deletion writes it too - through the
+		// activation path below, which maps the current mode onto the replacement. Wrap the seam that
+		// writes it for the length of the forward phase so every value this call leaves in the cache is
+		// recorded at the moment it is written: a snapshot taken afterwards would read a value our own
+		// half-finished activation left there and mistake it for someone else's write.
+		const seamSetModeConfig = this.setModeConfig
+		this.setModeConfig = async (mode: Mode, id: string): Promise<void> => {
+			await seamSetModeConfig.call(this, mode, id)
+			writtenLocalModeConfigs.set(mode, id)
+		}
 
 		try {
 			// Re-point any persisted view pin that referenced the deleted profile so views
@@ -3533,7 +3595,13 @@ export class ClineProvider
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings
 				// behind in both.
-				await this.activateProviderProfile({ name: profileToActivate })
+				try {
+					await this.activateProviderProfile({ name: profileToActivate })
+				} finally {
+					// Record whether or not the activation completed: a half-finished activation still moved
+					// the mappings it wrote, and those are this call's writes to roll back.
+					await recordModeWritesAfterGateWrite()
+				}
 
 				// The return below would otherwise skip the sibling re-pin further down:
 				// the activation's pinned-name refresh only selects siblings pinned to
@@ -3627,8 +3695,18 @@ export class ClineProvider
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 
+			// Last look before the step that can fail: every write this call makes to the gate has now
+			// committed, so this is the value its own writes left behind. Whatever the compensation finds
+			// different was written after this point, by someone else.
+			await recordModeWritesAfterGateWrite()
+			// The forward phase is over: hand the seam back before the compensation starts writing through
+			// it, so its own restores are not mistaken for forward writes.
+			this.setModeConfig = seamSetModeConfig
+
 			await this.postStateToWebview()
 		} catch (error) {
+			// The forward phase ended early; hand the seam back before anything is written back.
+			this.setModeConfig = seamSetModeConfig
 			// The manager delete committed but a later write failed: restore the
 			// deleted record first, then the shared metadata, selection, and shared
 			// settings the deletion had rewritten, and finally merge the affected
@@ -3682,27 +3760,52 @@ export class ClineProvider
 					})
 				}
 				const previousModeConfigs = previousManagerGate.modeApiConfigs ?? {}
-				const currentModeConfigs = currentManagerGate.modeApiConfigs ?? {}
-				for (const mode of new Set([...Object.keys(previousModeConfigs), ...Object.keys(currentModeConfigs)])) {
+				// Only the mappings recorded above as moved by this call are candidates, and each one is
+				// re-read from the store immediately before its own restore. The bulk snapshot above is too
+				// old to decide ownership for a single key: the record and list restores awaited between that
+				// read and this write give a sibling window room to re-point the mode onto a third profile.
+				for (const [mode, writtenModeConfigId] of writtenModeConfigs) {
 					const previousModeConfigId = previousModeConfigs[mode]
-					const currentModeConfigId = currentModeConfigs[mode]
-					if (
-						activatedManagerGateId !== undefined &&
-						currentModeConfigId === activatedManagerGateId &&
-						previousModeConfigId !== currentModeConfigId
-					) {
-						await this.providerSettingsManager.setModeConfig(mode as Mode, previousModeConfigId)
-						// Same leg, second map. Without this the cache still names the replacement and the
-						// next read returns it although the shared mapping is back. A mode this window never
-						// mapped is cleared rather than replayed, so it falls back to the window snapshot the
-						// way it did before the deletion.
-						const previousLocalModeConfigId = previousLocalModeConfigs.get(mode)
-						if (previousLocalModeConfigId === undefined) {
-							this.localModeConfigIds.delete(mode)
-						} else {
-							this.localModeConfigIds.set(mode, previousLocalModeConfigId)
-						}
+					if (previousModeConfigId === writtenModeConfigId) {
+						continue
 					}
+					let currentModeConfigId: string | undefined
+					let mappingUnconfirmed = false
+					try {
+						currentModeConfigId = await this.providerSettingsManager.getModeConfigId(mode as Mode)
+					} catch (readError) {
+						mappingUnconfirmed = true
+						this.log(
+							`[deleteProviderProfile] left the mapping for mode '${mode}' alone: it could not be re-read, so its current owner is unconfirmed: ${
+								readError instanceof Error ? readError.message : String(readError)
+							}`,
+						)
+					}
+					if (mappingUnconfirmed) {
+						continue
+					}
+					if (currentModeConfigId !== writtenModeConfigId) {
+						this.log(
+							`[deleteProviderProfile] skipped restoring the mapping for mode '${mode}': the store no longer holds what this deletion wrote (${writtenModeConfigId ?? "no mapping"} -> ${currentModeConfigId ?? "no mapping"}), so a later write owns that mapping`,
+						)
+						continue
+					}
+					const previousLocalModeConfigId = previousLocalModeConfigs.get(mode)
+					const writtenLocalModeConfigId = writtenLocalModeConfigs.get(mode)
+					if (this.localModeConfigIds.get(mode) === writtenLocalModeConfigId) {
+						// Both layers still hold what this deletion wrote, so both roll back together through
+						// the seam the forward write used: the manager write plus this window's mirror. A mode
+						// this window never mapped is cleared rather than replayed, so it falls back to the
+						// window snapshot the way it did before the deletion.
+						await this.restoreModeConfig(mode as Mode, previousModeConfigId, previousLocalModeConfigId)
+						continue
+					}
+					// Only the shared leg is still ours: this window has cached another choice since its own
+					// write, and rolling that back would undo a newer decision on the window layer.
+					this.log(
+						`[deleteProviderProfile] skipped restoring this window's cached mapping for mode '${mode}': the cache no longer holds what this deletion wrote, so this window has since chosen another profile`,
+					)
+					await this.providerSettingsManager.setModeConfig(mode as Mode, previousModeConfigId)
 				}
 			} catch (restoreError) {
 				this.log(

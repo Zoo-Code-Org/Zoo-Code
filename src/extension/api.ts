@@ -3,6 +3,7 @@ import fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
 
+import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 
@@ -712,6 +713,29 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// validates before storing, so a rejected save leaves every domain
 		// untouched and no rollback is needed.
 		await manager.saveConfig(savedProfileName, values)
+		// R2 (issue 2488, step 1): the record restore below may only undo what this call wrote, so record
+		// from the same layer the value this save left in the store. Neither the pre-save copy nor the
+		// caller's payload is that value - the store validates and merges what it is handed - so the only
+		// faithful record of our own write is the one the store reports back immediately after it.
+		let writtenRecordSettings: ProviderSettings | undefined
+		let writtenRecordAbsent = false
+		let writtenRecordUnconfirmed = false
+		try {
+			if (await manager.hasConfig(savedProfileName)) {
+				const {
+					name: _writtenName,
+					id: _writtenId,
+					...writtenSettings
+				} = await manager.getProfile({
+					name: savedProfileName,
+				})
+				writtenRecordSettings = writtenSettings as ProviderSettings
+			} else {
+				writtenRecordAbsent = true
+			}
+		} catch {
+			writtenRecordUnconfirmed = true
+		}
 		try {
 			await this.sidebarProvider.setValues(
 				// The caller's payload is another snapshot of machine-local state: writing it forward
@@ -740,16 +764,56 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				const { name: _previousName, id: _previousId, ...rest } = previousRecord
 				previousSettings = rest
 			}
+			// R3 (issue 2488, step 1): re-read the record from the same layer and compare it with what this
+			// call's own save left there. A sibling save that landed while this call was refreshing siblings
+			// owns the record now: replaying our snapshot over it would drop their accepted profile, and on
+			// the branch below it would delete a record they updated. A record that cannot be re-read is
+			// unconfirmed, so it is left alone rather than written blind.
+			let currentRecordSettings: ProviderSettings | undefined
+			let currentRecordAbsent = false
+			let currentRecordUnconfirmed = false
 			try {
-				if (recordExisted && previousSettings) {
-					await manager.saveConfig(savedProfileName, previousSettings)
+				if (await manager.hasConfig(savedProfileName)) {
+					const {
+						name: _currentName,
+						id: _currentId,
+						...currentSettings
+					} = await manager.getProfile({
+						name: savedProfileName,
+					})
+					currentRecordSettings = currentSettings as ProviderSettings
 				} else {
-					await manager.deleteConfig(savedProfileName)
+					currentRecordAbsent = true
 				}
-			} catch (restoreError) {
+			} catch {
+				currentRecordUnconfirmed = true
+			}
+			const recordStillOurs =
+				!writtenRecordUnconfirmed &&
+				!currentRecordUnconfirmed &&
+				(currentRecordAbsent
+					? writtenRecordAbsent
+					: writtenRecordSettings !== undefined && deepEqual(currentRecordSettings, writtenRecordSettings))
+			if (recordStillOurs) {
+				try {
+					if (recordExisted && previousSettings) {
+						await manager.saveConfig(savedProfileName, previousSettings)
+					} else {
+						await manager.deleteConfig(savedProfileName)
+					}
+				} catch (restoreError) {
+					this.log(
+						`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			} else if (writtenRecordUnconfirmed || currentRecordUnconfirmed) {
 				this.log(
-					`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					`[setConfiguration] left the profile record '${savedProfileName}' alone: the store could not be re-read, so its current owner is unconfirmed`,
+				)
+			} else {
+				this.log(
+					`[setConfiguration] skipped restoring the profile record '${savedProfileName}': the store no longer holds what this call saved, so a later write owns that record`,
 				)
 			}
 			const previousProfileName = previousValues.currentApiConfigName || "default"

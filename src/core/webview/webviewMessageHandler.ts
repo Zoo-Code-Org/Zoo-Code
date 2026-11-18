@@ -3,6 +3,7 @@ import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
+import deepEqual from "fast-deep-equal"
 import pWaitFor from "p-wait-for"
 import * as vscode from "vscode"
 
@@ -660,6 +661,12 @@ export const webviewMessageHandler = async (
 					const currentState = await provider.getState()
 					const currentConfigName = currentState.currentApiConfigName
 
+					// R2 (issue 2488, step 1): the repair below writes this view's own selection layer, so capture
+					// that layer before the existence lookups below await. Comparing against the manager or the
+					// global selection would be comparing a different layer.
+					const pinnedProfileNameBeforeRepair = provider.pinnedProfileName
+					const bufferedApiConfigurationBeforeRepair = provider["viewLocalState"]?.apiConfiguration
+
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
 							// The merged name (which may be this view's durable pin) no longer
@@ -672,7 +679,28 @@ export const webviewMessageHandler = async (
 								(await provider.providerSettingsManager.hasConfig(globalConfigName))
 							const name = listApiConfig[0]?.name
 
-							if (globalStillValid && globalConfigName) {
+							// R3 (issue 2488, step 1): re-read that same layer now that the lookups above have settled. A
+							// profile activated in this window while they were in flight supersedes the missing profile just
+							// classified, and repairing on top of it would clear the newer selection's buffered configuration
+							// and pin this view onto a choice it no longer holds. The repair is skipped then; when the
+							// selection is unchanged it runs exactly as it did before.
+							const selectionSupersededDuringLookup = !deepEqual(
+								{
+									pinnedProfileName: pinnedProfileNameBeforeRepair,
+									apiConfiguration: bufferedApiConfigurationBeforeRepair,
+								},
+								{
+									pinnedProfileName: provider.pinnedProfileName,
+									apiConfiguration: provider["viewLocalState"]?.apiConfiguration,
+								},
+							)
+							if (selectionSupersededDuringLookup) {
+								console.log(
+									`[webviewMessageHandler] Skipping the launch repair for profile '${currentConfigName}': this view's currentApiConfigName or buffered apiConfiguration changed while the existence lookup was in flight, so the newer selection stands`,
+								)
+							}
+
+							if (!selectionSupersededDuringLookup && globalStillValid && globalConfigName) {
 								// Re-pin this view to the still-valid shared global selection (not the
 								// first listed profile) so the view adopts the shared choice; the
 								// global selection itself is left untouched.
@@ -688,7 +716,7 @@ export const webviewMessageHandler = async (
 								await provider.postStateToWebview()
 								// Fall through: refresh listApiConfigMeta and post listApiConfig
 								// to this webview below.
-							} else {
+							} else if (!selectionSupersededDuringLookup) {
 								// Current config name not valid, get first config in list.
 								await updateGlobalState("currentApiConfigName", name)
 
