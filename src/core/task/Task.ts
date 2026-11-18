@@ -159,6 +159,7 @@ const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
 // Streamed deltas arrive far faster than the webview can usefully re-render a growing message
 // (tables and code fences reflow on nearly every update), so partial updates post at most this often.
 const PARTIAL_MESSAGE_UPDATE_INTERVAL_MS = 120
+
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
 // hung endpoint must not stall streaming, condense, or context-window
@@ -510,6 +511,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private telemetryMessageCountsBaseline: { user: number; assistant: number } = { user: 0, assistant: 0 }
 	private abortPromise?: Promise<void>
 	private disposalPromise?: Promise<void>
+	// Settlement waits that a cancellation or disposal must release: a submission parked on
+	// the profile-mutation promise has no other way to learn that the task is going away.
+	private settlementWakes = new Set<() => void>()
 	private diffReversionPromise: Promise<void> = Promise.resolve()
 
 	// Checkpoints
@@ -916,10 +920,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async initializeTaskMode(provider: ClineProvider): Promise<void> {
 		try {
 			const state = await provider.getState()
-			this._taskMode = state?.mode || defaultModeSlug
+
+			// Avoid clobbering a newer value that may have been set while awaiting provider state
+			// (e.g., a message-selected mode switch issued right after task creation).
+			if (this._taskMode === undefined) {
+				this._taskMode = state?.mode || defaultModeSlug
+			}
 		} catch (error) {
-			// If there's an error getting state, use the default mode
-			this._taskMode = defaultModeSlug
+			// If there's an error getting state, use the default mode (unless a newer value was set).
+			if (this._taskMode === undefined) {
+				this._taskMode = defaultModeSlug
+			}
 			// Use the provider's log method for better error visibility
 			const errorMessage = `Failed to initialize task mode: ${error instanceof Error ? error.message : String(error)}`
 			provider.log(errorMessage)
@@ -2637,8 +2648,75 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			if (provider) {
 				if (mode) {
-					await provider.setMode(mode)
-					this._taskMode = mode
+					// Route through the shared mode-switch handler so the switch is
+					// validated and recorded like any other mode change (task history,
+					// TaskModeSwitched, and — when this is the focused task — the view's
+					// durable mode pin + ModeChanged broadcast). The handler writes this
+					// task's mode only after validation and persistence, so an unknown
+					// slug leaves the task mode untouched instead of recording a bad one.
+					// A mode-switch failure (e.g. a task-history write failure) must not
+					// swallow the submitted message: log it locally and continue delivery.
+					// Let the constructor-started mode initialization settle first: its
+					// deferred provider-state read would otherwise resolve after the switch
+					// and clobber the explicitly selected mode with the pre-switch value.
+					try {
+						await this.waitForModeInitialization()
+						await provider.handleModeSwitch(mode, this)
+						// handleModeSwitch resolves without applying the switch for an
+						// unknown slug or an aborted/timed-out mutation; the task keeps
+						// its previous mode while the message below is delivered in the
+						// old mode, so leave a trace when the requested mode is not the
+						// task's mode after the call.
+						if (this._taskMode !== mode) {
+							console.warn(
+								`[Task#submitUserMessage] Mode switch to ${mode} was not applied (taskId=${this.taskId})`,
+							)
+						}
+					} catch (error) {
+						console.error(
+							`[Task#submitUserMessage] Mode switch to ${mode} failed (taskId=${this.taskId}):`,
+							error,
+						)
+						// A timed-out switch keeps its run-to-completion mutation queued and can still
+						// change this task's mode and profile. Wait for it to settle before delivering
+						// the message, or message processing runs against state the switch moves later.
+						// The wait must answer to cancellation as well: an abort during it leaves the queued
+						// mutation free to move this task after the message was already handed to processing.
+						// Disposal must answer too: a teardown raises the cancellation counter without
+						// emitting an abort, so a submission parked here after one would never come back.
+						const settleWait = provider.awaitProfileMutationSettled?.()
+						if (settleWait) {
+							// A sentinel resolution rather than a rejection keeps the never-settling mutation from
+							// surfacing as an unhandled rejection once the abort has won the race.
+							const generationAtEntry = this.cancellationGeneration
+							const abortWatch = new Promise<"aborted">((resolve) => {
+								const noteAbort = () => {
+									resolve("aborted")
+								}
+								if (this.abortPromise || this.cancellationGeneration !== generationAtEntry) {
+									resolve("aborted")
+									return
+								}
+								this.once(RooCodeEventName.TaskAborted, noteAbort)
+								// Disposal gets its own wake too: requestDispose raises the cancellation counter but
+								// emits no abort event, so registering for TaskAborted alone would park this wait.
+								this.settlementWakes.add(noteAbort)
+								// The abort can land between the check above and the subscription, in which case the
+								// event has already fired and would never wake this wait. Close that window.
+								if (this.abortPromise || this.cancellationGeneration !== generationAtEntry) {
+									this.off(RooCodeEventName.TaskAborted, noteAbort)
+									this.settlementWakes.delete(noteAbort)
+									resolve("aborted")
+								}
+							})
+							if ((await Promise.race([settleWait, abortWatch])) === "aborted") {
+								console.error(
+									`[Task#submitUserMessage] Cancelled while waiting for the profile mutation to settle (taskId=${this.taskId}): the message is not delivered because the queued switch may still move this task.`,
+								)
+								return
+							}
+						}
+					}
 				}
 
 				if (providerProfile) {
@@ -3626,6 +3704,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// task is gone.
 		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
+		// Wake any submission parked on the profile-mutation settlement watch. Disposal
+		// raises the counter above but emits no abort event, and disposeOnce drops every
+		// listener moments later, so a wait that subscribed only to TaskAborted would stay
+		// pending on a mutation that never settles.
+		for (const wake of this.settlementWakes) wake()
+		this.settlementWakes.clear()
 	}
 
 	private driveRunEvent(event: RunEvent): void {
@@ -4372,7 +4456,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// under the canonical name slip past a name comparison. The first call wins.
 										const idAlreadyUsed = this.assistantMessageContent.some(
 											(entry) =>
-												// Stryker disable next-line ConditionalExpression: equivalent mutant, only tool_use and mcp_tool_use entries carry an id, so the type check cannot change entry.id === event.id
 												(entry.type === "tool_use" || entry.type === "mcp_tool_use") &&
 												(entry as { id?: string }).id === event.id,
 										)
@@ -4425,7 +4508,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										// keep the deprecated single-entry-per-ID lookup.
 										let streamingKey: string | undefined
 
-										// Stryker disable next-line ConditionalExpression: equivalent mutant, event.name is always a string here, so the legacy nameless branch is unreachable
 										if (event.name !== undefined) {
 											streamingKey = NativeToolCallParser.makeStreamingKey(event.id, event.name)
 										} else {
@@ -4442,7 +4524,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										}
 
 										const partialToolUse =
-											// Stryker disable next-line ConditionalExpression: equivalent mutant, streamingKey is always a string here (makeStreamingKey), so the null side is unreachable
 											streamingKey === undefined
 												? null
 												: NativeToolCallParser.processStreamingChunk(
@@ -4451,7 +4532,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4870,7 +4950,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					if (event.type === "tool_call_end") {
 						// Create compound key for deduplication (same pattern as streaming handler).
 						// End events carry the tool name; fall back to the id for events that don't.
-						// Stryker disable next-line LogicalOperator: equivalent mutant, finalizeRawChunks emits end events with a string name, so the ?? event.id fallback is unreachable
+
 						let eventName = event.name ?? event.id
 						let dedupKey = NativeToolCallParser.makeStreamingKey(event.id, eventName)
 
@@ -4887,13 +4967,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
 								nativeToolCallParserScope,
 							)
-							// Stryker disable next-line ConditionalExpression: unreachable defensive region — getStreamingToolCallById can only resolve when the both-miss case above is reachable, which the raw-chunk pipeline cannot produce (see the directive there).
 							if (resolved) {
 								eventName = resolved.name
 								dedupKey = NativeToolCallParser.makeStreamingKey(resolved.id, resolved.name)

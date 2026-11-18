@@ -77,6 +77,7 @@ const ModesView = () => {
 		setCustomInstructions,
 		customModes,
 		mcpServers,
+		viewStateLoaded,
 	} = useExtensionState()
 
 	// Use a local state to track the visually active mode
@@ -611,6 +612,17 @@ const ModesView = () => {
 			promptMode: modeSlug,
 			customPrompt: updatedPrompt,
 		})
+	}
+
+	if (viewStateLoaded === false) {
+		return (
+			<div data-testid="modes-view-loading-skeleton" className="p-4" aria-busy="true">
+				<div className="mb-4 h-7 w-24 animate-pulse rounded bg-vscode-input-background" />
+				<div className="mb-3 h-8 w-full animate-pulse rounded bg-vscode-input-background" />
+				<div className="mb-4 h-16 w-full animate-pulse rounded bg-vscode-input-background" />
+				<div className="mb-4 h-16 w-full animate-pulse rounded bg-vscode-input-background" />
+			</div>
+		)
 	}
 
 	return (

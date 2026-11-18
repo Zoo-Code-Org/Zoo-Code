@@ -745,6 +745,7 @@ export interface WebviewMessage {
 		| "themeFixtureProbeResponse"
 		| "diagnosticsResponse"
 	text?: string
+	viewStateId?: string
 	taskId?: string
 	editedMessageContent?: string
 	tab?: "settings" | "history" | "mcp" | "modes" | "chat" | "marketplace" | "cloud"
