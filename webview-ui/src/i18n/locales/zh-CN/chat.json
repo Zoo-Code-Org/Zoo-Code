@@ -357,6 +357,11 @@
 			"title": "已达到自动批准的费用限额",
 			"description": "Zoo已经达到了${{count}}的自动批准成本限制。您想重置成本并继续任务吗？",
 			"button": "重置并继续"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "已达自动批准代币限制",
+			"description": "Zoo 已达到 {{count}} 个代币的自动批准限制。您想重置计数并继续任务吗？",
+			"button": "重置并继续"
 		}
 	},
 	"codebaseSearch": {

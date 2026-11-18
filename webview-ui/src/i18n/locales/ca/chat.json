@@ -364,6 +364,11 @@
 			"title": "S'ha arribat al límit de cost d'aprovació automàtica",
 			"button": "Restableix i continua",
 			"description": "Zoo ha arribat al límit de cost aprovat automàticament de ${{count}}. Vols restablir el cost i continuar amb la tasca?"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "S'ha arribat al límit de tokens aprovats automàticament",
+			"description": "Zoo ha arribat al límit aprovat automàticament de {{count}} tokens. Vols reiniciar el comptador i continuar amb la tasca?",
+			"button": "Reiniciar i continuar"
 		}
 	},
 	"codebaseSearch": {

@@ -385,6 +385,11 @@
 			"title": "已達自動核准費用上限",
 			"description": "Zoo 已達到 ${{count}} 的自動核准費用上限。您想重設費用並繼續工作嗎？",
 			"button": "重設並繼續"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "已達自動核准 Token 上限",
+			"description": "Zoo 已達到 {{count}} 個 Token 的自動核准上限。您想重設計數並繼續工作嗎？",
+			"button": "重設並繼續"
 		}
 	},
 	"indexingStatus": {

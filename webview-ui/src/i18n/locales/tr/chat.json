@@ -361,6 +361,11 @@
 			"title": "Otomatik Onaylanan Maliyet Sınırına Ulaşıldı",
 			"description": "Zoo otomatik olarak onaylanmış ${{count}} maliyet sınırına ulaştı. Maliyeti sıfırlamak ve göreve devam etmek ister misiniz?",
 			"button": "Sıfırla ve Devam Et"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "Otomatik Onaylanan Belirteç Limiti Aşıldı",
+			"description": "Zoo, {{count}} belirteç için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"button": "Sıfırla ve Devam Et"
 		}
 	},
 	"codebaseSearch": {

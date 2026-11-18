@@ -21,14 +21,21 @@ export const AutoApprovedRequestLimitWarning = memo(({ message }: AutoApprovedRe
 	}
 
 	const isCostLimit = type === "cost"
+	const isTokenLimit = type === "tokens"
 	const titleKey = isCostLimit
 		? "ask.autoApprovedCostLimitReached.title"
+		: isTokenLimit
+		? "ask.autoApprovedTokenLimitReached.title"
 		: "ask.autoApprovedRequestLimitReached.title"
 	const descriptionKey = isCostLimit
 		? "ask.autoApprovedCostLimitReached.description"
+		: isTokenLimit
+		? "ask.autoApprovedTokenLimitReached.description"
 		: "ask.autoApprovedRequestLimitReached.description"
 	const buttonKey = isCostLimit
 		? "ask.autoApprovedCostLimitReached.button"
+		: isTokenLimit
+		? "ask.autoApprovedTokenLimitReached.button"
 		: "ask.autoApprovedRequestLimitReached.button"
 
 	return (

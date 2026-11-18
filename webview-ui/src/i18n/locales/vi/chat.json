@@ -357,6 +357,11 @@
 			"button": "Đặt lại và Tiếp tục",
 			"title": "Đã Đạt Giới Hạn Chi Phí Tự Động Phê Duyệt",
 			"description": "Zoo đã đạt đến giới hạn chi phí tự động phê duyệt là ${{count}}. Bạn có muốn đặt lại chi phí và tiếp tục với nhiệm vụ không?"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "Đã Đạt Giới Hạn Token Tự Động Phê Duyệt",
+			"description": "Zoo đã đạt đến giới hạn tự động phê duyệt là {{count}} token. Bạn có muốn đặt lại bộ đếm và tiếp tục nhiệm vụ không?",
+			"button": "Đặt lại và Tiếp tục"
 		}
 	},
 	"codebaseSearch": {

@@ -364,6 +364,11 @@
 			"title": "Límite de Costo Auto-Aprobado Alcanzado",
 			"description": "Zoo ha alcanzado el límite de costo autoaprobado de ${{count}}. ¿Le gustaría reiniciar el costo y continuar con la tarea?",
 			"button": "Reiniciar y continuar"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "Límite de Tokens Auto-aprobados Alcanzado",
+			"description": "Zoo ha alcanzado el límite auto-aprobado de {{count}} tokens. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"button": "Reiniciar y Continuar"
 		}
 	},
 	"codebaseSearch": {

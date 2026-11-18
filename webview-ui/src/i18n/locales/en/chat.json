@@ -387,6 +387,11 @@
 			"title": "Auto-Approved Cost Limit Reached",
 			"description": "Zoo has reached the auto-approved cost limit of ${{count}}. Would you like to reset the cost and proceed with the task?",
 			"button": "Reset and Continue"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "Auto-Approved Token Limit Reached",
+			"description": "Zoo has reached the auto-approved limit of {{count}} tokens. Would you like to reset the count and proceed with the task?",
+			"button": "Reset and Continue"
 		}
 	},
 	"indexingStatus": {

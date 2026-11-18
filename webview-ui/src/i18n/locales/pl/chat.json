@@ -368,6 +368,11 @@
 			"button": "Zresetuj i Kontynuuj",
 			"title": "Osiągnięto limit kosztów z automatycznym zatwierdzaniem",
 			"description": "Zoo osiągnął automatycznie zatwierdzony limit kosztów wynoszący ${{count}}. Czy chcesz zresetować koszt i kontynuować zadanie?"
+		},
+		"autoApprovedTokenLimitReached": {
+			"title": "Osiągnięto limit automatycznie zatwierdzonych tokenów",
+			"description": "Zoo osiągnął automatycznie zatwierdzony limit {{count}} tokenów. Czy chcesz zresetować licznik i kontynuować zadanie?",
+			"button": "Zresetuj i kontynuuj"
 		}
 	},
 	"codebaseSearch": {
