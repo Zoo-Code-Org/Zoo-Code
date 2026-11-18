@@ -5031,11 +5031,13 @@ describe("ClineProvider", () => {
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
 			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
-			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
+			// Bind the file-level modes mock back to the production predicate: with no custom modes
+			// in play, the real lookup is what rejects the deleted slug.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				slug === "deleted-custom-mode" ? undefined : originalMode) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(
+				(await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")).getModeBySlug,
+			)
 			try {
 				await provider["setViewStateId"]("stable-sidebar-view")
 				await provider.saveViewState("mode", "deleted-custom-mode")
