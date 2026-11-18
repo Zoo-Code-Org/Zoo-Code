@@ -3526,26 +3526,17 @@ export class ClineProvider
 		// mappings one mode at a time and a sibling window can re-point any one of them.
 		const activatedManagerGateName = profileToActivate
 
-		// Compare-and-set bookkeeping for the mode mapping (issue 2488, step 1). Two things have to be
-		// recorded before any compensation runs: which mode mappings this call itself moved, and the
-		// value it left in each one. The compensation may only roll back keys in that set - a mapping a
-		// sibling window pointed at the replacement in the meantime is not ours to clear - and only while
-		// the layer still reports the value this call wrote.
-		const writtenModeConfigs = new Map<string, string | undefined>()
+		// Compare-and-set bookkeeping for the mode mapping (issue 2488, step 1). A mapping is ours to
+		// undo only if we can say what OUR write left there, and that has to be derived rather than
+		// observed: the store re-points a mode because that mode named the profile this deletion removes,
+		// and this call maps the current mode through its own seam, which records the id at the moment it
+		// is written. Reading the store afterwards cannot tell those writes apart from a concurrent
+		// activation that moved the same key first - it would record the other writer value as ours and
+		// then replay our snapshot over it - so the forward phase takes no gate read at all, and the
+		// compensation reads each candidate key once, immediately before undoing it.
 		const writtenLocalModeConfigs = new Map<string, string | undefined>()
-		const previousManagerModeConfigs = previousManagerGate.modeApiConfigs ?? {}
-		const recordModeWritesAfterGateWrite = async (): Promise<void> => {
-			const writtenGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
-			const writtenManagerModeConfigs = writtenGate.modeApiConfigs ?? {}
-			for (const mode of new Set([
-				...Object.keys(previousManagerModeConfigs),
-				...Object.keys(writtenManagerModeConfigs),
-			])) {
-				if (writtenManagerModeConfigs[mode] !== previousManagerModeConfigs[mode]) {
-					writtenModeConfigs.set(mode, writtenManagerModeConfigs[mode])
-				}
-			}
-		}
+		const deletedManagerConfigId = previousEntries.find((entry) => entry.name === profileToDelete.name)?.id
+		const activatedManagerGateId = previousEntries.find((entry) => entry.name === activatedManagerGateName)?.id
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
@@ -3566,9 +3557,10 @@ export class ClineProvider
 			)
 		}
 		// The delete is the first write that can move the manager gate: deleting the profile the store
-		// selects re-points the selection and the mappings onto a surviving profile. Record what it moved
-		// from the store's own report, immediately after it committed.
-		await recordModeWritesAfterGateWrite()
+		// selects re-points the mappings that named it onto a surviving profile. No read is taken here:
+		// a read of the store cannot tell that fan-out apart from a concurrent activation, so the
+		// compensation decides from the pre-delete snapshot plus what this call wrote through its own
+		// seam, and reads the store once per key right before the write that would undo it.
 
 		// This window's cached choice is a second layer, and the deletion writes it too - through the
 		// activation path below, which maps the current mode onto the replacement. Wrap the seam that
@@ -3595,13 +3587,7 @@ export class ClineProvider
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings
 				// behind in both.
-				try {
-					await this.activateProviderProfile({ name: profileToActivate })
-				} finally {
-					// Record whether or not the activation completed: a half-finished activation still moved
-					// the mappings it wrote, and those are this call's writes to roll back.
-					await recordModeWritesAfterGateWrite()
-				}
+				await this.activateProviderProfile({ name: profileToActivate })
 
 				// The return below would otherwise skip the sibling re-pin further down:
 				// the activation's pinned-name refresh only selects siblings pinned to
@@ -3695,12 +3681,9 @@ export class ClineProvider
 			// deleted profile's name and configuration.
 			await this.rePinViewLocalStateForDeletedProfile(profileToDelete.name, profileToActivate, survivingSettings)
 
-			// Last look before the step that can fail: every write this call makes to the gate has now
-			// committed, so this is the value its own writes left behind. Whatever the compensation finds
-			// different was written after this point, by someone else.
-			await recordModeWritesAfterGateWrite()
 			// The forward phase is over: hand the seam back before the compensation starts writing through
-			// it, so its own restores are not mistaken for forward writes.
+			// it, so its own restores are not mistaken for forward writes. No gate read is taken here
+			// either: the last one was the pre-delete snapshot, and the compensation re-reads per key.
 			this.setModeConfig = seamSetModeConfig
 
 			await this.postStateToWebview()
@@ -3760,12 +3743,38 @@ export class ClineProvider
 					})
 				}
 				const previousModeConfigs = previousManagerGate.modeApiConfigs ?? {}
-				// Only the mappings recorded above as moved by this call are candidates, and each one is
-				// re-read from the store immediately before its own restore. The bulk snapshot above is too
-				// old to decide ownership for a single key: the record and list restores awaited between that
-				// read and this write give a sibling window room to re-point the mode onto a third profile.
-				for (const [mode, writtenModeConfigId] of writtenModeConfigs) {
+				// Each candidate carries the value our own write was supposed to leave: the replacement id for a
+				// mapping the delete fan-out moved because it named the deleted profile, or the id recorded by
+				// our seam for a mapping this call mapped itself. The store is then re-read for that key, right
+				// here - the record and list restores awaited above - and the restore runs only while the store
+				// still holds that value. A candidate whose expectation is unknown is unconfirmed: an unknown
+				// replacement id and an unreadable store get the same answer, which is to write nothing.
+				const mappingCandidates = new Map<string, string | undefined>()
+				if (deletedManagerConfigId !== undefined && activatedManagerGateId !== undefined) {
+					for (const [mode, previousModeConfigId] of Object.entries(previousModeConfigs)) {
+						if (previousModeConfigId === deletedManagerConfigId) {
+							mappingCandidates.set(mode, activatedManagerGateId)
+						}
+					}
+				}
+				for (const [mode, writtenLocalModeConfigId] of writtenLocalModeConfigs) {
+					// Without an id for the profile this deletion activated, nothing in the mapping layer can be
+					// attributed to it: our own write is indistinguishable from a concurrent write of the same id,
+					// so it stays unconfirmed and no write happens for that key.
+					mappingCandidates.set(
+						mode,
+						activatedManagerGateId === undefined ? undefined : writtenLocalModeConfigId,
+					)
+				}
+				for (const [mode, writtenModeConfigId] of mappingCandidates) {
 					const previousModeConfigId = previousModeConfigs[mode]
+					if (writtenModeConfigId === undefined) {
+						this.log(
+							`[deleteProviderProfile] left the mapping for mode '${mode}' alone: this deletion cannot confirm the
+								replacement id it wrote there, so its current owner is unconfirmed`,
+						)
+						continue
+					}
 					if (previousModeConfigId === writtenModeConfigId) {
 						continue
 					}
