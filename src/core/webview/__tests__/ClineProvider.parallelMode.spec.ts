@@ -2276,9 +2276,95 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "y-key",
 			})
+			// Exactly one snapshot pass per activation: the sibling profile read belongs
+			// before the shared write. A second pass after activateProfile could abort an
+			// activation whose manager write already landed, and it repeats every sibling
+			// profile read on every activation.
+			const siblingProfileReads = vi
+				.mocked(providerA.providerSettingsManager.getProfile)
+				.mock.calls.filter((call) => call[0]?.name === "profile-y")
+			expect(siblingProfileReads).toHaveLength(1)
 
 			await providerA.dispose()
 			await providerB.dispose()
+		})
+
+		it("completes an activation whose late sibling pin cannot be resolved", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A third view follows the shared selection at first and gains its pin while
+			// the snapshot pass is already running.
+			const providerC = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue(
+				{
+					name: "profile-x",
+					id: "x-id",
+					apiProvider: providerIdentifiers.anthropic,
+					anthropicBaseUrl: "x-url",
+				} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
+			)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			// profile-y resolves. While that read is in flight providerC pins profile-z,
+			// and profile-z cannot be resolved at all: that is the state the second snapshot
+			// pass used to discover after activateProfile had already moved the manager.
+			let firstPass = true
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					if (args.name === "profile-y") {
+						if (firstPass) {
+							firstPass = false
+							providerC["viewLocalState"] = { currentApiConfigName: "profile-z" }
+						}
+						return {
+							name: "profile-y",
+							id: "y-id",
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "y-key",
+						} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>
+					}
+					throw new Error("late sibling pin could not be resolved")
+				},
+			)
+
+			await providerA.activateProviderProfile({ name: "profile-x" })
+
+			// Both writes land. Aborting after the manager write left the manager on
+			// profile-x while the shared provider settings still held the previous
+			// profile's settings, so the sibling snapshot runs once, before that write.
+			const aState = await providerA.getState()
+			expect(aState.currentApiConfigName).toBe("profile-x")
+			expect(aState.apiConfiguration).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			})
+
+			await providerA.dispose()
+			await providerB.dispose()
+			await providerC.dispose()
 		})
 
 		it("should leave a sibling's pre-existing overlay untouched when a different profile activates", async () => {

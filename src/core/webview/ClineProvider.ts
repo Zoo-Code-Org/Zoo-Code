@@ -4185,11 +4185,6 @@ export class ClineProvider
 			// See `upsertProviderProfile` for a description of what this is doing.
 			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
 
-			// Siblings pinned to other profiles must keep their own settings: the
-			// shared write below replaces the shared store, so pin their profile's
-			// settings into their overlays first.
-			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
-
 			try {
 				await Promise.all([
 					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
