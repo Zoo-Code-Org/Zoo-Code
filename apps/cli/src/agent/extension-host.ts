@@ -118,6 +118,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 	private vscode: ReturnType<typeof createVSCodeAPI> | null = null
 	private extensionModule: ExtensionModule | null = null
 	private extensionAPI: unknown = null
+	private readonly requireApproval: boolean
 	private options: ExtensionHostOptions
 	private isReady = false
 	private messageListener: ((message: ExtensionMessage) => void) | null = null
@@ -174,6 +175,7 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 		super()
 
 		this.options = options
+		this.requireApproval = !options.nonInteractive
 		// Mark this process as CLI runtime so extension code can apply
 		// CLI-specific behavior without affecting VS Code desktop usage.
 		this.previousCliRuntimeEnv = process.env.ROO_CLI_RUNTIME
@@ -524,7 +526,11 @@ export class ExtensionHost extends EventEmitter implements ExtensionHostInterfac
 			type: "newTask",
 			text: prompt,
 			taskId,
-			taskConfiguration: configuration,
+			// Task input must not weaken the operator's manual-approval policy.
+			taskConfiguration:
+				configuration && this.requireApproval
+					? { ...configuration, autoApprovalEnabled: false }
+					: configuration,
 			...(images !== undefined ? { images } : {}),
 		})
 		return this.waitForTaskCompletion()
