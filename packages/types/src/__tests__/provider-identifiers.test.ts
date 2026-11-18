@@ -35,6 +35,7 @@ const expectedProviderIdentifiers = [
 	"opencode-go",
 	"kenari",
 	"nanogpt",
+	"infer",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
@@ -112,6 +113,7 @@ describe("provider identifiers", () => {
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
 			providerIdentifiers.nanogpt,
+			providerIdentifiers.infer,
 			providerIdentifiers.kimiCode,
 			providerIdentifiers.friendli,
 		])

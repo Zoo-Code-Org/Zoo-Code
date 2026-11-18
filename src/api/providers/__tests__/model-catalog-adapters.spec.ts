@@ -11,6 +11,7 @@ import type { ApiHandler, ModelCacheScope } from "../../index"
 
 const fetchers = vi.hoisted(() => ({
 	getDeepSeekModels: vi.fn(),
+	getInferModels: vi.fn(),
 	getKenariModels: vi.fn(),
 	getKimiCodeModels: vi.fn(),
 	getLiteLLMModels: vi.fn(),
@@ -44,6 +45,10 @@ vi.mock("../fetchers/modelCache", async (importOriginal) => ({
 vi.mock("../fetchers/deepseek", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/deepseek")>()),
 	getDeepSeekModels: fetchers.getDeepSeekModels,
+}))
+vi.mock("../fetchers/infer", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../fetchers/infer")>()),
+	getInferModels: fetchers.getInferModels,
 }))
 vi.mock("../fetchers/kenari", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/kenari")>()),
@@ -104,6 +109,7 @@ vi.mock("../fetchers/zoo-gateway", async (importOriginal) => ({
 
 import { AnthropicHandler } from "../anthropic"
 import { DeepSeekHandler } from "../deepseek"
+import { InferHandler } from "../infer"
 import { KenariHandler } from "../kenari"
 import { KimiCodeHandler } from "../kimi-code"
 import { LiteLLMHandler } from "../lite-llm"
@@ -146,6 +152,16 @@ const cases: AdapterCase[] = [
 		fetcher: "getDeepSeekModels",
 		scope: { urlScoped: true, keyScoped: false, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
+		forwardsSignal: true,
+		prewarms: false,
+	},
+	{
+		name: "Infer",
+		create: () => new InferHandler({ inferApiKey: API_KEY }),
+		fetcher: "getInferModels",
+		// The public catalog is the same for every key, so the key is not sent with it.
+		scope: { urlScoped: false, keyScoped: false, authScoped: false },
+		expectedArgs: [],
 		forwardsSignal: true,
 		prewarms: false,
 	},

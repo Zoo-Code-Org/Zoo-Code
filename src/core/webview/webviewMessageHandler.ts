@@ -1222,6 +1222,7 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
+						[providerIdentifiers.infer]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 						[providerIdentifiers.friendli]: {},
@@ -1404,6 +1405,16 @@ export const webviewMessageHandler = async (
 				key: providerIdentifiers.kenari,
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
 			})
+
+			// Infer's catalog is public and the same for every key, so no key is sent. It is
+			// fetched only for a request that names Infer or for a profile that uses Infer, so
+			// an aggregate request from another profile does not contact Infer.
+			if (
+				providerFilter === providerIdentifiers.infer ||
+				apiConfiguration.apiProvider === providerIdentifiers.infer
+			) {
+				candidates.push({ key: providerIdentifiers.infer, options: { provider: providerIdentifiers.infer } })
+			}
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
 			// different allowlist. Prefer an explicitly supplied unsaved key and use the

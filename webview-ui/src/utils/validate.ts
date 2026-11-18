@@ -191,6 +191,11 @@ function validateModelsAndKeysProvided(
 				return t("settings:validation.apiKey")
 			}
 			break
+		case providerIdentifiers.infer:
+			if (!apiConfiguration.inferApiKey) {
+				return t("settings:validation.apiKey")
+			}
+			break
 		case providerIdentifiers.nanogpt:
 			if (!apiConfiguration.nanoGptApiKey) {
 				return t("settings:validation.apiKey")

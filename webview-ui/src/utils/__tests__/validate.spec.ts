@@ -49,6 +49,7 @@ describe("Model Validation Functions", () => {
 		requesty: {},
 		unbound: {},
 		litellm: {},
+		infer: {},
 		ollama: {},
 		lmstudio: {},
 		"vercel-ai-gateway": {},
@@ -467,6 +468,46 @@ describe("Model Validation Functions", () => {
 
 			const result = getModelValidationError(config, t, mockRouterModels, allowAllOrganization)
 			expect(result).toBe("settings:validation.modelId")
+		})
+	})
+
+	describe("Infer validation", () => {
+		it("returns an apiKey error when the Infer API key is unset", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.infer,
+				inferModelId: "infer/test-model:low-cost",
+			}
+
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBe("settings:validation.apiKey")
+		})
+
+		it("accepts an Infer API key and selected route", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "valid-key",
+				inferModelId: "infer/test-model:low-cost",
+			}
+
+			expect(validateApiConfiguration(config, t, mockRouterModels)).toBeUndefined()
+		})
+
+		it("reports a selected route that the fetched catalog no longer lists", () => {
+			const config: ProviderSettings = {
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "valid-key",
+				inferModelId: "infer/test-model:balanced",
+			}
+			const routerModels: RouterModels = {
+				...mockRouterModels,
+				infer: {
+					"infer/test-model:low-cost": { contextWindow: 128_000, supportsPromptCache: false },
+					"infer/test-model:official": { contextWindow: 128_000, supportsPromptCache: false },
+				},
+			}
+
+			expect(getModelValidationError(config, t, routerModels, allowAllOrganization)).toBe(
+				"settings:validation.modelAvailability modelId=infer/test-model:balanced",
+			)
 		})
 	})
 

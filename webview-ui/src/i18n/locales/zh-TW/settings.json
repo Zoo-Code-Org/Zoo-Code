@@ -417,6 +417,12 @@
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"kenariApiKey": "Kenari API 金鑰",
 		"getKenariApiKey": "取得 Kenari API 金鑰",
+		"infer": {
+			"provider": "Infer",
+			"apiKey": "Infer API 金鑰",
+			"getApiKey": "取得 Infer API 金鑰",
+			"model": "模型"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 金鑰",

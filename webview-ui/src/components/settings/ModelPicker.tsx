@@ -43,6 +43,7 @@ type ModelIdKey = keyof Pick<
 	| "opencodeGoModelId"
 	| "kenariModelId"
 	| "nanoGptModelId"
+	| "inferModelId"
 	| "zooGatewayModelId"
 	| "apiModelId"
 	| "ollamaModelId"

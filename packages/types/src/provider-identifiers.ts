@@ -15,6 +15,7 @@ export const providerIdentifiers = {
 	opencodeGo: "opencode-go",
 	kenari: "kenari",
 	nanogpt: "nanogpt",
+	infer: "infer",
 	ollama: "ollama",
 	lmstudio: "lmstudio",
 	vscodeLm: "vscode-lm",

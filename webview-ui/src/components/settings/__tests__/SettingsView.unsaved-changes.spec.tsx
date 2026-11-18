@@ -757,4 +757,85 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		expect(onDone).toHaveBeenCalledOnce()
 		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
 	})
+
+	it("buffers and saves the complete Infer provider configuration from cached state", async () => {
+		const liveApiConfiguration = {
+			apiProvider: providerIdentifiers.infer,
+			inferApiKey: "original-key",
+			inferModelId: "infer/original:low-cost",
+		}
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: liveApiConfiguration,
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<div>
+				<input
+					data-testid="cached-infer-key"
+					value={apiConfiguration.inferApiKey ?? ""}
+					onChange={(event) => setApiConfigurationField("inferApiKey", event.target.value)}
+				/>
+				<input
+					data-testid="cached-infer-model"
+					value={apiConfiguration.inferModelId ?? ""}
+					onChange={(event) => setApiConfigurationField("inferModelId", event.target.value)}
+				/>
+			</div>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} />, { queryClient })
+
+		expect(await screen.findByTestId("cached-infer-key")).toHaveValue("original-key")
+		expect(screen.getByTestId("cached-infer-model")).toHaveValue("infer/original:low-cost")
+
+		fireEvent.change(screen.getByTestId("cached-infer-key"), { target: { value: "unsaved-key" } })
+		fireEvent.change(screen.getByTestId("cached-infer-model"), { target: { value: "infer/next:official" } })
+
+		expect(liveApiConfiguration).toEqual({
+			apiProvider: providerIdentifiers.infer,
+			inferApiKey: "original-key",
+			inferModelId: "infer/original:low-cost",
+		})
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(postMessage).toHaveBeenCalledWith({
+			type: "upsertApiConfiguration",
+			text: "default",
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "unsaved-key",
+				inferModelId: "infer/next:official",
+			},
+		})
+	})
+
+	it("discards Infer cached edits and restores the extension values", async () => {
+		const onDone = vi.fn()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			apiConfiguration: {
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "saved-key",
+				inferModelId: "infer/saved:stable",
+			},
+		})
+		vi.mocked(ApiOptions).mockImplementation(({ apiConfiguration, setApiConfigurationField }) => (
+			<input
+				data-testid="cached-infer-key"
+				value={apiConfiguration.inferApiKey ?? ""}
+				onChange={(event) => setApiConfigurationField("inferApiKey", event.target.value)}
+			/>
+		))
+
+		renderWithExtensionState(<SettingsView onDone={onDone} />, { queryClient })
+		fireEvent.change(await screen.findByTestId("cached-infer-key"), { target: { value: "discard-me" } })
+		fireEvent.click(screen.getByText("settings:common.done"))
+		fireEvent.click(await screen.findByText("settings:unsavedChangesDialog.discardButton"))
+
+		await waitFor(() => expect(screen.getByTestId("cached-infer-key")).toHaveValue("saved-key"))
+		expect(onDone).toHaveBeenCalledOnce()
+		expect(postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+	})
 })
