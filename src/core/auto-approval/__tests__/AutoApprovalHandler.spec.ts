@@ -297,7 +297,7 @@ describe("AutoApprovalHandler", () => {
 		})
 
 		it("should trigger token limit when tokens exceed allowedMaxTokens", async () => {
-			;(mockState as GlobalState & { allowedMaxTokens?: number }).allowedMaxTokens = 50_000
+			mockState.allowedMaxTokens = 50_000
 			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
 
 			// Under token limit
@@ -336,7 +336,7 @@ describe("AutoApprovalHandler", () => {
 		})
 
 		it("should not proceed and not reset token window when user rejects token limit approval", async () => {
-			;(mockState as GlobalState & { allowedMaxTokens?: number }).allowedMaxTokens = 50_000
+			mockState.allowedMaxTokens = 50_000
 			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
 
 			// Exceeds token limit
@@ -361,6 +361,40 @@ describe("AutoApprovalHandler", () => {
 			expect(repeatResult.shouldProceed).toBe(false)
 			expect(repeatResult.requiresApproval).toBe(true)
 			expect(mockGetApiMetrics).toHaveBeenLastCalledWith(messages)
+		})
+
+		it("should trigger token limit using state constructed from provider state values", async () => {
+			const providerState = {
+				allowedMaxTokens: 50_000,
+			} as GlobalState
+			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
+
+			// When token limit is exceeded on state returned from provider
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 40_000, totalTokensOut: 20_000 })
+			mockAskForApproval.mockResolvedValue({ response: "yesButtonClicked" })
+			const result = await handler.checkAutoApprovalLimits(providerState, messages, mockAskForApproval)
+
+			expect(mockAskForApproval).toHaveBeenCalledWith(
+				"auto_approval_max_req_reached",
+				JSON.stringify({ count: (50_000).toLocaleString(), type: "tokens" }),
+			)
+			expect(result.shouldProceed).toBe(true)
+			expect(result.requiresApproval).toBe(true)
+			expect(result.approvalType).toBe("tokens")
+		})
+
+		it("should fall back to Infinity when allowedMaxTokens is unset", async () => {
+			const unsetState = {
+				allowedMaxTokens: undefined,
+			} as GlobalState
+			const messages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 1000 }]
+
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 1_000_000, totalTokensOut: 1_000_000 })
+			const result = await handler.checkAutoApprovalLimits(unsetState, messages, mockAskForApproval)
+
+			expect(result.shouldProceed).toBe(true)
+			expect(result.requiresApproval).toBe(false)
+			expect(mockAskForApproval).not.toHaveBeenCalled()
 		})
 	})
 

@@ -4664,6 +4664,17 @@ describe("ClineProvider", () => {
 		expect(state.diffFuzzyThreshold).toBe(0.5)
 	})
 
+	it("getState and getStateToPostToWebview pass through allowedMaxTokens", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedMaxTokens", 50_000)
+
+		const state = await provider.getState()
+		expect(state.allowedMaxTokens).toBe(50_000)
+
+		const stateToWebview = await provider.getStateToPostToWebview()
+		expect(stateToWebview.allowedMaxTokens).toBe(50_000)
+	})
+
 	it("loads saved API config when switching modes", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]
