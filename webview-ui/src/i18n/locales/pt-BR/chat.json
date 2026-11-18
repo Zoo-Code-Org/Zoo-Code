@@ -20,7 +20,9 @@
 	"unpin": "Desfixar",
 	"pin": "Fixar",
 	"fileChangesInConversation": {
-		"header": "{{count}} arquivo(s) alterado(s) nesta conversa"
+		"header_one": "{{count}} arquivo alterado nesta conversa",
+		"header_many": "{{count}} arquivos alterados nesta conversa",
+		"header_other": "{{count}} arquivos alterados nesta conversa"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espaço disponível: {{amount}} tokens",
@@ -287,7 +289,8 @@
 		"triggerLabelOff": "Aprovação automática desativada",
 		"triggerLabelOffShort": "Desativada",
 		"triggerLabel_zero": "0 aprovados automaticamente",
-		"triggerLabel_one": "1 aprovado automaticamente",
+		"triggerLabel_one": "{{count}} aprovado automaticamente",
+		"triggerLabel_many": "{{count}} aprovados automaticamente",
 		"triggerLabel_other": "{{count}} aprovados automaticamente",
 		"triggerLabelAll": "BRRR"
 	},
@@ -305,7 +308,8 @@
 		"truncation": {
 			"title": "Contexto truncado",
 			"inProgress": "Truncando contexto...",
-			"messagesRemoved": "{{count}} mensagem removida",
+			"messagesRemoved_one": "{{count}} mensagem removida",
+			"messagesRemoved_many": "{{count}} mensagens removidas",
 			"messagesRemoved_other": "{{count}} mensagens removidas",
 			"description": "Mensagens mais antigas foram removidas da conversa para permanecer dentro do limite da janela de contexto. Esta é uma abordagem rápida, mas menos preservadora de contexto em comparação com a condensação."
 		}
@@ -322,10 +326,12 @@
 		"title": "Zoo Code {{version}} lançado",
 		"support": "Apoie o Zoo Code nos dando uma estrela no <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novidades do Zoo Code v3.96.0",
-			"highlight1": "✨ Novas configurações de chat e diagnósticos: Mostra carimbos de data/hora nas mensagens com formatos de hora e data configuráveis, ajusta o TTL do prompt-cache para perfis Anthropic e gera relatórios de diagnóstico que preservam a privacidade.",
-			"highlight2": "💸 Custos e cache de provedores mais precisos: Mantém os resultados de ferramentas do Anthropic intactos, adota tokens de saída cumulativos nos custos do Anthropic e MiniMax, lê os contadores de prompt-cache do DeepSeek, mira o cache de Responses do xAI e cobra leituras de cache do Mistral a 0,1x.",
-			"highlight3": "🧭 Chats mais confiáveis e rápidos: Retoma tarefas concluídas depois de reiniciar, restaura checkpoints quando o commit salvo está ausente, recarrega automaticamente um renderizador de webview morto, limita atualizações de streaming e carrega idiomas sob demanda."
+			"heading": "Novidades do Zoo Code v3.98.0",
+			"highlight0": "🎟️ Experimente a próxima assinatura do Zoo Pass. 2 semanas de acesso gratuito; vagas limitadas",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ Títulos automáticos de tarefas e controle mais preciso de modelos: Gere títulos para novas tarefas raiz automaticamente e experimente a configuração experimental de esforço de raciocínio dinâmico.",
+			"highlight2": "🔌 Suporte ampliado a modelos e provedores: Use GPT-6.1 Terra e obtenha a lista mais recente de modelos do Friendli.",
+			"highlight3": "🛡️ Chats e edições mais seguros e responsivos: Cancele solicitações do OpenAI Native e do Requesty corretamente, proteja diffs fora do workspace contra aprovação automática acidental, alterne os idiomas da interface de forma consistente e evite recuperações ambíguas de backups JSON."
 		}
 	},
 	"costs": {
@@ -349,7 +355,9 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Limite de Solicitações Auto-aprovadas Atingido",
-			"description": "Zoo atingiu o limite auto-aprovado de {{count}} solicitação(ões) de API. Deseja redefinir a contagem e prosseguir com a tarefa?",
+			"description_one": "Zoo atingiu o limite auto-aprovado de {{count}} solicitação de API. Deseja redefinir a contagem e prosseguir com a tarefa?",
+			"description_many": "Zoo atingiu o limite auto-aprovado de {{count}} solicitações de API. Deseja redefinir a contagem e prosseguir com a tarefa?",
+			"description_other": "Zoo atingiu o limite auto-aprovado de {{count}} solicitações de API. Deseja redefinir a contagem e prosseguir com a tarefa?",
 			"button": "Redefinir e Continuar"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,7 +369,8 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo quer pesquisar na base de código por <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo quer pesquisar na base de código por <code>{{query}}</code> em <code>{{path}}</code>",
-		"didSearch_one": "Encontrado 1 resultado",
+		"didSearch_one": "Encontrado {{count}} resultado",
+		"didSearch_many": "Encontrados {{count}} resultados",
 		"didSearch_other": "Encontrados {{count}} resultados",
 		"resultTooltip": "Pontuação de similaridade: {{score}} (clique para abrir o arquivo)"
 	},
@@ -433,8 +442,10 @@
 	"tooManyTools": {
 		"title": "Muitas ferramentas habilitadas",
 		"toolsPart_one": "{{count}} ferramenta",
+		"toolsPart_many": "{{count}} ferramentas",
 		"toolsPart_other": "{{count}} ferramentas",
 		"serversPart_one": "{{count}} servidor MCP",
+		"serversPart_many": "{{count}} servidores MCP",
 		"serversPart_other": "{{count}} servidores MCP",
 		"messageTemplate": "Você tem {{tools}} habilitadas via {{servers}}. Um número tão alto pode confundir o modelo e levar a erros. Tente mantê-lo abaixo de {{threshold}}.",
 		"openMcpSettings": "Abrir Configurações MCP"

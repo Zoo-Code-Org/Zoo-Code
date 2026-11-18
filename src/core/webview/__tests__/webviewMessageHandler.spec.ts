@@ -84,6 +84,7 @@ import * as copilotProvider from "../../../api/providers/github-copilot"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
+import { experimentDefault } from "../../../shared/experiments"
 import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
@@ -1212,6 +1213,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1347,6 +1349,30 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.anything(),
 		)
 		expect(mockFlushModels).not.toHaveBeenCalled()
+	})
+
+	it("fetches only Friendli when the provider filter is friendli", async () => {
+		mockClineProvider.getState = vi.fn().mockResolvedValue({ apiConfiguration: {} })
+		mockGetModels.mockResolvedValue({
+			"zai-org/GLM-5.2": { maxTokens: 131072, contextWindow: 1000000, supportsPromptCache: true },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.friendli },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(mockGetModels).toHaveBeenCalledWith({ provider: providerIdentifiers.friendli }, expect.anything())
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: {
+				friendli: {
+					"zai-org/GLM-5.2": expect.objectContaining({ contextWindow: 1000000 }),
+				},
+			},
+			values: { provider: providerIdentifiers.friendli },
+		})
 	})
 
 	it("prefers an unsaved NanoGPT key and refreshes the matching key-scoped cache", async () => {
@@ -1487,6 +1513,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -1554,6 +1581,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
+				friendli: mockModels,
 			},
 			values: undefined,
 		})
@@ -2970,6 +2998,60 @@ describe("webviewMessageHandler - telemetrySetting", () => {
 		await Promise.resolve()
 
 		expect(TelemetryService.instance.updateTelemetryState).not.toHaveBeenCalled()
+	})
+})
+
+describe("webviewMessageHandler - experiments", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("persists dynamicThinkingEffort true merged with the saved experiments", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "experiments" ? { preventFocusDisruption: true } : undefined,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: { dynamicThinkingEffort: true } },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			preventFocusDisruption: true,
+			dynamicThinkingEffort: true,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists dynamicThinkingEffort false over a previously enabled value", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "experiments" ? { dynamicThinkingEffort: true } : undefined,
+		)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: { dynamicThinkingEffort: false } },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			dynamicThinkingEffort: false,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("persists the experiment defaults when no experiments are saved yet", async () => {
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { experiments: {} },
+		})
+
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("experiments", {
+			...experimentDefault,
+			dynamicThinkingEffort: false,
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 })
 

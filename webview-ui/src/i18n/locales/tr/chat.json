@@ -20,7 +20,8 @@
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
 	"fileChangesInConversation": {
-		"header": "Bu sohbette {{count}} dosya değiştirildi"
+		"header_one": "Bu sohbette {{count}} dosya değiştirildi",
+		"header_other": "Bu sohbette {{count}} dosya değiştirildi"
 	},
 	"tokenProgress": {
 		"availableSpace": "Kullanılabilir alan: {{amount}} token",
@@ -288,7 +289,7 @@
 		"triggerLabelOff": "Otomatik onay kapalı",
 		"triggerLabelOffShort": "Kapalı",
 		"triggerLabel_zero": "0 otomatik onaylandı",
-		"triggerLabel_one": "1 otomatik onaylandı",
+		"triggerLabel_one": "{{count}} otomatik onaylandı",
 		"triggerLabel_other": "{{count}} otomatik onaylandı",
 		"triggerLabelAll": "BRRR"
 	},
@@ -306,7 +307,7 @@
 		"truncation": {
 			"title": "Bağlam Kısaltıldı",
 			"inProgress": "Bağlam kısaltılıyor...",
-			"messagesRemoved": "{{count}} mesaj kaldırıldı",
+			"messagesRemoved_one": "{{count}} mesaj kaldırıldı",
 			"messagesRemoved_other": "{{count}} mesaj kaldırıldı",
 			"description": "Bağlam penceresi sınırında kalmak için eski mesajlar konuşmadan kaldırıldı. Bu, yoğunlaştırmaya kıyasla hızlı ancak daha az bağlam koruyucu bir yaklaşımdır."
 		}
@@ -323,10 +324,12 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Zoo Code v3.96.0'daki yenilikler",
-			"highlight1": "✨ Yeni sohbet ayarları ve tanılama: Yapılandırılabilir saat ve tarih biçimleriyle mesaj zaman damgalarını göster, Anthropic profilleri için prompt-cache TTL'sini ayarla ve gizliliği koruyan tanılama raporları oluştur.",
-			"highlight2": "💸 Daha doğru sağlayıcı maliyetleri ve önbellekleme: Anthropic araç sonuçlarını olduğu gibi korur, Anthropic ve MiniMax maliyetlerine kümülatif çıktı token'larını dahil eder, DeepSeek prompt-cache sayaçlarını okur, xAI Responses önbelleğini hedefler ve Mistral önbellek okumalarını 0,1x ile faturalandırır.",
-			"highlight3": "🧭 Daha güvenilir ve hızlı sohbetler: Yeniden başlatmanın ardından tamamlanan görevleri sürdür, kaydedilen commit eksikse checkpoint'i geri yükle, yanıt vermeyen webview oluşturucusunu otomatik olarak yeniden yükle, akış güncellemelerini kısıtla ve dilleri talep üzerine yükle."
+			"heading": "Zoo Code v3.98.0'daki yenilikler",
+			"highlight0": "🎟️ Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer",
+			"highlight0Url": "https://www.zoocode.dev/pass",
+			"highlight1": "🏷️ Otomatik görev başlıkları ve daha hassas model kontrolü: Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.",
+			"highlight2": "🔌 Genişletilmiş model ve sağlayıcı desteği: GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.",
+			"highlight3": "🛡️ Daha güvenli ve duyarlı sohbetler ile düzenlemeler: OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın."
 		}
 	},
 	"costs": {
@@ -350,7 +353,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Otomatik Onaylanan İstek Limiti Aşıldı",
-			"description": "Zoo, {{count}} API isteği/istekleri için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_one": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_other": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
 			"button": "Sıfırla ve Devam Et"
 		},
 		"autoApprovedCostLimitReached": {
@@ -362,7 +366,7 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo kod tabanında <code>{{query}}</code> aramak istiyor",
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
-		"didSearch_one": "1 sonuç bulundu",
+		"didSearch_one": "{{count}} sonuç bulundu",
 		"didSearch_other": "{{count}} sonuç bulundu",
 		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)"
 	},

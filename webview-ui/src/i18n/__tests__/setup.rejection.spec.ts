@@ -35,6 +35,7 @@ describe("i18n setup locale load failure", () => {
 		// registered either, so no half-translated locale can be activated.
 		expect(i18next.hasResourceBundle("ja", "common")).toBe(false)
 		expect(i18next.hasResourceBundle("ja", "settings")).toBe(false)
+		// eslint-disable-next-line no-restricted-syntax -- checks loaded resources outside React; nothing is memoized
 		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("Something went wrong")
 	})
 
@@ -65,6 +66,7 @@ describe("i18n setup locale load failure", () => {
 		loader.fail = false
 		await loadLanguage("ja")
 
+		// eslint-disable-next-line no-restricted-syntax -- checks loaded resources outside React; nothing is memoized
 		expect(i18next.t("common:errorBoundary.title", { lng: "ja" })).toBe("問題が発生しました")
 	})
 })
