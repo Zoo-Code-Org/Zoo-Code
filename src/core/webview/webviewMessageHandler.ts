@@ -3342,8 +3342,14 @@ export const webviewMessageHandler = async (
 							// carry a stale token from before sign-out. Persisted-only profiles get
 							// rewritten only when they previously had a token to avoid no-op disk writes.
 							const isThisProfileActive = isZooGatewayActive && currentApiConfigName === entry.name
+							// A live view pinned to this profile keeps its own overlay: the stored record can already
+							// look token-free while that buffer still carries the credential, and a pinned view
+							// reports what it buffers and sends it on new tasks. The sweep must reach pinned views
+							// even when the record has been cleared. activate stays false for them, so the shared
+							// selection is untouched.
+							const isThisProfilePinned = provider.isProfilePinnedByAnyLiveView(entry.name)
 
-							if (!isThisProfileActive && !profile.zooSessionToken) {
+							if (!isThisProfileActive && !profile.zooSessionToken && !isThisProfilePinned) {
 								continue
 							}
 
@@ -3372,7 +3378,13 @@ export const webviewMessageHandler = async (
 							}
 
 							provider.log(
-								`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile${isThisProfileActive ? " and updated in-memory handler" : ""}`,
+								`[zooCodeSignOut] Cleared zooSessionToken from "${entry.name}" profile${
+									isThisProfileActive
+										? " and updated in-memory handler"
+										: isThisProfilePinned
+											? " and refreshed its pinned views"
+											: ""
+								}`,
 							)
 						} catch (profileError) {
 							// Log but continue to the next profile so one failure doesn't

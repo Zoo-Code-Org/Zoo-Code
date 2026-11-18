@@ -4142,6 +4142,15 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Whether any live view in this window is pinned to (or still buffering) this profile.
+	 * `pinnedProfileName` is the public sibling-inspection view of the private buffer, so this reads
+	 * the same surface the sibling re-point helpers use.
+	 */
+	public isProfilePinnedByAnyLiveView(profileName: string): boolean {
+		return ClineProvider.getAllInstances().some((instance) => instance.pinnedProfileName === profileName)
+	}
+
 	async updateCustomInstructions(instructions?: string) {
 		// User may be clearing the field.
 		await this.updateGlobalState("customInstructions", instructions || undefined)

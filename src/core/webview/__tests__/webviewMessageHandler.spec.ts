@@ -168,6 +168,10 @@ const mockClineProvider = {
 	postStateToWebview: vi.fn(),
 	resolveWebviewThemeFixtureProbe: vi.fn(),
 	getCurrentTask: vi.fn(),
+	// Sign-out consults this before skipping a profile: a live view pinned to a profile keeps its
+	// own overlay, so the sweep has to reach it. The default reports no pinned view so existing
+	// scenarios keep their skip semantics.
+	isProfilePinnedByAnyLiveView: vi.fn().mockReturnValue(false),
 	getTaskWithId: vi.fn(),
 	createTaskWithHistoryItem: vi.fn(),
 	renameTaskWithId: vi.fn(),
@@ -2979,6 +2983,8 @@ describe("zooCodeSignOut", () => {
 		// The sweep rewrites the active profile (to clear its in-memory handler) and any persisted-only
 		// profile that had a token to drop. A zoo-gateway profile that is neither of those has nothing
 		// to clear: routing it through the queue anyway would rewrite a profile sign-out never touched.
+		// Nor is it pinned by a live view - the third way a profile can still be holding something the
+		// sweep has to drop.
 		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
 
 		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
@@ -3014,6 +3020,67 @@ describe("zooCodeSignOut", () => {
 		)
 		expect(upsertProviderProfile).not.toHaveBeenCalledWith("Quiet Zoo", expect.anything(), expect.anything())
 		expect(mockClineProvider.log).not.toHaveBeenCalledWith(expect.stringContaining("Quiet Zoo"))
+		// Consulted and answered: the skip is a decision about this profile, not an unexamined path.
+		expect(mockClineProvider.isProfilePinnedByAnyLiveView).toHaveBeenCalledWith("Quiet Zoo")
+	})
+
+	it("clears a profile a live view pins even when its record looks token-free", async () => {
+		// The guard has three legs and this one is the record alone cannot see: a live view keeps its
+		// own overlay, so the stored record can read token-free while that buffer still carries the
+		// credential - and a pinned view reports what it buffers and sends it on new tasks. The sweep
+		// has to reach the pinned profile. activate stays false, so the shared selection stays on the
+		// profile that was actually active.
+		const upsertProviderProfile = vi.fn().mockResolvedValue("profile-id")
+		const saveConfig = vi.fn()
+		const isProfilePinnedByAnyLiveView = vi
+			.spyOn(mockClineProvider, "isProfilePinnedByAnyLiveView")
+			.mockImplementation((name: string) => name === "Quiet Zoo")
+
+		const providerWithSignOutStubs = mockClineProvider as unknown as MutableSignOutProvider
+		;(mockClineProvider as unknown as MutableSignOutProvider).contextProxy = {
+			// Spread carries the double’s own setValue/getValue across the replacement.
+			...providerWithSignOutStubs.contextProxy,
+			getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.zooGateway }),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "Zoo Gateway" }),
+		}
+		;(mockClineProvider as unknown as MutableSignOutProvider).providerSettingsManager = {
+			listConfig: vi.fn().mockResolvedValue([
+				{ name: "Zoo Gateway", apiProvider: providerIdentifiers.zooGateway },
+				{ name: "Quiet Zoo", apiProvider: providerIdentifiers.zooGateway },
+			]),
+			getProfile: vi
+				.fn()
+				.mockResolvedValueOnce({
+					apiProvider: providerIdentifiers.zooGateway,
+					zooSessionToken: "token-active",
+				})
+				// Quiet Zoo's record is already token-free.
+				.mockResolvedValueOnce({ apiProvider: providerIdentifiers.zooGateway }),
+			saveConfig,
+		}
+		;(mockClineProvider as ClineProvider).upsertProviderProfile = upsertProviderProfile
+
+		await webviewMessageHandler(mockClineProvider, { type: "zooCodeSignOut" })
+
+		expect(upsertProviderProfile).toHaveBeenCalledTimes(2)
+		expect(upsertProviderProfile).toHaveBeenCalledWith(
+			"Quiet Zoo",
+			expect.not.objectContaining({ zooSessionToken: expect.anything() }),
+			// Not active: the sweep must not move the shared selection onto this profile.
+			false,
+		)
+		// Routed through the provider, not a direct record write, so the pinned view's buffer drops
+		// the token too.
+		expect(saveConfig).not.toHaveBeenCalled()
+		// The success line names the leg that made the clear observable: a pinned view was refreshed,
+		// and only the active profile may claim an in-memory handler update.
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Quiet Zoo" profile and refreshed its pinned views',
+		)
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			'[zooCodeSignOut] Cleared zooSessionToken from "Zoo Gateway" profile and updated in-memory handler',
+		)
+		isProfilePinnedByAnyLiveView.mockRestore()
 	})
 
 	it("logs the in-memory handler update only for the profile that is actually active", async () => {
