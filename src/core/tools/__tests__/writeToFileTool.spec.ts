@@ -121,7 +121,7 @@ describe("writeToFileTool", () => {
 		mockedIsPathOutsideWorkspace.mockReturnValue(false)
 		mockedGetReadablePath.mockReturnValue("test/path.txt")
 		mockedUnescapeHtmlEntities.mockImplementation((content) => {
-			return content
+			return content ?? ""
 		})
 		mockedEveryLineHasLineNumbers.mockReturnValue(false)
 		mockedStripLineNumbers.mockImplementation((content) => {

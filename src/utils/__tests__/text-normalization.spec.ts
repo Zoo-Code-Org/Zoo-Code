@@ -1,4 +1,3 @@
-// @ts-expect-error Vitest is provided by the test runner at runtime.
 import { describe, it, expect } from "vitest"
 
 import {
