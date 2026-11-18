@@ -3853,6 +3853,17 @@ export class ClineProvider
 		// the manager’s current report against these, and only roll back while they still match.
 		const activatedManagerGateName = profileToActivate
 		const activatedManagerGateId = previousEntries.find((entry) => entry.name === profileToActivate)?.id
+		// The live half of what an activation inside the try below does to THIS view: its pin, its
+		// settings overlay, and the current task's handler and sticky profile. Declared here, next
+		// to the other snapshots, because a catch cannot see the try's own bindings; filled in on
+		// the activation path, and restored by the compensation at the end of the try only while
+		// this call is still the last writer of each of them.
+		let previousViewPin: string | undefined
+		let previousViewOverlay: ExtensionState["apiConfiguration"] | undefined = undefined
+		let taskBeforeActivationId: string | undefined
+		let previousTaskStickyName: string | undefined
+		let previousTaskSettings: ProviderSettings | undefined
+		let activatedReplacement = false
 
 		// Remove the profile from the settings store (context.secrets) so it cannot be
 		// resurrected by a later listApiConfigMeta sync. A not-found rejection means
@@ -3883,11 +3894,26 @@ export class ClineProvider
 				this.viewLocalState.currentApiConfigName === profileToDelete.name
 
 			if (viewPinsDeletedProfile) {
+				// Read the live half immediately before the activation moves it: the activation points this
+				// view's pin at the replacement, clears the view's settings overlay, rebuilds the current
+				// task's handler and re-points that task's sticky profile. Without this read a failure AFTER
+				// a completed activation - the sibling re-pin below fails closed when the replacement's
+				// settings cannot be read - leaves getState() reporting the replacement's name while the
+				// restored record, shared settings and durable pins all say the deleted profile.
+				previousViewPin = this.viewLocalState.currentApiConfigName
+				previousViewOverlay = this.viewLocalState.apiConfiguration
+				const taskBeforeActivation = this.getCurrentTask()
+				taskBeforeActivationId = taskBeforeActivation?.taskId
+				previousTaskStickyName = taskBeforeActivation?.taskApiConfigName
+				previousTaskSettings = taskBeforeActivation?.apiConfiguration
 				// Apply the replacement through the activation path so this view's
 				// viewLocalState.apiConfiguration and the current task's api handler are
 				// refreshed; a name-only update would leave the deleted profile's settings
 				// behind in both.
 				await this.activateProviderProfile({ name: profileToActivate })
+				// Everything below this point can still fail, and from here on the failure has to
+				// put the live pin, overlay, task handler and sticky profile back as well.
+				activatedReplacement = true
 
 				// The return below would otherwise skip the sibling re-pin further down:
 				// the activation's pinned-name refresh only selects siblings pinned to
@@ -4092,12 +4118,73 @@ export class ClineProvider
 					`[deleteProviderProfile] failed to restore the persisted view pins: ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
 				)
 			}
+			// The live half, last so it agrees with the restored record and shared state above. The
+			// restores so far reach the manager record, the profile list, the manager gate, the shared
+			// selection, the shared provider settings and the durable pins; a deletion that failed
+			// after the activation completed would otherwise leave this view pinned to the
+			// replacement with the restored deleted profile's settings underneath it. Same
+			// compare-before-write rule the durable pins follow: write back only while this view and
+			// this task still hold what this call wrote, and name in the log whatever another view or
+			// a task switch moved under us.
+			if (activatedReplacement) {
+				try {
+					const movedKeys: string[] = []
+					const liveValues: Partial<RooCodeSettings> & Partial<ExtensionState> = {}
+					if (this.viewLocalState.currentApiConfigName === profileToActivate) {
+						liveValues.currentApiConfigName = previousViewPin
+					} else {
+						movedKeys.push("currentApiConfigName")
+					}
+					if (this.viewLocalState.apiConfiguration === undefined) {
+						liveValues.apiConfiguration = previousViewOverlay
+					} else {
+						movedKeys.push("apiConfiguration")
+					}
+					if (Object.keys(liveValues).length > 0) {
+						await this._saveViewLocalStateFromMutation(liveValues)
+					}
+					const taskAfterFailure = this.getCurrentTask()
+					if (
+						taskBeforeActivationId !== undefined &&
+						taskAfterFailure !== null &&
+						taskAfterFailure !== undefined &&
+						taskAfterFailure.taskId === taskBeforeActivationId
+					) {
+						if (taskAfterFailure.taskApiConfigName === profileToActivate) {
+							await this.persistStickyProviderProfileToCurrentTask(previousTaskStickyName, {
+								expectedCurrentTaskId: taskBeforeActivationId,
+							})
+							if (previousTaskSettings) {
+								this.updateTaskApiHandlerIfNeeded(previousTaskSettings, { forceRebuild: true })
+							}
+						} else {
+							movedKeys.push("task sticky profile and handler")
+						}
+					} else if (taskBeforeActivationId !== undefined) {
+						movedKeys.push("task sticky profile and handler")
+					}
+					if (movedKeys.length > 0) {
+						this.log(
+							`[deleteProviderProfile] skipped restoring ${movedKeys.join(", ")} on this view after the failed ` +
+								`deletion of '${profileToDelete.name}': another view or a task switch moved them under us, so ` +
+								`this call cannot tell which content is current.`,
+						)
+					}
+				} catch (restoreError) {
+					this.log(
+						`[deleteProviderProfile] failed to restore this view's live pin and task after the failed ` +
+							`deletion of '${profileToDelete.name}': ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+					)
+				}
+			}
 			throw error
 		}
 	}
 
 	private async persistStickyProviderProfileToCurrentTask(
-		apiConfigName: string,
+		// undefined restores a task that had no sticky profile before this activation: the
+		// deletion compensation puts the task back exactly as it found it.
+		apiConfigName: string | undefined,
 		options: { skipCurrentTaskRebuild?: boolean; expectedCurrentTaskId?: string } = {},
 	): Promise<void> {
 		if (options.skipCurrentTaskRebuild) return
@@ -4288,6 +4375,17 @@ export class ClineProvider
 
 		if (signal?.aborted) return
 
+		// Whether this activation must leave a foreign task alone, computed once here so both the
+		// success path below and the shared-write catch can apply the same guard. A launch-time pin
+		// repair (preserveForeignTask) deliberately leaves the task's sticky profile untouched, so its
+		// handler and credentials must stay on that profile too - including when a shared write of
+		// this very activation fails midway and the catch rebuilds the task from the activated
+		// profile's settings.
+		const foreignTaskFollowed =
+			options?.preserveForeignTask === true &&
+			this.getCurrentTask()?.taskApiConfigName !== undefined &&
+			this.getCurrentTask()?.taskApiConfigName !== name
+
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
 			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
@@ -4316,8 +4414,12 @@ export class ClineProvider
 				// switch and delivers its pending message now. The task must run the activated
 				// profile's settings: without this rebuild the handler still belongs to the profile
 				// the task started on, and the message goes out on that handler in the new mode.
+				// A task that follows another sticky profile is skipped here for the same reason the
+				// success path skips it: a shared write that failed midway must not move that
+				// conversation onto the target profile's provider and credentials.
 				this.updateTaskApiHandlerIfNeeded(providerSettings, {
 					forceRebuild: true,
+					skipCurrentTaskRebuild: skipCurrentTaskRebuild || foreignTaskFollowed,
 					expectedCurrentTaskId: options?.expectedCurrentTaskId,
 				})
 				throw error
@@ -4335,14 +4437,8 @@ export class ClineProvider
 			await this.setModeConfig(mode, id)
 		}
 
-		// Change the provider for the current task. A launch-time pin repair
-		// (preserveForeignTask) must not switch a task that follows a different
-		// sticky profile: the repair deliberately leaves the task's sticky profile
-		// untouched, so its handler and credentials must stay on that profile too.
-		const foreignTaskFollowed =
-			options?.preserveForeignTask === true &&
-			this.getCurrentTask()?.taskApiConfigName !== undefined &&
-			this.getCurrentTask()?.taskApiConfigName !== name
+		// Change the provider for the current task; foreignTaskFollowed is computed above so the
+		// shared-write catch applies the same guard.
 		const expectedCurrentTaskId = options?.expectedCurrentTaskId
 		this.updateTaskApiHandlerIfNeeded(providerSettings, {
 			forceRebuild: true,
