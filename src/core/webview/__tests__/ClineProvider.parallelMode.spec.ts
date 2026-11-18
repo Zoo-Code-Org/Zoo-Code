@@ -1243,7 +1243,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// A view without its own profile pin follows the deletion through the activation path,
 			// so the shared selection refreshes to the replacement profile via activation.
-			expect(activateSpy).toHaveBeenCalledWith({ name: "keeper-profile" })
+			expect(activateSpy).toHaveBeenCalledWith(
+				{ name: "keeper-profile" },
+				{ onModeMappingWritten: expect.any(Function) },
+			)
 			expect(await provider.getState()).toMatchObject({ currentApiConfigName: "keeper-profile" })
 
 			await provider.dispose()
@@ -1282,7 +1285,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			// The shared selection referenced the deleted profile, so the unpinned view takes
 			// the activation path and adopts the replacement profile.
-			expect(activateSpy).toHaveBeenCalledWith({ name: "replacement-profile" })
+			expect(activateSpy).toHaveBeenCalledWith(
+				{ name: "replacement-profile" },
+				{ onModeMappingWritten: expect.any(Function) },
+			)
 			expect(await provider.getState()).toMatchObject({ currentApiConfigName: "replacement-profile" })
 
 			await provider.dispose()
@@ -1326,7 +1332,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			})
 
 			// The pinning view must take the activation path with the replacement profile...
-			expect(activateSpy).toHaveBeenCalledWith({ name: "replacement-profile" })
+			expect(activateSpy).toHaveBeenCalledWith(
+				{ name: "replacement-profile" },
+				{ onModeMappingWritten: expect.any(Function) },
+			)
 			// ...and the shared store serves the replacement settings through
 			// getState(), while the cleared view-local overlay cannot mask them...
 			expect((await provider.getState()).apiConfiguration).toMatchObject({
