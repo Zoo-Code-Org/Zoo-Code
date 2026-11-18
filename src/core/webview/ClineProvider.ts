@@ -3613,6 +3613,10 @@ export class ClineProvider
 					profileToActivate,
 					replacementSettings,
 				)
+				// Hand the seam back on this exit as well: without it every deletion that lands here
+				// leaves another wrapper installed, and later mapping writes would traverse the retained
+				// chain and record into a map this call has already dropped.
+				this.setModeConfig = seamSetModeConfig
 				return
 			}
 

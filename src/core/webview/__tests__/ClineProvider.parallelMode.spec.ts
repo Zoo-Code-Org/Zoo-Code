@@ -1148,6 +1148,10 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				{ id: "doomed-id", name: "doomed-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
+			// The deletion installs a recorder over setModeConfig for the duration of its forward phase; a
+			// view with no pin takes the activation exit, which has to hand the method back like every
+			// other exit, or each successful deletion would leave another wrapper installed.
+			const seamBefore = provider["setModeConfig"]
 
 			await provider.deleteProviderProfile({
 				id: "doomed-id",
@@ -1159,6 +1163,8 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// so the shared selection refreshes to the replacement profile via activation.
 			expect(activateSpy).toHaveBeenCalledWith({ name: "keeper-profile" })
 			expect(await provider.getState()).toMatchObject({ currentApiConfigName: "keeper-profile" })
+
+			expect(provider["setModeConfig"]).toBe(seamBefore)
 
 			await provider.dispose()
 		})

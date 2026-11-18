@@ -6890,37 +6890,66 @@ describe("ClineProvider", () => {
 			await slowView["setViewStateId"]("repoint-order-second")
 			await slowView.saveViewState("currentApiConfigName", "repoint-order-profile")
 			const order: string[] = []
+			const failingPosts: string[] = []
 			let releaseSlowView: () => void = () => {}
 			const slowViewSettled = new Promise<void>((resolve) => {
 				releaseSlowView = resolve
 			})
-			vi.spyOn(failingView, "postStateToWebview").mockRejectedValue(new Error("repoint post failed"))
+			vi.spyOn(failingView, "postStateToWebview").mockImplementation(async () => {
+				failingPosts.push("failing-post-started")
+				throw new Error("repoint post failed")
+			})
 			vi.spyOn(slowView, "postStateToWebview").mockImplementation(async () => {
 				order.push("slow-view-post-started")
 				await slowViewSettled
 				order.push("slow-view-post-settled")
 			})
-			// The slow view's write is what is still in flight when the first one fails, so its release
-			// cannot depend on the re-point settling: the timer releases it while the caller is already
-			// waiting on the rejection.
-			const releaseTimer = setTimeout(releaseSlowView, 50)
 
-			await expect(
-				failingView["repointViewLocalStateAfterProfileRename"]("repoint-order-profile", "repoint-order-new", {
-					apiProvider: providerIdentifiers.openrouter,
-					openRouterApiKey: "renamed-key",
-				}),
-			).rejects.toThrow("repoint post failed")
+			try {
+				const repoint = failingView["repointViewLocalStateAfterProfileRename"](
+					"repoint-order-profile",
+					"repoint-order-new",
+					{
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterApiKey: "renamed-key",
+					},
+				)
+				// Observe the settlement before probing, so the rejection this call is expected to propagate
+				// is handled whichever side of the probe wins.
+				const repointOutcome = repoint.then(() => "settled").catch(() => "rejected")
 
-			clearTimeout(releaseTimer)
-			// The sibling write had to finish before the rejection was handed back, or the rename
-			// compensation would have started against a half-applied view.
-			expect(order).toEqual(["slow-view-post-started", "slow-view-post-settled"])
-			expect(failingView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
-			expect(slowView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
+				// Both posts report in before anything is concluded: the point of the test is what happens
+				// while the sibling write is still open, so the fixture waits for both callbacks to start
+				// instead of trusting a wall-clock delay to have let them start.
+				const bothPostsStarted = () => failingPosts.length > 0 && order.includes("slow-view-post-started")
+				let hops = 0
+				while (!bothPostsStarted() && hops < 50) {
+					await new Promise((resolve) => setImmediate(resolve))
+					hops++
+				}
+				expect(bothPostsStarted()).toBe(true)
+				// The first post has already thrown and the sibling is still inside its write, so the
+				// re-point has to be waiting: a promise-combining implementation would have rejected here.
+				const outcome = await Promise.race([
+					repointOutcome,
+					new Promise<string>((resolve) => {
+						setImmediate(() => setImmediate(() => resolve("still pending")))
+					}),
+				])
+				expect(outcome).toBe("still pending")
 
-			await failingView.dispose()
-			await slowView.dispose()
+				// Only now may the sibling write finish, and only then may the failure be handed back.
+				releaseSlowView()
+				await expect(repoint).rejects.toThrow("repoint post failed")
+				// The sibling write had to finish before the rejection was handed back, or the rename
+				// compensation would have started against a half-applied view.
+				expect(order).toEqual(["slow-view-post-started", "slow-view-post-settled"])
+				expect(failingView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
+				expect(slowView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
+			} finally {
+				await failingView.dispose()
+				await slowView.dispose()
+			}
 		})
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(
@@ -7597,6 +7626,87 @@ describe("ClineProvider", () => {
 
 			// The stale (temporary-id) load must not overwrite the stable id's load.
 			expect(provider["viewLocalState"]).toEqual({ mode: "debug" })
+
+			await provider.dispose()
+		})
+
+		// The reapplied name is resolved on its own await, so the selection can move again underneath
+		// the re-resolve. The settings resolved for the earlier name are already superseded by then,
+		// and committing them would pair this view with a profile it no longer names.
+		it("discards a re-resolved profile that a competing switch superseded during the re-resolve", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+				})
+
+			// Seed the entry through this instance's proxy so it owns the entry it is about to load, then
+			// adopt the stable id. That first load populates the buffer with the persisted profile's
+			// settings, which is exactly what a re-apply would have to overwrite.
+			await provider.contextProxy.setValue("viewStates", {
+				"stable-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			// getProfile is addressable either by name or by id; this fixture addresses every lookup by
+			// name, so the stub has to narrow the union before it can read the name.
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("stable-sidebar-view")
+			registrationLookup.mockRestore()
+			const settingsBeforeReapply = provider["viewLocalState"].apiConfiguration
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("persisted-profile")
+
+			// Two lookups and two brakes: the profile the load authorises, and the name the view
+			// re-applied underneath it.
+			let releasePersisted!: (value: PersistedProfile) => void
+			let releaseSibling!: (value: PersistedProfile) => void
+			const persistedLookup = new Promise<PersistedProfile>((resolve) => {
+				releasePersisted = resolve
+			})
+			const siblingLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseSibling = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((config) =>
+				profileName(config) === "persisted-profile" ? persistedLookup : siblingLookup,
+			)
+
+			const load = provider["loadViewState"]()
+
+			// The switch that makes the load re-resolve at all: it lands while the persisted profile is
+			// still being looked up, so the load finds a name it never authorised on a settings object it
+			// has never seen.
+			await provider.saveViewState("currentApiConfigName", "sibling-profile")
+			releasePersisted(profileOf("persisted-profile", providerIdentifiers.anthropic))
+
+			// The switch that supersedes the re-resolve itself, landing while that lookup is awaited.
+			await provider.saveViewState("currentApiConfigName", "third-profile")
+			releaseSibling(profileOf("sibling-profile", providerIdentifiers.openrouter))
+
+			await load
+
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Discarding the re-resolved settings for profile 'sibling-profile'"),
+			)
+			// Nothing of the superseded re-resolve was committed: the view keeps the selection that
+			// outran it, still paired with the settings it held before the discarded lookup.
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("third-profile")
+			expect(provider["viewLocalState"].apiConfiguration).toBe(settingsBeforeReapply)
 
 			await provider.dispose()
 		})
