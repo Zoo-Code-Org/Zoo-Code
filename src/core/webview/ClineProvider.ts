@@ -3084,8 +3084,30 @@ export class ClineProvider
 		// The task writes above await (the history write first), so a custom mode can be deleted
 		// inside that window even while this switch owns the queue. Re-check before the first
 		// durable write so a slug that no longer resolves is never pinned to the view or written
-		// to the shared mode, and undo the task-side writes that already landed.
-		if (!(await this.modeSlugResolves(newMode))) {
+		// to the shared mode, and undo the task-side writes that already landed. The re-check reads
+		// custom modes through the manager itself, so it can reject after the built-in lookup has
+		// already approved the slug: the task-side writes have landed by then too, and letting the
+		// rejection escape without the undo leaves the task on a mode its view pin and profile
+		// never took. Roll back the task-side writes on a failed lookup and rethrow the original
+		// error; the deleted-mode path below keeps returning without throwing.
+		let slugResolves: boolean
+		try {
+			slugResolves = await this.modeSlugResolves(newMode)
+		} catch (lookupError) {
+			if (rollbackTaskWrites) {
+				try {
+					await rollbackTaskWrites()
+				} catch (rollbackError) {
+					this.log(
+						`[handleModeSwitch] Failed to roll back task mode writes after the mode lookup failed: ${
+							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+						}`,
+					)
+				}
+			}
+			throw lookupError
+		}
+		if (!slugResolves) {
 			this.log(`[ClineProvider#handleModeSwitch] ignoring mode "${newMode}" deleted while the switch was pending`)
 
 			if (rollbackTaskWrites) {
@@ -3877,7 +3899,13 @@ export class ClineProvider
 			// settings into its overlay first, exactly as activation and upsert do before their
 			// shared writes.
 			if (deletedWasGlobal) {
-				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(profileToActivate)
+				// This view is part of its own snapshot here: its pin can name a third surviving
+				// profile and carry no overlay of its own, and the shared writes below would then
+				// serve this view the replacement's settings under its own pin name - exactly the
+				// failure the helper guards for siblings. The helper excludes the calling view by
+				// default because activation and upsert own their own overlay handling; a deletion
+				// moves the shared store under an unrelated pin, so it opts this view in.
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(profileToActivate, { includeSelf: true })
 
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
@@ -4064,13 +4092,22 @@ export class ClineProvider
 	 * (`rePinViewLocalStateForDeletedProfile`), and aborting here would let one stale view
 	 * block every later activation in the host. Same discrimination `deleteProviderProfile`
 	 * applies to its own missing-profile read.
+	 *
+	 * includeSelf opts the CALLING view into the same snapshot. A deletion moves the shared store
+	 * under this view's own pin when that pin names neither the deleted profile nor the
+	 * replacement, and the helper excludes the caller by default because activation and upsert
+	 * handle their own overlays. A caller that opts in must not be holding this view's mutation
+	 * queue - the self commit below writes through the same view-local save the queue commit
+	 * uses, without re-entering it.
 	 */
 	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(
 		activatedProfileName: string | undefined,
+		options: { includeSelf?: boolean } = {},
 	): Promise<void> {
+		const includeSelf = options.includeSelf === true
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
-				instance !== this &&
+				(instance !== this || includeSelf) &&
 				instance.pinnedProfileName !== undefined &&
 				instance.pinnedProfileName !== activatedProfileName &&
 				instance.viewLocalState.apiConfiguration === undefined,
@@ -4097,6 +4134,18 @@ export class ClineProvider
 					// gained a newer overlay) while this snapshot was in flight, and the
 					// captured settings must never land on top of a newer pin. Direct
 					// private access: compile-time safe across sibling instances.
+					// This view's own pin (includeSelf) commits through the same view-local save the queue
+					// commit below uses, without re-entering this view's mutation queue - a caller that
+					// already holds it would deadlock - and its caller posts state when it is done.
+					if (instance === this) {
+						if (this.pinnedProfileName === pinName && this.viewLocalState.apiConfiguration === undefined) {
+							await this._saveViewLocalStateFromMutation({
+								apiConfiguration: settings as ProviderSettings,
+							})
+						}
+						return
+					}
+
 					await instance["enqueueProviderProfileMutation"](async () => {
 						if (
 							instance.pinnedProfileName !== pinName ||
@@ -4117,7 +4166,11 @@ export class ClineProvider
 					// so that case fails the mutation before the shared write.
 					const deletedPin = error instanceof ProviderSettingsNotFoundError
 
-					if (!deletedPin) {
+					// An unreadable pin is fatal for a sibling - unknown settings must not be replaced by
+					// the profile the caller is about to activate - but not for this view's own pin:
+					// leaving the overlay untouched keeps it reporting what it reported before, and a
+					// mutation aborted by this read alone would have had to compensate anyway.
+					if (!deletedPin && instance !== this) {
 						unresolvedPins.push({ pinName, error })
 					}
 
@@ -4176,6 +4229,11 @@ export class ClineProvider
 		const persistTaskHistory = options?.persistTaskHistory ?? true
 		const skipCurrentTaskRebuild = options?.skipCurrentTaskRebuild ?? false
 
+		// The profile listing that the write group below persists is read together with the sibling
+		// snapshot, before the manager commits the activation, so that a fallible read does not
+		// land in the window after the switch is committed.
+		let listApiConfigMeta: ProviderSettingsEntry[] | undefined
+
 		if (!skipCurrentTaskRebuild) {
 			// Siblings pinned to other profiles must keep their own settings: the shared
 			// write below replaces the shared store, so pin their profile's settings into
@@ -4192,6 +4250,15 @@ export class ClineProvider
 			} else {
 				const listedProfiles = await this.providerSettingsManager.listConfig()
 				activatedProfileName = listedProfiles.find((entry) => entry.id === args.id)?.name ?? args.id
+				listApiConfigMeta = listedProfiles
+			}
+			// The listing the write group below persists is read here rather than after the manager
+			// commit: activateProfile only rewrites the shared selection, so the listing is the same
+			// either way, and a read that rejects after onSharedWriteStart would strand the switch -
+			// handleModeSwitch keeps the new mode once the manager has committed, and nothing around
+			// this read recovered the mode, the profile settings and the task handler together.
+			if (listApiConfigMeta === undefined) {
+				listApiConfigMeta = await this.providerSettingsManager.listConfig()
 			}
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName)
 		}
@@ -4204,12 +4271,30 @@ export class ClineProvider
 
 		if (signal?.aborted) return
 
+		// A launch-time pin repair (preserveForeignTask) must not switch a task that follows a
+		// different sticky profile: the repair deliberately leaves the task's sticky profile
+		// untouched, so its handler and credentials must stay on that profile too. Computed
+		// before the writes below - alongside expectedCurrentTaskId, which is captured at the
+		// same point - so the failure path below makes the same decision as the success path.
+		const foreignTaskFollowed =
+			options?.preserveForeignTask === true &&
+			this.getCurrentTask()?.taskApiConfigName !== undefined &&
+			this.getCurrentTask()?.taskApiConfigName !== name
+
 		if (!skipCurrentTaskRebuild) {
 			// See `upsertProviderProfile` for a description of what this is doing.
-			const listApiConfigMeta = await this.providerSettingsManager.listConfig()
+			// Safety net only: the listing is read in the pre-commit block above under the same gate,
+			// so this branch is unreachable while both blocks share skipCurrentTaskRebuild.
+			if (listApiConfigMeta === undefined) {
+				listApiConfigMeta = await this.providerSettingsManager.listConfig()
+			}
 
 			try {
-				await Promise.all([
+				// Settle every branch instead of awaiting Promise.all: Promise.all rejects on the first
+				// failure while another branch is still in flight, so the caller would release the
+				// mutation queue and run the compensation below while a write that started here could
+				// still land afterwards on top of a later activation's state.
+				const activationWrites = await Promise.allSettled([
 					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 					// Route through setValue so the in-memory viewLocalState buffer tracks the
 					// activated profile: a plain ContextProxy write would leave a stale loaded
@@ -4222,15 +4307,26 @@ export class ClineProvider
 					// new settings in getState().
 					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 				])
+				const failedWrite = activationWrites.find((result) => result.status === "rejected")
+				if (failedWrite && failedWrite.status === "rejected") {
+					// Every branch has settled: nothing started here is still writing when the
+					// compensation below runs or when the caller's own activation follows.
+					throw failedWrite.reason
+				}
 			} catch (error) {
 				// The manager has already written the activated profile, so the caller keeps the
 				// switch and delivers its pending message now. The task must run the activated
 				// profile's settings: without this rebuild the handler still belongs to the profile
-				// the task started on, and the message goes out on that handler in the new mode.
-				this.updateTaskApiHandlerIfNeeded(providerSettings, {
-					forceRebuild: true,
-					expectedCurrentTaskId: options?.expectedCurrentTaskId,
-				})
+				// the task started on, and the message goes out on that handler in the new mode. A
+				// launch-time pin repair is the exception - rebuilding here would move a foreign
+				// task's provider and credentials onto the activated profile while its sticky pin
+				// stays elsewhere, which is the failure the guard below prevents on success.
+				if (!foreignTaskFollowed) {
+					this.updateTaskApiHandlerIfNeeded(providerSettings, {
+						forceRebuild: true,
+						expectedCurrentTaskId: options?.expectedCurrentTaskId,
+					})
+				}
 				throw error
 			}
 
@@ -4246,14 +4342,9 @@ export class ClineProvider
 			await this.setModeConfig(mode, id)
 		}
 
-		// Change the provider for the current task. A launch-time pin repair
-		// (preserveForeignTask) must not switch a task that follows a different
-		// sticky profile: the repair deliberately leaves the task's sticky profile
-		// untouched, so its handler and credentials must stay on that profile too.
-		const foreignTaskFollowed =
-			options?.preserveForeignTask === true &&
-			this.getCurrentTask()?.taskApiConfigName !== undefined &&
-			this.getCurrentTask()?.taskApiConfigName !== name
+		// Change the provider for the current task. The pin-repair guard
+		// (foreignTaskFollowed) is computed above, before the shared writes, so the failure path
+		// above and this call make the same decision from the same captured state.
 		const expectedCurrentTaskId = options?.expectedCurrentTaskId
 		this.updateTaskApiHandlerIfNeeded(providerSettings, {
 			forceRebuild: true,
@@ -5710,6 +5801,16 @@ export class ClineProvider
 
 		const previousSharedValues = { [key]: this.contextProxy.getValue(key) } as RooCodeSettings
 		const writtenSharedValues = { [key]: value } as RooCodeSettings
+
+		// A provider-key write replaces the shared store that a sibling view's pin falls back onto,
+		// so pin that sibling's own profile settings into its overlay first - the protection
+		// setValues takes before a multi-key provider write and the activation paths take before
+		// their shared write. This write is not tied to a saved profile, so no pin is exempt from
+		// the snapshot. Unrelated single-key writes do not touch the shared store and skip it.
+		if (PROVIDER_SETTINGS_KEYS.some((providerKey) => providerKey in writtenSharedValues)) {
+			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(undefined)
+		}
+
 		try {
 			await this.contextProxy.setValue(key, value)
 		} catch (error) {

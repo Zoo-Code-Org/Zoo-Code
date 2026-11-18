@@ -432,11 +432,12 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	return {
 		...actual,
 		modes,
-		// Resolve against the mocked mode list above (not the real module modes) so the
-		// lookup matches exactly what the tests set up.
-		getModeBySlug: vi.fn().mockImplementation((slug: string) => {
-			return modes.find((m) => m.slug === slug) ?? null
-		}),
+		// The production lookup, not a copy of it: production calls getModeBySlug with the custom modes
+		// it reads through CustomModesManager, and a double that re-implemented the built-in scan -
+		// or ignored that argument - would stay green if the real lookup stopped accepting custom
+		// modes. Mode definitions come from the list above and from each test's customModesManager
+		// fixture, which is what the lookup itself reads.
+		getModeBySlug: actual.getModeBySlug,
 		defaultModeSlug: "code",
 	}
 })
@@ -1689,6 +1690,15 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			const siblingState = await providerB.getState()
 			expect(siblingState.currentApiConfigName).toBe("third-profile")
 			expect(siblingState.apiConfiguration).toMatchObject(thirdSettings)
+
+			// The deleting view pins the same third profile and held no overlay of its own. The snapshot
+			// helper excludes the calling view by default, so unless a deletion opts this view into its
+			// own snapshot, the shared writes above leave it reporting third-profile together with the
+			// replacement's provider and credentials.
+			expect(providerA["viewLocalState"].apiConfiguration).toMatchObject(thirdSettings)
+			const deletingViewState = await providerA.getState()
+			expect(deletingViewState.currentApiConfigName).toBe("third-profile")
+			expect(deletingViewState.apiConfiguration).toMatchObject(thirdSettings)
 
 			await providerA.dispose()
 			await providerB.dispose()
@@ -2968,20 +2978,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.setValue("mode", "code")
 			const logSpy = vi.spyOn(provider, "log")
 
-			// The file-level getModeBySlug mock ignores its customModes argument (and returns
-			// null for unknown slugs), so make the lookup custom-mode aware for this test.
-			const modesModule = vi.mocked(await import("../../../shared/modes"))
-			const originalGetModeBySlug = modesModule.getModeBySlug.getMockImplementation()
+			// The production lookup is in use in this file now, so a custom slug resolves only through
+			// the modes this fixture hands CustomModesManager: removing it from the fixture is what
+			// makes the slug unknown, the same way it does in the host.
 			type TestMode = { slug: string; name: string; roleDefinition: string; groups: string[] }
 			let customModes: TestMode[] = [
 				{ slug: "ephemeral-mode", name: "Ephemeral Mode", roleDefinition: "Test Role", groups: [] },
 			]
-			modesModule.getModeBySlug.mockImplementation(
-				((slug: string, custom?: TestMode[]) =>
-					custom?.find((mode) => mode.slug === slug) ??
-					modesModule.modes.find((mode) => mode.slug === slug) ??
-					null) as typeof modesModule.getModeBySlug,
-			)
 			const getCustomModesSpy = vi
 				.spyOn(provider.customModesManager, "getCustomModes")
 				.mockImplementation(async () => customModes as never)
@@ -3014,10 +3017,6 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				expect(provider.getValue("mode")).toBe("code")
 			} finally {
 				getCustomModesSpy.mockRestore()
-
-				if (originalGetModeBySlug) {
-					modesModule.getModeBySlug.mockImplementation(originalGetModeBySlug)
-				}
 			}
 
 			await provider.dispose()
@@ -3581,6 +3580,242 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			expect(provider["viewLocalState"]).toEqual({})
 
 			await provider.dispose()
+		})
+	})
+
+	describe("activation and mode-write failure paths", () => {
+		it("rolls back the task-side mode writes when the pre-write mode lookup rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("lookup-failure-view")
+			await provider.setValue("mode", "code")
+
+			// The custom mode resolves for every read up to the task-side emit; the read that
+			// happens after the task has been told about the new mode - the pre-write re-check -
+			// is the one that rejects, which is exactly the point past which the task-side writes
+			// cannot simply be abandoned.
+			const customMode = {
+				slug: "rolled-back-mode",
+				name: "Rolled Back Mode",
+				roleDefinition: "Test Role",
+				groups: [],
+			}
+			const task = { taskId: "task-lookup-failure", emit: vi.fn(), _taskMode: "code" }
+			const getCustomModesSpy = vi
+				.spyOn(provider.customModesManager, "getCustomModes")
+				.mockImplementation(async () => {
+					if (task.emit.mock.calls.length > 0) {
+						throw new Error("custom modes read failed")
+					}
+					return [customMode] as never
+				})
+			// The switch only reads taskId, emit and the in-memory mode, so a partial double stands
+			// in for the task; the assertion below reads the mode back off the same object.
+			const switchRun = provider.handleModeSwitch(
+				"rolled-back-mode",
+				task as unknown as Parameters<typeof provider.handleModeSwitch>[1],
+			)
+
+			await expect(switchRun).rejects.toThrow("custom modes read failed")
+			// The task had already been told about the new mode, so the rejection lands after the
+			// task-side writes, not at the switch's own validation.
+			expect(task.emit).toHaveBeenCalledWith(expect.any(String), "task-lookup-failure", "rolled-back-mode")
+			// A rejected re-check must undo the task-side writes it found: the view never pinned
+			// the slug, so a task left on it would run a mode its view and profile never took.
+			expect(task["_taskMode"]).toBe("code")
+			expect(getCustomModesSpy).toHaveBeenCalled()
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider.getValue("mode")).toBe("code")
+
+			await provider.dispose()
+		})
+
+		it("keeps the manager selection uncommitted when the profile listing read rejects", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("meta-read-failure-view")
+			await provider.contextProxy.setValue("currentApiConfigName", "before-meta")
+
+			const committed: string[] = []
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					committed.push("name" in args ? (args.name ?? "") : (args.id ?? ""))
+					return {
+						name: "meta-profile",
+						id: "meta-id",
+						apiProvider: providerIdentifiers.anthropic,
+					} satisfies ActivatedProfile
+				},
+			)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockRejectedValue(
+				new Error("profile listing read failed"),
+			)
+
+			let sharedWriteStarted = false
+			await expect(
+				provider["activateProviderProfileUnlocked"](
+					{ name: "meta-profile" },
+					{
+						onSharedWriteStart: () => {
+							sharedWriteStarted = true
+						},
+					},
+				),
+			).rejects.toThrow("profile listing read failed")
+
+			// The listing is read before the manager commits, so a rejected read leaves the store on
+			// the profile the view started on and never reports the switch as committed: after the
+			// commit there was no recovery that kept the mode, the profile settings and the task
+			// handler together.
+			expect(committed).toEqual([])
+			expect(sharedWriteStarted).toBe(false)
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("before-meta")
+
+			await provider.dispose()
+		})
+
+		it("drains every activation write before surfacing the first failure", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("drain-view")
+
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "drain-profile",
+				id: "drain-id",
+				apiProvider: providerIdentifiers.anthropic,
+			} satisfies ActivatedProfile)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "drain-id", name: "drain-profile", apiProvider: providerIdentifiers.anthropic },
+			])
+
+			const order: string[] = []
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key) => {
+				if (key === "listApiConfigMeta") {
+					// The branch that succeeds settles a tick after the branch that fails rejects, so the
+					// two orderings below are distinguishable without a signal from this test.
+					await new Promise((resolve) => {
+						setTimeout(resolve, 0)
+					})
+					order.push("branch-settled")
+				}
+			})
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockImplementation(async () => {
+				order.push("branch-failed")
+				throw new Error("shared store write failed")
+			})
+
+			const activation = provider["activateProviderProfileUnlocked"]({ name: "drain-profile" }, {})
+			activation.catch(() => {
+				order.push("failure-surfaced")
+			})
+
+			await expect(activation).rejects.toThrow("shared store write failed")
+			// The other branch of the same write group settled before the failure was handed to the
+			// caller: a queue that released while a write from this call was still in flight let the
+			// next activation finish first and this one land on top of it.
+			expect(order).toEqual(["branch-failed", "branch-settled", "failure-surfaced"])
+
+			await provider.dispose()
+		})
+
+		it("leaves a foreign task's handler alone when an activation write fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("foreign-task-view")
+
+			// A task whose sticky profile is neither the activated one nor unset: the pin repair this
+			// call performs must not move its provider and credentials.
+			const foreignTask = {
+				taskApiConfigName: "sticky-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				foreignTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "activated-profile",
+				id: "activated-id",
+				apiProvider: providerIdentifiers.anthropic,
+			} satisfies ActivatedProfile)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "activated-id", name: "activated-profile", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValue(
+				new Error("shared store write failed"),
+			)
+
+			await expect(
+				provider.activateProviderProfile({ name: "activated-profile" }, { preserveForeignTask: true }),
+			).rejects.toThrow("shared store write failed")
+
+			// The repair leaves the sticky pin where it is, so the failure path must not rebuild this
+			// task onto the activated profile: its handler and credentials belong to the other profile.
+			expect(foreignTask.updateApiConfiguration).not.toHaveBeenCalled()
+			expect(foreignTask.setTaskApiConfigName).not.toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
+		it("pins a sibling profile's settings before a single provider key is written", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const siblingSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "sibling-key" }
+			await providerB.saveViewState("currentApiConfigName", "sibling-profile")
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(async (args) =>
+				args.name === "sibling-profile"
+					? ({ name: "sibling-profile", id: "sibling-id", ...siblingSettings } satisfies ResolvedProfile)
+					: Promise.reject(new ProviderSettingsNotFoundError(`Config '${args.name}' not found`)),
+			)
+
+			// A single provider key reaches the same shared store the multi-key write does, while B's
+			// pin names a profile whose settings are not part of this payload.
+			await providerA.setValue("apiKey", "writer-key")
+
+			expect(providerB["viewLocalState"].apiConfiguration).toMatchObject(siblingSettings)
+			const siblingState = await providerB.getState()
+			expect(siblingState.currentApiConfigName).toBe("sibling-profile")
+			expect(siblingState.apiConfiguration).toMatchObject(siblingSettings)
+
+			await providerA.dispose()
+			await providerB.dispose()
 		})
 	})
 })
