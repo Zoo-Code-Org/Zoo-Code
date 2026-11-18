@@ -4313,7 +4313,7 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 		})
 
 		it("still gates issue_comment on the CodeRabbit author", () => {
-			const issueComment = (login: string | null, onPullRequest = true): GithubExpressionContext =>
+			const issueComment = (login: string, onPullRequest = true): GithubExpressionContext =>
 				contextFor({
 					event_name: "issue_comment",
 					event: {
