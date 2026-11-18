@@ -3799,11 +3799,14 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			)
 			const siblingSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "sibling-key" }
 			await providerB.saveViewState("currentApiConfigName", "sibling-profile")
-			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(async (args) =>
-				args.name === "sibling-profile"
-					? ({ name: "sibling-profile", id: "sibling-id", ...siblingSettings } satisfies ResolvedProfile)
-					: Promise.reject(new ProviderSettingsNotFoundError(`Config '${args.name}' not found`)),
-			)
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(async (args) => {
+				// getProfile takes a profile by name or by id; the snapshot helper reads pins by name.
+				const requested = "name" in args ? args.name : args.id
+				if (requested === "sibling-profile") {
+					return { name: "sibling-profile", id: "sibling-id", ...siblingSettings } satisfies ResolvedProfile
+				}
+				throw new ProviderSettingsNotFoundError(`Config '${requested}' not found`)
+			})
 
 			// A single provider key reaches the same shared store the multi-key write does, while B's
 			// pin names a profile whose settings are not part of this payload.
