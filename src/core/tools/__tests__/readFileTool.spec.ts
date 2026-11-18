@@ -624,9 +624,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 400]],
 				})
 
-				await readFileTool.execute({ path: "large.ts" }, mockTask as any, callbacks)
+				await readFileTool.execute({ path: "large.ts" }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
 			})
 
@@ -644,9 +644,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[200, 349]],
 				})
 
-				await readFileTool.execute({ path: "large.ts", offset: 200 }, mockTask as any, callbacks)
+				await readFileTool.execute({ path: "large.ts", offset: 200 }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toContain("200 | line 200")
 				expect(result).toContain("349 | line 349")
 				expect(result).not.toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
@@ -666,9 +666,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 50]],
 				})
 
-				await readFileTool.execute({ path: "large.ts", limit: 50 }, mockTask as any, callbacks)
+				await readFileTool.execute({ path: "large.ts", limit: 50 }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toContain("Showing lines 1-50 of 500 total lines")
 				expect(result).toContain("1 | line 1")
 				expect(result).toContain("50 | line 50")
@@ -689,9 +689,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 2000]],
 				})
 
-				await readFileTool.execute({ path: "very-large.ts" }, mockTask as any, callbacks)
+				await readFileTool.execute({ path: "very-large.ts" }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
 				expect(result).toContain("Status: Showing lines 1-100 and 2401-2500 (200 lines) of 2500 total lines.")
 				expect(result).toContain("To read more: Use the read_file tool with offset=101 and limit=2300.")
@@ -714,9 +714,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 2000]],
 				})
 
-				await readFileTool.execute({ path: "two-thousand.ts" }, mockTask as any, callbacks)
+				await readFileTool.execute({ path: "two-thousand.ts" }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toContain("IMPORTANT: File content truncated.")
 				expect(result).toContain("Status: Showing lines 1-100 and 1901-2000 (200 lines) of 2000 total lines.")
 				expect(result).toContain("To read more: Use the read_file tool with offset=101 and limit=1800.")
@@ -738,9 +738,9 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 2000]],
 				})
 
-				await readFileTool.execute({ files: [{ path: "very-large-legacy.ts" }] } as any, mockTask as any, callbacks)
+				await readFileTool.execute({ files: [{ path: "very-large-legacy.ts" }], _legacyFormat: true }, mockTask as unknown as Task, callbacks)
 
-				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
 				expect(result).toContain("1 | line 1")
 				expect(result).toContain("2500 | line 2500")
@@ -1419,8 +1419,8 @@ describe("ReadFileTool", () => {
 					path: "test.ts",
 					mode: "indentation",
 					offset: 5,
-				} as any,
-				mockTask as any,
+				},
+				mockTask as unknown as Task,
 				callbacks,
 			)
 
@@ -1447,8 +1447,8 @@ describe("ReadFileTool", () => {
 				{
 					path: "test.ts",
 					mode: "indentation",
-				} as any,
-				mockTask as any,
+				},
+				mockTask as unknown as Task,
 				callbacks,
 			)
 
@@ -1735,8 +1735,8 @@ describe("ReadFileTool", () => {
 					path: "test.ts",
 					mode: "indentation",
 					offset: 7,
-				} as any,
-				mockTask as any,
+				},
+				mockTask as unknown as Task,
 				callbacks,
 			)
 
