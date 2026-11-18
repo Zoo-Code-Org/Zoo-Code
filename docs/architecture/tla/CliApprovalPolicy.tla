@@ -4,13 +4,13 @@
 \* Failure: a task configuration turns on autoApprovalEnabled in a host that needs manual approval.
 \* Invariant: NoAutoApprovalWhenManual. The value in stored settings is the sink.
 \* Run each config on CliApprovalPolicyMC.tla. The MC module holds the sabotage variant.
-\* Expected before the run: the code holds. The sabotage variant fails in 2 states.
-\* Result: the code holds in 1 state. Sabotage fails in 2 states (stored becomes TRUE).
-\* The model has no task count. Each RunTask step sets stored from one input, so one step covers every order.
+\* Expected before the run: the invariant holds in the model. The sabotage variant fails in 2 states.
+\* Result: the invariant holds in the model in 1 state. Sabotage fails in 2 states (stored becomes TRUE).
+\* The model has no task count. Each Next step sets stored from one input, so one step covers every order.
 \* Not modeled: the other keys, such as alwaysAllowExecute. The master switch autoApprovalEnabled gates them.
 \* Not modeled: the VS Code UI toggle. It does not use runTask.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
-\* Review (PR 2472): 0 covered, 2 added (Init from NonInteractive, sabotage moved to the MC module), 0 gap. The first version was written after the fix. It is not an independent first pass.
+\* Review (PR 2472): 0 covered, 3 added (Init from NonInteractive, sabotage moved to the MC module, result wording), 0 gap. The first version was written after the fix. It is not an independent first pass.
 
 CONSTANT NonInteractive   \* TRUE when the CLI runs with the nonInteractive option
 
