@@ -321,14 +321,36 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		// Solution 1: Adaptive sliding-window truncation.
 		// When both offset and limit are omitted, files <= ADAPTIVE_FULL_READ_THRESHOLD (300 lines) are returned in full
 		// to eliminate multi-turn round trip penalties. Files > 300 lines get a 200-line head/tail window.
+		let adaptiveTruncated = false
+		let adaptiveHeadCount = 0
+		let adaptiveTailStart = 0
+		let adaptiveDisplayedLines = 0
+		let adaptiveOmittedStart = 0
+		let adaptiveOmittedCount = 0
+
 		if (entry.offset === undefined && entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
 			const truncated = truncateFileOutput(addLineNumbers(content, 1), SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
 			if (truncated.wasTruncated) {
 				output = truncated.content
+				adaptiveTruncated = true
+				adaptiveHeadCount = Math.floor(SLIDING_WINDOW_PREVIEW_LIMIT / 2)
+				const tailCount = SLIDING_WINDOW_PREVIEW_LIMIT - adaptiveHeadCount
+				adaptiveTailStart = result.totalLines - tailCount + 1
+				adaptiveOmittedStart = adaptiveHeadCount + 1
+				const omittedEnd = adaptiveTailStart - 1
+				adaptiveOmittedCount = omittedEnd - adaptiveOmittedStart + 1
+				adaptiveDisplayedLines = truncated.returnedLines
 			}
 		}
 
-		if (result.wasTruncated) {
+		if (adaptiveTruncated) {
+			// Put truncation warning at TOP (before content) to match @ mention format
+			output = `IMPORTANT: File content truncated.
+	Status: Showing lines 1-${adaptiveHeadCount} and ${adaptiveTailStart}-${result.totalLines} (${adaptiveDisplayedLines} lines) of ${result.totalLines} total lines.
+	To read more: Use the read_file tool with offset=${adaptiveOmittedStart} and limit=${adaptiveOmittedCount}.
+	
+	${output}`
+		} else if (result.wasTruncated) {
 			const startLine = offset1
 			const endLine = offset1 + result.returnedLines - 1
 			const nextOffset = endLine + 1

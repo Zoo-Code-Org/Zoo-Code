@@ -693,8 +693,34 @@ describe("ReadFileTool", () => {
 
 				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
 				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)
+				expect(result).toContain("Status: Showing lines 1-100 and 2401-2500 (200 lines) of 2500 total lines.")
+				expect(result).toContain("To read more: Use the read_file tool with offset=101 and limit=2300.")
+				expect(result).not.toContain("Showing lines 1-2000")
 				expect(result).toContain("1 | line 1")
 				expect(result).toContain("2500 | line 2500")
+			})
+
+			it("constructs pagination metadata reflecting the 200-line preview ranges and retrieval instructions for omitted lines", async () => {
+				const mockTask = createMockTask()
+				const callbacks = createMockCallbacks()
+				const lines = Array.from({ length: 2000 }, (_, i) => `line ${i + 1}`)
+
+				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
+				mockedReadWithSlice.mockReturnValue({
+					content: lines.map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					returnedLines: 2000,
+					totalLines: 2000,
+					wasTruncated: false,
+					includedRanges: [[1, 2000]],
+				})
+
+				await readFileTool.execute({ path: "two-thousand.ts" }, mockTask as any, callbacks)
+
+				const result = (callbacks.pushToolResult as any).mock.calls[0][0]
+				expect(result).toContain("IMPORTANT: File content truncated.")
+				expect(result).toContain("Status: Showing lines 1-100 and 1901-2000 (200 lines) of 2000 total lines.")
+				expect(result).toContain("To read more: Use the read_file tool with offset=101 and limit=1800.")
+				expect(result).not.toContain("Showing lines 1-2000")
 			})
 
 			it("includes true end of file in legacy adaptive preview when file exceeds default line limit", async () => {
