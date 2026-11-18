@@ -4000,26 +4000,257 @@ describe("ClineProvider", () => {
 			// rejects with a SettingsWriteError naming the keys it did store. Those must go back to
 			// their previous values before the error reaches the caller, and the view-local half of
 			// the write must not run at all for a shared write that never completed.
-			const originalSetValues = provider.contextProxy.setValues.bind(provider.contextProxy)
-			const partialWrite = new SettingsWriteError(
-				["mode"],
-				["currentApiConfigName"],
-				new Error("secret store failed"),
-			)
-			vi.spyOn(provider.contextProxy, "setValues")
-				.mockImplementationOnce(async () => {
-					throw partialWrite
-				})
-				.mockImplementation((values) => originalSetValues(values))
-
-			await expect(provider.setValues({ mode: "architect", currentApiConfigName: "other-config" })).rejects.toBe(
-				partialWrite,
-			)
+			// Run the real ContextProxy#setValues and fail only the second key's storage, so the
+			// committed key is committed by the same code a real failure uses, and the compensation
+			// has to name the key it undoes: a hand-built error could name keys the store never
+			// touched, and a payload-wide rollback leaves the two values below just as unchanged as
+			// the narrow one does.
+			const setValuesSpy = vi.spyOn(provider.contextProxy, "setValues")
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				if (key === "currentApiConfigName") {
+					throw new Error("profile slot store failed")
+				}
+				await originalUpdate(key, value as string | undefined)
+			})
+			let failure: unknown
+			try {
+				await provider.setValues({ mode: "architect", currentApiConfigName: "other-config" })
+				failure = new Error("expected the partially committed write to reject")
+			} catch (error) {
+				failure = error
+			} finally {
+				mockContext.globalState.update = originalUpdate
+			}
+			expect(failure).toBeInstanceOf(SettingsWriteError)
+			expect((failure as SettingsWriteError).committed).toEqual(["mode"])
+			expect((failure as SettingsWriteError).failed).toEqual(["currentApiConfigName"])
 			expect(provider.contextProxy.getValue("mode")).toBe("code")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("current-config")
 			expect(provider["viewLocalState"].mode).toBe("code")
+			// The compensation itself rather than only its outcome: exactly the key the store reported
+			// as committed, back to its previous value, and no other key. The first call is the failing
+			// write; the last one is the compensation.
+			const compensation = setValuesSpy.mock.calls.at(-1)?.[0]
+			expect(compensation).toEqual({ mode: "code" })
+			expect(Object.keys(compensation ?? {})).toEqual(["mode"])
 
 			await provider.dispose()
+		})
+		it("leaves a committed key alone when another view wrote it while the write was in flight", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sidebar["setViewStateId"]("committed-owner-sidebar")
+			await sibling["setViewStateId"]("committed-owner-sibling")
+			await sidebar.setValues({ mode: "code", currentApiConfigName: "current-config" })
+			const logSpy = vi.spyOn(sidebar, "log")
+			// The mode half of the payload below lands; the profile-slot half is still being stored
+			// when a second window changes the shared mode, and only then does that store fail.
+			// SettingsWriteError names the writes that landed - it does not say that this write still
+			// owns them, and the durable store is what a compensation must not overwrite.
+			let releaseStore!: (error: Error) => void
+			const storeGate = new Promise<void>((_resolve, reject) => {
+				releaseStore = reject
+			})
+			const writtenKeys: string[] = []
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				writtenKeys.push(key)
+				if (key === "currentApiConfigName") {
+					await storeGate
+				}
+				await originalUpdate(key, value as string | undefined)
+			})
+			try {
+				const pending = sidebar.setValues({ mode: "architect", currentApiConfigName: "other-config" })
+				await vi.waitFor(() => expect(writtenKeys).toContain("mode"))
+				await sibling.setValues({ mode: "debug" })
+				releaseStore(new Error("profile slot store failed"))
+				await expect(pending).rejects.toBeInstanceOf(SettingsWriteError)
+				expect(mockContext.globalState.get("mode")).toBe("debug")
+				expect(sibling.contextProxy.getValue("mode")).toBe("debug")
+				// The key that never landed stays where it was, and the skipped restore is reported
+				// rather than happening silently.
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("current-config")
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Leaving mode at its newer value: another write owns it"),
+				)
+			} finally {
+				mockContext.globalState.update = originalUpdate
+				await sibling.dispose()
+				await sidebar.dispose()
+			}
+		})
+
+		it("still rolls a committed key back when no other view wrote it in the meantime", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await sidebar["setViewStateId"]("committed-solo-view")
+			await sidebar.setValues({ mode: "code", currentApiConfigName: "current-config" })
+			const logSpy = vi.spyOn(sidebar, "log")
+			// The opposite outcome of the test above, same fixture and same failure: nobody writes the
+			// committed key while the write is in flight, so this write still owns it and the
+			// compensation has to restore it. A blanket skip would pass this and fail that one.
+			let releaseStore!: (error: Error) => void
+			const storeGate = new Promise<void>((_resolve, reject) => {
+				releaseStore = reject
+			})
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation(async (key: string, value: unknown) => {
+				if (key === "currentApiConfigName") {
+					await storeGate
+				}
+				await originalUpdate(key, value as string | undefined)
+			})
+			try {
+				const pending = sidebar.setValues({ mode: "architect", currentApiConfigName: "other-config" })
+				releaseStore(new Error("profile slot store failed"))
+				await expect(pending).rejects.toBeInstanceOf(SettingsWriteError)
+				expect(mockContext.globalState.get("mode")).toBe("code")
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("current-config")
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Leaving mode at its newer value"))
+			} finally {
+				mockContext.globalState.update = originalUpdate
+				await sidebar.dispose()
+			}
+		})
+
+		it("snapshots a pinned sibling before a flat provider-settings write lands in the shared slot", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const editor = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await sidebar["setViewStateId"]("flat-write-sidebar")
+				await editor["setViewStateId"]("flat-write-editor")
+				await sidebar.contextProxy.setValue("listApiConfigMeta", [
+					{ name: "work-profile", id: "work-id", apiProvider: providerIdentifiers.openrouter },
+					{ name: "personal-profile", id: "personal-id", apiProvider: providerIdentifiers.anthropic },
+				])
+				await sidebar.contextProxy.setValue("currentApiConfigName", "work-profile")
+				// The state an activation leaves in a second window: the shared slot names the profile
+				// that was activated, the window's buffer keeps that name as its pin, and its own
+				// settings overlay is cleared - so its settings resolve through the shared store.
+				editor["viewLocalState"].currentApiConfigName = "work-profile"
+				expect(editor.pinnedProfileName).toBe("work-profile")
+				expect(editor["viewLocalState"].apiConfiguration).toBeUndefined()
+				vi.spyOn(editor, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sidebar.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(sidebar.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+					if ("name" in params && params.name === "work-profile") {
+						return {
+							name: "work-profile",
+							id: "work-id",
+							apiProvider: providerIdentifiers.openrouter,
+							apiKey: "work-key",
+						}
+					}
+					return {
+						name: "personal-profile",
+						id: "personal-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "personal-key",
+					}
+				})
+				// The API configuration path: setConfiguration hands a flat payload to setValues,
+				// which writes it into the shared slot the editor reads through its own pin.
+				await sidebar.setValues({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "personal-key",
+					currentApiConfigName: "personal-profile",
+				})
+				await ClineProvider["persistedViewStateWriteQueue"]
+				// The editor still runs its next task under work: its overlay carries work's provider
+				// and credentials instead of reading personal's under work's name.
+				expect(editor["viewLocalState"].apiConfiguration?.apiProvider).toBe(providerIdentifiers.openrouter)
+				expect(editor["viewLocalState"].apiConfiguration?.apiKey).toBe("work-key")
+				expect(editor["viewLocalState"].currentApiConfigName).toBe("work-profile")
+				// The write itself landed, and the profile-write snapshot left the editor pinned.
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("personal-profile")
+				expect(mockContext.globalState.get("apiProvider")).toBe(providerIdentifiers.anthropic)
+			} finally {
+				await editor.dispose()
+				await sidebar.dispose()
+			}
+		})
+
+		it("leaves a sibling without a pin following the shared settings after a flat provider-settings write", async () => {
+			const sidebar = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const editor = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await sidebar["setViewStateId"]("flat-follow-sidebar")
+				await editor["setViewStateId"]("flat-follow-editor")
+				await sidebar.contextProxy.setValue("listApiConfigMeta", [
+					{ name: "work-profile", id: "work-id", apiProvider: providerIdentifiers.openrouter },
+					{ name: "personal-profile", id: "personal-id", apiProvider: providerIdentifiers.anthropic },
+				])
+				await sidebar.contextProxy.setValue("currentApiConfigName", "work-profile")
+				vi.spyOn(editor, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sidebar.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				vi.spyOn(sidebar.providerSettingsManager, "getProfile").mockResolvedValue({
+					name: "work-profile",
+					id: "work-id",
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "work-key",
+				})
+				const getProfileSpy = vi.spyOn(sidebar.providerSettingsManager, "getProfile")
+				// The opposite outcome of the test above: a window without a pin is meant to follow the
+				// shared settings, so it must keep reading them rather than get a materialized snapshot.
+				await sidebar.setValues({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "personal-key",
+					currentApiConfigName: "personal-profile",
+				})
+				await ClineProvider["persistedViewStateWriteQueue"]
+				expect(editor["viewLocalState"].apiConfiguration).toBeUndefined()
+				expect(editor.pinnedProfileName).toBeUndefined()
+				expect(getProfileSpy).not.toHaveBeenCalled()
+				// The shared slot moved, which is what an unpinned view reads once it reloads; the
+				// point of the control is that nothing was materialized in front of it.
+				expect(mockContext.globalState.get("apiProvider")).toBe(providerIdentifiers.anthropic)
+			} finally {
+				await editor.dispose()
+				await sidebar.dispose()
+			}
 		})
 
 		it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
@@ -5124,17 +5355,13 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			// @ts-ignore - Replace customModesManager with a test double (one custom mode, which is the
-			// storage boundary the real lookup consults.
-			provider.customModesManager = {
-				getCustomModes: vi
-					.fn()
-					.mockResolvedValue([
-						{ slug: "refactor", name: "Refactor", roleDefinition: "test", groups: ["read"] },
-					]),
-				dispose: vi.fn(),
-			}
+			// One custom mode, which is the storage boundary the real lookup consults. The lookup is
+			// named so the reject path can assert that a non-string mode never reaches it.
+			const getCustomModes = vi
+				.fn()
+				.mockResolvedValue([{ slug: "refactor", name: "Refactor", roleDefinition: "test", groups: ["read"] }])
+			// @ts-ignore - Reassign the readonly customModesManager for the test.
+			provider.customModesManager = { dispose: vi.fn(), getCustomModes }
 			// Bind the real lookup: 42 is a non-string that the typeof guard rejects before the lookup
 			// is consulted (short-circuit), so the lookup below is the real one and not a double that
 			// resolves the values under test.
@@ -5147,6 +5374,9 @@ describe("ClineProvider", () => {
 				await provider.setValue("mode", "refactor")
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
+				// The control for the assertion below: a string the guard cannot resolve does reach
+				// custom-mode storage, so the counter measures the lookup rather than the guard.
+				expect(getCustomModes).toHaveBeenCalled()
 				// The updateSettings webview handler routes every key through setValue:
 				// an unknown mode must be rejected there too, not only in setValues.
 				await provider.setValue("mode", "bogus-mode")
@@ -5154,11 +5384,15 @@ describe("ClineProvider", () => {
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
 				expect(provider["viewLocalState"].mode).toBe("refactor")
 				// A non-string mode must be rejected before persistence (double assertion: the
-				// type excludes non-strings), so it must not reach global state or the buffer —
-				// the typeof guard rejects it before the lookup is ever consulted.
+				// type excludes non-strings), so it must not reach global state or the buffer.
+				// Clearing the counter is what turns the last three lines into the discriminator: the
+				// real getModeBySlug rejects 42 too, so the warning and the unchanged store would look
+				// identical whether or not the typeof guard stopped it before the lookup.
+				getCustomModes.mockClear()
 				await provider.setValue("mode", 42 as unknown as RooCodeSettings["mode"])
 				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
+				expect(getCustomModes).not.toHaveBeenCalled()
 			} finally {
 				modesModule.getModeBySlug.mockReturnValue(originalMode)
 			}

@@ -360,6 +360,47 @@ export class ClineProvider
 	private providerProfileMutationGeneration = 0
 	/** Per-profile-name save counters, shared across instances: see recordProfileSave. */
 	private static readonly profileSaveGenerations = new Map<string, number>()
+	/**
+	 * Which write owns each field: the token of the write that last landed on it. The settings
+	 * keys are one store shared by every window, so the registry is static; the view mode pin and
+	 * the task mode are namespaced per view and per task so they cannot collide with a setting key.
+	 * Tokens are allocated when a write starts (beginFieldWrite) and stamped when it lands
+	 * (landFieldWrite), which is what makes a compensation safe: SettingsWriteError.committed
+	 * reports which stores landed, not which writes still own those keys.
+	 */
+	private static readonly fieldWriteTokens = new Map<string, number>()
+	private static nextFieldWriteToken = 0
+
+	/** Reserve ownership for a write that is about to run; tokens follow write-start order. */
+	private beginFieldWrite(): number {
+		return ++ClineProvider.nextFieldWriteToken
+	}
+
+	/**
+	 * Record that the write carrying `token` landed on `keys`. A key whose current owner token is
+	 * newer is left alone: a write that started earlier and landed later must not take a field back
+	 * from a write that started after it.
+	 */
+	private landFieldWrite(keys: readonly string[], token: number): void {
+		for (const key of keys) {
+			const current = ClineProvider.fieldWriteTokens.get(key)
+			if (current === undefined || current < token) {
+				ClineProvider.fieldWriteTokens.set(key, token)
+			}
+		}
+	}
+
+	/**
+	 * Whether the write that carries `token` may still restore `key`. A key with no recorded
+	 * owner is fair game: this write started, found nobody had landed on the field since, and may
+	 * not have landed itself - a shared write that rejected before storing left nothing behind, and
+	 * standing down there would leave the store holding the new value with nothing to restore it.
+	 * Only a token that landed after this write started is somebody else's claim.
+	 */
+	private ownsFieldWrite(key: string, token: number): boolean {
+		const current = ClineProvider.fieldWriteTokens.get(key)
+		return current === undefined || token >= current
+	}
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
@@ -2725,13 +2766,16 @@ export class ClineProvider
 	): Promise<void> {
 		const task = targetTask
 
-		// Ownership token. enqueueProviderProfileMutation bumps the generation immediately before
-		// it runs this function, so the number captured here is this mutation's. A timeout releases
-		// the queue without waiting for this function to return, so once a newer mutation starts the
-		// generation moves and this one no longer owns the shared mode, this view's pin, or the
-		// task's mode and history - which is what a rollback has to respect.
-		const startedGeneration = this.providerProfileMutationGeneration
-		const ownsSwitchWrites = () => this.providerProfileMutationGeneration === startedGeneration
+		// Ownership. Allocated before any of this switch's writes land, so the token is older than
+		// any write that starts after it and newer than any write that started before it. Ownership
+		// is per field, because that is what a rollback has to respect: an unrelated mutation that
+		// takes the released queue - a save of another profile, say - may run between this switch's
+		// pending write and its reconciliation without ever writing the shared mode, this view's pin
+		// or this task's mode, and may not therefore cancel this switch's rollback. A newer write of
+		// one of these fields does take it, and only that field.
+		const switchWriteToken = this.beginFieldWrite()
+		const viewModeKey = "view:" + this.viewStateId + ":mode"
+		const taskModeKey = "task:" + (task ? task.taskId : "none") + ":mode"
 
 		// Captured for the pin-write rollback below: the mode this task held before
 		// the switch (bracket access: _taskMode is private to Task).
@@ -2782,6 +2826,8 @@ export class ClineProvider
 
 				// Only update the task's mode after successful persistence.
 				;(task as any)._taskMode = newMode
+				// The history entry and the in-memory mode are one field to restore together.
+				this.landFieldWrite([taskModeKey], switchWriteToken)
 
 				// If the view's durable mode pin below fails after these task-side writes
 				// landed, restore them: the caller delivers the message on the caught
@@ -2847,8 +2893,8 @@ export class ClineProvider
 			// history. Restoring this switch's pre-switch values then would replay them over the newer
 			// switch's writes, so ownership is re-checked before every restore below: each restore is
 			// itself an await, so a newer mutation can take ownership between two of them.
-			const stillOwns = (what: string) => {
-				if (ownsSwitchWrites()) {
+			const stillOwns = (what: string, key: string) => {
+				if (this.ownsFieldWrite(key, switchWriteToken)) {
 					return true
 				}
 				this.log(
@@ -2860,7 +2906,7 @@ export class ClineProvider
 				)
 				return false
 			}
-			if (sharedAttempted && stillOwns("shared mode")) {
+			if (sharedAttempted && stillOwns("shared mode", "mode")) {
 				// The shared write may have landed before its promise rejected: restore
 				// it unconditionally so getValues() cannot mix a fresh shared mode with
 				// the rolled-back view state.
@@ -2874,7 +2920,7 @@ export class ClineProvider
 					)
 				}
 			}
-			if (pinLanded && stillOwns("view mode pin")) {
+			if (pinLanded && stillOwns("view mode pin", viewModeKey)) {
 				try {
 					await this.saveViewState("mode", previousViewMode)
 				} catch (rollbackError) {
@@ -2885,7 +2931,7 @@ export class ClineProvider
 					)
 				}
 			}
-			if (rollbackTaskWrites && stillOwns("task mode writes")) {
+			if (rollbackTaskWrites && stillOwns("task mode writes", taskModeKey)) {
 				try {
 					await rollbackTaskWrites()
 				} catch (rollbackError) {
@@ -2909,6 +2955,7 @@ export class ClineProvider
 				// write that landed, including this pin, so a delivered message never runs
 				// the new task mode against an unchanged view mode or mode-linked profile.
 				await this.saveViewState("mode", newMode)
+				this.landFieldWrite([viewModeKey], switchWriteToken)
 				pinLanded = true
 
 				// The mutation can be cancelled or time out while the pin write was in flight:
@@ -2925,7 +2972,9 @@ export class ClineProvider
 				// viewLocalState on top of the ContextProxy values, so an unsynced stale
 				// restored mode would otherwise shadow the fresh switch for consumers.
 				sharedAttempted = true
-				await this.setValue("mode", newMode)
+				// Pass the token: the shared mode is this switch's write, and setValue
+				// must land it under this switch's ownership rather than its own.
+				await this.setValue("mode", newMode, switchWriteToken)
 			}
 
 			// If workspace lock is on, keep the current API config: the mode-linked
@@ -5263,7 +5312,11 @@ export class ClineProvider
 		return this.contextProxy.getValue(key)
 	}
 
-	public async setValue<K extends keyof RooCodeSettings>(key: K, value: RooCodeSettings[K]) {
+	public async setValue<K extends keyof RooCodeSettings>(
+		key: K,
+		value: RooCodeSettings[K],
+		writeToken = this.beginFieldWrite(),
+	): Promise<number> {
 		// Mirror the setValues guard for the single-key write path: the updateSettings
 		// webview handler routes every key through setValue, so an unknown mode must not
 		// bypass the shared validation and reach persistence via the viewStates write.
@@ -5277,7 +5330,7 @@ export class ClineProvider
 				!getModeBySlug(modeValue, await this.customModesManager.getCustomModes())
 			) {
 				this.log(`[ClineProvider#setValue] Ignoring invalid mode "${String(value)}"`)
-				return
+				return writeToken
 			}
 		}
 
@@ -5287,6 +5340,7 @@ export class ClineProvider
 		const previousValue = this.contextProxy.getValue(key)
 
 		await this.contextProxy.setValue(key, value)
+		this.landFieldWrite([key], writeToken)
 
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
@@ -5294,6 +5348,14 @@ export class ClineProvider
 			// The shared write landed and the durable viewStates write did not: put the shared value
 			// back. A rollback that itself fails is logged with both messages and never substituted
 			// for the caller's error, because the caller must see the write it tried to make.
+			if (!this.ownsFieldWrite(key, writeToken)) {
+				// Another write landed on this key while the durable write was in flight: rolling the
+				// value captured above back now would stamp an older value over a newer one.
+				this.log(
+					"[ClineProvider#setValue] Leaving " + String(key) + " at its newer value: another write owns it",
+				)
+				throw error
+			}
 			try {
 				await this.contextProxy.setValue(key, previousValue)
 			} catch (rollbackError) {
@@ -5308,6 +5370,8 @@ export class ClineProvider
 			}
 			throw error
 		}
+
+		return writeToken
 	}
 
 	public getValue<K extends keyof RooCodeSettings>(key: K) {
@@ -5368,6 +5432,30 @@ export class ClineProvider
 			}
 		}
 
+		// A flat provider-settings write or a profile-slot change replaces what every view without an
+		// overlay of its own reads next. The profile-write paths snapshot pinned siblings before doing
+		// exactly this; the API configuration path lands the same shared write here, and a second window
+		// pinned to another profile - activation clears its overlay and leaves its pin in place - would
+		// keep its pin while taking this write's provider, model and credentials for its next task.
+		// Views without a pin follow the shared settings, which is the intended behaviour.
+		if (
+			"apiConfiguration" in sanitizedValues ||
+			"currentApiConfigName" in sanitizedValues ||
+			PROVIDER_SETTINGS_KEYS.some((key) => key in sanitizedValues)
+		) {
+			const writtenProfileName =
+				typeof sanitizedValues.currentApiConfigName === "string"
+					? sanitizedValues.currentApiConfigName
+					: this.getValue("currentApiConfigName")
+			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(writtenProfileName ?? "default")
+		}
+
+		// Allocated before the shared write starts, so a write that starts later owns a key ahead of
+		// this one even if this one lands first - the case the committed-key compensation below has to
+		// respect, because SettingsWriteError.committed says which stores landed, not which writes
+		// still own them.
+		const sharedWriteToken = this.beginFieldWrite()
+
 		try {
 			await this.contextProxy.setValues(sanitizedValues)
 		} catch (error) {
@@ -5378,22 +5466,40 @@ export class ClineProvider
 			// applies: the stored keys go back to the previous values captured above.
 			if (error instanceof SettingsWriteError && error.committed.length > 0) {
 				const committedKeys = error.committed
-				const committedPatch = Object.fromEntries(
-					committedKeys.map((key) => [key, previousValues[key as keyof RooCodeSettings]]),
-				) as RooCodeSettings
-				try {
-					await this.contextProxy.setValues(committedPatch)
-				} catch (rollbackError) {
+				// The stored keys landed, so this write owned them when they landed. A view that wrote one
+				// of them while this call was still in flight owns it now, and putting the value captured
+				// above over its newer one is the lost update the mode-switch fence exists for: only the
+				// keys still owned here go back.
+				this.landFieldWrite(committedKeys, sharedWriteToken)
+				const ownedKeys = committedKeys.filter((key) => this.ownsFieldWrite(key, sharedWriteToken))
+				const skippedKeys = committedKeys.filter((key) => !this.ownsFieldWrite(key, sharedWriteToken))
+				if (skippedKeys.length > 0) {
 					this.log(
-						"[ClineProvider#setValues] Could not roll back the keys the partial write stored (" +
-							committedKeys.join(", ") +
-							") failed: " +
-							(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)),
+						"[ClineProvider#setValues] Leaving " +
+							skippedKeys.join(", ") +
+							" at its newer value: another write owns it",
 					)
+				}
+				if (ownedKeys.length > 0) {
+					const committedPatch = Object.fromEntries(
+						ownedKeys.map((key) => [key, previousValues[key as keyof RooCodeSettings]]),
+					) as RooCodeSettings
+					try {
+						await this.contextProxy.setValues(committedPatch)
+					} catch (rollbackError) {
+						this.log(
+							"[ClineProvider#setValues] Could not roll back the keys the partial write stored (" +
+								ownedKeys.join(", ") +
+								") failed: " +
+								(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)),
+						)
+					}
 				}
 			}
 			throw error
 		}
+
+		this.landFieldWrite(Object.keys(sanitizedValues), sharedWriteToken)
 
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
@@ -5403,15 +5509,29 @@ export class ClineProvider
 			// own state, and leaving it pinned to the values the failed write tried to apply is exactly
 			// what the snapshot above exists to prevent. A failed shared rollback is logged, never
 			// substituted for the caller's error.
-			try {
-				await this.contextProxy.setValues(previousValues as RooCodeSettings)
-			} catch (rollbackError) {
+			// The same ownership rule as the compensation above: a key another view wrote while this
+			// call was in flight is not this write's to restore, whatever the reason this call failed.
+			const ownedRollbackKeys = Object.keys(previousValues).filter((key) =>
+				this.ownsFieldWrite(key, sharedWriteToken),
+			)
+			if (ownedRollbackKeys.length === 0) {
 				this.log(
-					"[ClineProvider#setValues] Rollback of the shared writes failed: " +
-						(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)) +
-						" (original: " +
-						(error instanceof Error ? error.message : String(error)),
+					"[ClineProvider#setValues] Leaving the shared writes at their newer values: another write owns them",
 				)
+			} else {
+				const rollbackPatch = Object.fromEntries(
+					ownedRollbackKeys.map((key) => [key, previousValues[key as keyof RooCodeSettings]]),
+				) as RooCodeSettings
+				try {
+					await this.contextProxy.setValues(rollbackPatch)
+				} catch (rollbackError) {
+					this.log(
+						"[ClineProvider#setValues] Rollback of the shared writes failed: " +
+							(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)) +
+							" (original: " +
+							(error instanceof Error ? error.message : String(error)),
+					)
+				}
 			}
 			// Restore the local overlay from the snapshot: the shared rollback alone would leave
 			// the view pinned to the overrides the failed write tried to apply.
