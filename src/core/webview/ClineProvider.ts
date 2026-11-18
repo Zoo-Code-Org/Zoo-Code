@@ -3361,6 +3361,29 @@ export class ClineProvider
 	}
 
 	/**
+	 * The window-local entry for a mode, without consulting the shared mapping that
+	 * `getModeConfigId` falls back to. Callers that write through `setModeConfig`
+	 * snapshot this before the write so a compensation can undo both layers.
+	 */
+	public getLocalModeConfigId(mode: Mode): string | undefined {
+		return this.localModeConfigIds.get(mode)
+	}
+
+	/**
+	 * Compensation seam for `setModeConfig`: put this window's entry back exactly as
+	 * it was. An undefined `localId` means the window had no entry, and deleting is
+	 * what restores `getModeConfigId`'s fallback to the opening snapshot - leaving a
+	 * stale entry here would out-rank the shared mapping the caller restores with.
+	 */
+	public restoreLocalModeConfig(mode: Mode, localId: string | undefined): void {
+		if (localId === undefined) {
+			this.localModeConfigIds.delete(mode)
+		} else {
+			this.localModeConfigIds.set(mode, localId)
+		}
+	}
+
+	/**
 	 * Updates the current task's API handler.
 	 * Rebuilds when:
 	 * - provider or model changes, OR

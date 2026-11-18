@@ -957,9 +957,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// critical section on purpose - it lengthens no cross-instance hold, and the mode writes it
 		// guards happen after the section anyway.
 		const previousModeConfigs: Array<[Mode, string | undefined]> = []
+		// The provider-level write below lands in the provider's window-local map as well,
+		// and that map out-ranks the shared mapping in getModeConfigId: snapshot it per mode
+		// (undefined = the window had no entry) so compensation can put both layers back
+		// instead of rewinding the local entry to a shared-store value it never held.
+		const previousLocalModeConfigs = new Map<string, string | undefined>()
 		if (values.modeApiConfigs) {
 			for (const mode of Object.keys(values.modeApiConfigs)) {
 				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
+				previousLocalModeConfigs.set(mode, this.sidebarProvider.getLocalModeConfigId(mode as Mode))
 			}
 		}
 
@@ -1136,20 +1142,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			}
 			try {
 				// The forward fan-out went through the provider wrapper, which records the id in this
-				// window local mode mapping next to the store write, so the rollback restores the same
-				// two layers: restoring only the store left this window resolving the mode to the profile
-				// it had just rolled back. A defined prior mapping travels through the wrapper for that
-				// reason. An absent prior mapping keeps the manager write, the only one that accepts an
-				// undefined clear, and drops the local entry the failed write created so the window
-				// returns to the mapping it had before the call.
+				// window local mode mapping next to the store write, so the rollback restores both
+				// layers, each from its own snapshot: the store from previousModeConfigs (read off the
+				// manager) and this window entry from previousLocalModeConfigs (read off the local map).
+				// The two differ whenever this window chose a profile the shared store did not hold, and
+				// rewinding the local entry to the store value would leave the mode resolving through an
+				// id this window never picked. A defined prior mapping travels through the wrapper for
+				// that reason; an absent prior mapping keeps the manager write, the only one that accepts
+				// an undefined clear. The local layer is restored in both shapes, including dropping the
+				// entry a failed write created for a mode this window had not mapped.
 				await Promise.all(
 					previousModeConfigs.map(async ([mode, configId]) => {
 						if (configId === undefined) {
 							await manager.setModeConfig(mode, undefined)
-							this.sidebarProvider["localModeConfigIds"].delete(mode)
-							return
+						} else {
+							await this.sidebarProvider.setModeConfig(mode, configId)
 						}
-						await this.sidebarProvider.setModeConfig(mode, configId)
+						this.sidebarProvider.restoreLocalModeConfig(mode, previousLocalModeConfigs.get(mode))
 					}),
 				)
 			} catch (restoreError) {

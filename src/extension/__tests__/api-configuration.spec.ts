@@ -5,7 +5,8 @@ import { providerIdentifiers } from "@roo-code/types"
 import type { RooCodeSettings } from "@roo-code/types"
 
 import { API } from "../api"
-import type { ClineProvider } from "../../core/webview/ClineProvider"
+import { ClineProvider } from "../../core/webview/ClineProvider"
+import type { Mode } from "../../shared/modes"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
 // The merged API constructor requires a ClineProviderFactory; this spec never
@@ -77,8 +78,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -133,8 +141,15 @@ describe("API - configuration", () => {
 				getModeConfigId,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -187,8 +202,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -226,8 +248,15 @@ describe("API - configuration", () => {
 				hasConfig: vi.fn().mockResolvedValue(false),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -276,8 +305,15 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -406,8 +442,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -464,8 +507,15 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -529,8 +579,15 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -571,13 +628,10 @@ describe("API - configuration", () => {
 				throw new Error("mode write failed")
 			}
 		})
-		// The wrapper the forward fan-out uses: it writes the store and records the id in this
-		// window map, which is why a rollback that touches only the store leaves the window
-		// resolving the mode to the profile it just rolled back.
-		const providerSetModeConfig = vi.fn(async (mode: string, configId: string) => {
-			await managerSetModeConfig(mode, configId)
-			localModeConfigIds.set(mode, configId)
-		})
+		// The fixture below binds ClineProvider's own setModeConfig, getLocalModeConfigId and
+		// restoreLocalModeConfig; only the manager storage boundary is mocked. The wrapper writes
+		// the store and records the id in this window map, so a rollback that rewinds only one of
+		// the two layers is observable here rather than hidden behind a copy of the wrapper.
 		const provider = {
 			context: {},
 			on: vi.fn(),
@@ -603,8 +657,16 @@ describe("API - configuration", () => {
 				),
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
-			setModeConfig: providerSetModeConfig,
 			localModeConfigIds,
+			setModeConfig(mode: Mode, configId: string) {
+				return ClineProvider.prototype.setModeConfig.call(this, mode, configId)
+			},
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -617,11 +679,12 @@ describe("API - configuration", () => {
 			}),
 		).rejects.toThrow("mode write failed")
 
-		// The architect write landed through the wrapper before code rejected, so its new id
-		// sits in this window map: the rollback must restore the mapping in both layers, not
-		// only in the store.
-		expect(localModeConfigIds.get("architect")).toBe("old-architect-config")
-		expect(providerSetModeConfig).toHaveBeenCalledWith("architect", "old-architect-config")
+		// The architect write landed through the wrapper before code rejected, so its new id sat
+		// in this window map. Each layer rewinds to its own snapshot: the store to the value the
+		// manager held, this window entry to the value this window held, which is the different
+		// one here. Rewinding the local entry to the store value is what this assertion rejects.
+		expect(localModeConfigIds.get("architect")).toBe("window-architect-config")
+		expect(managerSetModeConfig).toHaveBeenCalledWith("architect", "old-architect-config")
 		// The code mapping did not exist before the call: the rollback clears the store entry
 		// and leaves no local entry naming a mapping the store no longer has.
 		expect(localModeConfigIds.has("code")).toBe(false)
@@ -670,8 +733,15 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -785,8 +855,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -868,8 +945,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -941,8 +1025,15 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -1008,8 +1099,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -1081,8 +1179,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -1145,8 +1250,15 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
-			// The window-local mode mapping ClineProvider keeps beside the store.
+			// The window-local mode mapping ClineProvider keeps beside the store. The two
+			// compensation seams delegate to the production methods instead of copying them.
 			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel

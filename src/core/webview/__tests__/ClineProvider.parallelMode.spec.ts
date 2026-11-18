@@ -20,6 +20,12 @@ import { TelemetryService } from "@roo-code/telemetry"
 
 import type { Task } from "../../task/Task"
 
+// Method-specific fixture types: each profile mock validates its own literal against the return
+// type of the method it stands in for, rather than passing the value through unknown. A record the
+// real manager could not return now fails at the fixture instead of at some later consumer.
+type ResolvedProfile = Awaited<ReturnType<ClineProvider["providerSettingsManager"]["getProfile"]>>
+type ActivatedProfile = Awaited<ReturnType<ClineProvider["providerSettingsManager"]["activateProfile"]>>
+
 // Mock p-wait-for
 vi.mock("p-wait-for", () => ({
 	__esModule: true,
@@ -1012,13 +1018,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// Structural cast: the env mock shapes activateProfile results as getProfile results.
+			// Typed against ResolvedProfile: the fixture literal must match what the real manager returns.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
-			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 
 			await provider.deleteProviderProfile({
 				id: "deleted-id",
@@ -1114,7 +1120,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 						id: "keeper-id",
 						apiProvider: providerIdentifiers.openrouter,
 						openRouterApiKey: "keeper-key",
-					}) as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+					}) satisfies ResolvedProfile,
 			)
 
 			await provider.deleteProviderProfile({
@@ -1320,13 +1326,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
-			// Structural cast: the env mock shapes activateProfile results as getProfile results.
+			// Typed against ResolvedProfile: the fixture literal must match what the real manager returns.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
-			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
 
 			await provider.deleteProviderProfile({
@@ -1365,13 +1371,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				.mockResolvedValue([
 					{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 				])
-			// Structural cast: the env mock shapes activateProfile results as getProfile results.
+			// Typed against ResolvedProfile: the fixture literal must match what the real manager returns.
 			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterApiKey: "replacement-key",
-			} as unknown as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			const activateSpy = vi.spyOn(provider, "activateProviderProfile")
 
 			await provider.deleteProviderProfile({
@@ -1429,13 +1435,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
 
-			// Structural cast: the env mock shapes activateProfile/getProfile results uniformly.
+			// Typed against ResolvedProfile: the fixture literal must match what the real manager returns.
 			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
 				name: "replacement-profile",
 				id: "replacement-id",
 				apiProvider: providerIdentifiers.openrouter,
 				openRouterBaseUrl: "repl-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
@@ -1463,7 +1469,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 								id: "replacement-id",
 								apiProvider: providerIdentifiers.openrouter,
 								openRouterBaseUrl: "repl-url",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+							} satisfies ResolvedProfile)
 						: // A profile the store no longer has fails with the manager's typed
 							// ProviderSettingsNotFoundError (getProfile does exactly that), and the
 							// sibling-overlay guard tolerates a pin naming such a profile because the
@@ -1536,7 +1542,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				name: "replacement-profile",
 				id: "replacement-id",
 				apiProvider: providerIdentifiers.openrouter,
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "replacement-id", name: "replacement-profile", apiProvider: providerIdentifiers.openrouter },
 			])
@@ -2225,7 +2231,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
@@ -2239,13 +2245,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 								id: "y-id",
 								apiProvider: providerIdentifiers.openrouter,
 								openRouterApiKey: "y-key",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+							} satisfies ResolvedProfile)
 						: ({
 								name: "profile-x",
 								id: "x-id",
 								apiProvider: providerIdentifiers.anthropic,
 								anthropicBaseUrl: "x-url",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+							} satisfies ResolvedProfile),
 			)
 
 			await providerA.activateProviderProfile({ name: "profile-x" })
@@ -2321,7 +2327,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
@@ -2342,7 +2348,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 							id: "y-id",
 							apiProvider: providerIdentifiers.openrouter,
 							openRouterApiKey: "y-key",
-						} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>
+						} satisfies ResolvedProfile
 					}
 					throw new Error("late sibling pin could not be resolved")
 				},
@@ -2359,6 +2365,16 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
 			})
+			// The view snapshot cannot separate the shared write from the view rebuilding itself:
+			// getState() reads the overlay this activation just wrote, so a regression that posted the
+			// new profile to the view and left the shared provider settings on the previous profile
+			// would still pass above. Assert the shared store the activation wrote inside
+			// setProviderSettings, plus the shared pin, directly.
+			expect(providerA.contextProxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			})
+			expect(providerA.contextProxy.getValue("currentApiConfigName")).toBe("profile-x")
 
 			await providerA.dispose()
 			await providerB.dispose()
@@ -2396,7 +2412,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
@@ -2409,13 +2425,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 								id: "y-id",
 								apiProvider: providerIdentifiers.openrouter,
 								openRouterApiKey: "y-key",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+							} satisfies ResolvedProfile)
 						: ({
 								name: "profile-x",
 								id: "x-id",
 								apiProvider: providerIdentifiers.anthropic,
 								anthropicBaseUrl: "x-url",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+							} satisfies ResolvedProfile),
 			)
 
 			await providerA.activateProviderProfile({ name: "profile-x" })
@@ -2454,7 +2470,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
@@ -2467,13 +2483,13 @@ describe("ClineProvider - Parallel Mode Support", () => {
 								id: "y-id",
 								apiProvider: providerIdentifiers.openrouter,
 								openRouterApiKey: "y-key",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+							} satisfies ResolvedProfile)
 						: ({
 								name: "profile-x",
 								id: "x-id",
 								apiProvider: providerIdentifiers.anthropic,
 								anthropicBaseUrl: "x-url",
-							} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>),
+							} satisfies ResolvedProfile),
 			)
 
 			const postSpy = vi.spyOn(providerA, "postStateToWebview").mockResolvedValue(undefined)
@@ -2514,7 +2530,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
@@ -2524,7 +2540,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ResolvedProfile)
 
 			const postB = vi.spyOn(providerB, "postStateToWebview").mockResolvedValue(undefined)
 
@@ -2566,7 +2582,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
@@ -2615,7 +2631,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				id: "x-id",
 				apiProvider: providerIdentifiers.anthropic,
 				anthropicBaseUrl: "x-url",
-			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
+			} satisfies ActivatedProfile)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
 			])
