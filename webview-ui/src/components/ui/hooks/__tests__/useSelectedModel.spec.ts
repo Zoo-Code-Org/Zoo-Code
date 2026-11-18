@@ -18,6 +18,8 @@ import {
 	BEDROCK_MAX_TOKENS,
 	bedrockModels,
 	litellmDefaultModelInfo,
+	inferDefaultModelId,
+	inferDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelId,
@@ -1284,6 +1286,98 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.id).toBe(nanoGptDefaultModelId)
 			expect(result.current.info).toEqual(nanoGptDefaultModelInfo)
+		})
+	})
+
+	describe("infer provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("uses the catalog metadata of the configured Infer route", () => {
+			const routeInfo: ModelInfo = {
+				maxTokens: 128_000,
+				contextWindow: 1_000_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				inputPrice: 5,
+				outputPrice: 25,
+				displayName: "test-model (Official)",
+			}
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ [providerIdentifiers.infer]: { "infer/test-model:official": routeInfo } }),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.infer,
+						inferModelId: "infer/test-model:official",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("infer/test-model:official")
+			expect(result.current.info).toEqual(routeInfo)
+		})
+
+		it("uses Infer's shared fallback when its catalog is empty", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.infer]: {} }))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.infer,
+						// inferModelId intentionally omitted
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(inferDefaultModelId)
+			expect(result.current.info).toEqual(inferDefaultModelInfo)
+		})
+
+		it("preserves a configured route that is absent from the fetched catalog", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.infer]: {
+						"infer/test-model:low-cost": { contextWindow: 1_000_000, supportsPromptCache: true },
+					},
+				}),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.infer,
+						inferModelId: "infer/test-model:balanced",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			// A route can leave the catalog for a while. Requests still use the stored
+			// selector, so the picker shows it; only the metadata falls back.
+			expect(result.current.id).toBe("infer/test-model:balanced")
+			expect(result.current.info).toEqual(inferDefaultModelInfo)
+		})
+
+		it("preserves the configured route when the catalog fetch errors", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.infer,
+						inferModelId: "infer/test-model:stable",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("infer/test-model:stable")
+			expect(result.current.info).toEqual(inferDefaultModelInfo)
+			expect(result.current.isError).toBe(true)
 		})
 	})
 

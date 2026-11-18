@@ -739,6 +739,22 @@ describe("ContextProxy", () => {
 	})
 
 	describe("setProviderSettings", () => {
+		it("stores and returns the complete Infer configuration across secret and global state", async () => {
+			await proxy.setProviderSettings({
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "infer-secret",
+				inferModelId: "infer/claude-opus-5-5:low-cost",
+			})
+
+			expect(mockSecrets.store).toHaveBeenCalledWith("inferApiKey", "infer-secret")
+			expect(mockGlobalState.update).toHaveBeenCalledWith("inferModelId", "infer/claude-opus-5-5:low-cost")
+			expect(proxy.getProviderSettings()).toMatchObject({
+				apiProvider: providerIdentifiers.infer,
+				inferApiKey: "infer-secret",
+				inferModelId: "infer/claude-opus-5-5:low-cost",
+			})
+		})
+
 		it("stores and returns the complete NanoGPT configuration across secret and global state", async () => {
 			await proxy.setProviderSettings({
 				apiProvider: providerIdentifiers.nanogpt,

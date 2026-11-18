@@ -77,6 +77,7 @@ const OPENROUTER_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: false, 
 const LITELLM_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const REQUESTY_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 const NANOGPT_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: true, authScoped: false }
+const INFER_SCOPE: ModelCacheScope = { urlScoped: false, keyScoped: false, authScoped: false }
 const ZOO_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: true }
 const MOONSHOT_SCOPE: ModelCacheScope = { urlScoped: true, keyScoped: true, authScoped: false }
 
@@ -223,6 +224,24 @@ describe("getModels with new GetModelsOptions", () => {
 		const handler = makeHandler(NANOGPT_SCOPE, fetchModels)
 
 		const options = { provider: providerIdentifiers.nanogpt, apiKey: "nanogpt-key" } as const
+		const result = await getModels(options, handler)
+
+		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
+		expect(result).toEqual(mockModels)
+	})
+
+	it("dispatches Infer's public catalog without an API key", async () => {
+		const mockModels = {
+			"infer/test-model:low-cost": {
+				maxTokens: 8192,
+				contextWindow: 128000,
+				supportsPromptCache: false,
+			},
+		}
+		const fetchModels = vi.fn().mockResolvedValue(mockModels)
+		const handler = makeHandler(INFER_SCOPE, fetchModels)
+
+		const options = { provider: providerIdentifiers.infer } as const
 		const result = await getModels(options, handler)
 
 		expect(fetchModels).toHaveBeenCalledWith(options, expect.any(AbortSignal))
@@ -1235,6 +1254,30 @@ describe("NanoGPT key-scoped cache isolation", () => {
 		expect(new Set(cacheKeys).size).toBe(3)
 		expect(cacheKeys).toContain("nanogpt")
 		expect(cacheKeys.every((key) => !key.includes("nano-key-a") && !key.includes("nano-key-b"))).toBe(true)
+	})
+})
+
+describe("Infer shared public catalog cache", () => {
+	const inferModels = {
+		"infer/test-model:low-cost": { maxTokens: 8_192, contextWindow: 128_000, supportsPromptCache: false },
+	}
+
+	let handler: ApiHandler
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		handler = makeHandler(INFER_SCOPE, vi.fn().mockResolvedValue(inferModels))
+	})
+
+	it("stores one catalog under the bare provider key whatever key is supplied", async () => {
+		const mockCache = vi.mocked(new (vi.mocked(NodeCache))())
+		mockCache.get.mockReturnValue(undefined)
+
+		await getModels({ provider: providerIdentifiers.infer }, handler)
+		await getModels({ provider: providerIdentifiers.infer, apiKey: "infer-key-a" }, handler)
+
+		const cacheKeys = mockCache.set.mock.calls.map(([key]) => key as string)
+		expect(new Set(cacheKeys)).toEqual(new Set([providerIdentifiers.infer]))
 	})
 })
 

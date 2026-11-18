@@ -393,6 +393,12 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
+		"infer": {
+			"provider": "Infer",
+			"apiKey": "Klucz API Infer",
+			"getApiKey": "Uzyskaj klucz API Infer",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",

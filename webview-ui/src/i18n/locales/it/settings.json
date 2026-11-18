@@ -392,6 +392,12 @@
 		"getOpencodeGoApiKey": "Ottieni chiave API Opencode Go",
 		"kenariApiKey": "Chiave API Kenari",
 		"getKenariApiKey": "Ottieni chiave API Kenari",
+		"infer": {
+			"provider": "Infer",
+			"apiKey": "Chiave API Infer",
+			"getApiKey": "Ottieni chiave API Infer",
+			"model": "Modello"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chiave API NanoGPT",

@@ -103,6 +103,7 @@ describe("NanoGPT", () => {
 		"opencode-go": {},
 		kenari: {},
 		nanogpt: { "openai/test": { contextWindow: 1, maxTokens: 1, supportsPromptCache: false } },
+		infer: {},
 		"kimi-code": {},
 		friendli: {},
 		ollama: {},
