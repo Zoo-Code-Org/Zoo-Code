@@ -3402,9 +3402,12 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 			listConfig: ReturnType<typeof vi.fn>
 			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => Promise<unknown>
 		}
+		refreshViewLocalStateForUpdatedProfile: ReturnType<typeof vi.fn>
 	}
 	const originalSaveMembers = {
 		providerSettingsManager: provider.providerSettingsManager,
+		refreshViewLocalStateForUpdatedProfile: (mockClineProvider as unknown as Record<string, unknown>)
+			.refreshViewLocalStateForUpdatedProfile,
 	}
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -3442,6 +3445,9 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 				return []
 			}),
 		}
+		provider.refreshViewLocalStateForUpdatedProfile = vi.fn(async () => {
+			events.push("refreshPinnedSiblings")
+		})
 		// Another view's rename holds the section across its name check, its save, and its
 		// compensation delete.
 		const heldSection = runExclusiveAcrossInstances(async () => {
@@ -3464,7 +3470,51 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 		await saveWrite
 		await heldSection
 
-		expect(events).toEqual(["otherViewEnter", "otherViewExit", "saveConfig", "listConfig"])
+		expect(events).toEqual(["otherViewEnter", "otherViewExit", "saveConfig", "listConfig", "refreshPinnedSiblings"])
+	})
+
+	it("refreshes the views pinned to the profile the save rewrote", async () => {
+		section = Promise.resolve()
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			listConfig: vi.fn().mockResolvedValue([{ name: "saved-profile", id: "saved-id" }]),
+		}
+		const refresh = vi.fn().mockResolvedValue(undefined)
+		provider.refreshViewLocalStateForUpdatedProfile = refresh
+		const profileSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "rotated-key" }
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "saveApiConfiguration",
+			text: "saved-profile",
+			apiConfiguration: profileSettings,
+		})
+
+		// The save rewrote the shared record. Every other view pinned to that profile is
+		// still shadowing the pre-save settings with its own buffer, so it gets the same
+		// refresh an upsert gives it - with the settings that were just saved.
+		expect(refresh).toHaveBeenCalledWith("saved-profile", profileSettings)
+		expect(refresh).toHaveBeenCalledOnce()
+	})
+
+	it("does not refresh the pinned siblings when the save itself fails", async () => {
+		section = Promise.resolve()
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			saveConfig: vi.fn().mockRejectedValue(new Error("save failed")),
+			listConfig: vi.fn().mockResolvedValue([]),
+		}
+		const refresh = vi.fn().mockResolvedValue(undefined)
+		provider.refreshViewLocalStateForUpdatedProfile = refresh
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "saveApiConfiguration",
+			text: "saved-profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// Nothing landed in the shared store, so the pinned views keep their own settings.
+		expect(refresh).not.toHaveBeenCalled()
 	})
 })
 describe("webviewMessageHandler - kimiCodeSignIn", () => {

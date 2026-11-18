@@ -3065,6 +3065,29 @@ export class ClineProvider
 	}
 
 	/**
+	 * The window-local entry for a mode, without consulting the shared mapping that
+	 * `getModeConfigId` falls back to. Callers that write through `setModeConfig`
+	 * snapshot this before the write so a compensation can undo both layers.
+	 */
+	public getLocalModeConfigId(mode: Mode): string | undefined {
+		return this.localModeConfigIds.get(mode)
+	}
+
+	/**
+	 * Compensation seam for `setModeConfig`: put this window's entry back exactly as
+	 * it was. An undefined `localId` means the window had no entry, and deleting is
+	 * what restores `getModeConfigId`'s fallback to the opening snapshot - leaving a
+	 * stale entry here would out-rank the shared mapping the caller restores with.
+	 */
+	public restoreLocalModeConfig(mode: Mode, localId: string | undefined): void {
+		if (localId === undefined) {
+			this.localModeConfigIds.delete(mode)
+		} else {
+			this.localModeConfigIds.set(mode, localId)
+		}
+	}
+
+	/**
 	 * Updates the current task's API handler.
 	 * Rebuilds when:
 	 * - provider or model changes, OR
@@ -3584,6 +3607,19 @@ export class ClineProvider
 					const { name: _siblingPinName, ...settings } = await this.providerSettingsManager.getProfile({
 						name: pinName,
 					})
+					// Revalidate across the awaits above: the sibling can activate another profile
+					// through its own mutation queue while this read is in flight, and writing
+					// the old profile's settings then installs them under the sibling's new pin.
+					// That activation already owns the sibling's overlay, so drop this snapshot.
+					if (
+						instance.pinnedProfileName !== pinName ||
+						instance.viewLocalState.apiConfiguration !== undefined
+					) {
+						this.log(
+							`[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Profile '${pinName}' is no longer the pin of the sibling view; leaving that view to its own activation.`,
+						)
+						return
+					}
 					// Direct private access: compile-time safe across sibling instances.
 					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
 				} catch (error) {
@@ -3751,9 +3787,11 @@ export class ClineProvider
 	 * settings in the shared store and the store-backed manager, but a view
 	 * whose buffer loaded the profile earlier keeps shadowing the stale
 	 * settings in its getState() until its own next mutation. The originating
-	 * view refreshes its buffer at the mutation site itself.
+	 * view refreshes its buffer at the mutation site itself. Public because the
+	 * message handler's save-to-profile path rewrites the same shared record and
+	 * owes the pinned siblings the same refresh an upsert does.
 	 */
-	private async refreshViewLocalStateForUpdatedProfile(
+	public async refreshViewLocalStateForUpdatedProfile(
 		name: string,
 		providerSettings: ProviderSettings,
 	): Promise<void> {

@@ -186,8 +186,10 @@ describe("API.setConfiguration", () => {
 				setValues: vi.fn().mockResolvedValue(undefined),
 			},
 			// #2110 moved the forward mode-profile write onto the provider setter (it also
-			// updates this window's local mapping); the compensation restores via the manager.
+			// updates this window's local mapping); the compensation restores both layers.
 			setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
+			getLocalModeConfigId: vi.fn((mode: string) => (mode === "code" ? "old-code-local" : undefined)),
+			restoreLocalModeConfig: vi.fn(),
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),
@@ -217,6 +219,14 @@ describe("API.setConfiguration", () => {
 		// profile this call created is removed (it did not exist before), and the
 		// shared values are restored through the same provider setter.
 		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "old-mode-id")
+		// The window-local layer belongs to the same mapping: it is snapshotted before the
+		// forward write and has to go back with it, or this window keeps pointing the mode
+		// at the profile the failed call picked while the shared map says otherwise.
+		expect(provider.getLocalModeConfigId).toHaveBeenCalledWith("code")
+		expect(provider.getLocalModeConfigId.mock.invocationCallOrder[0]).toBeLessThan(
+			provider.setModeConfig.mock.invocationCallOrder[0],
+		)
+		expect(provider.restoreLocalModeConfig).toHaveBeenCalledWith("code", "old-code-local")
 		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("default")
 		expect(provider.setValues).toHaveBeenCalledTimes(2)
 		expect(provider.setValues.mock.calls[1][0]).toEqual({
@@ -224,6 +234,52 @@ describe("API.setConfiguration", () => {
 			apiProvider: undefined,
 			modeApiConfigs: undefined,
 		})
+	})
+
+	it("restores this window's local mode mapping for every mode in the call", async () => {
+		const provider = Object.assign({} as ClineProvider, {
+			context: {},
+			on: vi.fn(),
+			getValue: vi.fn((key: string) => (key === "currentApiConfigName" ? "old-name" : undefined)),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: { setValues: vi.fn().mockResolvedValue(undefined) },
+			// The forward write lands in the window's own map as well as the shared one, so
+			// compensation has to undo both layers.
+			setModeConfig: vi.fn().mockRejectedValueOnce(new Error("mode write failed")),
+			// "code" had a window-local choice; "architect" had none and must fall back to
+			// this window's opening snapshot afterwards.
+			getLocalModeConfigId: vi.fn((mode: string) => (mode === "code" ? "old-code-local" : undefined)),
+			restoreLocalModeConfig: vi.fn(),
+			providerSettingsManager: {
+				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue("old-shared-id"),
+				saveConfig: vi.fn().mockResolvedValue("default-id"),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+		const api = new API(
+			Object.assign({} as OutputChannel, { appendLine: vi.fn() }),
+			provider,
+			makeClineProviderFactory(),
+		)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "default",
+				modeApiConfigs: { code: "new-code", architect: "new-architect" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// Both layers are rewound, for every mode the call touched: the previously absent
+		// key goes back to undefined (deleting the entry restores the opening-snapshot
+		// fallback) instead of keeping the id this failed call wrote.
+		expect(provider.restoreLocalModeConfig).toHaveBeenCalledWith("code", "old-code-local")
+		expect(provider.restoreLocalModeConfig).toHaveBeenCalledWith("architect", undefined)
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("code", "old-shared-id")
+		expect(provider.providerSettingsManager.setModeConfig).toHaveBeenCalledWith("architect", "old-shared-id")
 	})
 
 	it("reports every failed compensation on the error instead of only logging it", async () => {
@@ -241,6 +297,9 @@ describe("API.setConfiguration", () => {
 			// #2110: the forward write goes through the provider setter, the restore through
 			// the manager - both fail here, so both failures must be reported.
 			setModeConfig: vi.fn().mockRejectedValueOnce(new Error("mode write failed")),
+			getLocalModeConfigId: vi.fn(),
+			restoreLocalModeConfig: vi.fn(),
+
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),
@@ -292,6 +351,9 @@ describe("API.setConfiguration", () => {
 			// #2110 moved the forward mode-profile write onto the provider setter; the
 			// compensation still restores through the manager below.
 			setModeConfig: vi.fn().mockRejectedValue(new Error("mode write failed")),
+			getLocalModeConfigId: vi.fn(),
+			restoreLocalModeConfig: vi.fn(),
+
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("transient read failure")),
 				hasConfig: vi.fn().mockResolvedValue(true),
@@ -467,6 +529,9 @@ describe("API.setConfiguration", () => {
 			// compensation restore on the manager; one recorder backs both surfaces so the
 			// ordering asserted below is the real cross-path ordering.
 			setModeConfig,
+			getLocalModeConfigId: vi.fn(),
+			restoreLocalModeConfig: vi.fn(),
+
 			providerSettingsManager: {
 				getProfile: vi.fn().mockRejectedValue(new Error("profile not found")),
 				hasConfig: vi.fn().mockResolvedValue(false),

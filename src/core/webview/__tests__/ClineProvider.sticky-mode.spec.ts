@@ -726,6 +726,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// emitted and the activation persisted the new profile - so a UI refresh
 			// failure must not roll the mode back: that would pair the old mode with
 			// the new profile, the very mismatch the reconcile exists to prevent.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
@@ -748,6 +752,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockTask["_taskMode"]).toBe("architect")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
 			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+			// Window-local resolution: the shared lookup was never consulted.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).not.toHaveBeenCalled()
 		})
 
 		it("keeps the switched mode when the mode-linked activation fails after writing", async () => {
@@ -763,6 +769,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// would pair the old mode with the profile the activation already switched to,
 			// the mismatch the reconcile exists to prevent: the switch must stand and the
 			// error must still surface.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
@@ -790,6 +800,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(mockTask["_taskMode"]).toBe("architect")
 			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("architect-profile")
 			expect(updateTaskHistorySpy).not.toHaveBeenCalledWith(expect.objectContaining({ mode: "code" }))
+			// Window-local resolution: the shared lookup was never consulted.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).not.toHaveBeenCalled()
 		})
 
 		it("keeps the switched mode when the mutation signal aborted before the failure", async () => {
@@ -897,6 +909,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// running profile-x.
 			await provider.setValue("currentApiConfigName", "profile-x")
 			await provider.contextProxy.setValue("currentApiConfigName", "profile-y")
+			// This window has no mapping for the mode, so the default-recording branch runs;
+			// seeded rather than left to whatever the shared store holds.
+			provider["initialModeConfigIds"] = Promise.resolve({})
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.openrouter },
@@ -915,6 +930,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			// and leaves the shared write alone. The x-id-vs-y-id discrimination is unchanged.
 			expect(provider["localModeConfigIds"].get("architect")).toBe("x-id")
 			expect(setModeConfig).not.toHaveBeenCalled()
+			// Window-local resolution: the shared lookup was never consulted.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).not.toHaveBeenCalled()
 		})
 
 		it("reconciles the switch when the mode-linked profile lookup fails", async () => {
@@ -929,6 +946,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// activated profile is written, so the committed-switch guard must still be
 			// off (the callback fires only after activateProfile resolves) and the
 			// reconcile must restore every mode write.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
@@ -1015,6 +1036,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// The activation writes the activated profile and only then rejects: the catch
 			// keeps the switch, and listeners plus the webview must still learn the
 			// committed mode before the error surfaces.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("architect-profile-id")
 			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "architect-profile-id", name: "architect-profile", apiProvider: providerIdentifiers.openrouter },
@@ -1040,6 +1065,8 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(emitSpy).toHaveBeenCalledWith("modeChanged", "architect")
 			expect(postSpy).toHaveBeenCalled()
 			expect(provider.getValue("mode")).toBe("architect")
+			// Window-local resolution: the shared lookup was never consulted.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).not.toHaveBeenCalled()
 		})
 
 		it("reports the committed mode when the signal aborts after the mode writes", async () => {
@@ -1053,6 +1080,10 @@ describe("ClineProvider - Sticky Mode", () => {
 			// The pin and shared mode writes land, then the mutation signal aborts during
 			// the activation reads. The activation is skipped, but the committed mode
 			// must still reach listeners and the webview through the emit/post tail.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
 			const emitSpy = vi.spyOn(provider, "emit")
 			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			const controller = new AbortController()
@@ -1068,6 +1099,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValue("mode")).toBe("architect")
 			expect(emitSpy).toHaveBeenCalledWith("modeChanged", "architect")
 			expect(postSpy).toHaveBeenCalled()
+			// The listing no longer contains the mapped id, so the read falls through to
+			// the shared lookup - which is where this row's abort lands.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).toHaveBeenCalled()
 		})
 
 		it("stays silent when a newer mutation supersedes the aborted switch", async () => {
@@ -1082,6 +1116,11 @@ describe("ClineProvider - Sticky Mode", () => {
 			// immediately moves the mode stores to its own mode: this switch's commit
 			// is superseded, so announcing it would clobber the newer owner - the
 			// emit/post tail must stay silent.
+			// The mapping must come from this test, not from whatever the shared store
+			// happens to hold: seed this window's opening snapshot so getModeConfigId reaches
+			// the mapped-profile branch instead of returning undefined up front.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "architect-profile-id" })
+
 			const emitSpy = vi.spyOn(provider, "emit")
 			const postSpy = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			const controller = new AbortController()
@@ -1098,6 +1137,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			expect(provider.getValue("mode")).toBe("ask")
 			expect(emitSpy).not.toHaveBeenCalledWith("modeChanged", "architect")
 			expect(postSpy).not.toHaveBeenCalled()
+			// The newer mutation moved the stores inside the shared lookup this read fell
+			// through to; without that fall-through the supersession is never exercised.
+			expect(vi.mocked(provider.providerSettingsManager.getModeConfigId)).toHaveBeenCalled()
 		})
 		it("keeps the cancellation result when the abort rollback write itself fails", async () => {
 			const mockTask = createModeSwitchTask()

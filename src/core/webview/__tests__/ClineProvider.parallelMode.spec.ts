@@ -424,11 +424,10 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	return {
 		...actual,
 		modes,
-		// Resolve against the mocked mode list above (not the real module modes) so the
-		// lookup matches exactly what the tests set up.
-		getModeBySlug: vi.fn().mockImplementation((slug: string) => {
-			return modes.find((m) => m.slug === slug) ?? null
-		}),
+		// Production getModeBySlug stays in place (it comes through ...actual): the
+		// mode-switch tests then exercise the real lookup - custom modes first, then
+		// built-ins - instead of a re-implementation of its predicate here. The fixture
+		// list above only narrows the exported modes, and uses the built-in slugs.
 		defaultModeSlug: "code",
 	}
 })
@@ -1710,18 +1709,34 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValueOnce("empty-profile-id")
+			// Seed this window's opening mapping (as the positive activation test does): with
+			// an empty map getModeConfigId("architect") returns before consulting anything,
+			// and this test would pass without ever reading the empty profile.
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "empty-profile-id" })
+			const getModeConfigIdSpy = vi
+				.spyOn(provider.providerSettingsManager, "getModeConfigId")
+				.mockResolvedValue("empty-profile-id")
 			const profileEntry: ProviderSettingsEntry = { id: "empty-profile-id", name: "empty-profile" }
-			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValueOnce([profileEntry])
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValueOnce({
+			// Both lookups need the listing: the window-local verification of the mapped id
+			// and the switch's own profile lookup.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([profileEntry])
+			const getProfileSpy = vi.spyOn(provider.providerSettingsManager, "getProfile").mockResolvedValue({
 				id: "empty-profile-id",
 				name: "empty-profile",
 			})
 			const activateProfileSpy = vi.spyOn(provider.providerSettingsManager, "activateProfile")
+			const currentApiConfigNameBefore = provider.contextProxy.getValue("currentApiConfigName")
 
 			await provider.handleModeSwitch("architect")
 
+			// The mapped-profile branch really ran: the profile was read, it has no
+			// apiProvider, and the switch fell through to the current configuration.
+			expect(getProfileSpy).toHaveBeenCalledWith({ name: "empty-profile" })
 			expect(activateProfileSpy).not.toHaveBeenCalled()
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe(currentApiConfigNameBefore)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			// Resolved window-locally from the seeded snapshot, not from the shared map.
+			expect(getModeConfigIdSpy).not.toHaveBeenCalled()
 
 			await provider.dispose()
 		})
@@ -1850,6 +1865,40 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				}),
 			)
 			expect(modeChangedSpy).toHaveBeenCalledWith("architect")
+
+			await provider.dispose()
+		})
+
+		// Production getModeBySlug resolves custom modes before built-ins. The double used
+		// to ignore customModes, so this switch was rejected by the mock rather than by the
+		// real lookup; the accepted case is what keeps the production path covered.
+		it("should accept a switch to a custom mode through the production lookup", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("custom-view")
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([
+				{
+					slug: "policy-writer",
+					name: "Policy Writer",
+					roleDefinition: "You write policies",
+					groups: ["read"],
+				},
+			])
+			const logSpy = vi.spyOn(provider, "log")
+			const modeChangedSpy = vi.fn()
+			provider.on(RooCodeEventName.ModeChanged, modeChangedSpy)
+
+			await provider.handleModeSwitch("policy-writer")
+
+			expect(provider["viewLocalState"].mode).toBe("policy-writer")
+			expect(modeChangedSpy).toHaveBeenCalledWith("policy-writer")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("ignoring unknown mode"))
 
 			await provider.dispose()
 		})

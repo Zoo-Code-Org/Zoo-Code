@@ -2577,6 +2577,13 @@ export const webviewMessageHandler = async (
 						await provider.providerSettingsManager.saveConfig(profileName, profileSettings)
 						const listApiConfig = await provider.providerSettingsManager.listConfig()
 						await updateGlobalState("listApiConfigMeta", listApiConfig)
+						// The save rewrote this profile's settings in the shared store. Every other
+						// live view pinned to it is still shadowing the pre-save settings with its
+						// own buffer, and its running task keeps the handler built from them: the
+						// upsert path refreshes those views through this helper, and a save to a
+						// pinned profile owes them the same refresh. Inside the section, so a
+						// competing rename cannot interleave with it.
+						await provider.refreshViewLocalStateForUpdatedProfile(profileName, profileSettings)
 					})
 				} catch (error) {
 					provider.log(

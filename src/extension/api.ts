@@ -964,6 +964,22 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					),
 				)
 			: []
+		// The provider-level write below lands in the provider's window-local map as
+		// well, and that map out-ranks the shared mapping in getModeConfigId: snapshot
+		// it per mode (undefined = the window had no entry) so compensation can put
+		// both layers back instead of leaving the rolled-back mode resolving through a
+		// local id the failed call installed.
+		const previousLocalModeConfigs = new Map<string, string | undefined>(
+			values.modeApiConfigs
+				? Object.keys(values.modeApiConfigs).map(
+						(mode) =>
+							[mode, this.sidebarProvider.getLocalModeConfigId(mode as Mode)] as [
+								string,
+								string | undefined,
+							],
+					)
+				: [],
+		)
 
 		try {
 			await this.sidebarProvider.setValues(values)
@@ -1024,6 +1040,16 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 						)
 					} catch (restoreError) {
 						recordRestoreFailure(`restore the mode mapping for ${mode}`, restoreError)
+					}
+					// The shared mapping alone is not the mode's resolution: undo the
+					// window-local entry the forward write landed in as well, so a rolled
+					// back mode resolves through the restored mapping (or the opening
+					// snapshot) instead of the id this failed call installed. Independent
+					// try so a failed shared restore cannot strand this one.
+					try {
+						this.sidebarProvider.restoreLocalModeConfig(mode as Mode, previousLocalModeConfigs.get(mode))
+					} catch (restoreError) {
+						recordRestoreFailure(`restore the window-local mode mapping for ${mode}`, restoreError)
 					}
 				}
 				try {

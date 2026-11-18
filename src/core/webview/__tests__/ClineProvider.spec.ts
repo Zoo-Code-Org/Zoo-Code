@@ -12407,6 +12407,57 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 			}
 		})
 
+		it("drops a sibling snapshot whose pin moved while the profile read was in flight", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// The sibling pins a profile of its own with no overlay buffered yet, which is
+				// exactly the state this snapshot exists to protect.
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				const siblingPost = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				// Mid-read, the sibling activates its own new profile through its own mutation
+				// queue: it re-pins and writes its own overlay while this read is still open.
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+					sibling["viewLocalState"].currentApiConfigName = "moved-profile"
+					sibling["viewLocalState"].apiConfiguration = {
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "sibling-own-settings",
+					}
+					return {
+						name: "sibling-profile",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "stale-pin-settings",
+					}
+				})
+
+				await provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]("activated-profile")
+
+				// The settings belonged to a pin this view no longer holds. Installing them would
+				// pair the sibling's new pin with the old profile's settings; the sibling's own
+				// activation owns its buffer now, so the stale snapshot is dropped.
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "sibling-own-settings",
+				})
+				expect(siblingPost).not.toHaveBeenCalled()
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+			}
+		})
+
 		it("does not rebuild the acting view's task when it runs under another profile", async () => {
 			// The acting view pins the saved profile while its own task follows a
 			// different sticky profile: the non-activating save refreshes the view
