@@ -28,7 +28,10 @@ describe("API - configuration", () => {
 			contextProxy: { setValues },
 			providerSettingsManager: { saveConfig, getProfile, getModeConfigId },
 			// #2110 moved the forward mode-profile write onto the provider so this window's
-			// local mode choice is updated too; the double follows that surface.
+			// local mode choice is updated too; the double follows that surface, including the two
+			// seams the compensation path uses to rewind this window's mapping.
+			getLocalModeConfigId: vi.fn(),
+			restoreLocalModeConfig: vi.fn(),
 			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
@@ -69,7 +72,10 @@ describe("API - configuration", () => {
 			contextProxy: { setValues },
 			providerSettingsManager: { saveConfig, getProfile, getModeConfigId },
 			// #2110 moved the forward mode-profile write onto the provider so this window's
-			// local mode choice is updated too; the double follows that surface.
+			// local mode choice is updated too; the double follows that surface, including the two
+			// seams the compensation path uses to rewind this window's mapping.
+			getLocalModeConfigId: vi.fn(),
+			restoreLocalModeConfig: vi.fn(),
 			setModeConfig,
 			postStateToWebview,
 		} as unknown as ClineProvider
