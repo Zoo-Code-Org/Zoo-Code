@@ -2282,7 +2282,7 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			// profile read on every activation.
 			const siblingProfileReads = vi
 				.mocked(providerA.providerSettingsManager.getProfile)
-				.mock.calls.filter((call) => call[0]?.name === "profile-y")
+				.mock.calls.filter((call) => "name" in call[0] && call[0].name === "profile-y")
 			expect(siblingProfileReads).toHaveLength(1)
 
 			await providerA.dispose()
