@@ -52,6 +52,7 @@ void test("mock authentication rejects fixture tampering and permits replay", as
 			assert.equal((await response.json()).choices[0].message.content, "trusted")
 		}
 		assert.equal((await client(`${mock.url}/__aimock/fixtures`)).status, 200)
+		assert.equal((await client(`${mock.url}/__aimock/reset`, { method: "POST" })).status, 200)
 	} finally {
 		await mock.stop()
 	}

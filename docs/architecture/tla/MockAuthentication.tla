@@ -13,10 +13,10 @@
 \* Replay: each guard was removed from mock-auth.ts. The property test failed.
 \* Replay: the restored wrapper passes the property tests. No new bug found.
 \* Limit: redirect replay checks fetch options, not browser credential rules.
-\* Cost: about 20 agent minutes. Each TLC run took less than one second.
+\* Cost: about 25 agent minutes. Each TLC run took less than one second.
 \* Gate: all four configs, property test and two integration tests passed as expected.
 \* Gate: package check-types and package ESLint passed. No suppressions added.
-\* Review: 0 covered, 0 added, 2 gap. CI found a test compile failure.
+\* Review: 0 covered, 0 added, 4 gap. CI found a test compile failure.
 \* Gap: Headers iteration types differ between the ESM and CommonJS configs.
 \* This model cannot check TypeScript libraries. Both compile checks now pass.
 \* Fix: headerEntries uses Headers.forEach. The credential model is unchanged.
@@ -26,6 +26,13 @@
 \* Test discovery is outside this credential model. Node tests now use .spec names.
 \* Code QA runs the package command. Mocha discovers only .test.js files.
 \* Gate: the package command fails with the redirect guard removed and passes after restore.
+\* Gap: PR 2474 found a missing build prerequisite. Build outputs are outside this model.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2474#discussion_r4608008137
+\* Fix: the test command builds @roo-code/types before it compiles the suite.
+\* Gap: PR 2474 found no success check for reset. Endpoint responses are outside this model.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2474#discussion_r4608008145
+\* Fix: the integration test checks that an authenticated reset returns 200.
+\* Gate: without types dist, plain tsc fails. The updated command builds it and all six tests pass.
 \* Run tests: pnpm --dir apps/vscode-e2e test:mock-auth.
 \* A model check covers this model. It does not prove the code correct.
 
