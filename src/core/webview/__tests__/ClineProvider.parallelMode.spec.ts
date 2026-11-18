@@ -2958,6 +2958,200 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await unperturbed.dispose()
 		})
 
+		// The manager shows its own error and resolves when the mode-file write fails, so a
+		// resolved delete call is not evidence that the mode is gone: the pins may only be
+		// cleared once the slug is confirmed to stop resolving.
+		it("keeps every pin when the mode still resolves after the manager swallowed a failure", async () => {
+			const pinning = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const unperturbed = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await pinning["resolveWebviewView"](createMockWebviewView())
+			await unperturbed["resolveWebviewView"](createMockWebviewView())
+			await pinning["setViewStateId"]("pin-swallowed-delete")
+			await unperturbed["setViewStateId"]("keep-swallowed-view")
+			await pinning.setValue("mode", "code")
+			await unperturbed.setValue("mode", "code")
+			await pinning.saveViewState("mode", "ephemeral-mode")
+			await unperturbed.saveViewState("mode", "ask")
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pin-swallowed-delete": { mode: "ephemeral-mode" },
+				"keep-swallowed-view": { mode: "ask" },
+			})
+			// A failed mode-file write leaves the mode in the list the manager reads back; the
+			// delete call itself still resolved after showing its error, so only this read can
+			// tell a deletion from a swallowed failure.
+			Object.assign(pinning.customModesManager, {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([
+					{
+						slug: "ephemeral-mode",
+						name: "Ephemeral",
+						roleDefinition: "test role",
+						groups: ["read"],
+					},
+				]),
+			})
+
+			await pinning.deleteCustomMode("ephemeral-mode")
+
+			expect(pinning["viewLocalState"].mode).toBe("ephemeral-mode")
+			expect(unperturbed["viewLocalState"].mode).toBe("ask")
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pin-swallowed-delete": { mode: "ephemeral-mode" },
+				"keep-swallowed-view": { mode: "ask" },
+			})
+
+			await pinning.dispose()
+			await unperturbed.dispose()
+		})
+
+		// The webview message posts only its own provider after the deletion, so the fan-out has
+		// to notify every affected view itself - and only after that view's buffer changed, or
+		// the notification would carry the deleted selection back.
+		it("posts each affected view's state after clearing its pin", async () => {
+			const initiating = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const unperturbed = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await initiating["resolveWebviewView"](createMockWebviewView())
+			await sibling["resolveWebviewView"](createMockWebviewView())
+			await unperturbed["resolveWebviewView"](createMockWebviewView())
+			await initiating["setViewStateId"]("fan-out-initiator")
+			await sibling["setViewStateId"]("fan-out-sibling")
+			await unperturbed["setViewStateId"]("fan-out-keeper")
+			await initiating.setValue("mode", "code")
+			await sibling.setValue("mode", "code")
+			await unperturbed.setValue("mode", "code")
+			await initiating.saveViewState("mode", "ephemeral-mode")
+			await sibling.saveViewState("mode", "ephemeral-mode")
+			await unperturbed.saveViewState("mode", "ask")
+			Object.assign(initiating.customModesManager, {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([]),
+			})
+			// The mode is read inside the spy, so an entry proves both that the view was notified
+			// and that its buffer was already cleared at the moment of the post.
+			const posted: { view: string; mode: string | undefined }[] = []
+			const postOf = (instance: ClineProvider, view: string) =>
+				vi.spyOn(instance, "postStateToWebview").mockImplementation(async () => {
+					posted.push({ view, mode: instance["viewLocalState"].mode })
+				})
+			const postInitiating = postOf(initiating, "initiator")
+			const postSibling = postOf(sibling, "sibling")
+			const postKeeper = vi.spyOn(unperturbed, "postStateToWebview").mockResolvedValue(undefined)
+
+			await initiating.deleteCustomMode("ephemeral-mode")
+
+			expect(initiating["viewLocalState"].mode).toBeUndefined()
+			expect(sibling["viewLocalState"].mode).toBeUndefined()
+			expect(postInitiating).toHaveBeenCalledTimes(1)
+			expect(postSibling).toHaveBeenCalledTimes(1)
+			expect(posted).toHaveLength(2)
+			expect(posted.map((entry: { view: string; mode: string | undefined }) => entry.view).sort()).toEqual([
+				"initiator",
+				"sibling",
+			])
+			expect(posted.every((entry: { view: string; mode: string | undefined }) => entry.mode === undefined)).toBe(
+				true,
+			)
+			// A view pinned to a mode that still resolves is neither cleared nor reposted.
+			expect(unperturbed["viewLocalState"].mode).toBe("ask")
+			expect(postKeeper).not.toHaveBeenCalled()
+
+			postInitiating.mockRestore()
+			postSibling.mockRestore()
+			postKeeper.mockRestore()
+			await initiating.dispose()
+			await sibling.dispose()
+			await unperturbed.dispose()
+		})
+
+		// The mode file is already gone when the durable pin write rejects, so the deletion has to
+		// finish anyway: the webview message's shared default write and its state post follow this
+		// call, and the view must stop selecting the deleted slug. The failed cleanup is reported
+		// and the durable entry stays behind, where loadViewState drops it on the next load.
+		it("completes the deletion when the durable pin write rejects", async () => {
+			const pinning = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const unperturbed = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await pinning["resolveWebviewView"](createMockWebviewView())
+			await unperturbed["resolveWebviewView"](createMockWebviewView())
+			await pinning["setViewStateId"]("pin-rejected-write")
+			await unperturbed["setViewStateId"]("keeper-rejected-write")
+			await pinning.setValue("mode", "code")
+			await unperturbed.setValue("mode", "code")
+			await pinning.saveViewState("mode", "ephemeral-mode")
+			await unperturbed.saveViewState("mode", "ask")
+			Object.assign(pinning.customModesManager, {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([]),
+			})
+			const logSpy = vi.spyOn(pinning, "log")
+			const postSpy = vi.spyOn(pinning, "postStateToWebview").mockResolvedValue(undefined)
+			const postKeeper = vi.spyOn(unperturbed, "postStateToWebview").mockResolvedValue(undefined)
+			// The clearing write to the persisted viewStates map is what fails here.
+			vi.spyOn(pinning.contextProxy, "setValue").mockRejectedValueOnce(
+				new Error("storage rejected the viewStates write"),
+			)
+
+			await pinning.deleteCustomMode("ephemeral-mode")
+
+			// Reported, not propagated: the caller keeps going and the view is still invalidated.
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("durable pin cleanup failed"))
+			expect(pinning["viewLocalState"].mode).toBeUndefined()
+			expect(postSpy).toHaveBeenCalledTimes(1)
+			expect(postKeeper).not.toHaveBeenCalled()
+			// The retained entry is the failed cleanup, kept for the next load; the other pin is
+			// untouched.
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pin-rejected-write": { mode: "ephemeral-mode" },
+				"keeper-rejected-write": { mode: "ask" },
+			})
+			expect(unperturbed["viewLocalState"].mode).toBe("ask")
+
+			await pinning.dispose()
+			await unperturbed.dispose()
+		})
+
 		it("should route a custom-mode deletion through the mutation queue", async () => {
 			const provider = new ClineProvider(
 				mockContext,

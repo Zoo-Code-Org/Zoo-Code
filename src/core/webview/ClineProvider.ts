@@ -418,6 +418,21 @@ export class ClineProvider
 		return this.enqueueProviderProfileMutation(
 			async () => {
 				await this.customModesManager.deleteCustomMode(slug)
+				// The manager shows its own error and resolves when the mode-file write fails, so a
+				// swallowed failure is not evidence of a deletion: confirm the slug no longer resolves
+				// before dropping any pin. A view whose mode still resolves - including a custom mode
+				// that shadowed a built-in, which now resolves to the built-in - keeps its pin, as it did
+				// before this method existed. An unreadable mode list leaves the deletion unverified, so
+				// the pins stay put there too.
+				let deletionConfirmed = false
+				try {
+					deletionConfirmed = !(await this.modeSlugResolves(slug))
+				} catch {
+					deletionConfirmed = false
+				}
+				if (!deletionConfirmed) {
+					return
+				}
 				// A view that pinned this slug keeps it in its durable pin, and getState() gives the
 				// pin precedence, so the view would go on selecting a mode whose definition is gone:
 				// the shared default write the webview message makes afterwards does not touch
@@ -428,7 +443,37 @@ export class ClineProvider
 					(instance) => instance.viewLocalState.mode === slug,
 				)
 				await Promise.all(
-					affected.map((instance) => instance._saveViewLocalStateFromMutation({ mode: undefined })),
+					affected.map(async (instance) => {
+						try {
+							await instance._saveViewLocalStateFromMutation({ mode: undefined })
+						} catch (error) {
+							// The mode file is already gone, so the view has to stop selecting the deleted slug
+							// even though its durable pin write failed: clear the live pin so getState() falls
+							// back to the shared mode, and report the failed cleanup. The durable entry stays
+							// behind, and loadViewState drops it on the next load because the mode no longer
+							// resolves. Letting this rejection escape would abort the shared default write and
+							// the state refresh the webview message performs after this call, which is what
+							// leaves an invalidated view pointing at a deleted mode.
+							instance._updateViewLocalStateFromMutation({ mode: undefined })
+							this.log(
+								`[deleteCustomMode] durable pin cleanup failed for view ` +
+									`${instance.viewStateId} after deleting mode '${slug}'; the live pin was cleared: ` +
+									(error instanceof Error ? error.message : String(error)),
+							)
+						}
+						try {
+							// The clear has to reach the screen as well: the webview message posts only its own
+							// provider afterwards, so an idle sibling would go on showing the deleted selection.
+							await instance.postStateToWebview()
+						} catch (error) {
+							// One view that cannot be notified must not stop the others from being notified.
+							this.log(
+								`[deleteCustomMode] failed to post state to view ${instance.viewStateId} after ` +
+									`deleting mode '${slug}': ` +
+									(error instanceof Error ? error.message : String(error)),
+							)
+						}
+					}),
 				)
 			},
 			// The deletion must run to completion: a timeout that advanced the queue while the
