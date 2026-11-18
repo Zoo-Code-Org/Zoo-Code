@@ -4026,12 +4026,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						`Token circuit breaker tripped: cumulative token limit reached (${totalTokens.toLocaleString()} / ${this.tokenCircuitBreakerLimit.toLocaleString()} tokens). Please review and decide whether to proceed.`,
 					)
 
-					if (response === "messageResponse") {
+					if (response === "yesButtonClicked" || response === "messageResponse") {
 						currentUserContent.push({
 							type: "text" as const,
-							text: text
-								? `User approved exceeding token budget: ${text}`
-								: "User approved continuing beyond token circuit breaker limit.",
+							text:
+								response === "messageResponse" && text
+									? `User approved exceeding token budget: ${text}`
+									: "User approved continuing beyond token circuit breaker limit.",
 						})
 						// Bump threshold to allow subsequent turns up to the next budget checkpoint
 						this.tokenCircuitBreakerLimit = totalTokens + this.tokenCircuitBreakerLimit
