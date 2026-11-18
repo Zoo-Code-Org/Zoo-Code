@@ -733,11 +733,20 @@ export class ContextProxy {
 		this.stateCache = {}
 		this.secretCache = {}
 
-		await Promise.all([
+		// Every key is cleared independently, so one rejection does not mean the rest never ran.
+		// Awaiting all of them keeps a rejection from returning while other clears are still in flight,
+		// which is what lets a caller refresh the views before a late clear lands. The first rejection
+		// stays the error the caller sees, unmodified and unwrapped.
+		const clearResults = await Promise.allSettled([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
 			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 		])
+		const firstFailure = clearResults.find((result) => result.status === "rejected")
+
+		if (firstFailure && firstFailure.status === "rejected") {
+			throw firstFailure.reason
+		}
 
 		await this.initialize()
 	}

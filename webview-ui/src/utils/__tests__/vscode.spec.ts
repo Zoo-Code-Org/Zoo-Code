@@ -66,9 +66,10 @@ describe("VSCodeAPIWrapper", () => {
 		})
 		const wrapper = new VSCodeAPIWrapper()
 
-		// The host's setViewStateId rejects every Object.prototype member name; accepting
-		// "constructor" here would make every launch message rejected and strand the
-		// pre-launch entry under the temporary id forever.
+		// The wrapper is stricter than the host here: ClineProvider.setViewStateId rejects only the
+		// proto name and reads persisted entries through a null-prototype map, so this records the
+		// wrapper's own policy for prototype member names rather than a launch failure the host
+		// would have produced for "constructor".
 		expect(wrapper.getViewStateId()).toBe("generated-view")
 		expect(JSON.parse(storage.getItem("vscodeState")!)).toMatchObject({ viewStateId: "generated-view" })
 	})

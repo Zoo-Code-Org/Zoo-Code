@@ -28,7 +28,7 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
 
-import { defaultModeSlug } from "../../../shared/modes"
+import { defaultModeSlug, type Mode } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { EMBEDDING_MODEL_PROFILES } from "../../../shared/embeddingModels"
 import { setTtsEnabled } from "../../../utils/tts"
@@ -4835,6 +4835,13 @@ describe("ClineProvider", () => {
 				}
 				throw new Error("sibling profile read failed")
 			})
+			// A read failure is only distinguishable from an absence through the manager's own listing,
+			// which is the store the read goes to. The listing here says the record is still there, so the
+			// failure has to stay an abort rather than an accepted deletion.
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ name: "sibling-profile", id: "sibling-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "activated-profile", id: "activated-id", apiProvider: providerIdentifiers.anthropic },
+			])
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue("mode-id")
 			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockResolvedValue(undefined)
 			// The snapshot must abort before the manager is asked to switch: the store's
@@ -5830,22 +5837,10 @@ describe("ClineProvider", () => {
 
 		it("waits for another view's critical section before saving the profile record", async () => {
 			const events: string[] = []
-			const savedForRival: Record<string, Record<string, unknown>> = {}
 			let releaseOtherView!: () => void
 			const otherViewHold = new Promise<void>((resolve) => {
 				releaseOtherView = resolve
 			})
-			// A promise-chain double, matching the real shared lock: a caller queues behind
-			// whoever holds the section instead of running inline.
-			let section: Promise<unknown> = Promise.resolve()
-			const runExclusiveAcrossInstances = <T>(cb: () => Promise<T>): Promise<T> => {
-				const run = section.then(cb)
-				section = run.then(
-					() => {},
-					() => {},
-				)
-				return run
-			}
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -5853,26 +5848,22 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			// @ts-ignore - Replace providerSettingsManager with a test double.
-			provider.providerSettingsManager = {
-				runExclusiveAcrossInstances,
-				saveConfig: vi.fn(async (savedName: string, savedSettings: Record<string, unknown>) => {
+			// A second real manager over the same extension context is what the other view is. The section
+			// below is the class-level lock keyed by the shared secrets store, so the queueing asserted
+			// here is the shipped one rather than a double that imitates a caller falling behind.
+			const rivalManager = new ProviderSettingsManager(mockContext)
+			const ownManager = provider.providerSettingsManager
+			const realSaveConfig = ownManager.saveConfig.bind(ownManager)
+			vi.spyOn(ownManager, "saveConfig").mockImplementation(
+				async (...saveArgs: Parameters<typeof realSaveConfig>) => {
 					events.push("saveConfig")
-					savedForRival[savedName] = savedSettings
-					return "rival-id"
-				}),
-				getProfile: vi.fn(async ({ name: readName }: { name: string }) => ({
-					name: readName,
-					id: "rival-id",
-					...savedForRival[readName],
-				})),
-				listConfig: vi.fn().mockResolvedValue([]),
-				setModeConfig: vi.fn(),
-			}
+					return realSaveConfig(...saveArgs)
+				},
+			)
 			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
 			// Another view's rename holds the section across its name check, its save, and its
 			// compensation delete.
-			const heldSection = runExclusiveAcrossInstances(async () => {
+			const heldSection = rivalManager.runExclusiveAcrossInstances(async () => {
 				events.push("otherViewEnter")
 				await otherViewHold
 				events.push("otherViewExit")
@@ -7870,10 +7861,23 @@ describe("ClineProvider", () => {
 			}
 			let activationStarted = false
 			let failSelectionWrite = true
-			let slowSettingsWritesRemaining = 1
-			// Recorded the moment the instrumented leg settles, so the assertion below can ask whether
-			// anything was still in flight when the caller received the error.
+			let settingsWriteGateUsed = false
+			// Recorded the moment the instrumented leg settles, so the ordering below can be asked at any
+			// point in the flow rather than only at the caller.
 			let settingsWriteLegSettled = false
+			// Set the moment the instrumented leg reaches the gate, so the test can tell a write that is
+			// genuinely in flight from a write that never started.
+			let settingsWriteGateReached = false
+			let releaseSettingsWriteGate: () => void = () => {}
+			const settingsWriteGate = new Promise<void>((resolve) => {
+				releaseSettingsWriteGate = resolve
+			})
+			// The two rollback operations the failure path can reach first, recorded in the order they begin
+			// together with what the instrumented write had done at that moment. Only these two are named,
+			// because the activation fan-out touches neither: it writes the profile list, the shared
+			// selection, the shared settings and this view's overlay through ContextProxy, so an entry here
+			// is evidence that the failure path has started rather than that a fan-out leg ran.
+			const rollbackOps: { op: string; settingsWriteLegSettled: boolean }[] = []
 			// ContextProxy has no typed seam for these two methods on its public surface, so the local
 			// alias is the documented way in: it names the two methods the case instruments.
 			const proxySurface = provider.contextProxy as unknown as {
@@ -7894,10 +7898,10 @@ describe("ClineProvider", () => {
 			// instrumented.
 			vi.spyOn(proxySurface, "setProviderSettings").mockImplementation(
 				async (values: Record<string, unknown>) => {
-					if (slowSettingsWritesRemaining > 0 && activationStarted) {
-						slowSettingsWritesRemaining -= 1
-						await new Promise<void>((resolve) => setTimeout(resolve, 0))
-						await new Promise<void>((resolve) => setTimeout(resolve, 0))
+					if (!settingsWriteGateUsed && activationStarted) {
+						settingsWriteGateUsed = true
+						settingsWriteGateReached = true
+						await settingsWriteGate
 						settingsWriteLegSettled = true
 					}
 					await realSetProviderSettings(values)
@@ -7939,8 +7943,13 @@ describe("ClineProvider", () => {
 						}
 					}),
 					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
-					setModeConfig: vi.fn(),
-					saveConfig: vi.fn().mockResolvedValue("old-id"),
+					setModeConfig: vi.fn().mockImplementation(async () => {
+						rollbackOps.push({ op: "manager mode mapping restore", settingsWriteLegSettled })
+					}),
+					saveConfig: vi.fn().mockImplementation(async () => {
+						rollbackOps.push({ op: "manager record restore", settingsWriteLegSettled })
+						return "old-id"
+					}),
 					getProfile: vi.fn().mockResolvedValue({
 						name: "keeper-profile",
 						id: "keeper-id",
@@ -7952,9 +7961,29 @@ describe("ClineProvider", () => {
 						modeApiConfigs: {},
 					}),
 				}
-				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("selection write failed")
-				// The claim under test: the fan-out settles before the failure path decides. Ask it at the
-				// moment the caller receives the error, before giving the instrumented leg any more time.
+				const deletion = provider.deleteProviderProfile(oldProfile)
+				// Drain until the instrumented leg is at the gate, and then a little further so a flow that
+				// rejects early has every chance to start compensating while the write is still held.
+				for (let drained = 0; drained < 40 && !settingsWriteGateReached; drained++) {
+					await new Promise<void>((resolve) => setTimeout(resolve, 0))
+				}
+				for (let drained = 0; drained < 40 && rollbackOps.length === 0; drained++) {
+					await new Promise<void>((resolve) => setTimeout(resolve, 0))
+				}
+				expect(settingsWriteGateReached).toBe(true)
+				// The claim under test, asked while the write is in flight: the fan-out has to settle before
+				// the failure path may touch anything. On the parent commit the selection leg rejects at
+				// once while this leg is still held, so the rollback starts mid-write and this assertion fails
+				// here rather than somewhere downstream.
+				expect(rollbackOps).toEqual([])
+				releaseSettingsWriteGate()
+				await expect(deletion).rejects.toThrow("selection write failed")
+				// The opposite outcome has to be reachable in the same case, or the ordering assertion above
+				// would pass vacuously on a flow that never compensated at all.
+				expect(rollbackOps.length).toBeGreaterThan(0)
+				// And the rollback never outranked the leg that was in flight: every recorded operation saw the
+				// write already settled, so nothing the failure path restored can be overwritten behind it.
+				expect(rollbackOps.map((entry) => entry.settingsWriteLegSettled)).toEqual(rollbackOps.map(() => true))
 				expect(settingsWriteLegSettled).toBe(true)
 				// The caller still sees the rejected selection write rather than a wrapper or a later error.
 				// The log names the leg that failed by key, and carries no stored value with it.
@@ -15265,6 +15294,397 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 				apiProvider: providerIdentifiers.anthropic,
 				apiKey: "shared-key",
 			})
+		})
+	})
+	describe("post-write checks and cross-view invalidation", () => {
+		// A custom slug, not a built-in: modeSlugResolves answers built-ins from the shared list without a
+		// store read, so only a custom name reaches the re-checks these cases exercise. Single assertion
+		// because the mode type closes over the built-in names and leaves custom slugs as strings.
+		const customSlug = "deleted-custom-mode" as Mode
+		const newProviderForView = function (viewType: "sidebar" | "editor", contextProxy: ContextProxy) {
+			return new ClineProvider(mockContext, mockOutputChannel, viewType, contextProxy, new WebviewFocusTracker())
+		}
+
+		it("writes the shared mode fallback before posting a view pinned to the deleted mode", async () => {
+			// One ContextProxy serves every live view, so a sibling's posted state reads the shared mode
+			// slot through it. The webview message that triggered the deletion writes the default mode only
+			// after this method returns, and posts only its own provider, so an idle view pinned to the
+			// deleted mode is posted while the shared slot still names it and getState() falls back to that
+			// slot once the pin is gone. The fallback therefore has to land before any affected view is posted.
+			const contextProxy = new ContextProxy(mockContext)
+			const provider = newProviderForView("sidebar", contextProxy)
+			const sibling = newProviderForView("editor", contextProxy)
+			Object.assign(provider["customModesManager"], {
+				deleteCustomMode: vi.fn().mockResolvedValue(undefined),
+				getCustomModes: vi.fn().mockResolvedValue([]),
+			})
+			await provider["setViewStateId"]("stable-deleting-view")
+			await sibling["setViewStateId"]("stable-pinned-view")
+			await contextProxy.setValue("mode", customSlug)
+			sibling["viewLocalState"].mode = customSlug
+			const modeAtSiblingPost: unknown[] = []
+			vi.spyOn(sibling, "postStateToWebview").mockImplementation(async () => {
+				modeAtSiblingPost.push(contextProxy.getValue("mode"))
+			})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+
+			// The resolution read is the seam this fixture cannot express through stores: the helper consults
+			// the built-in slug table plus the manager list, and only the answer matters here.
+			// The helper is private, so the spy goes through an alias of the surface it occupies; spyOn's
+			// key type only admits the public members of the class.
+			const resolutionSurface = provider as unknown as {
+				modeSlugResolves: (slug: Mode) => Promise<boolean>
+			}
+			vi.spyOn(resolutionSurface, "modeSlugResolves").mockResolvedValue(false)
+
+			await provider.deleteCustomMode(customSlug)
+
+			// The shared slot already names the default when the sibling is posted, rather than the deleted
+			// mode the sibling's cleared pin falls back to.
+			expect(modeAtSiblingPost).toEqual([defaultModeSlug])
+			expect(contextProxy.getValue("mode")).toBe(defaultModeSlug)
+			// The clear reaches the sibling's own buffer, which is what the post above reports.
+			expect(sibling["viewLocalState"].mode).toBeUndefined()
+
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
+		it("keeps the newer view id when an older registration fails after it committed", async () => {
+			// Two registrations overlap: the second commits while the first call's durable rekey is still in
+			// flight, so this provider already sits on the newer id when the first call fails. Putting the
+			// first call's captured id back would send every later per-view write to a key no live renderer
+			// uses, so that restore is owed only while the failing call is still the owner.
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			// rekeyPersistedViewStateEntry is private, so the local alias is the documented way in.
+			const viewSurface = provider as unknown as {
+				rekeyPersistedViewStateEntry: (viewStateId: string) => Promise<void>
+			}
+			const realRekey = viewSurface.rekeyPersistedViewStateEntry.bind(provider)
+			let releaseFirst: () => void = () => {}
+			const firstPermit = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			let firstCall = true
+			vi.spyOn(viewSurface, "rekeyPersistedViewStateEntry").mockImplementation(async (viewStateId: string) => {
+				if (firstCall) {
+					firstCall = false
+					await firstPermit
+					throw new Error("durable rekey failed")
+				}
+				return realRekey(viewStateId)
+			})
+			const firstRegistration = provider["setViewStateId"]("first-view")
+			await new Promise<void>((resolve) => setImmediate(resolve))
+			// The newer registration commits while the first call is inside its durable write.
+			await provider["setViewStateId"]("second-view")
+			expect(provider["viewStateId"]).toBe("second-view")
+			releaseFirst()
+
+			await expect(firstRegistration).rejects.toThrow("durable rekey failed")
+			expect(provider["viewStateId"]).toBe("second-view")
+			expect(provider["viewStateId"]).not.toBe(provider.viewId)
+			await provider.dispose()
+		})
+
+		it("does not install a profile loaded before an invalidation landed mid-load", async () => {
+			// loadViewState reads the durable entry and then awaits the profile lookup. An invalidation that
+			// lands during that lookup clears both the live buffer and the durable entry the read already
+			// returned, and the reapply guards cannot see it when the buffer was empty on both sides of the
+			// clear, so installing what was loaded resurrects a selection this invalidation threw away.
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			// The durable entry lives under this view's temporary id, which is the entry the registration
+			// rekeys and the load then reads.
+			await provider.saveViewState("currentApiConfigName", "loaded-profile")
+			Object.assign(provider["customModesManager"], { getCustomModes: vi.fn().mockResolvedValue([]) })
+			Object.assign(provider["providerSettingsManager"], {
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "loaded-profile", id: "loaded-id", apiProvider: providerIdentifiers.openrouter },
+					]),
+			})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			let releaseLookup: () => void = () => {}
+			const lookupGate = new Promise<void>((resolve) => {
+				releaseLookup = resolve
+			})
+			let lookupStarted = false
+			Object.assign(provider["providerSettingsManager"], {
+				getProfile: vi.fn(async () => {
+					lookupStarted = true
+					await lookupGate
+					return { name: "loaded-profile", id: "loaded-id", apiProvider: providerIdentifiers.openrouter }
+				}),
+			})
+			const launch = provider["setViewStateId"]("stable-loaded-view")
+			for (let drained = 0; drained < 40 && !lookupStarted; drained++) {
+				await new Promise<void>((resolve) => setTimeout(resolve, 0))
+			}
+			expect(lookupStarted).toBe(true)
+			// The invalidation lands while the lookup is still in flight, which is what a reset or an import
+			// performed in another window does.
+			const originator = newProviderForView("sidebar", new ContextProxy(mockContext))
+			vi.spyOn(originator, "postStateToWebview").mockResolvedValue(undefined)
+			await originator["broadcastResetToAllInstances"]()
+			releaseLookup()
+			await launch
+
+			// The durable entry the load read belonged to this view's temporary id, and the invalidation
+			// cleared the buffer; what must not survive is the pin the late lookup returned.
+			expect(provider["viewLocalState"].currentApiConfigName).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Discarding state loaded across an invalidation for viewId stable-loaded-view"),
+			)
+			await provider.dispose()
+			await originator.dispose()
+		})
+		it("rolls the task writes back when the post-write mode check cannot be read", async () => {
+			// The switch updates the task's persisted mode and its in-memory mode before it re-reads the mode
+			// list, so a list that cannot be read arrives after writes that already landed. An unreadable
+			// list confirms nothing: those writes have to be undone the same way a confirmed deletion undoes
+			// them, because the caller still delivers the turn, and the lookup failure must stay the error
+			// the caller sees rather than turning into a silent success.
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			const task: { taskId: string; emit: ReturnType<typeof vi.fn>; _taskMode?: string } = {
+				taskId: "switch-task",
+				emit: vi.fn(),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			await provider.contextProxy.setValue("taskHistory", [
+				{
+					id: "switch-task",
+					number: 1,
+					ts: 1700000000000,
+					task: "switch task",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					mode: "architect",
+				},
+			])
+			const getCustomModes = vi
+				.fn()
+				.mockResolvedValue([{ slug: customSlug, name: "Reviewer", roleDefinition: "Reviews the diff" }])
+			Object.assign(provider["customModesManager"], {
+				getCustomModes,
+				updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			})
+			Object.assign(provider["providerSettingsManager"], {
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				listConfig: vi
+					.fn()
+					.mockResolvedValue([
+						{ name: "current-config", id: "current-id", apiProvider: providerIdentifiers.anthropic },
+					]),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+			})
+			await provider.contextProxy.setValue("currentApiConfigName", "current-config")
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const resolutionSurface = provider as unknown as {
+				modeSlugResolves: (slug: Mode) => Promise<boolean>
+			}
+			vi.spyOn(resolutionSurface, "modeSlugResolves").mockImplementation(async (_slug: Mode) => {
+				// The switch asks twice: before the task-side writes, when the mode is still present, and again
+				// after they land. Only the second answer is unreadable, which is the interleaving this finding
+				// describes. The helper is a lookup rather than a store this fixture seeds, so the read itself
+				// is the seam, and every other part of the switch runs for real.
+				if (provider["getTaskHistoryItem"]("switch-task")?.mode === customSlug) {
+					throw new Error("mode list unreadable")
+				}
+				return true
+			})
+			await provider["setViewStateId"]("stable-switch-view")
+
+			await expect(provider.handleModeSwitch(customSlug)).rejects.toThrow("mode list unreadable")
+
+			// The lookup failure is reported rather than swallowed as a silent success.
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("could not confirm mode"))
+			// Both task-side writes are undone: the persisted entry keeps the pre-switch mode, and the task
+			// stops reporting a mode this call could not confirm.
+			expect(provider["getTaskHistoryItem"]("switch-task")?.mode).toBe("architect")
+			expect(task["_taskMode"]).toBeUndefined()
+			// The rollback re-emits only when there was a previous mode to restore, so the forward emit above
+			// is the only emit this switch produces.
+			expect(task.emit).toHaveBeenCalledTimes(1)
+			await provider.dispose()
+		})
+
+		it("restores this window's cached mode profile when a failed deletion rolls back", async () => {
+			// The activation inside a deletion re-points this window's in-memory mode-to-profile cache, and
+			// the manager-side restore does not reach it: the next implicit switch reads the local entry
+			// first, and that entry keeps resolving because the replacement record survived the deletion.
+			// The failure below lands on the mode-config write, after the shared selection has already
+			// moved, which is the point at which the cached entry has moved with it.
+			vi.useRealTimers()
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const keptMode = defaultModeSlug
+			// The manager's per-mode map, as the store holds it: the deleting view's mode points at the
+			// profile under deletion, so the rollback has to put that mapping back as well.
+			const managerModeConfigs: Record<string, string> = { [keptMode]: "old-id" }
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			provider["viewLocalState"].currentApiConfigName = "old-profile"
+			// The store-derived choice for this view's mode before anything is cached: the profile under
+			// deletion, matching the manager mapping above.
+			provider["initialModeConfigIds"] = Promise.resolve({ [keptMode]: "old-id" })
+			Object.assign(provider["providerSettingsManager"], {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				// The real delete drops the record and refreshes the shared listing.
+				deleteConfig: vi.fn(async () => {
+					await provider.contextProxy.setValue("listApiConfigMeta", [keeperProfile])
+				}),
+				activateProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+				// The mode write succeeds onto the replacement, and the window caches that choice on the way
+				// through; the failure below lands afterwards, with the cache already moved.
+				setModeConfig: vi.fn(async (mode: Mode, configId: string | undefined) => {
+					if (configId) {
+						managerModeConfigs[mode] = configId
+					}
+				}),
+				saveConfig: vi.fn().mockResolvedValue("old-id"),
+				getProfile: vi.fn().mockResolvedValue({
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}),
+				getSelectionAndModeConfigs: vi.fn(async () => ({
+					currentApiConfigName: provider.contextProxy.getValue("currentApiConfigName"),
+					modeApiConfigs: { ...managerModeConfigs },
+				})),
+			})
+			// The refresh after the writes is what fails, once the activation, the selection write and the
+			// mode mapping have all landed on the replacement.
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("refresh failed"))
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("refresh failed")
+
+			// Precondition the fix depends on: the failure went through the committed-vs-failed
+			// reconciliation, so the store side is already back on the deleted profile.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+			// The entry this deletion wrote is gone rather than left pointing at the replacement.
+			expect(provider["localModeConfigIds"].get(keptMode)).toBeUndefined()
+			// The next implicit switch, which is where a stale entry would have stayed visible: it reads the
+			// local map first, finds nothing, and falls back to the rolled-back manager mapping.
+			await expect(provider["getModeConfigId"](keptMode)).resolves.toBe("old-id")
+			await provider.dispose()
+		})
+		it("reaches the sibling repair when a bare sibling pin names the deleted profile", async () => {
+			// getProfile reports a missing record as a plain Error, so the error value alone cannot tell an
+			// expected absence from a storage failure, and the snapshot refuses the shared write for both.
+			// A sibling whose buffer names the deleted profile and holds no settings overlay has nothing to
+			// snapshot - the deletion re-points that view itself - so refusing here strands the view on a
+			// profile that no longer exists while a profile that merely cannot be read must still refuse.
+			vi.useRealTimers()
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			const sibling = newProviderForView("editor", new ContextProxy(mockContext))
+			sibling["viewLocalState"].currentApiConfigName = "old-profile"
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const logSpy = vi.spyOn(provider, "log")
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "old-shared-key",
+			})
+			provider["viewLocalState"].currentApiConfigName = "old-profile"
+			const keeperSettings = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "keeper-key",
+			}
+			Object.assign(provider["providerSettingsManager"], {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				deleteConfig: vi.fn().mockResolvedValue(undefined),
+				activateProfile: vi.fn().mockResolvedValue(keeperSettings),
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				saveConfig: vi.fn().mockResolvedValue("old-id"),
+				// The record is already gone when the sibling overlays are snapshotted: the manager's own
+				// listing says so, while getProfile can only offer a plain Error for the same fact.
+				listConfig: vi.fn().mockResolvedValue([keeperProfile]),
+				getProfile: vi.fn(async ({ name }: { name: string }) => {
+					if (name === "old-profile") {
+						throw new Error("Config with name 'old-profile' not found")
+					}
+					return keeperSettings
+				}),
+				getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+					currentApiConfigName: "old-profile",
+					modeApiConfigs: {},
+				}),
+			})
+			await provider.deleteProviderProfile(oldProfile)
+
+			expect(sibling["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("keeper-profile")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("cannot be resolved"))
+			await provider.dispose()
+			await sibling.dispose()
+		})
+
+		it("invalidates live views when the initial shared reset fails partway", async () => {
+			// resetAllState clears the stores key by key, so a rejection on one key leaves other clears
+			// committed and the shared stores half emptied. The live views still serve the modes, profiles
+			// and credentials this reset threw away, so the invalidation belongs inside the failure path
+			// rather than after it, and it has to finish before the error surfaces to the caller. The
+			// sibling below is the opposite-outcome half: it is the view that would otherwise keep reporting
+			// what it held before the reset, and it is notified through the real invalidation, not a double.
+			const provider = newProviderForView("sidebar", new ContextProxy(mockContext))
+			const sibling = newProviderForView("editor", new ContextProxy(mockContext))
+			sibling["viewLocalState"] = { currentApiConfigName: "old-profile" }
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			const broadcast = vi.spyOn(provider, "broadcastResetToAllInstances")
+			vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider.contextProxy, "resetAllState").mockRejectedValue(new Error("shared reset down"))
+			Object.assign(provider["customModesManager"], {
+				resetCustomModes: vi.fn().mockResolvedValue(undefined),
+			})
+			vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(
+				t("common:answers.yes") as unknown as vscode.MessageItem,
+			)
+
+			await expect(provider.resetState()).rejects.toThrow("shared reset down")
+
+			expect(broadcast).toHaveBeenCalledTimes(1)
+			expect(post).toHaveBeenCalledTimes(1)
+			expect(sibling["viewLocalState"].currentApiConfigName).toBeUndefined()
+			expect(provider["viewLocalState"]).toEqual({})
+			await provider.dispose()
+			await sibling.dispose()
 		})
 	})
 })

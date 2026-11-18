@@ -477,6 +477,14 @@ export class ClineProvider
 				const affected = ClineProvider.getAllInstances().filter(
 					(instance) => !instance._disposed && instance.viewLocalState.mode === slug,
 				)
+				// The shared mode can name the deleted slug as well, and getState() falls back to it once a
+				// pin is cleared, so the fallback has to land before any affected view is posted: the webview
+				// message writes the default mode only after this method returns and posts only its own
+				// provider, which is what leaves an idle sibling reporting the deleted selection.
+				if (this.contextProxy.getValue("mode") === slug) {
+					await this.contextProxy.setValue("mode", defaultModeSlug)
+				}
+
 				await Promise.all(
 					affected.map(async (instance) => {
 						try {
@@ -625,6 +633,11 @@ export class ClineProvider
 	 * alone lets another window's profile selection leak into this window's tasks.
 	 */
 	private readonly localModeConfigIds = new Map<string, string>()
+	// Counts the broadcasts that clear this view's state out from under a load that is already
+	// in flight. A load that read a pin before an invalidation must not install it afterwards,
+	// and a buffer that is empty on both sides of the clear leaves the field-by-field reapply
+	// in loadViewState unable to see that the clear happened at all.
+	private viewStateInvalidationGeneration = 0
 
 	/**
 	 * The shared mode map as it was when this window opened. Modes this window has not changed
@@ -1180,14 +1193,24 @@ export class ClineProvider
 			// with the same id would early-return on the guard above and the view would never
 			// reload its pinned mode/profile.
 			if (!(await this.loadViewState())) {
-				this.viewStateId = previousViewStateId
+				// A second registration that committed while this load was pending owns the id now, so
+				// putting this call's captured id back would send later per-view writes to a key no live
+				// renderer uses. Roll back only while this call is still the owner.
+				if (this.viewStateId === normalizedViewStateId) {
+					this.viewStateId = previousViewStateId
+				}
 			}
 		} catch (error) {
 			// A persistence failure must not leave the provider holding an id that was
 			// never registered: restore the previous id so a later launch retries the
 			// registration and the load instead of the guard above early-returning for
 			// the failed id.
-			this.viewStateId = previousViewStateId
+			// Same ownership rule as the load-failure path above: a registration that committed while
+			// this call was pending has already moved this provider onto a newer id, and this failure
+			// is not evidence that the newer id should go back to the older one.
+			if (this.viewStateId === normalizedViewStateId) {
+				this.viewStateId = previousViewStateId
+			}
 			throw error
 		}
 	}
@@ -1207,6 +1230,7 @@ export class ClineProvider
 		// or had nothing to load, false only when the read failed and swallowed the error, so
 		// a false return is the caller-only signal that the registered id must roll back.
 		const loadedForViewId = this.viewStateId
+		const generationAtLoadStart = this.viewStateInvalidationGeneration
 
 		// While the stable id has not been registered yet, the key is this instance's
 		// session-local name. Temporary names restart from 0 on every host start, so an
@@ -1366,6 +1390,17 @@ export class ClineProvider
 						mergedState.apiConfiguration = postReapplyBuffer.apiConfiguration
 					}
 				}
+			}
+
+			if (this.viewStateInvalidationGeneration !== generationAtLoadStart) {
+				// A reset or an import cleared this view while the profile lookup was in flight. The
+				// persisted read above is from before that clear, and the reapply above cannot see the
+				// clear when the buffer was empty on both sides of it, so installing the loaded state
+				// here would resurrect a selection the invalidation threw away and a task started from
+				// this view would run on the profile the reset removed. Superseded is not failed: the
+				// load counts as delivered, so the caller keeps the registered id.
+				this.log(`[loadViewState] Discarding state loaded across an invalidation for viewId ${loadedForViewId}`)
+				return true
 			}
 
 			this.viewLocalState = mergedState
@@ -3102,9 +3137,30 @@ export class ClineProvider
 		// inside that window even while this switch owns the queue. Re-check before the first
 		// durable write so a slug that no longer resolves is never pinned to the view or written
 		// to the shared mode, and undo the task-side writes that already landed.
-		if (!(await this.modeSlugResolves(newMode))) {
-			this.log(`[ClineProvider#handleModeSwitch] ignoring mode "${newMode}" deleted while the switch was pending`)
+		// An unreadable mode list is not an absent mode, but it confirms nothing either, and the
+		// task-side writes above have landed either way. Both outcomes have to run the same
+		// rollback: a lookup that rejects must not deliver the turn against the new mode with the
+		// old profile still underneath, and the lookup failure stays the error the caller sees
+		// rather than turning into a silent success.
+		let slugCheck: { confirmed: boolean } | { error: unknown }
 
+		try {
+			slugCheck = { confirmed: await this.modeSlugResolves(newMode) }
+		} catch (checkError) {
+			slugCheck = { error: checkError }
+		}
+
+		if ("error" in slugCheck) {
+			this.log(
+				`[ClineProvider#handleModeSwitch] could not confirm mode "${newMode}" after the task writes above: ${
+					slugCheck.error instanceof Error ? slugCheck.error.message : String(slugCheck.error)
+				}`,
+			)
+		} else if (!slugCheck.confirmed) {
+			this.log(`[ClineProvider#handleModeSwitch] ignoring mode "${newMode}" deleted while the switch was pending`)
+		}
+
+		if ("error" in slugCheck || !slugCheck.confirmed) {
 			if (rollbackTaskWrites) {
 				try {
 					await rollbackTaskWrites()
@@ -3115,6 +3171,10 @@ export class ClineProvider
 						}`,
 					)
 				}
+			}
+
+			if ("error" in slugCheck) {
+				throw slugCheck.error
 			}
 
 			return
@@ -3850,6 +3910,11 @@ export class ClineProvider
 		// restores in the catch below can reach it: snapshot it here, before the delete commits,
 		// through the manager’s own read (a copy of the map, not the live object).
 		const previousManagerGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
+		// The mode-to-profile choices this window caches in memory move with the same activation,
+		// and the resolver prefers them over the manager mapping, so the manager restore in the
+		// catch below cannot undo them on its own. Snapshot the map the way the gate above is
+		// snapshotted: a copy of the map, taken before the delete commits.
+		const previousLocalModeConfigIds = new Map(this.localModeConfigIds)
 		// What the activation below writes into that gate: the replacement’s name, and its id as
 		// the profile list records it (the mode mapping is keyed by id). The restore legs compare
 		// the manager’s current report against these, and only roll back while they still match.
@@ -4074,6 +4139,28 @@ export class ClineProvider
 						previousModeConfigId !== currentModeConfigId
 					) {
 						await this.providerSettingsManager.setModeConfig(mode as Mode, previousModeConfigId)
+					}
+				}
+
+				// The choice this window cached in memory moved with the same activation and the manager
+				// restore above does not reach it: the next implicit switch reads the local entry first,
+				// and that entry keeps resolving because the replacement record survived the deletion, so
+				// the switch would pick the replacement again after a deletion that reported failure.
+				// Restore only entries this deletion moved, an absent prior entry included.
+				for (const mode of new Set([
+					...Object.keys(previousModeConfigs),
+					...Object.keys(currentModeConfigs),
+					...previousLocalModeConfigIds.keys(),
+				])) {
+					if (this.localModeConfigIds.get(mode) !== activatedManagerGateId) {
+						continue
+					}
+					const previousLocalId = previousLocalModeConfigIds.get(mode)
+
+					if (previousLocalId === undefined) {
+						this.localModeConfigIds.delete(mode)
+					} else {
+						this.localModeConfigIds.set(mode, previousLocalId)
 					}
 				}
 			} catch (restoreError) {
@@ -4353,7 +4440,13 @@ export class ClineProvider
 					// other read failure leaves the sibling's settings unknown, and unknown settings
 					// must not be silently replaced by the profile this call is about to activate -
 					// so that case fails the mutation before the shared write.
-					const deletedPin = error instanceof ProviderSettingsNotFoundError
+					// getProfile reports a missing record as a plain Error, so the error value alone cannot tell
+					// an expected absence from a storage failure. Ask the manager's own listing, which does
+					// distinguish them: a pin naming a profile that is simply gone has no overlay to snapshot,
+					// and the deletion re-points that view itself, while a profile that exists but cannot be
+					// read leaves the sibling's settings unknown and must still refuse the shared write.
+					const deletedPin =
+						error instanceof ProviderSettingsNotFoundError || (await this.providerProfileIsAbsent(pinName))
 
 					if (!deletedPin) {
 						unresolvedPins.push({ pinName, error })
@@ -4376,6 +4469,21 @@ export class ClineProvider
 					...new Set(unresolvedPins.map(({ pinName }) => pinName)),
 				].join(", ")} (${firstError instanceof Error ? firstError.message : String(firstError)})`,
 			)
+		}
+	}
+
+	/**
+	 * Asks the manager's own listing whether a profile still exists. Used to tell a pin naming an
+	 * absent profile from a profile that is present but unreadable, because getProfile wraps both
+	 * in a plain Error. A listing that itself fails answers 'not absent', which keeps the caller's
+	 * fail-closed rule intact.
+	 */
+	private async providerProfileIsAbsent(name: string): Promise<boolean> {
+		try {
+			const entries = await this.providerSettingsManager.listConfig()
+			return !entries.some((entry) => entry.name === name)
+		} catch {
+			return false
 		}
 	}
 
@@ -6280,7 +6388,38 @@ export class ClineProvider
 	 * Clear view-local state cache so that getState() falls back to ContextProxy defaults.
 	 */
 	private _clearViewLocalState(): void {
+		// Invalidating the buffer is what a load has to be able to notice, and the counter is the
+		// only signal when the buffer was already empty before the clear as well as after it.
+		this.viewStateInvalidationGeneration += 1
 		this.viewLocalState = {}
+	}
+
+	/**
+	 * Invalidate the live views and refresh this one after a reset step failed, keeping the two legs
+	 * independent so a view that cannot be notified does not stop the invalidation, and taking no
+	 * error of its own: the caller keeps the step failure. The writes the failed step started are
+	 * already settled by the time this returns, because both legs are awaited rather than fired.
+	 */
+	private async invalidateViewsAfterFailedResetStep(failedStep: string): Promise<void> {
+		try {
+			await this.broadcastResetToAllInstances()
+		} catch (invalidateError) {
+			this.log(
+				`[resetState] failed to invalidate live views after ${failedStep}: ${
+					invalidateError instanceof Error ? invalidateError.message : String(invalidateError)
+				}`,
+			)
+		}
+
+		try {
+			await this.postStateToWebview()
+		} catch (postError) {
+			this.log(
+				`[resetState] failed to refresh this view after ${failedStep}: ${
+					postError instanceof Error ? postError.message : String(postError)
+				}`,
+			)
+		}
 	}
 
 	/**
@@ -6376,7 +6515,17 @@ export class ClineProvider
 			}
 		}
 
-		await this.contextProxy.resetAllState()
+		// The shared reset is inside the invalidation path rather than outside it: resetAllState
+		// clears the stores key by key, so when one clear rejects the others may already have
+		// committed, and the live views would otherwise keep serving the modes, profiles and
+		// credentials this reset threw away. The helper finishes the invalidation and the refresh
+		// before the error surfaces, and the original failure is what the caller sees.
+		try {
+			await this.contextProxy.resetAllState()
+		} catch (sharedResetError) {
+			await this.invalidateViewsAfterFailedResetStep("the initial shared reset")
+			throw sharedResetError
+		}
 
 		// Per-view state (this view's buffer and durable entry) is cleared by the
 		// broadcast below: it clears the durable map once through the serialized
@@ -6393,27 +6542,8 @@ export class ClineProvider
 			await this.removeClineFromStack()
 		} catch (resetError) {
 			// The shared reset already landed when this rejected, so the live views still hold the
-			// modes, profiles and credentials the reset threw away and a new task would run on them.
-			// Invalidate the live buffers and refresh the views before the error surfaces, and keep
-			// the original failure as the one the caller sees.
-			try {
-				await this.broadcastResetToAllInstances()
-			} catch (invalidateError) {
-				this.log(
-					`[resetState] failed to invalidate live views after a failed reset step: ${
-						invalidateError instanceof Error ? invalidateError.message : String(invalidateError)
-					}`,
-				)
-			}
-			try {
-				await this.postStateToWebview()
-			} catch (postError) {
-				this.log(
-					`[resetState] failed to refresh this view after a failed reset step: ${
-						postError instanceof Error ? postError.message : String(postError)
-					}`,
-				)
-			}
+			// modes, profiles and credentials the reset threw away.
+			await this.invalidateViewsAfterFailedResetStep("a later reset step")
 			throw resetError
 		}
 
