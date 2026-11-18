@@ -999,6 +999,237 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		// The three cases below cover the snapshot failure route of persistProviderProfile:
+		// the save has already landed by the time the sibling overlay snapshot runs, so a
+		// rejected snapshot must roll that landed write back. They drive the private method
+		// directly because the public upsertProviderProfile owns its failure - it logs,
+		// shows an error message and resolves to undefined - so only the private entry can
+		// assert that the original error reaches the caller unchanged.
+		it("restores the prior record when a sibling pin read fails after the save on the activate route", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			const priorRecord = {
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "old-url",
+			}
+			const stored = new Map<string, Record<string, unknown>>([["profile-x", { ...priorRecord }]])
+			vi.spyOn(providerA.providerSettingsManager, "saveConfig").mockImplementation(
+				async (configName: string, config: Record<string, unknown>) => {
+					stored.set(configName, { name: configName, id: "x-id", ...config })
+					return "x-id"
+				},
+			)
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					// The sibling pin is the lookup that fails, and it fails as a storage error
+					// rather than a missing record: only a missing record may be read as a deleted
+					// pin, so an unknown record must abort the mutation here.
+					if (args.name === "profile-y") {
+						throw new Error("profile store unavailable")
+					}
+					const record = stored.get(String(args.name))
+					if (!record) {
+						throw new ProviderSettingsNotFoundError(`no stored record for ${String(args.name)}`)
+					}
+					return record as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>
+				},
+			)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
+			])
+			const setSharedSettingsSpy = vi.spyOn(providerA.contextProxy, "setProviderSettings")
+			const setModeConfigSpy = vi.spyOn(providerA.providerSettingsManager, "setModeConfig")
+			const deleteConfigSpy = vi.spyOn(providerA.providerSettingsManager, "deleteConfig")
+
+			await expect(
+				providerA["persistProviderProfile"](
+					"profile-x",
+					{ apiProvider: providerIdentifiers.anthropic, anthropicBaseUrl: "new-url" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow(/pinned profile\(s\) could not be resolved: profile-y/)
+
+			// The landed write is rolled back to the record that preceded it, so the profile on
+			// disk never ends up holding settings whose activation failed. toEqual rules out the
+			// new base url surviving the rollback alongside the restored fields.
+			expect(stored.get("profile-x")).toEqual(priorRecord)
+			expect(deleteConfigSpy).not.toHaveBeenCalled()
+			// Nothing downstream of the aborted snapshot ran: the shared store, this mode profile
+			// id and the sibling overlay are all exactly as they were.
+			expect(setSharedSettingsSpy).not.toHaveBeenCalled()
+			expect(setModeConfigSpy).not.toHaveBeenCalled()
+			expect(providerA.contextProxy.getValue("currentApiConfigName")).not.toBe("profile-x")
+			expect(providerB["viewLocalState"].currentApiConfigName).toBe("profile-y")
+			expect(providerB["viewLocalState"].apiConfiguration).toBeUndefined()
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("deletes the profile when a sibling pin read fails after a landed create", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			// Nothing carries profile-new: getProfile reports it missing and hasConfig, the
+			// double standing answer, agrees, so the save is a create and the compensation must
+			// delete rather than restore a record that never existed.
+			const stored = new Map<string, Record<string, unknown>>()
+			const saveConfigSpy = vi
+				.spyOn(providerA.providerSettingsManager, "saveConfig")
+				.mockImplementation(async (configName: string, config: Record<string, unknown>) => {
+					stored.set(configName, { name: configName, id: "new-id", ...config })
+					return "new-id"
+				})
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					if (args.name === "profile-y") {
+						throw new Error("profile store unavailable")
+					}
+					const record = stored.get(String(args.name))
+					if (!record) {
+						throw new ProviderSettingsNotFoundError(`no stored record for ${String(args.name)}`)
+					}
+					return record as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>
+				},
+			)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "new-id", name: "profile-new", apiProvider: providerIdentifiers.anthropic },
+			])
+			const deleteConfigSpy = vi
+				.spyOn(providerA.providerSettingsManager, "deleteConfig")
+				.mockImplementation(async (configName: string) => {
+					stored.delete(configName)
+				})
+			const setSharedSettingsSpy = vi.spyOn(providerA.contextProxy, "setProviderSettings")
+
+			await expect(
+				providerA["persistProviderProfile"](
+					"profile-new",
+					{ apiProvider: providerIdentifiers.anthropic, anthropicBaseUrl: "new-url" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow(/pinned profile\(s\) could not be resolved: profile-y/)
+
+			expect(deleteConfigSpy).toHaveBeenCalledWith("profile-new")
+			expect(stored.has("profile-new")).toBe(false)
+			// The compensation deleted, so it never also tried to restore, and the shared store
+			// was never written.
+			expect(saveConfigSpy).toHaveBeenCalledTimes(1)
+			expect(setSharedSettingsSpy).not.toHaveBeenCalled()
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
+		it("logs a failed compensation and rethrows the original error when the rollback write fails", async () => {
+			const providerA = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const providerB = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await providerB.setValue("currentApiConfigName", "profile-y")
+
+			const priorRecord = {
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "old-url",
+			}
+			const stored = new Map<string, Record<string, unknown>>([["profile-x", { ...priorRecord }]])
+			// The first write is the profile save, which lands; the second is the compensation,
+			// which fails. A failed rollback must be logged and must not replace the error the
+			// caller receives, because the reason the mutation failed is the sibling pin.
+			let saveCalls = 0
+			vi.spyOn(providerA.providerSettingsManager, "saveConfig").mockImplementation(
+				async (configName: string, config: Record<string, unknown>) => {
+					saveCalls++
+					if (saveCalls > 1) {
+						throw new Error("rollback write failed")
+					}
+					stored.set(configName, { name: configName, id: "x-id", ...config })
+					return "x-id"
+				},
+			)
+			vi.spyOn(providerA.providerSettingsManager, "getProfile").mockImplementation(
+				async (args: { name?: string; id?: string }) => {
+					if (args.name === "profile-y") {
+						throw new Error("profile store unavailable")
+					}
+					const record = stored.get(String(args.name))
+					if (!record) {
+						throw new ProviderSettingsNotFoundError(`no stored record for ${String(args.name)}`)
+					}
+					return record as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>
+				},
+			)
+			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
+			])
+			const deleteConfigSpy = vi.spyOn(providerA.providerSettingsManager, "deleteConfig")
+
+			await expect(
+				providerA["persistProviderProfile"](
+					"profile-x",
+					{ apiProvider: providerIdentifiers.anthropic, anthropicBaseUrl: "new-url" },
+					true,
+					new AbortController().signal,
+				),
+			).rejects.toThrow(/pinned profile\(s\) could not be resolved: profile-y/)
+
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("failed to compensate the landed save of 'profile-x'"),
+			)
+			// The compensation was attempted, and it deleted nothing: the profile existed, so
+			// restoring was the right decision even though that write then failed.
+			expect(saveCalls).toBe(2)
+			expect(deleteConfigSpy).not.toHaveBeenCalled()
+			expect(stored.get("profile-x")).toMatchObject({ anthropicBaseUrl: "new-url" })
+
+			await providerA.dispose()
+			await providerB.dispose()
+		})
+
 		it("should synchronize viewLocalState when deleteProviderProfile selects a replacement profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,

@@ -3676,7 +3676,33 @@ export class ClineProvider
 			// Same sibling protection as the activation path: the shared write
 			// below replaces the shared store, so pin other profiles' settings
 			// into the views that reference them first.
-			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
+			// The save above has already landed, so a rejected snapshot must not leave it
+			// standing alone: a sibling would keep reporting a pin whose record this call
+			// could not read, while the profile on disk already holds the new settings. Roll
+			// the landed write back with the same restore-or-delete decision the read-back
+			// failure above uses - a landed create is deleted rather than restored to a
+			// record that never existed - and rethrow the original error unchanged, so the
+			// caller sees the failure that happened rather than the compensation's. The
+			// compensation below repeats the shape above on purpose: the two failure routes
+			// stay readable at their own call sites instead of sharing a helper that neither
+			// one could change without moving the other.
+			try {
+				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
+			} catch (error) {
+				try {
+					if (previousRecord) {
+						const { name: _previousName, id: _previousId, ...previousSettings } = previousRecord
+						await this.providerSettingsManager.saveConfig(name, previousSettings)
+					} else {
+						await this.providerSettingsManager.deleteConfig(name)
+					}
+				} catch (restoreError) {
+					this.log(
+						`[persistProviderProfile] failed to compensate the landed save of '${name}': ${restoreError instanceof Error ? restoreError.message : String(restoreError)}`,
+					)
+				}
+				throw error
+			}
 
 			// `allSettled` so the caller's error path never races a write still in flight.
 			const activationResults = await Promise.allSettled([
