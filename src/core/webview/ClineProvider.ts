@@ -1119,6 +1119,15 @@ export class ClineProvider
 				}
 			}
 
+			// Remember the mode this write was derived from, as a value rather than through the post-load
+			// reference, which the mutation paths keep updating in place. The commit below re-reads the mode
+			// against this reading and not against the pre-load snapshot: a mode can be edited twice inside the
+			// load window and return to the value it held before the load, and a comparison against the pre-load
+			// snapshot cannot see that trip - it sees only the first and the last value agreeing. A mode that
+			// was already this value when the merge was built is not an edit at all, so the persisted value keeps
+			// its precedence when nothing moved during the window.
+			const modeAtMerge = this.viewLocalState.mode
+
 			if (!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName)) {
 				if (postLoadBuffer.currentApiConfigName === undefined) {
 					delete mergedState.currentApiConfigName
@@ -1202,13 +1211,13 @@ export class ClineProvider
 				}
 			}
 
-			// The mode carried above was read from the buffer as it stood at the post-load snapshot, before
-			// the reapplied-profile lookup awaited, so a mode picked during that lookup would otherwise be
-			// committed one edit stale. Re-read it against the pre-load snapshot now and apply the same
-			// two directions the post-load reapply uses: a mode that moved to a value is set, a mode that
-			// moved to undefined stays cleared. Only a mode that moved inside the load window counts, so a
-			// buffer mode that the persisted record is about to replace is not mistaken for a newer edit.
-			if (!Object.is(preLoadBuffer.mode, this.viewLocalState.mode)) {
+			// The mode carried above was read from the buffer as it stood before the reapplied-profile lookup
+			// awaited, so a mode picked during that lookup would otherwise be committed one edit stale. Re-read
+			// it against the reading the carried value was derived from and apply the same two directions the
+			// post-load reapply uses: a mode that moved to a value is set, a mode that moved to undefined stays
+			// cleared. Comparing against that reading instead of the pre-load snapshot is what makes a mode that
+			// moves and moves back inside the window land on the newest value (review thread 4609689999).
+			if (!Object.is(modeAtMerge, this.viewLocalState.mode)) {
 				if (this.viewLocalState.mode === undefined) {
 					delete mergedState.mode
 				} else {

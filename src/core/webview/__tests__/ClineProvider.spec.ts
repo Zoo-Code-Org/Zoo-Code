@@ -7918,6 +7918,145 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		// Review thread 4609689999: the mode moves twice inside the load window and returns to the value it
+		// held before the load. The mode carried into the merged state is the one read at the merge, so the
+		// commit-time re-read has to compare against that reading; compared against the pre-load snapshot it
+		// sees the first and the last value agreeing, skips the update, and commits the value from the middle
+		// of the trip over the user's newest selection.
+		it("keeps the mode that returns to its pre-load value during the re-resolve", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+					apiKey: `${name}-key`,
+				})
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			await provider.contextProxy.setValue("viewStates", {
+				"aba-mode-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("aba-mode-sidebar-view")
+			registrationLookup.mockRestore()
+			expect(provider["viewLocalState"].mode).toBe("code")
+
+			let releasePersisted!: (value: PersistedProfile) => void
+			let releaseReapplied!: (value: PersistedProfile) => void
+			const persistedLookup = new Promise<PersistedProfile>((resolve) => {
+				releasePersisted = resolve
+			})
+			const reappliedLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseReapplied = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((config) =>
+				profileName(config) === "persisted-profile" ? persistedLookup : reappliedLookup,
+			)
+			const load = provider["loadViewState"]()
+
+			// First edit of the trip: the mode moves while the persisted lookup is awaited, so the mode carried
+			// into the merged state is the moved one. The name moves with it, which is what opens the re-resolve.
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "reapplied-profile")
+			releasePersisted(profileOf("persisted-profile", providerIdentifiers.anthropic))
+
+			// Second edit of the trip: the mode returns to its pre-load value while the reapplied profile is
+			// being resolved. That newest value has to be the one committed.
+			await provider.saveViewState("mode", "code")
+			releaseReapplied(profileOf("reapplied-profile", providerIdentifiers.openrouter))
+			await load
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiKey: "reapplied-profile-key",
+			})
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Discarding the re-resolved settings"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[loadViewState] Loaded state for viewId"))
+
+			await provider.dispose()
+		})
+
+		// The mirror direction of the same trip, so the comparison is symmetric the way the post-load reapply
+		// is: a mode that returns to a value sets it, and here the value it returns to is the persisted one.
+		it("keeps the mode that returns to its persisted value during the re-resolve from the other direction", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+					apiKey: `${name}-key`,
+				})
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			await provider.contextProxy.setValue("viewStates", {
+				"aba-mode-mirror-sidebar-view": {
+					mode: "architect",
+					currentApiConfigName: "persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("aba-mode-mirror-sidebar-view")
+			registrationLookup.mockRestore()
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			let releasePersisted!: (value: PersistedProfile) => void
+			let releaseReapplied!: (value: PersistedProfile) => void
+			const persistedLookup = new Promise<PersistedProfile>((resolve) => {
+				releasePersisted = resolve
+			})
+			const reappliedLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseReapplied = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((config) =>
+				profileName(config) === "persisted-profile" ? persistedLookup : reappliedLookup,
+			)
+			const load = provider["loadViewState"]()
+			await provider.saveViewState("mode", "code")
+			await provider.saveViewState("currentApiConfigName", "reapplied-profile")
+			releasePersisted(profileOf("persisted-profile", providerIdentifiers.anthropic))
+			await provider.saveViewState("mode", "architect")
+			releaseReapplied(profileOf("reapplied-profile", providerIdentifiers.openrouter))
+			await load
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiKey: "reapplied-profile-key",
+			})
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Discarding the re-resolved settings"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[loadViewState] Loaded state for viewId"))
+
+			await provider.dispose()
+		})
 	})
 
 	describe("getState default values", () => {
