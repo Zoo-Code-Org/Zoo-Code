@@ -13,6 +13,15 @@ const { openClineInNewTabMock } = vi.hoisted(() => ({
 	openClineInNewTabMock: vi.fn(),
 }))
 
+// The API module reads ClineProvider's live-instance list as a value when it decides whether a
+// new-tab provider is its own to dispose, so the module is stubbed here: loading the real one
+// pulls in the editor-decoration chain, which this file's partial vscode mock below cannot
+// satisfy. The providers under test are the doubles built by makeClineProviderFactory, and none
+// of them is registered in that list.
+vi.mock("../../core/webview/ClineProvider", () => ({
+	ClineProvider: { getAllInstances: vi.fn(() => []) },
+}))
+
 vi.mock("vscode", () => ({
 	commands: {
 		executeCommand: vi.fn().mockResolvedValue(undefined),

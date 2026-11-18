@@ -31,7 +31,7 @@ import { defaultModeSlug } from "../../../shared/modes"
 import { experimentDefault } from "../../../shared/experiments"
 import { EMBEDDING_MODEL_PROFILES } from "../../../shared/embeddingModels"
 import { setTtsEnabled } from "../../../utils/tts"
-import { ContextProxy } from "../../config/ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../../config/ContextProxy"
 import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
@@ -476,7 +476,7 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 // A same-name profile save joins the manager's cross-instance critical section, so a
 // double that stubs the manager must still run the callback inline: the real lock does
 // that whenever no other view holds the section.
-const runManagerSectionInline = (cb: () => Promise<unknown>): Promise<unknown> => cb()
+const runManagerSectionInline = <T>(cb: () => Promise<T>): Promise<T> => cb()
 
 describe("ClineProvider", () => {
 	it("reports hasResolvedView once a view or panel is resolved", async () => {
@@ -3906,6 +3906,122 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps the write failure visible when the setValue rollback also fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("rollback-fails-view")
+			await provider.setValue("mode", "code")
+
+			// Both halves fail: the durable viewStates write and the shared rollback that follows it.
+			// The caller must still see the failure of the write it asked for, and the rollback failure
+			// must be logged instead of replacing it (the shared store then keeps the value the
+			// rollback could not undo, which is why the log names both messages).
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let durableFailed = false
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates") {
+					durableFailed = true
+					throw new Error("persist failed")
+				}
+				if (durableFailed && key === "mode") {
+					throw new Error("rollback failed")
+				}
+				return originalSetValue(key, value)
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(provider.setValue("mode", "architect")).rejects.toThrow("persist failed")
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Rollback of mode failed after the durable write failed"),
+			)
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("original: persist failed"))
+
+			await provider.dispose()
+		})
+
+		it("restores this view's overlays when the setValues shared rollback fails", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("rollback-overlay-view")
+			await provider.contextProxy.setValue("mode", "architect")
+			await provider.saveViewState("mode", "architect")
+
+			// The durable viewStates write fails, and so does every store afterwards: that is the
+			// shared rollback and the overlay's own durable restore. Neither may decide what happens
+			// to this view's in-memory overlay, because the overlay is the half the snapshot captured
+			// above and the caller's error is the write it asked for.
+			let durableFailed = false
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "viewStates") {
+					durableFailed = true
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				if (durableFailed) {
+					return Promise.reject(new Error("rollback store unavailable"))
+				}
+				return Promise.resolve()
+			})
+			const logSpy = vi.spyOn(provider, "log")
+
+			await expect(provider.setValues({ mode: "code" })).rejects.toThrow("storage unavailable")
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Rollback of the shared writes failed"))
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Failed to restore the local view override for mode"),
+			)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			mockContext.globalState.update = originalUpdate
+			await provider.dispose()
+		})
+
+		it("rolls back the keys a partially committed shared write stored", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("partial-commit-view")
+			await provider.setValues({ mode: "code", currentApiConfigName: "current-config" })
+
+			// ContextProxy#setValues is not a transaction: it stores each key on its own and then
+			// rejects with a SettingsWriteError naming the keys it did store. Those must go back to
+			// their previous values before the error reaches the caller, and the view-local half of
+			// the write must not run at all for a shared write that never completed.
+			const originalSetValues = provider.contextProxy.setValues.bind(provider.contextProxy)
+			const partialWrite = new SettingsWriteError(
+				["mode"],
+				["currentApiConfigName"],
+				new Error("secret store failed"),
+			)
+			vi.spyOn(provider.contextProxy, "setValues")
+				.mockImplementationOnce(async () => {
+					throw partialWrite
+				})
+				.mockImplementation((values) => originalSetValues(values))
+
+			await expect(provider.setValues({ mode: "architect", currentApiConfigName: "other-config" })).rejects.toBe(
+				partialWrite,
+			)
+			expect(provider.contextProxy.getValue("mode")).toBe("code")
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("current-config")
+			expect(provider["viewLocalState"].mode).toBe("code")
+
+			await provider.dispose()
+		})
+
 		it("should merge concurrent persisted updates from separate provider instances without lost viewStates", async () => {
 			const provider1 = new ClineProvider(
 				mockContext,
@@ -4768,12 +4884,16 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
+			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
 			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
-			// The file-level modes mock resolves every slug to a mode; drop the pinned slug.
+			// Bind the real lookup: the deleted custom mode is absent from the built-in list and from
+			// the (empty) custom-mode storage, which is the fact this test is about. This file's mock of
+			// the modes module resolves every slug, so the delegation is what makes the rejection real.
+			const { getModeBySlug: realGetModeBySlug } =
+				await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				slug === "deleted-custom-mode" ? undefined : originalMode) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(realGetModeBySlug)
 			try {
 				await provider["setViewStateId"]("stable-sidebar-view")
 				await provider.saveViewState("mode", "deleted-custom-mode")
@@ -4956,12 +5076,24 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
-			// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
+			// @ts-ignore - Replace customModesManager with a test double (one custom mode, which is the
+			// storage boundary the real lookup consults.
+			provider.customModesManager = {
+				getCustomModes: vi
+					.fn()
+					.mockResolvedValue([
+						{ slug: "refactor", name: "Refactor", roleDefinition: "test", groups: ["read"] },
+					]),
+				dispose: vi.fn(),
+			}
+			// Bind the real lookup instead of listing the accepted slugs here: "refactor" is valid
+			// because the storage boundary above defines it, and "bogus-mode" is rejected because
+			// neither the built-in list nor that boundary defines it.
+			const { getModeBySlug: realGetModeBySlug } =
+				await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				slug === "refactor" ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(realGetModeBySlug)
 			try {
 				await provider.setValues({ mode: "refactor" })
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
@@ -4993,14 +5125,24 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
-			// The file-level modes mock resolves every slug to a mode; narrow it to the values under
-			// test. 42 resolves on purpose: the non-string case must be rejected by the typeof
-			// check alone, not by a failed slug lookup.
+			// @ts-ignore - Replace customModesManager with a test double (one custom mode, which is the
+			// storage boundary the real lookup consults.
+			provider.customModesManager = {
+				getCustomModes: vi
+					.fn()
+					.mockResolvedValue([
+						{ slug: "refactor", name: "Refactor", roleDefinition: "test", groups: ["read"] },
+					]),
+				dispose: vi.fn(),
+			}
+			// Bind the real lookup: 42 is a non-string that the typeof guard rejects before the lookup
+			// is consulted (short-circuit), so the lookup below is the real one and not a double that
+			// resolves the values under test.
+			const { getModeBySlug: realGetModeBySlug } =
+				await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: unknown) =>
-				slug === "refactor" || slug === 42 ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(realGetModeBySlug)
 			try {
 				await provider.setValue("mode", "refactor")
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
@@ -5013,7 +5155,7 @@ describe("ClineProvider", () => {
 				expect(provider["viewLocalState"].mode).toBe("refactor")
 				// A non-string mode must be rejected before persistence (double assertion: the
 				// type excludes non-strings), so it must not reach global state or the buffer —
-				// even though the slug lookup above resolves it.
+				// the typeof guard rejects it before the lookup is ever consulted.
 				await provider.setValue("mode", 42 as unknown as RooCodeSettings["mode"])
 				expect(logSpy).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
@@ -6588,12 +6730,16 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// This file's getModeBySlug mock resolves every slug; narrow it to the slugs
-			// under test so "not-a-real-mode" is rejected like the real lookup would.
+			// Bind the real lookup instead of reimplementing acceptance here: this file mocks the modes
+			// module wholesale, so without the delegation below the validator would accept any slug,
+			// including the unknown one this test is about. The custom-mode storage is mocked because
+			// it is the only boundary the lookup consults.
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			const { getModeBySlug: realGetModeBySlug } =
+				await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				["code", "architect"].includes(slug) ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(realGetModeBySlug)
 
 			try {
 				await provider.setValues({ mode: "not-a-real-mode" })
@@ -6625,12 +6771,14 @@ describe("ClineProvider", () => {
 			// registering configuration.customModes: the payload's own modes must count
 			// as valid even though the manager has not registered them yet.
 			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// Bind the real lookup instead of reimplementing custom-mode acceptance here: this file mocks
+			// the modes module wholesale, so without the delegation below the validator would accept any
+			// slug. The custom-mode storage above is the only boundary the lookup consults.
+			const { getModeBySlug: realGetModeBySlug } =
+				await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string, customModes?: { slug: string }[]) =>
-				customModes?.some((mode) => mode.slug === slug)
-					? { slug }
-					: undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(realGetModeBySlug)
 
 			try {
 				await provider.setValues({
@@ -6932,42 +7080,64 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// Seed persisted entries under both ids through the proxy so the loads
-			// observe them via the cached read path: the temporary entry holds a
-			// pre-registration selection, the stable entry the post-registration one.
+			// Defensive: the doubles in this suite can leave console writes pending at worker
+			// teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// Author the temporary entry through the real write path: only a write this instance
+			// actually persisted marks the temporary id as authored, and without that mark
+			// loadViewState returns before its profile lookup, so the stale-id guard would never be
+			// reached and this test would pass without exercising it. The stable entry belongs to the
+			// later registration, so it is seeded out of band.
+			await provider.saveViewState("mode", "architect")
+			await provider.saveViewState("currentApiConfigName", "ghost-profile")
 			await provider.contextProxy.setValue("viewStates", {
-				[provider.viewId]: { mode: "architect", currentApiConfigName: "ghost-profile", updatedAt: 1 },
+				...(provider.contextProxy.getValue("viewStates") ?? {}),
 				"stable-sidebar-view": { mode: "debug", updatedAt: 2 },
 			})
 
-			// Hang the temporary entry's profile lookup so that load is still in flight
-			// when the stable id is registered.
+			// Hang the temporary entry's profile lookup and wait until the load has actually entered
+			// it, so the stable id is registered while this load is in flight rather than after it
+			// had already settled (or, before the fix above, returned early without looking anything
+			// up).
+			let observeGhostLookup!: () => void
+			const ghostLookupEntered = new Promise<void>((resolve) => {
+				observeGhostLookup = resolve
+			})
 			let releaseGhost!: () => void
-			const ghostLoad = new Promise<void>((resolve) => {
+			const ghostLookup = new Promise<void>((resolve) => {
 				releaseGhost = resolve
 			})
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockReturnValue(
-				ghostLoad.then(() =>
-					Object.assign({} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>, {
-						name: "ghost-profile",
-						id: "ghost-id",
-						apiProvider: providerIdentifiers.anthropic,
-					}),
-				),
+			const ghostProfile = Object.assign(
+				{} as Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>,
+				{ name: "ghost-profile", id: "ghost-id", apiProvider: providerIdentifiers.anthropic },
 			)
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+				observeGhostLookup()
+				await ghostLookup
+				return ghostProfile
+			})
+			const logSpy = vi.spyOn(provider, "log")
 
 			const staleLoad = provider["loadViewState"]()
+			await ghostLookupEntered
 
-			// Register the stable id without awaiting its load: the re-key drops the
-			// temporary entry (the stable one already exists) and the registration's own
-			// load settles on the stable entry immediately.
+			// Register the stable id: the re-key drops the temporary entry (the stable one already
+			// exists) and the registration's own load settles on the stable entry immediately.
 			const register = provider["setViewStateId"]("stable-sidebar-view")
 			await register
 
 			releaseGhost()
 			await staleLoad
+			await ClineProvider["persistedViewStateWriteQueue"]
 
-			// The stale (temporary-id) load must not overwrite the stable id's load.
+			// The stale (temporary-id) load must not overwrite the stable id's load: its profile
+			// landed after the registration, so the whole load is dropped instead of applied.
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Discarding stale state for superseded view id"),
+			)
 			expect(provider["viewLocalState"]).toEqual({ mode: "debug" })
 
 			await provider.dispose()
@@ -12452,6 +12622,170 @@ describe("ClineProvider - Comprehensive Edit/Delete Edge Cases", () => {
 					apiKey: "sibling-own-settings",
 				})
 				expect(siblingPost).not.toHaveBeenCalled()
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+			}
+		})
+
+		it("drops a sibling snapshot whose pin moved while the snapshot write was in flight", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				sibling["viewLocalState"].currentApiConfigName = "sibling-profile"
+				const siblingPost = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider.providerSettingsManager, "hasConfig").mockResolvedValue(true)
+				let profileReadStarted = false
+				vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => {
+					profileReadStarted = true
+					return {
+						name: "sibling-profile",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "snapshot-settings",
+					}
+				})
+
+				// The pin moves during the snapshot's own write, not before it. A getter on the
+				// sibling's pin queues the move as a microtask the first time the guard above the write
+				// reads it, once the profile read has happened: the guard passes, the write is awaited,
+				// and the move lands inside that await. Revalidating immediately before the in-memory
+				// half is what stops this profile's settings from being installed under the sibling's
+				// new pin, which is the window the pre-write guard alone cannot see.
+				let pinnedName = "sibling-profile"
+				let moveQueued = false
+				Object.defineProperty(sibling["viewLocalState"], "currentApiConfigName", {
+					configurable: true,
+					enumerable: true,
+					get: () => {
+						if (profileReadStarted && !moveQueued) {
+							moveQueued = true
+							queueMicrotask(() => {
+								pinnedName = "moved-profile"
+								sibling["viewLocalState"].apiConfiguration = {
+									apiProvider: providerIdentifiers.anthropic,
+									apiKey: "sibling-own-settings",
+								}
+							})
+						}
+						return pinnedName
+					},
+					set: (value: string) => {
+						pinnedName = value
+					},
+				})
+
+				await provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"]("activated-profile")
+
+				// The snapshot belonged to a pin the sibling gave up while its settings were being
+				// persisted, and the sibling's own activation owns its buffer now: the in-memory half
+				// is skipped instead of pairing the new pin with this profile's settings.
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "sibling-own-settings",
+				})
+				expect(siblingPost).not.toHaveBeenCalled()
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+			}
+		})
+
+		it("refuses to publish a save that a later save of the same profile superseded", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				// Both views pin the same profile, so both would publish into the same overlay.
+				provider["viewLocalState"].currentApiConfigName = "shared-profile"
+				sibling["viewLocalState"].currentApiConfigName = "shared-profile"
+				sibling["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "before-any-save",
+				}
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				const logSpy = vi.spyOn(provider, "log")
+				for (const view of [provider, sibling]) {
+					view["providerSettingsManager"].runExclusiveAcrossInstances = runManagerSectionInline
+					view["providerSettingsManager"].saveConfig = vi.fn().mockResolvedValue("shared-id")
+					view["providerSettingsManager"].listConfig = vi.fn().mockResolvedValue([])
+					view["providerSettingsManager"].setModeConfig = vi.fn()
+				}
+				let releaseFirstRead!: (record: unknown) => void
+				const firstRead = new Promise((resolve) => {
+					releaseFirstRead = resolve
+				})
+				// View A's record lands, and then its read-back of the stored copy hangs: the
+				// manager's cross-instance lock is already released by then, which is the window
+				// the finding describes.
+				provider["providerSettingsManager"].getProfile = vi.fn().mockReturnValue(firstRead)
+				sibling["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+					name: "shared-profile",
+					id: "shared-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "second-save-settings",
+				})
+
+				const firstSave = provider.upsertProviderProfile(
+					"shared-profile",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "first-save-settings" },
+					false,
+				)
+				await new Promise((resolve) => setImmediate(resolve))
+
+				// View B saves the same name and publishes while A is still holding its read.
+				await sibling.upsertProviderProfile(
+					"shared-profile",
+					{ apiProvider: providerIdentifiers.anthropic, apiKey: "second-save-settings" },
+					false,
+				)
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "second-save-settings",
+				})
+
+				releaseFirstRead({
+					name: "shared-profile",
+					id: "shared-id",
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "first-save-settings",
+				})
+				await firstSave
+
+				// A's record did land, but a newer record for the same name is already stored and
+				// published: A's publication of its older read-back is refused rather than written
+				// over it, in this view's overlay and in every sibling pinned to the name.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Skipping publication for profile shared-profile"),
+				)
+				expect(sibling["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "second-save-settings",
+				})
+				expect(provider["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "second-save-settings",
+				})
 				await ClineProvider["persistedViewStateWriteQueue"]
 			} finally {
 				await sibling.dispose()

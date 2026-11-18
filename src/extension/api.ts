@@ -259,8 +259,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		startOptions?: { focusSidebar?: boolean },
 	) {
 		let provider: ClineProvider
-		// A provider created for this call and never handed a task must not outlive the
-		// failed call in the active-instance list.
+		// A provider created for this call and never handed a task must not outlive the failed
+		// call in the active-instance list. Ownership is membership, not the branch: createInNewTab
+		// may hand back a provider that was already live (a tab that joined an existing view), and
+		// that provider belongs to whoever created it. Only a provider this call brought into the
+		// list is this call's to tear down.
 		let createdInNewTab = false
 
 		if (newTab) {
@@ -269,8 +272,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				await vscode.commands.executeCommand("workbench.action.closeAllEditors")
 			}
 
+			// Snapshot the live instances before the factory call: a provider that was already listed
+			// when this call started is not this call's to dispose.
+			const liveInstancesBeforeTab = new Set(ClineProvider.getAllInstances())
 			provider = await this.providerFactory.createInNewTab()
-			createdInNewTab = true
+			createdInNewTab = !liveInstancesBeforeTab.has(provider)
 			this.registerListeners(provider)
 		} else {
 			// IPC callers omit focus: executeCommand cannot be cancelled and a

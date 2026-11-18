@@ -8,9 +8,19 @@ import type { Task } from "../../core/task/Task"
 import { Package } from "../../shared/package"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
+const { mockGetAllInstances } = vi.hoisted(() => ({
+	// Stand-in for the live-instance list: startNewTask decides new-tab provider ownership by
+	// whether the provider the factory returned was already listed when the call started.
+	mockGetAllInstances: vi.fn<() => unknown[]>(),
+}))
+
 vi.mock("vscode", () => ({ commands: { executeCommand: vi.fn().mockResolvedValue(undefined) } }))
 vi.mock("@roo-code/ipc", () => ({ IpcServer: class {} }))
-vi.mock("../../core/webview/ClineProvider", () => ({ ClineProvider: class {} }))
+vi.mock("../../core/webview/ClineProvider", () => ({
+	ClineProvider: class {
+		static getAllInstances = mockGetAllInstances
+	},
+}))
 
 function createProvider(taskId: string) {
 	// Only the task identity is consumed by this API path; task execution is outside this test's scope.
@@ -37,6 +47,8 @@ describe("API - startNewTask routing", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Fresh ownership state per test: the factory provider is not live until it is created.
+		mockGetAllInstances.mockReturnValue([])
 		sidebar = createProvider("sidebar-task")
 		editor = createProvider("editor-task")
 		outputChannel = {
@@ -198,5 +210,21 @@ describe("API - startNewTask routing", () => {
 
 		expect(target.createTask).toHaveBeenCalledOnce()
 		expect(other.createTask).not.toHaveBeenCalled()
+	})
+
+	it("does not dispose a new-tab provider that was already live when the call started", async () => {
+		// Ownership is membership, not the newTab branch: createInNewTab can hand back a provider
+		// that was already registered (a tab that joined an existing view), and that provider
+		// belongs to whoever created it. Only a provider this call brought into the active
+		// instance list may be disposed by this call's teardown.
+		mockGetAllInstances.mockReturnValueOnce([sidebar, editor])
+		editor.createTask.mockRejectedValueOnce(new Error("joined tab task creation failed"))
+
+		await expect(api.startNewTask({ configuration: {}, text: "new task", newTab: true })).rejects.toThrow(
+			"joined tab task creation failed",
+		)
+
+		expect(editor.dispose).not.toHaveBeenCalled()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
 	})
 })

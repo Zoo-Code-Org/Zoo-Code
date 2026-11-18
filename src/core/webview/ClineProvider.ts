@@ -133,7 +133,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy } from "../config/ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager, ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
@@ -357,6 +357,9 @@ export class ClineProvider
 	public static readonly PENDING_OPERATION_TIMEOUT_MS = 30000 // 30 seconds
 	private providerProfileMutationQueue = Promise.resolve()
 	private historyTaskCreationQueue = Promise.resolve()
+	private providerProfileMutationGeneration = 0
+	/** Per-profile-name save counters, shared across instances: see recordProfileSave. */
+	private static readonly profileSaveGenerations = new Map<string, number>()
 
 	private runDelegationTransition<T>(parentTaskId: string, fn: () => Promise<T>): Promise<T> {
 		return runDelegationTransition(ClineProvider.delegationTransitionLocks, parentTaskId, fn)
@@ -374,8 +377,14 @@ export class ClineProvider
 		const controller = new AbortController()
 		// Run fn after either outcome so a rejected mutation never poisons the queue.
 		const run = this.providerProfileMutationQueue.then(
-			() => fn(controller.signal),
-			() => fn(controller.signal),
+			() => {
+				this.providerProfileMutationGeneration++
+				return fn(controller.signal)
+			},
+			() => {
+				this.providerProfileMutationGeneration++
+				return fn(controller.signal)
+			},
 		)
 		const callerResult = this.withProviderProfileMutationTimeout(run, () => {
 			if (options.runToCompletion) {
@@ -2716,6 +2725,14 @@ export class ClineProvider
 	): Promise<void> {
 		const task = targetTask
 
+		// Ownership token. enqueueProviderProfileMutation bumps the generation immediately before
+		// it runs this function, so the number captured here is this mutation's. A timeout releases
+		// the queue without waiting for this function to return, so once a newer mutation starts the
+		// generation moves and this one no longer owns the shared mode, this view's pin, or the
+		// task's mode and history - which is what a rollback has to respect.
+		const startedGeneration = this.providerProfileMutationGeneration
+		const ownsSwitchWrites = () => this.providerProfileMutationGeneration === startedGeneration
+
 		// Captured for the pin-write rollback below: the mode this task held before
 		// the switch (bracket access: _taskMode is private to Task).
 		const previousTaskMode = task ? task["_taskMode"] : undefined
@@ -2824,7 +2841,26 @@ export class ClineProvider
 		// half-applied switch that runs the new mode against the unchanged profile.
 		// Each restore is awaited on its own and logged on failure, never swallowed.
 		const reconcileSwitchWrites = async () => {
-			if (sharedAttempted) {
+			// Ownership fence. A timeout aborts this mutation and advances the queue without waiting
+			// for the write that is in flight, so by the time a timed-out switch reconciles, a newer
+			// switch may already own the shared mode, this view's pin, and the task's mode and
+			// history. Restoring this switch's pre-switch values then would replay them over the newer
+			// switch's writes, so ownership is re-checked before every restore below: each restore is
+			// itself an await, so a newer mutation can take ownership between two of them.
+			const stillOwns = (what: string) => {
+				if (ownsSwitchWrites()) {
+					return true
+				}
+				this.log(
+					"[handleModeSwitch] Skipping the rollback of " +
+						what +
+						" for the switch to " +
+						newMode +
+						": a newer mutation owns these writes",
+				)
+				return false
+			}
+			if (sharedAttempted && stillOwns("shared mode")) {
 				// The shared write may have landed before its promise rejected: restore
 				// it unconditionally so getValues() cannot mix a fresh shared mode with
 				// the rolled-back view state.
@@ -2838,7 +2874,7 @@ export class ClineProvider
 					)
 				}
 			}
-			if (pinLanded) {
+			if (pinLanded && stillOwns("view mode pin")) {
 				try {
 					await this.saveViewState("mode", previousViewMode)
 				} catch (rollbackError) {
@@ -2849,7 +2885,7 @@ export class ClineProvider
 					)
 				}
 			}
-			if (rollbackTaskWrites) {
+			if (rollbackTaskWrites && stillOwns("task mode writes")) {
 				try {
 					await rollbackTaskWrites()
 				} catch (rollbackError) {
@@ -3258,6 +3294,23 @@ export class ClineProvider
 		}
 	}
 
+	/**
+	 * Record that a save of a profile name reached storage, and hand back that save's generation.
+	 * The counter is static because profile names are shared by every live view: a view that
+	 * saved and read back earlier must be able to tell that a later view stored the same name
+	 * again before it publishes what it read.
+	 */
+	private static recordProfileSave(name: string): number {
+		const generation = (ClineProvider.profileSaveGenerations.get(name) ?? 0) + 1
+		ClineProvider.profileSaveGenerations.set(name, generation)
+		return generation
+	}
+
+	/** True once any instance has saved the same name after the save identified by generation. */
+	private static isProfileSaveSuperseded(name: string, generation: number): boolean {
+		return (ClineProvider.profileSaveGenerations.get(name) ?? 0) !== generation
+	}
+
 	private async persistProviderProfile(
 		name: string,
 		providerSettings: ProviderSettings,
@@ -3278,6 +3331,12 @@ export class ClineProvider
 		const id = await this.providerSettingsManager.runExclusiveAcrossInstances(() =>
 			this.providerSettingsManager.saveConfig(name, providerSettings),
 		)
+
+		// The generation of THIS save. Every save of the same profile name bumps a counter that is
+		// shared across instances, because the read-back and the publication below run after the
+		// manager's cross-instance lock has been released: the counter is what tells a publication
+		// that another view has already stored a newer record under this name.
+		const saveGeneration = ClineProvider.recordProfileSave(name)
 
 		if (signal.aborted) return id
 
@@ -3346,8 +3405,19 @@ export class ClineProvider
 
 			// Other live views may have buffered this profile's settings earlier;
 			// refresh them so their getState() cannot report the updated profile's
-			// name with stale settings.
-			await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+			// name with stale settings. Guarded by the same supersession test as the
+			// non-activating path below: the read-back above runs outside the
+			// manager's cross-instance lock, so an older record must not be published
+			// over a newer save of the same name.
+			if (ClineProvider.isProfileSaveSuperseded(name, saveGeneration)) {
+				this.log(
+					"[persistProviderProfile] Skipping the sibling refresh for profile " +
+						name +
+						": a later save of that profile already landed",
+				)
+			} else {
+				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
+			}
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -3364,17 +3434,29 @@ export class ClineProvider
 			// every view pinned to it buffers a full copy of them. Refresh those views
 			// (and this one when it is the pinned view) or their getState() keeps
 			// serving the settings captured before the save under the same name.
-			if (this.pinnedProfileName === name) {
-				await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
-				// Only rebuild when the task actually runs under the saved profile: a
-				// view pinned to this profile can hold a task that follows a different
-				// sticky profile, and the forced rebuild would silently switch that
-				// conversation to the saved profile's settings.
-				if (this.getCurrentTask()?.taskApiConfigName === name) {
-					this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
+			// The same supersession test as the activating path guards this publication: the
+			// read-back above runs after the manager's cross-instance lock is released, so a
+			// later save of the same name from another view would be overwritten by this older
+			// record. That save publishes its own result.
+			if (ClineProvider.isProfileSaveSuperseded(name, saveGeneration)) {
+				this.log(
+					"[persistProviderProfile] Skipping publication for profile " +
+						name +
+						": a later save of that profile already landed",
+				)
+			} else {
+				if (this.pinnedProfileName === name) {
+					await this._saveViewLocalStateFromMutation({ apiConfiguration: normalizedSettings })
+					// Only rebuild when the task actually runs under the saved profile: a
+					// view pinned to this profile can hold a task that follows a different
+					// sticky profile, and the forced rebuild would silently switch that
+					// conversation to the saved profile's settings.
+					if (this.getCurrentTask()?.taskApiConfigName === name) {
+						this.updateTaskApiHandlerIfNeeded(normalizedSettings, { forceRebuild: true })
+					}
 				}
+				await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 			}
-			await this.refreshViewLocalStateForUpdatedProfile(name, normalizedSettings)
 		}
 
 		await this.postStateToWebview()
@@ -3620,8 +3702,24 @@ export class ClineProvider
 						)
 						return
 					}
-					// Direct private access: compile-time safe across sibling instances.
-					await instance._saveViewLocalStateFromMutation({ apiConfiguration: settings as ProviderSettings })
+					// Persist first, revalidate, then update the in-memory overlay: the durable write is an
+					// await, and a sibling that activates during it already owns its own overlay and its own
+					// pin, so applying this snapshot afterwards would install this profile's settings under
+					// that sibling's new pin. Direct private access is compile-time safe across instances.
+					const snapshotSettings = settings as ProviderSettings
+					await instance._persistViewLocalStateFromMutation({ apiConfiguration: snapshotSettings })
+					if (
+						instance.pinnedProfileName !== pinName ||
+						instance.viewLocalState.apiConfiguration !== undefined
+					) {
+						this.log(
+							"[snapshotSiblingOverlaysBeforeSharedSettingsWrite] Profile " +
+								pinName +
+								" changed while its settings were being persisted; leaving that view's own state alone",
+						)
+						return
+					}
+					instance._updateViewLocalStateFromMutation({ apiConfiguration: snapshotSettings })
 				} catch (error) {
 					unresolvablePins.push(`${pinName} (${error instanceof Error ? error.message : String(error)})`)
 					this.log(
@@ -5193,7 +5291,21 @@ export class ClineProvider
 		try {
 			await this._saveViewLocalStateFromMutation({ [key]: value })
 		} catch (error) {
-			await this.contextProxy.setValue(key, previousValue)
+			// The shared write landed and the durable viewStates write did not: put the shared value
+			// back. A rollback that itself fails is logged with both messages and never substituted
+			// for the caller's error, because the caller must see the write it tried to make.
+			try {
+				await this.contextProxy.setValue(key, previousValue)
+			} catch (rollbackError) {
+				this.log(
+					"[ClineProvider#setValue] Rollback of " +
+						String(key) +
+						" failed after the durable write failed: " +
+						(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)) +
+						" (original: " +
+						(error instanceof Error ? error.message : String(error)),
+				)
+			}
 			throw error
 		}
 	}
@@ -5256,12 +5368,51 @@ export class ClineProvider
 			}
 		}
 
-		await this.contextProxy.setValues(sanitizedValues)
+		try {
+			await this.contextProxy.setValues(sanitizedValues)
+		} catch (error) {
+			// ContextProxy#setValues is not a transaction: a rejected call reports which keys it did
+			// store. Undo exactly those before this view's own overlay write runs, so a partially
+			// committed shared write cannot leave this view buffering keys its storage never got, and
+			// hand the caller its own error. The compensation is the one the catch below already
+			// applies: the stored keys go back to the previous values captured above.
+			if (error instanceof SettingsWriteError && error.committed.length > 0) {
+				const committedKeys = error.committed
+				const committedPatch = Object.fromEntries(
+					committedKeys.map((key) => [key, previousValues[key as keyof RooCodeSettings]]),
+				) as RooCodeSettings
+				try {
+					await this.contextProxy.setValues(committedPatch)
+				} catch (rollbackError) {
+					this.log(
+						"[ClineProvider#setValues] Could not roll back the keys the partial write stored (" +
+							committedKeys.join(", ") +
+							") failed: " +
+							(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)),
+					)
+				}
+			}
+			throw error
+		}
 
 		try {
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {
-			await this.contextProxy.setValues(previousValues as RooCodeSettings)
+			// The durable view-local write failed. Roll the shared keys back, then restore this view's
+			// overlays whether or not that shared rollback succeeded: the overlay half is this view's
+			// own state, and leaving it pinned to the values the failed write tried to apply is exactly
+			// what the snapshot above exists to prevent. A failed shared rollback is logged, never
+			// substituted for the caller's error.
+			try {
+				await this.contextProxy.setValues(previousValues as RooCodeSettings)
+			} catch (rollbackError) {
+				this.log(
+					"[ClineProvider#setValues] Rollback of the shared writes failed: " +
+						(rollbackError instanceof Error ? rollbackError.message : String(rollbackError)) +
+						" (original: " +
+						(error instanceof Error ? error.message : String(error)),
+				)
+			}
 			// Restore the local overlay from the snapshot: the shared rollback alone would leave
 			// the view pinned to the overrides the failed write tried to apply.
 			const restoredOverlay: Partial<RooCodeSettings> = {}
@@ -5274,8 +5425,8 @@ export class ClineProvider
 				try {
 					await this.saveViewState(key, snapshot.present ? (snapshot.value as never) : undefined)
 				} catch (restoreError) {
-					// The original write failure is what the caller must see; a failed overlay restore
-					// is logged rather than replacing it.
+					// The original write failure is what the caller must see; a failed overlay restore is
+					// logged rather than replacing it.
 					this.log(
 						"[ClineProvider#setValues] Failed to restore the local view override for " +
 							key +

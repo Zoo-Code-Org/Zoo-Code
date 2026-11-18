@@ -986,6 +986,72 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(secondTask["_taskMode"]).toBe("code")
 		})
 
+		test("a timed-out mode switch leaves a newer switch's writes alone", async () => {
+			vi.useFakeTimers()
+			await provider.setViewStateId("rebuild-sidebar-view")
+			const task = new Task(defaultTaskOptions)
+			Object.defineProperty(task, "taskId", { value: "switch-task-id" })
+			task["_taskMode"] = "code" as Mode
+			await provider.addClineToStack(task)
+			const logSpy = vi.spyOn(provider, "log")
+
+			// The view mode pin is this switch's first durable write. Hanging it is what reproduces
+			// the state a timeout leaves behind: the queue advances without waiting for this function
+			// to return, so the next mutation runs to completion while this one is still inside an
+			// await, and only then does this one reach its own reconciliation.
+			const originalSetValue = provider.contextProxy.setValue.bind(provider.contextProxy)
+			let releasePinWrite!: () => void
+			const pinWrite = new Promise<void>((resolve) => {
+				releasePinWrite = resolve
+			})
+			let viewStatesWrites = 0
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				if (key === "viewStates" && viewStatesWrites++ === 0) {
+					await pinWrite
+				}
+				return originalSetValue(key, value)
+			})
+
+			try {
+				const firstSwitch = provider.handleModeSwitch("ask" as Mode)
+				const firstResult = expect(firstSwitch).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(0)
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+
+				// The timeout released the mutation queue, so the newer switch starts and gets as far
+				// as its own mode pin: the serialized view-state queue holds that write behind the
+				// older switch's, but the task mode write is not in that queue and has already landed
+				// by the time the pin write is merely pending.
+				const secondSwitch = provider.handleModeSwitch("debug" as Mode)
+				await vi.advanceTimersByTimeAsync(50)
+				expect(task["_taskMode"]).toBe("debug")
+
+				// Now the timed-out switch resumes inside its own pin write and reaches the reconcile
+				// that restores everything it landed. Restoring the pin, the task mode, or the task
+				// history here would replay the pre-switch values over the newer switch's committed
+				// writes: the restore queues behind the newer switch's own pin write, so it lands last.
+				releasePinWrite()
+				await secondSwitch
+				await ClineProvider["persistedViewStateWriteQueue"]
+
+				const persisted = mockContext.globalState.get("viewStates") as Record<string, { mode?: string }>
+				expect(persisted["rebuild-sidebar-view"].mode).toBe("debug")
+				expect(provider["viewLocalState"].mode).toBe("debug")
+				expect(provider.contextProxy.getValue("mode")).toBe("debug")
+				expect(task["_taskMode"]).toBe("debug")
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Skipping the rollback of view mode pin for the switch to ask"),
+				)
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("Skipping the rollback of task mode writes for the switch to ask"),
+				)
+			} finally {
+				releasePinWrite()
+				vi.useRealTimers()
+			}
+		})
+
 		test("fan-out preparation leaves the focused task untouched", async () => {
 			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			const mockTask = new Task({
