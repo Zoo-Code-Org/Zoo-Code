@@ -11,7 +11,7 @@ export function authenticatedMockFetch(fetch: typeof globalThis.fetch, mockUrl: 
 		const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined))
 		// aimock rejects conflicting credential headers, and recording uses the
 		// parent's providerKeys rather than any of these inbound credentials.
-		for (const name of ["authorization", "x-api-key", "x-goog-api-key", "api-key", "xi-api-key"]) {
+		for (const name of ["x-api-key", "x-goog-api-key", "api-key", "xi-api-key"]) {
 			headers.delete(name)
 		}
 		headers.set("authorization", `Bearer ${apiKey}`)
