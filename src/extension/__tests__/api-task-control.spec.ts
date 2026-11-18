@@ -647,6 +647,72 @@ describe("API task controls - per-view review fixes", () => {
 			} as never)
 			expect(update).toHaveBeenLastCalledWith("viewStates", { "view-a": { mode: "debug" } })
 		})
+		it("refuses zooSessionToken and openAiHeaders on both directions before storage sees them", async () => {
+			const get = vi.fn().mockReturnValue("stored")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			// Both keys are provider-settings keys, so they survive the secret-state
+			// omission that defines GlobalState: the schema guard lets them through and
+			// the credential guard is the only thing standing between them and storage.
+			// Reading them must not reach the mock at all, and writing them must not
+			// persist a value that a later reader would treat as ordinary settings.
+			expect(() => api.getGlobalState("zooSessionToken")).toThrow("credential-bearing key")
+			expect(() => api.getGlobalState("openAiHeaders")).toThrow("credential-bearing key")
+			await expect(api.setGlobalState("zooSessionToken", "x")).rejects.toThrow("credential-bearing key")
+			await expect(api.setGlobalState("openAiHeaders", { Authorization: "Bearer x" })).rejects.toThrow(
+				"credential-bearing key",
+			)
+			expect(get).not.toHaveBeenCalled()
+			expect(update).not.toHaveBeenCalled()
+			// Control on the same mocks: a non-credential key still reaches storage on
+			// both directions, so the four assertions above are about these keys and not
+			// about a surface that rejects everything.
+			expect(api.getGlobalState("mode")).toBe("stored")
+			await api.setGlobalState("mode", "ask")
+			expect(get).toHaveBeenCalledWith("mode")
+			expect(update).toHaveBeenCalledWith("mode", "ask")
+		})
+
+		it("refuses a key outside the settings schema on both directions before storage sees them", async () => {
+			const get = vi.fn().mockReturnValue("stored")
+			const update = vi.fn().mockResolvedValue(undefined)
+			sidebarProvider.context = {
+				extensionMode: vscode.ExtensionMode.Test,
+				globalState: { get, update },
+			}
+			api = new API(
+				outputChannel,
+				asClineProvider(sidebarProvider),
+				makeTabCreatingFactory(sidebarProvider, outputChannel),
+			)
+
+			// The generic constrains typed callers only: a crafted runtime key can be any
+			// string, which is why the key check is a runtime check on GLOBAL_STATE_KEYS.
+			// The as never below is the single assertion that lets the test hand the API a
+			// key no typed caller could name, mirroring the malformed-value cases above. The
+			// value needs the same assertion once the key is never, because the value
+			// parameter is then indexed by never.
+			expect(() => api.getGlobalState("notARealKey" as never)).toThrow("outside the settings schema")
+			await expect(api.setGlobalState("notARealKey" as never, "x" as never)).rejects.toThrow(
+				"outside the settings schema",
+			)
+			expect(get).not.toHaveBeenCalled()
+			expect(update).not.toHaveBeenCalled()
+			// A sibling key that is absent from the schema for a different reason - a
+			// provider setting with no value schema - is refused by that later guard,
+			// so this row pins the schema guard specifically and not the refusal itself.
+			await expect(api.setGlobalState("apiModelId", "x")).rejects.toThrow("without a value schema")
+			expect(update).not.toHaveBeenCalled()
+		})
 	})
 
 	describe("startNewTask view-state readiness", () => {
