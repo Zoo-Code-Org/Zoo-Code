@@ -1532,14 +1532,18 @@ describe("API - configuration", () => {
 	})
 	it("leaves the overlays alone when the compensation write and its confirmation read both fail", async () => {
 		// The same rule one step further: a confirmation that cannot read leaves the outcome unconfirmed, and
-		// an unconfirmed record gets no write - neither the restore the compensation wanted to make nor a
-		// refresh of the overlays pinned to it. The mode mapping still rolls back.
+		// an unconfirmed record gets no write from the rollback - neither the restore it wanted to make nor a
+		// refresh of the overlays pinned to it - while the refresh the forward write already drove stays the
+		// only one. The settings write runs through production setValues with only its persistence seams
+		// mocked, so the refresh that setter drives for a saved profile is inside the assertion instead of
+		// behind a no-op double. The mode mapping still rolls back.
 		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
 		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
 			records: { pinned: { id: "pinned-id", settings: priorSettings } },
 			profileEntries: [{ name: "pinned", id: "pinned-id" }],
 			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
 			compensationWrite: "save",
+			productionSetValues: true,
 			profileReader: ({ store: profileStore }) => {
 				let reads = 0
 				return async ({ name }: { name: string }) => {
@@ -1561,7 +1565,9 @@ describe("API - configuration", () => {
 		).rejects.toThrow("mode write failed")
 
 		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
-		expect(refreshSpy).not.toHaveBeenCalled()
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).not.toHaveBeenCalledWith("pinned", {})
 		expect(outputChannel.appendLine).toHaveBeenCalledWith(
 			expect.stringContaining("the compensation write failed and the record could not be read afterwards"),
 		)
