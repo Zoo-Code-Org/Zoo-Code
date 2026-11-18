@@ -2352,6 +2352,60 @@ describe("Task persistence", () => {
 			expect(overwrite).not.toHaveBeenCalled()
 		})
 
+		it.each(["cancel", "dispose", "generation", "abandon"] as const)(
+			"preserves newer history when pending preparation loses ownership through %s",
+			async (change) => {
+				const text = "read @/allowed please"
+				const segments = [{ text, source: "user" }]
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "resume-order",
+						number: 1,
+						ts: Date.now(),
+						task: "t",
+						tokensIn: 1,
+						tokensOut: 1,
+						totalCost: 0,
+					},
+					startTask: false,
+					initialStatus: "interrupted",
+				})
+				const initiate = vi
+					.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+					.mockResolvedValue(undefined)
+				const overwrite = vi.spyOn(task, "overwriteApiConversationHistory")
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", text, segments } as never)
+				mockReadApiMessages.mockResolvedValue([{ role: "user", content: [{ type: "text", text: "old turn" }] }])
+				mockProvider.taskHistoryStore.get = vi
+					.fn()
+					.mockReturnValue({ id: "resume-order", status: "interrupted" })
+
+				let finish: (value: Anthropic.Messages.TextBlockParam[]) => void = () => {}
+				vi.spyOn(task, "userInputContent").mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+				await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+				const pending = Promise.resolve(initiate.mock.calls[0][0])
+				const rejected = expect(pending).rejects.toThrow(
+					`[Task#resumeTaskFromHistory] task ${task.taskId}.${task.instanceId} aborted`,
+				)
+				if (change === "cancel") task.requestAbort(false)
+				else if (change === "dispose") task.requestDispose()
+				else if (change === "abandon") task.requestAbandon()
+				else task.cancellationGeneration++
+
+				const newerHistory: typeof task.apiConversationHistory = [{ role: "user", content: "new continuation" }]
+				await task.overwriteApiConversationHistory(newerHistory)
+				overwrite.mockClear()
+				mockSaveApiMessages.mockClear()
+				finish([])
+				await rejected
+				expect(overwrite).not.toHaveBeenCalled()
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+				expect(task.apiConversationHistory).toEqual(newerHistory)
+			},
+		)
+
 		it("pushes no response block for an empty response", async () => {
 			const { processed, parsed } = await resumeWith({ text: "" })
 

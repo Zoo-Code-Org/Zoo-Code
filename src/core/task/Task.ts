@@ -3453,9 +3453,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			// Only user segments expand.
+			const preparationGeneration = this.cancellationGeneration
 			const expanded = responseText ? this.userInputContent(responseText, segments) : Promise.resolve([])
 			const newUserContent = expanded.then(async (content) => {
-				// Write the history after the expansion. A cancel or an error during the expansion keeps the old history.
+				// A cancelled preparation must not replace history from a newer run.
+				if (this.abort || this.abandoned || this.cancellationGeneration !== preparationGeneration) {
+					throw new Error(`[Task#resumeTaskFromHistory] task ${this.taskId}.${this.instanceId} aborted`)
+				}
+				// Replace history before the loop appends the combined user content.
 				await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
 				const blocks: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent, ...content]
 
