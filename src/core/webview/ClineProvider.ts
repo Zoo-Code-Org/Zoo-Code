@@ -3462,6 +3462,12 @@ export class ClineProvider
 		// restores in the catch below can reach it: snapshot it here, before the delete commits,
 		// through the manager’s own read (a copy of the map, not the live object).
 		const previousManagerGate = await this.providerSettingsManager.getSelectionAndModeConfigs()
+		// The window-local mirror is the other half of the same write: `setModeConfig` posts the shared
+		// mapping and this window's cached choice together, so the mapping restore below has to roll
+		// both back. A mode this window had cached on the deleted profile would otherwise keep serving
+		// the replacement id - getModeConfigId prefers the cache whenever that profile exists, which the
+		// record restore above just made true again.
+		const previousLocalModeConfigs = new Map(this.localModeConfigIds)
 		// What the activation below writes into that gate: the replacement’s name, and its id as
 		// the profile list records it (the mode mapping is keyed by id). The restore legs compare
 		// the manager’s current report against these, and only roll back while they still match.
@@ -3660,6 +3666,16 @@ export class ClineProvider
 						previousModeConfigId !== currentModeConfigId
 					) {
 						await this.providerSettingsManager.setModeConfig(mode as Mode, previousModeConfigId)
+						// Same leg, second map. Without this the cache still names the replacement and the
+						// next read returns it although the shared mapping is back. A mode this window never
+						// mapped is cleared rather than replayed, so it falls back to the window snapshot the
+						// way it did before the deletion.
+						const previousLocalModeConfigId = previousLocalModeConfigs.get(mode)
+						if (previousLocalModeConfigId === undefined) {
+							this.localModeConfigIds.delete(mode)
+						} else {
+							this.localModeConfigIds.set(mode, previousLocalModeConfigId)
+						}
 					}
 				}
 			} catch (restoreError) {

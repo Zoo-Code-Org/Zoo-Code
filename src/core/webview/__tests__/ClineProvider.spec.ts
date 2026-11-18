@@ -5472,6 +5472,114 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("restores this window's mode mapping when a deletion compensates an activation that already moved it", async () => {
+			// The activation moves this window's cached mode choice onto the replacement id, and the
+			// deletion's opening snapshot predates that write. Rolling back the shared map alone leaves
+			// the cache - which getModeConfigId consults first, and which the record restore makes
+			// resolvable again - naming the profile the deletion just undid.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const ownChoiceProfile: ProviderSettingsEntry = {
+				apiProvider: providerIdentifiers.anthropic,
+				id: "own-choice-id",
+				name: "own-choice",
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			await provider.setValue("currentApiConfigName", "old-profile")
+			await provider.setValue("mode", "code")
+			// code follows the profile being deleted; architect holds a local choice the shared map
+			// never carried, so the restore must replay it rather than clear it.
+			provider["localModeConfigIds"].set("architect", "own-choice-id")
+			provider["localModeConfigIds"].set("code", "old-id")
+			provider["initialModeConfigIds"] = Promise.resolve({ architect: "own-choice-id", code: "old-id" })
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if ("name" in params && params.name === "old-profile") {
+					return {
+						apiKey: "old-key",
+						apiProvider: providerIdentifiers.openrouter,
+						id: "old-id",
+						name: "old-profile",
+					}
+				}
+				return {
+					apiKey: "keeper-key",
+					apiProvider: providerIdentifiers.anthropic,
+					id: "keeper-id",
+					name: "keeper-profile",
+				}
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("restored")
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				oldProfile,
+				keeperProfile,
+				ownChoiceProfile,
+			])
+			const setManagerModeConfig = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			// The manager gate is read once for the opening snapshot and again in the compensation,
+			// so the stub reports the pre-delete mapping first and the post-activation mapping
+			// afterwards.
+			let gateReads = 0
+			const gateSnapshot = async () => {
+				gateReads += 1
+				return gateReads === 1
+					? {
+							currentApiConfigName: "old-profile",
+							modeApiConfigs: { architect: "old-id", code: "old-id" },
+						}
+					: {
+							currentApiConfigName: "keeper-profile",
+							modeApiConfigs: { architect: "keeper-id", code: "keeper-id" },
+						}
+			}
+			vi.spyOn(provider.providerSettingsManager, "getSelectionAndModeConfigs").mockImplementation(gateSnapshot)
+			// The activation has passed its point of no return by now: the manager has the replacement
+			// selected, the shared store is written, and this window's code mapping names keeper-id.
+			// Failing the state post that follows makes the deletion compensate a mapping the
+			// activation already moved.
+			let postStateCalls = 0
+			vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+				postStateCalls += 1
+				if (postStateCalls === 1) {
+					throw new Error("post-activation write down")
+				}
+			})
+
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("post-activation write down")
+
+			expect(setManagerModeConfig).toHaveBeenCalledWith("code", "old-id")
+			expect(setManagerModeConfig).toHaveBeenCalledWith("architect", "old-id")
+			expect(provider["localModeConfigIds"].get("code")).toBe("old-id")
+			expect(provider["localModeConfigIds"].get("architect")).toBe("own-choice-id")
+			// The cache is what getModeConfigId consults first: the restored pair must agree with the
+			// restored map, and switching the mode away and back may only change the answer through a
+			// new local write. Dropping that write falls back to the window snapshot, which agrees too.
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("old-id")
+			await expect(provider["getModeConfigId"]("architect")).resolves.toBe("own-choice-id")
+			provider["localModeConfigIds"].set("code", "keeper-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("keeper-id")
+			provider["localModeConfigIds"].delete("code")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("old-id")
+
+			await provider.dispose()
+		})
 		it("keeps the mutation queue owned by a mode switch past its timeout", async () => {
 			// The fake timers, the provider, the gate and the prototype spy are declared
 			// before the try below so its finally block can name them: a failed assertion
