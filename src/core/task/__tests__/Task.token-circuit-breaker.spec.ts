@@ -1,5 +1,7 @@
 import type { Anthropic } from "@anthropic-ai/sdk"
 
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+
 import { setAbortLatch } from "../../../test-utils/run-state"
 import { Task } from "../Task"
 
@@ -12,7 +14,7 @@ describe("Task Token Circuit Breaker", () => {
 		Object.assign(task, {
 			taskId: "task-test-cb",
 			instanceId: "inst-test-cb",
-			apiConfiguration: { apiProvider: "anthropic" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
 			tokenCircuitBreakerLimit,
 			consecutiveMistakeLimit: 0,
 			consecutiveMistakeCount: 0,
