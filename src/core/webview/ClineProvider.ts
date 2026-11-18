@@ -1146,12 +1146,13 @@ export class ClineProvider
 			// authoritative for both the name and its settings.
 			// R2 (issue 2488, step 1): this branch resolves settings for a name read from this view's own
 			// buffer and then writes that same buffer, so the copy it compares against is the buffer's own
-			// selection taken before the lookup - not anything the manager reports. A profile or mode the
-			// user picks while the lookup waits is a newer edit on this layer and has to survive.
+			// selection taken before the lookup - not anything the manager reports. A profile the user picks
+			// while the lookup waits is a newer edit on this layer and has to survive. The mode is not part
+			// of that copy: the re-resolved settings are keyed to the profile name, so a mode cannot supersede
+			// them, and a mode picked while the lookup waits is carried at the commit below instead.
 			const selectionBeforeReapply = {
 				currentApiConfigName: this.viewLocalState.currentApiConfigName,
 				apiConfiguration: this.viewLocalState.apiConfiguration,
-				mode: this.viewLocalState.mode,
 			}
 			const reappliedProfileName =
 				!Object.is(preLoadBuffer.currentApiConfigName, postLoadBuffer.currentApiConfigName) &&
@@ -1176,19 +1177,21 @@ export class ClineProvider
 					delete mergedState.apiConfiguration
 				}
 
-				// R3: re-read that same layer before committing to it. The view-id check below only catches a
-				// replaced view; it does not catch a changed selection inside the same view, which is what
-				// can happen while the lookup above awaits. A changed selection means the settings resolved
-				// here are already superseded, so they are dropped and the newer choice stands.
+				// R3: re-read the two fields these settings are keyed to before committing to them. The view-id
+				// check below only catches a replaced view; it does not catch a changed selection inside the same
+				// view, which is what can happen while the lookup above awaits. A name or settings that moved on
+				// this layer means the settings resolved here are already superseded, so they are dropped and the
+				// newer selection stands. The mode is deliberately absent from this comparison: it cannot supersede
+				// settings resolved for a profile name, and a mode picked during this lookup is carried at the
+				// commit below instead (review thread 4609496486).
 				if (
 					!deepEqual(selectionBeforeReapply, {
 						currentApiConfigName: this.viewLocalState.currentApiConfigName,
 						apiConfiguration: this.viewLocalState.apiConfiguration,
-						mode: this.viewLocalState.mode,
 					})
 				) {
 					this.log(
-						`[loadViewState] Discarding the re-resolved settings for profile '${reappliedProfileName}': currentApiConfigName, apiConfiguration and mode moved on this view while the lookup was in flight, so the newer selection stands`,
+						`[loadViewState] Discarding the re-resolved settings for profile '${reappliedProfileName}': this view's currentApiConfigName or apiConfiguration moved while the reapplied profile was being resolved, so those settings are superseded and the newer selection stands`,
 					)
 					return
 				}
@@ -1196,6 +1199,20 @@ export class ClineProvider
 				if (this.viewStateId !== loadedForViewId) {
 					this.log(`[loadViewState] Discarding stale state for superseded view id ${loadedForViewId}`)
 					return
+				}
+			}
+
+			// The mode carried above was read from the buffer as it stood at the post-load snapshot, before
+			// the reapplied-profile lookup awaited, so a mode picked during that lookup would otherwise be
+			// committed one edit stale. Re-read it against the pre-load snapshot now and apply the same
+			// two directions the post-load reapply uses: a mode that moved to a value is set, a mode that
+			// moved to undefined stays cleared. Only a mode that moved inside the load window counts, so a
+			// buffer mode that the persisted record is about to replace is not mistaken for a newer edit.
+			if (!Object.is(preLoadBuffer.mode, this.viewLocalState.mode)) {
+				if (this.viewLocalState.mode === undefined) {
+					delete mergedState.mode
+				} else {
+					mergedState.mode = this.viewLocalState.mode
 				}
 			}
 

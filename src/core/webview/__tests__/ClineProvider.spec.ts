@@ -7775,6 +7775,149 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+
+		// Review thread 4609496486: the name moves while the persisted lookup is in flight, which puts the
+		// load on the re-resolve path, and then the mode moves while that re-resolve is awaited. The mode is
+		// not a field the resolved settings are keyed to, so it must not discard them; the newer mode still has
+		// to survive the commit, because the mode merged into the loaded state was read before this lookup
+		// awaited, so committing it unchanged would be one edit stale.
+		it("keeps the reapplied profile's settings and the newer mode when the mode moves during the re-resolve", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+					apiKey: `${name}-key`,
+				})
+			// getProfile is addressable either by name or by id; this fixture addresses every lookup by
+			// name, so the stub has to narrow the union before it can read the name.
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			// Seed the entry through this instance's proxy so it owns the entry it is about to load.
+			await provider.contextProxy.setValue("viewStates", {
+				"reapply-mode-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("reapply-mode-sidebar-view")
+			registrationLookup.mockRestore()
+			const settingsBeforeReapply = provider["viewLocalState"].apiConfiguration
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("persisted-profile")
+			expect(provider["viewLocalState"].mode).toBe("code")
+
+			let releasePersisted!: (value: PersistedProfile) => void
+			let releaseReapplied!: (value: PersistedProfile) => void
+			const persistedLookup = new Promise<PersistedProfile>((resolve) => {
+				releasePersisted = resolve
+			})
+			const reappliedLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseReapplied = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((config) =>
+				profileName(config) === "persisted-profile" ? persistedLookup : reappliedLookup,
+			)
+
+			const load = provider["loadViewState"]()
+
+			// The switch that puts the load on the re-resolve path, landing during the persisted lookup.
+			await provider.saveViewState("currentApiConfigName", "reapplied-profile")
+			releasePersisted(profileOf("persisted-profile", providerIdentifiers.anthropic))
+
+			// The mode-only switch that lands while the reapplied profile is being resolved.
+			await provider.saveViewState("mode", "plan")
+			releaseReapplied(profileOf("reapplied-profile", providerIdentifiers.openrouter))
+			await load
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+			expect(provider["viewLocalState"].mode).toBe("plan")
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiKey: "reapplied-profile-key",
+			})
+			// Not the settings this view held before the re-resolve: the reapplied profile's own record.
+			expect(provider["viewLocalState"].apiConfiguration).not.toBe(settingsBeforeReapply)
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Discarding the re-resolved settings"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[loadViewState] Loaded state for viewId"))
+
+			await provider.dispose()
+		})
+
+		// The cleared direction of the same commit-time re-read: a mode that moved to undefined during the
+		// re-resolve stays cleared instead of being resurrected from the value merged earlier.
+		it("keeps the reapplied profile's settings when the mode is cleared during the re-resolve", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			type PersistedProfile = Awaited<ReturnType<typeof provider.providerSettingsManager.getProfile>>
+			const profileOf = (name: string, apiProvider: string): PersistedProfile =>
+				Object.assign({} as PersistedProfile, {
+					name,
+					id: `${name}-id`,
+					apiProvider: apiProvider as PersistedProfile["apiProvider"],
+					apiKey: `${name}-key`,
+				})
+			const profileName = (config: { name: string } | { id: string }): string =>
+				"name" in config ? config.name : config.id
+			await provider.contextProxy.setValue("viewStates", {
+				"reapply-mode-cleared-sidebar-view": {
+					mode: "code",
+					currentApiConfigName: "persisted-profile",
+					updatedAt: 1,
+				},
+			})
+			const registrationLookup = vi
+				.spyOn(provider.providerSettingsManager, "getProfile")
+				.mockImplementation(async (config) => profileOf(profileName(config), providerIdentifiers.anthropic))
+			await provider["setViewStateId"]("reapply-mode-cleared-sidebar-view")
+			registrationLookup.mockRestore()
+			expect(provider["viewLocalState"].mode).toBe("code")
+
+			let releasePersisted!: (value: PersistedProfile) => void
+			let releaseReapplied!: (value: PersistedProfile) => void
+			const persistedLookup = new Promise<PersistedProfile>((resolve) => {
+				releasePersisted = resolve
+			})
+			const reappliedLookup = new Promise<PersistedProfile>((resolve) => {
+				releaseReapplied = resolve
+			})
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation((config) =>
+				profileName(config) === "persisted-profile" ? persistedLookup : reappliedLookup,
+			)
+			const load = provider["loadViewState"]()
+			await provider.saveViewState("currentApiConfigName", "reapplied-profile")
+			releasePersisted(profileOf("persisted-profile", providerIdentifiers.anthropic))
+			await provider.saveViewState("mode", undefined)
+			releaseReapplied(profileOf("reapplied-profile", providerIdentifiers.openrouter))
+			await load
+
+			expect(provider["viewLocalState"].currentApiConfigName).toBe("reapplied-profile")
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider["viewLocalState"].apiConfiguration).toMatchObject({
+				apiKey: "reapplied-profile-key",
+			})
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("Discarding the re-resolved settings"))
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("[loadViewState] Loaded state for viewId"))
+
+			await provider.dispose()
+		})
 	})
 
 	describe("getState default values", () => {
