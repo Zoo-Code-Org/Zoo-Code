@@ -52,6 +52,30 @@ const makeProfileStoreDouble = (seed: Record<string, { id: string; settings: Rec
 	return { entries, hasConfig, getProfile, saveConfig, deleteConfig }
 }
 
+// A second extension-host window reaches the same profile store through its own manager instance:
+// the datastore is shared, the instance is not. These are the record methods pointed at an entry
+// map another double already owns, which is how a competing writer changes a record after this call
+// saved it and before this call compensates. The id is preserved on an overwrite exactly as the
+// production manager does, which is what makes the id alone useless as an ownership test.
+const makeSharedStoreManagerView = (entries: Map<string, { id: string; settings: Record<string, unknown> }>) => ({
+	hasConfig: (name: string) => Promise.resolve(entries.has(name)),
+	getProfile: ({ name }: { name: string }) => {
+		const entry = entries.get(name)
+		if (!entry) {
+			return Promise.reject(new Error(`Profile "${name}" does not exist`))
+		}
+		return Promise.resolve({ name, id: entry.id, ...entry.settings })
+	},
+	saveConfig: (name: string, settings: Record<string, unknown>) => {
+		const id = entries.get(name)?.id ?? "other-window-id"
+		entries.set(name, { id, settings })
+		return Promise.resolve(id)
+	},
+	deleteConfig: (name: string) => {
+		entries.delete(name)
+		return Promise.resolve()
+	},
+})
 describe("API - configuration", () => {
 	it("persists every supplied mode API config mapping", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
@@ -1125,6 +1149,274 @@ describe("API - configuration", () => {
 		})
 		expect(refreshSpy.mock.invocationCallOrder[0]).toBeGreaterThan(setValues.mock.invocationCallOrder[1])
 		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "old-key" }))
+	})
+
+	// The compensation tests below share one shape: a payload that saves a profile, writes the settings,
+	// and then fails on a mode mapping write, over a live-backed profile store. The failing mode write is
+	// the seam that puts another window write between this call save and this call compensation, because
+	// the compensation only runs in the failure path the stub creates. Both window-local mode seams call
+	// the production ClineProvider methods rather than copying them, so the rollback under test is the one
+	// the extension host runs.
+	const makeRollbackHarness = ({
+		records,
+		profileEntries,
+		snapshot,
+		beforeFailingModeWrite,
+		profileReader,
+	}: {
+		records: Record<string, { id: string; settings: Record<string, unknown> }>
+		profileEntries: { name: string; id: string }[]
+		snapshot: Record<string, unknown>
+		beforeFailingModeWrite?: (deps: {
+			store: ReturnType<typeof makeProfileStoreDouble>
+			otherWindowManager: ReturnType<typeof makeSharedStoreManagerView>
+		}) => Promise<unknown>
+		profileReader?: (deps: {
+			store: ReturnType<typeof makeProfileStoreDouble>
+			otherWindowManager: ReturnType<typeof makeSharedStoreManagerView>
+		}) => (params: { name: string }) => Promise<unknown>
+	}) => {
+		const store = makeProfileStoreDouble(records)
+		const deps = { store, otherWindowManager: makeSharedStoreManagerView(store.entries) }
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const managerSetModeConfig = vi.fn().mockResolvedValue(undefined)
+		const refreshSpy = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const log = vi.fn()
+		const setModeConfig = vi.fn(async () => {
+			if (beforeFailingModeWrite) {
+				await beforeFailingModeWrite(deps)
+			}
+			throw new Error("mode write failed")
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			log,
+			getProviderProfileEntries: vi.fn().mockReturnValue(profileEntries),
+			getValues: vi.fn().mockReturnValue({ ...snapshot }),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			providerSettingsManager: {
+				runExclusiveAcrossInstances: runManagerSectionInline,
+				hasConfig: store.hasConfig,
+				getProfile: profileReader ? profileReader(deps) : store.getProfile,
+				saveConfig: store.saveConfig,
+				deleteConfig: store.deleteConfig,
+				setModeConfig: managerSetModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			setModeConfig,
+			localModeConfigIds: new Map<string, string>(),
+			getLocalModeConfigId(mode: Mode) {
+				return ClineProvider.prototype.getLocalModeConfigId.call(this, mode)
+			},
+			restoreLocalModeConfig(mode: Mode, localId: string | undefined) {
+				ClineProvider.prototype.restoreLocalModeConfig.call(this, mode, localId)
+			},
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		// Logging is enabled so the compensation log lines land on the output channel, where the tests
+		// below assert them; without the fifth argument this.log is a no-op. The socket path stays unset
+		// so the API never enters ipc mode.
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+		return {
+			api,
+			provider,
+			store,
+			setValues,
+			managerSetModeConfig,
+			refreshSpy,
+			outputChannel,
+			otherWindowManager: deps.otherWindowManager,
+		}
+	}
+
+	it("keeps a record another window rewrote after this call saved it", async () => {
+		// Finding 4604351737, the case the different-id test cannot reach. The record existed before this
+		// call, so the compensation used to write the prior record back whatever the store held. A second
+		// window saves the same profile after this call releases the manager section, and this call own
+		// save - not that write - is what moved the value away from the prior record, so the ownership
+		// base is the value this call wrote. The newer record stays and the rest of the rollback runs.
+		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
+		const { api, store, managerSetModeConfig, setValues, outputChannel } = makeRollbackHarness({
+			records: { pinned: { id: "pinned-id", settings: priorSettings } },
+			profileEntries: [{ name: "pinned", id: "pinned-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			beforeFailingModeWrite: ({ otherWindowManager }) =>
+				otherWindowManager.saveConfig("pinned", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "other-window-key",
+				}),
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// The second window record survives: this call saved the profile once, wrote nothing back over it,
+		// and deleted nothing.
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "other-window-key" }))
+		expect(store.saveConfig).toHaveBeenCalledTimes(1)
+		expect(store.deleteConfig).not.toHaveBeenCalled()
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("skipped restoring the profile record 'pinned'"),
+		)
+		// The other compensations still run: the mode mapping this call created, and the replay of the
+		// settings keys this call wrote.
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+		expect(setValues).toHaveBeenCalledTimes(2)
+	})
+
+	it("restores the prior record when no other window touched it after the save", async () => {
+		// The no-interference counterpart of the test above: with the store still holding what this call
+		// wrote, the compare-and-set restore still puts the prior record back, so the new comparison is
+		// not a way of skipping every rollback.
+		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
+		const { api, store, managerSetModeConfig, outputChannel } = makeRollbackHarness({
+			records: { pinned: { id: "pinned-id", settings: priorSettings } },
+			profileEntries: [{ name: "pinned", id: "pinned-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.saveConfig).toHaveBeenCalledTimes(2)
+		expect(store.saveConfig).toHaveBeenLastCalledWith("pinned", expect.objectContaining({ apiKey: "prior-key" }))
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "prior-key" }))
+		expect(store.deleteConfig).not.toHaveBeenCalled()
+		expect(outputChannel.appendLine).not.toHaveBeenCalledWith(
+			expect.stringContaining("skipped restoring the profile record"),
+		)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+	})
+
+	it("replays the surviving record to pinned siblings when another window overwrote it under the same id", async () => {
+		// Finding 4604351756 together with the same-id overwrite case of 4604351737. This call created the
+		// profile, so its rollback deletes the record and replays an empty overlay to the siblings pinned
+		// to it. A second window saved the same profile in between, and saveConfig preserves the id, so
+		// the id check passes while the values say otherwise: the delete must be skipped, and the overlay
+		// replay must carry the settings the store actually holds rather than this call empty view of a
+		// profile it created, which would strip the newer record credentials from every pinned sibling.
+		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: { default: { id: "default-id", settings: { apiProvider: providerIdentifiers.anthropic } } },
+			profileEntries: [{ name: "default", id: "default-id" }],
+			snapshot: { currentApiConfigName: "new-profile", apiProvider: providerIdentifiers.anthropic },
+			beforeFailingModeWrite: ({ otherWindowManager }) =>
+				otherWindowManager.saveConfig("new-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "other-window-key",
+				}),
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "new-profile",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.deleteConfig).not.toHaveBeenCalled()
+		expect(store.entries.get("new-profile")?.settings).toEqual(
+			expect.objectContaining({ apiKey: "other-window-key" }),
+		)
+		expect(store.saveConfig).toHaveBeenCalledTimes(1)
+		// The pinned siblings end on the surviving record, not on the empty overlay this call would have
+		// installed for a profile it created.
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("new-profile", expect.objectContaining({ apiKey: "other-window-key" }))
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("skipped deleting the profile record 'new-profile'"),
+		)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+	})
+
+	it("deletes a profile this call created and replays an empty overlay when no other window wrote it", async () => {
+		// The no-interference counterpart of the test above: the delete and the empty-overlay replay are
+		// both still the compensation when the store still holds what this call wrote.
+		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: { default: { id: "default-id", settings: { apiProvider: providerIdentifiers.anthropic } } },
+			profileEntries: [{ name: "default", id: "default-id" }],
+			snapshot: { currentApiConfigName: "new-profile", apiProvider: providerIdentifiers.anthropic },
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "new-profile",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.saveConfig).toHaveBeenCalledTimes(1)
+		expect(store.deleteConfig).toHaveBeenCalledWith("new-profile")
+		expect(store.entries.has("new-profile")).toBe(false)
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("new-profile", {})
+		expect(outputChannel.appendLine).not.toHaveBeenCalledWith(
+			expect.stringContaining("skipped deleting the profile record"),
+		)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+	})
+
+	it("leaves the record and its overlays alone when the compensation re-read fails", async () => {
+		// Rule R3.4: a failed re-read means unconfirmed, not restore anyway. The write section reads the
+		// record twice - the prior record, then the value this call wrote - and every read from the
+		// compensation onward fails here. Nothing is written back over the record, nothing is replayed to
+		// the siblings pinned to it, and the mode mapping still rolls back.
+		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
+		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: { pinned: { id: "pinned-id", settings: priorSettings } },
+			profileEntries: [{ name: "pinned", id: "pinned-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			profileReader: ({ store: profileStore }) => {
+				let reads = 0
+				return async ({ name }: { name: string }) => {
+					reads += 1
+					if (reads >= 3) {
+						throw new Error("store read failed")
+					}
+					return profileStore.getProfile({ name })
+				}
+			},
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// The record keeps what this call last wrote to it: no blind restore of the prior record, and no
+		// blind delete either.
+		expect(store.saveConfig).toHaveBeenCalledTimes(1)
+		expect(store.deleteConfig).not.toHaveBeenCalled()
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).not.toHaveBeenCalled()
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("left the profile record 'pinned' unrestored"),
+		)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
 	})
 	it("preserves credentials in overlays pinned to a different previous profile", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)

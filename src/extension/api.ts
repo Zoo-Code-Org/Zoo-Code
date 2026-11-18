@@ -4,6 +4,7 @@ import * as path from "path"
 import * as os from "os"
 
 import * as vscode from "vscode"
+import deepEqual from "fast-deep-equal"
 import pWaitFor from "p-wait-for"
 
 import {
@@ -914,7 +915,10 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 	 * prior mode-mapping read runs just before that section so a failed read aborts the call with
 	 * nothing mutated, and the
 	 * compensation runs in its own section after re-reading the record, so a record another view
-	 * created is never deleted by this call rollback. On failure the call restores the prior record,
+	 * created is never deleted by this call rollback and a record another view rewrote is never restored
+	 * over: each branch re-reads the layer it writes and acts only while the stored value still equals
+	 * the one this call wrote (compare-and-set, step 1 of issue 2488), and a re-read that fails leaves
+	 * that key exactly as it stands. On failure the call restores the prior record,
 	 * the prior shared settings, the prior shared mode and profile pin, and the prior mapping of every
 	 * mode the payload touched, then replays only the settings keys this call itself wrote, taken from
 	 * the snapshot it captured; the replay is best effort - a restore that itself fails is logged
@@ -980,22 +984,42 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// existing record and let rollback delete it. A failed existence read is treated as "may exist"
 		// so rollback never deletes blindly, and the prior-record read still fails closed before
 		// anything is mutated.
-		const { recordExisted, previousRecord, savedId } = await manager.runExclusiveAcrossInstances(async () => {
-			let existed: boolean
-			try {
-				existed = await manager.hasConfig(savedProfileName)
-			} catch {
-				existed = true
-			}
-			const priorRecord = existed ? await manager.getProfile({ name: savedProfileName }) : undefined
-			// saveConfig validates before storing, so a rejected save leaves every domain
-			// untouched and the call fails with nothing to roll back. The record takes the same
-			// filtered payload as the shared write: a caller may hand this call a stale viewStates
-			// snapshot (a map of every other view's selection), and storing it in a profile record
-			// would pin those views to the snapshot the moment the record is re-applied.
-			const id = await manager.saveConfig(savedProfileName, forwardValues)
-			return { recordExisted: existed, previousRecord: priorRecord, savedId: id }
-		})
+		const { recordExisted, previousRecord, savedId, writtenSettings } = await manager.runExclusiveAcrossInstances(
+			async () => {
+				let existed: boolean
+				try {
+					existed = await manager.hasConfig(savedProfileName)
+				} catch {
+					existed = true
+				}
+				const priorRecord = existed ? await manager.getProfile({ name: savedProfileName }) : undefined
+				// saveConfig validates before storing, so a rejected save leaves every domain
+				// untouched and the call fails with nothing to roll back. The record takes the same
+				// filtered payload as the shared write: a caller may hand this call a stale viewStates
+				// snapshot (a map of every other view's selection), and storing it in a profile record
+				// would pin those views to the snapshot the moment the record is re-applied.
+				const id = await manager.saveConfig(savedProfileName, forwardValues)
+				// Ownership base for both compensation branches: the value this call wrote, read back from
+				// the layer it wrote while this section still holds it. The prior record is the value a restore
+				// writes, not the value that says whether this call still owns the name - our own save is what
+				// moved it - and saveConfig normalises the payload (a legacy downgrade plus a schema parse),
+				// so comparing the compensation re-read against the caller object would compare two different
+				// shapes and report a competing write that never happened. A failed read-back leaves ownership
+				// unconfirmed, and an unconfirmed key is neither restored nor deleted.
+				let writtenSettings: ProviderSettings | undefined
+				try {
+					const {
+						name: _writtenName,
+						id: _writtenId,
+						...writtenRecord
+					} = await manager.getProfile({ name: savedProfileName })
+					writtenSettings = writtenRecord
+				} catch {
+					writtenSettings = undefined
+				}
+				return { recordExisted: existed, previousRecord: priorRecord, savedId: id, writtenSettings }
+			},
+		)
 		try {
 			await this.sidebarProvider.setValues(
 				// Only the keys this call owns travel forward; see the filter comment above.
@@ -1021,9 +1045,72 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				const { name: _previousName, id: _previousId, ...rest } = previousRecord
 				previousSettings = rest
 			}
+			// Compare-and-set restore (rule R3 of issue 2488, step 1). Both branches re-read the layer they
+			// are about to write and act only while the stored value still equals the value this call wrote,
+			// read back from that same layer in the section above. The comparison is the one the manager
+			// itself uses to decide whether a profile changed - deepEqual from fast-deep-equal over records,
+			// plain equality over ids - rather than a hand-rolled one. When the value moved under us the key is skipped, every other compensation
+			// still runs, and the skip is logged with the profile name. A re-read that fails is
+			// unconfirmed: the key keeps whatever it holds and nothing is written over it, neither the
+			// prior record nor a delete. Value equality cannot separate two writes of the same value (rule
+			// R5): a second view that rewrote this profile with an identical value has its write cleared
+			// here, which is harmless because the surviving value is the value this call would have
+			// restored anyway; record-level write revision - step 2 of the same issue - is what tells the
+			// two writes apart.
+			let survivingRecordSettings: ProviderSettings | undefined
+			let recordStateConfirmed = true
+			// Both branches read through this helper so a failed read is reported once, with the key it
+			// concerns, instead of throwing out of the section and losing the compare.
+			const readSurvivingRecord = async (onFailure: (error: unknown) => void) => {
+				try {
+					const { name: _readName, ...surviving } = await manager.getProfile({ name: savedProfileName })
+					return surviving
+				} catch (readError) {
+					onFailure(readError)
+					return undefined
+				}
+			}
 			try {
 				await manager.runExclusiveAcrossInstances(async () => {
 					if (recordExisted && previousSettings) {
+						const surviving = await readSurvivingRecord((readError) => {
+							recordStateConfirmed = false
+							this.log(
+								"[setConfiguration] left the profile record '" +
+									savedProfileName +
+									"' unrestored: its current value could not be read, so this call does not " +
+									"write over it (" +
+									(readError instanceof Error ? readError.message : String(readError)) +
+									").",
+							)
+						})
+						if (!surviving) {
+							return
+						}
+						const { id: _survivingId, ...survivingSettings } = surviving
+						// The base is the record this call saved, not the record it found: our own save is what moved
+						// the value, so any other value in the store belongs to a writer this call does not own.
+						if (writtenSettings === undefined || !deepEqual(survivingSettings, writtenSettings)) {
+							if (writtenSettings === undefined) {
+								recordStateConfirmed = false
+							} else {
+								survivingRecordSettings = survivingSettings
+							}
+							this.log(
+								"[setConfiguration] skipped restoring the profile record '" +
+									savedProfileName +
+									"': " +
+									(writtenSettings === undefined
+										? "the value this call wrote could not be read back, so the restore is unconfirmed"
+										: "another view rewrote it under this call (id '" +
+											surviving.id +
+											"', this call wrote '" +
+											savedId +
+											"')") +
+									", so the surviving value is kept.",
+							)
+							return
+						}
 						await manager.saveConfig(savedProfileName, previousSettings)
 						return
 					}
@@ -1033,11 +1120,48 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					if (!(await manager.hasConfig(savedProfileName))) {
 						return
 					}
-					const currentRecord = await manager.getProfile({ name: savedProfileName })
-					if (currentRecord.id !== savedId) {
+					const surviving = await readSurvivingRecord((readError) => {
+						recordStateConfirmed = false
+						this.log(
+							"[setConfiguration] left the profile record '" +
+								savedProfileName +
+								"' undeleted: its current value could not be read, so this call does not delete " +
+								"blind (" +
+								(readError instanceof Error ? readError.message : String(readError)) +
+								").",
+						)
+					})
+					if (!surviving) {
+						return
+					}
+					if (surviving.id !== savedId) {
+						const { id: _keptId, ...keptSettings } = surviving
+						survivingRecordSettings = keptSettings
 						this.log(
 							`[setConfiguration] kept the profile record '${savedProfileName}': another view wrote ` +
-								`it (id '${currentRecord.id}', this call wrote '${savedId}').`,
+								`it (id '${surviving.id}', this call wrote '${savedId}').`,
+						)
+						return
+					}
+					// A view that saves the same profile keeps its id - saveConfig preserves it - so the id
+					// alone does not prove this call still owns the record. Compare what the store holds
+					// against the values our own save wrote, read back from the store above.
+					const { id: _ownId, ...ownSettings } = surviving
+					if (writtenSettings === undefined || !deepEqual(ownSettings, writtenSettings)) {
+						if (writtenSettings === undefined) {
+							recordStateConfirmed = false
+						} else {
+							survivingRecordSettings = ownSettings
+						}
+						this.log(
+							"[setConfiguration] skipped deleting the profile record '" +
+								savedProfileName +
+								"': " +
+								(writtenSettings === undefined
+									? "the value this call wrote could not be read back, so the delete is " +
+										"unconfirmed"
+									: "another view rewrote it under this call with the same id '" + savedId + "'") +
+								", so the surviving value is kept.",
 						)
 						return
 					}
@@ -1097,17 +1221,39 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// siblings with non-secret values, and this replay must be the last
 			// refresh so the overlays end on the restored record's settings. An
 			// absent prior profile restores an empty overlay.
-			try {
-				await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
-					savedProfileName,
-					previousSettings ?? {},
-				)
-			} catch (restoreError) {
+			//
+			// What counts as the record's settings now follows the ownership decision above rather than
+			// the pre-write snapshot alone: when another view owns the surviving record this call has no
+			// claim on it, and replaying this call view of the profile would overwrite the newer record -
+			// for a profile this call created, that view is an empty overlay, which strips the newer
+			// record credentials from every sibling pinned to it. So the replay carries the values the
+			// store holds now when ownership moved, the prior record when this call still owns the
+			// rollback, and an empty overlay when the record is gone. When the re-read failed nothing is
+			// replayed at all: the overlays keep whatever the failed write left there, which is the same
+			// rule the record compensation follows.
+			const overlaySettingsForSavedProfile: ProviderSettings | undefined = recordStateConfirmed
+				? (survivingRecordSettings ?? previousSettings ?? {})
+				: undefined
+			if (overlaySettingsForSavedProfile) {
+				try {
+					await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+						savedProfileName,
+						overlaySettingsForSavedProfile,
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to refresh the overlays pinned to '" +
+							savedProfileName +
+							"': " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			} else {
 				this.log(
-					"[setConfiguration] failed to refresh the overlays pinned to '" +
+					"[setConfiguration] skipped refreshing the overlays pinned to '" +
 						savedProfileName +
-						"': " +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+						"': the record compensation could not read its current value, so this call left " +
+						"those overlays as they are.",
 				)
 			}
 			// When the mutation switched profiles, the configuration restore above
