@@ -1070,6 +1070,65 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					return undefined
 				}
 			}
+			// A compensation write that fails does not report what it left behind: the restore save may have
+			// rejected before storing anything, and a delete may have rejected with the record still in the
+			// store. Inferring the outcome from the read taken before the write - or from the value the write
+			// meant to store - is the blind write the compare-and-set above exists to prevent, one step further
+			// on: it would replay the prior record, or an empty overlay, to every sibling pinned to a profile
+			// the store has not changed, or no longer holds. So the record is read again and the outcome
+			// follows what the store holds now: its settings while it survives, an empty overlay when it is
+			// confirmed gone, and nothing at all when this confirmation cannot read it either (rule R3 of the
+			// write-ownership issue: an unconfirmed record gets no write, neither a restore nor a refresh of
+			// the overlays pinned to it). The write is already logged; this only decides what follows it.
+			const confirmRecordOutcomeAfterFailedCompensation = async (failure: unknown): Promise<void> => {
+				let exists: boolean
+				try {
+					exists = await manager.hasConfig(savedProfileName)
+				} catch (probeError) {
+					recordStateConfirmed = false
+					this.log(
+						"[setConfiguration] left the overlays pinned to '" +
+							savedProfileName +
+							"' alone: the compensation write failed and the record existence could not be confirmed (" +
+							(probeError instanceof Error ? probeError.message : String(probeError)) +
+							").",
+					)
+					return
+				}
+				if (!exists) {
+					survivingRecordSettings = {}
+					this.log(
+						"[setConfiguration] confirmed the profile record '" +
+							savedProfileName +
+							"' is gone after the failed compensation write, so the overlays pinned to it are refreshed from an empty profile (" +
+							(failure instanceof Error ? failure.message : String(failure)) +
+							").",
+					)
+					return
+				}
+				const reread = await readSurvivingRecord((readError) => {
+					recordStateConfirmed = false
+					this.log(
+						"[setConfiguration] left the overlays pinned to '" +
+							savedProfileName +
+							"' alone: the compensation write failed and the record could not be read afterwards (" +
+							(readError instanceof Error ? readError.message : String(readError)) +
+							").",
+					)
+				})
+				if (!reread) {
+					return
+				}
+				const { id: _confirmedId, ...confirmedSettings } = reread
+				survivingRecordSettings = confirmedSettings
+				this.log(
+					"[setConfiguration] confirmed the profile record '" +
+						savedProfileName +
+						"' after the failed compensation write: the overlays pinned to it are refreshed from what the store holds now, not from the value the failed write meant to store (" +
+						(failure instanceof Error ? failure.message : String(failure)) +
+						").",
+				)
+			}
 			try {
 				await manager.runExclusiveAcrossInstances(async () => {
 					if (recordExisted && previousSettings) {
@@ -1172,6 +1231,12 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
+				// The outcome of that write is unknown, not the prior record and not an absent profile. Confirm it
+				// from the store before the overlay replay below decides what to send the siblings pinned to this
+				// profile; a confirmation that itself cannot read leaves the replay skipped.
+				if (recordStateConfirmed) {
+					await confirmRecordOutcomeAfterFailedCompensation(restoreError)
+				}
 			}
 			// A rollback may restore only what this call wrote, taken from the snapshot it captured.
 			// Every key this call wrote is replayed, including one the snapshot did not hold: replaying
@@ -1192,8 +1257,18 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// actually active. When the payload did write the pin the two readings are the same
 			// value, because the replay holds the snapshot value for every key it carries.
 			const previousProfileName = snapshotValues.currentApiConfigName || "default"
+			// The configuration restore drives a sibling refresh of its own: production setValues refreshes the
+			// overlays pinned to the profile the payload names from the provider keys the replay carries, and a
+			// rollback replay often carries only a key whose snapshot value is undefined, which filters down to an
+			// empty object - enough to strip the credentials a sibling already holds. That refresh is safe only
+			// because the record replay below follows it with the record real settings. When the record outcome is
+			// unconfirmed nothing follows it, so the restore must not refresh: omitting the saved profile name
+			// pins those siblings to the overlay they already hold instead of overwriting it with an empty one.
 			try {
-				await this.sidebarProvider.setValues(replayValues, { savedProfileName: previousProfileName })
+				await this.sidebarProvider.setValues(
+					replayValues,
+					recordStateConfirmed ? { savedProfileName: previousProfileName } : undefined,
+				)
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the previous configuration values: " +
@@ -1229,8 +1304,8 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 			// record credentials from every sibling pinned to it. So the replay carries the values the
 			// store holds now when ownership moved, the prior record when this call still owns the
 			// rollback, and an empty overlay when the record is gone. When the re-read failed nothing is
-			// replayed at all: the overlays keep whatever the failed write left there, which is the same
-			// rule the record compensation follows.
+			// replayed at all, and the configuration restore above is told not to refresh them either, so they keep
+			// what they hold - the same rule the record compensation follows for an unconfirmed read.
 			const overlaySettingsForSavedProfile: ProviderSettings | undefined = recordStateConfirmed
 				? (survivingRecordSettings ?? previousSettings ?? {})
 				: undefined

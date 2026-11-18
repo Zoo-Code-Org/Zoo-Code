@@ -1163,6 +1163,8 @@ describe("API - configuration", () => {
 		snapshot,
 		beforeFailingModeWrite,
 		profileReader,
+		compensationWrite,
+		productionSetValues,
 	}: {
 		records: Record<string, { id: string; settings: Record<string, unknown> }>
 		profileEntries: { name: string; id: string }[]
@@ -1175,10 +1177,44 @@ describe("API - configuration", () => {
 			store: ReturnType<typeof makeProfileStoreDouble>
 			otherWindowManager: ReturnType<typeof makeSharedStoreManagerView>
 		}) => (params: { name: string }) => Promise<unknown>
+		// Makes the compensation write itself fail: "save" rejects the restore save (the second save this
+		// call makes - the first is the forward write and must land), "delete" rejects the only delete.
+		// Neither mutates the entry it rejects, which is what a storage failure leaves behind.
+		compensationWrite?: "save" | "delete"
+		// Routes the settings write through the production ClineProvider#setValues instead of a no-op, with
+		// only its persistence boundaries mocked, so the sibling refresh that setter drives for a saved
+		// profile is real in the test rather than hidden by the double.
+		productionSetValues?: boolean
 	}) => {
 		const store = makeProfileStoreDouble(records)
 		const deps = { store, otherWindowManager: makeSharedStoreManagerView(store.entries) }
-		const setValues = vi.fn().mockResolvedValue(undefined)
+		// The compensation-write seam: the store double stays the source of truth, only the write that the
+		// compensation performs is made to reject, and it rejects before touching the entry.
+		let saveCalls = 0
+		const saveConfig =
+			compensationWrite === "save"
+				? vi.fn((name: string, settings: Record<string, unknown>) => {
+						saveCalls += 1
+						if (saveCalls === 2) {
+							return Promise.reject(new Error("compensation save failed"))
+						}
+						return store.saveConfig(name, settings)
+					})
+				: store.saveConfig
+		const deleteConfig =
+			compensationWrite === "delete"
+				? vi.fn((_name: string) => Promise.reject(new Error("compensation delete failed")))
+				: store.deleteConfig
+		// The persistence boundaries of the production setter: the shared write, the per-view record and the
+		// sibling-overlay snapshot are mocked; the validation, ordering and the refresh it drives are not.
+		const saveViewLocalStateSpy = vi.fn().mockResolvedValue(undefined)
+		const overlaySnapshotSpy = vi.fn().mockResolvedValue(undefined)
+		const setValuesViaProvider = ClineProvider.prototype.setValues
+		const setValues = productionSetValues
+			? vi.fn((values: RooCodeSettings, options?: { savedProfileName?: string }) =>
+					setValuesViaProvider.call(provider, values, options),
+				)
+			: vi.fn().mockResolvedValue(undefined)
 		const managerSetModeConfig = vi.fn().mockResolvedValue(undefined)
 		const refreshSpy = vi.fn().mockResolvedValue(undefined)
 		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
@@ -1203,12 +1239,16 @@ describe("API - configuration", () => {
 				setProviderSettings: vi.fn().mockResolvedValue(undefined),
 			},
 			refreshViewLocalStateForUpdatedProfile: refreshSpy,
+			// Bracketed private members of ClineProvider stand in as the mocked persistence boundaries the
+			// production setter needs; they are not copies of its behaviour.
+			snapshotSiblingOverlaysBeforeSharedSettingsWrite: overlaySnapshotSpy,
+			_saveViewLocalStateFromMutation: saveViewLocalStateSpy,
 			providerSettingsManager: {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 				hasConfig: store.hasConfig,
 				getProfile: profileReader ? profileReader(deps) : store.getProfile,
-				saveConfig: store.saveConfig,
-				deleteConfig: store.deleteConfig,
+				saveConfig,
+				deleteConfig,
 				setModeConfig: managerSetModeConfig,
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
@@ -1234,6 +1274,8 @@ describe("API - configuration", () => {
 			setValues,
 			managerSetModeConfig,
 			refreshSpy,
+			overlaySnapshotSpy,
+			saveViewLocalStateSpy,
 			outputChannel,
 			otherWindowManager: deps.otherWindowManager,
 		}
@@ -1382,11 +1424,17 @@ describe("API - configuration", () => {
 		// record twice - the prior record, then the value this call wrote - and every read from the
 		// compensation onward fails here. Nothing is written back over the record, nothing is replayed to
 		// the siblings pinned to it, and the mode mapping still rolls back.
+		//
+		// The settings write goes through the production ClineProvider#setValues with only its persistence boundaries
+		// mocked, because that setter drives a sibling refresh of its own whenever the payload names the profile it
+		// saves - and a rollback replay names one. A no-op double hides the only route by which this rollback can
+		// reach a sibling overlay at all, so an assertion about the overlays has to be made against the setter.
 		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
 		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
 			records: { pinned: { id: "pinned-id", settings: priorSettings } },
 			profileEntries: [{ name: "pinned", id: "pinned-id" }],
 			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			productionSetValues: true,
 			profileReader: ({ store: profileStore }) => {
 				let reads = 0
 				return async ({ name }: { name: string }) => {
@@ -1412,9 +1460,113 @@ describe("API - configuration", () => {
 		expect(store.saveConfig).toHaveBeenCalledTimes(1)
 		expect(store.deleteConfig).not.toHaveBeenCalled()
 		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
-		expect(refreshSpy).not.toHaveBeenCalled()
+		// The forward write left the overlays pinned to this profile holding this call credentials, through the
+		// refresh production setValues drives for a saved profile. The compensation adds no refresh of its own:
+		// it could not confirm the record, so it neither replays the prior record nor lets the replay collapse
+		// those overlays to an empty one.
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).not.toHaveBeenCalledWith("pinned", {})
 		expect(outputChannel.appendLine).toHaveBeenCalledWith(
 			expect.stringContaining("left the profile record 'pinned' unrestored"),
+		)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+	})
+	it("replays what the store holds when the compensation restore itself fails", async () => {
+		// The restore save is a write like the forward one, so its failure does not report which value the
+		// record ended on. Assuming the prior record from the read taken before the write would replay that
+		// guess to every sibling pinned to the profile, so the outcome is read from the store instead.
+		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
+		const { api, store, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: { pinned: { id: "pinned-id", settings: priorSettings } },
+			profileEntries: [{ name: "pinned", id: "pinned-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			compensationWrite: "save",
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(store.deleteConfig).not.toHaveBeenCalled()
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("failed to restore the profile record 'pinned'"),
+		)
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("refreshed from what the store holds now, not from the value the failed write"),
+		)
+	})
+	it("replays the surviving record when the compensation delete fails", async () => {
+		// A delete that rejects leaves the profile this call created in the store with this call settings.
+		// Selecting an empty overlay because the delete was the write that ran would strip those credentials
+		// from every sibling pinned to it, so the replay follows the record that survived instead.
+		const { api, store, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: {},
+			profileEntries: [{ name: "pinned", id: "created-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			compensationWrite: "delete",
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).toHaveBeenCalledTimes(1)
+		expect(refreshSpy).toHaveBeenCalledWith("pinned", expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).not.toHaveBeenCalledWith("pinned", {})
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("refreshed from what the store holds now, not from the value the failed write"),
+		)
+	})
+	it("leaves the overlays alone when the compensation write and its confirmation read both fail", async () => {
+		// The same rule one step further: a confirmation that cannot read leaves the outcome unconfirmed, and
+		// an unconfirmed record gets no write - neither the restore the compensation wanted to make nor a
+		// refresh of the overlays pinned to it. The mode mapping still rolls back.
+		const priorSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "prior-key" }
+		const { api, store, managerSetModeConfig, refreshSpy, outputChannel } = makeRollbackHarness({
+			records: { pinned: { id: "pinned-id", settings: priorSettings } },
+			profileEntries: [{ name: "pinned", id: "pinned-id" }],
+			snapshot: { currentApiConfigName: "pinned", apiProvider: providerIdentifiers.anthropic },
+			compensationWrite: "save",
+			profileReader: ({ store: profileStore }) => {
+				let reads = 0
+				return async ({ name }: { name: string }) => {
+					reads += 1
+					if (reads >= 4) {
+						throw new Error("confirmation read failed")
+					}
+					return profileStore.getProfile({ name })
+				}
+			},
+		})
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				apiKey: "this-call-key",
+				modeApiConfigs: { code: "code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(store.entries.get("pinned")?.settings).toEqual(expect.objectContaining({ apiKey: "this-call-key" }))
+		expect(refreshSpy).not.toHaveBeenCalled()
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("the compensation write failed and the record could not be read afterwards"),
+		)
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining("skipped refreshing the overlays pinned to 'pinned'"),
 		)
 		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
 	})
