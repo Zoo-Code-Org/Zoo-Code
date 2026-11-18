@@ -5264,13 +5264,23 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 			const logSpy = vi.spyOn(provider, "log")
-			// @ts-ignore - Replace customModesManager with a test double (no custom modes).
-			provider.customModesManager = { getCustomModes: vi.fn().mockResolvedValue([]), dispose: vi.fn() }
-			// The file-level modes mock resolves every slug to a mode; narrow it to the slugs under test.
+			// @ts-ignore - Replace customModesManager with a test double: "refactor" exists only as a
+			// custom mode here, which is the mode data the production lookup consumes.
+			provider.customModesManager = {
+				getCustomModes: vi
+					.fn()
+					.mockResolvedValue([
+						{ slug: "refactor", name: "Refactor", roleDefinition: "test role", groups: ["read"] },
+					]),
+				dispose: vi.fn(),
+			}
+			// Bind the file-level modes mock back to the production predicate: the mode data above is
+			// what varies per test, never the slug lookup itself.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				slug === "refactor" ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(
+				(await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")).getModeBySlug,
+			)
 			try {
 				await provider.setValues({ mode: "refactor" })
 				expect(mockContext.globalState.get("mode")).toBe("refactor")
@@ -7255,12 +7265,13 @@ describe("ClineProvider", () => {
 				new WebviewFocusTracker(),
 			)
 
-			// This file's getModeBySlug mock resolves every slug; narrow it to the slugs
-			// under test so "not-a-real-mode" is rejected like the real lookup would.
+			// Bind the file-level mock to the production predicate: "code" and "architect" are real
+			// built-ins, and "not-a-real-mode" is rejected by the same lookup the extension uses.
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string) =>
-				["code", "architect"].includes(slug) ? { slug } : undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(
+				(await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")).getModeBySlug,
+			)
 
 			try {
 				await provider.setValues({ mode: "not-a-real-mode" })
@@ -7292,12 +7303,13 @@ describe("ClineProvider", () => {
 			// registering configuration.customModes: the payload's own modes must count
 			// as valid even though the manager has not registered them yet.
 			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+			// Production validates the payload's own custom modes against the real lookup; the mode
+			// store stays the mocked boundary (empty above).
 			const modesModule = vi.mocked(await import("../../../shared/modes"))
 			const originalMode = modesModule.getModeBySlug("code")
-			modesModule.getModeBySlug.mockImplementation(((slug: string, customModes?: { slug: string }[]) =>
-				customModes?.some((mode) => mode.slug === slug)
-					? { slug }
-					: undefined) as typeof modesModule.getModeBySlug)
+			modesModule.getModeBySlug.mockImplementation(
+				(await vi.importActual<typeof import("../../../shared/modes")>("../../../shared/modes")).getModeBySlug,
+			)
 
 			try {
 				await provider.setValues({

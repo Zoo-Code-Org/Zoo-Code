@@ -416,7 +416,21 @@ export class ClineProvider
 	 */
 	public async deleteCustomMode(slug: string): Promise<void> {
 		return this.enqueueProviderProfileMutation(
-			async () => this.customModesManager.deleteCustomMode(slug),
+			async () => {
+				await this.customModesManager.deleteCustomMode(slug)
+				// A view that pinned this slug keeps it in its durable pin, and getState() gives the
+				// pin precedence, so the view would go on selecting a mode whose definition is gone:
+				// the shared default write the webview message makes afterwards does not touch
+				// per-view pins. Clear the pin of every view naming the deleted slug and leave views
+				// pinned to another mode alone. A closed view holds its pin only in the persisted
+				// map, where loadViewState already drops a mode that no longer resolves.
+				const affected = ClineProvider.getAllInstances().filter(
+					(instance) => instance.viewLocalState.mode === slug,
+				)
+				await Promise.all(
+					affected.map((instance) => instance._saveViewLocalStateFromMutation({ mode: undefined })),
+				)
+			},
 			// The deletion must run to completion: a timeout that advanced the queue while the
 			// mode files were being rewritten would let the next switch read a partial list.
 			{ runToCompletion: true },

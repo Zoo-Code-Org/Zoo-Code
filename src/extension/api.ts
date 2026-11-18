@@ -27,6 +27,7 @@ import {
 	TASK_START_FAILURE_ERROR_CODE,
 	TASK_START_FAILURE_ERROR_MESSAGE,
 	isRetiredProvider,
+	PROVIDER_SETTINGS_KEYS,
 	providerSettingsWithIdSchema,
 	discriminatedProviderSettingsWithIdSchema,
 } from "@roo-code/types"
@@ -978,17 +979,28 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 			// The merged replay above wrote this view's mode and pin into shared state, which
 			// belongs to every unpinned view: put the shared pair back from the pre-write snapshot.
 			// This touches the shared store only - this view's own overlay keeps the same pair the
-			// replay just wrote there, so nothing about this view changes.
-			try {
-				await this.sidebarProvider.contextProxy.setValues({
-					mode: previousSharedMode,
-					currentApiConfigName: previousSharedProfileName,
-				})
-			} catch (restoreError) {
-				this.log(
-					"[setConfiguration] failed to restore the shared mode and profile pin: " +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
-				)
+			// replay just wrote there, so nothing about this view changes. Only a key this call
+			// actually wrote can need putting back: a payload that never mentioned the shared mode
+			// or pin left both alone, so replaying them would roll a mode or profile that another
+			// view activated in the meantime back into this call's rollback.
+			const sharedPairEntries: [string, unknown][] = []
+			if (writtenKeys.has("mode")) {
+				sharedPairEntries.push(["mode", previousSharedMode])
+			}
+			if (writtenKeys.has("currentApiConfigName")) {
+				sharedPairEntries.push(["currentApiConfigName", previousSharedProfileName])
+			}
+			if (sharedPairEntries.length > 0) {
+				try {
+					await this.sidebarProvider.contextProxy.setValues(
+						Object.fromEntries(sharedPairEntries) as RooCodeSettings,
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to restore the shared mode and profile pin: " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
 			}
 			// Replay the restored record to the sibling overlays pinned to the
 			// saved profile AFTER the configuration restore: when the saved profile
@@ -1031,13 +1043,19 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 					)
 				}
 			}
-			try {
-				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
-			} catch (restoreError) {
-				this.log(
-					"[setConfiguration] failed to restore the shared provider settings: " +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
-				)
+			// The flat shared provider store belongs to every unpinned view too, and this call moved
+			// it only when its payload carried provider keys: a settings-only payload leaves it
+			// alone, so restoring the snapshot here would overwrite a provider another view
+			// selected while this call was in flight.
+			if (PROVIDER_SETTINGS_KEYS.some((key) => writtenKeys.has(key))) {
+				try {
+					await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to restore the shared provider settings: " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
 			}
 			try {
 				await Promise.all(

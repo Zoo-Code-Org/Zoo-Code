@@ -1114,7 +1114,11 @@ describe("API - configuration", () => {
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
-		await expect(api.setConfiguration({ currentApiConfigName: "pinned" })).rejects.toThrow("refresh down")
+		// The payload carries a provider key so the shared provider-settings restore is owed to
+		// this call: the rollback restores only what the call itself wrote.
+		await expect(api.setConfiguration({ apiModelId: "model-new", currentApiConfigName: "pinned" })).rejects.toThrow(
+			"refresh down",
+		)
 
 		// The save landed but the shared/sibling refresh rejected: the round trip
 		// is one transaction, so the created record is deleted and the shared
@@ -1195,6 +1199,50 @@ describe("API - configuration", () => {
 			writeOrder.lastIndexOf("provider.setValues"),
 		)
 		expect(postStateToWebview).not.toHaveBeenCalled()
+	})
+	// A payload that never mentioned the shared mode or pin left both where they were: the
+	// rollback must not write this call's pre-write snapshot back over a mode or profile
+	// another view activated while it was in flight, nor the provider store it never moved.
+	it("leaves the shared mode, pin, and provider store alone when the payload wrote none of them", async () => {
+		const sharedBefore = { mode: "code", currentApiConfigName: "shared-profile", mcpEnabled: true }
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
+		const setValues = vi.fn().mockRejectedValue(new Error("refresh down"))
+		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue(sharedBefore),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn((key: string) => sharedBefore[key as keyof typeof sharedBefore]),
+				setValues: sharedSetValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings,
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				setModeConfig: vi.fn().mockResolvedValue(undefined),
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(api.setConfiguration({ mcpEnabled: false })).rejects.toThrow("refresh down")
+
+		// The per-view half of the rollback still replays the key this call wrote...
+		expect(setValues).toHaveBeenCalledTimes(2)
+		expect(setValues).toHaveBeenLastCalledWith(expect.objectContaining({ mcpEnabled: true }), expect.anything())
+		// ...and neither shared restore runs: this call wrote none of those keys, so replaying
+		// their snapshot would undo a mode, profile, or provider another view chose meanwhile.
+		expect(sharedSetValues).not.toHaveBeenCalled()
+		expect(setProviderSettings).not.toHaveBeenCalled()
 	})
 	it("restores the previous record when rolling back a save over an existing profile", async () => {
 		// The shared refresh succeeds and the mode fan-out fails: the overlays
@@ -1303,7 +1351,13 @@ describe("API - configuration", () => {
 		const api = new API(outputChannel, provider, makeClineProviderFactory())
 
 		await expect(
-			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+			api.setConfiguration({
+				// A provider key in the payload is what makes the shared provider-settings restore
+				// owed to this call; the rollback restores only what the call itself wrote.
+				apiModelId: "model-new",
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { code: "new-code-config" },
+			}),
 		).rejects.toThrow("mode write failed")
 
 		// The shared refresh had already succeeded when the mode write failed, so

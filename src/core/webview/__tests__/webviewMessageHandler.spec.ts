@@ -2303,6 +2303,21 @@ describe("webviewMessageHandler - mode through updateSettings", () => {
 		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", "architect")
 	})
 
+	// The mode list the guard consults is the manager's, so a slug the user defined must be
+	// accepted through the same path that rejects an unknown one.
+	it("persists a custom mode the manager knows", async () => {
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([
+			{ slug: "custom-review", name: "Custom Review", roleDefinition: "test", groups: ["read"] } as ModeConfig,
+		])
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { mode: "custom-review" },
+		})
+
+		expect(mockClineProvider.setValue).toHaveBeenCalledWith("mode", "custom-review")
+	})
+
 	it("drops an unknown mode instead of writing it to the shared store and the view pin", async () => {
 		await webviewMessageHandler(mockClineProvider, {
 			type: "updateSettings",
@@ -2312,6 +2327,17 @@ describe("webviewMessageHandler - mode through updateSettings", () => {
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", "no-such-mode")
 		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", expect.anything())
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Ignoring invalid mode"))
+	})
+	// A non-string mode is truthy, so only the type check in the guard keeps it out of both
+	// persistence layers.
+	it("drops a non-string mode without writing it to the shared store or the view pin", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: Object.assign({} as RooCodeSettings, { mode: 42 }),
+		})
+
+		expect(mockClineProvider.setValue).not.toHaveBeenCalledWith("mode", expect.anything())
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "42"'))
 	})
 })
 

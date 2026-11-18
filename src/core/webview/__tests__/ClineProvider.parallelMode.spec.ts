@@ -4,6 +4,7 @@ import * as vscode from "vscode"
 
 import {
 	type HistoryItem,
+	type ModeConfig,
 	type ProviderSettingsEntry,
 	type ProviderSettingsWithId,
 	PROVIDER_SETTINGS_KEYS,
@@ -396,7 +397,7 @@ vi.mock("@roo-code/cloud", () => ({
 // Mock modes
 vi.mock("../../../shared/modes", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("../../../shared/modes")>()
-	const modes = [
+	const modes: ModeConfig[] = [
 		{
 			slug: "code",
 			name: "Code Mode",
@@ -425,11 +426,13 @@ vi.mock("../../../shared/modes", async (importOriginal) => {
 	return {
 		...actual,
 		modes,
-		// Resolve against the mocked mode list above (not the real module modes) so the
-		// lookup matches exactly what the tests set up.
-		getModeBySlug: vi.fn().mockImplementation((slug: string) => {
-			return modes.find((m) => m.slug === slug) ?? null
-		}),
+		// Only the mode *data* is mocked here: the slug predicate stays production code. The
+		// fixture list is handed to it as the caller's custom modes - the one place the real
+		// lookup accepts test data - so these tests resolve exactly the slugs they set up
+		// (including "debugger", which is not a built-in slug) without re-implementing it.
+		getModeBySlug: vi.fn((slug: string, customModes?: ModeConfig[]) =>
+			actual.getModeBySlug(slug, [...(customModes ?? []), ...modes]),
+		),
 		defaultModeSlug: "code",
 	}
 })
@@ -2861,20 +2864,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.setValue("mode", "code")
 			const logSpy = vi.spyOn(provider, "log")
 
-			// The file-level getModeBySlug mock ignores its customModes argument (and returns
-			// null for unknown slugs), so make the lookup custom-mode aware for this test.
-			const modesModule = vi.mocked(await import("../../../shared/modes"))
-			const originalGetModeBySlug = modesModule.getModeBySlug.getMockImplementation()
+			// The file-level mock delegates to the production lookup, so this test supplies only
+			// the custom mode's definition: the mode store is the boundary it mocks.
 			type TestMode = { slug: string; name: string; roleDefinition: string; groups: string[] }
 			let customModes: TestMode[] = [
 				{ slug: "ephemeral-mode", name: "Ephemeral Mode", roleDefinition: "Test Role", groups: [] },
 			]
-			modesModule.getModeBySlug.mockImplementation(
-				((slug: string, custom?: TestMode[]) =>
-					custom?.find((mode) => mode.slug === slug) ??
-					modesModule.modes.find((mode) => mode.slug === slug) ??
-					null) as typeof modesModule.getModeBySlug,
-			)
 			const getCustomModesSpy = vi
 				.spyOn(provider.customModesManager, "getCustomModes")
 				.mockImplementation(async () => customModes as never)
@@ -2907,13 +2902,60 @@ describe("ClineProvider - Parallel Mode Support", () => {
 				expect(provider.getValue("mode")).toBe("code")
 			} finally {
 				getCustomModesSpy.mockRestore()
-
-				if (originalGetModeBySlug) {
-					modesModule.getModeBySlug.mockImplementation(originalGetModeBySlug)
-				}
 			}
 
 			await provider.dispose()
+		})
+
+		// Deleting the mode must not leave a view selecting it: getState() gives the per-view
+		// pin precedence, and the webview message's shared default write afterwards does not
+		// touch pins. A view pinned to a mode that still resolves keeps its pin.
+		it("clears the durable pin of a view that pinned the deleted custom mode", async () => {
+			const pinning = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const unperturbed = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await pinning["resolveWebviewView"](createMockWebviewView())
+			await unperturbed["resolveWebviewView"](createMockWebviewView())
+			await pinning["setViewStateId"]("pin-deleted-mode")
+			await unperturbed["setViewStateId"]("keep-mode-view")
+			await pinning.setValue("mode", "code")
+			await unperturbed.setValue("mode", "code")
+			await pinning.saveViewState("mode", "ephemeral-mode")
+			await unperturbed.saveViewState("mode", "ask")
+			// Both pins live in the same persisted record, so the clearing write must be selective.
+			expect(mockContext.globalState.get("viewStates")).toMatchObject({
+				"pin-deleted-mode": { mode: "ephemeral-mode" },
+				"keep-mode-view": { mode: "ask" },
+			})
+			// The CustomModesManager double in this file has no deleteCustomMode member, so it is
+			// installed on the instance instead of spied.
+			const deleteSpy = vi.fn().mockResolvedValue(undefined)
+			Object.assign(pinning.customModesManager, { deleteCustomMode: deleteSpy })
+
+			await pinning.deleteCustomMode("ephemeral-mode")
+
+			expect(deleteSpy).toHaveBeenCalledWith("ephemeral-mode")
+			// The pin is cleared from the live buffer and from the persisted record, so the next
+			// state push falls back to the shared mode instead of the deleted slug.
+			expect(pinning["viewLocalState"].mode).toBeUndefined()
+			expect(mockContext.globalState.get("viewStates")).not.toMatchObject({
+				"pin-deleted-mode": { mode: expect.anything() },
+			})
+			expect(unperturbed["viewLocalState"].mode).toBe("ask")
+
+			await pinning.dispose()
+			await unperturbed.dispose()
 		})
 
 		it("should route a custom-mode deletion through the mutation queue", async () => {
