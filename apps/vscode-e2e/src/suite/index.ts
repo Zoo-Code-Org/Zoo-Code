@@ -7,8 +7,18 @@ import * as vscode from "vscode"
 import { RooCodeEventName, type RooCodeAPI } from "@roo-code/types"
 
 import { isCompletedAsk, waitFor } from "./utils"
+import { authenticatedMockFetch } from "../mock-auth"
 
 export async function run() {
+	// Install before extension activation so SDK clients capture the authenticated fetch.
+	if (process.env.AIMOCK_URL && process.env.E2E_AIMOCK_API_KEY) {
+		globalThis.fetch = authenticatedMockFetch(
+			globalThis.fetch,
+			process.env.AIMOCK_URL,
+			process.env.E2E_AIMOCK_API_KEY,
+		)
+	}
+
 	const extension = vscode.extensions.getExtension<RooCodeAPI>("ZooCodeOrganization.zoo-code")
 
 	if (!extension) {
@@ -22,7 +32,7 @@ export async function run() {
 
 	await api.setConfiguration({
 		apiProvider: providerIdentifiers.openrouter,
-		// In record mode, forward the real key so aimock can proxy it to OpenRouter.
+		// The fetch wrapper supplies mock authentication; the parent owns recording keys.
 		// In replay mode, "mock-key" is sufficient — aimock never contacts the real API.
 		openRouterApiKey: aimockUrl && !isRecord ? "mock-key" : process.env.OPENROUTER_API_KEY!,
 		openRouterModelId: "openai/gpt-4.1",
