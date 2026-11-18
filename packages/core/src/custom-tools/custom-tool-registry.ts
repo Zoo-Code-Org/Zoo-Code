@@ -37,7 +37,12 @@ export class CustomToolRegistry {
 	private lastLoaded: Map<string, number> = new Map()
 
 	constructor(options?: RegistryOptions) {
-		this.cacheDir = options?.cacheDir ?? path.join(os.tmpdir(), "dynamic-tools-cache")
+		this.cacheDir =
+			options?.cacheDir ??
+			path.join(
+				process.platform === "win32" ? os.homedir() : os.tmpdir(),
+				`dynamic-tools-cache-${process.getuid?.() ?? "user"}`,
+			)
 		// Default to current working directory's node_modules.
 		this.nodePaths = options?.nodePaths ?? [path.join(process.cwd(), "node_modules")]
 		this.extensionPath = options?.extensionPath
@@ -234,6 +239,49 @@ export class CustomToolRegistry {
 		return this.extensionPath
 	}
 
+	/** Reject cache paths that another account could supply or replace. */
+	private validateCachePath(cachePath: string, directory: boolean): void {
+		const stat = fs.lstatSync(cachePath)
+		const uid = process.getuid?.()
+		if (
+			(directory ? !stat.isDirectory() : !stat.isFile()) ||
+			(uid !== undefined && (stat.uid !== uid || (stat.mode & 0o077) !== 0)) ||
+			(!directory && stat.nlink !== 1)
+		) {
+			throw new Error(`Unsafe custom tool cache path: ${cachePath}`)
+		}
+	}
+
+	private prepareCacheDirectory(): void {
+		// Resolve platform aliases (e.g. /var on macOS), then check ancestors before writing.
+		let ancestor = path.dirname(path.resolve(this.cacheDir))
+		const missing: string[] = []
+		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
+			missing.unshift(path.basename(ancestor))
+			ancestor = path.dirname(ancestor)
+		}
+		let parent = fs.realpathSync(ancestor)
+		for (let current = parent; ; current = path.dirname(current)) {
+			const stat = fs.statSync(current)
+			const uid = process.getuid?.()
+			if (
+				uid !== undefined &&
+				((stat.uid !== uid && stat.uid !== 0) || ((stat.mode & 0o022) !== 0 && (stat.mode & 0o1000) === 0))
+			) {
+				throw new Error(`Unsafe custom tool cache parent: ${current}`)
+			}
+			if (path.dirname(current) === current) break
+		}
+		for (const component of missing) {
+			parent = path.join(parent, component)
+			fs.mkdirSync(parent, { recursive: true, mode: 0o700 })
+			this.validateCachePath(parent, true)
+		}
+		this.cacheDir = path.join(parent, path.basename(this.cacheDir))
+		fs.mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 })
+		this.validateCachePath(this.cacheDir, true)
+	}
+
 	/**
 	 * Clear the TypeScript compilation cache (both in-memory and on disk).
 	 * This removes all tool-specific subdirectories and their contents.
@@ -243,6 +291,7 @@ export class CustomToolRegistry {
 
 		if (fs.existsSync(this.cacheDir)) {
 			try {
+				this.prepareCacheDirectory()
 				const entries = fs.readdirSync(this.cacheDir, { withFileTypes: true })
 				for (const entry of entries) {
 					const entryPath = path.join(this.cacheDir, entry.name)
@@ -282,9 +331,13 @@ export class CustomToolRegistry {
 		const stat = fs.statSync(absolutePath)
 		const cacheKey = `${absolutePath}:${stat.mtimeMs}`
 
+		this.prepareCacheDirectory()
+
 		// Check if we have a cached version in memory.
 		if (this.tsCache.has(cacheKey)) {
 			const cachedPath = this.tsCache.get(cacheKey)!
+			this.validateCachePath(path.dirname(cachedPath), true)
+			this.validateCachePath(cachedPath, false)
 			return import(`file://${cachedPath}`)
 		}
 
@@ -292,12 +345,14 @@ export class CustomToolRegistry {
 
 		// Use a tool-specific subdirectory to avoid .env file conflicts between tools.
 		const toolCacheDir = path.join(this.cacheDir, hash)
-		fs.mkdirSync(toolCacheDir, { recursive: true })
+		fs.mkdirSync(toolCacheDir, { recursive: true, mode: 0o700 })
+		this.validateCachePath(toolCacheDir, true)
 
 		const tempFile = path.join(toolCacheDir, "bundle.mjs")
 
 		// Check if we have a cached version on disk (from a previous run/instance).
-		if (fs.existsSync(tempFile)) {
+		if (fs.lstatSync(tempFile, { throwIfNoEntry: false })) {
+			this.validateCachePath(tempFile, false)
 			this.tsCache.set(cacheKey, tempFile)
 			return import(`file://${tempFile}`)
 		}
@@ -330,6 +385,9 @@ export class CustomToolRegistry {
 			this.extensionPath,
 		)
 
+		fs.chmodSync(tempFile, 0o600)
+		this.validateCachePath(tempFile, false)
+
 		// Copy .env files from the tool's source directory to the tool-specific cache directory.
 		// This allows tools that use dotenv with __dirname to find their .env files,
 		// while ensuring different tools' .env files don't overwrite each other.
@@ -360,6 +418,7 @@ export class CustomToolRegistry {
 				const stat = fs.statSync(srcPath)
 				if (stat.isFile()) {
 					fs.copyFileSync(srcPath, destPath)
+					fs.chmodSync(destPath, 0o600)
 					console.log(`[CustomToolRegistry] copied ${envFile} to tool cache directory`)
 				}
 			}
