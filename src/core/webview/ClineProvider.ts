@@ -4112,7 +4112,10 @@ export class ClineProvider
 			return
 		}
 
-		await Promise.all(
+		// Settle every live view before reporting. A rejection must not surface while a sibling view's
+		// forward write is still in flight: the caller's compensation re-points these same views back,
+		// and starting it mid-write races the write it is trying to undo.
+		const results = await Promise.allSettled(
 			affected.map(async (instance) => {
 				// Assigning the settings (even undefined) is what replaces or clears the
 				// overlay: the renamed record's current settings are the only correct
@@ -4133,6 +4136,10 @@ export class ClineProvider
 				await instance.postStateToWebview()
 			}),
 		)
+		const failure = results.find((result) => result.status === "rejected")
+		if (failure) {
+			throw failure.reason
+		}
 	}
 
 	async updateCustomInstructions(instructions?: string) {

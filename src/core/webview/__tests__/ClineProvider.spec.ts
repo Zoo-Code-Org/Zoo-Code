@@ -6529,6 +6529,62 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("waits for every live view to settle before reporting a failed re-point", async () => {
+			// The rename compensation re-points these same views when this call rejects. If the first
+			// failure surfaced while a sibling view's forward write was still in flight, the
+			// compensation would race the write it is trying to undo, so the re-point settles every
+			// view first and only then propagates the first failure.
+			const failingView = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const slowView = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await failingView["setViewStateId"]("repoint-order-first")
+			await failingView.saveViewState("currentApiConfigName", "repoint-order-profile")
+			await slowView["setViewStateId"]("repoint-order-second")
+			await slowView.saveViewState("currentApiConfigName", "repoint-order-profile")
+			const order: string[] = []
+			let releaseSlowView: () => void = () => {}
+			const slowViewSettled = new Promise<void>((resolve) => {
+				releaseSlowView = resolve
+			})
+			vi.spyOn(failingView, "postStateToWebview").mockRejectedValue(new Error("repoint post failed"))
+			vi.spyOn(slowView, "postStateToWebview").mockImplementation(async () => {
+				order.push("slow-view-post-started")
+				await slowViewSettled
+				order.push("slow-view-post-settled")
+			})
+			// The slow view's write is what is still in flight when the first one fails, so its release
+			// cannot depend on the re-point settling: the timer releases it while the caller is already
+			// waiting on the rejection.
+			const releaseTimer = setTimeout(releaseSlowView, 50)
+
+			await expect(
+				failingView["repointViewLocalStateAfterProfileRename"]("repoint-order-profile", "repoint-order-new", {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "renamed-key",
+				}),
+			).rejects.toThrow("repoint post failed")
+
+			clearTimeout(releaseTimer)
+			// The sibling write had to finish before the rejection was handed back, or the rename
+			// compensation would have started against a half-applied view.
+			expect(order).toEqual(["slow-view-post-started", "slow-view-post-settled"])
+			expect(failingView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
+			expect(slowView["viewLocalState"].currentApiConfigName).toBe("repoint-order-new")
+
+			await failingView.dispose()
+			await slowView.dispose()
+		})
 		it("clears this view's buffered apiConfiguration when directly activating a profile", async () => {
 			const provider = new ClineProvider(
 				mockContext,
