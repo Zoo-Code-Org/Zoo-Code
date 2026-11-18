@@ -682,7 +682,10 @@ describe("ReadFileTool", () => {
 
 				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
 				mockedReadWithSlice.mockReturnValue({
-					content: lines.slice(0, 2000).map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					content: lines
+						.slice(0, 2000)
+						.map((l, i) => `${i + 1} | ${l}`)
+						.join("\n"),
 					returnedLines: 2000,
 					totalLines: 2500,
 					wasTruncated: true,
@@ -731,14 +734,21 @@ describe("ReadFileTool", () => {
 				mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
 				mockedFsReadFile.mockResolvedValue(Buffer.from(lines.join("\n")))
 				mockedReadWithSlice.mockReturnValue({
-					content: lines.slice(0, 2000).map((l, i) => `${i + 1} | ${l}`).join("\n"),
+					content: lines
+						.slice(0, 2000)
+						.map((l, i) => `${i + 1} | ${l}`)
+						.join("\n"),
 					returnedLines: 2000,
 					totalLines: 2500,
 					wasTruncated: true,
 					includedRanges: [[1, 2000]],
 				})
 
-				await readFileTool.execute({ files: [{ path: "very-large-legacy.ts" }], _legacyFormat: true }, mockTask as unknown as Task, callbacks)
+				await readFileTool.execute(
+					{ files: [{ path: "very-large-legacy.ts" }], _legacyFormat: true },
+					mockTask as unknown as Task,
+					callbacks,
+				)
 
 				const result = callbacks.pushToolResult.mock.calls[0][0]
 				expect(result).toMatch(/\[\.\.\.(?:SKIPPED|TRUNCATED)/)

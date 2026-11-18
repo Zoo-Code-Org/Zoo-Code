@@ -328,8 +328,16 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 		let adaptiveOmittedStart = 0
 		let adaptiveOmittedCount = 0
 
-		if (entry.offset === undefined && entry.limit === undefined && result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
-			const truncated = truncateFileOutput(addLineNumbers(content, 1), SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines)
+		if (
+			entry.offset === undefined &&
+			entry.limit === undefined &&
+			result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD
+		) {
+			const truncated = truncateFileOutput(
+				addLineNumbers(content, 1),
+				SLIDING_WINDOW_PREVIEW_LIMIT,
+				result.totalLines,
+			)
 			if (truncated.wasTruncated) {
 				output = truncated.content
 				adaptiveTruncated = true
@@ -830,7 +838,11 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
 					if (result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
-						content = truncateFileOutput(addLineNumbers(rawContent, 1), SLIDING_WINDOW_PREVIEW_LIMIT, result.totalLines).content
+						content = truncateFileOutput(
+							addLineNumbers(rawContent, 1),
+							SLIDING_WINDOW_PREVIEW_LIMIT,
+							result.totalLines,
+						).content
 					}
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`

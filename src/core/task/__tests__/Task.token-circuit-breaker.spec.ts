@@ -37,7 +37,9 @@ describe("Task Token Circuit Breaker", () => {
 
 		expect(task.ask).toHaveBeenCalledWith(
 			"mistake_limit_reached",
-			expect.stringContaining("Token circuit breaker tripped: cumulative token limit reached (60,000 / 50,000 tokens)"),
+			expect.stringContaining(
+				"Token circuit breaker tripped: cumulative token limit reached (60,000 / 50,000 tokens)",
+			),
 		)
 		// Advanced threshold: currentTokens (60k) + initialLimit (50k) = 110k
 		expect(task.tokenCircuitBreakerLimit).toBe(110_000)
