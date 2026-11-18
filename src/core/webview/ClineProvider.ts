@@ -4133,17 +4133,39 @@ export class ClineProvider
 				// the shared store under whatever name this view's buffer holds, and createTask starts
 				// a task from that pair. A name carries no information about the content underneath it,
 				// so the pair goes back together only while BOTH slots still hold what this call wrote.
-				// If either slot moved, the content this view holds now is a pair this call cannot
-				// describe, and both slots are left alone instead of pairing one writer's name with
-				// another writer's settings.
-				const pinMoved = this.viewLocalState.currentApiConfigName !== profileToActivate
-				const overlayMoved = this.viewLocalState.apiConfiguration !== undefined
-				if (!pinMoved && !overlayMoved) {
+				// If either slot moved, this view holds content this call cannot describe, and both slots
+				// are left alone rather than pairing one writer's name with another writer's settings.
+				// The check before the durable write keeps a pair that already moved from being written
+				// over by a call that no longer owns it. The durable half awaits - it goes through the
+				// serialized view-state write queue that every other writer of this slot uses - so the
+				// same check runs again against the live buffer afterwards: a pair that moved while the
+				// write was in flight is left alone too, rather than overwritten with this call's copy.
+				const movedPairSlots = (): string[] => {
+					const moved: string[] = []
+					if (this.viewLocalState.currentApiConfigName !== profileToActivate) {
+						moved.push("currentApiConfigName")
+					}
+					if (this.viewLocalState.apiConfiguration !== undefined) {
+						moved.push("apiConfiguration")
+					}
+					return moved
+				}
+				const pairSkipPhrase = (moved: string[]): string =>
+					`currentApiConfigName and apiConfiguration as one pair (${moved.join(" and ")} moved)`
+				const pairValues: Partial<RooCodeSettings> & Partial<ExtensionState> = {
+					currentApiConfigName: previousViewPin,
+					apiConfiguration: previousViewOverlay,
+				}
+				const movedBeforeWrite = movedPairSlots()
+				if (movedBeforeWrite.length === 0) {
 					try {
-						await this._saveViewLocalStateFromMutation({
-							currentApiConfigName: previousViewPin,
-							apiConfiguration: previousViewOverlay,
-						})
+						await this._persistViewLocalStateFromMutation(pairValues)
+						const movedDuringWrite = movedPairSlots()
+						if (movedDuringWrite.length === 0) {
+							this._updateViewLocalStateFromMutation(pairValues)
+						} else {
+							movedKeys.push(pairSkipPhrase(movedDuringWrite))
+						}
 					} catch (viewStateRestoreError) {
 						this.log(
 							`[deleteProviderProfile] failed to restore this view's pin and overlay after the failed ` +
@@ -4151,13 +4173,7 @@ export class ClineProvider
 						)
 					}
 				} else {
-					const movedSlots = [
-						pinMoved ? "currentApiConfigName" : null,
-						overlayMoved ? "apiConfiguration" : null,
-					]
-						.filter((key): key is string => key !== null)
-						.join(" and ")
-					movedKeys.push(`currentApiConfigName and apiConfiguration as one pair (${movedSlots} moved)`)
+					movedKeys.push(pairSkipPhrase(movedBeforeWrite))
 				}
 				// The task half gets its own boundary: a rejected view-state write above must not leave the
 				// task running on the replacement's handler and sticky profile once the manager record,
@@ -4176,16 +4192,24 @@ export class ClineProvider
 								expectedCurrentTaskId: taskBeforeActivationId,
 							})
 							// That restore awaits task-history persistence, so the webview can focus another task
-							// while it is in flight. The handler rebuild is a write like every other one in this
-							// method: re-read the current task after the await and rebuild only the task this call
-							// moved, instead of rebuilding whatever happens to be current when the await returns.
+							// while it is in flight, and this call can lose ownership of the same task without
+							// losing its identity: an explicit profile activation on the task this deletion moved
+							// settles inside that await with the id unchanged and the sticky name set to the newly
+							// activated profile. The rebuild is a write like every other one here, so after the
+							// await it re-checks both the task it is about to write onto and the sticky name this call
+							// just wrote back onto it. Our own restore is what moved that name, so ownership is judged
+							// against what this call wrote, not against the name the activation wrote; a profile
+							// activation that settles inside the await moved it again, and the task is left alone in
+							// that case rather than rebuilt under a profile this call no longer describes.
 							const taskAfterSticky = this.getCurrentTask()
 							if (
 								taskAfterSticky !== null &&
 								taskAfterSticky !== undefined &&
 								taskAfterSticky.taskId === taskBeforeActivationId
 							) {
-								if (previousTaskSettings) {
+								if (taskAfterSticky.taskApiConfigName !== previousTaskStickyName) {
+									movedKeys.push("task api handler (the task's sticky profile moved under us)")
+								} else if (previousTaskSettings) {
 									this.updateTaskApiHandlerIfNeeded(previousTaskSettings, {
 										forceRebuild: true,
 										expectedCurrentTaskId: taskBeforeActivationId,

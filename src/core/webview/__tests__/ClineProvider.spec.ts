@@ -7194,21 +7194,23 @@ describe("ClineProvider", () => {
 			)
 			const logSpy = vi.spyOn(provider, "log")
 			const saveConfigSpy = vi.fn().mockResolvedValue("old-id")
-			// The compensation writes this view's pin and overlay through this method, and the
-			// rejection has to be injected there. The method is private and has no typed
-			// accessor, so the double assertion is the documented way in for the failure.
+			// The compensation writes this view's durable view-state half through this method, and
+			// the rejection has to be injected there: the live half is a separate call that follows
+			// an await, so a failure anywhere in the durable write is what the boundary must catch.
+			// The method is private and has no typed accessor, so the double assertion is the
+			// documented way in for the failure.
 			const proto = ClineProvider.prototype as unknown as {
-				_saveViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+				_persistViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
 			}
-			const realSaveViewLocalState = proto._saveViewLocalStateFromMutation
+			const realPersistViewLocalState = proto._persistViewLocalStateFromMutation
 			let viewStateWriteShouldFail = false
 			const saveViewSpy = vi
-				.spyOn(proto, "_saveViewLocalStateFromMutation")
+				.spyOn(proto, "_persistViewLocalStateFromMutation")
 				.mockImplementation(async (values) => {
 					if (viewStateWriteShouldFail) {
 						throw new Error("view state write down")
 					}
-					return realSaveViewLocalState.call(provider, values)
+					return realPersistViewLocalState.call(provider, values)
 				})
 			try {
 				const oldProfile: ProviderSettingsEntry = {
@@ -7470,6 +7472,362 @@ describe("ClineProvider", () => {
 				// The skip is named, and it names only the surface that actually moved.
 				expect(logSpy).toHaveBeenCalledWith(
 					expect.stringContaining("skipped restoring task api handler on this view"),
+				)
+				expect(logSpy).not.toHaveBeenCalledWith(
+					expect.stringContaining("currentApiConfigName and apiConfiguration"),
+				)
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+		it("leaves a pair a sibling refreshed while the view-state write is in flight alone", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const saveConfigSpy = vi.fn().mockResolvedValue("old-id")
+			const otherView = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// A third live view is the one whose save rewrote the replacement's settings: the
+			// refresh it broadcasts to the views pinned to that profile is what lands on this view
+			// while the compensation's own write is in flight. The originating view is not one of
+			// the affected ones, so it has to be a different instance from the one being restored.
+			otherView["viewLocalState"].currentApiConfigName = "keeper-profile"
+			vi.spyOn(otherView, "postStateToWebview").mockResolvedValue(undefined)
+			// The restore's durable viewStates write is private and has no typed accessor, so the
+			// double assertion is the documented way to hold that write open while another writer
+			// acts inside its await window.
+			const proto = ClineProvider.prototype as unknown as {
+				_persistViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+			}
+			const realPersistViewLocalState = proto._persistViewLocalStateFromMutation
+			let holdNextWrite = false
+			let markHoldStarted: () => void = () => {}
+			const holdStarted = new Promise<void>((resolve) => {
+				markHoldStarted = resolve
+			})
+			let releaseWrite: () => void = () => {}
+			const writeHeld = new Promise<void>((resolve) => {
+				releaseWrite = resolve
+			})
+			const persistSpy = vi
+				.spyOn(proto, "_persistViewLocalStateFromMutation")
+				.mockImplementation(async (values) => {
+					if (holdNextWrite) {
+						holdNextWrite = false
+						// The restore's durable write is in flight at this point: the test performs the
+						// sibling refresh here and releases the write once it has landed.
+						markHoldStarted()
+						await writeHeld
+					}
+					return realPersistViewLocalState.call(provider, values)
+				})
+			try {
+				const oldProfile: ProviderSettingsEntry = {
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+				provider["viewLocalState"].currentApiConfigName = "old-profile"
+				provider["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				const stickyProfile: { name: string | undefined } = { name: "old-profile" }
+				const task = {
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "task-key",
+					},
+					// Mirrors the real setter, which writes the field back (see the tests above).
+					get taskApiConfigName() {
+						return stickyProfile.name
+					},
+					taskId: "provider-task",
+					setTaskApiConfigName: vi.fn((name: string | undefined) => {
+						stickyProfile.name = name
+					}),
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					task as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				// A live sibling still pins the deleted profile, which is what makes the re-pin fail
+				// closed once the replacement's settings turn out to be unreadable.
+				sibling["viewLocalState"].currentApiConfigName = "old-profile"
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					activateProfile: vi.fn().mockResolvedValue({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}),
+					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+					setModeConfig: vi.fn(),
+					saveConfig: saveConfigSpy,
+					// The replacement's settings cannot be read, which is what fails the sibling re-pin
+					// closed after the activation ran. Arming here puts this call's restore of the pair
+					// exactly where the refresh has to land: inside the await of its durable write.
+					getProfile: vi.fn().mockImplementation(async (params: { name?: string }) => {
+						if (params.name === "keeper-profile") {
+							holdNextWrite = true
+							throw new Error("Failed to get profile: storage read down")
+						}
+						return {
+							name: "old-profile",
+							id: "old-id",
+							apiProvider: providerIdentifiers.openrouter,
+							apiKey: "old-key",
+						}
+					}),
+					// The compensation snapshots the manager gate before committing; this double reports
+					// a gate the deletion never moved, so the gated restore legs stay inert here.
+					getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+						currentApiConfigName: "keeper-profile",
+						modeApiConfigs: {},
+					}),
+				}
+				const deletion = provider.deleteProviderProfile(oldProfile)
+				// The restore's durable write is held open. While it is in flight the replacement's
+				// settings arrive through the path a sibling refresh uses, which re-points this view's
+				// overlay at the replacement's content.
+				await holdStarted
+				await otherView.refreshViewLocalStateForUpdatedProfile("keeper-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "sibling-refresh",
+				})
+				releaseWrite()
+				await expect(deletion).rejects.toThrow("to re-point 1 live view(s) after deleting 'old-profile'")
+				// The refresh won while this call's write was in flight, so the pair it installed is
+				// left whole: the compensation may not put the deleted profile's name back on top of
+				// content it never wrote, which is the same incoherence the check before the write
+				// refuses when the refresh lands earlier.
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("keeper-profile")
+				expect(provider["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "sibling-refresh",
+				})
+				const stateAfterCompensation = await provider.getState({ includeTaskHistory: false })
+				expect(stateAfterCompensation.apiConfiguration.apiKey).toBe("sibling-refresh")
+				// The durable half still went through, so the durable selection and the live buffer
+				// disagree for this view until the next reload. That cross-layer question belongs to
+				// the ownership decision this compensation does not make; the test pins which side
+				// wins here rather than leaving it unstated.
+				const durableViewStates = (await provider.contextProxy.getValue("viewStates")) as Record<
+					string,
+					{ currentApiConfigName?: string }
+				>
+				// The entry is keyed by the id this instance writes under, not by its view id.
+				expect(durableViewStates[provider["viewStateId"]]?.currentApiConfigName).toBe("old-profile")
+				// The task leg is untouched by this interleaving and restores on its own account.
+				expect(task.setTaskApiConfigName).toHaveBeenLastCalledWith("old-profile")
+				expect(task.updateApiConfiguration).toHaveBeenLastCalledWith({
+					apiProvider: providerIdentifiers.openrouter,
+					apiKey: "task-key",
+				})
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"skipped restoring currentApiConfigName and apiConfiguration as one pair (apiConfiguration moved)",
+					),
+				)
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("failed to restore this view's pin"))
+				await ClineProvider["persistedViewStateWriteQueue"]
+			} finally {
+				releaseWrite()
+				persistSpy.mockRestore()
+				await otherView.dispose()
+				await sibling.dispose()
+				await provider.dispose()
+			}
+		})
+		it("leaves a task that changed profile during the sticky write out of the handler rebuild", async () => {
+			// Defensive: the doubles in this suite can leave console writes pending
+			// at worker teardown.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const saveConfigSpy = vi.fn().mockResolvedValue("old-id")
+			try {
+				const oldProfile: ProviderSettingsEntry = {
+					name: "old-profile",
+					id: "old-id",
+					apiProvider: providerIdentifiers.openrouter,
+				}
+				const keeperProfile: ProviderSettingsEntry = {
+					name: "keeper-profile",
+					id: "keeper-id",
+					apiProvider: providerIdentifiers.anthropic,
+				}
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+				provider["viewLocalState"].currentApiConfigName = "old-profile"
+				provider["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				const stickyA: { name: string | undefined } = { name: "old-profile" }
+				// Task A keeps its id throughout: the interference is a profile activation on the
+				// same task, which is how this task can leave the compensation's hands without the
+				// webview ever focusing another one.
+				const taskA = {
+					apiConfiguration: {
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "task-a-key",
+					},
+					// Mirrors the real setter, which writes the field back (see the tests above).
+					get taskApiConfigName() {
+						return stickyA.name
+					},
+					taskId: "task-a",
+					setTaskApiConfigName: vi.fn((name: string | undefined) => {
+						stickyA.name = name
+					}),
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					taskA as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				// Task A is in the task-history store, so the sticky restore really does await a
+				// persistence write, and that await is where an activation on this task can settle.
+				const historyItem = {
+					id: "task-a",
+					task: "test task",
+					ts: 1,
+					number: 1,
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+				}
+				provider.taskHistoryStore["cache"].set(historyItem.id, historyItem)
+				provider["taskHistoryStoreInitialized"] = true
+				let activationArmed = false
+				vi.spyOn(provider, "updateTaskHistory").mockImplementation(async () => {
+					if (activationArmed) {
+						activationArmed = false
+						// An explicit activation of another profile on the same task, written the way the
+						// real activation writes it: sticky name plus that profile's handler settings.
+						taskA.setTaskApiConfigName("q-profile")
+						taskA.updateApiConfiguration({
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "q-key",
+						})
+					}
+					return []
+				})
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+				sibling["viewLocalState"].currentApiConfigName = "old-profile"
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					activateProfile: vi.fn().mockResolvedValue({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}),
+					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+					setModeConfig: vi.fn(),
+					saveConfig: saveConfigSpy,
+					// The deleted record reads fine before the delete; the replacement does not read at
+					// all, which is the shape that fails the sibling re-pin closed after the activation
+					// ran. The arm line below flips the interference just before that failure, so it
+					// lands after the activation completed and before the compensation runs.
+					getProfile: vi.fn().mockImplementation(async (params: { name?: string }) => {
+						if (params.name === "keeper-profile") {
+							activationArmed = true
+							throw new Error("Failed to get profile: storage read down")
+						}
+						return {
+							name: "old-profile",
+							id: "old-id",
+							apiProvider: providerIdentifiers.openrouter,
+							apiKey: "old-key",
+						}
+					}),
+					// The compensation snapshots the manager gate before committing; this double reports
+					// a gate the deletion never moved, so the gated restore legs stay inert here.
+					getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+						currentApiConfigName: "keeper-profile",
+						modeApiConfigs: {},
+					}),
+				}
+				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow(
+					"to re-point 1 live view(s) after deleting 'old-profile'",
+				)
+				// This view's own pair was never contested, so it goes back whole.
+				expect(provider["viewLocalState"].currentApiConfigName).toBe("old-profile")
+				expect(provider["viewLocalState"].apiConfiguration).toEqual({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				})
+				// Task A still carries the profile the activation settled on. The rebuild is a write
+				// onto that task: it would have put the deleted profile's handler settings and
+				// credentials under Q's sticky name, leaving one task describing two profiles. The
+				// task left this call's hands during the awaited history write, so the rebuild leaves
+				// it on the profile it now follows.
+				expect(taskA.taskApiConfigName).toBe("q-profile")
+				expect(taskA.updateApiConfiguration).toHaveBeenCalledTimes(2)
+				expect(taskA.updateApiConfiguration).toHaveBeenLastCalledWith({
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "q-key",
+				})
+				// The skip names the dimension that moved, not just the identity that survived.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining(
+						"skipped restoring task api handler (the task's sticky profile moved under us)",
+					),
 				)
 				expect(logSpy).not.toHaveBeenCalledWith(
 					expect.stringContaining("currentApiConfigName and apiConfiguration"),
