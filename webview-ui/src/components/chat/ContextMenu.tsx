@@ -31,6 +31,7 @@ interface ContextMenuProps {
 	dynamicSearchResults?: SearchResult[]
 	commands?: Command[]
 	history?: string[]
+	isHistoryQuery?: boolean
 }
 
 const ContextMenu: React.FC<ContextMenuProps> = ({
@@ -45,6 +46,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 	dynamicSearchResults = [],
 	commands = [],
 	history = [],
+	isHistoryQuery,
 }) => {
 	const [materialIconsBaseUri, setMaterialIconsBaseUri] = useState("")
 	const menuRef = useRef<HTMLDivElement>(null)
@@ -58,8 +60,9 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
 			modes,
 			commands,
 			history,
+			isHistoryQuery,
 		)
-	}, [searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands, history])
+	}, [searchQuery, selectedType, queryItems, dynamicSearchResults, modes, commands, history, isHistoryQuery])
 
 	useEffect(() => {
 		if (menuRef.current) {

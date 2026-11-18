@@ -239,6 +239,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
 		const [showContextMenu, setShowContextMenu] = useState(false)
+		// Which trigger opened the menu. Recorded from the input event rather than
+		// re-derived from the controlled value: a mention query can start with "!"
+		// ("Check @!"), and the controlled prop can lag behind the keystroke.
+		const [menuSource, setMenuSource] = useState<"mention" | "slash" | "history" | null>(null)
 		const [cursorPosition, setCursorPosition] = useState(0)
 		const [searchQuery, setSearchQuery] = useState("")
 		const textAreaRef = useRef<HTMLTextAreaElement | null>(null)
@@ -258,10 +262,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const suppressedHistoryRef = useRef<string | null>(null)
 
 		// A controlled reset (for example sending the message) does not go through
-		// handleInputChange, so clear the dismissal once the input is empty again.
+		// handleInputChange, so close the picker and drop its stale state, and
+		// clear the dismissal once the input is empty again.
 		useEffect(() => {
 			if (!normalizedInputValue) {
 				suppressedHistoryRef.current = null
+				setShowContextMenu(false)
+				setMenuSource(null)
+				setSearchQuery("")
+				setSelectedType(null)
+				setSelectedMenuIndex(-1)
 			}
 		}, [normalizedInputValue])
 
@@ -477,6 +487,10 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleKeyDown = useCallback(
 			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
 				const isComposing = event.nativeEvent?.isComposing ?? false
+				// Taken from the trigger that opened the menu: a mention query can
+				// start with "!" (for example "Check @!") and must not be treated
+				// as history.
+				const isHistoryQuery = menuSource === "history"
 
 				if (showContextMenu) {
 					if (event.key === "Escape" && !isComposing) {
@@ -505,6 +519,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 								allModes,
 								commands,
 								promptHistory,
+								isHistoryQuery,
 							)
 							const optionsLength = options.length
 
@@ -553,6 +568,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							allModes,
 							commands,
 							promptHistory,
+							isHistoryQuery,
 						)[selectedMenuIndex]
 						if (
 							selectedOption &&
@@ -568,7 +584,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						// Nothing selectable (e.g. "No results"). A history query is the
 						// whole message, so let Enter send it. Other menus keep their
 						// previous behavior and absorb the key.
-						if (!isHistoryTrigger(searchQuery)) {
+						if (!isHistoryQuery) {
 							event.preventDefault()
 							return
 						}
@@ -647,6 +663,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			[
 				onSend,
 				showContextMenu,
+				menuSource,
 				searchQuery,
 				selectedMenuIndex,
 				handleMentionSelect,
@@ -697,6 +714,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					// empty picker would swallow Enter for a message starting with "!".
 					if ((suppressed !== null && newValue.startsWith(suppressed)) || promptHistory.length === 0) {
 						setShowContextMenu(false)
+						setMenuSource(null)
 						setSearchQuery("")
 						setSelectedMenuIndex(-1)
 						return
@@ -710,11 +728,13 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				if (showMenu) {
 					if (isHistoryTrigger(newValue)) {
 						// getContextMenuOptions dispatches on the leading "!" itself.
+						setMenuSource("history")
 						setSearchQuery(newValue)
 						setSelectedMenuIndex(0)
 					} else if (newValue.startsWith("/") && !newValue.includes(" ")) {
 						// Handle slash command - request fresh commands
 						const query = newValue
+						setMenuSource("slash")
 						setSearchQuery(query)
 						// Set to first selectable item (skip section headers)
 						setSelectedMenuIndex(1) // Section header is at 0, first command is at 1
@@ -724,6 +744,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						// Existing @ mention handling.
 						const lastAtIndex = newValue.lastIndexOf("@", newCursorPosition - 1)
 						const query = newValue.slice(lastAtIndex + 1, newCursorPosition)
+						setMenuSource("mention")
 						setSearchQuery(query)
 
 						// Send file search request if query is not empty.
@@ -760,6 +781,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setSearchQuery("")
 					setSelectedMenuIndex(-1)
 					setFileSearchResults([]) // Clear file search results.
+					setMenuSource(null)
 				}
 			},
 			[
@@ -1135,6 +1157,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 									dynamicSearchResults={fileSearchResults}
 									commands={commands}
 									history={promptHistory}
+									isHistoryQuery={menuSource === "history"}
 								/>
 							</div>
 						)}

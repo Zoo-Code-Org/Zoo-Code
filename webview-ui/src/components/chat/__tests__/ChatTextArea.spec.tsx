@@ -1044,6 +1044,40 @@ describe("ChatTextArea", () => {
 				expect(container.querySelector('[title="!dpl"]')).toBeNull()
 			})
 
+			it("should close the picker and clear its state when the controlled value is reset", () => {
+				const { container, rerender } = render(<ChatTextArea {...defaultProps} inputValue="" />)
+
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.change(textarea, { target: { value: "!thi", selectionStart: 4 } })
+				rerender(<ChatTextArea {...defaultProps} inputValue="!thi" />)
+				expect(container.querySelector('[data-testid="context-menu"]')).not.toBeNull()
+
+				// The parent clears the value without an input event.
+				rerender(<ChatTextArea {...defaultProps} inputValue="" />)
+				expect(container.querySelector('[data-testid="context-menu"]')).toBeNull()
+
+				// The query is cleared too: typing "!" lists every prompt again.
+				fireEvent.change(textarea, { target: { value: "!", selectionStart: 1 } })
+				expect(container.textContent).toContain("Second prompt")
+			})
+
+			it("should keep a mention query that starts with ! on the mention path", () => {
+				const setInputValue = vi.fn()
+				const { container } = render(
+					<ChatTextArea {...defaultProps} setInputValue={setInputValue} inputValue="" />,
+				)
+
+				const textarea = container.querySelector("textarea")!
+
+				// "Check @!" is a mention query "!" — not a history trigger.
+				fireEvent.change(textarea, { target: { value: "Check @!", selectionStart: 8 } })
+				expect(container.querySelector('[title="Third prompt"]')).toBeNull()
+
+				fireEvent.keyDown(textarea, { key: "Enter" })
+				expect(setInputValue).not.toHaveBeenCalledWith("Third prompt")
+			})
+
 			it("should reset history navigation when sending message", () => {
 				const onSend = vi.fn()
 				const setInputValue = vi.fn()

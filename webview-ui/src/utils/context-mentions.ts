@@ -148,10 +148,14 @@ export function getContextMenuOptions(
 	modes?: ModeConfig[],
 	commands?: Command[],
 	history: string[] = [],
+	isHistoryQuery: boolean = isHistoryTrigger(query),
 ): ContextMenuQueryItem[] {
 	// Prompt history recall. Newest-first, de-duplicated so that repeated
 	// prompts (e.g. "continue") don't fill the picker with identical rows.
-	if (isHistoryTrigger(query)) {
+	// The caller decides whether this is a history query: a mention query can
+	// also start with "!" (for example "Check @!"), and those must stay on the
+	// mention path.
+	if (isHistoryQuery) {
 		const historyQuery = query.slice(1)
 		const prompts = Array.from(new Set(history.filter((prompt) => prompt.trim().length > 0)))
 
