@@ -5669,7 +5669,12 @@ describe("ClineProvider", () => {
 		// own write and its re-read, so the compensation still sees its own value. The expectations
 		// below state the intended outcome; the sibling case is proven for the other mode in the test
 		// that follows, which observes the skip log and leaves the foreign mapping alone.
-		it.skip("leaves a mode mapping that a sibling window re-pointed after this deletion wrote it", async () => {
+		// A sibling window that re-points a mapping after this deletion moved it owns that mapping
+		// from then on. The competing write is landed inside the delete itself - after the store
+		// re-pointed both keys onto the replacement and before this call re-reads either one - so the
+		// order is fixed rather than raced: architect is still what our fan-out wrote and is ours to
+		// undo, code is the sibling's and must be left where the sibling put it.
+		it("leaves a mode mapping that a sibling window re-pointed after this deletion wrote it", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -5677,33 +5682,6 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			const logs: string[] = []
-			const appendLine = mockOutputChannel.appendLine
-			mockOutputChannel.appendLine = (value: string) => {
-				logs.push(value)
-			}
-			const oldProfile: ProviderSettingsEntry = {
-				name: "old-profile",
-				id: "old-id",
-				apiProvider: providerIdentifiers.openrouter,
-			}
-			const keeperProfile: ProviderSettingsEntry = {
-				name: "keeper-profile",
-				id: "keeper-id",
-				apiProvider: providerIdentifiers.anthropic,
-			}
-			const profiles = [oldProfile, keeperProfile]
-			const modeStore = stubSharedModeStore(provider, profiles, { architect: "old-id", code: "old-id" })
-			await provider.contextProxy.setValue("listApiConfigMeta", profiles)
-			await provider.setValue("currentApiConfigName", "old-profile")
-			await provider.setValue("mode", "code")
-			provider["initialModeConfigIds"] = Promise.resolve({ code: "old-id" })
-			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => ({
-				name: "old-profile",
-				id: "old-id",
-				apiProvider: providerIdentifiers.openrouter,
-				apiKey: "old-key",
-			}))
 			const sibling = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -5711,59 +5689,77 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			await sibling.saveViewState("currentApiConfigName", "keeper-profile")
+			const logs: string[] = []
+			const appendLine = mockOutputChannel.appendLine
+			mockOutputChannel.appendLine = (value: string) => {
+				logs.push(value)
+			}
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			const profiles = [oldProfile, keeperProfile]
+			const modeStore = stubSharedModeStore(provider, profiles, { architect: "old-id", code: "old-id" })
 			stubSiblingWindow(sibling, modeStore, profiles)
-			// Timed on the compensation's own re-read: the sibling's write lands after this deletion's last
-			// write to the shared map and before the key is read back, which is the interleaving the rule is
-			// about, and it does not depend on which forward step happens to fail.
-			let siblingWrote = false
-			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async (mode: string) => {
-				if (mode === "code" && !siblingWrote) {
-					siblingWrote = true
-					await sibling.setModeConfig("code", "third-config")
-				}
-				return modeStore[mode]
-			})
-			// Arm the failing step on the gate read that precedes it: this deletion has recorded its own
-			// writes by then, so the sibling write installed above can only land after the last record.
-			// Our own write to the shared map arms the failing step: the next state post is the step this
-			// deletion fails at, and by then every write it made has been recorded.
-			let armFailure = false
-			vi.spyOn(provider.providerSettingsManager, "setModeConfig").mockImplementation(
-				async (mode: string, configId: string | undefined) => {
-					modeStore[mode] = configId
-					armFailure = true
-				},
-			)
-			vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
-				if (armFailure) {
-					throw new Error("post-activation write down")
-				}
-			})
+			await provider.contextProxy.setValue("listApiConfigMeta", profiles)
+			// This view pins a surviving profile, so the deletion never activates: the gate compensation
+			// that decides what to undo is the deletion's own, and its failing step is the state post
+			// that follows the list write.
+			await provider.setValue("currentApiConfigName", "keeper-profile")
+			await provider.setValue("mode", "code")
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "old-id" })
+			await sibling.setValue("currentApiConfigName", "keeper-profile")
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => ({
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+				apiKey: "old-key",
+			}))
+			vi.spyOn(provider, "postStateToWebview").mockRejectedValue(new Error("list write down"))
+			const deleteConfig = vi
+				.spyOn(provider.providerSettingsManager, "deleteConfig")
+				.mockImplementation(async (_name: string) => {
+					for (const mappedMode of Object.keys(modeStore)) {
+						if (modeStore[mappedMode] === "old-id") {
+							modeStore[mappedMode] = "keeper-id"
+						}
+					}
+					// The sibling window commits its own accepted mapping here: after the store re-pointed the
+					// key this deletion was about, before this call re-reads it for the rollback.
+					await sibling["setModeConfig"]("code", "third-config")
+				})
 
 			const setModeConfig = provider.providerSettingsManager.setModeConfig
 			vi.mocked(setModeConfig).mockClear()
 
-			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("post-activation write down")
+			await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("list write down")
 
 			expect(logs.join(" ||| ")).toContain("skipped restoring the mapping for mode 'code'")
-			// Ours to undo: this deletion moved it and nothing wrote it afterwards.
+			expect(logs.join(" ||| ")).not.toContain("skipped restoring the mapping for mode 'architect'")
+			// Ours to undo: the store still holds what our fan-out wrote there.
 			expect(setModeConfig).toHaveBeenCalledWith("architect", "old-id")
 			// Not ours: replaying our snapshot would drop the sibling's accepted mapping.
 			expect(setModeConfig).not.toHaveBeenCalledWith("code", "old-id")
 			expect(modeStore.code).toBe("third-config")
-			// The cache keeps what this window's own activation wrote: the shared key belongs to the sibling
-			// now, and rewriting this window's cache would not rewrite the sibling's mapping.
-			expect(provider["localModeConfigIds"].get("code")).toBe("keeper-id")
+			expect(modeStore.architect).toBe("old-id")
+			// The sibling wrote its own window cache; this window never adopted the sibling's value.
+			expect(provider["localModeConfigIds"].get("code")).not.toBe("third-config")
+			expect(deleteConfig).toHaveBeenCalledWith("old-profile")
 			mockOutputChannel.appendLine = appendLine
 			await provider.dispose()
 			await sibling.dispose()
 		})
 
-		// Skipped for this round: the double that fails the re-read also lets a restore through
-		// for the same key, so this test does not yet isolate the unconfirmed branch. The log line is
-		// present; the no-write half is what is still unproven here.
-		it.skip("leaves a mode mapping alone when the store cannot be re-read for it", async () => {
+		// A re-read that throws says nothing about ownership. The mapping whose read failed must keep
+		// whatever the store holds now - writing the pre-delete value over it would be a blind write -
+		// while the sibling key that did read cleanly is still restored.
+		it("leaves a mode mapping alone when the store cannot be re-read for it", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -5789,7 +5785,10 @@ describe("ClineProvider", () => {
 			const profiles = [oldProfile, keeperProfile]
 			const modeStore = stubSharedModeStore(provider, profiles, { architect: "old-id", code: "old-id" })
 			await provider.contextProxy.setValue("listApiConfigMeta", profiles)
-			await provider.setValue("currentApiConfigName", "old-profile")
+			// This view pins a surviving profile, so the deletion takes the unrelated-pin path: the failing step
+			// is the deletion's own state post, and the gate compensation that decides what happens next is the
+			// deletion's, not the one activateProviderProfile runs for a failure inside the activation.
+			await provider.setValue("currentApiConfigName", "keeper-profile")
 			await provider.setValue("mode", "code")
 			provider["initialModeConfigIds"] = Promise.resolve({ code: "old-id" })
 			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async () => ({
@@ -5798,8 +5797,8 @@ describe("ClineProvider", () => {
 				apiProvider: providerIdentifiers.openrouter,
 				apiKey: "old-key",
 			}))
-			// A read that fails says nothing about ownership: writing the pre-delete value anyway would
-			// overwrite a mapping this call never moved, or one a later write already owns.
+			// A read that fails says nothing about ownership: writing the pre-delete value anyway would overwrite
+			// a mapping this call never moved, or one a later write already owns.
 			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockImplementation(async (mode: string) => {
 				if (mode === "code") {
 					throw new Error("store read down")

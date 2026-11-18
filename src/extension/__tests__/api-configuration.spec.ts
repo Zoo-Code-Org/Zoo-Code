@@ -334,6 +334,160 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
+	// A later write to the same record owns it from then on. The competitor is landed inside the
+	// step that fails - after this call saved and read the record back, before the rollback reads it
+	// - so the order is fixed rather than raced, and the rollback has to leave the value alone
+	// instead of replaying the copy it captured before its own save.
+	it("leaves the profile record alone when a later write owns it by the time the rollback reads it", async () => {
+		const stored = {
+			pinned: {
+				name: "pinned",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "old-key",
+			},
+		}
+		const saveConfig = vi.fn(async () => {
+			stored.pinned = {
+				name: "pinned",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "our-key",
+			}
+			return "pinned-id"
+		})
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const logLines: string[] = []
+		// The mode fan-out is the step that fails, and the write that lands inside it is someone
+		// else's: by the time this call reads the record back for its rollback it holds a different
+		// value, which is all the rollback needs to learn that the record is no longer its write.
+		const setModeConfig = vi.fn(async (_mode: string, _configId: string | undefined) => {
+			stored.pinned = {
+				name: "pinned",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "sibling-key",
+			}
+			throw new Error("mode write failed")
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([{ name: "pinned", id: "pinned-id" }]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig: vi.fn(async () => stored.pinned !== undefined),
+				getProfile: vi.fn(async () => ({ ...stored.pinned })),
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			setModeConfig,
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = {
+			appendLine: vi.fn((value: string) => {
+				logLines.push(value)
+			}),
+		} as unknown as vscode.OutputChannel
+		// enableLogging is what routes this.log to the output channel double: without it the class
+		// logs nowhere, and the skip would go unreported.
+		// console is the other sink this class writes to; capture it into the same array so the
+		// assertion does not depend on which sink is wired and nothing leaks to the worker log.
+		vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+			logLines.push(args.map(String).join(" "))
+		})
+		const api = new API(outputChannel, provider, makeClineProviderFactory(), undefined, true)
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { code: "new-code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+		vi.restoreAllMocks()
+
+		// The save happened once, forward. The rollback wrote nothing back to the record.
+		expect(saveConfig).toHaveBeenCalledTimes(1)
+		expect(deleteConfig).not.toHaveBeenCalled()
+		expect(stored.pinned.apiKey).toBe("sibling-key")
+		expect(logLines.join(" ||| ")).toContain("skipped restoring the profile record 'pinned'")
+	})
+
+	// A record this call created is its own to delete: nothing else touched it between the save and
+	// the rollback, so the compare-and-set lets the original compensation through.
+	it("deletes the record it created when nothing else wrote it before the rollback", async () => {
+		const stored: { pinned?: { name: string; id: string; apiProvider: string; apiKey: string } } = {}
+		const saveConfig = vi.fn(async () => {
+			stored.pinned = {
+				name: "pinned",
+				id: "pinned-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiKey: "our-key",
+			}
+			return "pinned-id"
+		})
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({}),
+			setValues: vi.fn().mockResolvedValue(undefined),
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue({ apiProvider: providerIdentifiers.anthropic }),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig: vi.fn(async () => stored.pinned !== undefined),
+				getProfile: vi.fn(async () => {
+					if (!stored.pinned) {
+						throw new Error("absent")
+					}
+					return { ...stored.pinned }
+				}),
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			setModeConfig,
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { code: "new-code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		expect(saveConfig).toHaveBeenCalledTimes(1)
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+	})
 	it("rolls back the complete mutation when a mode mapping write fails", async () => {
 		const setValues = vi.fn().mockResolvedValue(undefined)
 		const saveConfig = vi.fn().mockResolvedValue("pinned-id")

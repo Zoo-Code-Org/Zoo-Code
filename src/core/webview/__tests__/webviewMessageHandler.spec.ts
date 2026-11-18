@@ -1008,6 +1008,45 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
 	})
 
+	// The existence lookup is awaited, so a switch that lands while it is in flight is newer than
+	// anything this handler snapshotted. Re-pinning the view onto the shared global would then
+	// overwrite the selection that just won, so the repair is skipped and reported by name.
+	it("skips the launch repair when the view selection changes while the existence lookup is in flight", async () => {
+		const printed: string[] = []
+		const consoleSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+			printed.push(args.map(String).join(" "))
+		})
+		// The repair decides from the provider's own view state, which the fixture otherwise leaves
+		// unset; seeding it is what gives the competing write something to move.
+		const viewStateHost = double as unknown as {
+			pinnedProfileName?: string
+			viewLocalState?: { apiConfiguration?: { apiProvider: string } }
+		}
+		viewStateHost.pinnedProfileName = "view-local-profile"
+		viewStateHost.viewLocalState = { apiConfiguration: { apiProvider: providerIdentifiers.anthropic } }
+		let pinnedLookup = false
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(async (name: string) => {
+			if (!pinnedLookup && name === "view-local-profile") {
+				pinnedLookup = true
+				// The competing switch: this view now buffers another profile's settings, and it lands
+				// while the lookup above is still awaited.
+				viewStateHost.viewLocalState = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter } }
+				return false
+			}
+			return name === "shared-profile"
+		})
+		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+		await new Promise((resolve) => setImmediate(resolve))
+		consoleSpy.mockRestore()
+		viewStateHost.pinnedProfileName = undefined
+		viewStateHost.viewLocalState = undefined
+
+		expect(printed.join(" ||| ")).toContain("Skipping the launch repair for profile 'view-local-profile'")
+		// The repair would have re-pinned the view onto the shared global selection: it did not write.
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+	})
+
 	it("re-pins the view to the shared global profile rather than the first listed profile", async () => {
 		double.providerSettingsManager.listConfig = vi.fn().mockResolvedValue([
 			{ name: "first-listed", apiProvider: providerIdentifiers.anthropic },
