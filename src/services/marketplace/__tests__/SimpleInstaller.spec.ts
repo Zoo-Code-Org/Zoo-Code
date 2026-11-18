@@ -168,6 +168,65 @@ describe("SimpleInstaller", () => {
 			expect(writtenData.mcpServers["test-mcp"]).toBeDefined()
 		})
 
+		it.each([
+			["single template", undefined],
+			["selectedIndex", 1],
+			["parameter selection", 2],
+		])("keeps parameter data inside string values for %s", async (_name, selection) => {
+			const template = {
+				command: "trusted-server",
+				args: ["{{path}}", "{{path}}"],
+				env: { TOKEN: "prefix {{api.key}} suffix", "{{path}}": "fixed" },
+				disabled: false,
+				timeout: 60,
+				nested: [null, { value: "{{missing}}" }],
+			}
+			const parameters = [{ name: "Path", key: "path", optional: false }]
+			const methodParameters = [{ name: "Token", key: "api.key", optional: false }]
+			const item: MarketplaceItem = {
+				...mockMcpItem,
+				parameters: selection === undefined ? [...parameters, ...methodParameters] : parameters,
+				content:
+					selection === undefined
+						? JSON.stringify(template)
+						: [
+								{ name: "Default", content: '{"command":"other-server"}' },
+								{ name: "Selected", content: JSON.stringify(template), parameters: methodParameters },
+							],
+			}
+			const payloads = [
+				'"], "command": "attacker", "args": ["injected',
+				"C:\\Users\\test\\database.sqlite",
+				'quotes " and newline\n and tab\t',
+				"$& $` $' $$",
+				"{{api.key}}",
+				"",
+			]
+			for (const payload of payloads) {
+				mockFs.readFile.mockResolvedValueOnce('{"mcpServers":{"existing":{"command":"keep"}}}')
+				await installer.installItem(item, {
+					target: "project",
+					selectedIndex: selection === 1 ? 1 : undefined,
+					parameters: {
+						path: payload,
+						"api.key": payload,
+						...(selection === 2 ? { _selectedIndex: 1 } : {}),
+					},
+				})
+				const written = JSON.parse(String(mockFs.writeFile.mock.lastCall?.[1]))
+				expect(written).toEqual({
+					mcpServers: {
+						existing: { command: "keep" },
+						"test-mcp": {
+							...template,
+							args: [payload, payload],
+							env: { TOKEN: `prefix ${payload} suffix`, "{{path}}": "fixed" },
+						},
+					},
+				})
+			}
+		})
+
 		it("should throw error when mcp.json contains invalid JSON", async () => {
 			const invalidJson = '{ "mcpServers": { invalid json'
 
