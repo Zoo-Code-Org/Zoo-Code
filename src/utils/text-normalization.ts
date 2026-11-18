@@ -82,8 +82,11 @@ export function normalizeString(str: string, options: NormalizeOptions = DEFAULT
  * @param text The string containing HTML entities to unescape
  * @returns The unescaped string with HTML entities converted to their literal characters
  */
-export function unescapeHtmlEntities(text?: string | null): string {
-	if (text === undefined) return undefined as unknown as string
+export function unescapeHtmlEntities(text: string): string
+export function unescapeHtmlEntities(text?: undefined): undefined
+export function unescapeHtmlEntities(text?: string | null): string | undefined
+export function unescapeHtmlEntities(text?: string | null): string | undefined {
+	if (text === undefined) return undefined
 	if (!text) return ""
 
 	return text
