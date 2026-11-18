@@ -319,6 +319,20 @@ describe("AutoApprovalHandler", () => {
 			expect(result.shouldProceed).toBe(true)
 			expect(result.requiresApproval).toBe(true)
 			expect(result.approvalType).toBe("tokens")
+
+			// Add messages after approval reset
+			const newMessages: ClineMessage[] = [{ type: "say", say: "api_req_started", text: "{}", ts: 2000 }]
+			messages.push(...newMessages)
+
+			// Subsequent check below new limit: verifies reset behavior and message slicing
+			mockAskForApproval.mockClear()
+			mockGetApiMetrics.mockReturnValue({ totalCost: 0, totalTokensIn: 15_000, totalTokensOut: 5_000 })
+			result = await handler.checkAutoApprovalLimits(mockState, messages, mockAskForApproval)
+
+			expect(mockGetApiMetrics).toHaveBeenLastCalledWith(newMessages)
+			expect(result.shouldProceed).toBe(true)
+			expect(result.requiresApproval).toBe(false)
+			expect(mockAskForApproval).not.toHaveBeenCalled()
 		})
 
 		it("should not proceed and not reset token window when user rejects token limit approval", async () => {
