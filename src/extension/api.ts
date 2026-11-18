@@ -1044,14 +1044,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				)
 			}
 			// A rollback may restore only what this call wrote, taken from the snapshot it captured.
-			// Anything else the snapshot happens to hold belongs to a writer that has moved on since
+			// Every key this call wrote is replayed, including one the snapshot did not hold: replaying
+			// only the keys the snapshot held left such a key holding what this call wrote, a profile pin
+			// to the record the compensation had just deleted being the clearest case. Anything the
+			// snapshot holds that this call did not write belongs to a writer that has moved on since
 			// then, so replaying it would roll another view change back into this one. That subsumes the
 			// host-owned viewStates map and the pass-through taskHistory key: neither is replayed unless
 			// this call own payload carried it.
-			const writtenKeys = new Set(Object.keys(forwardValues))
-			const replayValues: RooCodeSettings = Object.fromEntries(
-				Object.entries(snapshotValues).filter(([key]) => writtenKeys.has(key)),
-			)
+			const writtenKeys = Object.keys(forwardValues)
+			const replayValues = Object.fromEntries(
+				writtenKeys.map((key) => [key, snapshotValues[key as keyof RooCodeSettings]]),
+			) as RooCodeSettings
 			// Which profile the views return to is read from the snapshot, not from the replay
 			// filter: a payload that never wrote currentApiConfigName leaves the pin out of the
 			// replay, and defaulting it here would refresh the overlays pinned to "default" with
@@ -1132,7 +1135,23 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				)
 			}
 			try {
-				await Promise.all(previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId)))
+				// The forward fan-out went through the provider wrapper, which records the id in this
+				// window local mode mapping next to the store write, so the rollback restores the same
+				// two layers: restoring only the store left this window resolving the mode to the profile
+				// it had just rolled back. A defined prior mapping travels through the wrapper for that
+				// reason. An absent prior mapping keeps the manager write, the only one that accepts an
+				// undefined clear, and drops the local entry the failed write created so the window
+				// returns to the mapping it had before the call.
+				await Promise.all(
+					previousModeConfigs.map(async ([mode, configId]) => {
+						if (configId === undefined) {
+							await manager.setModeConfig(mode, undefined)
+							this.sidebarProvider["localModeConfigIds"].delete(mode)
+							return
+						}
+						await this.sidebarProvider.setModeConfig(mode, configId)
+					}),
+				)
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the mode API config mappings: " +

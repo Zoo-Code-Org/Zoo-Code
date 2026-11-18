@@ -77,6 +77,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -131,6 +133,8 @@ describe("API - configuration", () => {
 				getModeConfigId,
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -183,6 +187,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -220,6 +226,8 @@ describe("API - configuration", () => {
 				hasConfig: vi.fn().mockResolvedValue(false),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -268,6 +276,8 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -396,6 +406,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -452,6 +464,8 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -477,6 +491,143 @@ describe("API - configuration", () => {
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
+	it("replays a written key the snapshot did not hold instead of leaving it pinned", async () => {
+		const written: Array<{ values: RooCodeSettings; options?: { savedProfileName?: string } }> = []
+		const setValues = vi.fn(async (values: RooCodeSettings, options?: { savedProfileName?: string }) => {
+			written.push({ values, options })
+		})
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		const sharedBefore = { apiModelId: "model-old" }
+		// The snapshot holds no profile pin at all, and the pin is one of the keys this call
+		// writes: the replay must carry it back as absent. Replaying only the keys the
+		// snapshot happened to hold left every view pinned to the record the compensation
+		// had just deleted.
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({ apiModelId: "model-old" }),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: sharedSetValues,
+				getProviderSettings: vi.fn().mockReturnValue(sharedBefore),
+				setProviderSettings,
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				setModeConfig,
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { code: "new-code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		const replayed: Partial<RooCodeSettings> = written[written.length - 1]?.values ?? {}
+		// The pin returns as an explicit absent key so the views drop the pin to the deleted
+		// record instead of naming a profile the store no longer has.
+		expect(Object.keys(replayed)).toContain("currentApiConfigName")
+		expect(replayed.currentApiConfigName).toBeUndefined()
+		// The mode mapping is a key this call owns too, and the snapshot did not hold it:
+		// the replay clears it alongside the store write it compensates.
+		expect(Object.keys(replayed)).toContain("modeApiConfigs")
+		expect(written[written.length - 1]?.options).toEqual({ savedProfileName: "default" })
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+	})
+
+	it("restores this window mode mapping when a mode mapping write is rolled back", async () => {
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const { saveConfig, deleteConfig, hasConfig, getProfile } = makeProfileStoreDouble()
+		const setProviderSettings = vi.fn().mockResolvedValue(undefined)
+		const sharedSetValues = vi.fn().mockResolvedValue(undefined)
+		const postStateToWebview = vi.fn().mockResolvedValue(undefined)
+		// The window-local mapping layer, the same map ClineProvider keeps: architect had a
+		// local id before this call and code had none.
+		const localModeConfigIds = new Map<string, string>([["architect", "window-architect-config"]])
+		// The store accepts an undefined clear, so only the forward write of the new code
+		// mapping fails; the rollback clear of the same mode succeeds.
+		const managerSetModeConfig = vi.fn(async (mode: string, _configId?: string) => {
+			if (mode === "code" && _configId !== undefined) {
+				throw new Error("mode write failed")
+			}
+		})
+		// The wrapper the forward fan-out uses: it writes the store and records the id in this
+		// window map, which is why a rollback that touches only the store leaves the window
+		// resolving the mode to the profile it just rolled back.
+		const providerSetModeConfig = vi.fn(async (mode: string, configId: string) => {
+			await managerSetModeConfig(mode, configId)
+			localModeConfigIds.set(mode, configId)
+		})
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "old-profile" }),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: sharedSetValues,
+				getProviderSettings: vi.fn().mockReturnValue({ apiModelId: "model-old" }),
+				setProviderSettings,
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				hasConfig,
+				getProfile,
+				setModeConfig: managerSetModeConfig,
+				// architect was mapped before the call, code was not.
+				getModeConfigId: vi.fn(async (mode: string) =>
+					mode === "architect" ? "old-architect-config" : undefined,
+				),
+				runExclusiveAcrossInstances: runManagerSectionInline,
+			},
+			setModeConfig: providerSetModeConfig,
+			localModeConfigIds,
+			postStateToWebview,
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({
+				currentApiConfigName: "pinned",
+				modeApiConfigs: { architect: "new-architect-config", code: "new-code-config" },
+			}),
+		).rejects.toThrow("mode write failed")
+
+		// The architect write landed through the wrapper before code rejected, so its new id
+		// sits in this window map: the rollback must restore the mapping in both layers, not
+		// only in the store.
+		expect(localModeConfigIds.get("architect")).toBe("old-architect-config")
+		expect(providerSetModeConfig).toHaveBeenCalledWith("architect", "old-architect-config")
+		// The code mapping did not exist before the call: the rollback clears the store entry
+		// and leaves no local entry naming a mapping the store no longer has.
+		expect(localModeConfigIds.has("code")).toBe(false)
+		expect(managerSetModeConfig).toHaveBeenCalledWith("code", undefined)
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+	})
 	it("keeps host-owned viewStates out of both the settings write and the rollback replay", async () => {
 		// Same rollback scenario as the mode-mapping test above, but the caller payload and
 		// the pre-call snapshot each carry a viewStates map: the forward write would pin other
@@ -519,6 +670,8 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -632,6 +785,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -713,6 +868,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -784,6 +941,8 @@ describe("API - configuration", () => {
 				runExclusiveAcrossInstances: runManagerSectionInline,
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -849,6 +1008,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -920,6 +1081,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -982,6 +1145,8 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The window-local mode mapping ClineProvider keeps beside the store.
+			localModeConfigIds: new Map<string, string>(),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
