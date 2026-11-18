@@ -22,6 +22,7 @@ describe("AutoApproveToggle", () => {
 		alwaysAllowMcp: false,
 		alwaysAllowModeSwitch: true,
 		alwaysAllowSubtasks: false,
+		alwaysAllowWebFetch: false,
 		alwaysAllowExecute: true,
 		alwaysAllowFollowupQuestions: false,
 		onToggle: mockOnToggle,
@@ -63,6 +64,21 @@ describe("AutoApproveToggle", () => {
 		fireEvent.click(readOnlyButton)
 		expect(mockOnToggle).toHaveBeenCalledTimes(2)
 		expect(mockOnToggle).toHaveBeenCalledWith("alwaysAllowReadOnly", false)
+	})
+
+	test("renders a web fetch toggle that is off by default and toggles on", () => {
+		render(
+			<TranslationProvider>
+				<AutoApproveToggle {...initialProps} />
+			</TranslationProvider>,
+		)
+
+		const webFetchButton = screen.getByTestId("always-allow-web-fetch-toggle")
+		expect(webFetchButton).toHaveAttribute("aria-label", "settings:autoApprove.webFetch.label")
+		expect(webFetchButton).toHaveAttribute("aria-pressed", "false")
+
+		fireEvent.click(webFetchButton)
+		expect(mockOnToggle).toHaveBeenCalledWith("alwaysAllowWebFetch", true)
 	})
 
 	test("updates aria-pressed attribute after toggle", () => {

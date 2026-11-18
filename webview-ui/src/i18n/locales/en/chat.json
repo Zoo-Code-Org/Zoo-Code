@@ -265,6 +265,10 @@
 		"didSearch_other": "Found {{count}} results",
 		"resultTooltip": "Similarity score: {{score}} (click to open file)"
 	},
+	"webFetch": {
+		"wantsToFetch": "Zoo wants to fetch web content",
+		"didFetch": "Zoo fetched web content"
+	},
 	"commandExecution": {
 		"abort": "Abort",
 		"running": "Running",

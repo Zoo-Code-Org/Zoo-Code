@@ -115,6 +115,17 @@ const ALLOWED_VSCODE_SETTINGS = new Set(["terminal.integrated.inheritEnv"])
 // entire read-write-apply sequence completes before the next one starts.
 let telemetrySettingQueue: Promise<void> = Promise.resolve()
 
+// Serializes handling of "updateSettings" messages. A save writes its settings one at a time across awaits (e.g.
+// installing the destructive command guard, MCP and VS Code configuration updates). Without serialization, a slow
+// save can resume after a later one and overwrite it: a save enabling `alwaysAllowWebFetch` that is still waiting
+// would write `true` after a newer save already stored `false`, while the webview reports the newer save as stored.
+let updateSettingsQueue: Promise<void> = Promise.resolve()
+
+// Incremented each time the user triggers "Reset State". A queued save captures this value at enqueue time and
+// checks it before writing: if the counter has advanced, a reset occurred after the save was enqueued, so the
+// stale write is discarded rather than restoring settings the user just cleared.
+let settingsResetGeneration = 0
+
 import { MarketplaceManager, MarketplaceItemType } from "../../services/marketplace"
 import { setPendingTodoList } from "../tools/UpdateTodoListTool"
 import {
@@ -750,172 +761,202 @@ export const webviewMessageHandler = async (
 			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
 			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
 			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
-			let failed = false
-			let failure: unknown
+			// Saves run one after another through `updateSettingsQueue`, in the order they were received.
+			// Capture the reset generation now so a "resetState" that arrives while this save waits in the
+			// queue is detected when the save actually runs.
+			const capturedGeneration = settingsResetGeneration
 
-			try {
-				if (!message.updatedSettings) break
+			// A web-fetch revocation must take effect immediately: it must not wait behind a slow DCG
+			// installation in the queue. Fire-and-forget: the full save also runs in the queue and will
+			// write the final value again, which is fine.
+			if (message.updatedSettings?.alwaysAllowWebFetch === false) {
+				Promise.resolve(provider.contextProxy.setValue("alwaysAllowWebFetch", false)).catch(() => undefined)
+			}
 
-				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
-					try {
-						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
-						const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
-						if (!binaryPath) {
+			const applySettings = async () => {
+				// A reset occurred after this save was enqueued: discard the stale write.
+				if (settingsResetGeneration !== capturedGeneration) {
+					return
+				}
+
+				let failed = false
+				let failure: unknown
+
+				try {
+					if (!message.updatedSettings) return
+
+					if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
+						try {
+							const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
+							const binaryPath = await ensureDcgInstalled(provider.context.globalStorageUri.fsPath)
+							if (!binaryPath) {
+								message.updatedSettings.destructiveCommandGuardEnabled = false
+								vscode.window.showErrorMessage(t("common:errors.destructiveCommandGuard.unavailable"))
+							}
+						} catch (error) {
 							message.updatedSettings.destructiveCommandGuardEnabled = false
-							vscode.window.showErrorMessage(t("common:errors.destructiveCommandGuard.unavailable"))
+							vscode.window.showErrorMessage(
+								t("common:errors.destructiveCommandGuard.enableFailed", {
+									error: error instanceof Error ? error.message : String(error),
+								}),
+							)
 						}
-					} catch (error) {
-						message.updatedSettings.destructiveCommandGuardEnabled = false
-						vscode.window.showErrorMessage(
-							t("common:errors.destructiveCommandGuard.enableFailed", {
-								error: error instanceof Error ? error.message : String(error),
-							}),
-						)
-					}
-				}
-
-				for (const [key, value] of Object.entries(message.updatedSettings)) {
-					// An invalid display value is ignored, before anything is done for it.
-					if (isInvalidDisplayValue(key, value)) {
-						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
-						continue
 					}
 
-					let newValue = value
+					// Re-check after the slow install: a reset that fired during the install
+					// must still cause this save to be discarded.
+					if (settingsResetGeneration !== capturedGeneration) {
+						return
+					}
 
-					if (key === "language") {
-						newValue = value ?? "en"
-						changeLanguage(newValue as Language)
-					} else if (key === "allowedCommands") {
-						const commands = value ?? []
-
-						newValue = Array.isArray(commands)
-							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-							: []
-
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("allowedCommands", newValue, vscode.ConfigurationTarget.Global)
-					} else if (key === "deniedCommands") {
-						const commands = value ?? []
-
-						newValue = Array.isArray(commands)
-							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
-							: []
-
-						await vscode.workspace
-							.getConfiguration(Package.name)
-							.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
-					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
-						const patterns = value ?? []
-
-						// Blank lines, which the textarea editor produces freely,
-						// name no file and are dropped here. Patterns are
-						// otherwise not `.trim()`ed: leading whitespace is
-						// significant in gitignore syntax, and trailing
-						// whitespace has to be escaped by the user to be kept.
-						newValue = Array.isArray(patterns)
-							? patterns.filter((pattern) => typeof pattern === "string" && pattern.trim().length > 0)
-							: []
-					} else if (key === "ttsEnabled") {
-						newValue = value ?? true
-						setTtsEnabled(newValue as boolean)
-					} else if (key === "ttsSpeed") {
-						newValue = value ?? 1.0
-						setTtsSpeed(newValue as number)
-					} else if (key === "terminalShellIntegrationTimeout") {
-						if (value !== undefined) {
-							Terminal.setShellIntegrationTimeout(value as number)
-						}
-					} else if (key === "terminalShellIntegrationDisabled") {
-						if (value !== undefined) {
-							Terminal.setShellIntegrationDisabled(value as boolean)
-						}
-					} else if (key === "terminalCommandDelay") {
-						if (value !== undefined) {
-							Terminal.setCommandDelay(value as number)
-						}
-					} else if (key === "terminalPowershellCounter") {
-						if (value !== undefined) {
-							Terminal.setPowershellCounter(value as boolean)
-						}
-					} else if (key === "terminalZshClearEolMark") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshClearEolMark(value as boolean)
-						}
-					} else if (key === "terminalZshOhMy") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshOhMy(value as boolean)
-						}
-					} else if (key === "terminalZshP10k") {
-						if (value !== undefined) {
-							Terminal.setTerminalZshP10k(value as boolean)
-						}
-					} else if (key === "terminalZdotdir") {
-						if (value !== undefined) {
-							Terminal.setTerminalZdotdir(value as boolean)
-						}
-					} else if (key === "terminalProfile") {
-						const previousProfile = Terminal.getTerminalProfile()
-						Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
-						newValue = Terminal.getTerminalProfile()
-
-						if (newValue !== previousProfile) {
-							// Discard idle terminals so the next command gets a fresh
-							// terminal using the new profile's shell instead of reusing
-							// a stale one from the previous profile.
-							TerminalRegistry.closeIdleTerminals()
-						}
-					} else if (key === "execaShellPath") {
-						Terminal.setExecaShellPath(value as string | undefined)
-					} else if (key === "mcpEnabled") {
-						newValue = value ?? true
-						const mcpHub = provider.getMcpHub()
-
-						if (mcpHub) {
-							await mcpHub.handleMcpEnabledChange(newValue as boolean)
-						}
-					} else if (key === "experiments") {
-						if (!value) {
+					for (const [key, value] of Object.entries(message.updatedSettings)) {
+						// An invalid display value is ignored, before anything is done for it.
+						if (isInvalidDisplayValue(key, value)) {
+							provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
 							continue
 						}
 
-						newValue = {
-							...(getGlobalState("experiments") ?? experimentDefault),
-							...(value as Record<ExperimentId, boolean>),
+						let newValue = value
+
+						if (key === "language") {
+							newValue = value ?? "en"
+							changeLanguage(newValue as Language)
+						} else if (key === "allowedCommands") {
+							const commands = value ?? []
+
+							newValue = Array.isArray(commands)
+								? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
+								: []
+
+							await vscode.workspace
+								.getConfiguration(Package.name)
+								.update("allowedCommands", newValue, vscode.ConfigurationTarget.Global)
+						} else if (key === "deniedCommands") {
+							const commands = value ?? []
+
+							newValue = Array.isArray(commands)
+								? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
+								: []
+
+							await vscode.workspace
+								.getConfiguration(Package.name)
+								.update("deniedCommands", newValue, vscode.ConfigurationTarget.Global)
+						} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
+							const patterns = value ?? []
+
+							// Blank lines, which the textarea editor produces freely,
+							// name no file and are dropped here. Patterns are
+							// otherwise not `.trim()`ed: leading whitespace is
+							// significant in gitignore syntax, and trailing
+							// whitespace has to be escaped by the user to be kept.
+							newValue = Array.isArray(patterns)
+								? patterns.filter((pattern) => typeof pattern === "string" && pattern.trim().length > 0)
+								: []
+						} else if (key === "ttsEnabled") {
+							newValue = value ?? true
+							setTtsEnabled(newValue as boolean)
+						} else if (key === "ttsSpeed") {
+							newValue = value ?? 1.0
+							setTtsSpeed(newValue as number)
+						} else if (key === "terminalShellIntegrationTimeout") {
+							if (value !== undefined) {
+								Terminal.setShellIntegrationTimeout(value as number)
+							}
+						} else if (key === "terminalShellIntegrationDisabled") {
+							if (value !== undefined) {
+								Terminal.setShellIntegrationDisabled(value as boolean)
+							}
+						} else if (key === "terminalCommandDelay") {
+							if (value !== undefined) {
+								Terminal.setCommandDelay(value as number)
+							}
+						} else if (key === "terminalPowershellCounter") {
+							if (value !== undefined) {
+								Terminal.setPowershellCounter(value as boolean)
+							}
+						} else if (key === "terminalZshClearEolMark") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshClearEolMark(value as boolean)
+							}
+						} else if (key === "terminalZshOhMy") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshOhMy(value as boolean)
+							}
+						} else if (key === "terminalZshP10k") {
+							if (value !== undefined) {
+								Terminal.setTerminalZshP10k(value as boolean)
+							}
+						} else if (key === "terminalZdotdir") {
+							if (value !== undefined) {
+								Terminal.setTerminalZdotdir(value as boolean)
+							}
+						} else if (key === "terminalProfile") {
+							const previousProfile = Terminal.getTerminalProfile()
+							Terminal.setTerminalProfile(typeof value === "string" ? value : undefined)
+							newValue = Terminal.getTerminalProfile()
+
+							if (newValue !== previousProfile) {
+								// Discard idle terminals so the next command gets a fresh
+								// terminal using the new profile's shell instead of reusing
+								// a stale one from the previous profile.
+								TerminalRegistry.closeIdleTerminals()
+							}
+						} else if (key === "execaShellPath") {
+							Terminal.setExecaShellPath(value as string | undefined)
+						} else if (key === "mcpEnabled") {
+							newValue = value ?? true
+							const mcpHub = provider.getMcpHub()
+
+							if (mcpHub) {
+								await mcpHub.handleMcpEnabledChange(newValue as boolean)
+							}
+						} else if (key === "experiments") {
+							if (!value) {
+								continue
+							}
+
+							newValue = {
+								...(getGlobalState("experiments") ?? experimentDefault),
+								...(value as Record<ExperimentId, boolean>),
+							}
+						} else if (key === "customSupportPrompts") {
+							if (!value) {
+								continue
+							}
 						}
-					} else if (key === "customSupportPrompts") {
-						if (!value) {
-							continue
-						}
+
+						await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 					}
-
-					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
+				} catch (error) {
+					failed = true
+					failure = error
 				}
-			} catch (error) {
-				failed = true
-				failure = error
+
+				// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
+				try {
+					await provider.postStateToWebview()
+				} catch (error) {
+					provider.log(
+						`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+					)
+				}
+
+				if (message.requestId) {
+					await provider.postMessageToWebview({
+						type: "settingsSaveResult",
+						requestId: message.requestId,
+						success: !failed,
+						...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+					})
+				}
+
+				if (failed) throw failure
 			}
 
-			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
-			try {
-				await provider.postStateToWebview()
-			} catch (error) {
-				provider.log(
-					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
-				)
-			}
-
-			if (message.requestId) {
-				await provider.postMessageToWebview({
-					type: "settingsSaveResult",
-					requestId: message.requestId,
-					success: !failed,
-					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
-				})
-			}
-
-			if (failed) throw failure
+			// A failed save must not keep later saves from running, so the next one chains onto a settled link.
+			const thisSave = updateSettingsQueue.then(applySettings)
+			updateSettingsQueue = thisSave.catch(() => undefined)
+			await thisSave
 
 			break
 		}
@@ -1160,6 +1201,7 @@ export const webviewMessageHandler = async (
 
 			break
 		case "resetState":
+			settingsResetGeneration++
 			await provider.resetState()
 			break
 		case "requestProviderInfo":
