@@ -697,7 +697,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		// call creates for the first time (an undefined prior id restores the
 		// no-mapping semantics getModeConfigId reports).
 		const previousModeConfigs: Array<[Mode, string | undefined]> = []
+		// The fan-out below goes through the provider, so it moves this window's cached mode choice
+		// along with the shared map; the compensation has to move both back. Snapshot the window's own
+		// choices while they are still the pre-call values - a choice this window made locally (an
+		// unmapped mode's default) never reaches the shared map, and the restore must not lose it.
+		let previousLocalModeConfigs = new Map<string, string>()
 		if (values.modeApiConfigs) {
+			previousLocalModeConfigs = this.sidebarProvider.getLocalModeConfigIds()
 			for (const mode of Object.keys(values.modeApiConfigs)) {
 				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
 			}
@@ -820,10 +826,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				)
 			}
 			try {
-				// The restore replays the shared map only: a prior id of undefined means "no
-				// mapping", which the provider accessor does not accept, and the manager write
-				// is what the forward fan-out compensated against.
-				await Promise.all(previousModeConfigs.map(([mode, configId]) => manager.setModeConfig(mode, configId)))
+				// Both maps move back together, the way the forward fan-out wrote them: the shared mapping
+				// through the manager, and this window's cached choice from the snapshot above. A mode that
+				// was unmapped everywhere reverts to "no mapping" - the accessor clears the cache instead
+				// of leaving it at the id the rejected call stored.
+				await Promise.all(
+					previousModeConfigs.map(([mode, configId]) =>
+						this.sidebarProvider.restoreModeConfig(mode, configId, previousLocalModeConfigs.get(mode)),
+					),
+				)
 			} catch (restoreError) {
 				this.log(
 					"[setConfiguration] failed to restore the mode API config mappings: " +

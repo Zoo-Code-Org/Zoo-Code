@@ -3100,6 +3100,32 @@ export class ClineProvider
 		await this.providerSettingsManager.setModeConfig(mode, id)
 		this.localModeConfigIds.set(mode, id)
 	}
+	/**
+	 * This window's mode -> config choices, as a copy. A caller that fans a mapping out through
+	 * `setModeConfig` needs the pre-write copy to roll the same leg back.
+	 */
+	public getLocalModeConfigIds(): Map<string, string> {
+		return new Map(this.localModeConfigIds)
+	}
+
+	/**
+	 * Rolls one mode -> config mapping back in both maps `setModeConfig` writes together: the shared
+	 * mapping through the manager, and this window's cached choice. A restored choice of "undefined"
+	 * clears the cache instead of leaving it at the id a rejected write stored, so the next read
+	 * reports "no mapping" the way it did before the write.
+	 */
+	public async restoreModeConfig(
+		mode: Mode,
+		configId: string | undefined,
+		localChoiceId: string | undefined,
+	): Promise<void> {
+		await this.providerSettingsManager.setModeConfig(mode, configId)
+		if (localChoiceId === undefined) {
+			this.localModeConfigIds.delete(mode)
+		} else {
+			this.localModeConfigIds.set(mode, localChoiceId)
+		}
+	}
 
 	/**
 	 * Updates the current task's API handler.

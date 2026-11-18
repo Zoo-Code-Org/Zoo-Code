@@ -5580,6 +5580,46 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		it("clears the window-local mode choice when a restore replays an absent mapping", async () => {
+			// restoreModeConfig is the pair-write accessor the compensations replay through: the shared
+			// map and this window's cache move together, so replaying an absent mapping has to clear
+			// the cache too. Otherwise the next read still reports the id a rejected write stored.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ apiProvider: providerIdentifiers.anthropic, id: "keeper-id", name: "keeper-profile" },
+			])
+			const setModeConfig = vi
+				.spyOn(provider.providerSettingsManager, "setModeConfig")
+				.mockResolvedValue(undefined)
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			provider["initialModeConfigIds"] = Promise.resolve({})
+			provider["localModeConfigIds"].set("code", "rejected-id")
+
+			await provider.restoreModeConfig("code", undefined, undefined)
+
+			expect(setModeConfig).toHaveBeenCalledWith("code", undefined)
+			expect(provider["localModeConfigIds"].has("code")).toBe(false)
+			await expect(provider["getModeConfigId"]("code")).resolves.toBeUndefined()
+
+			// A restore that replays a mapping both sides held puts it back in both maps.
+			await provider.restoreModeConfig("code", "keeper-id", "keeper-id")
+			expect(setModeConfig).toHaveBeenLastCalledWith("code", "keeper-id")
+			expect(provider["localModeConfigIds"].get("code")).toBe("keeper-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("keeper-id")
+			// A distinct local choice survives a shared map that names nothing: that is the seam this
+			// window's cache exists for.
+			await provider.restoreModeConfig("code", undefined, "keeper-id")
+			expect(provider["localModeConfigIds"].get("code")).toBe("keeper-id")
+			await expect(provider["getModeConfigId"]("code")).resolves.toBe("keeper-id")
+
+			await provider.dispose()
+		})
 		it("keeps the mutation queue owned by a mode switch past its timeout", async () => {
 			// The fake timers, the provider, the gate and the prototype spy are declared
 			// before the try below so its finally block can name them: a failed assertion

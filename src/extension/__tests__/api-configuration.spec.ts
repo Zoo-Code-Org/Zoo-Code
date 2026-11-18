@@ -37,6 +37,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -87,6 +93,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -298,6 +310,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -352,6 +370,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -374,9 +398,59 @@ describe("API - configuration", () => {
 		// The profile did not exist before: its overlay is restored to empty.
 		expect(provider["refreshViewLocalStateForUpdatedProfile"]).toHaveBeenCalledWith("pinned", {})
 		expect(setModeConfig).toHaveBeenLastCalledWith("code", undefined)
+		// The rollback hands both halves back through the provider accessor: the shared mapping it
+		// recorded and this window's cached choice, both absent before the call.
+		expect(provider["restoreModeConfig"]).toHaveBeenCalledWith("code", undefined, undefined)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
 
+	it("replays this window's local mode choice when the mode mapping rolls back", async () => {
+		// The fan-out moves the window's cached choice with the shared map, so the rollback has to
+		// hand both halves back. A mode this window mapped on its own is not in the shared
+		// snapshot, and "no mapping" there must not erase the choice this window made.
+		const setValues = vi.fn().mockResolvedValue(undefined)
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockRejectedValue(new Error("mode write failed"))
+		const restoreModeConfig = vi.fn().mockResolvedValue(undefined)
+		const localChoices = new Map<string, string>([["code", "window-code-config"]])
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "old-profile" }),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues,
+				getProviderSettings: vi.fn().mockReturnValue({}),
+			},
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				hasConfig: vi.fn().mockResolvedValue(false),
+				// The shared map had no code mapping before the call.
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			setModeConfig,
+			getLocalModeConfigIds: vi.fn().mockReturnValue(localChoices),
+			restoreModeConfig,
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("mode write failed")
+
+		expect(setModeConfig).toHaveBeenCalledWith("code", "new-code-config")
+		// Both halves of the write come back: the shared mapping it created is cleared, and the
+		// choice this window held for the mode is replayed rather than erased.
+		expect(restoreModeConfig).toHaveBeenCalledWith("code", undefined, "window-code-config")
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+	})
 	it("keeps host-owned viewStates out of both the settings write and the rollback replay", async () => {
 		// Same rollback scenario as the mode-mapping test above, but the caller payload and
 		// the pre-call snapshot each carry a viewStates map: the forward write would pin other
@@ -416,6 +490,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -482,6 +562,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
@@ -552,6 +638,12 @@ describe("API - configuration", () => {
 				getModeConfigId: vi.fn().mockResolvedValue(undefined),
 			},
 			setModeConfig,
+			// The mode fan-out has a window-local leg: this double keeps no cache of its own, so it
+			// reports an empty one and replays the shared mapping through the spy the assertions read.
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig: vi.fn(async (mode: string, configId: string | undefined) =>
+				setModeConfig(mode, configId),
+			),
 			postStateToWebview,
 		} as unknown as ClineProvider
 		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
