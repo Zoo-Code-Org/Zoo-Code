@@ -1,19 +1,21 @@
 import type { Anthropic } from "@anthropic-ai/sdk"
 
+import { setAbortLatch } from "../../../test-utils/run-state"
 import { Task } from "../Task"
 
 describe("Task Token Circuit Breaker", () => {
 	function createTestTask(tokenCircuitBreakerLimit: number, totalTokens: number) {
 		const task = Object.create(Task.prototype) as Task
+		setAbortLatch(task, false)
 		const stopError = new Error("STOP_AFTER_CIRCUIT_BREAKER")
 
 		Object.assign(task, {
 			taskId: "task-test-cb",
 			instanceId: "inst-test-cb",
+			apiConfiguration: { apiProvider: "anthropic" },
 			tokenCircuitBreakerLimit,
 			consecutiveMistakeLimit: 0,
 			consecutiveMistakeCount: 0,
-			abort: false,
 			getTokenUsage: vi.fn().mockReturnValue({
 				totalTokensIn: totalTokens,
 				totalTokensOut: 0,

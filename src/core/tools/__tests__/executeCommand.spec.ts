@@ -80,6 +80,7 @@ describe("executeCommand", () => {
 		// Mock TerminalRegistry.getOrCreateTerminal
 		;(TerminalRegistry.getOrCreateTerminal as any).mockResolvedValue(mockTerminal)
 		vitest.mocked(Terminal.isActiveShellCmdExe).mockReturnValue(false)
+		vitest.mocked(Terminal.compressTerminalOutput).mockImplementation((input: string) => input)
 	})
 
 	afterEach(() => {

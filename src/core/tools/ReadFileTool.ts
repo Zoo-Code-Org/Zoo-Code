@@ -815,7 +815,13 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 				}
 
 				// Read text file
-				const rawContent = await fs.readFile(fullPath, "utf8")
+				const fileData = await fs.readFile(fullPath, "utf8")
+				const rawContent =
+					typeof fileData === "string"
+						? fileData
+						: Buffer.isBuffer(fileData)
+							? fileData.toString("utf-8")
+							: String(fileData ?? "")
 
 				// Handle line ranges if specified
 				let content: string

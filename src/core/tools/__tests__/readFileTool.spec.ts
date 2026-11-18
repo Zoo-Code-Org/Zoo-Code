@@ -48,9 +48,10 @@ vi.mock("isbinaryfile")
 
 vi.mock("../../../integrations/misc/extract-text", () => ({
 	extractTextFromFile: vi.fn(),
-	addLineNumbers: vi.fn().mockImplementation((text: string, startLine = 1) => {
+	addLineNumbers: vi.fn().mockImplementation((text: string | Buffer, startLine = 1) => {
 		if (!text) return ""
-		const lines = text.split("\n")
+		const str = typeof text === "string" ? text : Buffer.from(text).toString("utf-8")
+		const lines = str.split("\n")
 		return lines.map((line, i) => `${startLine + i} | ${line}`).join("\n")
 	}),
 	getSupportedBinaryFormats: vi.fn(() => [".pdf", ".docx", ".ipynb"]),
