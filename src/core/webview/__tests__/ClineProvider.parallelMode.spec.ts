@@ -2316,14 +2316,12 @@ describe("ClineProvider - Parallel Mode Support", () => {
 
 			await providerB.setValue("currentApiConfigName", "profile-y")
 
-			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue(
-				{
-					name: "profile-x",
-					id: "x-id",
-					apiProvider: providerIdentifiers.anthropic,
-					anthropicBaseUrl: "x-url",
-				} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>,
-			)
+			vi.spyOn(providerA.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "profile-x",
+				id: "x-id",
+				apiProvider: providerIdentifiers.anthropic,
+				anthropicBaseUrl: "x-url",
+			} as unknown as Awaited<ReturnType<typeof providerA.providerSettingsManager.getProfile>>)
 			vi.spyOn(providerA.providerSettingsManager, "listConfig").mockResolvedValue([
 				{ id: "y-id", name: "profile-y", apiProvider: providerIdentifiers.openrouter },
 				{ id: "x-id", name: "profile-x", apiProvider: providerIdentifiers.anthropic },
