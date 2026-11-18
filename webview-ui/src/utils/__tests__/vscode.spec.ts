@@ -398,6 +398,29 @@ describe("VSCodeAPIWrapper", () => {
 		// authoritative, so the malformed value is never parsed again.
 		expect(storage.getItem).toHaveBeenCalledTimes(1)
 	})
+
+	it("returns the in-memory state when a read throws after every write landed", () => {
+		// The failed-write shortcut at the top of getState is not what this case exercises: every write
+		// landed, so storageWriteFailed stays false and the answer has to come from the catch under the
+		// read. A read that cannot be answered must fall back to this session's state, not to nothing.
+		const storage = createMockStorage()
+		Object.defineProperty(globalThis, "localStorage", {
+			configurable: true,
+			value: storage,
+		})
+		const wrapper = new VSCodeAPIWrapper()
+
+		wrapper.setState({ mode: "code" })
+		expect(storage.setItem).toHaveBeenCalledWith("vscodeState", '{"mode":"code"}')
+		expect(wrapper.getState()).toEqual({ mode: "code" })
+
+		// Storage is revoked between reads: the persisted copy is still there and the read just cannot
+		// reach it any more.
+		storage.getItem = vi.fn(() => {
+			throw new Error("storage access revoked")
+		})
+		expect(wrapper.getState()).toEqual({ mode: "code" })
+	})
 	it("keeps the in-memory viewStateId when setItem is unavailable while reads still work", () => {
 		const randomUUID = vi.fn().mockReturnValueOnce("no-setitem-view").mockReturnValueOnce("flapped-view")
 		Object.defineProperty(globalThis, "crypto", {

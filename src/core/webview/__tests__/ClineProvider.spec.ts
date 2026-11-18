@@ -7838,6 +7838,264 @@ describe("ClineProvider", () => {
 				await provider.dispose()
 			}
 		})
+
+		it("keeps a late activation write from landing on top of the state the failure path restored", async () => {
+			// The four activation writes fan out at once. This case rejects the shared selection write
+			// immediately and lets the shared provider-settings write land two timers later. The order
+			// matters because the deletion flow compensates in the failure path: it restores the selection
+			// and the settings the activation moved, and a leg that is still in flight when that restore
+			// runs stores on top of it, so the durable selection and the durable settings disagree until
+			// the next reload. Settling the fan-out first removes that window.
+			vi.useRealTimers()
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			let activationStarted = false
+			let failSelectionWrite = true
+			let slowSettingsWritesRemaining = 1
+			// Recorded the moment the instrumented leg settles, so the assertion below can ask whether
+			// anything was still in flight when the caller received the error.
+			let settingsWriteLegSettled = false
+			// ContextProxy has no typed seam for these two methods on its public surface, so the local
+			// alias is the documented way in: it names the two methods the case instruments.
+			const proxySurface = provider.contextProxy as unknown as {
+				setValue: (key: string, value: unknown) => Promise<void>
+				setProviderSettings: (values: Record<string, unknown>) => Promise<void>
+			}
+			const realSetValue = proxySurface.setValue.bind(provider.contextProxy)
+			const realSetProviderSettings = proxySurface.setProviderSettings.bind(provider.contextProxy)
+			vi.spyOn(proxySurface, "setValue").mockImplementation(async (key: string, value: unknown) => {
+				if (failSelectionWrite && activationStarted && key === "currentApiConfigName") {
+					failSelectionWrite = false
+					throw new Error("selection write failed")
+				}
+				return realSetValue(key, value)
+			})
+			// The instrumented leg lands two timers late and does store. The token is armed only once the
+			// activation has begun, so the setup write this test performs itself is not the one being
+			// instrumented.
+			vi.spyOn(proxySurface, "setProviderSettings").mockImplementation(
+				async (values: Record<string, unknown>) => {
+					if (slowSettingsWritesRemaining > 0 && activationStarted) {
+						slowSettingsWritesRemaining -= 1
+						await new Promise<void>((resolve) => setTimeout(resolve, 0))
+						await new Promise<void>((resolve) => setTimeout(resolve, 0))
+						settingsWriteLegSettled = true
+					}
+					await realSetProviderSettings(values)
+				},
+			)
+			try {
+				await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+				await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+				await provider.contextProxy.setProviderSettings({
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "old-shared-key",
+				})
+				provider["viewLocalState"].currentApiConfigName = "old-profile"
+				provider["viewLocalState"].apiConfiguration = {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "deleted-profile-secret",
+				}
+				const task = {
+					taskId: "late-write-task",
+					taskApiConfigName: "old-profile",
+					setTaskApiConfigName: vi.fn(),
+					updateApiConfiguration: vi.fn(),
+				}
+				vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+					task as unknown as ReturnType<typeof provider.getCurrentTask>,
+				)
+				vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+				// @ts-ignore - Replace providerSettingsManager with a test double.
+				provider.providerSettingsManager = {
+					runExclusiveAcrossInstances: runManagerSectionInline,
+					deleteConfig: vi.fn().mockResolvedValue(undefined),
+					activateProfile: vi.fn().mockImplementation(async () => {
+						activationStarted = true
+						return {
+							name: "keeper-profile",
+							id: "keeper-id",
+							apiProvider: providerIdentifiers.anthropic,
+							apiKey: "keeper-key",
+						}
+					}),
+					listConfig: vi.fn().mockResolvedValue([oldProfile, keeperProfile]),
+					setModeConfig: vi.fn(),
+					saveConfig: vi.fn().mockResolvedValue("old-id"),
+					getProfile: vi.fn().mockResolvedValue({
+						name: "keeper-profile",
+						id: "keeper-id",
+						apiProvider: providerIdentifiers.anthropic,
+						apiKey: "keeper-key",
+					}),
+					getSelectionAndModeConfigs: vi.fn().mockResolvedValue({
+						currentApiConfigName: "old-profile",
+						modeApiConfigs: {},
+					}),
+				}
+				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow("selection write failed")
+				// The claim under test: the fan-out settles before the failure path decides. Ask it at the
+				// moment the caller receives the error, before giving the instrumented leg any more time.
+				expect(settingsWriteLegSettled).toBe(true)
+				// The caller still sees the rejected selection write rather than a wrapper or a later error.
+				// The log names the leg that failed by key, and carries no stored value with it.
+				expect(logSpy).toHaveBeenCalledWith(
+					expect.stringContaining("the shared selection (currentApiConfigName)"),
+				)
+				expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining("keeper-key"))
+				// And the rollback is the last word. Give the late write every chance to land, then read the
+				// durable pair: the selection the failure path restored and the settings it restored have to
+				// still agree, rather than a restored selection over the activated profile's settings.
+				await new Promise<void>((resolve) => setTimeout(resolve, 10))
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("old-profile")
+				expect(provider.contextProxy.getValue("apiProvider")).toBe(providerIdentifiers.openrouter)
+				expect(provider.contextProxy.getValue("apiKey")).toBeUndefined()
+				expect(provider.contextProxy.getValue("openRouterApiKey")).toBe("old-shared-key")
+			} finally {
+				await provider.dispose()
+			}
+		})
+
+		it("leaves a view that has begun teardown out of the re-pin after a profile deletion", async () => {
+			// Teardown sets _disposed before it awaits task eviction, so a sibling is still registered while
+			// its own teardown runs. Re-pinning into it then does work its teardown is already doing.
+			vi.useRealTimers()
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			sibling["viewLocalState"].currentApiConfigName = "old-profile"
+			const task = { taskId: "teardown-task", taskApiConfigName: "old-profile" }
+			vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof sibling.getCurrentTask>,
+			)
+			// The teardown body is held open so the instance stays registered with _disposed set, which is
+			// the window a real task eviction creates. These four methods are private, so the local alias is
+			// the documented way in.
+			let releaseTeardown: () => void = () => {}
+			const teardownGate = new Promise<void>((resolve) => {
+				releaseTeardown = resolve
+			})
+			const siblingSurface = sibling as unknown as {
+				updateTaskApiHandlerIfNeeded: (settings: ProviderSettings, options?: { forceRebuild?: boolean }) => void
+				persistStickyProviderProfileToCurrentTask: (name: string | undefined) => Promise<void>
+				savePersistedViewState: (values: Record<string, unknown>) => Promise<void>
+				disposeInternal: () => Promise<void>
+			}
+			const handlerSpy = vi.spyOn(siblingSurface, "updateTaskApiHandlerIfNeeded").mockImplementation(() => {})
+			const stickySpy = vi
+				.spyOn(siblingSurface, "persistStickyProviderProfileToCurrentTask")
+				.mockResolvedValue(undefined)
+			const durableSpy = vi.spyOn(siblingSurface, "savePersistedViewState").mockResolvedValue(undefined)
+			const postSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(siblingSurface, "disposeInternal").mockImplementation(() => teardownGate)
+			const teardown = sibling.dispose()
+			try {
+				// Confirm the case really runs inside the teardown window rather than after it.
+				expect(sibling["_disposed"]).toBe(true)
+				expect(ClineProvider.getAllInstances()).toContain(sibling)
+				await provider["rePinViewLocalStateForDeletedProfile"]("old-profile", "keeper-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				})
+				expect(handlerSpy).not.toHaveBeenCalled()
+				expect(stickySpy).not.toHaveBeenCalled()
+				expect(durableSpy).not.toHaveBeenCalled()
+				expect(postSpy).not.toHaveBeenCalled()
+			} finally {
+				releaseTeardown()
+				await teardown
+				await provider.dispose()
+			}
+		})
+
+		it("leaves a view that has begun teardown out of the sibling refresh after a profile save", async () => {
+			// The same window, the other sibling loop: a save that updates a profile refreshes every view
+			// pinned to it, and a view whose teardown has begun must be left alone.
+			vi.useRealTimers()
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const sibling = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			sibling["viewLocalState"].currentApiConfigName = "keeper-profile"
+			const task = { taskId: "teardown-task", taskApiConfigName: "keeper-profile" }
+			vi.spyOn(sibling, "getCurrentTask").mockReturnValue(
+				task as unknown as ReturnType<typeof sibling.getCurrentTask>,
+			)
+			let releaseTeardown: () => void = () => {}
+			const teardownGate = new Promise<void>((resolve) => {
+				releaseTeardown = resolve
+			})
+			const siblingSurface = sibling as unknown as {
+				_saveViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+				updateTaskApiHandlerIfNeeded: (settings: ProviderSettings, options?: { forceRebuild?: boolean }) => void
+				disposeInternal: () => Promise<void>
+			}
+			const mutationSpy = vi.spyOn(siblingSurface, "_saveViewLocalStateFromMutation").mockResolvedValue(undefined)
+			const handlerSpy = vi.spyOn(siblingSurface, "updateTaskApiHandlerIfNeeded").mockImplementation(() => {})
+			const postSpy = vi.spyOn(sibling, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(siblingSurface, "disposeInternal").mockImplementation(() => teardownGate)
+			const teardown = sibling.dispose()
+			try {
+				expect(sibling["_disposed"]).toBe(true)
+				await provider.refreshViewLocalStateForUpdatedProfile("keeper-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "fresh-key",
+				})
+				expect(mutationSpy).not.toHaveBeenCalled()
+				expect(handlerSpy).not.toHaveBeenCalled()
+				expect(postSpy).not.toHaveBeenCalled()
+			} finally {
+				releaseTeardown()
+				await teardown
+				await provider.dispose()
+			}
+		})
 	})
 
 	describe("local state isolation", () => {

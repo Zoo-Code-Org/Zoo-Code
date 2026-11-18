@@ -472,8 +472,10 @@ export class ClineProvider
 				// per-view pins. Clear the pin of every view naming the deleted slug and leave views
 				// pinned to another mode alone. A closed view holds its pin only in the persisted
 				// map, where loadViewState already drops a mode that no longer resolves.
+				// A sibling that has begun teardown owns its own state; clearing a pin into it here would
+				// be duplicate work its own teardown is already doing.
 				const affected = ClineProvider.getAllInstances().filter(
-					(instance) => instance.viewLocalState.mode === slug,
+					(instance) => !instance._disposed && instance.viewLocalState.mode === slug,
 				)
 				await Promise.all(
 					affected.map(async (instance) => {
@@ -4300,8 +4302,12 @@ export class ClineProvider
 	private async snapshotSiblingOverlaysBeforeSharedSettingsWrite(
 		activatedProfileName: string | undefined,
 	): Promise<void> {
+		// Skip a sibling that has begun teardown: dispose sets _disposed before it awaits task
+		// eviction, so the instance is still registered while its webview closes. Work aimed at it
+		// would be duplicate work its own teardown is already doing.
 		const affected = ClineProvider.getAllInstances().filter(
 			(instance) =>
+				!instance._disposed &&
 				instance !== this &&
 				instance.pinnedProfileName !== undefined &&
 				instance.pinnedProfileName !== activatedProfileName &&
@@ -4457,7 +4463,21 @@ export class ClineProvider
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(name)
 
 			try {
-				await Promise.all([
+				// Every leg is awaited before this failure path decides, the way ContextProxy.setValues already
+				// awaits every store: Promise.all rejects at the first rejection and leaves the other stores in
+				// flight, and a store that lands after the caller has already rolled a key back overwrites that
+				// rollback. Settling first means no write is pending when the caller receives the error. Two
+				// promises this change deliberately does not make: it does not make every layer agree after a
+				// failed activation, and it does not undo the rule below that a failed activation keeps the
+				// switch. Which store is authoritative for another window is the write-revision question that
+				// issue 2488 leaves open.
+				const writeLegNames = [
+					"the profile list (listApiConfigMeta)",
+					"the shared selection (currentApiConfigName)",
+					"the shared provider settings (setProviderSettings)",
+					"this view's overlay clear (_saveViewLocalStateFromMutation)",
+				]
+				const writeLegs = await Promise.allSettled([
 					this.contextProxy.setValue("listApiConfigMeta", listApiConfigMeta),
 					// Route through setValue so the in-memory viewLocalState buffer tracks the
 					// activated profile: a plain ContextProxy write would leave a stale loaded
@@ -4470,6 +4490,27 @@ export class ClineProvider
 					// new settings in getState().
 					this._saveViewLocalStateFromMutation({ apiConfiguration: undefined }),
 				])
+				const failedWriteLegs: string[] = []
+				let firstWriteFailure: unknown
+				let sawFailure = false
+				for (let legIndex = 0; legIndex < writeLegs.length; legIndex++) {
+					const leg = writeLegs[legIndex]
+					if (leg.status === "fulfilled") {
+						continue
+					}
+					failedWriteLegs.push(writeLegNames[legIndex])
+					if (!sawFailure) {
+						sawFailure = true
+						firstWriteFailure = leg.reason
+					}
+				}
+				if (sawFailure) {
+					this.log(
+						`[activateProviderProfile] shared write failed after all legs settled: ${failedWriteLegs.join(", ")}`,
+					)
+					// The caller sees the first rejection, exactly as it did before this change.
+					throw firstWriteFailure
+				}
 			} catch (error) {
 				// The manager has already written the activated profile, so the caller keeps the
 				// switch and delivers its pending message now. The task must run the activated
@@ -4534,8 +4575,11 @@ export class ClineProvider
 	 * view refreshes its buffer at the mutation site itself.
 	 */
 	async refreshViewLocalStateForUpdatedProfile(name: string, providerSettings: ProviderSettings): Promise<void> {
+		// Skip a sibling that has begun teardown: dispose sets _disposed before it awaits task
+		// eviction, so the instance is still registered while its webview closes. Work aimed at it
+		// would be duplicate work its own teardown is already doing.
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === name,
+			(instance) => !instance._disposed && instance !== this && instance.pinnedProfileName === name,
 		)
 
 		if (affected.length === 0) {
@@ -4584,8 +4628,11 @@ export class ClineProvider
 		replacementName: string,
 		replacementSettings: ProviderSettings | undefined,
 	): Promise<void> {
+		// Skip a sibling that has begun teardown: dispose sets _disposed before it awaits task
+		// eviction, so the instance is still registered while its webview closes. Work aimed at it
+		// would be duplicate work its own teardown is already doing.
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => instance !== this && instance.pinnedProfileName === deletedProfileName,
+			(instance) => !instance._disposed && instance !== this && instance.pinnedProfileName === deletedProfileName,
 		)
 
 		if (affected.length === 0) {
@@ -4663,7 +4710,12 @@ export class ClineProvider
 		// first so a view that launches after an intervening activation still follows the
 		// renamed profile instead of dangling at the deleted name.
 		await this.repointPersistedViewStates(oldName, newName)
-		const affected = ClineProvider.getAllInstances().filter((instance) => instance.pinnedProfileName === oldName)
+		// Skip a sibling that has begun teardown: dispose sets _disposed before it awaits task
+		// eviction, so the instance is still registered while its webview closes. Work aimed at it
+		// would be duplicate work its own teardown is already doing.
+		const affected = ClineProvider.getAllInstances().filter(
+			(instance) => !instance._disposed && instance.pinnedProfileName === oldName,
+		)
 
 		if (affected.length === 0) {
 			return
@@ -6272,8 +6324,10 @@ export class ClineProvider
 			instance._clearViewLocalState()
 		}
 
+		// Teardown owns a disposing sibling's state: it sets _disposed before it awaits task
+		// eviction, so it is still registered here and a post aimed at it is duplicate work.
 		for (const instance of allInstances) {
-			if (instance !== this) {
+			if (instance !== this && !instance._disposed) {
 				// A sibling's post can throw mid-reset (state generation reaches the
 				// settings file through customModesManager.getCustomModes): the failure
 				// must not stop the reset from reaching the remaining instances, whose
