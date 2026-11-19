@@ -140,6 +140,12 @@ Merged PR #1625 changed the confirmed downstream readers: `getEnvironmentDetails
 
 `scripts/check-delegated-mode-readers.ts` does not execute `getEnvironmentDetails`, `presentAssistantMessage`, or `validateToolUse`. It checks the production handoff selector and a pure built-in-mode permission divergence, establishing that the wrong source is observable. It is refinement support, not exhaustive reader coverage. Other mode-sensitive consumers remain an explicit inventory gap, and this suite does not claim universal task-local reader isolation.
 
+## Queue ask landing model
+
+`scripts/check-queue-ask-landing.ts` is a bounded model of where a queued message lands after `MessageQueueService` drains it. It imports the real `MessageQueueService` and the `nextRunState` kernel. The `askResponse` slot and the `setTimeout(0)` hop in `Task.ts` are model abstractions, because `Task.ts` needs VS Code.
+
+The invariant is that every added message is queued, in flight, in the slot, or consumed. Nothing is dropped. The production policy sets the slot with no ask pending, and the next `ask()` resets it. The model keeps this gap as a known witness (#2421). The requeue policy is the proposed fix and must stay clean. Remove the witness when production changes.
+
 ## Task fan-out protocol model
 
 `scripts/check-task-fanout-protocol.ts` is a separate, optional bounded protocol model for the #369/#372 fan-out safety contract. It explores a live parent with two sibling slots, a two-permit scheduler, independent result readiness, explicit child-to-parent delivery, parent loss, orphan cancellation, and permit release. It checks scheduler capacity and exact permit ownership, one writer and at-most-once delivery per child, readiness before delivery, and no result routing after parent loss. Named landmarks require concurrent siblings beneath a live parent, out-of-order result delivery, single-writer results, parent loss while work is running, and complete orphan cleanup to remain reachable. Injected unsafe states confirm those invariants reject wrong writers, early and duplicate delivery, post-parent-loss routing, and scheduler over-allocation.
