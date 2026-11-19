@@ -4,7 +4,11 @@ import { renderWithExtensionState, screen, fireEvent, within, waitFor } from "@/
 import { act } from "@testing-library/react"
 
 import { vscode } from "@/utils/vscode"
-import { DEFAULT_CHECKPOINT_TIMEOUT_SECONDS, type ProviderSettings } from "@roo-code/types"
+import {
+	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+	DEFAULT_PER_WRITE_CHECKPOINTS,
+	type ProviderSettings,
+} from "@roo-code/types"
 import { experimentDefault } from "@roo/experiments"
 import type { ApiOptionsProps } from "../ApiOptions"
 
@@ -598,10 +602,41 @@ describe("SettingsView - Sound Settings", () => {
 						soundEnabled: true,
 						enableCheckpoints: false,
 						checkpointTimeout: DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
+						perWriteCheckpoints: DEFAULT_PER_WRITE_CHECKPOINTS,
 						terminalShellIntegrationTimeout: 30_000,
 					}),
 				}),
 			),
+		)
+	})
+
+	it("saves a disabled per-write checkpoints setting as false in the updateSettings payload", () => {
+		// CheckpointSettings.spec.tsx covers the control's render and its setter; this
+		// is the UI-to-payload link: a stored true that the user un-checks has to reach
+		// the save payload as false, not as the display default. The neighbouring cases
+		// assert with objectContaining, which ignores a key that is missing from the
+		// payload entirely, so this key is named here. The per-write checkbox is the
+		// first checkbox of the checkpoints section and the enable-checkpoints box is
+		// seeded false, so the two boxes are told apart by their state, not by order.
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="checkpoints" />, {
+			state: { perWriteCheckpoints: true, enableCheckpoints: false },
+		})
+
+		const content = screen.getByTestId("settings-content")
+		const [perWriteCheckbox, enableCheckbox] = within(content).getAllByRole("checkbox")
+		expect(perWriteCheckbox).toHaveProperty("checked", true)
+		expect(enableCheckbox).toHaveProperty("checked", false)
+
+		fireEvent.click(perWriteCheckbox)
+		fireEvent.click(screen.getByTestId("save-button"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "updateSettings",
+				updatedSettings: expect.objectContaining({
+					perWriteCheckpoints: false,
+				}),
+			}),
 		)
 	})
 

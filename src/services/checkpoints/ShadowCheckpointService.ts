@@ -330,7 +330,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 
 	public async saveCheckpoint(
 		message: string,
-		options?: { allowEmpty?: boolean; suppressMessage?: boolean },
+		options?: { allowEmpty?: boolean; suppressMessage?: boolean; suppressBroadcast?: boolean },
 	): Promise<CheckpointResult | undefined> {
 		try {
 			this.log(
@@ -357,6 +357,7 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 					toHash,
 					duration,
 					suppressMessage: options?.suppressMessage ?? false,
+					suppressBroadcast: options?.suppressBroadcast ?? false,
 				})
 			}
 
