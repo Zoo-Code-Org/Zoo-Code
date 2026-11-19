@@ -1,7 +1,7 @@
 import path from "path"
 import fs from "fs/promises"
 
-import { type ClineSayTool, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
+import { type ClineSayTool, DEFAULT_PER_WRITE_CHECKPOINTS, DEFAULT_WRITE_DELAY_MS } from "@roo-code/types"
 
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
@@ -12,7 +12,8 @@ import { getReadablePath } from "../../utils/path"
 import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
-import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
+import { convertNewFileToUnifiedDiff, computeDiffStats, sanitizeUnifiedDiff, type DiffStats } from "../diff/stats"
+import { checkpointSave } from "../checkpoints"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -102,10 +103,15 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			const state = await provider?.getState()
 			const diagnosticsEnabled = state?.diagnosticsEnabled ?? true
 			const writeDelayMs = state?.writeDelayMs ?? DEFAULT_WRITE_DELAY_MS
+			const perWriteCheckpoints = state?.perWriteCheckpoints ?? DEFAULT_PER_WRITE_CHECKPOINTS
 			const isPreventFocusDisruptionEnabled = experiments.isEnabled(
 				state?.experiments ?? {},
 				EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION,
 			)
+
+			// B2: the approval-diff stats for the write, shared by both the
+			// approval message and the change-journal entry below.
+			let approvalDiffStats: DiffStats | null = null
 
 			if (isPreventFocusDisruptionEnabled) {
 				task.diffViewProvider.editType = fileExists ? "modify" : "create"
@@ -120,10 +126,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
+				approvalDiffStats = computeDiffStats(unified)
 				const completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
-					diffStats: computeDiffStats(unified) || undefined,
+					diffStats: approvalDiffStats || undefined,
 				} satisfies ClineSayTool)
 
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
@@ -151,10 +158,11 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 					? formatResponse.createPrettyPatch(relPath, task.diffViewProvider.originalContent, newContent)
 					: convertNewFileToUnifiedDiff(newContent, relPath)
 				unified = sanitizeUnifiedDiff(unified)
+				approvalDiffStats = computeDiffStats(unified)
 				const completeMessage = JSON.stringify({
 					...sharedMessageProps,
 					content: unified,
-					diffStats: computeDiffStats(unified) || undefined,
+					diffStats: approvalDiffStats || undefined,
 				} satisfies ClineSayTool)
 
 				const didApprove = await askApproval("tool", completeMessage, undefined, isWriteProtected)
@@ -176,6 +184,21 @@ export class WriteToFileTool extends BaseTool<"write_to_file"> {
 			const message = await task.diffViewProvider.pushToolWriteResult(task, task.cwd, !fileExists)
 
 			pushToolResult(message)
+
+			if (perWriteCheckpoints) {
+				// B2: the change-journal entry for this write is appended inside
+				// checkpointSave (the hook stays a single call site), keyed by the
+				// checkpoint commit that call produces. Await so the checkpoint
+				// (staging + commit) finishes before the next queued write starts;
+				// otherwise two writes can collapse into one commit.
+				await checkpointSave(task, false, true, {
+					path: relPath,
+					operation: fileExists ? "update" : "create",
+					diffStats: approvalDiffStats
+						? { additions: approvalDiffStats.added, deletions: approvalDiffStats.removed }
+						: undefined,
+				}).catch(() => {})
+			}
 
 			await task.diffViewProvider.reset()
 			this.resetPartialState()
