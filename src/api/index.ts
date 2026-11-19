@@ -7,6 +7,7 @@ import {
 	retiredProviderIdentifiers,
 	type ProviderSettings,
 	type ModelInfo,
+	type ReasoningEffortExtended,
 	type ModelRecord,
 } from "@roo-code/types"
 
@@ -127,6 +128,16 @@ export interface ApiHandlerCreateMessageMetadata {
 	 * when the user clicks stop, preventing wasted API tokens/compute on the provider side.
 	 */
 	abortSignal?: AbortSignal
+	/**
+	 * Per-request thinking effort override applied by rebuilding the handler.
+	 * Providers resolve effort from the handler options (each provider reads
+	 * `options.reasoningEffort` through its own model-params step), so passing the
+	 * override in the configuration handed to `buildApiHandler` is what takes effect;
+	 * it outranks the settings-derived `reasoningEffort` for the handler built from
+	 * this object. Task-scoped and transient: it applies to the next request only
+	 * (no mid-stream effect) and is never persisted to settings.
+	 */
+	reasoningEffort?: ReasoningEffortExtended
 }
 
 /**
