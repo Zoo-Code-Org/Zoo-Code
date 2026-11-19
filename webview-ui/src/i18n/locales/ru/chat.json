@@ -355,6 +355,21 @@
 			"copy_code": "Копировать код"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Параллельные расследования",
+		"progress": "Выполнено {{completed}} из {{total}}",
+		"status": {
+			"queued": "В очереди",
+			"running": "Выполняется",
+			"completed": "Завершена",
+			"failed": "Не удалось",
+			"aborted": "Прервана"
+		},
+		"openReport": "Отчёт",
+		"openDebugLog": "Журнал JSON",
+		"goToTask": "Перейти к задаче",
+		"noReport": "Отчёт пока недоступен"
+	},
 	"profileViolationWarning": "Текущий профиль несовместим с настройками вашей организации",
 	"shellIntegration": {
 		"title": "Предупреждение о выполнении команды",

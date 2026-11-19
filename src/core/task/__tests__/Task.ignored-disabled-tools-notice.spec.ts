@@ -156,7 +156,7 @@ async function startTaskWithDisabledTools(disabledTools: string[] | undefined, p
 		startTask: false,
 	})
 
-	const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+	const saySpy = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 	// The model-profile suppression route is fed through the model info, never
 	// the provider state, so the fixture can vary it independently of the list.
 	const modelInfo: ModelInfo = {
@@ -203,7 +203,7 @@ async function startTaskWithFailingStateRead() {
 
 	// Mention expansion also reads the state. This test covers the notice read only.
 	vi.spyOn(task, "userInputContent").mockResolvedValue([])
-	const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+	const saySpy = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 	const taskAccess = getStartTaskAccess(task)
 	vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
 		enabledToolCount: 0,
@@ -245,7 +245,7 @@ async function resumeTaskWithDisabledTools(disabledTools: string[] | undefined) 
 		startTask: false,
 	})
 
-	const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+	const saySpy = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 	const askSpy = vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
 	// Persisted-history reads are stubbed so the resume path drives entirely in
 	// memory; the saved API history ends on an assistant turn, the ordinary

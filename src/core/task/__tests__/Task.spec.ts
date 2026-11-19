@@ -2565,7 +2565,7 @@ describe("Cline", () => {
 				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
 				vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 				task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
-				const say = vi.spyOn(task, "say").mockResolvedValue(undefined)
+				const say = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 				return { task, say }
 			}
 
@@ -2805,7 +2805,7 @@ describe("Cline", () => {
 				totalTokensOut: 0,
 				contextTokens: 0,
 			})
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 		}
 
 		afterEach(() => {
@@ -3032,7 +3032,9 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			const saySpy = vi.spyOn(cline, "say").mockResolvedValue(undefined)
+			const saySpy = vi
+				.spyOn(cline, "say")
+				.mockResolvedValue({ ts: 0, type: "say" as const, say: "text", text: "" })
 
 			// relPath provided -> the "...WithPath" message branch.
 			const withPath = await cline.sayAndCreateMissingParamError("read_file", "path", "src/foo.ts")
@@ -5848,7 +5850,7 @@ describe("Cline", () => {
 					totalTokensOut: 0,
 					contextTokens: 0,
 				})
-				vi.spyOn(task, "say").mockResolvedValue(undefined)
+				vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 				task.apiConversationHistory = [
 					{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 				]
@@ -6474,7 +6476,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// summarize/overwrite assertions can report a regression.
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -6526,7 +6528,7 @@ describe("Cline", () => {
 			// The early return this guards never reaches say; the spy only keeps
 			// the aborted task's post-overwrite say from throwing before the
 			// overwrite assertion can report the regression.
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// The summarizeConversation module mock is never cleared, so pin the
 			// call count this condense starts from.
@@ -6576,7 +6578,7 @@ describe("Cline", () => {
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			// Suspend inside the collector so the abort lands while the
 			// summarization request cannot have started yet.
@@ -6623,7 +6625,7 @@ describe("Cline", () => {
 				{ role: "user", content: [{ type: "text", text: "test message" }], ts: Date.now() },
 			]
 			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
-			vi.spyOn(task, "say").mockResolvedValue(undefined)
+			vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			const overwriteSpy = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 			let releaseFilesRead!: (value: string[] | undefined) => void
 			const filesReadGate = new Promise<string[] | undefined>((resolve) => {
@@ -6806,7 +6808,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 
-			const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
+			const ensureModelFetched = vi.fn().mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			Object.assign(task.api, { ensureModelFetched })
 			vi.spyOn(task.api, "getModel").mockReturnValue({
 				id: mockApiConfig.apiModelId!,
@@ -7334,7 +7336,7 @@ describe("Cline", () => {
 					expect(task.clineMessages).toEqual([])
 					await pendingPostState
 				})
-			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" })
 			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
 				enabledToolCount: 0,
 				enabledServerCount: 0,

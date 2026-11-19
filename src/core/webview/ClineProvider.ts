@@ -72,6 +72,7 @@ import {
 	DEFAULT_MODES,
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	getModelId,
+	historyItemSchema,
 	isRetiredProvider,
 	modelIdKeys,
 	providerIdentifiers,
@@ -82,8 +83,16 @@ import { TaskScheduler } from "../task/TaskScheduler"
 import {
 	getEffectiveTaskApiConfiguration,
 	selectHandoffExecutionContext,
+	type SavedModeProfile,
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
+import { BACKGROUND_CHILD_DISABLED_TOOLS, BACKGROUND_CHILD_EXPERIMENTS } from "../background-subtasks/policy"
+import type {
+	BackgroundChildEntry,
+	BackgroundChildHandle,
+	BackgroundSubtaskSpec,
+	SpawnBackgroundChildrenResult,
+} from "../background-subtasks/types"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
@@ -136,7 +145,7 @@ import { ContextProxy } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager } from "../config/CustomModesManager"
-import { PendingActionSettlementError, Task } from "../task/Task"
+import { PendingActionSettlementError, Task, type TaskOptions } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
@@ -154,6 +163,7 @@ import {
 	LifecycleTransitionError,
 } from "../task-persistence"
 import { readTaskMessages } from "../task-persistence/taskMessages"
+import { addBackgroundChild } from "../task-persistence/taskLifecycle"
 import { readFileWithMissingRetry } from "../task-persistence/readFileWithMissingRetry"
 import { TaskTitleService } from "../task-title/TaskTitleService"
 import { getNonce } from "./getNonce"
@@ -169,6 +179,87 @@ import { PendingEditOperationStore, type PendingEditOperationInput } from "./Pen
  */
 
 type DelegatedChildContext = TaskExecutionContext
+
+/**
+ * Requested background children when a caller does not specify a size cap
+ * (design OD-3). Also the default scheduler concurrency for a fan-out.
+ */
+export const DEFAULT_MAX_PARALLEL_SUBTASKS = 4
+
+/** Hard ceiling for one fan-out batch; excess specs are truncated (design OD-3). */
+export const MAX_PARALLEL_SUBTASKS_CAP = 6
+
+/**
+ * Cumulative ceiling on live background children per parent, applied across
+ * repeated fan-outs (F-17). The per-call cap bounds one batch; this bounds a
+ * parent that calls `parallel_subtasks` on every turn.
+ */
+export const MAX_LIVE_BACKGROUND_CHILDREN_PER_PARENT = 8
+
+/**
+ * Options `createTask` accepts on top of the public `CreateTaskOptions`.
+ *
+ * Background children need fields that are `TaskOptions`-only: `rootTask` and
+ * `rootTaskId` (their lineage is not carried by the delegation chain; the id
+ * covers a root that has no live object), `taskNumber` (their own numbering
+ * channel), and `backgroundToolPolicy` (their read-only policy).
+ * `backgroundChildHosted` additionally marks the spawn-time child as a LIVE
+ * off-stack background child; keeping these in a provider-local type leaves
+ * the public `CreateTaskOptions` contract untouched.
+ */
+type CreateTaskInternalOptions = CreateTaskOptions & {
+	handoffExecutionContext?: DelegatedChildContext
+	segments?: MentionSegment[]
+	rootTask?: Task
+	/**
+	 * Authoritative lineage root id for a child whose root has no live `Task`
+	 * object (a parent restored from History, or an ancestor that delegation
+	 * popped off the stack). `rootTask` cannot carry it in that case because no
+	 * object exists to reference; the id is passed through to `TaskOptions`.
+	 */
+	rootTaskId?: string
+	taskNumber?: number
+	backgroundToolPolicy?: TaskOptions["backgroundToolPolicy"]
+	/** Mark a spawn-time background child as a LIVE off-stack background child (P1-2). */
+	backgroundChildHosted?: boolean
+	/** Skip the stack push for tasks that run beside the stack (background children). */
+	skipStackPush?: boolean
+}
+
+interface BackgroundChildRecord {
+	entry: BackgroundChildEntry
+	task: Task
+	parentTaskId: string
+	/** Resolves the handle's `done` promise exactly once. */
+	settle: (entry: BackgroundChildEntry) => void
+	/**
+	 * The disposal `finishBackgroundChild` started at settlement. Callers that
+	 * must drain disposal (the abort cascade, deletion) await this promise so
+	 * they never need a second `dispose()` call: `Task.dispose()` is memoized,
+	 * but a second call still trips exactly-once accounting around the child.
+	 */
+	disposalPromise?: Promise<void>
+}
+
+/**
+ * Optional hooks for one `spawnBackgroundChildren` call.
+ *
+ * `onChildStarted` fires from inside the background scheduler permit, right
+ * before the child's run loop starts, with the entry already marked
+ * `running`; the caller uses it to update its progress panel (F-09).
+ */
+export interface SpawnBackgroundChildrenOptions {
+	onChildStarted?: (entry: BackgroundChildEntry) => void
+}
+
+interface BackgroundAbortHook {
+	parent: Task
+	listener: () => void
+}
+
+function isTerminalBackgroundStatus(status: BackgroundChildEntry["status"]): boolean {
+	return status === "completed" || status === "failed" || status === "aborted"
+}
 
 function runDelegationTransition<T>(
 	locks: Map<string, Promise<void>>,
@@ -264,6 +355,61 @@ export class ClineProvider
 	private view?: vscode.WebviewView | vscode.WebviewPanel
 	private taskRegistry = new TaskRegistry()
 	private taskScheduler = new TaskScheduler()
+	// Background children run beside the stack instead of on top of it, so a
+	// fan-out can never starve the serial delegation gate (design D7).
+	private backgroundTaskScheduler = new TaskScheduler(
+		Math.min(DEFAULT_MAX_PARALLEL_SUBTASKS, MAX_PARALLEL_SUBTASKS_CAP),
+	)
+	private readonly backgroundTasks = new Map<string, BackgroundChildRecord>()
+	private readonly backgroundAbortHooks = new Map<string, BackgroundAbortHook>()
+	// Cancellation epoch per parent. `TaskAborted` bumps it, and an in-flight
+	// spawn captures it when the batch starts; the abort cascade cannot see a
+	// child that has no record yet, so the loop compares epochs after each await
+	// and declines to start a child created inside a cancelled batch.
+	private readonly backgroundSpawnEpochs = new WeakMap<Task, number>()
+	// Highest task number issued to each parent's background children, so
+	// sequential fan-outs keep counting up instead of restarting (F-19).
+	private readonly backgroundChildNumberHighWater = new Map<string, number>()
+	// Background children whose abort/disposal drain outlives their record:
+	// `finishBackgroundChild` removes the live record synchronously, while
+	// `abortTask()`'s final message save and disposal finish later. Deletion
+	// awaits these promises so it cannot remove a task directory that an
+	// aborted child is still writing (the abort cascade can run ahead of a
+	// concurrent `deleteTaskWithId`).
+	private readonly pendingBackgroundChildCleanup = new Map<string, Promise<void>>()
+	// Child → parent history links whose registration write kept failing. A
+	// child stamped with `backgroundParentTaskId` but missing from the parent's
+	// `childIds` survives its parent's deletion (permanent `active` row), so a
+	// failed link is retried at the next registration, child settlement, or
+	// task deletion until it lands.
+	private readonly pendingBackgroundParentLinks = new Map<string, string>()
+	// Terminal history writes still in flight for children whose records
+	// already settled: settlement is synchronous while the bounded-retry write
+	// runs behind, so a caller that must not race the write (disposal above
+	// all) drains these promises instead of the live record map.
+	private readonly pendingBackgroundTerminalWrites = new Map<string, Promise<unknown>>()
+	// Children whose terminal write exhausted its bounded retries, keyed by
+	// child task id with the terminal entry to write. Retried by
+	// `flushPendingBackgroundTerminalRepairs` at the next registration, child
+	// settlement, or task deletion — the same repair cadence as
+	// `pendingBackgroundParentLinks` — because startup reconciliation skips a
+	// child whose parent is still `active` or `delegated`, which is exactly
+	// what a cancelled parent leaves behind.
+	private readonly pendingBackgroundTerminalRepairs = new Map<string, BackgroundChildEntry>()
+	// Background-child registrations (parent `childIds` link + child row) in
+	// flight, keyed by parent task id. Deletion drains the entries for the
+	// selected task and its descendants before it reads their `childIds`, so a
+	// registration that lands mid-delete either joins the cascade or is
+	// declined by the closed admission gate below — never a live child of a
+	// deleted parent. Unrelated parents' registrations are never drained: none
+	// of their children can enter that deletion set, so waiting for them would
+	// only stall the delete.
+	private readonly pendingBackgroundRegistrations = new Map<string, Set<Promise<void>>>()
+	// Parents that must not admit new background children. Deletion closes
+	// admission for the task being deleted: a spawn loop that already passed
+	// its earlier checks must not publish a child for a deleted parent. Ids
+	// are never removed; a deleted task never spawns again.
+	private readonly backgroundAdmissionClosed = new Set<string>()
 	private static readonly delegationTransitionLocks = new Map<string, Promise<void>>()
 	private cancelledDelegationChildIds = new Set<string>()
 	private _workspaceTracker?: WorkspaceTracker // workSpaceTracker read-only for access outside this class
@@ -461,7 +607,11 @@ export class ClineProvider
 		void this.updateGlobalState("codebaseIndexModels", EMBEDDING_MODEL_PROFILES)
 
 		// Initialize the authoritative per-task file-based history store.
-		this.taskHistoryStore = new TaskHistoryStore(this.contextProxy.globalStorageUri.fsPath)
+		this.taskHistoryStore = new TaskHistoryStore(this.contextProxy.globalStorageUri.fsPath, {
+			// A live background child is registered in host memory, never on disk
+			// alone, so the startup orphan pass must not mark it interrupted (D11).
+			isLiveBackgroundChild: (taskId) => this.backgroundTasks.has(taskId),
+		})
 		this.initializeTaskHistoryStore().catch((error) => {
 			this.log(`Failed to initialize TaskHistoryStore: ${error}`)
 		})
@@ -1019,6 +1169,54 @@ export class ClineProvider
 		// Reject any tasks still waiting for a scheduler permit so they don't
 		// hold the event loop after the provider is torn down.
 		this.taskScheduler.cancelQueued()
+		this.backgroundTaskScheduler.cancelQueued()
+
+		// Abort every background child before the stack drains, so no child
+		// outlives the provider (design D8). Any record still live afterwards
+		// (an abort that threw) is settled synchronously below.
+		try {
+			const backgroundParentTaskIds = new Set(
+				Array.from(this.backgroundTasks.values(), (record) => record.parentTaskId),
+			)
+			for (const parentTaskId of backgroundParentTaskIds) {
+				await this.abortBackgroundChildren(parentTaskId)
+			}
+		} catch (error) {
+			this.log(
+				`[ClineProvider#dispose] Background child cleanup failed: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+
+		for (const childTaskId of Array.from(this.backgroundTasks.keys())) {
+			void this.finishBackgroundChild(childTaskId, { status: "aborted", error: "Provider disposed" })
+		}
+
+		this.releaseAllBackgroundAbortHooks()
+
+		// An abort cascade that started before disposal (the parent's
+		// TaskAborted hook) settles children out of `backgroundTasks` before
+		// `dispose()`'s own pass, then keeps saving the child's final messages
+		// and draining its disposal under `pendingBackgroundChildCleanup`.
+		// Draining those registrations before the history store is torn down
+		// keeps the teardown ordered after the child's last write, the same
+		// guard the deletion path applies (`stopBackgroundChildrenBeingDeleted`,
+		// CR finding axIE). Both reads use the undefined-tolerant shape because
+		// rollback tests drive dispose-adjacent methods with test doubles.
+		const pendingBackgroundChildCleanup: Map<string, Promise<void>> | undefined = this.pendingBackgroundChildCleanup
+		if (pendingBackgroundChildCleanup && pendingBackgroundChildCleanup.size > 0) {
+			await Promise.all(Array.from(pendingBackgroundChildCleanup.values()))
+		}
+
+		// Terminal history writes outlive their records by design (see
+		// `finishBackgroundChild`); drain them so the store is not disposed
+		// mid-write.
+		const pendingBackgroundTerminalWrites: Map<string, Promise<unknown>> | undefined =
+			this.pendingBackgroundTerminalWrites
+		if (pendingBackgroundTerminalWrites && pendingBackgroundTerminalWrites.size > 0) {
+			await Promise.allSettled(Array.from(pendingBackgroundTerminalWrites.values()))
+		}
 
 		// Clear all tasks from the stack. The first pop goes through evictCurrentTask()
 		// so an active delegated child is marked interrupted before the extension shuts down,
@@ -1660,6 +1858,17 @@ export class ClineProvider
 			startTask: false,
 			// Preserve the status from the history item to avoid overwriting it when the task saves messages
 			initialStatus: historyItem.status,
+			// A background child restored from history must keep its read-only
+			// policy: the policy itself is not persisted, so keying on the
+			// `backgroundParentTaskId` stamp is the only thing that keeps a
+			// restored child from becoming fully privileged (F-05). It must NOT
+			// set `backgroundChildHosted`: a restored child installed as the
+			// current stack task stays interactive (state posts flow, the resume
+			// ask blocks for approval, no auto-run); only its tool layer stays
+			// read-only via the policy carried here (P1-2).
+			backgroundToolPolicy: historyItem.backgroundParentTaskId
+				? { disabledTools: BACKGROUND_CHILD_DISABLED_TOOLS, experiments: BACKGROUND_CHILD_EXPERIMENTS }
+				: undefined,
 			rateLimitClock: this.rateLimitClock,
 			diffFuzzyThreshold,
 		})
@@ -2936,6 +3145,33 @@ export class ClineProvider
 		try {
 			await this.getTaskWithId(id)
 
+			// Close admission of new background children for the task being
+			// deleted, then drain its in-progress registrations before
+			// `childIds` is read or the delete cascade is collected: a spawn
+			// that passed its earlier checks would otherwise publish a live
+			// child for a deleted parent, and an in-flight registration whose
+			// link write lands after the drain below would escape the cascade
+			// with a permanent `active` row. Both are scoped to the selected
+			// task; the cascade closes admission and drains each descendant as
+			// it reaches it (below), and unrelated parents keep spawning and
+			// are never drained here. The undefined-tolerant reads match the
+			// prototype-called guards below for test doubles.
+			const backgroundAdmissionClosed: Set<string> | undefined = this.backgroundAdmissionClosed
+			if (backgroundAdmissionClosed) {
+				backgroundAdmissionClosed.add(id)
+			}
+			await ClineProvider.prototype.drainPendingBackgroundRegistrationsFor.call(this, [id])
+			await ClineProvider.prototype.flushPendingBackgroundTerminalRepairs.call(this)
+
+			// Complete any background parent link whose registration write kept
+			// failing BEFORE the cascade below collects `childIds` from the
+			// store: otherwise a repaired-orphan child escapes the delete
+			// cascade and keeps a permanent `active` row (CR finding axIR).
+			// Prototype call, same reason as stopBackgroundChildrenBeingDeleted:
+			// delegation rollback drives this method with a test double as
+			// `this`, and the double carries no private methods.
+			await ClineProvider.prototype.flushPendingBackgroundParentLinks.call(this)
+
 			// Collect all task IDs to delete (parent + all subtasks)
 			const allIdsToDelete: string[] = [id]
 
@@ -2943,6 +3179,20 @@ export class ClineProvider
 				// Recursively collect all child IDs
 				const collectChildIds = async (taskId: string): Promise<void> => {
 					try {
+						// Close admission and drain in-flight registrations for
+						// this node BEFORE its record is read: a live descendant
+						// (e.g. a running background child) can otherwise admit
+						// and register a new background child while the
+						// collector awaits `getTaskWithId`, and the late
+						// `childIds` link escapes the cascade snapshot — the
+						// child's history row and files then survive the
+						// deletion. Ids are never re-opened, so the root's
+						// second close below is a no-op.
+						if (backgroundAdmissionClosed) {
+							backgroundAdmissionClosed.add(taskId)
+						}
+						await ClineProvider.prototype.drainPendingBackgroundRegistrationsFor.call(this, [taskId])
+
 						const { historyItem: item } = await this.getTaskWithId(taskId)
 						if (item.childIds && item.childIds.length > 0) {
 							for (const childId of item.childIds) {
@@ -2967,6 +3217,15 @@ export class ClineProvider
 					break
 				}
 			}
+
+			// A background child runs beside the stack, so the check above never
+			// matches it: deleting a running child by its own id would otherwise
+			// remove its history and files while its run keeps writing (CR finding
+			// 4). Stop and drain every live child being deleted before either
+			// removal; siblings not selected here keep running. Reached through
+			// the prototype for the same reason as resolveLineageRoot: delegation
+			// rollback drives this method with a test double as `this`.
+			await ClineProvider.prototype.stopBackgroundChildrenBeingDeleted.call(this, allIdsToDelete)
 
 			for (const taskId of allIdsToDelete) {
 				this.taskTitleService.cancel(taskId, "deleted")
@@ -4372,10 +4631,7 @@ export class ClineProvider
 		text?: string,
 		images?: string[],
 		parentTask?: Task,
-		options: CreateTaskOptions & {
-			handoffExecutionContext?: DelegatedChildContext
-			segments?: MentionSegment[]
-		} = {},
+		options: CreateTaskInternalOptions = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
@@ -4442,6 +4698,8 @@ export class ClineProvider
 			throw new OrganizationAllowListViolationError(t("common:errors.violated_organization_allowlist"))
 		}
 
+		const { skipStackPush, ...taskOptions } = options
+
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
@@ -4461,11 +4719,15 @@ export class ClineProvider
 			// its initial state update, so state.currentTaskId is available ASAP.
 			startTask: false,
 			diffFuzzyThreshold,
-			...options,
+			...taskOptions,
 			rateLimitClock: this.rateLimitClock,
 		})
 
-		await this.addClineToStack(task)
+		// Background children are started under their own scheduler and must
+		// never become the current stack task.
+		if (!skipStackPush) {
+			await this.addClineToStack(task)
+		}
 		if (options.startTask !== false) {
 			scheduleTask(this.taskScheduler, task, "createTask")
 		}
@@ -4546,6 +4808,20 @@ export class ClineProvider
 		// Wait for abortTask to fully settle (including its final saveClineMessages write)
 		// before we persist "interrupted", so our write is always the last one.
 		await abortPromise.catch(() => {})
+
+		// Background children belong to this parent and must not outlive its
+		// cancellation. Runs before the rehydrate race checks below so the
+		// cascade also happens on their early-return paths; a cancel must never
+		// be blocked by a failing child abort.
+		try {
+			await this.abortBackgroundChildren(task.taskId)
+		} catch (error) {
+			this.log(
+				`[cancelTask] Failed to abort background children of ${task.taskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
 
 		// Defensive safeguard: if current instance already changed, skip rehydrate
 		const current = this.getCurrentTask()
@@ -4634,6 +4910,1181 @@ export class ClineProvider
 
 		// Clears task again, so we need to abortTask manually above.
 		await this.createTaskWithHistoryItem({ ...historyItem, rootTask, parentTask })
+	}
+
+	// Background subtasks (design D2/D7/D8)
+	//
+	// A background child is a read-only task spawned beside the active task
+	// instead of on top of it: it is created with `startTask: false`, never
+	// enters `taskRegistry`, and runs under its own scheduler permit pool. The
+	// provider owns the map so cancel, dispose, and the completion route all
+	// settle the same records exactly once.
+
+	/**
+	 * Spawn read-only background children for `parallel_subtasks`.
+	 *
+	 * The parent remains the sole stack task: `createTask` is called with
+	 * `startTask: false` and without `addClineToStack`, then each child is
+	 * started under `backgroundTaskScheduler`. The parent's history record
+	 * gains the child ids (`addBackgroundChild`), and each child is stamped
+	 * with `backgroundParentTaskId` before it can write history itself.
+	 *
+	 * Rejected specs (unknown mode, failed construction) produce a terminal
+	 * `failed` handle instead of a live task, so callers always receive a
+	 * settleable handle and `done` never rejects.
+	 */
+	public async spawnBackgroundChildren(
+		parent: Task,
+		specs: BackgroundSubtaskSpec[],
+		options: SpawnBackgroundChildrenOptions = {},
+	): Promise<SpawnBackgroundChildrenResult> {
+		const children: BackgroundChildHandle[] = []
+
+		if (specs.length === 0) {
+			return { children, started: false }
+		}
+
+		let effectiveSpecs = specs
+
+		if (specs.length > MAX_PARALLEL_SUBTASKS_CAP) {
+			effectiveSpecs = specs.slice(0, MAX_PARALLEL_SUBTASKS_CAP)
+			this.log(
+				`[spawnBackgroundChildren] Truncated ${specs.length} requested background children to the hard cap of ${MAX_PARALLEL_SUBTASKS_CAP}`,
+			)
+		}
+
+		const { customModes } = await this.getState()
+		const parentMode = await parent.getTaskMode()
+		const parentExecutionContext: DelegatedChildContext = {
+			mode: parentMode,
+			apiConfigName: await parent.getTaskApiConfigName(),
+			apiConfiguration: structuredClone(parent.apiConfiguration),
+		}
+		const savedModeProfiles = new Map<string, SavedModeProfile | undefined>()
+
+		// `createTask` would hand every child the same `taskRegistry.length + 1`,
+		// because none of them is pushed to the stack. Number the batch from a
+		// per-parent high-water mark instead, so sequential fan-outs keep
+		// counting up rather than repeating the previous batch (F-19).
+		const baseTaskNumber = this.nextBackgroundChildNumber(parent)
+		const lineageRoot = this.resolveLineageRoot(parent)
+		const spawnEpoch = this.backgroundSpawnEpoch(parent)
+		let started = false
+
+		// Installed before the first child is scheduled so an abort during the
+		// batch is observed. The finally block releases it once the last child
+		// is gone, including when the loop throws before any child registered
+		// (F-21).
+		this.ensureBackgroundAbortHook(parent)
+
+		try {
+			for (const [index, spec] of effectiveSpecs.entries()) {
+				// A parent cancelled (or a provider disposed) while an earlier
+				// spec awaited `createTask`/registration is re-checked only from
+				// the awaits that follow it. Without this gate every remaining
+				// spec would still pay a full `createTask` construction that the
+				// post-await check then settles and disposes for nothing (CR
+				// finding 1: check the parent and provider before admitting
+				// work). The handle still settles so callers keep one handle
+				// per spec (ParallelSubtasksTool counts on that).
+				if (!this.isBackgroundSpawnParentActive(parent, spawnEpoch)) {
+					children.push(this.cancelledBackgroundHandle(spec))
+					continue
+				}
+
+				// The per-call cap bounds one batch; this bounds the parent's
+				// cumulative fan-out across turns (F-17).
+				if (this.countLiveBackgroundChildren(parent.taskId) >= MAX_LIVE_BACKGROUND_CHILDREN_PER_PARENT) {
+					children.push(
+						this.failedBackgroundHandle(
+							spec,
+							`Live background child limit reached (${MAX_LIVE_BACKGROUND_CHILDREN_PER_PARENT} per parent)`,
+						),
+					)
+					continue
+				}
+
+				if (!getModeBySlug(spec.mode, customModes)) {
+					children.push(this.failedBackgroundHandle(spec, `Unknown mode: ${spec.mode}`))
+					continue
+				}
+
+				const lockApiConfigAcrossModes =
+					spec.mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
+				let savedModeProfile: SavedModeProfile | undefined
+
+				if (spec.mode !== parentMode && !lockApiConfigAcrossModes) {
+					savedModeProfile = await this.loadSavedModeProfile(spec.mode, savedModeProfiles)
+				}
+
+				const handoffExecutionContext = selectHandoffExecutionContext(
+					parentExecutionContext,
+					spec.mode,
+					parentMode,
+					lockApiConfigAcrossModes,
+					savedModeProfile,
+				)
+
+				let child: Task
+
+				try {
+					child = await this.createTask(spec.message, undefined, parent, {
+						initialStatus: "active",
+						startTask: false,
+						skipStackPush: true,
+						taskNumber: baseTaskNumber + index,
+						// A background child has neither a `historyItem` nor a stack
+						// entry, so the lineage root has to be passed explicitly: the
+						// live object when one is reachable, or the authoritative root
+						// id on its own so the child still persists the true root
+						// instead of inheriting the parent's id (CR finding 5).
+						rootTask: lineageRoot.rootTask,
+						...(lineageRoot.rootTask ? {} : { rootTaskId: lineageRoot.rootTaskId }),
+						handoffExecutionContext,
+						backgroundToolPolicy: {
+							disabledTools: BACKGROUND_CHILD_DISABLED_TOOLS,
+							experiments: BACKGROUND_CHILD_EXPERIMENTS,
+						},
+						// LIVE off-stack background child (P1-2): `isBackgroundSubtaskChild`
+						// derives from this flag, not from the policy, so the child runs
+						// non-interactively beside the parent. A history-restore must NOT
+						// set it.
+						backgroundChildHosted: true,
+					})
+				} catch (error) {
+					const message = error instanceof Error ? error.message : String(error)
+					// `label` is model-controlled, so JSON-encode it: a newline in
+					// the label must not be able to forge a second log line
+					// (CWE-117, F-22).
+					this.log(
+						`[spawnBackgroundChildren] Failed to create child ${JSON.stringify(spec.label)}: ${message}`,
+					)
+					children.push(this.failedBackgroundHandle(spec, message))
+					continue
+				}
+
+				// The parent may have been cancelled, evicted, or the provider
+				// disposed while `createTask` was awaiting (CR finding 1). The
+				// abort cascade settled only the records that existed then, so
+				// this child has no record and would otherwise be published and
+				// scheduled after cancellation. Never run it.
+				if (!this.isBackgroundSpawnParentActive(parent, spawnEpoch)) {
+					children.push(this.settleBackgroundChildWithoutScheduling(spec, child))
+					continue
+				}
+
+				// The child's own history write only starts with its task loop, so
+				// both sides of the registration are written before it can race them.
+				await this.registerBackgroundChild(parent, child, handoffExecutionContext)
+
+				// Registration awaits history-store writes; re-check the same window
+				// before the record is published and the run is scheduled.
+				if (!this.isBackgroundSpawnParentActive(parent, spawnEpoch)) {
+					children.push(this.settleBackgroundChildWithoutScheduling(spec, child))
+					continue
+				}
+
+				const entry: BackgroundChildEntry = {
+					taskId: child.taskId,
+					label: spec.label,
+					mode: spec.mode,
+					status: "queued",
+					startedAt: Date.now(),
+				}
+				let settle!: (settled: BackgroundChildEntry) => void
+				const done = new Promise<BackgroundChildEntry>((resolve) => {
+					let settled = false
+					settle = (settledEntry) => {
+						if (settled) {
+							return
+						}
+						settled = true
+						resolve(settledEntry)
+					}
+				})
+
+				this.backgroundTasks.set(child.taskId, {
+					entry,
+					task: child,
+					parentTaskId: parent.taskId,
+					settle,
+				})
+
+				// A child that aborts itself (API failure, disposal) must still
+				// settle its handle even when nothing calls the host methods.
+				child.once(RooCodeEventName.TaskAborted, () => {
+					void this.finishBackgroundChild(child.taskId, {
+						status: "aborted",
+						error: "Background child was aborted",
+					})
+				})
+
+				children.push({ taskId: child.taskId, label: spec.label, mode: spec.mode, done })
+				started = true
+
+				// Re-assert the hook: a sibling that failed during an earlier await
+				// could have released it when its record was the last live one.
+				this.ensureBackgroundAbortHook(parent)
+
+				scheduleTask(
+					this.backgroundTaskScheduler,
+					child,
+					"spawnBackgroundChildren",
+					() => {
+						// The run wrapper is invoked after the permit is acquired,
+						// so this is the first moment the child is running (F-09).
+						this.markBackgroundChildRunning(child.taskId, options.onChildStarted)
+
+						// Race the run against the handle: the host settles `done`
+						// exactly when a terminal state is recorded (D5 resolve, the
+						// TaskAborted hook, or the failure callback below), so the
+						// scheduler permit is released at that point even if a future
+						// change lets the run promise itself dangle. A background
+						// child has no user who could cancel it, so a terminal child
+						// must never keep holding a permit.
+						return Promise.race([child.run(), done]).then(() => {
+							// Catch-all (F-02): `run()` settled without any terminal
+							// record (D5 resolve, the TaskAborted hook, or the
+							// scheduler onError). Every such exit ends through an
+							// abort-style throw, not a recorded terminal state: the
+							// mistake-limit terminal (F-08), the bounded background
+							// retries exceeding MAX_BACKGROUND_CHILD_RETRY_ATTEMPTS
+							// (P1-1: empty assistant response, mid-stream failure,
+							// first-chunk failure), an output-token-limit denial, or a
+							// first-chunk API failure with auto-approval off. Fail the
+							// handle so the caller's join always settles. A recorded
+							// terminal state already removed the record, so this is a
+							// no-op for every normal path.
+							this.failBackgroundChild(
+								child.taskId,
+								"Background child run ended without a terminal state",
+							)
+						})
+					},
+					(error) => {
+						void this.finishBackgroundChild(child.taskId, {
+							status: "failed",
+							error: error instanceof Error ? error.message : String(error),
+						})
+					},
+				)
+			}
+		} finally {
+			this.releaseBackgroundAbortHookIfIdle(parent.taskId)
+		}
+
+		this.backgroundChildNumberHighWater.set(parent.taskId, baseTaskNumber + effectiveSpecs.length - 1)
+
+		return { children, started }
+	}
+
+	/**
+	 * First task number for `parent`'s next background batch. `createTask`
+	 * numbers by stack length, which repeats for every batch because background
+	 * children never join the stack; the per-parent high-water mark keeps
+	 * numbers monotonic across sequential fan-outs (F-19), and existing history
+	 * numbers seed it so a restart cannot reuse one.
+	 */
+	private nextBackgroundChildNumber(parent: Task): number {
+		let historyFloor = 0
+
+		for (const item of this.taskHistoryStore.getAll()) {
+			if (item.backgroundParentTaskId === parent.taskId && typeof item.number === "number") {
+				historyFloor = Math.max(historyFloor, item.number)
+			}
+		}
+
+		const previousBatchFloor = this.backgroundChildNumberHighWater.get(parent.taskId) ?? 0
+		const liveFloor = this.taskRegistry.length + this.backgroundTasks.size
+
+		return Math.max(historyFloor, previousBatchFloor, liveFloor) + 1
+	}
+
+	private countLiveBackgroundChildren(parentTaskId: string): number {
+		let count = 0
+
+		for (const record of this.backgroundTasks.values()) {
+			if (record.parentTaskId === parentTaskId) {
+				count++
+			}
+		}
+
+		return count
+	}
+
+	/**
+	 * Mark a queued child as running and publish the transition to the
+	 * fan-out owner. Called from inside the scheduler permit, so it runs once
+	 * per child and never for an already-terminal one.
+	 */
+	private markBackgroundChildRunning(
+		childTaskId: string,
+		onChildStarted?: (entry: BackgroundChildEntry) => void,
+	): void {
+		const record = this.backgroundTasks.get(childTaskId)
+
+		if (!record || record.entry.status !== "queued") {
+			return
+		}
+
+		const entry: BackgroundChildEntry = { ...record.entry, status: "running", startedAt: Date.now() }
+		record.entry = entry
+
+		try {
+			onChildStarted?.(entry)
+		} catch (error) {
+			this.log(
+				`[spawnBackgroundChildren] Background child start listener failed for ${childTaskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
+	/**
+	 * Resolve a background child that reported its result through
+	 * `attempt_completion`. Idempotent: a terminal child is never re-settled.
+	 */
+	public resolveBackgroundChild(childTaskId: string, result: string): void {
+		void this.finishBackgroundChild(childTaskId, { status: "completed", result })
+	}
+
+	/**
+	 * Record a failed background child (API error, rejected completion,
+	 * fail-closed ask) and settle its handle. Idempotent like the resolve path.
+	 */
+	public failBackgroundChild(childTaskId: string, error: string): void {
+		void this.finishBackgroundChild(childTaskId, { status: "failed", error })
+	}
+
+	/**
+	 * Abort every live background child of `parentTaskId` and settle each
+	 * handle as `aborted`. Used by the `TaskAborted` hook, `cancelTaskInternal`
+	 * and `dispose`; a per-child abort failure never prevents the rest from
+	 * settling (design D8).
+	 */
+	public async abortBackgroundChildren(parentTaskId: string): Promise<void> {
+		const records = Array.from(this.backgroundTasks.values()).filter(
+			(record) => record.parentTaskId === parentTaskId,
+		)
+
+		if (records.length === 0) {
+			return
+		}
+
+		this.log(`[abortBackgroundChildren] Aborting ${records.length} background child(ren) of ${parentTaskId}`)
+
+		await Promise.all(
+			records.map(async (record) => {
+				const childTaskId = record.entry.taskId
+
+				// Register the pending cleanup BEFORE settling: settlement
+				// removes the record from `backgroundTasks` synchronously, and a
+				// concurrent `deleteTaskWithId` that reaches the lookup after
+				// this point must still be able to await the abort/disposal
+				// drain that is about to start.
+				let runCleanup!: (cleanup: Promise<void>) => void
+				const cleanupPending = new Promise<void>((resolve) => {
+					runCleanup = resolve
+				})
+				this.pendingBackgroundChildCleanup.set(childTaskId, cleanupPending)
+
+				try {
+					// Settle before aborting: `abortTask()` emits TaskAborted, and the
+					// child's own listener would otherwise win the terminal-state race
+					// with a generic "child was aborted" reason. The terminal write
+					// promise stays fire-and-forget here; it is tracked in
+					// `pendingBackgroundTerminalWrites` for disposal to drain.
+					void this.finishBackgroundChild(childTaskId, {
+						status: "aborted",
+						error: "Parent task was cancelled",
+					})
+
+					runCleanup(
+						(async () => {
+							try {
+								await record.task.abortTask()
+							} catch (error) {
+								this.log(
+									`[abortBackgroundChildren] abortTask failed for ${childTaskId}: ${
+										error instanceof Error ? error.message : String(error)
+									}`,
+								)
+							}
+
+							// `abortTask()` starts disposal without awaiting it, and
+							// settlement above started `dispose()` for real: drain the
+							// recorded promise so a concurrent deletion never removes
+							// the task directory while the child's own cleanup is
+							// still running. A second `dispose()` call is avoided even
+							// though Task memoizes it, because exactly-once disposal
+							// accounting around the child must not see two calls.
+							if (record.disposalPromise) {
+								try {
+									await record.disposalPromise
+								} catch {
+									// Settlement already logged the disposal failure.
+								}
+							}
+						})(),
+					)
+
+					await cleanupPending
+				} finally {
+					if (this.pendingBackgroundChildCleanup.get(childTaskId) === cleanupPending) {
+						this.pendingBackgroundChildCleanup.delete(childTaskId)
+					}
+				}
+			}),
+		)
+
+		this.releaseBackgroundAbortHookIfIdle(parentTaskId)
+	}
+
+	/**
+	 * Stop and drain the background children among `taskIds` before their
+	 * history and files are deleted (CR finding 4).
+	 *
+	 * `abortBackgroundChildren` is keyed by parent; deletion is keyed by the
+	 * children themselves, and a background child never matches
+	 * `getCurrentTask()`. Each child is settled before `abortTask()` so the
+	 * TaskAborted listener cannot overwrite the aborted outcome, and disposal is
+	 * awaited so no pending write from the deleted task survives the removal.
+	 *
+	 * A child the abort cascade already settled is gone from `backgroundTasks`,
+	 * but its abort/disposal drain is still tracked in
+	 * `pendingBackgroundChildCleanup`: deleting the parent mid-cascade would
+	 * otherwise remove the directory while the aborted child's final save is
+	 * still in flight. Only the selected ids are awaited, so a sibling that is
+	 * not being deleted never stalls the deletion.
+	 */
+	private async stopBackgroundChildrenBeingDeleted(taskIds: readonly string[]): Promise<void> {
+		// Prototype-call doubles (delegation rollback tests) drive this method
+		// with a plain object that carries no background map; nothing can be live
+		// there, so there is nothing to stop.
+		const backgroundTasks: Map<string, BackgroundChildRecord> | undefined = this.backgroundTasks
+		const pendingBackgroundChildCleanup: Map<string, Promise<void>> | undefined = this.pendingBackgroundChildCleanup
+
+		if (!backgroundTasks || !pendingBackgroundChildCleanup) {
+			return
+		}
+
+		const uniqueIds = Array.from(new Set(taskIds))
+		const records = uniqueIds
+			.map((taskId) => backgroundTasks.get(taskId))
+			.filter((record): record is BackgroundChildRecord => record !== undefined)
+		const pendingCleanups = uniqueIds
+			.map((taskId) => pendingBackgroundChildCleanup.get(taskId))
+			.filter((cleanup): cleanup is Promise<void> => cleanup !== undefined)
+
+		if (records.length === 0 && pendingCleanups.length === 0) {
+			return
+		}
+
+		await Promise.all([
+			...records.map(async (record) => {
+				// Settle first (the handle resolves synchronously), then let the
+				// terminal history write land before this row can be removed:
+				// `deleteMany` runs as soon as this drain resolves.
+				await this.finishBackgroundChild(record.entry.taskId, {
+					status: "aborted",
+					error: "Task was deleted",
+				})
+
+				try {
+					await record.task.abortTask()
+				} catch (error) {
+					this.log(
+						`[deleteTaskWithId] abortTask failed for background child ${record.entry.taskId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+
+				try {
+					// `abortTask()` starts disposal without awaiting it; drain that
+					// promise so the caller removes the directory only after the
+					// task's own cleanup (reversion, artifacts) has finished.
+					await record.task.dispose()
+				} catch (error) {
+					this.log(
+						`[deleteTaskWithId] dispose failed for background child ${record.entry.taskId}: ${
+							error instanceof Error ? error.message : String(error)
+						}`,
+					)
+				}
+			}),
+			// Already-settled children: the cascade logged its own failures, and
+			// the tracked cleanup promise never rejects, so it is awaited as-is.
+			...pendingCleanups,
+		])
+	}
+
+	/**
+	 * Settle one live record. The terminal check and the map removal run in the
+	 * same synchronous turn, so concurrent resolve/abort/failure paths can never
+	 * double-settle or overwrite a terminal outcome.
+	 *
+	 * The synchronous part settles the handle exactly as before; the returned
+	 * promise is the child's terminal history write so a caller that must not
+	 * race it (deletion before `deleteMany`, disposal before the store is torn
+	 * down) can await the write after settlement. The write is also tracked in
+	 * `pendingBackgroundTerminalWrites`, which outlives the record.
+	 */
+	private finishBackgroundChild(
+		childTaskId: string,
+		update: { status: BackgroundChildEntry["status"] } & Partial<Pick<BackgroundChildEntry, "result" | "error">>,
+	): Promise<unknown> {
+		const record = this.backgroundTasks.get(childTaskId)
+
+		if (!record || isTerminalBackgroundStatus(record.entry.status)) {
+			return Promise.resolve()
+		}
+
+		const entry: BackgroundChildEntry = { ...record.entry, ...update, finishedAt: Date.now() }
+		record.entry = entry
+		record.settle(entry)
+		this.backgroundTasks.delete(childTaskId)
+		this.releaseBackgroundAbortHookIfIdle(record.parentTaskId)
+
+		// A background child never enters the task stack, so stack eviction never
+		// releases the resources its dispose() owns (fileContextTracker,
+		// rooIgnoreController, messageQueueService). Terminal settlement is the
+		// only release point for a child that completes normally or dies through
+		// the retry/mistake limit. `dispose()` is memoized by `disposalPromise`
+		// (abortTaskOnce may call it too) and it never emits TaskAborted, so the
+		// recorded terminal status above cannot change. The started promise is
+		// kept on the record so the abort cascade and deletion can drain this
+		// same disposal instead of calling `dispose()` again.
+		const disposalPromise = record.task.dispose()
+		record.disposalPromise = disposalPromise
+		void disposalPromise.catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Failed to release resources of settled child ${childTaskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+
+		// The terminal write gets a bounded retry: a single rejected write
+		// would otherwise leave the row `active` with no later repair while
+		// the parent stays active/delegated. The promise is returned and
+		// tracked in `pendingBackgroundTerminalWrites` so disposal can drain
+		// it before the history store is torn down; settlement above already
+		// happened, so the settle-first order is unchanged.
+		const terminalWrite = this.persistBackgroundChildTerminalWithRetry(entry)
+		this.trackBackgroundTerminalWrite(childTaskId, terminalWrite)
+		void terminalWrite.catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Unexpected error persisting terminal state for ${childTaskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+
+		// The child has stopped touching its own record, so settlement is a
+		// natural repair point for any parent `childIds` link whose registration
+		// write kept failing (CR finding axIR), and for any sibling child whose
+		// terminal write exhausted its bounded retries.
+		void ClineProvider.prototype.flushPendingBackgroundParentLinks.call(this).catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Unexpected error repairing pending parent links: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+		void ClineProvider.prototype.flushPendingBackgroundTerminalRepairs.call(this).catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Unexpected error repairing pending terminal writes: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+
+		return terminalWrite
+	}
+
+	/**
+	 * Write the child's terminal history status. A child that aborted or failed
+	 * has no terminal history status of its own, so it is persisted as
+	 * `interrupted`; `completed` is written as-is.
+	 */
+	private async persistBackgroundChildTerminal(entry: BackgroundChildEntry): Promise<void> {
+		if (!this.taskHistoryStore.get(entry.taskId)) {
+			// The row can be missing when the child-side registration upsert
+			// kept failing or the row was already removed; the write would be
+			// dropped silently otherwise, which made those states
+			// indistinguishable from a landed write in the logs.
+			this.log(
+				`[spawnBackgroundChildren] Not persisting terminal state for ${entry.taskId}: no history record exists`,
+			)
+			return
+		}
+
+		const status = entry.status === "completed" ? "completed" : "interrupted"
+
+		await this.taskHistoryStore.atomicReadAndUpdate(entry.taskId, (item) =>
+			item.status === "completed" ? item : { ...item, status },
+		)
+		this.recentTasksCache = undefined
+
+		if (this.isViewLaunched) {
+			const updated = this.taskHistoryStore.get(entry.taskId)
+			if (updated) {
+				await this.postMessageToWebview({ type: "taskHistoryItemUpdated", taskHistoryItem: updated })
+			}
+		}
+	}
+
+	/**
+	 * Bounded-retry wrapper around the child's terminal history write. A
+	 * single fire-and-forget write that rejects leaves the child's history row
+	 * `active` with no later repair: startup reconciliation
+	 * (`TaskHistoryStore.reconcileBackgroundChildren`) skips a child whose
+	 * parent is still active or delegated, which is exactly the state a
+	 * cancelled parent leaves behind. The realistic failure mode is a
+	 * transient filesystem error (e.g. a Windows/OneDrive file lock on the
+	 * history file), so the write is retried a small number of times, with a
+	 * short backoff. A write that still fails is recorded in
+	 * `pendingBackgroundTerminalRepairs` and retried by
+	 * `flushPendingBackgroundTerminalRepairs` at the next registration, child
+	 * settlement, or task deletion, so the row is never left `active` with no
+	 * further action. The recorded terminal status semantics are unchanged:
+	 * the retry writes exactly what a first-attempt success would have.
+	 *
+	 * Returns `true` when the write landed (or the row is gone, which needs
+	 * no repair) and `false` when every attempt failed and the repair was
+	 * recorded.
+	 */
+	private async persistBackgroundChildTerminalWithRetry(entry: BackgroundChildEntry): Promise<boolean> {
+		const pendingBackgroundTerminalRepairs: Map<string, BackgroundChildEntry> | undefined =
+			this.pendingBackgroundTerminalRepairs
+		const maxAttempts = 3
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				await this.persistBackgroundChildTerminal(entry)
+				pendingBackgroundTerminalRepairs?.delete(entry.taskId)
+				return true
+			} catch (error) {
+				this.log(
+					`[spawnBackgroundChildren] Persisting terminal state for ${entry.taskId} failed (attempt ${attempt}/${maxAttempts}): ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+				if (attempt < maxAttempts) {
+					await delay(50)
+				}
+			}
+		}
+
+		pendingBackgroundTerminalRepairs?.set(entry.taskId, entry)
+		this.log(
+			`[spawnBackgroundChildren] Giving up persisting terminal state for ${entry.taskId} after ${maxAttempts} failed attempts; recorded for repair at the next registration, child settlement, or task deletion`,
+		)
+		return false
+	}
+
+	/**
+	 * Track a child's in-flight terminal write so `dispose()` can drain it
+	 * before the history store is torn down. The record itself is already
+	 * gone at settlement, so the map — not `backgroundTasks` — is the
+	 * reachability anchor for the write.
+	 */
+	private trackBackgroundTerminalWrite(childTaskId: string, terminalWrite: Promise<unknown>): void {
+		const pendingBackgroundTerminalWrites: Map<string, Promise<unknown>> | undefined =
+			this.pendingBackgroundTerminalWrites
+
+		if (!pendingBackgroundTerminalWrites) {
+			return
+		}
+
+		pendingBackgroundTerminalWrites.set(childTaskId, terminalWrite)
+		void terminalWrite
+			.finally(() => {
+				if (pendingBackgroundTerminalWrites.get(childTaskId) === terminalWrite) {
+					pendingBackgroundTerminalWrites.delete(childTaskId)
+				}
+			})
+			.catch(() => {
+				// The write logs its own failures; the drain must never reject.
+			})
+	}
+
+	/**
+	 * Retry every child whose terminal history write exhausted its bounded
+	 * retries. Entries whose write lands are removed; the rest stay queued for
+	 * the next pass. Mirrors `flushPendingBackgroundParentLinks`, including
+	 * the undefined-tolerant map read: prototype-call doubles (delegation
+	 * rollback tests) drive callers of this method with a plain object that
+	 * carries no pending-repair map.
+	 */
+	private async flushPendingBackgroundTerminalRepairs(): Promise<void> {
+		const pending: Map<string, BackgroundChildEntry> | undefined = this.pendingBackgroundTerminalRepairs
+
+		if (!pending || pending.size === 0) {
+			return
+		}
+
+		for (const [childTaskId, entry] of Array.from(pending)) {
+			if (await this.persistBackgroundChildTerminalWithRetry(entry)) {
+				pending.delete(childTaskId)
+			}
+		}
+	}
+
+	/**
+	 * Whether a spawn loop may still publish and schedule a child for `parent`.
+	 *
+	 * The loop awaits `createTask` and the history-store registration, and the
+	 * parent can be cancelled (or the provider disposed) while those are
+	 * pending. `abortBackgroundChildren` settles only children that already have
+	 * a record, so a child created inside that window would otherwise be
+	 * published and scheduled after the abort cascade drained the map.
+	 */
+	private isBackgroundSpawnParentActive(parent: Task, spawnEpoch: number): boolean {
+		if (this._disposed) {
+			return false
+		}
+
+		// Deletion closes admission permanently for the task being deleted: a
+		// spawn loop that passed its earlier checks must not publish a child
+		// for a deleted parent. The undefined-tolerant read matches the other
+		// background guards for prototype-call test doubles.
+		const backgroundAdmissionClosed: Set<string> | undefined = this.backgroundAdmissionClosed
+		if (backgroundAdmissionClosed?.has(parent.taskId)) {
+			return false
+		}
+
+		// A batch that started before the parent aborted must not publish any
+		// more children; a batch started afterwards is a different decision.
+		if (this.backgroundSpawnEpoch(parent) !== spawnEpoch) {
+			return false
+		}
+
+		// `abortTask()` flips this synchronously, so it also covers a
+		// cancellation whose TaskAborted event this provider did not observe.
+		return !parent.abort
+	}
+
+	private backgroundSpawnEpoch(parent: Task): number {
+		return this.backgroundSpawnEpochs.get(parent) ?? 0
+	}
+
+	/**
+	 * Settle a child that was constructed while its parent was being cancelled
+	 * (or the provider disposed) without ever publishing it to
+	 * `backgroundTasks` or scheduling it.
+	 *
+	 * The normal record path would emit TaskAborted and could overwrite the
+	 * terminal outcome, so the handle is resolved directly. Disposal releases
+	 * the resources the never-started task already allocated (CR finding 1).
+	 * The terminal history write still has to land: it goes through the
+	 * bounded retry so a transient store error cannot strand the row on
+	 * `active` (startup reconciliation skips a child whose parent is still
+	 * active or delegated).
+	 */
+	private settleBackgroundChildWithoutScheduling(spec: BackgroundSubtaskSpec, child: Task): BackgroundChildHandle {
+		const finishedAt = Date.now()
+		const entry: BackgroundChildEntry = {
+			taskId: child.taskId,
+			label: spec.label,
+			mode: spec.mode,
+			status: "aborted",
+			error: this._disposed ? "Provider disposed" : "Parent task was cancelled",
+			startedAt: finishedAt,
+			finishedAt,
+		}
+
+		this.log(
+			`[spawnBackgroundChildren] Child ${child.taskId} finished construction after its parent was cancelled or the provider was disposed; not scheduling it`,
+		)
+
+		void child.dispose().catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Failed to dispose unscheduled child ${child.taskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+
+		// The terminal history write still has to land: it goes through the
+		// bounded retry so a transient store error cannot strand the row on
+		// `active` (startup reconciliation skips a child whose parent is still
+		// active or delegated). The promise is tracked like the scheduled
+		// path's write so disposal can drain it.
+		const terminalWrite = this.persistBackgroundChildTerminalWithRetry(entry)
+		this.trackBackgroundTerminalWrite(entry.taskId, terminalWrite)
+		void terminalWrite.catch((error) => {
+			this.log(
+				`[spawnBackgroundChildren] Unexpected error persisting terminal state for unscheduled child ${child.taskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		})
+
+		return { taskId: entry.taskId, label: spec.label, mode: spec.mode, done: Promise.resolve(entry) }
+	}
+
+	private failedBackgroundHandle(spec: BackgroundSubtaskSpec, error: string): BackgroundChildHandle {
+		const finishedAt = Date.now()
+		// No task exists for a rejected spec, so the handle carries a synthetic id.
+		const entry: BackgroundChildEntry = {
+			taskId: crypto.randomUUID(),
+			label: spec.label,
+			mode: spec.mode,
+			status: "failed",
+			error,
+			startedAt: finishedAt,
+			finishedAt,
+		}
+
+		return { taskId: entry.taskId, label: spec.label, mode: spec.mode, done: Promise.resolve(entry) }
+	}
+
+	/**
+	 * Settled `aborted` handle for a spec that was never constructed because
+	 * its parent was cancelled or the provider disposed before the spec was
+	 * admitted to the batch. Mirrors the outcome of
+	 * `settleBackgroundChildWithoutScheduling` minus the task: with no task
+	 * constructed there is nothing to dispose and no history record to
+	 * reconcile, so this writes nothing.
+	 */
+	private cancelledBackgroundHandle(spec: BackgroundSubtaskSpec): BackgroundChildHandle {
+		const finishedAt = Date.now()
+		// `label` is model-controlled, so JSON-encode it: a newline in the label
+		// must not be able to forge a second log line (CWE-117, F-22).
+		this.log(
+			`[spawnBackgroundChildren] Parent was cancelled or the provider disposed before spec ${JSON.stringify(spec.label)} was admitted; not constructing a child`,
+		)
+		const entry: BackgroundChildEntry = {
+			taskId: crypto.randomUUID(),
+			label: spec.label,
+			mode: spec.mode,
+			status: "aborted",
+			error: this._disposed ? "Provider disposed" : "Parent task was cancelled",
+			startedAt: finishedAt,
+			finishedAt,
+		}
+
+		return { taskId: entry.taskId, label: spec.label, mode: spec.mode, done: Promise.resolve(entry) }
+	}
+
+	private async loadSavedModeProfile(
+		mode: string,
+		cache: Map<string, SavedModeProfile | undefined>,
+	): Promise<SavedModeProfile | undefined> {
+		if (cache.has(mode)) {
+			return cache.get(mode)
+		}
+
+		let profile: SavedModeProfile | undefined
+
+		// `getModeConfigId` lists the saved profiles and can reject. It shares the
+		// fallback below with the profile read: a rejection here used to escape the
+		// spawn loop, aborting children that were already running and denying the
+		// later spec its parent-configuration fallback (CR finding 3).
+		try {
+			const savedConfigId = await this.getModeConfigId(mode as Mode)
+
+			if (savedConfigId) {
+				const {
+					name,
+					id: _id,
+					...savedConfiguration
+				} = await this.providerSettingsManager.getProfile({
+					id: savedConfigId,
+				})
+				profile = { name, apiConfiguration: savedConfiguration }
+			}
+		} catch (error) {
+			this.log(
+				`[spawnBackgroundChildren] Saved profile lookup for mode '${mode}' failed: ${
+					error instanceof Error ? error.message : String(error)
+				}. Using the parent task configuration.`,
+			)
+		}
+
+		cache.set(mode, profile)
+		return profile
+	}
+
+	/**
+	 * The lineage root for `parent`'s children: a live root object when one is
+	 * reachable, plus the authoritative root id.
+	 *
+	 * The registry is consulted first, but it cannot be the only source:
+	 * delegation pops every ancestor off the stack, so a delegated parent's
+	 * root is usually absent from it (D-01). `Task` retains its `parentTask`
+	 * reference after those pops (Task.ts constructor), so the chain walk is
+	 * the production-reachable fallback.
+	 *
+	 * A task restored from History can carry `rootTaskId: R` with no live
+	 * reference to `R` at all. Falling back to the parent object would make
+	 * every descendant persist the parent as its root, so the stored id is
+	 * returned on its own and carried through the explicit `rootTaskId` Task
+	 * option (CR finding 5).
+	 */
+	private resolveLineageRoot(parent: Task): { rootTask?: Task; rootTaskId: string } {
+		const rootTaskId = parent.rootTaskId ?? parent.taskId
+		const registryRoot = this.taskRegistry.getById(rootTaskId)
+
+		if (registryRoot) {
+			return { rootTask: registryRoot, rootTaskId }
+		}
+
+		for (let ancestor: Task | undefined = parent; ancestor; ancestor = ancestor.parentTask) {
+			if (ancestor.taskId === rootTaskId) {
+				return { rootTask: ancestor, rootTaskId }
+			}
+		}
+
+		if (rootTaskId !== parent.taskId) {
+			this.log(
+				`[resolveLineageRoot] Root task ${rootTaskId} is reachable from neither the registry nor the parent chain; carrying the stored root id into the child`,
+			)
+			return { rootTaskId }
+		}
+
+		return { rootTask: parent, rootTaskId }
+	}
+
+	/**
+	 * Persist both sides of the background-child registration: the parent's
+	 * `childIds` (delete cascade, cost aggregation, diagnostics) and the
+	 * child's `backgroundParentTaskId` stamp (startup orphan cleanup, D10/D11).
+	 *
+	 * The parent link must be durable before the child counts as registered:
+	 * parent deletion follows `childIds`, so a stamped child missing from it
+	 * keeps a permanent `active` row that no later child-side save repairs
+	 * (CR finding axIR). The link therefore gets the same bounded retry as the
+	 * terminal write; a link that still fails is recorded in
+	 * `pendingBackgroundParentLinks` and retried at the next registration,
+	 * child settlement, or task deletion. The child's own stamp stays
+	 * best-effort, never fatal: an unregistered child can still run and
+	 * report, and aborting the spawn would orphan running tasks.
+	 */
+	private async registerBackgroundChild(
+		parent: Task,
+		child: Task,
+		handoffExecutionContext: DelegatedChildContext,
+	): Promise<void> {
+		// Tracked per parent so deletion can drain only the registrations that
+		// can change its deletion set: a registration writes its own parent's
+		// `childIds`, so an unrelated parent's registration never affects it
+		// and must not stall it. Within a parent, a registration that lands
+		// mid-delete must either join the cascade or be declined by the closed
+		// admission gate, never orphan a live child of a deleted parent.
+		const registration = this.performBackgroundChildRegistration(parent, child, handoffExecutionContext)
+		let registrations = this.pendingBackgroundRegistrations.get(parent.taskId)
+
+		if (!registrations) {
+			registrations = new Set()
+			this.pendingBackgroundRegistrations.set(parent.taskId, registrations)
+		}
+
+		registrations.add(registration)
+
+		try {
+			await registration
+		} finally {
+			registrations.delete(registration)
+
+			if (registrations.size === 0) {
+				this.pendingBackgroundRegistrations.delete(parent.taskId)
+			}
+		}
+	}
+
+	private async performBackgroundChildRegistration(
+		parent: Task,
+		child: Task,
+		handoffExecutionContext: DelegatedChildContext,
+	): Promise<void> {
+		await this.flushPendingBackgroundParentLinks()
+		await this.flushPendingBackgroundTerminalRepairs()
+
+		const parentLinked = await this.addBackgroundChildToParentWithRetry(parent.taskId, child.taskId)
+
+		if (!parentLinked) {
+			this.pendingBackgroundParentLinks.set(child.taskId, parent.taskId)
+			this.log(
+				`[spawnBackgroundChildren] Parent link for ${child.taskId} → ${parent.taskId} is pending repair; the child may outlive its parent's deletion until it lands`,
+			)
+		}
+
+		try {
+			await this.taskHistoryStore.upsert(
+				historyItemSchema.parse({
+					id: child.taskId,
+					rootTaskId: child.rootTaskId,
+					parentTaskId: parent.taskId,
+					backgroundParentTaskId: parent.taskId,
+					number: child.taskNumber,
+					ts: Date.now(),
+					task: child.metadata.task ?? "",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					workspace: child.cwd,
+					mode: handoffExecutionContext.mode,
+					...(handoffExecutionContext.apiConfigName
+						? { apiConfigName: handoffExecutionContext.apiConfigName }
+						: {}),
+					status: "active",
+				}),
+			)
+		} catch (error) {
+			this.log(
+				`[spawnBackgroundChildren] Failed to stamp ${child.taskId} with backgroundParentTaskId ${parent.taskId}: ${
+					error instanceof Error ? error.message : String(error)
+				}`,
+			)
+		}
+	}
+
+	private async addBackgroundChildToParent(parentTaskId: string, childTaskId: string): Promise<void> {
+		await this.taskHistoryStore.atomicReadAndUpdate(parentTaskId, (item) => addBackgroundChild(item, childTaskId))
+	}
+
+	/**
+	 * Bounded-retry wrapper around the parent's `childIds` write, same idiom as
+	 * `persistBackgroundChildTerminalWithRetry`: the realistic failure is a
+	 * transient filesystem error (e.g. a Windows/OneDrive file lock on the
+	 * history file), and a single rejected write would otherwise leave the
+	 * child missing from the parent's `childIds` for the whole run. Returns
+	 * `false` when every attempt failed; the caller records the link for a
+	 * later repair pass.
+	 */
+	private async addBackgroundChildToParentWithRetry(parentTaskId: string, childTaskId: string): Promise<boolean> {
+		const maxAttempts = 3
+
+		for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+			try {
+				await this.addBackgroundChildToParent(parentTaskId, childTaskId)
+				return true
+			} catch (error) {
+				this.log(
+					`[spawnBackgroundChildren] Registering ${childTaskId} in parent ${parentTaskId} failed (attempt ${attempt}/${maxAttempts}): ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+
+				if (attempt < maxAttempts) {
+					await delay(50)
+				}
+			}
+		}
+
+		return false
+	}
+
+	/**
+	 * Retry every background parent link whose registration write kept failing.
+	 * Links that land are removed; the rest stay queued for the next pass.
+	 * Deletion calls this before collecting `childIds` so a repaired link
+	 * brings the child into the delete cascade.
+	 */
+	private async flushPendingBackgroundParentLinks(): Promise<void> {
+		// Prototype-call doubles (delegation rollback tests) drive this method
+		// with a plain object that carries no pending-link map; nothing can be
+		// pending there, so there is nothing to flush. Same guard shape as
+		// stopBackgroundChildrenBeingDeleted.
+		const pending: Map<string, string> | undefined = this.pendingBackgroundParentLinks
+
+		if (!pending || pending.size === 0) {
+			return
+		}
+
+		for (const [childTaskId, parentTaskId] of Array.from(pending)) {
+			if (await this.addBackgroundChildToParentWithRetry(parentTaskId, childTaskId)) {
+				pending.delete(childTaskId)
+			}
+		}
+	}
+
+	/**
+	 * Drain the in-flight background-child registrations of `parentIds` (parent
+	 * `childIds` link + child row). Deletion calls this after closing admission
+	 * for an id and before reading that id's `childIds`, so a registration that
+	 * is mid-write either lands in time to join the cascade or was already
+	 * declined by the admission gate. Registrations belonging to parents
+	 * outside `parentIds` are not awaited: none of their children can enter
+	 * this deletion set, so waiting for them would only stall the delete.
+	 * Prototype-call doubles carry no registration map, so the read is
+	 * undefined-tolerant like the other background guards.
+	 */
+	private async drainPendingBackgroundRegistrationsFor(parentIds: readonly string[]): Promise<void> {
+		const pending: Map<string, Set<Promise<void>>> | undefined = this.pendingBackgroundRegistrations
+
+		if (!pending || pending.size === 0) {
+			return
+		}
+
+		const drained: Promise<void>[] = []
+
+		for (const parentId of parentIds) {
+			const registrations = pending.get(parentId)
+
+			if (registrations) {
+				drained.push(...registrations)
+			}
+		}
+
+		if (drained.length === 0) {
+			return
+		}
+
+		await Promise.allSettled(drained)
+	}
+
+	/** Observe the parent's own abort so a cancel that bypasses `cancelTask` still cascades. */
+	private ensureBackgroundAbortHook(parent: Task): void {
+		if (this.backgroundAbortHooks.has(parent.taskId)) {
+			return
+		}
+
+		const listener = () => {
+			// A spawn loop awaiting `createTask`/registration reads this epoch
+			// after the await: its child has no record yet, so the cascade below
+			// cannot settle it (CR finding 1).
+			this.backgroundSpawnEpochs.set(parent, this.backgroundSpawnEpoch(parent) + 1)
+			void this.abortBackgroundChildren(parent.taskId).catch((error) => {
+				this.log(
+					`[spawnBackgroundChildren] Abort cascade for ${parent.taskId} failed: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				)
+			})
+		}
+
+		parent.once(RooCodeEventName.TaskAborted, listener)
+		this.backgroundAbortHooks.set(parent.taskId, { parent, listener })
+	}
+
+	private releaseBackgroundAbortHookIfIdle(parentTaskId: string): void {
+		const hook = this.backgroundAbortHooks.get(parentTaskId)
+
+		if (!hook) {
+			return
+		}
+
+		for (const record of this.backgroundTasks.values()) {
+			if (record.parentTaskId === parentTaskId) {
+				return
+			}
+		}
+
+		this.backgroundAbortHooks.delete(parentTaskId)
+		hook.parent.off(RooCodeEventName.TaskAborted, hook.listener)
+	}
+
+	private releaseAllBackgroundAbortHooks(): void {
+		for (const hook of this.backgroundAbortHooks.values()) {
+			hook.parent.off(RooCodeEventName.TaskAborted, hook.listener)
+		}
+
+		this.backgroundAbortHooks.clear()
 	}
 
 	// Clear the current task without treating it as a subtask.
@@ -4867,9 +6318,14 @@ export class ClineProvider
 			mode !== parentMode && this.context.workspaceState.get("lockApiConfigAcrossModes", false)
 		let savedModeProfile: { name?: string; apiConfiguration: ProviderSettings } | undefined
 		if (mode !== parentMode && !lockApiConfigAcrossModes) {
-			const savedConfigId = await this.getModeConfigId(mode as Mode)
-			if (savedConfigId) {
-				try {
+			// The mode-config id lookup lists the saved profiles and can reject;
+			// it shares this fallback with the profile read so a failing lookup
+			// degrades to the parent configuration instead of failing the
+			// delegation (same contract as loadSavedModeProfile).
+			let savedConfigId: string | undefined
+			try {
+				savedConfigId = await this.getModeConfigId(mode as Mode)
+				if (savedConfigId) {
 					const {
 						name,
 						id: _id,
@@ -4878,11 +6334,12 @@ export class ClineProvider
 						id: savedConfigId,
 					})
 					savedModeProfile = { name, apiConfiguration: savedConfiguration }
-				} catch (error) {
-					this.log(
-						`[delegateParentAndOpenChild] Saved profile ${savedConfigId} for mode '${mode}' could not be loaded for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}. Using the parent task configuration.`,
-					)
 				}
+			} catch (error) {
+				const profileLabel = savedConfigId ? `Saved profile ${savedConfigId}` : "Saved profile lookup"
+				this.log(
+					`[delegateParentAndOpenChild] ${profileLabel} for mode '${mode}' could not be loaded for parent ${parentTaskId}: ${error instanceof Error ? error.message : String(error)}. Using the parent task configuration.`,
+				)
 			}
 		}
 		const handoffExecutionContext = selectHandoffExecutionContext(
@@ -4926,6 +6383,22 @@ export class ClineProvider
 			)
 		}
 
+		// Capture the lineage root before the parent leaves the stack: `createTask`
+		// otherwise derives `rootTask` from `taskRegistry.getAll()[0]`, which is
+		// empty by the time the child is constructed, so a delegated child would
+		// persist `rootTaskId: undefined` and sever the lineage root of every
+		// background child it later parents (D-01).
+		// Prototype-call idiom (same as createTaskWithHistoryItemUnlocked at the
+		// enqueueHistoryTaskTransition call sites): delegation is driven through
+		// `ClineProvider.prototype.delegateParentAndOpenChild*.call(this, ...)`
+		// with test doubles as `this`, so a sibling method must be reached through
+		// the prototype rather than through the double, which does not carry it.
+		const lineageRoot = ClineProvider.prototype.resolveLineageRoot.call<
+			ClineProvider,
+			[Task],
+			{ rootTask?: Task; rootTaskId: string }
+		>(this, parent)
+
 		// 3) Enforce single-open invariant by closing/disposing the parent first
 		//    This ensures we never have >1 tasks open at any time during delegation.
 		//    Await abort completion to ensure clean disposal and prevent unhandled rejections.
@@ -4958,6 +6431,10 @@ export class ClineProvider
 			initialStatus: "active",
 			startTask: false,
 			handoffExecutionContext,
+			rootTask: lineageRoot.rootTask,
+			// Only an id without a live root object needs the explicit option; a
+			// live root keeps the original derivation (CR finding 5).
+			...(lineageRoot.rootTask ? {} : { rootTaskId: lineageRoot.rootTaskId }),
 		})
 
 		// 5) Persist parent delegation metadata BEFORE the child starts writing.

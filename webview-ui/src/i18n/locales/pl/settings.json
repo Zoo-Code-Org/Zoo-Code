@@ -938,6 +938,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamiczny wysiłek myślowy",
 			"description": "Przygotowuje narzędzie set_thinking_effort do późniejszego wsparcia: to ustawienie zapisuje tylko preferencję, zachowanie na żądanie pojawi się w kolejnych pracach. (eksperymentalne)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Włącz równoległe podzadania",
+			"description": "Po włączeniu Zoo może uruchomić wiele zadań śledztwa w tle, z dostępem tylko do odczytu, w różnych trybach i modelach, a następnie zebrać ich raporty. Zadania podrzędne są strukturalnie zablokowane przed zapisywaniem plików, uruchamianiem poleceń i delegowaniem kolejnych podzadań."
 		}
 	},
 	"temperature": {

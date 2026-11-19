@@ -9,7 +9,18 @@ import type { HistoryItem } from "@roo-code/types"
 import { providerIdentifiers, RooCodeEventName } from "@roo-code/types"
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { TaskScheduler } from "../core/task/TaskScheduler"
+import { TaskRegistry } from "../core/task/TaskRegistry"
 import { LifecycleTransitionError } from "../core/task-persistence"
+
+/**
+ * Delegation drives real ClineProvider prototype methods against a plain
+ * double. `resolveLineageRoot` (D-01) reads `taskRegistry` from `this`, so
+ * every provider double carries a real (empty) registry; an empty registry
+ * is the production-reachable state for these tests (the root is absent).
+ */
+function makeProviderDouble(fields: Record<string, unknown>): ClineProvider {
+	return { taskRegistry: new TaskRegistry(), ...fields } as unknown as ClineProvider
+}
 
 const parentHistoryItem: HistoryItem = {
 	id: "parent-1",
@@ -69,13 +80,13 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				},
 			}),
 		})
-		const provider = {
+		const provider = makeProviderDouble({
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack,
 			createTask,
 			handleModeSwitch,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -114,7 +125,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		const parentTask = makeParentTask()
 		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -124,7 +135,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log: vi.fn(),
 			isViewLaunched: false,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -164,7 +175,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -177,7 +188,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log: vi.fn(),
 			isViewLaunched: false,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -204,7 +215,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const handleModeSwitch = vi.fn().mockResolvedValue(undefined)
 		const taskHistoryStore = makeStoreStub()
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: providerEmit,
 			getCurrentTask: vi.fn(() => parentTask),
@@ -215,7 +226,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -243,6 +254,10 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			initialTodos: [],
 			initialStatus: "active",
 			startTask: false,
+			// D-01: the lineage root is captured before removeClineFromStack and
+			// passed explicitly; with an empty registry and no in-memory
+			// parentTask the parent itself is the root.
+			rootTask: parentTask,
 		})
 
 		// Delegation metadata written via atomicReadAndUpdate with correct taskId
@@ -284,7 +299,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			getCurrentProfileName: vi.fn(),
 		}
 		const workspaceGet = vi.fn().mockReturnValue(false)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -297,7 +312,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// No window-local choice is recorded, so the lookup reaches the shared manager.
 			getModeConfigId: (mode: string) => providerSettingsManager.getModeConfigId(mode),
 			context: { workspaceState: { get: workspaceGet } },
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -339,7 +354,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			openRouterModelId: "openai/gpt-4.1-mini",
 		})
 		const sharedGetModeConfigId = vi.fn().mockResolvedValue("other-window-profile-id")
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -352,7 +367,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// This window's own choice differs from the shared value another window wrote.
 			getModeConfigId: vi.fn().mockResolvedValue("local-profile-id"),
 			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -396,7 +411,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				: vi.fn().mockResolvedValue(savedProfile)
 		const log = vi.fn()
 		const getModeConfigId = vi.fn().mockResolvedValue(savedConfigId)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -409,7 +424,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// No window-local choice is recorded, so the lookup reaches the shared manager.
 			getModeConfigId,
 			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -450,7 +465,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			get: vi.fn().mockReturnValueOnce(parentHistoryItem).mockReturnValue(updatedParent),
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -462,7 +477,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: true,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -484,7 +499,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			get: vi.fn().mockReturnValue(undefined),
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -496,7 +511,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: true,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -526,7 +541,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			}),
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => parentTask),
@@ -537,7 +552,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -573,7 +588,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			}),
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask: vi.fn(() => makeParentTask()),
@@ -584,7 +599,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
@@ -634,7 +649,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			}),
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -648,7 +663,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -670,12 +685,12 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const taskHistoryStore = makeStoreStub({
 			get: vi.fn().mockReturnValue({ ...parentHistoryItem, status: "delegated" }),
 		})
-		const provider = {
+		const provider = makeProviderDouble({
 			getCurrentTask: vi.fn(() => parentTask),
 			removeClineFromStack: vi.fn(),
 			createTask: vi.fn(),
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -713,7 +728,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 					return [durableParent]
 				}),
 			}
-			const provider = {
+			const provider = makeProviderDouble({
 				taskScheduler: new TaskScheduler(),
 				emit: vi.fn(),
 				getCurrentTask: vi.fn(() => parent),
@@ -722,7 +737,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				log: vi.fn(),
 				isViewLaunched: false,
 				taskHistoryStore: store,
-			} as unknown as ClineProvider
+			})
 			return { provider, child, removeClineFromStack }
 		}
 
@@ -775,7 +790,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			return child
 		})
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -789,7 +804,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			recentTasksCache: undefined,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -842,7 +857,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				return current
 			}),
 		}
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			recentTasksCache: [parentHistoryItem],
 			emit: vi.fn(),
@@ -856,7 +871,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log: vi.fn(),
 			isViewLaunched: false,
 			taskHistoryStore,
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -905,7 +920,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const clearPendingActionIfMatching = vi.fn()
 		const deleteTaskWithId = vi.fn().mockResolvedValue(undefined)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -923,7 +938,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
 			},
-		} as unknown as ClineProvider
+		})
 
 		let rejection: unknown
 		try {
@@ -969,7 +984,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		const atomicReadAndUpdate = vi.fn().mockRejectedValue(persistenceError)
 		const clearPendingActionIfMatching = vi.fn().mockResolvedValue(interruptedParent)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -987,7 +1002,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
 			},
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -1034,7 +1049,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const clearPendingActionIfMatching = vi.fn().mockRejectedValue(settlementError)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -1052,7 +1067,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				atomicReadAndUpdate,
 				clearPendingActionIfMatching,
 			},
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -1098,7 +1113,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const clearPendingActionIfMatching = vi.fn().mockResolvedValue(completedParent)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -1119,7 +1134,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				}),
 				clearPendingActionIfMatching,
 			},
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -1165,7 +1180,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const clearPendingActionIfMatching = vi.fn(async (_taskId: string, _actionId: string) => replacedParent)
 		const createTaskWithHistoryItem = vi.fn().mockResolvedValue(undefined)
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
 			getCurrentTask,
@@ -1186,7 +1201,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				}),
 				clearPendingActionIfMatching,
 			},
-		} as unknown as ClineProvider
+		})
 
 		await expect(
 			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
@@ -1242,7 +1257,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		})
 		const clearPendingActionIfMatching = vi.fn(async () => settledParent)
 
-		const provider = {
+		const provider = makeProviderDouble({
 			taskScheduler: new TaskScheduler(),
 			recentTasksCache: [parentHistoryItem],
 			emit: vi.fn(),
@@ -1271,7 +1286,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				clearPendingActionIfMatching,
 				deleteMany: vi.fn().mockResolvedValue(undefined),
 			},
-		} as unknown as ClineProvider
+		})
 
 		try {
 			await expect(

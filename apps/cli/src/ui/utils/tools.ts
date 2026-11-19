@@ -80,6 +80,22 @@ export function extractToolData(toolInfo: Record<string, unknown>): ToolData {
 		}))
 	}
 
+	// Extract parallel subtask rows (approval asks send "tasks", progress rows send "subtasks")
+	const subtaskRows = Array.isArray(toolInfo.subtasks) ? toolInfo.subtasks : toolInfo.tasks
+
+	if (Array.isArray(subtaskRows)) {
+		toolData.subtasks = (subtaskRows as Array<Record<string, unknown>>).map((s) => ({
+			taskId: s.taskId as string | undefined,
+			label: s.label as string | undefined,
+			mode: s.mode as string | undefined,
+			message: s.message as string | undefined,
+			status: s.status as string | undefined,
+			reportPath: s.reportPath as string | undefined,
+			summary: s.summary as string | undefined,
+			error: s.error as string | undefined,
+		}))
+	}
+
 	// Extract question/completion fields
 	if (toolInfo.question !== undefined) {
 		toolData.question = toolInfo.question as string

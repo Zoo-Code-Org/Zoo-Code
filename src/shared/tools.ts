@@ -97,6 +97,9 @@ export const toolParamNames = [
 	// read_file legacy format parameter (backward compatibility)
 	"files",
 	"line_ranges",
+	// parallel_subtasks parameters
+	"tasks",
+	"label",
 ] as const
 
 export type ToolParamName = (typeof toolParamNames)[number]
@@ -119,6 +122,7 @@ export type NativeToolArgs = {
 	apply_patch: { patch: string }
 	list_files: { path: string; recursive?: boolean }
 	new_task: { mode: string; message: string; todos?: string }
+	parallel_subtasks: { tasks: Array<{ label?: string; mode: string; message: string }> }
 	ask_followup_question: {
 		question: string
 		follow_up: Array<{ text: string; mode?: string }>
@@ -216,6 +220,9 @@ export const ALWAYS_AVAILABLE_TOOLS: ToolName[] = [
 	"attempt_completion",
 	"switch_mode",
 	"new_task",
+	// Advertised in every mode; the tool-policy layer must drop it while the
+	// experiment flag is off so the flag actually un-advertises it.
+	"parallel_subtasks",
 	"update_todo_list",
 	"run_slash_command",
 	"skill",

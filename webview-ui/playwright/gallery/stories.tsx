@@ -343,6 +343,117 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/__tests__/OpencodeGoTemperature.visual.fixture")
 		return <OpencodeGoTemperatureFixture />
 	},
+	"parallel-subtasks-approval": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// The host serializes the single approval ask as `{ tool, tasks }` before any
+		// child exists, so ChatRow renders ParallelSubtasksPreview from this payload.
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "ask",
+			ask: "tool",
+			ts: 0,
+			text: JSON.stringify({
+				tool: "parallelSubtasks",
+				tasks: [
+					{
+						label: "Trace the parser",
+						mode: "code",
+						message: "Find where the lexer drops template literals and list the call sites.",
+					},
+					{
+						label: "Audit locale coverage",
+						mode: "code",
+						message: "Confirm every locale file ships the parallelSubtasks keys.",
+					},
+					{
+						label: "Check the MCP index",
+						mode: "debug",
+						message: "Reproduce the stale tool lookup after the server reconnects.",
+					},
+				],
+			}),
+		}
+		return (
+			<AppProviders>
+				<div
+					data-testid="parallel-subtasks-approval-story"
+					className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
+	"parallel-subtasks-progress": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// The visual test freezes the clock at this time so the running row's
+		// elapsed badge (startedAt below) stays stable across runs.
+		const now = new Date("2026-06-01T12:00:45Z").getTime()
+		const subtasks: import("@roo-code/types").ParallelSubtaskInfo[] = [
+			{
+				taskId: "child-parser",
+				label: "Trace the parser",
+				mode: "code",
+				status: "running",
+				startedAt: now - 45_000,
+			},
+			{
+				taskId: "child-locales",
+				label: "Audit locale coverage",
+				mode: "code",
+				status: "completed",
+				reportPath: "/workspace/demo/.zoocode/subtask-reports/task-1/audit-locale-coverage-child-locales.md",
+				summary: "All 16 locales ship the parallelSubtasks keys.",
+			},
+			{
+				taskId: "child-mcp",
+				label: "Check the MCP index",
+				mode: "debug",
+				status: "failed",
+				error: 'Mode "debug" is not allowed for parallel subtasks.',
+			},
+		]
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "say",
+			say: "tool",
+			ts: 0,
+			text: JSON.stringify({ tool: "parallelSubtasks", subtasks }),
+			partial: true,
+		}
+		return (
+			<AppProviders>
+				<div
+					data-testid="parallel-subtasks-progress-story"
+					className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"rendered-content-contrast": async () => {
 		const [{ AppProviders }, { RenderedContentContrastFixture }] = await Promise.all([
 			import("../AppProviders"),

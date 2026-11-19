@@ -962,6 +962,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "動態思考強度",
 			"description": "為後續支援準備 set_thinking_effort 工具：此設定僅儲存偏好，逐次請求的工具行為會在後續工作中提供。（實驗性）"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "啟用平行子任務",
+			"description": "啟用後，Zoo 可以在不同模式和模型中產生多個唯讀背景調查工作，然後收集它們的報告。子工作在結構上被封鎖，無法寫入檔案、執行命令或委派更多子任務。"
 		}
 	},
 	"temperature": {

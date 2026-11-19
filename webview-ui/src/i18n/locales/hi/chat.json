@@ -348,6 +348,21 @@
 			"copy_code": "कोड कॉपी करें"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "समांतर जांच",
+		"progress": "{{total}} में से {{completed}} पूर्ण",
+		"status": {
+			"queued": "कतारबद्ध",
+			"running": "चल रहा है",
+			"completed": "पूर्ण",
+			"failed": "विफल",
+			"aborted": "रद्द"
+		},
+		"openReport": "रिपोर्ट",
+		"openDebugLog": "JSON लॉग",
+		"goToTask": "कार्य पर जाएं",
+		"noReport": "अभी कोई रिपोर्ट उपलब्ध नहीं है"
+	},
 	"profileViolationWarning": "वर्तमान प्रोफ़ाइल आपके संगठन की सेटिंग्स के साथ संगत नहीं है",
 	"shellIntegration": {
 		"title": "कमांड निष्पादन चेतावनी",

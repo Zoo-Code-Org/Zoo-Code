@@ -75,11 +75,12 @@ describe("CodebaseSearchTool workspace selection", () => {
 		vi.mocked(getWorkspacePath).mockReturnValue(first.uri.fsPath)
 		// Only the provider context and task members consumed by this tool are needed.
 		provider = { context: makeExtensionContext(), contextProxy: {} } as ClineProvider
+		// `say` returns the message it appended, so the stub resolves one.
 		const taskStub: Pick<Task, "cwd" | "providerRef" | "consecutiveMistakeCount" | "say"> = {
 			cwd: second.uri.fsPath,
 			providerRef: new WeakRef(provider),
 			consecutiveMistakeCount: 0,
-			say: vi.fn<Task["say"]>().mockResolvedValue(undefined),
+			say: vi.fn<Task["say"]>().mockResolvedValue({ ts: 0, type: "say", say: "text", text: "" }),
 		}
 		task = taskStub as Task
 		callbacks = {

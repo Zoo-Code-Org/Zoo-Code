@@ -354,6 +354,21 @@
 			"copy_code": "Kopiuj kod"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Równoległe śledztwa",
+		"progress": "Ukończono {{completed}} z {{total}}",
+		"status": {
+			"queued": "W kolejce",
+			"running": "Wykonywanie",
+			"completed": "Ukończone",
+			"failed": "Niepowodzenie",
+			"aborted": "Przerwane"
+		},
+		"openReport": "Raport",
+		"openDebugLog": "Dziennik JSON",
+		"goToTask": "Przejdź do zadania",
+		"noReport": "Raport nie jest jeszcze dostępny"
+	},
 	"profileViolationWarning": "Bieżący profil nie jest kompatybilny z ustawieniami Twojej organizacji",
 	"shellIntegration": {
 		"title": "Ostrzeżenie wykonania polecenia",

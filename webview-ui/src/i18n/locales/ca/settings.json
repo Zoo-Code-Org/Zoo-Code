@@ -937,6 +937,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esforç de pensament dinàmic",
 			"description": "Prepara l'eina set_thinking_effort per a un suport posterior: aquest paràmetre només desa la preferència i el comportament per sol·licitud arribarà en una feina posterior. (experimental)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Habilita subtasques paral·leles",
+			"description": "Quan està habilitat, Zoo pot crear diverses tasques d'investigació de només lectura en segon pla en diferents modes i models, i després recopilar els seus informes. Les tasques fill tenen bloquejada estructuralment l'escriptura de fitxers, l'execució de comandes o la delegació de més subtasques."
 		}
 	},
 	"temperature": {

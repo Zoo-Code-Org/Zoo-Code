@@ -351,6 +351,21 @@
 			"copy_code": "Copier le code"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Investigations parallèles",
+		"progress": "{{completed}} sur {{total}} terminées",
+		"status": {
+			"queued": "En file d'attente",
+			"running": "En cours d'exécution",
+			"completed": "Terminée",
+			"failed": "Échouée",
+			"aborted": "Abandonnée"
+		},
+		"openReport": "Rapport",
+		"openDebugLog": "Journal JSON",
+		"goToTask": "Aller à la tâche",
+		"noReport": "Aucun rapport disponible pour le moment"
+	},
 	"profileViolationWarning": "Le profil actuel n'est pas compatible avec les paramètres de votre organisation",
 	"shellIntegration": {
 		"title": "Avertissement d'exécution de commande",

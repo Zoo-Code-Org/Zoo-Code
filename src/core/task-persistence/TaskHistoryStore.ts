@@ -27,6 +27,24 @@ function mergeWithDisk(delta: Partial<HistoryItem>): (existing: unknown, incomin
 }
 
 /**
+ * Raised from a guarded repair write when the locked disk record shows the
+ * repair target no longer matches the snapshot the repair was computed from:
+ * the record was deleted, or its status / background parent changed. Callers
+ * skip the repair (and drop any deferral) instead of retrying against a stale
+ * snapshot. `diskItem` is the authoritative replacement for the cache, or
+ * null when the record is gone.
+ */
+class RepairTargetChangedError extends Error {
+	constructor(
+		public readonly taskId: string,
+		public readonly diskItem: HistoryItem | null,
+	) {
+		super(`[TaskHistoryStore] repair target ${taskId} changed on disk`)
+		this.name = "RepairTargetChangedError"
+	}
+}
+
+/**
  * Durable intent for the one repair that spans an active delegated child and
  * its parent. Task files remain authoritative; this file only records the
  * guarded target transition that must be completed after a crash.
@@ -80,16 +98,28 @@ export interface TaskHistoryStoreOptions {
 	 * globalState during the transition period.
 	 */
 	onWrite?: (items: HistoryItem[]) => Promise<void>
+
+	/**
+	 * Optional hook consulted by the startup background-child pass (D11):
+	 * returns true when `taskId` belongs to a live in-memory background child
+	 * of the running extension host. A live child is never marked interrupted
+	 * by that pass. Defaults to "not live", which is correct for startup
+	 * cleanup because a live child is registered in host memory, not only on
+	 * disk.
+	 */
+	isLiveBackgroundChild?: (taskId: string) => boolean
 }
 
 export class TaskHistoryStore {
 	private readonly globalStoragePath: string
 	private readonly onWrite?: (items: HistoryItem[]) => Promise<void>
+	private readonly isLiveBackgroundChild?: (taskId: string) => boolean
 	private cache: Map<string, HistoryItem> = new Map()
 	private taskFileMtimes: Map<string, number> = new Map()
 	private writeLock: Promise<void> = Promise.resolve()
 	private fsWatcher: fsSync.FSWatcher | null = null
 	private reconcileTimer: ReturnType<typeof setTimeout> | null = null
+	private deferredBackgroundChildRepairs: Set<string> = new Set()
 	private disposed = false
 
 	/**
@@ -105,6 +135,7 @@ export class TaskHistoryStore {
 	constructor(globalStoragePath: string, options?: TaskHistoryStoreOptions) {
 		this.globalStoragePath = globalStoragePath
 		this.onWrite = options?.onWrite
+		this.isLiveBackgroundChild = options?.isLiveBackgroundChild
 		this.initialized = new Promise<void>((resolve) => {
 			this.resolveInitialized = resolve
 		})
@@ -137,10 +168,18 @@ export class TaskHistoryStore {
 			// 3. Repair delegation inconsistencies left by a previous crash
 			await this.reconcileDelegationState(persistedActiveIds)
 
-			// 4. Start fs.watch for cross-instance reactivity
+			// 4. Clean up background children orphaned by a previous session (D11): a
+			//    persisted child stamped `backgroundParentTaskId` whose parent is no
+			//    longer active was left running when the extension went away, so mark it
+			//    interrupted. Like `reconcileDelegationState`, the wrapper acquires
+			//    `withLock` and the core writes through `upsertCore` directly so the
+			//    non-reentrant lock is never re-entered.
+			await this.reconcileBackgroundChildren(persistedActiveIds)
+
+			// 5. Start fs.watch for cross-instance reactivity
 			this.startWatcher()
 
-			// 5. Start periodic reconciliation as a defensive fallback
+			// 6. Start periodic reconciliation as a defensive fallback
 			this.startPeriodicReconciliation()
 		} finally {
 			// Mark initialization as complete so callers awaiting `initialized` can proceed
@@ -209,7 +248,7 @@ export class TaskHistoryStore {
 	 */
 	private async upsertCore(
 		item: HistoryItem,
-		options: { skipTransitionCheck?: boolean } = {},
+		options: { skipTransitionCheck?: boolean; repairGuard?: (existing: unknown) => void } = {},
 	): Promise<HistoryItem[]> {
 		const existing = this.cache.get(item.id)
 
@@ -241,7 +280,7 @@ export class TaskHistoryStore {
 		const delta = existing ? this.buildDelta(item.id, existing, item) : { ...item }
 		let written: HistoryItem
 		try {
-			written = await this.writeTaskFile(merged, delta)
+			written = await this.writeTaskFile(merged, delta, options.repairGuard)
 		} catch (error) {
 			if (error instanceof DeltaRejectedError) {
 				const diskItem = await this.readTaskFile(item.id)
@@ -336,6 +375,9 @@ export class TaskHistoryStore {
 	 *
 	 * - Tasks on disk but missing from cache: read and add
 	 * - Tasks in cache but missing from disk: remove
+	 * - Orphan-repair deferrals from `reconcileBackgroundChildren` are retried
+	 *   at the end of the pass, so the watcher- and timer-driven reconciliations
+	 *   re-evaluate a child once its parent's record becomes readable again
 	 */
 	async reconcile(options: { forceRefresh?: boolean } = {}): Promise<void> {
 		// Run through the write lock to prevent interleaving with upsert/delete
@@ -410,6 +452,11 @@ export class TaskHistoryStore {
 					this.taskFileMtimes.delete(taskId)
 				}
 			}
+
+			// Retry orphan repairs deferred while a parent record was
+			// unreadable. The set is empty on almost every pass, so this is a
+			// no-op unless startup (or an earlier pass) registered a deferral.
+			await this.retryDeferredBackgroundChildRepairsCore()
 		})
 	}
 
@@ -529,6 +576,270 @@ export class TaskHistoryStore {
 				// child.status === "interrupted" or "delegated" → leave as-is this pass
 			}
 		} while (repairsInThisPass > 0)
+	}
+
+	/**
+	 * Clean up background children orphaned by a previous session (D11).
+	 *
+	 * Called once from `initialize()` after `reconcileDelegationState()`.
+	 *
+	 * Must NOT be called from within `withLock` — `withLock` is non-reentrant
+	 * (promise chain); calling `upsert` (which acquires the lock) from inside
+	 * would deadlock. `upsertCore` is called directly here instead, bypassing
+	 * transition validation via `skipTransitionCheck: true` because these
+	 * writes are administrative repairs, not runtime state-machine transitions.
+	 *
+	 * Cases repaired per child (children the startup pass never touches are
+	 * left exactly as-is):
+	 * - Child without `backgroundParentTaskId` → not a background child, skip
+	 * - Child status not `active` (explicit or implicit) → already terminal, skip
+	 * - Child live in host memory per the `isLiveBackgroundChild` hook → skip;
+	 *   a startup pass must not kill a child the running host still owns
+	 * - Parent record missing from the cache: read the parent file
+	 *   authoritatively — an unreadable record defers the repair to a later
+	 *   pass; a confirmed-missing or terminal parent means child to `interrupted`
+	 * - Parent status not `active`/`delegated` → child → `interrupted`
+	 * - Parent `active`/`delegated` → the parent may still be resumed and its
+	 *   fan-out retried, so the child is left for normal lifecycle handling
+	 *
+	 * The interrupted write is guarded: inside the child file's advisory lock,
+	 * the repair is skipped when the record no longer exists, is no longer
+	 * active, or carries a different `backgroundParentTaskId` — a child deleted
+	 * or changed by another host after the scan must not be recreated from the
+	 * startup snapshot.
+	 *
+	 * A deferred child is registered in `deferredBackgroundChildRepairs`;
+	 * every later `reconcile()` pass (watcher- or timer-driven) retries it via
+	 * `retryDeferredBackgroundChildRepairsCore` once the parent's record
+	 * becomes readable.
+	 *
+	 * The pass never rethrows: each child's repair is caught and logged so one
+	 * bad record cannot stop the remaining repairs or block startup.
+	 */
+	private async reconcileBackgroundChildren(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		return this.withLock(() => this.reconcileBackgroundChildrenCore(persistedActiveIds))
+	}
+
+	/**
+	 * Reconcile orphaned background children while the store lock is held.
+	 *
+	 * Callers that do not hold the lock must use `reconcileBackgroundChildren()`.
+	 */
+	private async reconcileBackgroundChildrenCore(persistedActiveIds: ReadonlySet<string>): Promise<void> {
+		const byId = new Map(Array.from(this.cache.values()).map((i) => [i.id, i]))
+
+		for (const [, item] of byId) {
+			try {
+				const parentTaskId = item.backgroundParentTaskId
+				if (parentTaskId === undefined) {
+					continue
+				}
+
+				// Mirror reconcileDelegationStateCore: only statuses loaded from
+				// persistence represent sessions that could have been orphaned by a
+				// crash. No earlier startup pass re-activates a background child, so
+				// the snapshot guard is documentation as much as enforcement.
+				const childStatus: HistoryItemStatus = item.status ?? "active"
+				if (childStatus !== "active" || !persistedActiveIds.has(item.id)) {
+					continue
+				}
+
+				if (this.isLiveBackgroundChild?.(item.id)) {
+					continue
+				}
+
+				const parent = byId.get(parentTaskId)
+				if (parent) {
+					const parentStatus: HistoryItemStatus = parent.status ?? "active"
+					if (parentStatus === "active" || parentStatus === "delegated") {
+						continue
+					}
+					// Terminal parent confirmed by the startup scan: repair below.
+				} else {
+					// A cache miss is not proof the parent is gone. A transient read
+					// failure during the startup scan keeps a live parent's record out
+					// of the cache while its child's record loads normally, and this
+					// pass must not write `interrupted` to the child on that guess.
+					// Read the parent file authoritatively: defer on a read error and
+					// keep the repair only for a confirmed missing or terminal parent.
+					const diskParent = await this.readTaskFileDiscriminated(parentTaskId)
+					if (diskParent.kind === "unreadable") {
+						this.deferredBackgroundChildRepairs.add(item.id)
+						console.warn(
+							`[TaskHistoryStore] Deferred orphaned-background-child repair for task ${item.id}: parent ${parentTaskId} record unreadable`,
+							diskParent.reason,
+						)
+						continue
+					}
+					if (diskParent.kind === "found") {
+						this.cache.set(parentTaskId, diskParent.item)
+						const diskParentStatus: HistoryItemStatus = diskParent.item.status ?? "active"
+						if (diskParentStatus === "active" || diskParentStatus === "delegated") {
+							continue
+						}
+					}
+					// kind === "missing": the parent file is confirmed gone.
+				}
+
+				await this.upsertCore(
+					{ ...item, status: "interrupted" },
+					{
+						skipTransitionCheck: true,
+						repairGuard: this.backgroundChildRepairGuard(item.id, parentTaskId),
+					},
+				)
+				console.warn(
+					`[TaskHistoryStore] Reconciled orphaned background child: task ${item.id} → interrupted (parent ${parentTaskId} ${
+						parent ? `status ${parent.status}` : "not found"
+					})`,
+				)
+			} catch (error) {
+				if (error instanceof RepairTargetChangedError) {
+					// Another host deleted or changed the child after the scan.
+					// Skip the repair; the authoritative disk record (or its
+					// absence) wins over the startup snapshot.
+					this.settleSkippedBackgroundChildRepair(error)
+					continue
+				}
+				// One child's repair failure (e.g. a locked or unwritable file)
+				// must not end the pass: the remaining orphaned children are
+				// still repaired. The failed child's cache entry is untouched —
+				// upsertCore throws before updating it.
+				console.error(`[TaskHistoryStore] Failed to reconcile background child ${item.id}:`, error)
+			}
+		}
+	}
+
+	/**
+	 * Retry orphan repairs deferred because a parent record was unreadable,
+	 * while the store lock is already held. `reconcile()` invokes this at
+	 * the end of its locked pass, so both the fs.watch debounce and the
+	 * periodic timer retry a deferred child once the parent's record
+	 * becomes readable again.
+	 *
+	 * Every deferred child is re-evaluated before any write, against the
+	 * just-refreshed cache: a child that is no longer active, has no
+	 * `backgroundParentTaskId`, or is now owned by the live host drops its
+	 * deferral untouched; a parent that is readable and `active`/`delegated`
+	 * means normal lifecycle handling owns the child, so the deferral is
+	 * dropped too; a parent that is still unreadable keeps the deferral for
+	 * a later pass; only a parent confirmed missing or terminal reaches the
+	 * same `interrupted` write as the startup pass, guarded inside the child
+	 * file's advisory lock the same way: a child deleted or changed after the
+	 * cache refresh drops its deferral instead of being recreated. A failed
+	 * write keeps the deferral instead of cancelling the retry.
+	 */
+	private async retryDeferredBackgroundChildRepairsCore(): Promise<void> {
+		for (const taskId of Array.from(this.deferredBackgroundChildRepairs)) {
+			try {
+				const item = this.cache.get(taskId)
+				const parentTaskId = item?.backgroundParentTaskId
+				if (!item || parentTaskId === undefined) {
+					this.deferredBackgroundChildRepairs.delete(taskId)
+					continue
+				}
+
+				const childStatus: HistoryItemStatus = item.status ?? "active"
+				if (childStatus !== "active" || this.isLiveBackgroundChild?.(taskId)) {
+					this.deferredBackgroundChildRepairs.delete(taskId)
+					continue
+				}
+
+				const parent = this.cache.get(parentTaskId)
+				if (parent) {
+					const parentStatus: HistoryItemStatus = parent.status ?? "active"
+					if (parentStatus === "active" || parentStatus === "delegated") {
+						this.deferredBackgroundChildRepairs.delete(taskId)
+						continue
+					}
+					// Terminal parent visible to the refreshed cache: repair below.
+				} else {
+					const diskParent = await this.readTaskFileDiscriminated(parentTaskId)
+					if (diskParent.kind === "unreadable") {
+						// Still unreadable: keep the deferral for a later pass.
+						continue
+					}
+					if (diskParent.kind === "found") {
+						this.cache.set(parentTaskId, diskParent.item)
+						const diskParentStatus: HistoryItemStatus = diskParent.item.status ?? "active"
+						if (diskParentStatus === "active" || diskParentStatus === "delegated") {
+							this.deferredBackgroundChildRepairs.delete(taskId)
+							continue
+						}
+					}
+					// kind === "missing": the parent file is confirmed gone.
+				}
+
+				await this.upsertCore(
+					{ ...item, status: "interrupted" },
+					{
+						skipTransitionCheck: true,
+						repairGuard: this.backgroundChildRepairGuard(taskId, parentTaskId),
+					},
+				)
+				this.deferredBackgroundChildRepairs.delete(taskId)
+				console.warn(
+					`[TaskHistoryStore] Reconciled deferred orphaned background child: task ${taskId} → interrupted (parent ${parentTaskId})`,
+				)
+			} catch (error) {
+				if (error instanceof RepairTargetChangedError) {
+					// The child was deleted or changed while deferred: nothing
+					// left to repair, so drop the deferral instead of retrying
+					// against a stale snapshot.
+					this.settleSkippedBackgroundChildRepair(error)
+					this.deferredBackgroundChildRepairs.delete(taskId)
+					continue
+				}
+				// Keep the deferral: a transient failure must not cancel the retry.
+				console.error(
+					`[TaskHistoryStore] Failed to retry deferred background child repair for ${taskId}:`,
+					error,
+				)
+			}
+		}
+	}
+
+	/**
+	 * Build the under-lock guard for an orphaned-background-child repair write.
+	 * The check runs inside `safeWriteJson`'s per-file advisory-lock merge,
+	 * against the record the lock hands us — not this store's cache, which the
+	 * scan (or a concurrent reconcile) may have raced. A child deleted by
+	 * another host after the scan must not be recreated as `interrupted`: a
+	 * missing disk record would otherwise flow through `mergeHistoryDelta` as
+	 * a fresh insert. A child whose status or background parent changed must
+	 * not be overwritten from the stale snapshot either.
+	 */
+	private backgroundChildRepairGuard(
+		taskId: string,
+		expectedBackgroundParentTaskId: string,
+	): (existing: unknown) => void {
+		return (existing: unknown) => {
+			const disk =
+				existing && typeof existing === "object" && "id" in existing ? (existing as HistoryItem) : undefined
+			if (!disk || disk.id !== taskId) {
+				throw new RepairTargetChangedError(taskId, null)
+			}
+			if (
+				(disk.status ?? "active") !== "active" ||
+				disk.backgroundParentTaskId !== expectedBackgroundParentTaskId
+			) {
+				throw new RepairTargetChangedError(taskId, disk)
+			}
+		}
+	}
+
+	/**
+	 * Keep the cache consistent with the authoritative disk record after a
+	 * guarded repair was skipped: a changed record replaces the stale cache
+	 * entry, a deleted record evicts it.
+	 */
+	private settleSkippedBackgroundChildRepair(error: RepairTargetChangedError): void {
+		if (error.diskItem) {
+			this.cache.set(error.taskId, error.diskItem)
+		} else {
+			this.cache.delete(error.taskId)
+			this.taskFileMtimes.delete(error.taskId)
+		}
 	}
 
 	private getPersistedActiveIds(): ReadonlySet<string> {
@@ -889,14 +1200,22 @@ export class TaskHistoryStore {
 	 * delta to the current disk state, so fields written by another
 	 * process are preserved. Without a delta the full item is written
 	 * as-is (used by administrative repair paths that are authoritative).
+	 * `repairGuard` runs first, inside the advisory lock, and may throw
+	 * `RepairTargetChangedError` to abort a repair whose disk record no
+	 * longer matches (see `backgroundChildRepairGuard`).
 	 */
-	private async writeTaskFile(item: HistoryItem, delta?: Partial<HistoryItem>): Promise<HistoryItem> {
+	private async writeTaskFile(
+		item: HistoryItem,
+		delta?: Partial<HistoryItem>,
+		repairGuard?: (existing: unknown) => void,
+	): Promise<HistoryItem> {
 		const filePath = await this.getTaskFilePath(item.id)
 		if (delta) {
 			let written: HistoryItem = item
 			const mergeFn = mergeWithDisk(delta)
 			await safeWriteJson(filePath, item, {
 				merge: (existing, incoming) => {
+					repairGuard?.(existing)
 					const result = mergeFn(existing, incoming)
 					written = result as HistoryItem
 					return result
@@ -1105,6 +1424,24 @@ export class TaskHistoryStore {
 	}
 
 	private async readTaskFileForAutoTitle(taskId: string): Promise<AutoTitleDiskRead> {
+		const disk = await this.readTaskFileDiscriminated(taskId)
+		if (disk.kind === "unreadable") {
+			// The caller only sees `applied: false`, so the reason is logged here.
+			console.warn(`[TaskHistoryStore] Failed to read task ${taskId} for auto title:`, disk.reason)
+			return { kind: "unreadable" }
+		}
+		return disk
+	}
+
+	/**
+	 * Read a HistoryItem from disk, distinguishing a missing file from an
+	 * unreadable one (I/O or parse failure, or a mismatched record id). Callers
+	 * that would repair or evict other state based on this result must defer on
+	 * `unreadable`: a read error is not evidence of absence.
+	 */
+	private async readTaskFileDiscriminated(
+		taskId: string,
+	): Promise<{ kind: "found"; item: HistoryItem } | { kind: "missing" } | { kind: "unreadable"; reason: unknown }> {
 		let raw: string
 		try {
 			raw = await readFileWithMissingRetry(await this.getTaskFilePath(taskId))
@@ -1112,24 +1449,18 @@ export class TaskHistoryStore {
 			if (getErrorCode(error) === "ENOENT") {
 				return { kind: "missing" }
 			}
-			return this.unreadableForAutoTitle(taskId, error)
+			return { kind: "unreadable", reason: error }
 		}
 		try {
 			const item: unknown = JSON.parse(raw)
 			const id = typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined
 			if (id !== taskId) {
-				return this.unreadableForAutoTitle(taskId, `task file has id ${JSON.stringify(id)}`)
+				return { kind: "unreadable", reason: `task file has id ${JSON.stringify(id)}` }
 			}
 			return { kind: "found", item: item as HistoryItem }
 		} catch (error) {
-			return this.unreadableForAutoTitle(taskId, error)
+			return { kind: "unreadable", reason: error }
 		}
-	}
-
-	/** The caller only sees `applied: false`, so the reason is logged here. */
-	private unreadableForAutoTitle(taskId: string, reason: unknown): AutoTitleDiskRead {
-		console.warn(`[TaskHistoryStore] Failed to read task ${taskId} for auto title:`, reason)
-		return { kind: "unreadable" }
 	}
 
 	/**

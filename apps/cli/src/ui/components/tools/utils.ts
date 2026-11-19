@@ -70,6 +70,10 @@ export function getToolDisplayName(toolName: string): string {
 		new_task: "New Task",
 		finishTask: "Finish Task",
 
+		// Parallel subtask operations
+		parallelSubtasks: "Parallel Subtasks",
+		parallel_subtasks: "Parallel Subtasks",
+
 		// Completion operations
 		attempt_completion: "Task Complete",
 		attemptCompletion: "Task Complete",
@@ -121,6 +125,10 @@ export function getToolIconName(toolName: string): IconName {
 		newTask: "switch",
 		new_task: "switch",
 		finishTask: "check",
+
+		// Parallel subtask operations
+		parallelSubtasks: "switch",
+		parallel_subtasks: "switch",
 
 		// Completion operations
 		attempt_completion: "check",

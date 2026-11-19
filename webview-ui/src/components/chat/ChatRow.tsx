@@ -27,6 +27,7 @@ import { formatPathTooltip } from "@src/utils/formatPathTooltip"
 
 import { ToolUseBlock, ToolUseBlockHeader } from "../common/ToolUseBlock"
 import UpdateTodoListToolBlock from "./UpdateTodoListToolBlock"
+import ParallelSubtasksBlock, { ParallelSubtasksPreview, type ParallelSubtaskRequest } from "./ParallelSubtasksBlock"
 import { TodoChangeDisplay } from "./TodoChangeDisplay"
 import CodeAccordion from "../common/CodeAccordion"
 import MarkdownBlock from "../common/MarkdownBlock"
@@ -118,6 +119,27 @@ function isNewTaskMessage(message: ClineMessage): boolean {
 	return message.ask === "tool" && safeJsonParse<ClineSayTool>(message.text)?.tool === "newTask"
 }
 
+/**
+ * Ids of background children, read from the parent's `parallelSubtasks` panel
+ * rows. Background children are registered in the parent's `childIds` but never
+ * produce a `newTask` ask or a `subtask_result` row, so they must not shift the
+ * positional fallback below (F-07).
+ */
+function getBackgroundChildIds(messages: ClineMessage[]): Set<string> {
+	const ids = new Set<string>()
+	for (const message of messages) {
+		if (message.type !== "say" || message.say !== "tool") continue
+		// Cheap pre-filter only; the parsed tool field below is the identity test.
+		if (!message.text?.includes('"parallelSubtasks"')) continue
+		const tool = safeJsonParse<ClineSayTool>(message.text)
+		if (tool?.tool !== "parallelSubtasks") continue
+		for (const subtask of tool.subtasks ?? []) {
+			ids.add(subtask.taskId)
+		}
+	}
+	return ids
+}
+
 function getLinkedChildTaskId(
 	message: ClineMessage,
 	messages: ClineMessage[],
@@ -141,7 +163,11 @@ function getLinkedChildTaskId(
 		return completedByChildId
 	}
 
-	const childTaskId = childIds[precedingNewTasks.length - 1]
+	// Background children sit in `childIds` without a delegation row of their own,
+	// so remove them before indexing by serial delegation count (F-07).
+	const backgroundChildIds = getBackgroundChildIds(messages)
+	const serialChildIds = childIds.filter((candidate) => !backgroundChildIds.has(candidate))
+	const childTaskId = serialChildIds[precedingNewTasks.length - 1]
 	// Rejected asks must not borrow a child explicitly assigned to another approval.
 	const isAssignedToAnotherAsk = messages.some(
 		(candidate) => isNewTaskMessage(candidate) && candidate.childTaskId === childTaskId,
@@ -933,6 +959,14 @@ export const ChatRowContent = ({
 						</div>
 					</>
 				)
+			case "parallelSubtasks": {
+				// Design §11's single approval point: no child exists before the
+				// ask is approved, so the payload carries the requested tasks
+				// rather than the say-side `subtasks` rows (F-06).
+				const request = safeJsonParse<{ tasks?: ParallelSubtaskRequest[] }>(message.text)
+				const tasks = Array.isArray(request?.tasks) ? request.tasks : []
+				return <ParallelSubtasksPreview tasks={tasks} />
+			}
 			case "finishTask":
 				return (
 					<>
@@ -1602,6 +1636,17 @@ export const ChatRowContent = ({
 										</span>
 									)}
 								</div>
+							)
+						}
+						case "parallelSubtasks": {
+							// Registered case shipped with the panel component so the
+							// say-tool row never falls into the default (F10).
+							return (
+								<ParallelSubtasksBlock
+									subtasks={sayTool.subtasks ?? []}
+									partial={message.partial === true}
+									childTaskIds={currentTaskItem?.childIds}
+								/>
 							)
 						}
 						default:

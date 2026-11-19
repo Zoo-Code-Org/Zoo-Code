@@ -47,6 +47,7 @@ import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
 import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
+import { isSafeTaskId } from "../../services/diagnostics/persistence"
 import {
 	handleRequestSkills,
 	handleCreateSkill,
@@ -4179,15 +4180,31 @@ export const webviewMessageHandler = async (
 		case "openDebugApiHistory":
 		case "openDebugUiHistory": {
 			const currentTask = provider.getCurrentTask()
-			if (!currentTask) {
+			// A child task's debug log can be requested long after the child
+			// stopped being the active task, so an explicit taskId wins over
+			// the current task; only fall back when the caller omits it.
+			const targetTaskId = message.taskId ?? currentTask?.taskId
+			if (!targetTaskId) {
 				vscode.window.showErrorMessage("No active task to view history for")
+				break
+			}
+
+			// The task id is webview-supplied and flows into path.join plus an
+			// fs.mkdir under global storage, so anything outside the
+			// host-generated id shape is rejected outright. There is no
+			// fallback to the current task: a traversal payload must not be
+			// routed to the filesystem, and silently substituting another id
+			// would hide the attack.
+			if (!isSafeTaskId(targetTaskId)) {
+				provider.log(`Rejected debug history request with unsafe taskId ${JSON.stringify(targetTaskId)}`)
+				vscode.window.showErrorMessage("Invalid task id for debug history")
 				break
 			}
 
 			try {
 				const { getTaskDirectoryPath } = await import("../../utils/storage")
 				const globalStoragePath = provider.contextProxy.globalStorageUri.fsPath
-				const taskDirPath = await getTaskDirectoryPath(globalStoragePath, currentTask.taskId)
+				const taskDirPath = await getTaskDirectoryPath(globalStoragePath, targetTaskId)
 
 				const fileName =
 					message.type === "openDebugApiHistory" ? "api_conversation_history.json" : "ui_messages.json"
@@ -4216,7 +4233,7 @@ export const webviewMessageHandler = async (
 				// Create a temporary file
 				const tmpDir = os.tmpdir()
 				const timestamp = Date.now()
-				const tempFileName = `roo-debug-${message.type === "openDebugApiHistory" ? "api" : "ui"}-${currentTask.taskId.slice(0, 8)}-${timestamp}.json`
+				const tempFileName = `roo-debug-${message.type === "openDebugApiHistory" ? "api" : "ui"}-${targetTaskId.slice(0, 8)}-${timestamp}.json`
 				const tempFilePath = path.join(tmpDir, tempFileName)
 
 				await fs.writeFile(tempFilePath, prettifiedContent, "utf8")

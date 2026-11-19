@@ -936,6 +936,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamische Denkintensität",
 			"description": "Bereitet das set_thinking_effort-Tool für spätere Unterstützung vor: Diese Einstellung speichert nur die Präferenz, das Verhalten pro Anfrage folgt in späterer Arbeit. (experimentell)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Parallele Teilaufgaben aktivieren",
+			"description": "Wenn aktiviert, kann Zoo mehrere schreibgeschützte Untersuchungsaufgaben im Hintergrund in verschiedenen Modi und Modellen starten und deren Berichte sammeln. Kindaufgaben sind strukturell daran gehindert, Dateien zu schreiben, Befehle auszuführen oder weitere Teilaufgaben zu delegieren."
 		}
 	},
 	"temperature": {

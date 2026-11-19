@@ -936,6 +936,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dinamik düşünme çabası",
 			"description": "set_thinking_effort aracını sonraki destek için hazırlar: bu ayar yalnızca tercihi saklar, istek başına davranış sonraki çalışmada gelir. (deneysel)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Paralel alt görevleri etkinleştir",
+			"description": "Etkinleştirildiğinde, Zoo farklı modlarda ve modellerde birden fazla salt-okunur arka plan araştırma görevi başlatabilir ve ardından raporlarını toplayabilir. Alt görevler dosya yazma, komut çalıştırma veya başka alt görevlere delege etme konusunda yapısal olarak engellenir."
 		}
 	},
 	"temperature": {
