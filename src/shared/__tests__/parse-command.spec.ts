@@ -2724,9 +2724,9 @@ describe("parseCommand", () => {
 
 		it("refuses an escaped backtick in a backtick region nested inside any tracked context", () => {
 			// The region can hide behind a command substitution, on a heredoc
-			// opener line's live remainder, or on a heredoc body line: each walk
-			// that tracks a backtick region refuses the escape at its own site,
-			// before any payload survives to be re-scanned.
+			// opener line's live remainder, or on a heredoc body line. The main
+			// scan and the payload walk refuse the escape where they read it;
+			// on the opener line the payload walk refuses it first.
 			const nested = "echo $(`echo \\`rm x\\``)"
 			const nestedResult = parseCommand(nested)
 			expect(nestedResult.parseError?.quoteType).toBe("ambiguous-escape")
@@ -2734,10 +2734,8 @@ describe("parseCommand", () => {
 			const remainder = "cat <<E `echo \\`rm x\\``\nE\n"
 			const remainderResult = parseCommand(remainder)
 			// The openIndex pins the refusal to the escape byte in the opener
-			// line's remainder (index 14). Without this walk's own site the same
-			// bytes are only refused later, when the extracted payload is
-			// re-scanned at its own smaller index — the input still fails closed,
-			// but the refusal would no longer stand where the disagreement is.
+			// line's remainder (index 14). The payload walk reads the remainder
+			// before this walk runs and reports the escape at the same index.
 			expect(remainderResult.parseError).toEqual(
 				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 14 }),
 			)
@@ -2749,9 +2747,8 @@ describe("parseCommand", () => {
 				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 11 }),
 			)
 			// A region on the opener line that closes cleanly and whose payload
-			// carries no second trigger: this walk's own refusal is the only
-			// thing that keeps `echo \$HOME`'s escaped dollar from being masked
-			// into opaque host text and riding the heredoc word past the lists.
+			// carries no second trigger: the payload walk still refuses the
+			// escaped dollar at the same index, so the input fails closed.
 			const remainderSoleRefusal = "cat <<E `echo \\$HOME`\nE\n"
 			expect(parseCommand(remainderSoleRefusal).parseError).toEqual(
 				expect.objectContaining({ quoteType: "ambiguous-escape", openIndex: 14 }),
@@ -2788,11 +2785,11 @@ describe("parseCommand", () => {
 		})
 
 		it("refuses only backtick regions, not every frame, at each refusal site", () => {
-			// The accept path through each of the three refusal sites. Inside a
-			// double-quoted frame (heredoc body walk) and outside any frame
-			// (heredoc opener-line remainder) the shell removes the same
-			// backslashes during ordinary expansion, so the models never
-			// disagree there and these shapes must stay parseable.
+			// The accept path through each refusal site. Inside a double-quoted
+			// frame (heredoc body walk) and outside any frame (heredoc
+			// opener-line remainder) the shell removes the same backslashes
+			// during ordinary expansion, so the models never disagree there and
+			// these shapes must stay parseable.
 			const dqInBody = parseCommand('cat <<E\necho "\\$HOME"\nE\n')
 			expect(dqInBody.parseError).toBeNull()
 			const remainderEscape = parseCommand("cat <<E a\\$HOME\nE\n")
