@@ -10,7 +10,7 @@
 
 import fs from "fs"
 import path from "path"
-import { createHash } from "crypto"
+import { createHash, randomUUID } from "crypto"
 import os from "os"
 
 import type { CustomToolDefinition, SerializedCustomToolDefinition, CustomToolParametersSchema } from "@roo-code/types"
@@ -368,25 +368,31 @@ export class CustomToolRegistry {
 		// Bundle the TypeScript file with dependencies using esbuild CLI.
 		// - Node.js built-ins are external (they can't be bundled and are always available)
 		// - npm packages are bundled with CommonJS require() shim for compatibility
-		await runEsbuild(
-			{
-				entryPoint: absolutePath,
-				outfile: tempFile,
-				format: "esm",
-				platform: "node",
-				target: "node18",
-				bundle: true,
-				sourcemap: "inline",
-				packages: "bundle",
-				nodePaths,
-				external: NODE_BUILTIN_MODULES,
-				banner: COMMONJS_REQUIRE_BANNER,
-			},
-			this.extensionPath,
-		)
+		const pendingFile = path.join(toolCacheDir, `bundle-${randomUUID()}.tmp.mjs`)
+		try {
+			await runEsbuild(
+				{
+					entryPoint: absolutePath,
+					outfile: pendingFile,
+					format: "esm",
+					platform: "node",
+					target: "node18",
+					bundle: true,
+					sourcemap: "inline",
+					packages: "bundle",
+					nodePaths,
+					external: NODE_BUILTIN_MODULES,
+					banner: COMMONJS_REQUIRE_BANNER,
+				},
+				this.extensionPath,
+			)
 
-		fs.chmodSync(tempFile, 0o600)
-		this.validateCachePath(tempFile, false)
+			fs.chmodSync(pendingFile, 0o600)
+			this.validateCachePath(pendingFile, false)
+			fs.renameSync(pendingFile, tempFile)
+		} finally {
+			fs.rmSync(pendingFile, { force: true })
+		}
 
 		// Copy .env files from the tool's source directory to the tool-specific cache directory.
 		// This allows tools that use dotenv with __dirname to find their .env files,
