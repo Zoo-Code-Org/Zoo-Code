@@ -6,7 +6,8 @@
 		"cancel": "रद्द करें",
 		"select": "चुनें",
 		"add": "हेडर जोड़ें",
-		"remove": "हटाएं"
+		"remove": "हटाएं",
+		"milliseconds": "{{value}} मि.से."
 	},
 	"search": {
 		"placeholder": "सेटिंग्स खोजें...",
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "{{total}} में से {{count}} कार्य इतिहास आयात किए।",
 			"detailPreparing": "Roo Code इतिहास आयात की तैयारी हो रही है।",
 			"progressAriaLabel": "Roo Code इतिहास आयात की प्रगति"
-		}
+		},
+		"version": "संस्करण: {{version}}",
+		"versionWithCommit": "संस्करण: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "कस्टम वर्कफ़्लो और क्रियाओं को तेज़ी से निष्पादित करने के लिए अपने स्लैश कमांड प्रबंधित करें। <DocsLink>और जानें</DocsLink>",
@@ -685,6 +688,17 @@
 			"signInDescription": "अपने खाते के साथ Zoo Gateway का उपयोग करने के लिए साइन इन करें",
 			"authenticated": "प्रमाणित",
 			"authenticatedAs": "{{name}} के रूप में प्रमाणित"
+		},
+		"awsAuthMethod": "प्रमाणीकरण विधि",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth क्रेडेंशियल्स पाथ",
+			"oauthPathDescription": "तुम्हारी Qwen OAuth क्रेडेंशियल्स फ़ाइल का पाथ। खाली छोड़ने पर {{defaultPath}} इस्तेमाल होगा।",
+			"description": "Qwen Code एक OAuth-आधारित API है, जिसके लिए आधिकारिक Qwen क्लाइंट से प्रमाणीकरण ज़रूरी है। तुम्हें पहले OAuth क्रेडेंशियल्स सेट करने होंगे।",
+			"gettingStarted": "शुरू करने के लिए:",
+			"step1": "1. आधिकारिक Qwen क्लाइंट इंस्टॉल करो",
+			"step2": "2. अपने खाते से प्रमाणीकरण करो",
+			"step3": "3. OAuth क्रेडेंशियल्स अपने आप सेव हो जाएँगे",
+			"setupInstructions": "सेटअप निर्देश"
 		}
 	},
 	"checkpoints": {
@@ -916,7 +930,8 @@
 			"refreshing": "रिफ्रेश हो रहा है...",
 			"refreshSuccess": "टूल्स सफलतापूर्वक रिफ्रेश हुए",
 			"refreshError": "टूल्स रिफ्रेश करने में विफल",
-			"toolParameters": "पैरामीटर्स"
+			"toolParameters": "पैरामीटर्स",
+			"required": "आवश्यक"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "डायनामिक चिंतन प्रयास",
@@ -955,7 +970,12 @@
 			"freeRequests_other": "* प्रति मिनट {{count}} अनुरोधों तक मुफ्त। उसके बाद, बिलिंग प्रॉम्प्ट आकार पर निर्भर करती है।",
 			"pricingDetails": "अधिक जानकारी के लिए, मूल्य निर्धारण विवरण देखें।",
 			"billingEstimate": "* बिलिंग एक अनुमान है - सटीक लागत प्रॉम्प्ट आकार पर निर्भर करती है।"
-		}
+		},
+		"tokensValue_one": "{{count, number}} टोकन",
+		"tokensValue_other": "{{count, number}} टोकन",
+		"pricePerMillionTokens": "{{price}} / 1M टोकन",
+		"showMore": "और देखें",
+		"showLess": "कम देखें"
 	},
 	"modelPicker": {
 		"automaticFetch": "एक्सटेंशन <serviceLink>{{serviceName}}</serviceLink> पर उपलब्ध मॉडलों की नवीनतम सूची स्वचालित रूप से प्राप्त करता है। यदि आप अनिश्चित हैं कि कौन सा मॉडल चुनना है, तो Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> के साथ सबसे अच्छा काम करता है। आप वर्तमान में उपलब्ध निःशुल्क विकल्पों के लिए \"free\" भी खोज सकते हैं।",
@@ -1020,7 +1040,8 @@
 			"inputPrice": "उदा. 0.0001",
 			"outputPrice": "उदा. 0.0002",
 			"cacheWritePrice": "उदा. 0.00005"
-		}
+		},
+		"defaultValue": "डिफ़ॉल्ट: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "डिफ़ॉल्ट: http://localhost:11434",
@@ -1049,7 +1070,9 @@
 			"input": "इनपुट",
 			"output": "आउटपुट",
 			"cacheReads": "कैश रीड"
-		}
+		},
+		"label": "सेवा स्तर",
+		"tooltip": "API अनुरोधों की तेज़ प्रोसेसिंग के लिए प्राथमिकता प्रोसेसिंग सेवा स्तर आज़माओ। अधिक विलंबता के साथ कम कीमतों के लिए फ़्लेक्स प्रोसेसिंग स्तर आज़माओ।"
 	},
 	"ui": {
 		"collapseThinking": {

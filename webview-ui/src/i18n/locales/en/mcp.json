@@ -55,5 +55,10 @@
 		"running": "Running",
 		"completed": "Completed",
 		"error": "Error"
-	}
+	},
+	"resource": {
+		"returns": "Returns",
+		"unknownMimeType": "Unknown"
+	},
+	"toggleServerAriaLabel": "Toggle {{serverName}} server"
 }

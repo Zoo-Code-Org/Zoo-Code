@@ -367,10 +367,12 @@ export const stories: Record<string, Story> = {
 		return <TelemetryBannerFixture />
 	},
 	"theme-aware-controls": async () => {
-		const [{ SelectDropdown }, { default: UpdateTodoListToolBlock }] = await Promise.all([
-			import("@/components/ui/select-dropdown"),
-			import("@/components/chat/UpdateTodoListToolBlock"),
-		])
+		const [{ SelectDropdown }, { default: UpdateTodoListToolBlock }, { EnglishChatTranslations }] =
+			await Promise.all([
+				import("@/components/ui/select-dropdown"),
+				import("@/components/chat/UpdateTodoListToolBlock"),
+				import("@/components/chat/__tests__/UpdateTodoListToolBlock.visual.fixture"),
+			])
 		type Todo = NonNullable<React.ComponentProps<typeof UpdateTodoListToolBlock>["todos"]>[number]
 
 		function ThemeAwareControlsStory() {
@@ -381,7 +383,9 @@ export const stories: Record<string, Story> = {
 			return (
 				<div className="flex flex-col gap-4 w-96">
 					<SelectDropdown value={value} options={[{ value: "code", label: "Code" }]} onChange={setValue} />
-					<UpdateTodoListToolBlock todos={todos} onChange={setTodos} />
+					<EnglishChatTranslations>
+						<UpdateTodoListToolBlock todos={todos} onChange={setTodos} />
+					</EnglishChatTranslations>
 				</div>
 			)
 		}

@@ -6,7 +6,8 @@
 		"cancel": "キャンセル",
 		"select": "選択",
 		"add": "ヘッダーを追加",
-		"remove": "削除"
+		"remove": "削除",
+		"milliseconds": "{{value}}ミリ秒"
 	},
 	"search": {
 		"placeholder": "設定を検索...",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
 			"detailPreparing": "Roo Code の履歴インポートを準備中です。",
 			"progressAriaLabel": "Roo Code の履歴インポートの進行状況"
-		}
+		},
+		"version": "バージョン: {{version}}",
+		"versionWithCommit": "バージョン: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "スラッシュコマンドを管理して、カスタムワークフローやアクションを素早く実行します。<DocsLink>詳細はこちら</DocsLink>",
@@ -684,6 +687,17 @@
 			"signInDescription": "Zoo Gateway をアカウントで使用するにはサインインしてください",
 			"authenticated": "認証済み",
 			"authenticatedAs": "{{name}} として認証済み"
+		},
+		"awsAuthMethod": "認証方法",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 認証情報のパス",
+			"oauthPathDescription": "Qwen OAuth 認証情報ファイルのパス。空欄の場合は {{defaultPath}} が使われます。",
+			"description": "Qwen Code は OAuth ベースの API で、公式 Qwen クライアントでの認証が必要です。先に OAuth 認証情報を設定してください。",
+			"gettingStarted": "はじめに:",
+			"step1": "1. 公式 Qwen クライアントをインストール",
+			"step2": "2. アカウントで認証",
+			"step3": "3. OAuth 認証情報は自動的に保存されます",
+			"setupInstructions": "セットアップ手順"
 		}
 	},
 	"checkpoints": {
@@ -915,7 +929,8 @@
 			"refreshing": "更新中...",
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
-			"toolParameters": "パラメーター"
+			"toolParameters": "パラメーター",
+			"required": "必須"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "ダイナミック思考強度",
@@ -953,7 +968,11 @@
 			"freeRequests_other": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
 			"pricingDetails": "詳細は価格情報をご覧ください。",
 			"billingEstimate": "* 課金は見積もりです - 正確な費用はプロンプトのサイズによって異なります。"
-		}
+		},
+		"tokensValue_other": "{{count, number}} トークン",
+		"pricePerMillionTokens": "{{price}} / 100万トークン",
+		"showMore": "もっと見る",
+		"showLess": "閉じる"
 	},
 	"modelPicker": {
 		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",
@@ -1018,7 +1037,8 @@
 			"inputPrice": "例：0.0001",
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
-		}
+		},
+		"defaultValue": "デフォルト: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "デフォルト：http://localhost:11434",
@@ -1047,7 +1067,9 @@
 			"input": "入力",
 			"output": "出力",
 			"cacheReads": "キャッシュ読み取り"
-		}
+		},
+		"label": "サービスティア",
+		"tooltip": "API リクエストをより速く処理したい場合は、優先処理（Priority）のサービスティアを試してください。レイテンシーが高くても価格を抑えたい場合は、Flex 処理ティアを試してください。"
 	},
 	"ui": {
 		"collapseThinking": {

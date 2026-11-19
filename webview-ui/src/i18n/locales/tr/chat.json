@@ -21,7 +21,8 @@
 	"pin": "Sabitle",
 	"fileChangesInConversation": {
 		"header_one": "Bu sohbette {{count}} dosya değiştirildi",
-		"header_other": "Bu sohbette {{count}} dosya değiştirildi"
+		"header_other": "Bu sohbette {{count}} dosya değiştirildi",
+		"lineStatsAriaLabel": "Eklenen satır: {{added}}, silinen satır: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Kullanılabilir alan: {{amount}} token",
@@ -233,7 +234,9 @@
 		"addToAllowed": "İzin verilenler listesine ekle",
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
 		"addToDenied": "Reddedilenler listesine ekle",
-		"removeFromDenied": "Reddedilenler listesinden kaldır"
+		"removeFromDenied": "Reddedilenler listesinden kaldır",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Kalıbı düzenlemek için tıkla"
 	},
 	"text": {
 		"rooSaid": "Zoo dedi"
@@ -291,7 +294,9 @@
 		"triggerLabel_zero": "0 otomatik onaylandı",
 		"triggerLabel_one": "{{count}} otomatik onaylandı",
 		"triggerLabel_other": "{{count}} otomatik onaylandı",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Etkin",
+		"toggleAriaLabel": "Otomatik onayı aç/kapat"
 	},
 	"reasoning": {
 		"thinking": "Düşünüyor",
@@ -368,7 +373,8 @@
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
 		"didSearch_one": "{{count}} sonuç bulundu",
 		"didSearch_other": "{{count}} sonuç bulundu",
-		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)"
+		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)",
+		"displayError": "Arama sonuçları görüntülenirken hata oluştu."
 	},
 	"read-batch": {
 		"approve": {
@@ -420,7 +426,17 @@
 		"noResults": "Sonuç yok",
 		"problems": "Sorunlar",
 		"terminal": "Terminal",
-		"url": "İçeriği getirmek için URL'yi yapıştırın"
+		"url": "İçeriği getirmek için URL'yi yapıştırın",
+		"gitCommits": "Git commit'leri",
+		"gitCommitsDescription": "Depo geçmişinde ara",
+		"workingChanges": "Çalışma değişiklikleri",
+		"workingChangesDescription": "Commit edilmemiş mevcut değişiklikler",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git commit hash'i",
+		"addFile": "Dosya ekle",
+		"addFolder": "Klasör ekle",
+		"commands": "Komutlar",
+		"modes": "Modlar"
 	},
 	"queuedMessages": {
 		"title": "Sıradaki Mesajlar",
@@ -433,7 +449,28 @@
 	"todo": {
 		"partial": "{{total}} yapılacaklar listesinden {{completed}} tanesi tamamlandı",
 		"complete": "{{total}} yapılacaklar listesi tamamlandı",
-		"updated": "Yapılacaklar listesi güncellendi"
+		"updated": "Yapılacaklar listesi güncellendi",
+		"listUpdated": "Yapılacaklar listesi güncellendi",
+		"userEdit": "Kullanıcı düzenlemesi",
+		"userEdits": "Kullanıcı düzenlemeleri",
+		"edit": "Düzenle",
+		"done": "Bitti",
+		"itemPlaceholder": "Yapılacak öğe gir",
+		"newItemPlaceholder": "Yapılacak öğe gir, eklemek için Enter'a bas",
+		"remove": "Kaldır",
+		"add": "Ekle",
+		"cancel": "İptal",
+		"addTodo": "+ Yapılacak ekle",
+		"status": {
+			"notStarted": "Başlanmadı",
+			"inProgress": "Devam ediyor",
+			"completed": "Tamamlandı"
+		},
+		"deleteDialog": {
+			"title": "Yapılacak öğeyi sil",
+			"description": "Bu yapılacak öğeyi silmek istediğinden emin misin?",
+			"confirm": "Sil"
+		}
 	},
 	"tooManyTools": {
 		"title": "Çok fazla araç etkinleştirildi",
@@ -455,5 +492,25 @@
 		"title": "Sağlayıcı artık desteklenmiyor",
 		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code'a giriş yap",
+		"goToDashboard": "Panele git",
+		"signOut": "Çıkış yap",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Bağlı"
+	},
+	"arguments": "Argümanlar:",
+	"copyAsMarkdown": "Markdown olarak kopyala",
+	"openInPreview": "Önizlemede aç",
+	"codeAccordion": {
+		"userEdits": "Kullanıcı düzenlemeleri",
+		"consoleLogs": "Konsol günlükleri",
+		"openFileAriaLabel": "Dosyayı aç: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} gizli satır",
+		"hiddenLines_other": "{{count}} gizli satır"
 	}
 }

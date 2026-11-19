@@ -6,7 +6,8 @@
 		"cancel": "Cancelar",
 		"select": "Selecionar",
 		"add": "Adicionar cabeçalho",
-		"remove": "Remover"
+		"remove": "Remover",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Pesquisar configurações...",
@@ -81,7 +82,9 @@
 			"detailTasksImported_other": "{{count}} de {{total}} históricos de tarefas importados.",
 			"detailPreparing": "Preparando a importação do histórico do Roo Code.",
 			"progressAriaLabel": "Progresso da importação do histórico do Roo Code"
-		}
+		},
+		"version": "Versão: {{version}}",
+		"versionWithCommit": "Versão: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Gerencie seus comandos de barra para executar rapidamente fluxos de trabalho e ações personalizadas. <DocsLink>Saiba mais</DocsLink>",
@@ -686,6 +689,17 @@
 			"signInDescription": "Entre para usar o Zoo Gateway com sua conta",
 			"authenticated": "Autenticado",
 			"authenticatedAs": "Autenticado como {{name}}"
+		},
+		"awsAuthMethod": "Método de autenticação",
+		"qwenCode": {
+			"oauthPathLabel": "Caminho das credenciais OAuth",
+			"oauthPathDescription": "Caminho para o seu arquivo de credenciais OAuth do Qwen. Se deixar em branco, será usado {{defaultPath}}.",
+			"description": "O Qwen Code é uma API baseada em OAuth que exige autenticação pelo cliente oficial do Qwen. Primeiro, você precisa configurar as credenciais OAuth.",
+			"gettingStarted": "Para começar:",
+			"step1": "1. Instale o cliente oficial do Qwen",
+			"step2": "2. Autentique-se com sua conta",
+			"step3": "3. As credenciais OAuth serão salvas automaticamente",
+			"setupInstructions": "Instruções de configuração"
 		}
 	},
 	"checkpoints": {
@@ -917,7 +931,8 @@
 			"refreshing": "Atualizando...",
 			"refreshSuccess": "Ferramentas atualizadas com sucesso",
 			"refreshError": "Falha ao atualizar ferramentas",
-			"toolParameters": "Parâmetros"
+			"toolParameters": "Parâmetros",
+			"required": "obrigatório"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Esforço de pensamento dinâmico",
@@ -957,7 +972,13 @@
 			"freeRequests_other": "* Gratuito até {{count}} requisições por minuto. Depois disso, a cobrança depende do tamanho do prompt.",
 			"pricingDetails": "Para mais informações, consulte os detalhes de preços.",
 			"billingEstimate": "* A cobrança é uma estimativa - o custo exato depende do tamanho do prompt."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_many": "{{count, number}} de tokens",
+		"tokensValue_other": "{{count, number}} tokens",
+		"pricePerMillionTokens": "{{price}} / 1M de tokens",
+		"showMore": "Mais",
+		"showLess": "Menos"
 	},
 	"modelPicker": {
 		"automaticFetch": "A extensão busca automaticamente a lista mais recente de modelos disponíveis em <serviceLink>{{serviceName}}</serviceLink>. Se você não tem certeza sobre qual modelo escolher, o Zoo Code funciona melhor com <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Você também pode pesquisar por \"free\" para encontrar opções gratuitas atualmente disponíveis.",
@@ -1022,7 +1043,8 @@
 			"inputPrice": "ex: 0.0001",
 			"outputPrice": "ex: 0.0002",
 			"cacheWritePrice": "ex: 0.00005"
-		}
+		},
+		"defaultValue": "Padrão: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Padrão: http://localhost:11434",
@@ -1051,7 +1073,9 @@
 			"input": "Entrada",
 			"output": "Saída",
 			"cacheReads": "Leituras de cache"
-		}
+		},
+		"label": "Nível de serviço",
+		"tooltip": "Para um processamento mais rápido das solicitações à API, experimente o nível de serviço de processamento prioritário. Para preços mais baixos com maior latência, experimente o nível de processamento flex."
 	},
 	"ui": {
 		"collapseThinking": {

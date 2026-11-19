@@ -70,7 +70,8 @@
 		"goToModes": "转到模式设置",
 		"moreInfoMcp": "查看 {{name}} MCP 文档",
 		"validationRequired": "请为 {{paramName}} 提供值",
-		"prerequisites": "前置条件"
+		"prerequisites": "前置条件",
+		"optional": "（可选）"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "发现 marketplace 项目问题或有新项目建议？<0>在 GitHub 开启 issue</0> 告诉我们！"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "模式"
 	}
 }

@@ -6,7 +6,8 @@
 		"cancel": "Batal",
 		"select": "Pilih",
 		"add": "Tambah Header",
-		"remove": "Hapus"
+		"remove": "Hapus",
+		"milliseconds": "{{value}} md"
 	},
 	"search": {
 		"placeholder": "Cari pengaturan...",
@@ -79,7 +80,9 @@
 			"detailTasksImported_other": "{{count}} dari {{total}} riwayat tugas diimpor.",
 			"detailPreparing": "Mempersiapkan impor riwayat Roo Code.",
 			"progressAriaLabel": "Progres impor riwayat Roo Code"
-		}
+		},
+		"version": "Versi: {{version}}",
+		"versionWithCommit": "Versi: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Kelola perintah slash kamu untuk mengeksekusi alur kerja dan tindakan kustom dengan cepat. <DocsLink>Pelajari lebih lanjut</DocsLink>",
@@ -684,6 +687,17 @@
 			"signInDescription": "Masuk untuk menggunakan Zoo Gateway dengan akun Anda",
 			"authenticated": "Terautentikasi",
 			"authenticatedAs": "Terautentikasi sebagai {{name}}"
+		},
+		"awsAuthMethod": "Metode autentikasi",
+		"qwenCode": {
+			"oauthPathLabel": "Path kredensial OAuth",
+			"oauthPathDescription": "Path ke file kredensial OAuth Qwen milikmu. Jika dibiarkan kosong, {{defaultPath}} akan digunakan.",
+			"description": "Qwen Code adalah API berbasis OAuth yang memerlukan autentikasi melalui klien resmi Qwen. Kamu perlu menyiapkan kredensial OAuth terlebih dahulu.",
+			"gettingStarted": "Untuk memulai:",
+			"step1": "1. Instal klien resmi Qwen",
+			"step2": "2. Autentikasi menggunakan akunmu",
+			"step3": "3. Kredensial OAuth akan disimpan secara otomatis",
+			"setupInstructions": "Petunjuk penyiapan"
 		}
 	},
 	"checkpoints": {
@@ -915,7 +929,8 @@
 			"refreshing": "Merefresh...",
 			"refreshSuccess": "Tool berhasil direfresh",
 			"refreshError": "Gagal merefresh tool",
-			"toolParameters": "Parameter"
+			"toolParameters": "Parameter",
+			"required": "wajib"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Usaha berpikir dinamis",
@@ -953,7 +968,11 @@
 			"freeRequests_other": "* Gratis hingga {{count}} permintaan per menit. Setelah itu, penagihan tergantung pada ukuran prompt.",
 			"pricingDetails": "Untuk info lebih lanjut, lihat detail harga.",
 			"billingEstimate": "* Penagihan adalah estimasi - biaya sebenarnya tergantung pada ukuran prompt."
-		}
+		},
+		"tokensValue_other": "{{count, number}} token",
+		"pricePerMillionTokens": "{{price}} / 1 juta token",
+		"showMore": "Selengkapnya",
+		"showLess": "Lebih sedikit"
 	},
 	"modelPicker": {
 		"automaticFetch": "Ekstensi secara otomatis mengambil daftar model terbaru yang tersedia di <serviceLink>{{serviceName}}</serviceLink>. Jika kamu tidak yakin model mana yang harus dipilih, Zoo Code bekerja terbaik dengan <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Kamu juga dapat mencoba mencari \"free\" untuk opsi tanpa biaya yang saat ini tersedia.",
@@ -1018,7 +1037,8 @@
 			"inputPrice": "misalnya 0.0001",
 			"outputPrice": "misalnya 0.0002",
 			"cacheWritePrice": "misalnya 0.00005"
-		}
+		},
+		"defaultValue": "Default: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Default: http://localhost:11434",
@@ -1047,7 +1067,9 @@
 			"input": "Input",
 			"output": "Output",
 			"cacheReads": "Pembacaan cache"
-		}
+		},
+		"label": "Tingkat layanan",
+		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih murah dengan latensi lebih tinggi, coba tingkat pemrosesan flex."
 	},
 	"ui": {
 		"collapseThinking": {

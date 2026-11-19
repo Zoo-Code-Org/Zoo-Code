@@ -6,7 +6,8 @@
 		"cancel": "Cancel",
 		"select": "Select",
 		"add": "Add Header",
-		"remove": "Remove"
+		"remove": "Remove",
+		"milliseconds": "{{value}}ms"
 	},
 	"header": {
 		"title": "Settings",
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "Imported {{count}} of {{total}} task histories.",
 			"detailPreparing": "Preparing Roo Code history import.",
 			"progressAriaLabel": "Roo history import progress"
-		}
+		},
+		"version": "Version: {{version}}",
+		"versionWithCommit": "Version: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Slash commands are shortcuts for reusable workflows and actions to be used on demand (like creating a PR, running a set of tasks, etc). <DocsLink>Learn more</DocsLink>",
@@ -758,7 +761,18 @@
 			"low": "Low",
 			"description": "Controls how detailed the model's responses are. Low verbosity produces concise answers, while high verbosity provides thorough explanations."
 		},
-		"setReasoningLevel": "Enable Reasoning Effort"
+		"setReasoningLevel": "Enable Reasoning Effort",
+		"awsAuthMethod": "Authentication Method",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth Credentials Path",
+			"oauthPathDescription": "Path to your Qwen OAuth credentials file. Defaults to {{defaultPath}} if left empty.",
+			"description": "Qwen Code is an OAuth-based API that requires authentication through the official Qwen client. You'll need to set up OAuth credentials first.",
+			"gettingStarted": "To get started:",
+			"step1": "1. Install the official Qwen client",
+			"step2": "2. Authenticate using your account",
+			"step3": "3. OAuth credentials will be stored automatically",
+			"setupInstructions": "Setup Instructions"
+		}
 	},
 	"checkpoints": {
 		"timeout": {
@@ -989,7 +1003,8 @@
 			"refreshing": "Refreshing...",
 			"refreshSuccess": "Tools refreshed successfully",
 			"refreshError": "Failed to refresh tools",
-			"toolParameters": "Parameters"
+			"toolParameters": "Parameters",
+			"required": "required"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamic thinking effort",
@@ -1028,7 +1043,12 @@
 			"freeRequests_other": "* Free up to {{count}} requests per minute. After that, billing depends on prompt size.",
 			"pricingDetails": "For more info, see pricing details.",
 			"billingEstimate": "* Billing is an estimate - exact cost depends on prompt size."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_other": "{{count, number}} tokens",
+		"pricePerMillionTokens": "{{price}} / 1M tokens",
+		"showMore": "More",
+		"showLess": "Less"
 	},
 	"modelPicker": {
 		"automaticFetch": "The extension automatically fetches the latest list of models available on <serviceLink>{{serviceName}}</serviceLink>. If you're unsure which model to choose, Zoo Code works best with <defaultModelLink>{{defaultModelId}}</defaultModelLink>. You can also try searching \"free\" for no-cost options currently available.",
@@ -1093,7 +1113,8 @@
 			"inputPrice": "e.g. 0.0001",
 			"outputPrice": "e.g. 0.0002",
 			"cacheWritePrice": "e.g. 0.00005"
-		}
+		},
+		"defaultValue": "Default: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Default: http://localhost:11434",
@@ -1122,7 +1143,9 @@
 			"input": "Input",
 			"output": "Output",
 			"cacheReads": "Cache reads"
-		}
+		},
+		"label": "Service tier",
+		"tooltip": "For faster processing of API requests, try the priority processing service tier. For lower prices with higher latency, try the flex processing tier."
 	},
 	"language": {
 		"description": "Language and date/time display.",

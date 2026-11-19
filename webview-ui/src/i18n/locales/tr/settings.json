@@ -6,7 +6,8 @@
 		"cancel": "İptal",
 		"select": "Seç",
 		"add": "Başlık Ekle",
-		"remove": "Kaldır"
+		"remove": "Kaldır",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Ayarları ara...",
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "{{total}} görev geçmişinden {{count}} tanesi içe aktarıldı.",
 			"detailPreparing": "Roo Code geçmişi içe aktarma hazırlanıyor.",
 			"progressAriaLabel": "Roo Code geçmişi içe aktarma ilerlemesi"
-		}
+		},
+		"version": "Sürüm: {{version}}",
+		"versionWithCommit": "Sürüm: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Özel iş akışlarını ve eylemleri hızlı bir şekilde yürütmek için eğik çizgi komutlarınızı yönetin. <DocsLink>Daha fazla bilgi edinin</DocsLink>",
@@ -685,6 +688,17 @@
 			"signInDescription": "Hesabınızla Zoo Gateway kullanmak için giriş yapın",
 			"authenticated": "Kimlik doğrulandı",
 			"authenticatedAs": "{{name}} olarak kimlik doğrulandı"
+		},
+		"awsAuthMethod": "Kimlik doğrulama yöntemi",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth kimlik bilgileri yolu",
+			"oauthPathDescription": "Qwen OAuth kimlik bilgileri dosyanın yolu. Boş bırakırsan {{defaultPath}} kullanılır.",
+			"description": "Qwen Code, resmi Qwen istemcisi üzerinden kimlik doğrulama gerektiren OAuth tabanlı bir API'dir. Önce OAuth kimlik bilgilerini ayarlaman gerekir.",
+			"gettingStarted": "Başlamak için:",
+			"step1": "1. Resmi Qwen istemcisini yükle",
+			"step2": "2. Hesabınla kimlik doğrula",
+			"step3": "3. OAuth kimlik bilgileri otomatik olarak kaydedilir",
+			"setupInstructions": "Kurulum talimatları"
 		}
 	},
 	"checkpoints": {
@@ -916,7 +930,8 @@
 			"refreshing": "Yenileniyor...",
 			"refreshSuccess": "Araçlar başarıyla yenilendi",
 			"refreshError": "Araçlar yenilenemedi",
-			"toolParameters": "Parametreler"
+			"toolParameters": "Parametreler",
+			"required": "zorunlu"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dinamik düşünme çabası",
@@ -955,7 +970,12 @@
 			"freeRequests_other": "* Dakikada {{count}} isteğe kadar ücretsiz. Bundan sonra, ücretlendirme istem boyutuna bağlıdır.",
 			"pricingDetails": "Daha fazla bilgi için fiyatlandırma ayrıntılarına bakın.",
 			"billingEstimate": "* Ücretlendirme bir tahmindir - kesin maliyet istem boyutuna bağlıdır."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_other": "{{count, number}} token",
+		"pricePerMillionTokens": "{{price}} / 1 milyon token",
+		"showMore": "Daha fazla",
+		"showLess": "Daha az"
 	},
 	"modelPicker": {
 		"automaticFetch": "Uzantı <serviceLink>{{serviceName}}</serviceLink> üzerinde bulunan mevcut modellerin en güncel listesini otomatik olarak alır. Hangi modeli seçeceğinizden emin değilseniz, Zoo Code <defaultModelLink>{{defaultModelId}}</defaultModelLink> ile en iyi şekilde çalışır. Şu anda mevcut olan ücretsiz seçenekleri bulmak için \"free\" araması da yapabilirsiniz.",
@@ -1020,7 +1040,8 @@
 			"inputPrice": "örn. 0.0001",
 			"outputPrice": "örn. 0.0002",
 			"cacheWritePrice": "örn. 0.00005"
-		}
+		},
+		"defaultValue": "Varsayılan: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Varsayılan: http://localhost:11434",
@@ -1049,7 +1070,9 @@
 			"input": "Giriş",
 			"output": "Çıkış",
 			"cacheReads": "Önbellek okumaları"
-		}
+		},
+		"label": "Hizmet seviyesi",
+		"tooltip": "API isteklerinin daha hızlı işlenmesi için öncelikli işleme hizmet seviyesini dene. Daha yüksek gecikmeyle daha düşük fiyatlar için esnek işleme seviyesini dene."
 	},
 	"ui": {
 		"collapseThinking": {
