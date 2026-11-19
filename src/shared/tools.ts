@@ -20,12 +20,9 @@ export type AutoApprovalContext = {
 	 */
 	dcgDecision?: DcgDecision
 	/**
-	 * Directory the command will actually run in (`execute_command` only):
-	 * the tool's resolved working directory, which differs from the task's
-	 * own `cwd` whenever the call carries a custom `cwd`. Command-list
-	 * enforcement judges this directory so a command executing in another
-	 * workspace folder is judged by that folder's policy, never the task
-	 * folder's.
+	 * Directory the command actually runs in (`execute_command` only). Command
+	 * lists judge this directory, so a command in another workspace folder is
+	 * judged by that folder's policy, never the task folder's.
 	 */
 	commandCwd?: string
 }

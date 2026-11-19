@@ -1329,9 +1329,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Disengaged: the queued answer is a legitimate approval, as before.
 			return { action: "consume" }
 		}
-		// Engaged: the full policy decides, with the fresh state. `cwd`, the
-		// forwarded DCG verdict, and the command's working directory match the
-		// ask-time `checkAutoApproval` call.
+		// Engaged: the full policy decides with the fresh state and the same
+		// inputs as the ask-time `checkAutoApproval` call.
 		const approval = await checkAutoApproval({
 			state: freshState,
 			cwd: commandCwd ?? this.cwd,
@@ -1995,10 +1994,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// `this.cwd`, not `provider.cwd`:
 		// The path inside `text` was made relative to this task's workspace,
 		// which for a resumed or child task need not be the one the provider
-		// currently reports. A tool that forwards a `commandCwd` overrides that
-		// for policy purposes: the command lists must judge the directory the
-		// command will actually run in, which a custom tool `cwd` moves off the
-		// task folder.
+		// currently reports. A forwarded `commandCwd` overrides that for policy:
+		// the command lists judge the directory the command actually runs in.
 		const approval = queuedAskResolution
 			? ({ decision: "ask" } as const)
 			: await checkAutoApproval({

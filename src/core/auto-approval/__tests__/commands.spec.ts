@@ -242,17 +242,13 @@ it("isShadowedByAnyEntry: compares case-insensitively, the way the matcher match
 })
 
 it("isShadowedByAnyEntry: compares entries as stored, the way the matcher compares them", () => {
-	// The matcher trims commands, never entries, and shadowing mirrors that:
-	// both sides compare as stored. A trimmed comparison would let an inert
-	// padded entry erase a decidable one (and the reverse), deciding with a
-	// rule enforcement never applies.
+	// The matcher trims commands, never entries; shadowing must compare as stored.
 	expect(isShadowedByAnyEntry(" git push ", ["git"])).toBe(false)
 	expect(isShadowedByAnyEntry("git push", [" git "])).toBe(false)
 })
 
 it("layered decisions: a padded global deny entry cannot erase a workspace deny entry", () => {
-	// The padded global entry is inert at enforcement, so it must not shadow
-	// the workspace entry the matcher does honor: the deny survives.
+	// The inert padded entry must not shadow the workspace deny the matcher honors.
 	const scopes = (globalList: string[], workspaceList: string[]) => ({
 		global: globalList,
 		workspace: workspaceList,
@@ -264,9 +260,7 @@ it("layered decisions: a padded global deny entry cannot erase a workspace deny 
 })
 
 it("layered decisions: a padded global allow entry cannot erase a workspace allow entry", () => {
-	// Mirror of the deny side: the inert padded entry leaves the workspace
-	// allow entry effective, so the command is approved rather than downgraded
-	// to a prompt for a match no entry can produce.
+	// Mirror of the deny side: the inert padded entry leaves the workspace allow effective.
 	const scopes = (globalList: string[], workspaceList: string[]) => ({
 		global: globalList,
 		workspace: workspaceList,
@@ -278,19 +272,15 @@ it("layered decisions: a padded global allow entry cannot erase a workspace allo
 })
 
 it("isShadowedByAnyEntry: never treats an empty entry as covered", () => {
-	// Compared naively, an empty entry prefix-matches every command, so
-	// against an empty shadow entry it would report itself covered. The
-	// empty-entry guard keeps such an entry visible instead. Command-list
-	// layers sanitize blanks before shadowing, so this pins the function's
-	// contract directly.
+	// An empty entry prefix-matches everything; the guard keeps it from
+	// shadowing itself. Layers sanitize blanks first, so this pins the contract.
 	expect(isShadowedByAnyEntry("", [""])).toBe(false)
 	expect(isShadowedByAnyEntry("", ["git"])).toBe(false)
 })
 
 it("layered decisions: reproduces the global-decides precedence through the scope-blind matcher", () => {
-	// Global deny "git" vs workspace allow "git push": the composed lists
-	// drop the shadowed allow entry, so the scope-blind matcher — never told
-	// about layers — returns the global layer's deny.
+	// Global deny "git" shadows workspace allow "git push" at composition, so the
+	// scope-blind matcher returns the deny.
 	const scopes = (globalList: string[], workspaceList: string[]) => ({
 		global: globalList,
 		workspace: workspaceList,

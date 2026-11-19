@@ -91,10 +91,9 @@ import { useSearchIndexRegistry, SearchIndexProvider } from "./useSettingsSearch
 import { nextSaveRequestId } from "./saveRequestId"
 
 /**
- * How long the form waits for the host to answer a save whose writes it watches: one that changes a time or date
- * setting, or one that edits a command list. The host always answers (success or failure), but a write that never
- * settles would otherwise leave Save disabled until the webview reloads. After this the save is treated as failed: the
- * edits stay unsaved and Save works again.
+ * How long the form waits for the host to answer a watched save. A write
+ * that never settles would otherwise leave Save disabled until reload. After
+ * this, treat the save as failed: edits stay unsaved, Save works again.
  */
 export const SAVE_ANSWER_TIMEOUT_MS = 20_000
 
@@ -105,8 +104,8 @@ export const settingsTabTrigger =
 	"whitespace-nowrap overflow-hidden min-w-0 h-12 px-4 py-3 box-border flex items-center border-l-2 border-transparent text-vscode-foreground opacity-70 hover:bg-vscode-list-hoverBackground data-[compact=true]:w-12 data-[compact=true]:p-4"
 export const settingsTabTriggerActive = "opacity-100 border-vscode-focusBorder bg-vscode-list-activeSelectionBackground"
 
-// Command-list snapshot of a settings state object. Entries are compared by value because every
-// state post delivers freshly deserialized arrays; reference identity carries no meaning here.
+// Command-list snapshot of a state object. Compare entries by value: each
+// state post delivers freshly deserialized arrays.
 interface CommandListSnapshot {
 	allowedCommands?: string[]
 	deniedCommands?: string[]
@@ -187,24 +186,24 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const sentState = useRef<typeof extensionState | undefined>(undefined)
 	const latestCachedState = useRef(cachedState)
 	latestCachedState.current = cachedState
-	// The live host state, read when a save settles without re-subscribing the result handler on every post.
+	// The live host state, read when a save settles.
 	const latestExtensionState = useRef(extensionState)
-	// Refreshed synchronously at commit: a host state post and the save answer that follows it can arrive as
-	// back-to-back messages, and the answer's task must observe the post it answers, not the state before it.
+	// Refresh synchronously at commit: the save answer can follow its state post
+	// immediately, and must observe that post, not the state before it.
 	useLayoutEffect(() => {
 		latestExtensionState.current = extensionState
 	}, [extensionState])
-	// The save the host must answer records the baseline it stamped and the lists it submitted, so the
-	// save-result effect can reconcile each list's baseline against that list's own write outcome.
+	// Records the baseline and lists of the save the host must answer, so the
+	// save-result effect can reconcile each list against its own write outcome.
 	const submittedListSave = useRef<{ baselined: [string[], string[]]; sent: [string[], string[]] } | undefined>(
 		undefined,
 	)
 
-	// Command-list values the dialog last displayed, so a later state post can be recognized as
-	// an external change rather than a restatement of what is already shown.
+	// What the dialog last displayed, so a later post reads as an external
+	// change, not a restatement.
 	const lastDisplayedCommandSnapshot = useRef(commandListSnapshot(extensionState))
-	// An in-flight user edit of either list claims ownership of the lists until Save, discard, or
-	// a full reseed; external list updates must not silently overwrite it.
+	// An in-flight list edit owns the lists until Save, discard, or reseed;
+	// external updates must not overwrite it.
 	const commandListsTouched = useRef(false)
 
 	const {
@@ -312,21 +311,19 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
-	// The command lists can change in the extension host while this dialog is open (for example,
-	// a settings-file edit landing mid-session). Fold exactly those fields into the edit buffer on
-	// every state post that changes them, so a later Save cannot rewrite the configuration layer
-	// from a list that never showed the new entry. List fields are held back while the user has an
-	// in-flight list edit (in-flight edits win); every other buffered field is left untouched and
-	// the dirty flag is never cleared here, keeping the buffer's Save-gated semantics.
+	// The host can change the command lists while this dialog is open. Fold the
+	// changed list fields into the edit buffer on every state post, so a later
+	// Save cannot rewrite the file from a list that never showed the new entry.
+	// An in-flight list edit holds the list fields back; other fields are
+	// untouched and the dirty flag is never cleared here.
 	useEffect(() => {
 		const snapshot = commandListSnapshot(extensionState)
 		if (snapshot === lastDisplayedCommandSnapshot.current) {
 			return
 		}
 
-		// The merge is computed here, outside the state update, from the committed buffer the
-		// effect's render saw; a state update must stay a pure function of the state it is
-		// applied to.
+		// Compute the merge here, outside the state update: a state update must
+		// stay a pure function of the state it applies to.
 		const prevState = latestCachedState.current
 		const merged: CommandListSnapshot = {}
 
@@ -342,17 +339,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			merged.workspaceCommandListsEnabled = extensionState.workspaceCommandListsEnabled
 		}
 
-		// The stamp records the lists this merge leaves on screen, never the posted
-		// state outright: an entry held back by an in-flight edit was never displayed,
-		// and a baseline claiming it had been lets the save erase it as a user
-		// deletion without warning. While the lists are held back the buffered lists
-		// are themselves unposted, so the stamp keeps its prior lists instead - a
-		// deletion inside the buffered edit must stay in the baseline for the save to
-		// apply it rather than resurrect the deleted entry as an external addition.
-		// The gate slot holds back with those lists because the stamp has to describe
-		// one displayed state: pairing held-back lists with an externally-flipped gate
-		// would claim the held-back entries were displayed under a gate they never
-		// appeared alongside.
+		// The stamp records what this merge leaves on screen, never the posted
+		// state: a held-back entry was never displayed, and claiming it had been
+		// lets the save erase it as a user deletion. While the lists are held
+		// back, keep the prior lists: a deletion inside the buffered edit must
+		// stay in the baseline so the save applies it. The gate holds back with
+		// the lists so the stamp describes one displayed state.
 		const [stampAllowed, stampDenied, stampGate] = commandListsTouched.current
 			? (JSON.parse(lastDisplayedCommandSnapshot.current) as [string[], string[], boolean])
 			: [
@@ -372,9 +364,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	}, [extensionState])
 
 	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
-		// A list edit claims ownership of the lists only when the value actually changes; the
-		// equality guard is duplicated here so the marking can sit outside the state update,
-		// keeping that update pure without giving a no-op set ownership it never had.
+		// Claim ownership only when the value actually changes: a no-op set must
+		// not own the lists. The guard is duplicated so the marking stays outside
+		// the (pure) state update.
 		if ((field === "allowedCommands" || field === "deniedCommands") && latestCachedState.current[field] !== value) {
 			commandListsTouched.current = true
 		}
@@ -509,9 +501,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 	const isSettingValid = !errorMessage
 
-	// The time and date values are written one at a time on the host, and a write can fail: a save that changes one of
-	// them waits for the host's answer, just as a save that edits a command list does. A save that changes neither
-	// display nor command lists asks for no answer, and behaves as it always did.
+	// The host writes time/date settings one at a time and a write can fail, so
+	// a save that changes one waits for the host's answer, like a list edit.
+	// A save that changes neither asks for no answer.
 	const displayChanged =
 		(cachedState.timeFormat ?? "auto") !== (extensionState.timeFormat ?? "auto") ||
 		(cachedState.dateFormat ?? "auto") !== (extensionState.dateFormat ?? "auto") ||
@@ -523,10 +515,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				lastDisplayedCommandSnapshot.current,
 			) as [string[], string[], boolean]
 
-			// The host reports a rejected command-list write in the same answer it gives a failed display-setting
-			// write, so a save carrying either waits for it. Reporting nothing for a list-only save would leave
-			// the dialog unable to tell a stored list from a rejected one, and it would show the rejected edit as
-			// saved.
+			// The host reports a rejected list write in the same answer as a
+			// failed display write, so a save carrying either waits for it.
+			// Without an id, a rejected list edit would look saved.
 			const saveId = displayChanged || commandListsTouched.current ? nextSaveRequestId() : undefined
 			if (saveId) {
 				sentState.current = cachedState
@@ -543,14 +534,10 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				commandListBaseline: {
 					allowedCommands: lastDisplayedAllowed,
 					deniedCommands: lastDisplayedDenied,
-					// The gate travels with the lists it was displayed alongside: the stamp
-					// always carries the gate that was on screen with its lists, so a gate
-					// flip between display and save cannot pair old-gate entries with a
-					// new-gate label and reclassify a baseline-shown entry as a brand-new
-					// promotion into the global layer. A dialog whose host never delivered
-					// the gate has no displayed gate to accompany the baseline: it posts
-					// none, and the save path keeps the legacy classification for an
-					// absent flag.
+					// The stamp carries the gate its lists were displayed under, so
+					// a gate flip cannot reclassify a shown entry as a new global
+					// promotion. If the host never delivered the gate, post none;
+					// the save path then uses the legacy classification.
 					workspaceCommandListsEnabled:
 						cachedState.workspaceCommandListsEnabled === undefined ? undefined : gateAtSubmit,
 				},
@@ -645,13 +632,11 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				deniedCommands,
 				workspaceCommandListsEnabled: gateAtSubmit,
 			})
-			// The stamp records what is on screen, so it moves at submit; the settle below then re-derives each
-			// edited list's entry from whether that list's own write landed. The lists' ownership of the buffer
-			// does not move at submit. A save releases that hold - and with it the unsaved flag - only once the
-			// refresh shows every submitted write landed: releasing earlier would let the state refresh that
-			// follows a rejected list write overwrite the edit the user is still looking at. A save that carries
-			// neither a watched display setting nor an edited list asks for no answer, so it clears the hold at
-			// submit.
+			// The stamp moves at submit; the settle below re-derives each edited
+			// list from its own write outcome. The lists' hold does not move at
+			// submit: releasing early would let the refresh after a rejected write
+			// overwrite the user's edit. An unwatched save needs no answer, so it
+			// clears the hold here.
 			if (!saveId) {
 				commandListsTouched.current = false
 				setChangeDetected(false)
@@ -664,16 +649,12 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 
 		const settle = (success: boolean) => {
 			setPendingSaveId(undefined)
-			// The answer's flag reports one outcome for the whole payload, but the payload's lists are written
-			// separately, and a report of success says only that the other settings stored: a rejected
-			// command-list write is absent from the flag. Each edited list's own write result comes from the
-			// refresh the host posts before its answer, so every save reconciles each list against what was
-			// submitted: a list equal to what was submitted records that its own write landed, and its baseline
-			// stays advanced, since restoring the pre-submit baseline of a written list claims an entry the file
-			// no longer holds was displayed. Every other edited list's baseline rolls back to what was displayed
-			// before the submit, so a deletion whose write never ran is still classified as a user deletion on
-			// retry instead of an external addition to re-admit. Lists the save did not edit keep the stamp's
-			// baseline, which the external-update merge already maintains.
+			// The answer's flag reports the whole payload; each list's own write
+			// result comes from the refresh the host posts before its answer.
+			// Reconcile each edited list: one equal to what was submitted landed,
+			// so its baseline stays advanced. Every other edited list rolls back to
+			// the pre-submit baseline, so an unwritten deletion stays a user
+			// deletion on retry. Unedited lists keep the stamp's baseline.
 			const save = submittedListSave.current
 			submittedListSave.current = undefined
 			let everyEditedWriteLanded = true
@@ -715,10 +696,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 					workspaceCommandListsEnabled: stampGate,
 				})
 			}
-			// The unsaved flag goes off only when nothing is left unsaved: an edit made while the save was in
-			// flight is not in what was sent, and an edited list whose write never landed still holds its edit.
-			// In both cases the buffered lists keep holding off external updates, so a host refresh cannot
-			// replace the edit the user is looking at.
+			// Clear the flag only when nothing is left unsaved: an edit made
+			// during the save, or a list whose write never landed, keeps the hold
+			// so a host refresh cannot replace the user's edit.
 			if (success && everyEditedWriteLanded && latestCachedState.current === sentState.current) {
 				commandListsTouched.current = false
 				setChangeDetected(false)

@@ -1017,6 +1017,58 @@ it("checkAutoApproval command: decides each sub-command of a chain by its own ma
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
 })
 
+it("checkAutoApproval command: denies a mixed allow/deny chain when one sub-command is unapproved under blanket", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// The folder layers stay empty: no deny entry may decide the chain, so
+	// only the all-sub-commands rule can keep it unapproved.
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: true },
+		[folderB.fsPath]: { gate: true },
+	})
+
+	// One sub-command approved, one not: only that rule denies the chain. An
+	// any-match rule would approve it on "git status".
+	const blanket = await checkAutoApproval({
+		state: { ...layeredState(["git"]), alwaysDenyUnapprovedCommands: true },
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "git status && docker ps",
+	})
+	expect(blanket).toEqual({ decision: "deny", autoDeny: { kind: "not_allowlisted", command: "docker ps" } })
+
+	// Without blanket the same chain falls to the plain user prompt.
+	const prompt = await checkAutoApproval({
+		state: layeredState(["git"]),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "git status && docker ps",
+	})
+	expect(prompt).toEqual({ decision: "ask" })
+})
+
+it("checkAutoApproval command: ignores a workspace allow entry while the gate is off", async () => {
+	vi.clearAllMocks()
+	const { folderA, folderB } = openMultiRootWindow()
+	// Gate off in both folders: the folder configuration is read, but its
+	// allow entry must never reach the effective lists.
+	mockFolderConfigurations({
+		[folderA.fsPath]: { gate: false },
+		[folderB.fsPath]: { gate: false, allow: ["echo"] },
+	})
+
+	// The raw global layers keep the layered composition selected; it is
+	// empty, so the gated-off workspace entry is all that could allow "echo".
+	const result = await checkAutoApproval({
+		state: layeredState([], []),
+		cwd: folderB.fsPath,
+		ask: "command",
+		text: "echo hi",
+	})
+
+	expect(result).toEqual({ decision: "ask" })
+})
+
 // The layered aggregator also owns the chain parsing, redirect sanitization,
 // substitution veto, and deny reporting of the flat matcher — the enforcement
 // path selects it whenever both raw global lists are present, regardless of

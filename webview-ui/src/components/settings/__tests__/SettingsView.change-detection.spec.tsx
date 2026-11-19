@@ -798,8 +798,7 @@ describe("SettingsView - Change Detection Fix", () => {
 				await new Promise((resolve) => setTimeout(resolve, 0))
 			})
 
-			// Save must submit the list that includes the entry the dialog now displays, not the
-			// stale one captured when the dialog opened.
+			// Save must submit the now-displayed list, not the stale one from open time.
 			fireEvent.click(screen.getByTestId("save-button"))
 			expect(mockPostMessage).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -830,9 +829,8 @@ describe("SettingsView - Change Detection Fix", () => {
 				await new Promise((resolve) => setTimeout(resolve, 0))
 			})
 
-			// The baseline must be the list the dialog NOW displays (post-merge), so the
-			// merge's entry counts as shown - not the empty list present when the dialog
-			// opened, which would make the merge's own entry look externally added.
+			// The baseline must be the post-merge list, so the merge's entry counts
+			// as shown; the empty open-time list would make it look externally added.
 			fireEvent.click(screen.getByTestId("save-button"))
 			expect(mockPostMessage).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -853,8 +851,8 @@ describe("SettingsView - Change Detection Fix", () => {
 			fireEvent.click(screen.getByTestId("set-provider-baseten"))
 			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-			// One state post flips the workspace command-list gate and adds a deny entry, which is
-			// what enabling the gate does: workspace entries become part of the displayed lists.
+			// One post flips the gate and adds a deny entry: enabling the gate makes
+			// workspace entries part of the displayed lists.
 			await act(async () => {
 				extensionState = createExtensionState({
 					deniedCommands: ["git push"],

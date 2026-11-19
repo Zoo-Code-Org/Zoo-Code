@@ -21,10 +21,8 @@ export interface CommandListScopes {
 }
 
 /**
- * The workspace-scoped layers of a command-list key as reported by
- * `WorkspaceConfiguration.inspect()`. Capturing it once lets a save derive
- * the read layers, the write target, and a rollback value from a single
- * configuration state instead of three independent reads that could disagree.
+ * The workspace layers of a command-list key, from `inspect()`. One capture
+ * gives a save consistent read layers, write target, and rollback value.
  */
 export interface CommandListInspection {
 	workspaceValue?: string[]
@@ -32,17 +30,11 @@ export interface CommandListInspection {
 }
 
 /**
- * The configuration object for every command-list read and write. Scoped to
- * `folderResource` when the caller resolved one — per-task enforcement reads
- * the folder that task runs in — and to the first workspace folder otherwise,
- * the default the display, save, and seeding callers keep. Sharing one scoped
- * access path keeps the two sides symmetric: `inspect()` can report
- * `workspaceFolderValue`, and `ConfigurationTarget.WorkspaceFolder` updates
- * are legal (the API contract throws for that target when the configuration
- * is not scoped to a resource). With no folder open — or when a supplied
- * resource resolved to nothing, see {@link commandListFolderForResource} —
- * the configuration is unscoped or defaults to the first folder and reports
- * only what that lookup can see.
+ * The configuration for every command-list read and write. Scoped to
+ * `folderResource` when given, else the first workspace folder. One shared
+ * scoped path keeps read and write symmetric: `ConfigurationTarget.
+ * WorkspaceFolder` updates are legal only when the configuration is scoped to
+ * a resource.
  */
 export function commandListConfiguration(folderResource?: vscode.Uri): vscode.WorkspaceConfiguration {
 	return vscode.workspace.getConfiguration(
@@ -53,57 +45,38 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
 
 /**
  * Resolves the workspace folder a task's `cwd` lives in, so command-list
- * enforcement scopes its configuration reads to the folder the task belongs
- * to instead of the window's first folder. A child task inherits the working
- * directory of the task it came from, so it resolves to the same folder
- * without separate plumbing.
+ * enforcement reads that folder's configuration instead of the window's
+ * first folder. A child task inherits its parent's cwd and resolves the same
+ * way.
  *
- * The command path hands this lookup a cwd the filesystem has already
- * resolved to its real path, while the workspace registry holds each root as
- * it was opened. Containment is therefore tested against every root's real
- * path, so a root that is itself a symlink (or a Windows junction) keeps
- * matching its own real directory. Comparing against the registered paths
- * alone could not decide the folder: that comparison is lexical, so an outer
- * root lexically contains a directory that physically belongs to a deeper
- * root, and enforcing the outer root's lists there would let the deeper
- * folder's deny entries be skipped. Among several matches the deepest root
- * wins, mirroring how VS Code's own containment picks the innermost folder.
- * A root whose real path cannot be resolved is compared by its registered
- * path: the cwd is already canonical, so an unresolvable root can only
- * narrow which folder layer applies, never widen what a folder's allow list
- * may approve — and dropping the layer outright would silently change
- * enforcement for a folder the user has open.
+ * The cwd arrives canonicalized, but the registry holds roots as opened, so
+ * containment is tested against each root's real path. A lexical-only compare
+ * would let an outer root claim a symlinked deeper root's directory and skip
+ * its deny entries. The deepest match wins, like VS Code's own containment.
+ * A root whose real path cannot be resolved falls back to its registered
+ * path: that can only narrow which layer applies, never widen approvals.
  *
- * @param cwd - The task's working directory. An empty or absent cwd yields
- * `undefined` and keeps the first-folder configuration. A nonempty cwd with
- * no matching root also yields `undefined`. When both raw global lists are
- * available, enforcement then excludes the workspace layer; otherwise, it
- * uses the pre-composed state lists.
- * @returns The containing folder's registry URI — never a canonicalized one,
- * because folder-scoped configuration resolves against the registry — or
- * `undefined` when cwd is empty, resolves to no root, or lookup fails.
+ * @param cwd - The task's working directory. Empty, absent, or unmatched
+ * yields `undefined` and keeps the first-folder configuration.
+ * @returns The containing folder's registry URI — never canonicalized, since
+ * folder-scoped configuration resolves against the registry.
  */
 export function commandListFolderForResource(cwd?: string): vscode.Uri | undefined {
 	if (!cwd) {
 		return undefined
 	}
 
-	// A failed lookup returns undefined, like a cwd naming no root.
-	// With both raw global lists available, enforcement excludes the workspace
-	// layer; otherwise, it uses the pre-composed state lists.
+	// A failed lookup returns undefined, like a cwd naming no root; the caller
+	// then falls back to the pre-composed state lists.
 	try {
-		// Comparing by root-path length makes the deepest match win: a root
-		// registered lexically above a symlinked root must not claim a command
-		// running in the deeper root's real directory. The separator guard
-		// keeps a sibling like `/root/other` from matching a root `/root`.
+		// Longest match wins so an outer root cannot claim a symlinked deeper
+		// root's directory. The separator guard keeps `/root/other` out of `/root`.
 		let match: vscode.Uri | undefined
 		let matchedLength = 0
 		for (const candidate of vscode.workspace.workspaceFolders ?? []) {
 			const rootPath = realPathOrRegistered(candidate.uri.fsPath)
 			// A filesystem root (`/`, `C:\`) already ends in a separator;
-			// appending a second one (`//`, `C:\\`) would leave no child path
-			// able to match the root, so the separator is added only where the
-			// root lacks one.
+			// doubling it would leave no child path able to match.
 			const childPrefix = rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep
 			if ((cwd === rootPath || cwd.startsWith(childPrefix)) && rootPath.length > matchedLength) {
 				match = candidate.uri
@@ -117,12 +90,9 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 }
 
 /**
- * The path a workspace root is compared by: its real filesystem path, or —
- * when that cannot be resolved (a relocated or deleted root) — the path the
- * registry holds. Root-side lookups stay best-effort because the cwd being
- * matched is already canonical; failing the comparison for one unresolvable
- * root would drop that folder's command-list layer without widening any
- * approval.
+ * The path a workspace root is compared by: its real path, or the registered
+ * path when the real one cannot be resolved. The cwd is already canonical, so
+ * a fallback here can only narrow matching, never widen approvals.
  */
 function realPathOrRegistered(fsPath: string): string {
 	try {
@@ -136,21 +106,19 @@ function realPathOrRegistered(fsPath: string): string {
  * Reads an auto-approval command list from both configuration layers and
  * composes the list that should be enforced and displayed.
  *
- * The workspace layer is read via `inspect()` rather than `get()` on purpose:
- * `get()` returns the effective value, which already folds `globalValue` into
- * the result. Unioning that with the global layer would double-count entries
- * and make removals from global settings unable to shrink the enforced set.
+ * The workspace layer comes from `inspect()`, not `get()`: `get()` returns the
+ * effective value, which already folds in `globalValue`. Unioning that with
+ * the global layer would double-count and keep global removals from shrinking
+ * the enforced set.
  *
  * @param configKey - The extension configuration key to read.
  * @param globalList - The list persisted in extension global state.
- * @param inspectionOverride - A snapshot captured by the caller before any
- * write; when present it is used as-is and no fresh lookup happens, so a
- * save's reads, target resolution, and rollback stay derived from one
- * configuration state. Without it the lookup runs guarded (lenient): this is
- * the enforcement/display path, where an unavailable workspace layer must
- * degrade to empty rather than fail.
- * @param folderResource - Workspace folder the configuration is scoped to;
- * `undefined` keeps the first-folder default.
+ * @param inspectionOverride - A pre-write snapshot; when present it is used
+ * as-is so a save's reads, target, and rollback share one configuration
+ * state. Without it the lookup is guarded: enforcement degrades to an empty
+ * workspace layer rather than failing.
+ * @param folderResource - Workspace folder to scope to; `undefined` keeps the
+ * first-folder default.
  * @returns The per-layer lists and their deduplicated set union.
  */
 export function readCommandListScopes(
@@ -163,11 +131,8 @@ export function readCommandListScopes(
 
 	let inspected: CommandListInspection | undefined = inspectionOverride
 	if (inspected === undefined) {
-		// Only the configuration lookup itself is guarded: it can fail (for
-		// example before the workspace is ready), and an absent workspace layer
-		// must not break enforcement. The value reads below have no failure mode
-		// of their own, so the catch covers exactly the failure it exists to
-		// absorb.
+		// Only the lookup is guarded: it can fail before the workspace is ready.
+		// The reads below have no failure mode of their own.
 		try {
 			inspected = commandListConfiguration(folderResource).inspect<string[]>(configKey)
 		} catch {
@@ -175,13 +140,10 @@ export function readCommandListScopes(
 		}
 	}
 
-	// The folder value wins over the workspace value, matching VS Code's
-	// folder-over-workspace precedence. An absent inspect result composes to
-	// an empty workspace layer: enforcement must not break.
+	// Folder value wins over workspace value, as in VS Code's precedence.
 	const workspace = sanitizeCommandList(inspected?.workspaceFolderValue ?? inspected?.workspaceValue)
 
-	// Set union: an entry present in both layers collapses to one, so
-	// composition cannot change prefix-match outcomes.
+	// Set union: an entry in both layers collapses to one.
 	const merged = [...new Set([...global, ...workspace])]
 
 	return { global, workspace, merged }
@@ -193,21 +155,14 @@ export interface CommandListWriteScopes {
 }
 
 /**
- * Splits the merged command list the settings dialog saves back into the two
- * configuration layers it was composed from, so saving the dialog cannot
- * flatten workspace-scoped entries into the user's global settings.
+ * Splits the dialog's merged list back into the two layers it was composed
+ * from, so saving cannot flatten workspace entries into global settings.
  *
- * Semantics:
- * - An entry the user kept that exists in the workspace layer stays in the
- *   workspace layer. If the same entry also exists in the global layer it
- *   stays there too: dropping it from the global write would silently delete
- *   a user's global entry just because the current folder happens to define
- *   it as well.
- * - An entry the user removed is dropped from every layer that contained it,
- *   which makes workspace-scoped entries deletable from the dialog.
- * - A brand-new entry (in neither layer) lands in the global layer, matching
- *   the pre-existing behavior of routing dialog edits to
- *   `ConfigurationTarget.Global`.
+ * - A kept entry stays in every layer that contained it; dropping it from the
+ *   global write would delete a global entry the folder merely mirrors.
+ * - A removed entry leaves every layer that contained it, so dialog deletes
+ *   work for workspace entries.
+ * - A new entry lands in the global layer, as dialog edits did before.
  *
  * @param incoming - The full merged list sent by the webview on save.
  * @param workspaceLayer - The current workspace-scope configuration value.
@@ -236,26 +191,20 @@ export function splitCommandListScopes(
 }
 
 /**
- * Picks the configuration target that owns the current workspace-scope layer
- * for `configKey`. Reading the layers runs through the same
- * `commandListConfiguration()` object `readCommandListScopes` uses; because
- * that configuration is scoped to the first workspace folder, folder values
- * resolve against that folder's settings; with no folder open the
- * configuration is unscoped and reports no folder value, so no folder target
- * can be selected.
+ * Picks the configuration target that owns the current workspace layer for
+ * `configKey`, reading through the same scoped configuration as
+ * `readCommandListScopes`.
  *
- * - `workspaceFolderValue` set -> write at `WorkspaceFolder` scope.
- * - Otherwise `workspaceValue` set -> write at `Workspace` scope.
- * - Neither set -> `undefined`: no workspace layer exists, so none should be
- *   created (an empty workspace layer must not materialize in settings.json).
+ * - `workspaceFolderValue` set -> `WorkspaceFolder`.
+ * - Else `workspaceValue` set -> `Workspace`.
+ * - Neither -> `undefined`: an empty workspace layer must not materialize in
+ *   settings.json.
  *
  * @param configKey - The extension configuration key to inspect.
- * @param inspectionOverride - A snapshot captured by the caller; when present
- * it alone decides the target and no fresh lookup happens, keeping a save's
- * split, write, and rollback on one configuration state. Without it the
- * lookup is guarded leniently: a failure means no workspace layer exists.
- * @returns The workspace-scoped target to write, or `undefined` when no
- * workspace layer exists.
+ * @param inspectionOverride - A caller snapshot; when present it alone
+ * decides the target, keeping a save on one configuration state. Without it
+ * a failed lookup means no workspace layer exists.
+ * @returns The workspace-scoped target to write, or `undefined`.
  */
 export function resolveWorkspaceWriteTarget(
 	configKey: CommandListConfigKey,
@@ -263,9 +212,7 @@ export function resolveWorkspaceWriteTarget(
 ): vscode.ConfigurationTarget.WorkspaceFolder | vscode.ConfigurationTarget.Workspace | undefined {
 	let inspected: CommandListInspection | undefined = inspectionOverride
 	if (inspected === undefined) {
-		// Same defensive posture as readCommandListScopes: only the
-		// configuration lookup itself may fail, and a failure means we create no
-		// workspace layer.
+		// Same guarded posture as readCommandListScopes: failure means no workspace layer.
 		try {
 			inspected = commandListConfiguration().inspect<string[]>(configKey)
 		} catch {
@@ -283,12 +230,10 @@ export function resolveWorkspaceWriteTarget(
 }
 
 /**
- * Reads the `zoo-code.workspaceCommandListsEnabled` gate that decides whether
- * the workspace layers of the command-list keys take part in enforcement and
- * display at all. The configuration declares the key with `scope:
- * "application"`, so only user settings can flip it. The lookup is guarded
- * leniently like the command-list reads: a configuration failure keeps the
- * workspace layers inert, which cannot widen what auto-approval allows.
+ * Reads the gate that decides whether workspace command lists take part in
+ * enforcement and display. Its manifest scope is "application", so only user
+ * settings flip it. A failed lookup keeps the workspace layers inert, which
+ * cannot widen approvals.
  */
 export function workspaceCommandListsEnabled(): boolean {
 	try {
@@ -307,15 +252,14 @@ export interface EffectiveCommandLists {
 	globalDeny: string[]
 	/**
 	 * Workspace allow entries the gate and shadowing kept; they decide only
-	 * commands no global entry matches (see {@link getEffectiveCommandDecision}).
+	 * commands no global entry matches.
 	 */
 	keptWorkspaceAllow: string[]
 	/** Deny-side counterpart of {@link keptWorkspaceAllow}. */
 	keptWorkspaceDeny: string[]
 	/**
-	 * Workspace allow entries absent from the effective allowlist — hidden by
-	 * the gate or shadowed by a global entry — which a dialog save must not be
-	 * able to delete by omission.
+	 * Workspace allow entries hidden from the effective list by the gate or a
+	 * global shadow. A dialog save must not delete these by omission.
 	 */
 	hiddenWorkspaceAllow: string[]
 	/** Deny-side counterpart of {@link hiddenWorkspaceAllow}. */
@@ -323,27 +267,19 @@ export interface EffectiveCommandLists {
 }
 
 /**
- * Composes the raw per-key layers into the pair of lists the settings dialog
- * displays, together with the layer split {@link getEffectiveCommandDecision}
- * matches commands against, so display and enforcement draw on one composition
- * pass and cannot drift.
+ * Composes the raw per-key layers into the pair the dialog displays and the
+ * layer split {@link getEffectiveCommandDecision} matches against, so display
+ * and enforcement share one pass and cannot drift.
  *
- * Gate off: the workspace layers contribute nothing and the global layers are
- * effective verbatim. Gate on: a workspace entry survives in the pair only
- * when no entry of either global list shadows it — an entry whose every match
- * a global entry also matches can decide nothing on its own, and keeping it
- * out of the pair keeps the dialog honest about what the global layer already
- * covers. A surviving entry may still overlap a global entry without being
- * shadowed by it (a wildcard deny matches commands no global prefix reaches);
- * the overlap is harmless because {@link getEffectiveCommandDecision} lets the
- * global layer decide every command it matches, so a workspace entry never
- * outranks a global match. Shadowing is cross-directional because a global
- * allow entry silences a workspace deny entry (and vice versa) just as much as
- * a same-list shadow.
+ * Gate off: the global layers are effective verbatim. Gate on: a workspace
+ * entry survives only when no global entry shadows it. Shadowing is
+ * cross-directional: a global allow silences a workspace deny just as a
+ * global deny silences a workspace allow. A surviving entry may overlap a
+ * global entry without being shadowed; the overlap is harmless because the
+ * global layer decides every command it matches.
  *
- * Composing here — not inside {@link readCommandListScopes} — keeps the raw
- * layers intact for the save path, which derives the write split from them and
- * must never see entries filtered out of the workspace layer.
+ * Composing here keeps the raw layers intact for the save path, which derives
+ * its write split from them.
  *
  * @param allowScopes - Raw `allowedCommands` layers from readCommandListScopes.
  * @param denyScopes - Raw `deniedCommands` layers from readCommandListScopes.
@@ -383,24 +319,18 @@ export function resolveEffectiveCommandLists(
 }
 
 /**
- * Decides a single command under the precedence the command layers are
- * authored with: wherever a global (user-level) entry — allow or deny —
- * matches the command, the global layer decides it, so a user's own allow
- * outranks a project's deny and a user's own deny outranks a project's allow;
- * workspace entries apply only where no global entry matches. Within either
- * layer the established matcher semantics stand: the longest matching prefix
- * wins and an equal-length allow/deny conflict denies.
- *
- * The scope is one command: a chained command is decided per sub-command, and
- * chain splitting lives with the command matcher.
+ * Decides one command. Any matching global entry decides it: a user's allow
+ * outranks a project's deny, and a user's deny outranks a project's allow.
+ * Workspace entries apply only where no global entry matches. Within a layer
+ * the matcher semantics stand: longest prefix wins, equal-length conflicts
+ * deny. Chain splitting lives with the command matcher.
  *
  * @param command - The single (unchained) command to decide.
  * @param effective - A composition from {@link resolveEffectiveCommandLists}.
  * @returns The decision produced by the matching layer.
  */
 export function getEffectiveCommandDecision(command: string, effective: EffectiveCommandLists): CommandDecision {
-	// One longest-prefix probe asks the only question the precedence turns on:
-	// does the global layer hold any match for this command at all?
+	// One probe asks the precedence question: does the global layer match at all?
 	if (findLongestPrefixMatch(command, [...effective.globalAllow, ...effective.globalDeny]) !== null) {
 		return getSingleCommandDecision(command, effective.globalAllow, effective.globalDeny)
 	}

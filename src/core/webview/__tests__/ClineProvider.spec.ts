@@ -4161,8 +4161,8 @@ describe("ClineProvider", () => {
 	})
 
 	describe("command list scope merging", () => {
-		// getConfiguration overrides must not leak past these tests:
-		// clearAllMocks does not remove mockReturnValue defaults.
+		// clearAllMocks does not remove mockReturnValue defaults, so reset
+		// the configuration here. Overrides must not leak to later tests.
 		afterEach(() => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockReturnValue([]),
@@ -4171,8 +4171,7 @@ describe("ClineProvider", () => {
 			Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
 		})
 
-		// The gate is a synchronous configuration read, so the doubles make the
-		// `get` lookup key-aware: only the gate key reports true here.
+		// The doubles make `get` key-aware so only the gate key reports true.
 		test("getState enforces workspace-scope denied commands even when global state is empty", async () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),
@@ -4204,9 +4203,8 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getStateToPostToWebview()
 
-			// The workspace entry survives because no global entry shadows it, so
-			// display is the global layer plus that entry — exactly what
-			// getState() enforces.
+			// No global entry shadows the workspace entry, so display shows the
+			// global layer plus that entry — what getState() enforces.
 			expect(state.deniedCommands).toEqual(["git", "docker"])
 			expect(state.allowedCommands).toEqual([])
 		})
@@ -4225,11 +4223,10 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getState()
 
-			// The raw global layers are the feed per-folder enforcement
-			// re-composes from, so they must stay distinguishable from the
-			// window-composed pair: with the layers diverging here, a dropped
-			// field or a composed value would silently reroute enforcement to
-			// the first-folder lists.
+			// Per-folder enforcement re-composes from the raw global layers, so
+			// they must differ from the window-composed pair. If the fields were
+			// dropped or composed, enforcement would silently use the
+			// first-folder lists.
 			expect(state.globalAllowedCommands).toEqual(["git"])
 			expect(state.globalDeniedCommands).toEqual(["curl"])
 			expect(state.allowedCommands).toEqual(["git", "docker"])
@@ -4251,22 +4248,20 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getState()
 
-			// The folder value replaces (not unions with) the workspace value, and
-			// the effective get() value is ignored so global-scoped entries do not
-			// leak into the workspace layer.
+			// The folder value replaces the workspace value; it does not union.
+			// The effective get() value is ignored, so global entries cannot leak
+			// into the workspace layer.
 			expect(state.deniedCommands).toEqual(["pnpm docker"])
 		})
 
 		test("getState scopes its command-list lookups to the first workspace folder", async () => {
-			// Each folder carries its own distinct configuration, keyed by the
-			// resource the lookup was scoped with: any lookup that resolves to
-			// the second folder — or to no resource at all — reads the second
-			// folder's values, so the first folder's list can only come from a
-			// configuration scoped to the first folder's uri.
+			// Each folder gets its own configuration, chosen by the scope resource.
+			// An unscoped lookup reads the second folder, so the first folder's
+			// list can only come from a lookup scoped to its uri.
 			const firstFolder = { uri: makeUri("/root/one"), name: "first", index: 0 }
 			const secondFolder = { uri: makeUri("/root/two"), name: "second", index: 1 }
-			// The mocked module's workspaceFolders is readonly-typed, so the test
-			// installs it through defineProperty; the afterEach removes it again.
+			// workspaceFolders is readonly-typed in the mock, so set it through
+			// defineProperty. The afterEach removes it again.
 			Reflect.defineProperty(vscode.workspace, "workspaceFolders", {
 				configurable: true,
 				value: [firstFolder, secondFolder],
@@ -4296,11 +4291,10 @@ describe("ClineProvider", () => {
 			expect(state.workspaceCommandListsEnabled).toBe(true)
 		})
 
-		// A workspace-only allow entry is exactly what the gate decides: enabled
-		// it joins the effective lists enforcement uses; disabled enforcement ignores it.
+		// The gate decides a workspace-only allow entry: enabled, it joins the
+		// effective lists; disabled, enforcement ignores it.
 		function mockGateConfiguration(enabled: boolean) {
-			// The shared double reports scripted values through `get`, which
-			// is how the gate reader sees its value; the per-key `inspect`
+			// The gate reader reads its value through `get`; the `inspect`
 			// override supplies the allow-side workspace layer.
 			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: enabled })
 			const inspect = vi.fn()
@@ -4311,11 +4305,10 @@ describe("ClineProvider", () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
 		}
 
-		// Counterpart for a profile that never set the gate: the configuration
-		// reports nothing for the gate key, so the provider paths must apply the
-		// shared default themselves. The allow-side workspace layer is present so
-		// the asserted default direction (workspace entries stay inert) is
-		// observable, not just the boolean.
+		// For a profile that never set the gate: the configuration reports nothing,
+		// so the provider must apply the shared default. The workspace layer is
+		// present so the default direction (workspace entries stay inert) is
+		// observable.
 		function mockUnsetGateConfiguration() {
 			const config = makeWorkspaceConfiguration()
 			const inspect = vi.fn()
@@ -4388,8 +4381,7 @@ describe("ClineProvider", () => {
 			const state = await provider.getState()
 
 			expect(state.workspaceCommandListsEnabled).toBe(DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED)
-			// The default's direction, not just its value: an unset gate keeps the
-			// workspace entry out of the effective list.
+			// An unset gate keeps the workspace entry out of the effective list.
 			expect(state.allowedCommands).toEqual([])
 		})
 

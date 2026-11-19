@@ -422,13 +422,10 @@ export type ExtensionState = Pick<
 	cwd?: string // Current working directory
 
 	/**
-	 * The user-scope command lists as persisted in extension global state,
-	 * before any workspace-scoped composition. Auto-approval composes the
-	 * pair it enforces from these raw layers plus the folder the task runs
-	 * in, because the merged `allowedCommands`/`deniedCommands` pair follows
-	 * the window's first folder and would judge a task by another root's
-	 * lists. Not user settings: runtime state, written by the provider's
-	 * state bake, never by the settings dialog.
+	 * User-scope command lists from extension global state, before workspace
+	 * composition. Auto-approval enforces these raw layers plus the task's
+	 * folder; the merged pair follows only the window's first folder. Runtime
+	 * state, not user settings: the provider writes it, never the dialog.
 	 */
 	globalAllowedCommands?: string[]
 	globalDeniedCommands?: string[]
@@ -859,20 +856,18 @@ export interface WebviewMessage {
 	}
 	updatedSettings?: RooCodeSettings
 	/**
-	 * The command lists as the settings dialog last displayed them, sent alongside the
-	 * save that rewrites them. The settings file can gain entries while the dialog is
-	 * open, and without this baseline the save path cannot tell those additions apart
-	 * from list entries the user deleted: both look like "in the file, absent from the
-	 * submitted list". Senders that do not display the lists omit it.
+	 * The lists as the dialog last displayed them, sent with the save that rewrites
+	 * them. Without it the save cannot tell a file-side addition from a user
+	 * deletion: both look like "in the file, absent from the submission". Senders
+	 * that display no lists omit it.
 	 */
 	commandListBaseline?: {
 		allowedCommands?: string[]
 		deniedCommands?: string[]
 		/**
-		 * The workspace-command-lists gate as the dialog last displayed it. Flipping the
-		 * gate between display and save hides workspace entries, so this travels with the
-		 * baseline to let the save path classify an entry the baseline already showed as
-		 * existing workspace knowledge rather than a brand-new promotion into the global layer.
+		 * The gate as the dialog last displayed it. A gate flip between display and
+		 * save hides workspace entries; this lets the save treat an already-shown
+		 * entry as known workspace knowledge, not a new promotion to global.
 		 */
 		workspaceCommandListsEnabled?: boolean
 	}

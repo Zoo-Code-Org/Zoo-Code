@@ -170,27 +170,20 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
 
-	// Seed before the terminal registry is initialized: a rejected seed must
-	// abort activation while the registry holds no resources, because its
-	// listeners are released only by `deactivate()`, which the host does not
-	// guarantee after a failed activation.
-	// Each list key carries its own first-run guard, so a profile whose
-	// allowlist was seeded by an earlier version still gets the deny-list
-	// migration on the next activation.
+	// Seed before the terminal registry initializes: the host may skip
+	// `deactivate()` after a failed activation, and only it releases the
+	// registry's listeners.
+	// Each key has its own first-run guard, so a profile seeded by an earlier
+	// version still gets the deny-list migration.
 	try {
 		await seedCommandList(context.globalState, "allowedCommands")
 		await seedCommandList(context.globalState, "deniedCommands")
 	} catch (error) {
-		// Activation aborts here, and `deactivate()` is not guaranteed to run
-		// afterward, so this catch performs its own teardown before rethrowing:
-		// shut down the telemetry client registered above, clear the
-		// persistence trace sink, and dispose the output channel — in reverse
-		// of the order those three were acquired (the output channel was
-		// first), each step run only after the previous one settles.
-		// Teardown failures are logged or dropped, never rethrown, so they
-		// cannot mask the seed rejection; the telemetry service bounds its own
-		// drain and client-flush phases, so a stuck client cannot hang the
-		// host here.
+		// The host may skip `deactivate()`, so this catch tears down before
+		// rethrowing: telemetry shutdown, then trace-sink clear, then channel
+		// dispose — reverse acquisition order, each step awaited. Teardown
+		// failures are logged or dropped, never rethrown. Telemetry shutdown
+		// is bounded, so a stuck client cannot hang activation here.
 		try {
 			await telemetryService.shutdown()
 		} catch (shutdownError) {
@@ -198,16 +191,11 @@ export async function activate(context: vscode.ExtensionContext) {
 				`Failed to shut down telemetry service: ${shutdownError instanceof Error ? shutdownError.message : String(shutdownError)}`,
 			)
 		}
-		// The persistence trace sink installed above writes its lines through
-		// the output channel, so it is cleared — passing undefined restores the
-		// default console sink — before the channel is disposed, keeping any
-		// later trace event (such as a deactivate() shutdown trace) from
-		// writing into a disposed channel.
+		// The trace sink logs through the output channel, so clear it first:
+		// undefined restores the default console sink.
 		setPersistenceTraceSink(undefined)
-		// The channel is disposed after every step that logs through it, so no
-		// teardown log is written to an already-dead channel. Once it is gone,
-		// no extension output sink is left to report a failed dispose to; the
-		// error is deliberately dropped rather than routed to the console.
+		// Dispose the channel last: earlier teardown steps log through it.
+		// A failed dispose has no sink left to report to, so it is dropped.
 		try {
 			outputChannel.dispose()
 		} catch {

@@ -555,24 +555,21 @@ describe("extension.ts", () => {
 					}
 					return key === "allowedCommands" ? [...(globalValue ?? []), ...(workspaceValue ?? [])] : undefined
 				}),
-				// Key-scoped inspect: the deny seed must not read the allow scope's
-				// values through the same fixture object.
+				// Key-scoped inspect: the deny seed must not read allow-scope values.
 				inspect: vi.fn().mockImplementation((key: string) =>
 					key === "deniedCommands"
 						? { key, defaultValue: [], globalValue: deniedGlobalValue }
 						: {
 								key,
-								// Real inspect() always reports the declared package default;
-								// including it here lets the workspace-override test prove the
-								// default stays unseeded beside an override, not just absent.
+								// The override test must show the package default stays
+								// unseeded, not merely absent.
 								defaultValue: ["git log", "git diff", "git show"],
 								globalValue,
 								workspaceValue,
 							},
 				),
 				update: vi.fn(),
-				// The double scripts key-scoped get() and per-scope inspect()
-				// shapes the shared helper cannot express without obscuring them.
+				// This double scripts shapes the shared helper cannot express.
 			} as unknown as vscode.WorkspaceConfiguration)
 		}
 
@@ -585,16 +582,14 @@ describe("extension.ts", () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockReturnValue([]),
 				inspect: vi.fn(),
-				// Restores the neutral default after the scope fixtures above;
-				// update is intentionally absent because no test runs after this.
+				// Restores the neutral default. `update` is absent: no test runs after this.
 			} as unknown as vscode.WorkspaceConfiguration)
 		})
 
 		test("seeds both command lists before initializing the terminal registry", async () => {
-			// Invariant: a seed rejection must fail activation before the terminal
-			// registry is initialized, so no initialized-but-half-activated state is
-			// reachable (the registry's listeners are released only via deactivate,
-			// which the host does not guarantee after a failed activation).
+			// A seed rejection must fail activation before the registry initializes:
+			// the host may skip deactivate(), and only it releases the registry's
+			// listeners.
 			const order: string[] = []
 			const seedCommandList = vi.fn(async (_globalState: vscode.Memento, configKey: string): Promise<void> => {
 				order.push(`seed:${configKey}`)
@@ -625,8 +620,7 @@ describe("extension.ts", () => {
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// The seed rejection must reach the host unchanged, with the registry
-				// never initialized and no downstream activation (sidebar provider) reached.
+				// The seed rejection reaches the host unchanged; nothing downstream runs.
 				expect(TerminalRegistry.initialize).not.toHaveBeenCalled()
 				expect(ClineProvider).not.toHaveBeenCalled()
 			} finally {
@@ -635,19 +629,16 @@ describe("extension.ts", () => {
 		})
 
 		test("shuts down the telemetry service before propagating a seed rejection", async () => {
-			// The telemetry client is created and registered before the seed point,
-			// so a rejected seed must shut it down on the failure path: without
-			// `deactivate()` after a failed activation, an unshut-down client keeps
-			// sending events against an extension the host treats as inactive.
+			// The seed runs after telemetry registers, and the host may skip
+			// `deactivate()` after a failed activation, so the failure path must shut
+			// telemetry down itself.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
-			// A never-settling shutdown: activation may only reject once the awaited
-			// teardown settles, pinning that the seed rejection never reaches the
-			// host ahead of it.
+			// Activation may reject only after the awaited teardown settles.
 			let settleShutdown: () => void = () => {}
 			shutdown.mockImplementation(() => {
 				teardownOrder.push("telemetry-shutdown")
@@ -663,11 +654,10 @@ describe("extension.ts", () => {
 					rejected = true
 				})
 
-				// The awaited teardown step runs on the failure path, exactly once.
+				// The failure path runs the awaited teardown exactly once.
 				await vi.waitFor(() => expect(teardownOrder).toEqual(["telemetry-shutdown"]))
 
-				// Still unrejected while the awaited shutdown is unsettled: the catch
-				// must not propagate the seed rejection before teardown completes.
+				// The catch must not propagate before teardown completes.
 				expect(rejected).toBe(false)
 
 				settleShutdown()
@@ -679,11 +669,8 @@ describe("extension.ts", () => {
 		})
 
 		test("logs a rejected telemetry shutdown without masking the seed rejection", async () => {
-			// The seed-failure catch awaits the shutdown inside its own try/catch, so a
-			// rejecting shutdown must be logged and the seed error must still reach the
-			// host as the activation failure. A regression that rethrows the shutdown
-			// error hides why activation aborted; one that swallows it silently loses
-			// the only record of the telemetry teardown failure.
+			// A rejecting shutdown must be logged, and the seed error must still
+			// reach the host as the activation failure.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
@@ -701,8 +688,7 @@ describe("extension.ts", () => {
 
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// The shutdown failure surfaces through the appendLine idiom, with its
-				// error text, instead of replacing the seed rejection the host receives.
+				// The shutdown failure is logged, not swapped for the seed rejection.
 				const channel = vi.mocked(vscode.window.createOutputChannel).mock.results.at(-1)?.value
 				expect(channel?.appendLine).toHaveBeenCalledWith(
 					"Failed to shut down telemetry service: shutdown drain failed",
@@ -716,10 +702,9 @@ describe("extension.ts", () => {
 		})
 
 		test("disposes the output channel last when seeding rejects activation", async () => {
-			// The output channel is the first resource `activate` acquires, and the
-			// host does not guarantee `deactivate()` after a failed activation, so
-			// the failure path must release it too — last, because every earlier
-			// teardown step logs its own failure through this channel.
+			// The host may skip `deactivate()` after a failed activation, so the
+			// failure path must dispose the channel itself — last, because earlier
+			// teardown steps log through it.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
@@ -732,22 +717,18 @@ describe("extension.ts", () => {
 			})
 			try {
 				const vscode = await import("vscode")
-				// The factory double is a fixed object, so calling the mock now hands
-				// back the same channel `activate` will create; arming its dispose
-				// before activation lets the order assertion observe the step.
+				// Calling the fixed-object factory double now returns the same channel
+				// `activate` will create; arming dispose observes its disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
 				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
 
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// Strict reverse acquisition: the channel was acquired first, so it is
-				// disposed after the telemetry shutdown — every teardown log line was
-				// still writable when that step ran.
+				// Reverse acquisition order: channel first, so disposed last.
 				expect(teardownOrder).toEqual(["telemetry-shutdown", "channel-disposed"])
 				expect(channel.dispose).toHaveBeenCalledExactlyOnceWith()
-				// Still registered for the normal deactivate path; the failure-path
-				// dispose must not have replaced the subscription push.
+				// The failure-path dispose must not drop the subscriptions entry.
 				expect(mockContext.subscriptions).toContain(channel)
 			} finally {
 				shutdown.mockReset()
@@ -756,18 +737,14 @@ describe("extension.ts", () => {
 		})
 
 		test("clears the persistence trace sink before disposing the output channel when seeding rejects", async () => {
-			// The persistence trace sink installed at activation start mirrors
-			// trace lines through the output channel, so the failure path must
-			// unregister it before the channel goes away: a later trace — such as
-			// `deactivate()`'s shutdown event — would otherwise write into a
-			// disposed channel.
+			// The trace sink logs through the output channel, so the failure path
+			// must clear it before disposing the channel.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			// Only the teardown call is an order marker: installation passes the
-			// channel-logging sink, while clearing passes undefined — the setter's
-			// documented way to restore the default console sink.
+			// Clearing passes undefined (restore the default sink); that call marks
+			// the order assertion.
 			const setPersistenceTraceSink = vi.fn((sink?: unknown) => {
 				if (sink === undefined) {
 					teardownOrder.push("trace-sink-cleared")
@@ -785,22 +762,18 @@ describe("extension.ts", () => {
 			})
 			try {
 				const vscode = await import("vscode")
-				// The factory double is a fixed object, so calling the mock now hands
-				// back the same channel `activate` will create; arming its dispose
-				// before activation lets the order assertion observe the step.
+				// Calling the fixed-object factory double now returns the same channel
+				// `activate` will create; arming dispose observes its disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
 				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
 
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// Reverse acquisition order: the sink was installed after the channel
-				// it logs through but before the telemetry client, so it is cleared
-				// after the telemetry shutdown — and before the channel, which goes
-				// last.
+				// Reverse acquisition order: sink installed after the channel, so it
+				// clears after telemetry shutdown and before the channel.
 				expect(teardownOrder).toEqual(["telemetry-shutdown", "trace-sink-cleared", "channel-disposed"])
-				// Exactly the install call and the clear: the failure path neither
-				// skips the clear nor repeats it.
+				// The failure path clears the sink exactly once: install + clear.
 				expect(setPersistenceTraceSink).toHaveBeenCalledTimes(2)
 				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(1, expect.any(Function))
 				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(2, undefined)
@@ -812,8 +785,7 @@ describe("extension.ts", () => {
 		})
 
 		test("does not shut down telemetry when activation completes", async () => {
-			// Telemetry shutdown is failure-path only: a successfully activated
-			// extension owns the telemetry client until deactivate() runs.
+			// A successful activation owns the telemetry client until deactivate().
 			const { TelemetryService } = await import("@roo-code/telemetry")
 
 			const { activate } = await import("../extension")
@@ -824,10 +796,9 @@ describe("extension.ts", () => {
 
 		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
-			// The gate is on: an enforced workspace list replaces the default across
-			// scopes, so the seed must not re-grant the approvals it removed. (With
-			// the gate off the workspace layer is inert and the default is seeded —
-			// pinned in the seed module's own spec.)
+			// Gate on: the workspace list replaces the default, so the seed must not
+			// re-grant what it removed. (Gate-off seeding is pinned in the seed
+			// module's own spec.)
 			setConfigScope(vscode, { workspaceValue: ["docker"], gate: true })
 
 			const { activate } = await import("../extension")

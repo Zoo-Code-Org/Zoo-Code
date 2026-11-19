@@ -67,6 +67,13 @@ vi.mock("../rulesMessageHandler", () => ({
 	handleOpenRulesDirectory: vi.fn(),
 }))
 
+// The import case needs no real import: the shared import function is a
+// mock, and the save tests script the configuration state directly.
+vi.mock("../../config/importExport", () => ({
+	exportSettings: vi.fn(),
+	importSettingsWithFeedback: vi.fn(),
+}))
+
 vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		hasInstance: vi.fn().mockReturnValue(false),
@@ -82,6 +89,7 @@ import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
 import { Package } from "../../../shared/package"
+import { importSettingsWithFeedback } from "../../config/importExport"
 import { readCommandListScopes } from "../../auto-approval/commandScope"
 import { makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import { seedCommandList } from "../../../utils/seedAllowedCommands"
@@ -2152,16 +2160,10 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	// list configuration resolves to its uri.
 	const mockWorkspaceFolderUri = { fsPath: "/mock/workspace" }
 
-	// Mirrors the real VS Code configuration API: `inspect()` exposes the
-	// per-scope values, and `update()` records the target it was written to.
-	// Extension global state is left unset (getValue returns undefined), i.e.
-	// the global layer starts empty.
-	//
-	// `updateSequence` / `inspectSequence` let a failure test script what
-	// successive `update()` / `inspect()` calls return (each `update()` return
-	// is awaited by the handler, so a rejected promise fails that write), in
-	// call order; a plain value resolves like the default mock, and an Error
-	// element makes that call throw.
+	// Mirrors the real configuration API: `inspect()` exposes per-scope values,
+	// `update()` records its target. Extension state stays unset.
+	// `updateSequence` / `inspectSequence` script successive call outcomes in
+	// call order: an Error element makes that call throw.
 	type InspectedCommandList = {
 		globalValue?: string[]
 		workspaceValue?: string[]
@@ -2289,14 +2291,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	})
 
 	it("writes the global layer before the workspace layer and undoes only its own delta when the workspace write fails", async () => {
-		// update() call order: global write succeeds, workspace write rejects,
-		// undo write runs. The undo re-reads the global layer and applies only
-		// this save's delta, so an entry a third party added mid-save
-		// ("mid-save") survives while the save's own addition ("aws") is
-		// removed and its deletions ("keep", "drop") are restored. The gate is
-		// on so the workspace write is a plain keep with no hidden-entry re-add,
-		// keeping each scripted call distinguishable; the undo is pinned by
-		// call position.
+		// Call order: global write succeeds, workspace write rejects, undo runs.
+		// The undo applies only this save's delta, so the third party's
+		// mid-save addition survives while "aws" is removed and "keep"/"drop"
+		// are restored. The gate is on to keep each scripted call
+		// distinguishable; the undo is pinned by call position.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
 			key === "deniedCommands" ? ["keep", "drop"] : undefined,
 		)
@@ -2958,15 +2957,10 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	})
 
 	it("clears the key only when the undo's re-read finds no layer", async () => {
-		// A rolled-back addition-only save must not leave an empty global layer
-		// where the rollback found none: the activation seed treats an explicit
-		// `[]` as an override, so writing `[]` over an absent layer would
-		// suppress the default command lists after a restart. The undo clears the
-		// key instead, at the same call position the `[]` write would have
-		// occupied. What decides clear-versus-write is the guarded re-read's
-		// finding, so both legs land in the same clear: in each, a third party
-		// cleared the layer while the save ran, leaving even this save's addition
-		// gone.
+		// The undo must not leave an empty `[]` layer where the re-read found
+		// none: `[]` is the activation seed's override and would suppress the
+		// default lists. It clears the key instead. Both legs share the
+		// scenario: a third party cleared the layer while the save ran.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
 		const { update } = mockCommandConfiguration(
 			{},
@@ -3017,14 +3011,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	})
 
 	it("clears the key when the undo's re-read finds only this save's own write", async () => {
-		// The global layer was absent when the save started, and the re-read
-		// during the compensation finds it holding exactly the list this save
-		// wrote — the half-applied save itself, not another writer's decision.
-		// An undo that wrote `[]` back would materialize an explicit empty
-		// override that the activation seed honors over the default lists, so
-		// the rollback clears the key and restores the absence the save
-		// started from. Both legs are that signature: the second when the
-		// save's own global write was itself empty.
+		// The re-read finds the layer holding exactly this save's own write
+		// over an absent start — the half-applied save itself, not another
+		// writer's decision — so the undo clears the key and restores the
+		// absence. Both legs share that signature; the second save's own
+		// global write was empty.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockReturnValue(undefined)
 		const { update } = mockCommandConfiguration(
 			{},
@@ -3854,6 +3845,73 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			"git diff",
 			"git show",
 		])
+	})
+
+	it("preserves a settings-imported entry whose only home is the state copy", async () => {
+		// A settings import mirrors each command list into the global layer
+		// (pinned in importExport.spec.ts); this test pins the save side.
+		// Without that mirrored layer the next unrelated Save would classify
+		// the displayed entry as externally removed and delete it. The
+		// scripted configuration is stateful: update() changes what the next
+		// inspect() reports, as the real API does.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			// The import's state write: "imported" exists here too.
+			key === "allowedCommands" ? ["git", "imported"] : undefined,
+		)
+		// The import's mirror write holds the full list in the global layer;
+		// an earlier dialog save had already created that layer, so the
+		// absent-layer exception cannot carry the case either.
+		const layers: { globalValue?: string[] } = { globalValue: ["git", "imported"] }
+		const update = vi.fn()
+		update.mockImplementation(async (_key: string, value: string[]) => {
+			layers.globalValue = value
+		})
+		const inspect = vi.fn()
+		inspect.mockImplementation((key: string) => (key === "allowedCommands" ? layers : {}))
+		const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+		config.update = update
+		config.inspect = inspect
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+		// The next unrelated Save submits the same list with the baseline the
+		// import re-posted to the dialog.
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { allowedCommands: ["git", "imported"] },
+			commandListBaseline: {
+				allowedCommands: ["git", "imported"],
+				workspaceCommandListsEnabled: true,
+			},
+		})
+
+		// The mirrored entry survives the save in both homes instead of
+		// being dropped as externally removed.
+		expect(update).toHaveBeenCalledWith("allowedCommands", ["git", "imported"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("allowedCommands", ["git"], vscode.ConfigurationTarget.Global)
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("allowedCommands", ["git", "imported"])
+		// Retention, not a file-side change: no disclosure.
+		expect(vscode.window.showWarningMessage).not.toHaveBeenCalled()
+	})
+
+	it("delegates the import case to the shared import function without a configuration write", async () => {
+		// The command-list mirror lives inside importSettingsWithFeedback
+		// (pinned in importExport.spec.ts), so the message case must stay a
+		// thin delegate: it adds no configuration write of its own, even
+		// with a state copy holding command lists.
+		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
+			key === "allowedCommands" ? ["git", "imported"] : undefined,
+		)
+		const { update } = mockCommandConfiguration({ globalValue: ["git"] }, undefined, undefined, true)
+
+		await webviewMessageHandler(mockClineProvider, { type: "importSettings" })
+
+		expect(importSettingsWithFeedback).toHaveBeenCalledWith({
+			providerSettingsManager: mockClineProvider.providerSettingsManager,
+			contextProxy: mockClineProvider.contextProxy,
+			customModesManager: mockClineProvider.customModesManager,
+			provider: mockClineProvider,
+		})
+		expect(update).not.toHaveBeenCalled()
 	})
 
 	it("preserves a configuration-global entry the dialog displayed at the workspace scope", async () => {

@@ -156,32 +156,21 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				return
 			}
 			const provider = await task.providerRef.deref()
-			// One canonical working directory, resolved before any approval
-			// decision: the command-list policy, the DCG run, and the terminal
-			// spawn must all see the same directory, so a custom `cwd` can never
+			// Resolve one working directory before any approval decision: policy,
+			// DCG, and spawn all see the same directory, so a custom `cwd` cannot
 			// be approved against one folder and executed in another.
 			const lexicalWorkingDirectory = customCwd
 				? path.isAbsolute(customCwd)
 					? customCwd
 					: path.resolve(task.cwd, customCwd)
 				: task.cwd
-			// A folder's command lists apply to a command by containment: the
-			// working directory is matched against the open roots, and against
-			// each root's real path when the registered paths match nothing, so
-			// a root that is itself a link still claims its own directory.
-			// Canonicalizing here keeps both sides of that match physical, so
-			// the judged folder is the one containing the directory the process
-			// actually starts in — a symlinked directory would otherwise be
-			// judged by the folder its path sits in while the process starts in
-			// the link's target, the same drift in filesystem form (precedent:
-			// `RooIgnoreController.validateAccess` also resolves symlinks with
-			// realpath before a policy check). Unlike that file-access posture,
-			// an unresolvable link here names no directory any policy could
-			// judge, so the command fails closed through the working-directory
-			// error channel rather than falling back to the lexical path. A link
-			// re-pointed between this call and the spawn cannot be closed from
-			// here; it rides the same accepted race class as a settings flip
-			// during a pending prompt.
+			// Folder command lists apply by containment. Canonicalizing here keeps
+			// both sides of that match physical, so a symlinked directory is judged
+			// where the process actually starts (`RooIgnoreController.validateAccess`
+			// sets the realpath-before-policy precedent). An unresolvable link names
+			// no judgeable directory: fail closed via the working-directory error,
+			// no lexical fallback. A link re-pointed before the spawn is an accepted
+			// race, like a settings flip during a pending prompt.
 			let workingDirectory: string
 			try {
 				workingDirectory = await fs.realpath(lexicalWorkingDirectory)
@@ -439,10 +428,9 @@ export type ExecuteCommandOptions = {
 	customCwd?: string
 	/**
 	 * The directory the approval was judged against, resolved once by the
-	 * tool. When present the command spawns there directly, so the executed
-	 * directory cannot drift from the one the command policy approved;
-	 * callers that build options without it fall back to resolving
-	 * `customCwd` against the task's own `cwd` here.
+	 * tool. The command spawns there directly, so execution cannot drift from
+	 * the approved directory. Without it, callers resolve `customCwd` against
+	 * the task `cwd` here.
 	 */
 	workingDirectory?: string
 	terminalShellIntegrationDisabled?: boolean

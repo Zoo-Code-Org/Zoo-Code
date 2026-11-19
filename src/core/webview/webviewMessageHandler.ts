@@ -786,11 +786,9 @@ export const webviewMessageHandler = async (
 					}
 				}
 
-				// Shadowing is cross-directional, and a payload can carry both
-				// command-list keys, so the second-processed key's hidden-entry
-				// check would otherwise read the layer the first key's iteration
-				// just wrote. Both global layers are captured before any write so
-				// a hidden entry's preservation cannot depend on payload key order.
+				// Shadowing spans both directions, and one payload can carry both
+				// command-list keys. Capture both global layers before any write,
+				// so hidden-entry preservation cannot depend on payload key order.
 				const commandListGlobalsAtSaveStart = {
 					allowedCommands: getGlobalState("allowedCommands"),
 					deniedCommands: getGlobalState("deniedCommands"),
@@ -810,11 +808,9 @@ export const webviewMessageHandler = async (
 						newValue = value ?? "en"
 						changeLanguage(newValue as Language)
 					} else if (key === "workspaceCommandListsEnabled") {
-						// The gate's effective value is the synchronous
-						// user-scope configuration read that enforcement and
-						// display already perform; a value arriving in a
-						// settings payload is not a second source that can flip
-						// it, so it is never persisted here.
+						// The gate's effective value is the synchronous user-scope
+						// configuration read that enforcement and display already
+						// perform. A settings payload never flips or persists it.
 						continue
 					} else if (key === "allowedCommands" || key === "deniedCommands") {
 						const commands = value ?? []
@@ -823,27 +819,20 @@ export const webviewMessageHandler = async (
 							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
 							: []
 
-						// The webview always sends the full merged list (it displays
-						// the union of the global-state and workspace-scope layers).
-						// Splitting that list by origin scope needs the workspace
-						// layer, the write target, and the rollback value to describe
-						// the SAME configuration state, so they are all derived from
-						// one inspect() snapshot taken before any write. Without a
-						// snapshot the key's save is aborted rather than guessed at:
-						// reading the workspace layer as empty would classify a
-						// workspace-scoped entry as brand new and re-copy it into
-						// global settings.
+						// The webview sends the full merged list. Splitting it by
+						// origin scope needs one inspect() snapshot before any write:
+						// the workspace layer, write target, and rollback value must
+						// describe the same configuration state. A guessed-empty
+						// workspace layer would re-copy workspace entries into global
+						// settings, so a key without a snapshot aborts instead.
 						// Only the snapshot read is guarded: a failing
-						// commandListConfiguration() lookup propagates instead of being
-						// downgraded to a per-key save failure.
+						// commandListConfiguration() lookup propagates instead of
+						// becoming a per-key save failure.
 						const config = commandListConfiguration()
 						let inspection: CommandListInspection | undefined
-						// The same save-start snapshot keeps its global layer: the
-						// rollback below distinguishes an absent Global layer from an
-						// empty one and computes this save's delta against it — the
-						// layer the write below actually targets — and re-reading here
-						// would give the rollback a configuration state the scope read
-						// never saw.
+						// The rollback needs this snapshot's global layer: it
+						// distinguishes an absent layer from an empty one, and the
+						// delta is computed against the layer the write targets.
 						let globalLayerAtSaveStart: string[] | undefined
 						let inspectionFailure: string | undefined
 						try {
@@ -855,10 +844,8 @@ export const webviewMessageHandler = async (
 						}
 						if (inspection === undefined) {
 							// No snapshot: the workspace layer could only be guessed
-							// at, and a guessed-empty layer re-copies workspace entries
-							// into global settings, so this key's save is abandoned
-							// while the remaining keys of the payload persist normally.
-							// The abandoned key still reports through the save result.
+							// at, so this key's save is abandoned. The other keys
+							// persist, and this key reports through the save result.
 							vscode.window.showErrorMessage(
 								`Failed to save ${key}: ${inspectionFailure ?? "the configuration value could not be read"}`,
 							)
@@ -868,28 +855,22 @@ export const webviewMessageHandler = async (
 
 						const currentScopes = readCommandListScopes(key, getGlobalState(key), inspection)
 
-						// The compensation's delta baseline: the global layer of the same
-						// save-start snapshot — the configuration the global write below
-						// targets — sanitized the way every command-list read sanitizes it.
-						// The extension state copy (`currentScopes.global`) is a separate
-						// cache that can hold a different list, and a delta computed
-						// against it would restore that stale list over the entries a
-						// rolled-back save actually wrote over in the configuration.
+						// The compensation's delta baseline: the snapshot's global layer —
+						// the configuration the global write targets. The state copy is a
+						// separate cache; a delta against it would restore a stale list
+						// over entries the rolled-back save replaced in the configuration.
 						const configGlobalAtSaveStart = readCommandListScopes(
 							key,
 							globalLayerAtSaveStart,
 							inspection,
 						).global
 
-						// Shadowing is cross-directional, so the hidden-entry set
-						// needs the opposite key's global layer as input. It comes
-						// from the save-start snapshot, not a fresh read: an
-						// earlier iteration of this loop may already have written
-						// that key. The layer only feeds the hidden-entry mechanism
-						// below — additive preservation, external-addition
-						// classification, and the split's promotion filter —
-						// and never this key's target or rollback, which stay
-						// on the per-key configuration snapshot.
+						// Shadowing spans both directions, so the hidden-entry set
+						// needs the opposite key's global layer. Take it from the
+						// save-start snapshot, not a fresh read: an earlier loop
+						// iteration may already have written that key. The layer
+						// feeds only the hidden-entry mechanism, never this key's
+						// target or rollback.
 						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
 						const otherScopes = readCommandListScopes(otherKey, commandListGlobalsAtSaveStart[otherKey])
 						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
@@ -897,35 +878,27 @@ export const webviewMessageHandler = async (
 							key === "deniedCommands" ? currentScopes : otherScopes,
 							workspaceCommandListsEnabled(),
 						)
-						// Entries hidden from the dialog — while the gate is off,
-						// or shadowed by a global entry with it on — cannot be
-						// deleted through a list that never displayed them, so a
-						// save re-adds them to the workspace layer it rewrites.
-						// Users remove those directly in the workspace settings
-						// file.
+						// Hidden entries — gate off, or shadowed by a global
+						// entry — were never displayed. A list cannot delete what
+						// it never showed, so a save re-adds them to the workspace
+						// layer it rewrites. Remove them in the settings file.
 						const hiddenWorkspaceEntries =
 							key === "allowedCommands" ? hiddenWorkspaceAllow : hiddenWorkspaceDeny
 
-						// An entry the settings file gained while the dialog was open has
-						// the same shape as an entry the user deleted: present in the file,
-						// absent from the submitted list. Only the dialog's last-displayed
-						// baseline separates the two, so file entries outside that baseline
-						// are re-admitted before the split (deletions of baseline entries
-						// still apply). Hidden entries never appear in that baseline, yet
-						// the workspace-layer re-add below preserves them, so classifying
-						// them as external additions would repeat a false "settings file
-						// changed" warning on every save. That exclusion only speaks for
-						// entries whose save-start provenance is the hidden workspace
-						// layer: an entry the configuration's own global layer holds is
-						// displayed global knowledge, and excluding it would delete the
-						// user's file addition. A sender that shows no lists
-						// sends no baseline, and its submitted list is written
-						// unclassified. The union covers every layer that can hold an
-						// entry at save start: the extension-state global copy is not
-						// refreshed when the settings file is edited directly, so an
-						// entry only the configuration's own global layer holds would be
-						// invisible to a union of the state copy and the workspace layer,
-						// and the global write below would delete it from the user file.
+						// A file entry the dialog never showed looks like a user
+						// deletion: in the file, absent from the submitted list. The
+						// last-displayed baseline separates them, so file entries
+						// outside it are re-admitted before the split; deleting a
+						// baseline entry still applies. Hidden entries are excluded:
+						// the workspace re-add below preserves them, so calling them
+						// external additions would warn on every save. The exclusion
+						// covers only entries the hidden workspace layer held; an
+						// entry in the configuration's global layer is displayed, and
+						// excluding it would delete the user's file addition. A sender
+						// with no baseline writes its list unclassified. The union
+						// spans every layer that can hold an entry at save start: the
+						// state copy lags direct file edits, so a config-only entry
+						// must still be visible to the classifier.
 						const baseline = message.commandListBaseline?.[key]
 						const externallyAdded = Array.isArray(baseline)
 							? [
@@ -942,27 +915,18 @@ export const webviewMessageHandler = async (
 											configGlobalAtSaveStart.includes(entry)),
 								)
 							: []
-						// An entry the settings file lost while the dialog was open is
-						// still in the submitted list, and with no layer holding it
-						// anymore the split below would classify it as brand-new
-						// knowledge and promote a project entry into the global layer.
-						// The baseline separates that from a user addition: a baseline
-						// entry was displayed, so submitting it signals retention, not
-						// newness — a retained entry that no layer still holds was
-						// removed in the file, and external removal wins over the stale
-						// dialog buffer, mirroring how the external-addition re-admit
-						// above lets the file win over a stale deletion. "No layer"
-						// means the configuration layers the writes target: they alone
-						// can disprove a removal, because the extension-state copy is
-						// never refreshed when the settings file is edited directly and
-						// so can hold an entry the file has deleted just as it can miss
-						// one the file has gained. The state copy is still retention
-						// evidence where the configuration has no global layer at all:
-						// an absent layer is no file that could have deleted anything,
-						// and the entries the copy holds from the activation seed (the
-						// built-in defaults, before this list was ever saved) would
-						// otherwise vanish from every layer on the first save. Entries
-						// absent from the baseline keep their promotion path untouched.
+						// A file-deleted entry is still in the submitted list. With
+						// no layer holding it, the split would treat it as brand-new
+						// and promote a project entry into the global layer. The
+						// baseline separates that from a user addition: submitting a
+						// displayed entry signals retention, and a retained entry no
+						// configuration layer holds was removed in the file — the
+						// file wins over the stale dialog buffer. Only the
+						// configuration layers can disprove a removal: the state
+						// copy lags direct file edits. The state copy still counts
+						// where the configuration has no global layer at all — an
+						// absent layer deleted nothing, and activation-seeded
+						// defaults would otherwise vanish on the first save.
 						const splitSourceEntries = Array.isArray(baseline)
 							? [...incoming, ...externallyAdded].filter(
 									(entry) =>
@@ -972,15 +936,12 @@ export const webviewMessageHandler = async (
 										(currentScopes.global.includes(entry) && globalLayerAtSaveStart === undefined),
 								)
 							: [...incoming, ...externallyAdded]
-						// The baseline also carries the gate as the dialog last displayed
-						// it. When the gate flipped since, the hidden set can hold
-						// entries the user did see, and an entry the dialog displayed is
-						// existing workspace knowledge: keeping it must stay a workspace
-						// decision, not a brand-new promotion into the global layer.
-						// Entries hidden by shadowing (or by a gate state the baseline
-						// already reflects) are absent from the baseline, so their
-						// promotion behavior is unchanged. A baseline without the gate
-						// slot predates it and keeps the current classification.
+						// The baseline carries the gate as the dialog displayed it.
+						// If the gate flipped since, the hidden set can hold entries
+						// the user did see; keeping a displayed entry must stay a
+						// workspace decision, not a promotion into the global layer.
+						// A baseline without the gate slot keeps the current
+						// classification.
 						const gateAtDisplay = message.commandListBaseline?.workspaceCommandListsEnabled
 						const promotionHiddenEntries =
 							gateAtDisplay === undefined || gateAtDisplay === workspaceCommandListsEnabled()
@@ -990,19 +951,17 @@ export const webviewMessageHandler = async (
 									)
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							splitSourceEntries,
-							// Hidden entries are not existing knowledge for promotion
-							// purposes: the dialog never displayed them, so an entry the
-							// user just added is new even when the workspace layer
-							// already holds it hidden — except entries the baseline
-							// shows the dialog did display. The re-add below restores
-							// the hidden entries this reduced layer drops.
+							// Hidden entries are not existing knowledge: the dialog
+							// never displayed them, so a submitted entry the user just
+							// added is new even when the workspace layer holds it
+							// hidden. Entries the baseline shows displayed are the
+							// exception; the re-add below restores dropped hidden
+							// entries.
 							currentScopes.workspace.filter((entry) => !promotionHiddenEntries.includes(entry)),
-							// The global origin set decides which kept entries the Global
-							// write preserves, so it covers the same configuration layer
-							// as the retained-entry filter above: only the
-							// configuration's own global layer is evidence of existing
-							// global knowledge, because the extension-state copy is not
-							// refreshed when the settings file is edited directly.
+							// The global origin set must match the retained-entry
+							// filter: only the configuration's own global layer proves
+							// existing global knowledge, because the state copy lags
+							// direct file edits.
 							configGlobalAtSaveStart,
 						)
 
@@ -1023,38 +982,29 @@ export const webviewMessageHandler = async (
 						]
 						const workspaceTarget = resolveWorkspaceWriteTarget(key, inspection)
 
-						// The two configuration writes below are not atomic, so their
-						// order is chosen against the composed enforcement set — the set
-						// union of the layers: the global layer is written first, so a
-						// save interrupted between the writes can only leave an entry
-						// duplicated across the layers (inert under the union, no
-						// approval outcome differs), never absent from both. A failed
-						// global write changes nothing and needs no compensation; only a
-						// failed workspace write leaves the global layer holding this
-						// save's value, and that half is undone below.
+						// The two configuration writes are not atomic. Global is
+						// written first: an interrupted save can only duplicate an
+						// entry across layers (inert under the enforcement union),
+						// never lose it. A failed global write changes nothing; a
+						// failed workspace write is undone below.
 						let globalWriteApplied = false
 						try {
 							await config.update(key, globalWrite, vscode.ConfigurationTarget.Global)
 							globalWriteApplied = true
 
-							// Then the workspace layer, at the target that owns it. When
-							// no workspace layer exists the write is skipped entirely so
-							// saving never materializes one; when entries were deleted
-							// the `[]` write clears them at that scope.
+							// The workspace layer, at the target that owns it. With no
+							// workspace layer the write is skipped, so saving never
+							// materializes one; deletions clear it with `[]`.
 							if (workspaceTarget !== undefined) {
 								await config.update(key, workspaceWrite, workspaceTarget)
 							}
 						} catch (error) {
 							const failure = error instanceof Error ? error.message : String(error)
 
-							// Only a failed workspace write leaves a changed layer, and
-							// only the global one changed. The compensation undoes
-							// exactly this save's delta — removing the entries it added
-							// to the global layer and restoring the ones it deleted —
-							// against a fresh read, so entries a third party added to
-							// that layer mid-save survive. A whole-snapshot rewind
-							// would clobber them, and the configuration API offers no
-							// compare-and-set to make that safe.
+							// Undo exactly this save's global delta, against a fresh
+							// read, so entries a third party added mid-save survive.
+							// A snapshot rewind would clobber them; the configuration
+							// API offers no compare-and-set.
 							if (globalWriteApplied) {
 								const addedByThisSave = globalWrite.filter(
 									(entry) => !configGlobalAtSaveStart.includes(entry),
@@ -1062,22 +1012,14 @@ export const webviewMessageHandler = async (
 								const removedByThisSave = configGlobalAtSaveStart.filter(
 									(entry) => !globalWrite.includes(entry),
 								)
-								// The re-read is guarded: when even the read fails there
-								// is nothing safe to write, and falling back to the
-								// save-start value is the clobber this compensation
-								// exists to avoid. An undo that would empty a layer that
-								// is absent clears the key instead: the configuration
-								// distinguishes `[]` from absent, and the activation seed
-								// treats `[]` as an override, so writing `[]` where no
-								// value existed would suppress the default lists after a
-								// rolled-back save. What the rollback must respect is whose
-								// presence the layer holds: a layer the re-read finds holding
-								// something other than this save's own write came about
-								// through another writer's decision (or predates the save),
-								// and its explicit `[]` override must survive this undo; a
-								// layer still holding exactly this save's write over an
-								// absent start is the half-applied save itself, so its
-								// absence is what the rollback restores.
+								// A failed re-read means nothing is safe to write: the
+								// save-start fallback is the clobber this path avoids.
+								// An undo that would empty an absent layer clears the key
+								// instead of writing `[]`, which the activation seed
+								// honors as the user's override. Respect whose decision
+								// the layer holds: another writer's `[]` survives; a layer
+								// holding only this save's own write over an absent start
+								// is the half-applied save, so its absence is restored.
 								let freshGlobalValue: string[] | undefined
 								try {
 									freshGlobalValue = config.inspect<string[]>(key)?.globalValue
@@ -1129,23 +1071,19 @@ export const webviewMessageHandler = async (
 								}
 							}
 
-							// Only this key's save is abandoned; the remaining keys of the
-							// payload persist normally, and the abandoned key reports
-							// through the save result without re-raising the failure.
+							// Abandon only this key; the other keys persist, and this
+							// key reports through the save result without re-raising.
 							vscode.window.showErrorMessage(`Failed to save ${key}: ${failure}`)
 							commandListSaveFailed = true
 							continue
 						}
 
-						// Extension global state keeps only the global layer:
-						// enforcement re-adds the workspace layer through
-						// readCommandListScopes, so storing the merged list here
-						// would double-home workspace entries and re-leak them on the
-						// next save.
+						// Extension state keeps only the global layer: enforcement
+						// re-adds the workspace layer, so storing the merged list here
+						// would double-home workspace entries and re-leak them.
 						newValue = globalWrite
-						// Accumulated only after both configuration writes succeeded: the
-						// disclosure must not claim preservation for a key whose save was
-						// abandoned by a failed write.
+						// Accumulate only after both writes succeeded: the disclosure
+						// must not name a key whose save was abandoned.
 						externallyAddedCommandEntries.push(...externallyAdded)
 					} else if (key === "allowedReadFiles" || key === "allowedWriteFiles") {
 						const patterns = value ?? []

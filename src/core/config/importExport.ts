@@ -21,6 +21,7 @@ import { ContextProxy } from "./ContextProxy"
 import { CustomModesManager } from "./CustomModesManager"
 import { downgradeLegacyRooConfig, ROUTER_REMOVAL_IMPORT_WARNING } from "./routerRemoval"
 import { resolveDefaultSaveUri, saveLastExportPath } from "../../utils/export"
+import { Package } from "../../shared/package"
 import { t } from "../../i18n"
 
 export type ImportOptions = {
@@ -386,6 +387,24 @@ export const importSettingsWithFeedback = async (
 	}
 
 	if (result.success) {
+		// Import writes the command lists only to the extension-state
+		// copy. A save classifies a displayed entry as externally
+		// removed unless a configuration layer holds it. Mirror each
+		// imported list into the global layer so the next save keeps it.
+		for (const key of ["allowedCommands", "deniedCommands"] as const) {
+			const imported = result.globalSettings?.[key]
+			if (Array.isArray(imported)) {
+				try {
+					await vscode.workspace
+						.getConfiguration(Package.name)
+						.update(key, imported, vscode.ConfigurationTarget.Global)
+				} catch (error) {
+					// The import itself succeeded; the lists work until a save rewrites both homes.
+					console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
+				}
+			}
+		}
+
 		provider.settingsImportedAt = Date.now()
 		await provider.postStateToWebview()
 		provider.settingsImportedAt = undefined

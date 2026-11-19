@@ -769,10 +769,9 @@ describe("SettingsView - Allowed Commands", () => {
 	})
 
 	it("sends the lists displayed at open as the save baseline, unmoved by an in-flight list edit", () => {
-		// The save path classifies divergence between "user deleted this" and "the
-		// settings file gained this" from the baseline, so the payload must carry what
-		// the dialog displayed BEFORE this save - not the edited list it is submitting,
-		// and not the committed value the post-save bookkeeping writes back.
+		// The save path tells "user deleted this" from "the file gained this" using
+		// the baseline, so the payload must carry what the dialog displayed before
+		// this save - not the submitted list, not the committed value.
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
 			state: { allowedCommands: ["git"], alwaysAllowExecute: true },
 		})
@@ -795,10 +794,9 @@ describe("SettingsView - Allowed Commands", () => {
 	})
 
 	it("carries the gate displayed as on in the save baseline", () => {
-		// The save path compares this flag against the gate at write time: with the flag
-		// on, entries the baseline displayed are existing workspace knowledge, so a gate
-		// flip between display and save cannot reclassify a kept entry as a brand-new
-		// promotion into the global layer.
+		// The save path compares this flag against the gate at write time. With it
+		// on, baseline entries are known workspace entries, so a gate flip cannot
+		// reclassify a kept entry as a new global promotion.
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
 			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: true },
 		})
@@ -824,10 +822,10 @@ describe("SettingsView - Allowed Commands", () => {
 	})
 
 	it("keeps the stamped gate paired with held-back lists when the gate flips during a buffered edit", async () => {
-		// An external state post flips the gate while a list edit is in flight: the lists are held
-		// back, so the baseline must keep the gate those entries were displayed under - posting
-		// the flipped gate alongside the held-back entries would let the save path classify a
-		// baseline-shown workspace entry as a brand-new promotion into the global layer.
+		// An external post flips the gate during a list edit. The lists are held
+		// back, so the baseline must keep the gate they were displayed under;
+		// posting the flipped gate would reclassify a shown entry as a new
+		// global promotion.
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
 			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: true },
 		})
@@ -861,9 +859,8 @@ describe("SettingsView - Allowed Commands", () => {
 	})
 
 	it("sends the merged gate with the merged lists when no list edit is in flight", async () => {
-		// The same merge's other branch: with no in-flight list edit the merge adopts the posted
-		// lists AND the gate, so the baseline describes the newly displayed state - the pairing
-		// guard holds in both directions, and a held stamp must not strand a stale gate.
+		// The other merge branch: with no in-flight edit the merge adopts the
+		// posted lists and the gate, so the baseline describes the new state.
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
 			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: false },
 		})
@@ -897,9 +894,8 @@ describe("SettingsView - Allowed Commands", () => {
 	})
 
 	it("carries the gate displayed as off in the save baseline without persisting it", () => {
-		// The gate value reaches the save path through the baseline only: the dialog
-		// displays the host's gate but never writes it, so the flag must not appear in
-		// the settings payload the host persists.
+		// The dialog shows the host's gate but never writes it, so the flag must
+		// reach the save path through the baseline only, not the settings payload.
 		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
 			state: { allowedCommands: ["git"], alwaysAllowExecute: true, workspaceCommandListsEnabled: false },
 		})

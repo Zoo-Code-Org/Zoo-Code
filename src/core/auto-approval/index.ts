@@ -156,22 +156,14 @@ function isWriteAllowedByPatterns(
 }
 
 /**
- * Same chain aggregation as `getCommandDecisionDetailed` — split into
- * sub-commands, any denial denies the whole command, a dangerous substitution
- * forces the user prompt, and approval needs every sub-command approved — but
- * each sub-command is decided by `getEffectiveCommandDecision`, so the global
- * layer decides every command it matches and workspace entries apply only
- * where no global entry matches. A flat merged pair cannot express that
- * precedence: a workspace wildcard deny ties a global prefix allow in the
- * matcher's longest-prefix comparison, so composition would have to drop one
- * layer's entries to break the tie and lose its verdicts elsewhere.
- *
- * The aggregation mirrors `getCommandDecisionDetailed` on purpose: malformed
- * parsing, redirection sanitization, the substitution veto, and the
- * offending-command/matched-pattern reporting must not drift between the two
- * paths — only the per-sub-command leaf decision differs. Where a sub-command
- * has no global match at all, both paths reach the same outcome, because the
- * flat pair is the union of exactly the layers the split evaluates.
+ * Chain aggregation identical to `getCommandDecisionDetailed` — any denial
+ * denies, a dangerous substitution prompts, approval needs every sub-command
+ * approved — except each sub-command goes through
+ * `getEffectiveCommandDecision`. A flat merged pair cannot express the
+ * global-decides precedence: a workspace wildcard deny ties a global prefix
+ * allow in the longest-prefix comparison, and breaking the tie would drop
+ * one layer's verdicts elsewhere. The aggregation mirrors the flat path so
+ * parsing, sanitization, and reporting cannot drift between them.
  */
 function getLayerScopedCommandDecisionDetailed(
 	command: string,
@@ -194,8 +186,7 @@ function getLayerScopedCommandDecisionDetailed(
 	if (denyIndex !== -1) {
 		const offendingCommand = sanitizedCommands[denyIndex]
 		const lowerMatch = findLongestPrefixMatch(offendingCommand, effective.denied)
-		// Prefer the original-cased pattern the user typed, falling back to the
-		// case-insensitive match itself.
+		// Prefer the user-typed casing; fall back to the case-insensitive match.
 		const matchedPattern =
 			effective.denied.find((pattern) => pattern.toLowerCase() === lowerMatch) ?? lowerMatch ?? undefined
 
@@ -244,19 +235,11 @@ export async function checkAutoApproval({
 }: {
 	state?: Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
 	/**
-	 * Workspace root the allowlist patterns and the checked path are resolved
-	 * against.
-	 *
-	 * For every ask but a command, this is the `cwd` of the task the ask belongs
-	 * to — the root the path in `text` was made relative to. A command ask is
-	 * judged against the command's own resolved working directory when the
-	 * caller forwards `commandCwd`, which a custom working directory moves off
-	 * the task folder. It is not read from `state`, because
-	 * the provider's `cwd` follows the window (the focused editor in a multi-root
-	 * workspace, or a `refreshWorkspace()` while the task runs) and a resumed or
-	 * child task can run against another root entirely. Resolving against the
-	 * wrong one would let a pattern written for one workspace approve a write
-	 * landing in another.
+	 * Workspace root the allowlist patterns and the checked path resolve against.
+	 * For a non-command ask this is the task's `cwd`; for a command ask it is the
+	 * command's own working directory when the caller forwards `commandCwd`.
+	 * Never the provider's `state.cwd`: that follows the window, so a resumed or
+	 * child task could be judged by another root's patterns.
 	 */
 	cwd?: string
 	ask: ClineAsk
@@ -384,19 +367,12 @@ export async function checkAutoApproval({
 				return { decision: "approve" }
 			}
 
-			// The pair on `state` was composed against the window's first
-			// folder; a command executing in another folder must be judged by
-			// that folder's lists, so enforcement re-composes from the raw
-			// global layers at the folder the command's `cwd` resolves to. A
-			// non-blank `cwd` that resolves to no workspace root names a
-			// directory outside every folder, and no folder's layer may decide
-			// it: the workspace layer is dropped (`enabled=false`) and only the
-			// global layers apply — fail-closed, so nothing on a folder's
-			// allow list can approve a command in a directory no folder
-			// claims. A blank or absent `cwd` keeps the first-folder
-			// configuration. Without the raw layers the pre-composed pair is
-			// all the state carries, and that pair is what enforcement
-			// consumes.
+			// The pair on `state` follows the window's first folder, so a command
+			// in another folder is re-judged from the raw global layers at its own
+			// folder. A `cwd` outside every workspace root gets no folder layer at
+			// all — fail-closed: no folder's allow list may approve it. A blank
+			// `cwd` keeps the first-folder configuration. Without raw layers, the
+			// pre-composed pair is all the state carries.
 			const commandFolder = commandListFolderForResource(cwd)
 			const cwdNamesNoFolder = Boolean(cwd) && commandFolder === undefined
 			const effectiveLists =
@@ -418,10 +394,8 @@ export async function checkAutoApproval({
 						)
 					: { allowed: state.allowedCommands || [], denied: state.deniedCommands || [] }
 
-			// The layered composition carries the per-layer split, so each
-			// sub-command goes through getEffectiveCommandDecision; the
-			// pre-composed fallback pair carries no layers and keeps the flat
-			// matcher.
+			// Layered composition takes the per-layer split; the fallback pair
+			// keeps the flat matcher.
 			const { decision, offendingCommand, matchedPattern, parseError } =
 				"globalAllow" in effectiveLists
 					? getLayerScopedCommandDecisionDetailed(text, effectiveLists)

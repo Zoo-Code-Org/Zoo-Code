@@ -3341,8 +3341,7 @@ export class ClineProvider
 			checkpointTimeout: checkpointTimeout ?? DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 			shouldShowAnnouncement:
 				telemetrySetting !== "unset" && lastShownAnnouncementId !== this.latestAnnouncementId,
-			// getState() always resolves these to the effective command lists
-			// (never undefined), so no fallback is needed here.
+			// These lists are never undefined; getState() resolves them.
 			allowedCommands,
 			deniedCommands,
 			workspaceCommandListsEnabled: gateEnabled ?? DEFAULT_WORKSPACE_COMMAND_LISTS_ENABLED,
@@ -3552,9 +3551,8 @@ export class ClineProvider
 
 		const taskSyncEnabled: boolean = false
 
-		// One gate read and one resolver pass per getState() call, so the
-		// effective lists and the gate value posted together describe a single
-		// configuration state.
+		// One gate read and one resolver pass per call, so the effective lists
+		// and the gate value always describe one configuration state.
 		const gateEnabled = workspaceCommandListsEnabled()
 		const allowScopes = readCommandListScopes("allowedCommands", stateValues.allowedCommands)
 		const denyScopes = readCommandListScopes("deniedCommands", stateValues.deniedCommands)
@@ -3589,20 +3587,15 @@ export class ClineProvider
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			// The effective lists composed from the global-state and
-			// workspace-scope configuration layers, scoped to the window's
-			// first folder; getStateToPostToWebview shows exactly these values,
-			// so the dialog cannot drift from what this state posts. In a
-			// multi-root window a task in another folder is judged by that
-			// folder's lists instead — enforcement re-composes the pair from
-			// the raw global layers below, so the displayed pair describes the
-			// window, not the task.
+			// Composed from the global and workspace layers, scoped to the
+			// window's first folder. Display shows exactly these values. A
+			// task in another folder is judged by that folder's lists:
+			// enforcement re-composes the pair from the raw global layers below.
 			allowedCommands: effectiveCommandLists.allowed,
 			deniedCommands: effectiveCommandLists.denied,
 			workspaceCommandListsEnabled: gateEnabled,
-			// The global layers before workspace composition, so command
-			// enforcement can re-compose the pair against each task's own
-			// folder; the window-scoped pair above stays what display shows.
+			// Raw global layers, before workspace composition. Enforcement
+			// re-composes them against each task's folder.
 			globalAllowedCommands: allowScopes.global,
 			globalDeniedCommands: denyScopes.global,
 			soundEnabled: stateValues.soundEnabled ?? false,
@@ -4346,9 +4339,8 @@ export class ClineProvider
 		if (configuration) {
 			await this.setValues(configuration)
 
-			// Deliberately Global-targeted: these writes carry "start this task with
-			// exactly this auto-approval policy" semantics (e.g. from handoff/delegation
-			// payloads), unlike the scope-split persistence in the settings dialog.
+			// Global target on purpose: these writes mean "start this task with
+			// exactly this auto-approval policy". The settings dialog splits by scope.
 			if (configuration.allowedCommands) {
 				await vscode.workspace
 					.getConfiguration(Package.name)
