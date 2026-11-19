@@ -326,7 +326,7 @@
 	},
 	"api/providers/unbound.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/utils/__tests__/error-handler.spec.ts": {
