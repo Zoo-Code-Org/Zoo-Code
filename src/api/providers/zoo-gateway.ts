@@ -1,6 +1,6 @@
 import * as vscode from "vscode"
 import { Anthropic } from "@anthropic-ai/sdk"
-import OpenAI from "openai"
+import OpenAI, { APIConnectionTimeoutError } from "openai"
 
 import {
 	zooGatewayDefaultModelId,
@@ -37,7 +37,9 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	rejectOnAbort,
+	settleOnAbort,
 	throwIfAborted,
+	resolveModelWithAbort,
 	toSdkTimeoutMs,
 } from "./utils/abort-signal"
 
@@ -209,9 +211,22 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		// Fail fast when the task is already cancelled before any model-catalog
+		// work starts: the standardized AbortError wins over any failure the
+		// fallible resolution could raise — including the auth check below.
+		const externalAbortSignal = metadata?.abortSignal
+		if (externalAbortSignal?.aborted) {
+			throw createAbortError("Zoo Gateway")
+		}
+
 		this.ensureAuthenticated()
 
-		const { id: modelId, info } = await this.fetchModel()
+		// Establish the cancellation scope around model resolution: a signal
+		// that fires while model metadata is loading settles on the
+		// standardized AbortError; any other resolution failure propagates
+		// unchanged.
+		const resolved = await resolveModelWithAbort(() => this.fetchModel(), externalAbortSignal, "Zoo Gateway")
+		const { id: modelId, info } = resolved
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -247,12 +262,30 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
+		// Per-request signal bridged from the caller's abort signal via the shared helper
+		// (pre-aborted guard, once-only listener, retained cleanup). The never-aborting
+		// fallback preserves the previous always-signal behaviour when the caller has no
+		// external signal, and dispose() detaches the listener when the request ends.
+		const { signal: bridgedSignal, dispose: detachExternalAbortSignal } =
+			bridgeExternalAbortSignal(externalAbortSignal)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
+
 		try {
-			const completion = await this.client.chat.completions.create(body, {
+			const pendingCompletion = this.client.chat.completions.create(body, {
 				headers: requestHeaders,
+				signal: requestSignal,
 			})
+			// Race the create: the SDK sleeps out a Retry-After backoff without observing the signal, so
+			// awaiting it alone can outlive the cancel (the completion path below already races this way).
+			const completion = await settleOnAbort(pendingCompletion, bridgedSignal, "Zoo Gateway")
 
 			for await (const chunk of completion) {
+				// The SDK swallows the body-read abort and can end the iterator normally, so leave the loop
+				// here and let the checks below raise the contract AbortError.
+				if (externalAbortSignal?.aborted) {
+					break
+				}
+
 				// Once the gateway starts streaming the HTTP status is already 200, so it
 				// reports upstream failures (e.g. provider rate limits) as an in-band error
 				// chunk. Surface it so the user sees the real reason instead of an empty reply.
@@ -271,6 +304,10 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				// Emit raw tool call chunks - NativeToolCallParser handles state management
 				if (delta?.tool_calls) {
 					for (const toolCall of delta.tool_calls) {
+						if (externalAbortSignal?.aborted) {
+							throw createAbortError("Zoo Gateway") // a cancel must not emit the rest of this chunk
+						}
+
 						yield {
 							type: "tool_call_partial",
 							index: toolCall.index,
@@ -282,6 +319,12 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 
 				if (chunk.usage) {
+					// A cancel that lands after the text of this frame must not be billed: the usage item is the
+					// last thing the same iteration can still hand over.
+					if (externalAbortSignal?.aborted) {
+						throw createAbortError("Zoo Gateway") // no usage chunk for a cancelled turn
+					}
+
 					const usage = chunk.usage as ZooGatewayUsage
 					yield {
 						type: "usage",
@@ -294,19 +337,47 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 				}
 			}
 		} catch (error) {
+			// Preserve abort identity (series standard): a cancelled request
+			// must surface as a DOM-standard AbortError before the gateway
+			// error surfacing/telemetry path, not the raw SDK abort error.
+			if (isRequestAborted(error, externalAbortSignal)) {
+				throw createAbortError("Zoo Gateway")
+			}
 			try {
-				await surfaceGatewayApiError(error)
+				// The notification can wait for the user: a cancel that arrives while it is open must settle at
+				// once instead of holding the iterator on the original 402 (same shape as completePrompt).
+				const surfacing = surfaceGatewayApiError(error)
+				await settleOnAbort(surfacing, bridgedSignal, "Zoo Gateway")
 			} catch (surfaceError) {
-				console.error(
-					"Failed to surface Zoo Gateway error:",
-					surfaceError instanceof Error ? surfaceError.message : surfaceError,
-				)
+				if (!externalAbortSignal?.aborted) {
+					console.error(
+						"Failed to surface Zoo Gateway error:",
+						surfaceError instanceof Error ? surfaceError.message : surfaceError,
+					)
+				}
+			}
+			if (externalAbortSignal?.aborted) {
+				throw createAbortError("Zoo Gateway") // cancelled while the notification was open
 			}
 			throw error
+		} finally {
+			detachExternalAbortSignal()
+		}
+		// The SDK can close the SSE iterator without throwing after a cancel: a cancelled stream must not
+		// read as a completed turn, so reject with the contract AbortError before the generator returns.
+		if (externalAbortSignal?.aborted) {
+			throw createAbortError("Zoo Gateway")
 		}
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		// Same entry guard as createMessage: a cancelled task must not run the
+		// fallible auth check, and the standardized AbortError wins over anything
+		// the auth step or the lookup could raise.
+		if (options?.abortSignal?.aborted) {
+			throw createAbortError("Zoo Gateway")
+		}
+
 		// Same abort-signal contract as the other providers (see requesty.ts): the SDK gets a
 		// per-request signal bridged from the caller's signal, so its abort listener does not stay on
 		// the caller's long-lived signal. The `finally` below detaches the bridge on every exit path.
@@ -344,6 +415,10 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens
+			// Build request options with abortSignal and/or timeout.
+			// timeoutMs <= 0 means "no explicit timeout": omit the SDK timeout
+			// option entirely — the OpenAI SDK treats timeout: 0 as an immediate
+			// abort, which would cancel the request right away.
 
 			const createOptions: OpenAI.RequestOptions = {
 				...(requestAbortSignal && { signal: requestAbortSignal }),
@@ -360,7 +435,10 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 					: await pendingCompletion
 			} catch (error) {
 				// A cancel or timeout is not a gateway failure: do not show a gateway error for it.
-				if (requestAbortSignal?.aborted) {
+				// The series standard also maps a name-based abort rejection and the SDK's own
+				// timeout class onto the same AbortError identity, in case the SDK rejects a
+				// moment before the merged request signal flips.
+				if (isRequestAborted(error, requestAbortSignal) || error instanceof APIConnectionTimeoutError) {
 					throw createAbortError(ZOO_GATEWAY_PROVIDER_NAME)
 				}
 				try {
