@@ -2,8 +2,9 @@
 \* Model switches remove one boundary guard at a time.
 EXTENDS ResponsesProtocol
 CONSTANTS RequireTerminal, RejectFailures, PreserveReasoning, PreserveOrder, ReplayReasoning, ResetReasoning,
-          PreserveRestriction, UseAzureV1, GuardInference
+          PreserveRestriction, UseAzureV1, GuardInference, GuardReplayScope
 Samples == {<<>>, <<"r1">>, <<"r1", "r2">>}
+ReplayScopeOracle == [destination \in {"same", "other", "chat"} |-> GuardReplayScope => destination = "same"]
 AcceptOracle == [status \in {"completed", "failed", "incomplete", "cancelled", "error", "ended"} |->
                   status = "completed" \/ ~RejectFailures \/ (~RequireTerminal /\ status = "ended")]
 SaveOracle == [items \in Samples |-> IF ~PreserveReasoning THEN <<>> ELSE IF PreserveOrder THEN items ELSE [i \in 1..Len(items) |-> items[Len(items) - i + 1]]]

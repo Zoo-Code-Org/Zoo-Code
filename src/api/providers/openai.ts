@@ -4,6 +4,7 @@ import axios from "axios"
 
 import {
 	type ModelInfo,
+	providerIdentifiers,
 	azureOpenAiDefaultApiVersion,
 	isAzureAiInferenceBaseUrl,
 	isAzureOpenAiBaseUrl,
@@ -25,7 +26,11 @@ import { buildResponsesRequest } from "./utils/openai-compatible-responses"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { assertResponsesApiSuccess } from "../transform/responses-api-error"
-import { readResponsesReasoningItem } from "../transform/responses-api-reasoning"
+import {
+	readResponsesReasoningItem,
+	responsesReasoningScope,
+	type ScopedResponsesReasoningItem,
+} from "../transform/responses-api-reasoning"
 import { OutputTokenLimitError } from "./utils/output-token-limit-error"
 import { getModelParams } from "../transform/model-params"
 
@@ -373,6 +378,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			metadata,
 			tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 			extraBody: this.extraBody,
+			reasoningScope: responsesReasoningScope(this.client.baseURL),
 		})
 
 		// Bridge the external abort signal only after every throw-prone part of
@@ -426,9 +432,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	getReasoningDetails(): OpenAI.Responses.ResponseReasoningItem[] | undefined {
+	getReasoningDetails(): ScopedResponsesReasoningItem[] | undefined {
 		return this.options.openAiUseResponsesApi && this.responsesReasoning.length
-			? structuredClone(this.responsesReasoning)
+			? structuredClone(this.responsesReasoning).map((item) => ({
+					...item,
+					format: "openai-responses-v1" as const,
+					provider: providerIdentifiers.openai,
+					endpoint: responsesReasoningScope(this.client.baseURL),
+				}))
 			: undefined
 	}
 
@@ -499,6 +510,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					messages: [{ role: "user", content: prompt }],
 					tools: undefined,
 					extraBody: this.extraBody,
+					reasoningScope: responsesReasoningScope(this.client.baseURL),
 				})
 				const response = await this.client.responses.create(
 					{ ...body, stream: false },

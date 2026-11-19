@@ -1,4 +1,4 @@
-import { openAiModelInfoSaneDefaults } from "@roo-code/types"
+import { openAiModelInfoSaneDefaults, providerIdentifiers } from "@roo-code/types"
 import { buildResponsesRequest } from "../openai-compatible-responses"
 import { expectNoLoneSurrogates } from "../../../../test-utils/surrogates"
 
@@ -25,6 +25,7 @@ it.each(cases)(
 			tools: [
 				{ type: "function", function: { name: "read_file", parameters: { type: "object" }, strict: false } },
 			],
+			reasoningScope: "test-endpoint",
 			extraBody: { model: "wrong", stream: !streaming, service_tier: "flex" },
 		}
 		const before = structuredClone(input)
@@ -59,6 +60,7 @@ function makeInput(overrides: Partial<RequestInput> = {}): RequestInput {
 		messages: [],
 		tools: undefined,
 		extraBody: {},
+		reasoningScope: "test-endpoint",
 		...overrides,
 	}
 }
@@ -161,8 +163,18 @@ it.each([{}, { function: null }, { function: { name: 42 } }, { function: { name:
 	},
 )
 
-it("preserves standalone reasoning items before sanitizing legacy history", () => {
+it.each([true, false])("replays standalone reasoning only with verified ownership: %s", (owned) => {
 	const item = { type: "reasoning" as const, id: "rs1", encrypted_content: "opaque", summary: [] }
-	const body = buildResponsesRequest(makeInput({ messages: [item] }))
-	expect(body.input).toEqual([item])
+	const saved = owned
+		? { ...item, format: "openai-responses-v1", provider: providerIdentifiers.openai, endpoint: "test-endpoint" }
+		: item
+	const body = buildResponsesRequest(makeInput({ messages: [saved] }))
+	expect(body.input).toEqual(owned ? [item] : [])
+})
+
+it("preserves API defaults for tools without strictness or parameters", () => {
+	const body = buildResponsesRequest(makeInput({ tools: [{ type: "function", function: { name: "no_args" } }] }))
+	expect(body.tools).toEqual([
+		{ type: "function", name: "no_args", description: undefined, strict: null, parameters: null },
+	])
 })

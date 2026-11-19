@@ -1,4 +1,6 @@
-import { readResponsesReasoningItem } from "../responses-api-reasoning"
+import { providerIdentifiers } from "@roo-code/types"
+import { convertToOpenAiMessages } from "../openai-format"
+import { readResponsesReasoningItem, responsesReasoningScope } from "../responses-api-reasoning"
 import { assertResponsesApiSuccess } from "../responses-api-error"
 import { convertToResponsesApiInput } from "../responses-api-input"
 
@@ -68,4 +70,43 @@ it("preserves terminal failure details", () => {
 it("accepts a standalone encrypted reasoning item from existing history", () => {
 	const item = { type: "reasoning" as const, id: "rs1", encrypted_content: "opaque", summary: [] }
 	expect(convertToResponsesApiInput([item])).toEqual([item])
+})
+
+const scope = responsesReasoningScope("https://gateway.example/v1")
+const scoped = { ...reasoning, format: "openai-responses-v1", provider: providerIdentifiers.openai, endpoint: scope }
+
+it.each([
+	{ detail: scoped, endpoint: scope, replay: true },
+	{ detail: scoped, endpoint: responsesReasoningScope("https://other.example/v1"), replay: false },
+	{ detail: scoped, endpoint: undefined, replay: false },
+	{ detail: { ...scoped, provider: providerIdentifiers.xai }, endpoint: scope, replay: false },
+	{ detail: { ...scoped, endpoint: undefined }, endpoint: scope, replay: false },
+	{ detail: reasoning, endpoint: scope, replay: false },
+])("limits replay to matching ownership: %j", ({ detail, endpoint, replay }) => {
+	const message = { role: "assistant" as const, content: "answer", reasoning_details: [detail] }
+	const expected = [{ type: "message", role: "assistant", content: [{ type: "output_text", text: "answer" }] }]
+	expect(convertToResponsesApiInput([message], endpoint)).toEqual(replay ? [reasoning, ...expected] : expected)
+	const standalone = {
+		...detail,
+		type: "reasoning" as const,
+		summary: [{ type: "summary_text" as const, text: "summary" }],
+	}
+	expect(convertToResponsesApiInput([standalone], endpoint)).toEqual(replay ? [reasoning] : [])
+})
+
+it.each([reasoning, scoped])("excludes Responses reasoning from Chat Completions: %j", (detail) => {
+	const message = { role: "assistant" as const, content: "answer", reasoning_details: [detail] }
+	expect(convertToOpenAiMessages([message])).toEqual([{ role: "assistant", content: "answer" }])
+})
+
+it("normalizes trailing slashes without storing URL secrets in ownership metadata", () => {
+	const url = "https://user:secret@gateway.example/v1?token=private"
+	expect(responsesReasoningScope(url + "/")).toBe(responsesReasoningScope(url))
+	expect(responsesReasoningScope(url)).toMatch(/^[a-f0-9]{64}$/)
+})
+
+it("uses the top-level response message when nested error details are missing", () => {
+	expect(() => assertResponsesApiSuccess({ status: "failed", message: "backend unavailable" })).toThrow(
+		"backend unavailable",
+	)
 })

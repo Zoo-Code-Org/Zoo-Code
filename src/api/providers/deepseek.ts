@@ -94,6 +94,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
+			openAiUseResponsesApi: false,
 			openAiApiKey: options.deepSeekApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? deepSeekDefaultModelId,
 			openAiBaseUrl: options.deepSeekBaseUrl || "https://api.deepseek.com",

@@ -19,6 +19,7 @@ type ResponsesRequestInput = {
 	metadata?: ApiHandlerCreateMessageMetadata
 	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined
 	extraBody: Readonly<Record<string, unknown>>
+	reasoningScope: string
 }
 
 /** Builds a request from explicit inputs without registering listeners or calling the SDK. */
@@ -31,6 +32,7 @@ export function buildResponsesRequest({
 	metadata,
 	tools,
 	extraBody,
+	reasoningScope,
 }: ResponsesRequestInput): OpenAI.Responses.ResponseCreateParams {
 	// Sanitize before conversion, including strings inside JSON tool arguments.
 	// Encode IDs first so distinct tool calls remain distinct after sanitization.
@@ -54,7 +56,7 @@ export function buildResponsesRequest({
 	const requestBody: OpenAI.Responses.ResponseCreateParams = {
 		model: options.openAiModelId ?? "",
 		instructions: sanitizeSurrogates(systemPrompt),
-		input: convertToResponsesApiInput(sanitizedHistory),
+		input: convertToResponsesApiInput(sanitizedHistory, reasoningScope),
 		stream: options.openAiStreamingEnabled ?? true,
 		// Stateless operation: don't store responses server-side.
 		store: false,
@@ -72,7 +74,7 @@ export function buildResponsesRequest({
 		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
 	}
 
-	// Mirror the Chat Completions temperature policy: omit it unless the
+	// Omit temperature unless the
 	// model supports it and the user set a custom value, so the server's own
 	// default applies.
 	if (modelInfo.supportsTemperature !== false && options.modelTemperature != null) {

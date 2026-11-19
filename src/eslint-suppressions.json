@@ -436,7 +436,7 @@
 	},
 	"api/transform/openai-format.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 7
 		}
 	},
 	"api/transform/r1-format.ts": {

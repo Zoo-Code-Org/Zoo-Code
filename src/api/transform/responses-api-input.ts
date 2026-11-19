@@ -1,5 +1,5 @@
 import type OpenAI from "openai"
-import { readResponsesReasoningItem } from "./responses-api-reasoning"
+import { readReplayableResponsesReasoning } from "./responses-api-reasoning"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 export type ResponsesApiMessage = Anthropic.Messages.MessageParam | OpenAI.Responses.ResponseReasoningItem
@@ -17,11 +17,11 @@ export type ResponsesApiMessage = Anthropic.Messages.MessageParam | OpenAI.Respo
  * @param messages - Array of Anthropic MessageParam objects
  * @returns Array of Responses API input items
  */
-export function convertToResponsesApiInput(messages: ResponsesApiMessage[]): any[] {
+export function convertToResponsesApiInput(messages: ResponsesApiMessage[], reasoningScope?: string): any[] {
 	const input: any[] = []
 
 	for (const message of messages) {
-		const reasoning = readResponsesReasoningItem(message)
+		const reasoning = readReplayableResponsesReasoning(message, reasoningScope)
 		if (reasoning) {
 			input.push(reasoning)
 			continue
@@ -33,7 +33,7 @@ export function convertToResponsesApiInput(messages: ResponsesApiMessage[]): any
 			Array.isArray(message.reasoning_details)
 		) {
 			for (const detail of message.reasoning_details) {
-				const item = readResponsesReasoningItem(detail)
+				const item = readReplayableResponsesReasoning(detail, reasoningScope)
 				if (item) input.push(item)
 			}
 		}

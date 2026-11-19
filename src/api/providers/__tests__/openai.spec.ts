@@ -1,3 +1,5 @@
+import { DeepSeekHandler } from "../deepseek"
+import { responsesReasoningScope } from "../../transform/responses-api-reasoning"
 import { KimiCodeHandler } from "../kimi-code"
 import { MoonshotHandler } from "../moonshot"
 import { MimoHandler } from "../mimo"
@@ -35,8 +37,9 @@ vitest.mock("openai", () => {
 	const mockAzureConstructor = vitest.fn()
 	return {
 		__esModule: true,
-		default: mockConstructor.mockImplementation(function () {
+		default: mockConstructor.mockImplementation(function (options: { baseURL: string }) {
 			return {
+				baseURL: options.baseURL,
 				chat: {
 					completions: {
 						create: mockCreate.mockImplementation(async (options) => {
@@ -2499,7 +2502,7 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		).rejects.toMatchObject({ name: "OutputTokenLimitError" })
 	})
 
-	it.each([KimiCodeHandler, MoonshotHandler, MimoHandler])(
+	it.each([KimiCodeHandler, MoonshotHandler, MimoHandler, DeepSeekHandler])(
 		"isolates the inherited Responses flag in %s",
 		async (Provider) => {
 			const handler = new Provider({
@@ -2537,7 +2540,14 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 				: { status: "completed", output },
 		)
 		await collectStream(handler.createMessage(systemPrompt, messages))
-		expect(handler.getReasoningDetails()).toEqual(expected)
+		expect(handler.getReasoningDetails()).toEqual(
+			expected.map((item) => ({
+				...item,
+				format: "openai-responses-v1",
+				provider: providerIdentifiers.openai,
+				endpoint: responsesReasoningScope(baseOptions.openAiBaseUrl!),
+			})),
+		)
 		const saved = prepareApiConversationMessage({
 			message: { role: "assistant", content: [{ type: "tool_use", id: "call1", name: "read_file", input: {} }] },
 			api: handler,
@@ -2563,6 +2573,65 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		expect(handler.getReasoningDetails()).toBeUndefined()
 	})
 
+	it.each(["endpoint", "chat"])("does not forward saved reasoning after switching %s", async (destination) => {
+		const handler = new OpenAiHandler(baseOptions)
+		const item = { type: "reasoning", id: "rs1", summary: [], encrypted_content: "private-opaque" }
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([{ type: "response.completed", response: { status: "completed", output: [item] } }]),
+		)
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		const saved = prepareApiConversationMessage({
+			message: { role: "assistant", content: "answer" },
+			api: handler,
+			apiConfiguration: { ...baseOptions, apiProvider: providerIdentifiers.openai },
+			apiConversationHistory: [],
+		})
+		const reloaded: typeof saved = JSON.parse(JSON.stringify(saved))
+		const next = new OpenAiHandler({
+			...baseOptions,
+			openAiUseResponsesApi: destination !== "chat",
+			openAiBaseUrl: "https://other.example/v1",
+		})
+		mockCreate.mockClear()
+		mockResponsesCreate.mockClear()
+		await collectStream(next.createMessage(systemPrompt, [reloaded]))
+		const calls = destination === "chat" ? mockCreate.mock.calls : mockResponsesCreate.mock.calls
+		expect(calls).toHaveLength(1)
+		expect(JSON.stringify(calls[0][0])).not.toContain("private-opaque")
+		expect(JSON.stringify(calls[0][0])).not.toContain("reasoning_details")
+	})
+
+	it("returns a fresh copy of encrypted reasoning details", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+		const item = {
+			type: "reasoning",
+			id: "rs1",
+			summary: [{ type: "summary_text", text: "summary" }],
+			encrypted_content: "opaque",
+		}
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([{ type: "response.completed", response: { status: "completed", output: [item] } }]),
+		)
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		const details = handler.getReasoningDetails()!
+		details[0].encrypted_content = "changed"
+		details[0].summary[0].text = "changed"
+		expect(handler.getReasoningDetails()?.[0]).toMatchObject(item)
+	})
+
+	it("normalizes an aborted Responses completion", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+		const controller = new AbortController()
+		mockResponsesCreate.mockImplementationOnce(async (_body, options) => {
+			controller.abort()
+			options.signal.throwIfAborted()
+		})
+		await expect(handler.completePrompt("prompt", { abortSignal: controller.signal })).rejects.toMatchObject({
+			name: "AbortError",
+		})
+		expect(mockResponsesCreate.mock.calls[0][1].signal).toBe(controller.signal)
+	})
+
 	it.each(["failure", "close", "construction"])("clears prior reasoning on $s", async (exit) => {
 		const handler = new OpenAiHandler(baseOptions)
 		const item = { type: "reasoning", id: "rs1", summary: [], encrypted_content: "opaque" }
@@ -2570,7 +2639,7 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 			asyncStreamFrom([{ type: "response.completed", response: { status: "completed", output: [item] } }]),
 		)
 		await collectStream(handler.createMessage(systemPrompt, messages))
-		expect(handler.getReasoningDetails()).toEqual([item])
+		expect(handler.getReasoningDetails()).toEqual([expect.objectContaining(item)])
 		if (exit === "construction") {
 			vi.spyOn(handler, "getModel").mockImplementationOnce(() => {
 				throw new Error("construction failed")

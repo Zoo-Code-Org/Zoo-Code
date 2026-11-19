@@ -11,23 +11,27 @@
 \* Domain: compatible provider with Responses enabled. SDK events and storage are oracles.
 \* The domain has two opaque reasoning items. Their contents are not parsed.
 \* Final review added premature EOF: ended means SDK EOF without a completion event.
-\* Manual gate: 3456 states pass. All ten sabotage configs fail with invariant error 12.
+\* Current gate: 10368 states pass; eleven sabotage configs fail with invariant error 12.
+\* Review 6385d18512: expect cross-endpoint replay. Added NoForeignReasoning for finding 3.
+\* Sources: saved reasoning scope. Sinks: Responses input and Chat Completions conversion.
+\* Failure: reasoning reaches a different endpoint or Chat Completions.
+\* Cost: about 15 agent minutes for ownership rules and tests.
 \* Each sabotage was replayed by removing its code guard and running the matching focused tests.
 \* New inspection finding: use completed output order, not item arrival order, for saved reasoning.
 \* Self-review ratchet: 0 covered, 3 added, 0 gap (saved order, replay domain, and premature EOF).
 \* Model setup: the replay oracle domain was extended to include a reordered sample.
 \* No real-code replay false alarm remains. The model does not prove the code correct.
-\* Cost: each config runs in less than 1 second. Agent cost is in OpenAICompatibleResponses.tla.
+\* Cost: about 15 agent minutes this round; each config runs in about 1 second.
 \* Run with -config ResponsesProtocol.cfg ResponsesProtocolMC.tla, and repeat for each variant.
 EXTENDS Naturals, Sequences
 CONSTANTS ReasoningSamples, AcceptBoundary, SaveBoundary, ReplayBoundary,
-          ResetBoundary, PublishFailedBoundary, ChoiceBoundary, ClientBoundary
+          ResetBoundary, PublishFailedBoundary, ChoiceBoundary, ClientBoundary, ReplayScopeBoundary
 VARIABLES source, phase, received, saved, replayed, accepted
 vars == <<source, phase, received, saved, replayed, accepted>>
 Domain == [status : {"completed", "failed", "incomplete", "cancelled", "error", "ended"},
            reasoning : ReasoningSamples, choice : {"none", "auto", "restricted", "malformed"},
            endpoint : {"generic", "azureLegacy", "azureV1", "inferenceLegacy", "inferenceV1"},
-           explicitVersion : BOOLEAN]
+           explicitVersion : BOOLEAN, destination : {"same", "other", "chat"}]
 ExpectedClient(s) ==
     IF s.endpoint = "inferenceLegacy" THEN "reject"
     ELSE IF s.endpoint = "azureLegacy" /\ s.explicitVersion THEN "azure"
@@ -67,13 +71,14 @@ Replay ==
     /\ phase = "finished"
     /\ accepted
     /\ phase' = "replayed"
-    /\ replayed' = ReplayBoundary[saved]
+    /\ replayed' = IF ReplayScopeBoundary[source.destination] THEN ReplayBoundary[saved] ELSE <<>>
     /\ UNCHANGED <<source, received, saved, accepted>>
 Next == Reset \/ Build \/ Receive \/ Finish \/ Replay
 Spec == Init /\ [][Next]_vars
 TerminalFailuresVisible == phase \in {"finished", "replayed"} /\ source.status # "completed" => ~accepted
 SavedComplete == phase \in {"finished", "replayed"} /\ source.status = "completed" => saved = source.reasoning
-ReplayComplete == phase = "replayed" /\ source.status = "completed" => replayed = source.reasoning
+ReplayComplete == phase = "replayed" /\ source.status = "completed" /\ source.destination = "same" => replayed = source.reasoning
+NoForeignReasoning == phase = "replayed" /\ source.destination # "same" => replayed = <<>>
 NoStaleReasoning == phase \in {"build", "request", "buildFailed"} => saved = <<>>
 NoFailedReasoning == phase \in {"finished", "replayed"} /\ source.status # "completed" => saved = <<>>
 ToolRestrictionPreserved ==
