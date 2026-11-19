@@ -37,6 +37,7 @@ import {
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
 	rejectOnAbort,
+	resolveModelWithAbort,
 	throwIfAborted,
 } from "./utils/abort-signal"
 import { applyRouterToolPreferences } from "./utils/router-tool-preferences"
@@ -185,80 +186,148 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const {
-			id: model,
-			info,
-			maxTokens: max_tokens,
-			temperature,
-			reasoningEffort: reasoning_effort,
-			reasoning: thinking,
-		} = await this.fetchModel()
+		// Bridge the external abort signal into a request-local controller using the shared
+		// helper (pre-aborted guard, once-only listener, retained cleanup). The request keeps a
+		// signal for the SDK even without an external one: a never-aborting fallback preserves the
+		// previous behavior of always passing a signal to the client.
+		const { signal: bridgedSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
+		const requestSignal = bridgedSignal ?? new AbortController().signal
 
-		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-			{ role: "system", content: systemPrompt },
-			...convertToOpenAiMessages(messages),
-		]
-
-		// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
-		const allowedEffort = (["low", "medium", "high"] as const).includes(reasoning_effort as any)
-			? (reasoning_effort as OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming["reasoning_effort"])
-			: undefined
-
-		const completionParams: RequestyChatCompletionParamsStreaming = {
-			messages: openAiMessages,
-			model,
-			max_tokens,
-			temperature,
-			...(allowedEffort && { reasoning_effort: allowedEffort }),
-			...(thinking && { thinking }),
-			stream: true,
-			stream_options: { include_usage: true },
-			requesty: { trace_id: metadata?.taskId, extra: { mode: metadata?.mode } },
-			tools: this.convertToolsForOpenAI(metadata?.tools),
-			tool_choice: metadata?.tool_choice,
-		}
-
-		let stream
 		try {
-			// With streaming params type, SDK returns an async iterable stream
-			stream = await this.client.chat.completions.create(completionParams)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
-		let lastUsage: any = undefined
+			// Resolve the model inside this request's cancellation scope. resolveModelWithAbort owns
+			// the three pieces the scope needs: the pre-abort fast path (no catalog request started,
+			// no shared flight joined), the race that settles this waiter at once when the scope
+			// aborts while the lookup is pending, and the normalization of an abort-shaped lookup
+			// failure to the provider's AbortError.
+			//
+			// The scope is forwarded to the lookup instead of withheld. modelCache joins every caller
+			// through its own per-waiter abort view (joinFlight): the view detaches only this waiter
+			// and aborts the underlying fetch when the last waiter leaves, so one caller's abort can
+			// never reject the fetch out from under a concurrent caller. Forwarding it is what lets a
+			// cancellation here release that fetch — stopping a discovery request this abort already
+			// made pointless rather than letting it run to modelCache's own 15 s bound.
+			const {
+				id: model,
+				info,
+				maxTokens: max_tokens,
+				temperature,
+				reasoningEffort: reasoning_effort,
+				reasoning: thinking,
+			} = await resolveModelWithAbort(() => this.fetchModel(requestSignal), requestSignal, this.providerName)
 
-		for await (const chunk of stream) {
-			const delta = chunk.choices[0]?.delta
+			const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+				{ role: "system", content: systemPrompt },
+				...convertToOpenAiMessages(messages),
+			]
 
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
+			// Map extended efforts to OpenAI Chat Completions-accepted values (omit unsupported)
+			const allowedEffort = (["low", "medium", "high"] as const).find((effort) => effort === reasoning_effort)
+
+			const completionParams: RequestyChatCompletionParamsStreaming = {
+				messages: openAiMessages,
+				model,
+				max_tokens,
+				temperature,
+				...(allowedEffort && { reasoning_effort: allowedEffort }),
+				...(thinking && { thinking }),
+				stream: true,
+				stream_options: { include_usage: true },
+				requesty: { trace_id: metadata?.taskId, extra: { mode: metadata?.mode } },
+				tools: this.convertToolsForOpenAI(metadata?.tools),
+				tool_choice: metadata?.tool_choice,
 			}
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
+			let stream
+			try {
+				// With streaming params type, SDK returns an async iterable stream
+				const pendingStream = this.client.chat.completions.create(completionParams, { signal: requestSignal })
+				// Race the creation against the cancellation scope, as completePrompt does below:
+				// openai@5.23.2 does not observe the signal inside `retryRequest`, which sleeps for the
+				// backoff (or a server-provided `retry-after-ms`, up to about a minute) before issuing
+				// the next attempt, so awaiting the SDK call alone can hold createMessage open long
+				// after the caller cancelled. The race settles at once, and a rejection the SDK wins
+				// first is still normalized by the catch below.
+				stream = await rejectOnAbort(pendingStream, requestSignal, this.providerName)
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError instead of
+				// a completion error.
+				if (requestSignal.aborted) {
+					throw createAbortError(this.providerName)
+				}
+				throw handleOpenAIError(error, this.providerName)
 			}
+			try {
+				let lastUsage: RequestyUsage | undefined = undefined
 
-			// Handle native tool calls
-			if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				for await (const chunk of stream) {
+					// The iterator can keep delivering buffered chunks after the abort has already
+					// fired (openai@5.23.2 swallows the mid-stream AbortError), so re-check the
+					// signal before processing each chunk. A yield is a suspension point, so an
+					// abort can land between two yields of the same chunk: the guarded yields
+					// below re-check before emitting (the first yield of a chunk is covered by
+					// this check alone — no suspension point separates them).
+					if (requestSignal.aborted) {
+						break
+					}
+
+					const delta = chunk.choices[0]?.delta
+
+					// Yield reasoning chunks before content chunks so consumers see them in model order.
+					// No pre-yield guard: this is the first yield of the iteration — the
+					// top-of-loop check runs without a suspension point before it.
+					const reasoningText = extractReasoningFromDelta(delta)
+					if (reasoningText) {
+						yield { type: "reasoning", text: reasoningText }
+					}
+
+					if (delta?.content) {
+						// Re-check before emitting: the consumer may have aborted while
+						// processing a previously yielded part of this chunk.
+						throwIfAborted(requestSignal)
+						yield { type: "text", text: delta.content }
+					}
+
+					// Handle native tool calls
+					if (delta && "tool_calls" in delta && Array.isArray(delta.tool_calls)) {
+						for (const toolCall of delta.tool_calls) {
+							throwIfAborted(requestSignal)
+							yield {
+								type: "tool_call_partial",
+								index: toolCall.index,
+								id: toolCall.id,
+								name: toolCall.function?.name,
+								arguments: toolCall.function?.arguments,
+							}
+						}
+					}
+
+					if (chunk.usage) {
+						lastUsage = chunk.usage
 					}
 				}
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
-			}
-		}
+				// openai@5.23.2's stream iterator swallows a mid-stream AbortError and returns
+				// normally instead of throwing, so the catch below would never run: without this
+				// check, createMessage completes silently after yielding partial output.
+				if (requestSignal.aborted) {
+					throw createAbortError(this.providerName)
+				}
 
-		if (lastUsage) {
-			yield this.processUsageMetrics(lastUsage, info)
+				if (lastUsage) {
+					yield this.processUsageMetrics(lastUsage, info)
+				}
+			} catch (error) {
+				// Normalize abort-driven stream failures (SDK abort or timeout errors) to a
+				// DOM-standard AbortError so callers can detect the aborted request.
+				if (requestSignal.aborted) {
+					throw createAbortError(this.providerName)
+				}
+				throw error
+			}
+		} finally {
+			removeExternalAbortListener()
 		}
 	}
 
