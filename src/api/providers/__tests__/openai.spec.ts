@@ -2259,6 +2259,61 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		expect(input[3].call_id).toBe(input[1].call_id)
 	})
 
+	it("resolves model parameters once on the Responses route", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+		const getModel = vi.spyOn(handler, "getModel")
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		expect(getModel).toHaveBeenCalledOnce()
+	})
+
+	it.each([true, false])(
+		"does not attach a listener when construction fails with streaming=%s",
+		async (streaming) => {
+			const controller = new AbortController()
+			const add = vi.spyOn(controller.signal, "addEventListener")
+			const failure = new Error("history could not be read")
+			const history: Anthropic.Messages.MessageParam[] = [
+				{
+					role: "user",
+					get content(): string {
+						throw failure
+					},
+				},
+			]
+			await expect(
+				collectStream(
+					new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: streaming }).createMessage(
+						systemPrompt,
+						history,
+						makeCreateMessageMetadata({ abortSignal: controller.signal }),
+					),
+				),
+			).rejects.toBe(failure)
+			expect(add).not.toHaveBeenCalled()
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each(["before", "during"])("forwards an external abort %s the request", async (timing) => {
+		const controller = new AbortController()
+		const add = vi.spyOn(controller.signal, "addEventListener")
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		if (timing === "before") controller.abort()
+		const stream = new OpenAiHandler(baseOptions).createMessage(
+			systemPrompt,
+			messages,
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+		await stream.next()
+		const signal: AbortSignal = mockResponsesCreate.mock.calls[0][1].signal
+		expect(signal.aborted).toBe(timing === "before")
+		controller.abort()
+		expect(signal.aborted).toBe(true)
+		await stream.return(undefined)
+		if (timing === "before") expect(add).not.toHaveBeenCalled()
+		else expect(remove).toHaveBeenCalledWith("abort", add.mock.calls[0][1])
+	})
+
 	it.each([true, false])("releases the listener on completion with streaming=%s", async (streaming) => {
 		const controller = new AbortController()
 		const add = vi.spyOn(controller.signal, "addEventListener")

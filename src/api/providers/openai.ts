@@ -19,13 +19,9 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import {
-	sanitizeSurrogates,
-	sanitizeSurrogatesDeep,
-	sanitizeIdentifierSurrogates,
-} from "../transform/sanitize-surrogates"
+import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
-import { convertToResponsesApiInput } from "../transform/responses-api-input"
+import { buildResponsesRequest } from "./utils/openai-compatible-responses"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { getModelParams } from "../transform/model-params"
@@ -107,24 +103,24 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		const modelId = this.options.openAiModelId ?? ""
+		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
+		// OpenAI deployments of reasoning models behind corporate gateways) reject
+		// `reasoning_effort` combined with function tools on /chat/completions and
+		// require /responses instead.
+		if (this.options.openAiUseResponsesApi) {
+			yield* this.handleResponsesApiMessage(systemPrompt, messages, metadata)
+			return
+		}
+
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
-		const modelId = this.options.openAiModelId ?? ""
 		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
 		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
-
-		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
-		// OpenAI deployments of reasoning models behind corporate gateways) reject
-		// `reasoning_effort` combined with function tools on /chat/completions and
-		// require /responses instead.
-		if (this.options.openAiUseResponsesApi) {
-			yield* this.handleResponsesApiMessage(modelId, systemPrompt, messages, metadata)
-			return
-		}
 
 		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -317,88 +313,26 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 	/** Sends the opt-in Responses request through the shared input and stream transforms. */
 	private async *handleResponsesApiMessage(
-		modelId: string,
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const model = this.getModel()
-		const { info: modelInfo, reasoning } = model
+		const { info: modelInfo, reasoning } = this.getModel()
 		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
 		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
-		// Sanitize before conversion, including strings inside JSON tool arguments.
-		// Encode IDs first so distinct tool calls remain distinct after sanitization.
-		const history = messages.map((message) => ({
-			...message,
-			content:
-				typeof message.content === "string"
-					? message.content
-					: message.content.map((part) => {
-							if (part.type === "tool_use") return { ...part, id: sanitizeIdentifierSurrogates(part.id) }
-							if (part.type === "tool_result")
-								return { ...part, tool_use_id: sanitizeIdentifierSurrogates(part.tool_use_id) }
-							return part
-						}),
-		}))
-		// The deep sanitizer preserves the message structure and only replaces strings.
-		const sanitizedHistory = sanitizeSurrogatesDeep(history) as Anthropic.Messages.MessageParam[]
-		const requestBody: OpenAI.Responses.ResponseCreateParams = {
-			model: modelId,
-			instructions: sanitizeSurrogates(systemPrompt),
-			input: convertToResponsesApiInput(sanitizedHistory),
-			stream: this.options.openAiStreamingEnabled ?? true,
-			// Stateless operation: don't store responses server-side.
-			store: false,
-		}
-
-		// The Responses API takes reasoning as `reasoning: { effort }` instead of
-		// the Chat Completions `reasoning_effort` field; translate the resolved
-		// params (which honor the custom model info's reasoningEffort) so
-		// reasoning and function tools can be combined on this endpoint.
-		if (reasoning?.reasoning_effort) {
-			requestBody.reasoning = {
-				effort: reasoning.reasoning_effort,
-			} as OpenAI.Responses.ResponseCreateParamsStreaming["reasoning"]
-			// Only request encrypted reasoning content when reasoning is active.
-			requestBody.include = ["reasoning.encrypted_content"]
-		}
-
-		// Mirror the Chat Completions temperature policy: omit it unless the
-		// model supports it and the user set a custom value, so the server's own
-		// default applies.
-		if (modelInfo.supportsTemperature !== false && this.options.modelTemperature != null) {
-			requestBody.temperature = this.options.modelTemperature
-		}
-
-		// Mirror the Chat Completions max-tokens policy: only cap output when the
-		// user opted in via includeMaxTokens.
-		if (this.options.includeMaxTokens === true) {
-			requestBody.max_output_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
-		}
-
-		// convertToolsForOpenAI already applies the strict/non-strict schema
-		// policy (including the MCP strict exemption); the Responses API only
-		// needs the flattened function shape.
-		const responseTools = this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas)
-			?.filter((tool) => tool?.type === "function")
-			.map((tool) => ({
-				type: "function" as const,
-				name: tool.function.name as string,
-				description: tool.function.description as string | undefined,
-				parameters: tool.function.parameters,
-				strict: (tool.function.strict as boolean | undefined) ?? null,
-			}))
-
-		if (responseTools?.length) {
-			requestBody.tools = responseTools
-			if (metadata?.tool_choice) {
-				requestBody.tool_choice = this.mapToolChoiceForResponsesApi(metadata.tool_choice)
-			}
-			requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
-		}
+		const body = buildResponsesRequest({
+			options: this.options,
+			modelInfo,
+			reasoning,
+			systemPrompt,
+			messages,
+			metadata,
+			tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
+			extraBody: this.extraBody,
+		})
 
 		// Bridge the external abort signal only after every throw-prone part of
 		// request construction has run, so a construction failure cannot leak a
@@ -408,9 +342,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		)
 
 		try {
-			const body = this.withExtraBody(requestBody)
 			const requestOptions = abortSignal ? { signal: abortSignal } : undefined
-			if (requestBody.stream) {
+			if (body.stream) {
 				const stream = await this.client.responses.create({ ...body, stream: true }, requestOptions)
 				yield* processResponsesApiStream(stream, createUsageNormalizer())
 			} else {
@@ -434,29 +367,6 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			throw handleOpenAIError(error, this.providerName)
 		} finally {
 			removeExternalAbortListener()
-		}
-	}
-
-	/**
-	 * Maps a Chat Completions tool choice to the Responses API shape. String
-	 * options (auto/required/none) are identical in both APIs; named-tool
-	 * choices nest the name under `function`/`custom` in Chat Completions but
-	 * keep it at the top level in the Responses API. The Chat Completions
-	 * `allowed_tools` shape has no equivalent mapping here and is omitted.
-	 */
-	private mapToolChoiceForResponsesApi(
-		toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
-	): OpenAI.Responses.ResponseCreateParamsStreaming["tool_choice"] {
-		if (typeof toolChoice === "string") {
-			return toolChoice
-		}
-		switch (toolChoice.type) {
-			case "function":
-				return { type: "function", name: toolChoice.function.name }
-			case "custom":
-				return { type: "custom", name: toolChoice.custom.name }
-			default:
-				return undefined
 		}
 	}
 
