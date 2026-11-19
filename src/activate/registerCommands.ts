@@ -1,7 +1,7 @@
 import * as vscode from "vscode"
 import delay from "delay"
 
-import type { CommandId } from "@roo-code/types"
+import type { CommandId, ExtensionMessage } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { getCommand } from "../utils/commands"
@@ -13,6 +13,7 @@ import { handleNewTask } from "./handleTask"
 import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
+import { Package } from "../shared/package"
 import { createDiagnosticsReport } from "../services/diagnostics"
 
 /**
@@ -31,8 +32,16 @@ export function getVisibleProviderOrLog(outputChannel: vscode.OutputChannel): Cl
 let sidebarPanel: vscode.WebviewView | undefined = undefined
 let tabPanel: vscode.WebviewPanel | undefined = undefined
 
+// In-flight "open in editor" creation shared by overlapping calls: a
+// double-click starts before the first call tracks its new panel, so
+// concurrent callers must share one creation instead of racing to create
+// two tab panels.
+let pendingTabPanelCreation: Promise<ClineProvider> | undefined
+
 /**
- * Get the currently active panel
+ * Get the currently active panel.
+ *
+ * @internal Exported for focused implementation tests.
  * @returns WebviewPanel或WebviewView
  */
 export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined {
@@ -40,7 +49,12 @@ export function getPanel(): vscode.WebviewPanel | vscode.WebviewView | undefined
 }
 
 /**
- * Set panel references
+ * Set panel references.
+ *
+ * The two refs are independent: each surface keeps its own ref for its whole
+ * lifetime, so resolving the sidebar view never wipes a live tab panel (and
+ * vice versa). Callers pass `undefined` only when the surface itself is
+ * disposed (see the `onDidDispose` wiring in `openClineInNewTab`).
  */
 export function setPanel(
 	newPanel: vscode.WebviewPanel | vscode.WebviewView | undefined,
@@ -48,11 +62,20 @@ export function setPanel(
 ): void {
 	if (type === "sidebar") {
 		sidebarPanel = newPanel as vscode.WebviewView
-		tabPanel = undefined
 	} else {
 		tabPanel = newPanel as vscode.WebviewPanel
-		sidebarPanel = undefined
 	}
+}
+
+/**
+ * The instance that owns the tracked tab panel, if it is still alive.
+ *
+ * Title-bar commands on the editor-tab surface use this instead of the
+ * visible-instance heuristic, so a click on the tab's title bar always
+ * targets that tab even when the sidebar is visible side-by-side.
+ */
+function getTabProvider(): ClineProvider | undefined {
+	return tabPanel ? ClineProvider.getInstanceForView(tabPanel) : undefined
 }
 
 export type RegisterCommandOptions = {
@@ -81,27 +104,73 @@ export const registerCommands = (options: RegisterCommandOptions) => {
 // type while rejecting direct calls with arguments. VS Code dispatches positional
 // arguments dynamically; `unknown` requires callers to inspect returned values.
 type CommandCallback = (...args: never[]) => unknown
+
+// Posts each action in order to the target instance. Failures are logged
+// (not thrown) with the handler-specific prefix so a failed post stays
+// attributable in the output channel.
+const postActions = (
+	outputChannel: vscode.OutputChannel,
+	target: ClineProvider,
+	actions: readonly NonNullable<ExtensionMessage["action"]>[],
+	logPrefix: string,
+) => {
+	for (const action of actions) {
+		void target
+			.postMessageToWebview({ type: "action", action })
+			.catch((error) => outputChannel.appendLine(`[${logPrefix}] postMessageToWebview failed: ${error}`))
+	}
+}
+
 const getCommandsMap = ({
 	context,
 	outputChannel,
 	provider,
 }: RegisterCommandOptions): Record<Exclude<CommandId, "showRipgrepDiagnostic">, CommandCallback> => ({
 	activationCompleted: () => {},
+	// The `view/title` menu is scoped to the sidebar view, so the click
+	// origin of these handlers is the sidebar provider wired in at
+	// activation (`provider`). Target it directly instead of the
+	// visible-instance heuristic, which would follow the user's focus to a
+	// tab instance when both surfaces are open side-by-side. The `*InTab`
+	// variants serve the `editor/title` menu and target the tab instance
+	// through `getTabProvider()` instead.
 	plusButtonClicked: async () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		if (!visibleProvider) {
+		await provider.evictCurrentTask()
+		await provider.refreshWorkspace()
+
+		// The worktree auto-open flow (`extension.ts`) invokes this command without a sidebar click,
+		// so the view may not be resolved yet: focus it explicitly instead of posting into a webview
+		// that does not exist. On the menu path the view is already resolved and this is a no-op.
+		if (!provider.isViewLaunched) {
+			await vscode.commands.executeCommand(`${Package.name}.SidebarProvider.focus`)
+			// The focus command settles when VS Code opens the pane, not when resolveWebviewView
+			// hands this provider its view, and postMessageToWebview returns without sending while the
+			// view is unset - both actions below would be dropped. Wait for the resolution that this
+			// command just asked VS Code to start. The wait releases on one of three things: this
+			// provider receives its view, the sidebar view is disposed (the pane was closed before
+			// resolving), or the provider is disposed. It has no clock of its own, so a view that is
+			// neither resolved nor torn down leaves this command pending until one of those happens.
+			await provider.whenViewResolved()
+		}
+		await provider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		// Send focusInput action immediately after chatButtonClicked
+		// This ensures the focus happens after the view has switched
+		await provider.postMessageToWebview({ type: "action", action: "focusInput" })
+	},
+	plusButtonClickedInTab: async () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("plus")
 
-		await visibleProvider.evictCurrentTask()
-		await visibleProvider.refreshWorkspace()
-		await visibleProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
-		// Send focusInput action immediately after chatButtonClicked
-		// This ensures the focus happens after the view has switched
-		await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+		await tabProvider.evictCurrentTask()
+		await tabProvider.refreshWorkspace()
+		await tabProvider.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
+		await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 	},
 	popoutButtonClicked: () => {
 		TelemetryService.instance.captureTitleButtonClicked("popout")
@@ -111,43 +180,50 @@ const getCommandsMap = ({
 	openInNewTab: () =>
 		openClineInNewTab({ context, outputChannel, webviewFocusTracker: provider.webviewFocusTracker }),
 	settingsButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		if (!visibleProvider) {
+		// Also explicitly post the visibility message to trigger scroll reliably.
+		postActions(outputChannel, provider, ["settingsButtonClicked", "didBecomeVisible"], "settingsButtonClicked")
+	},
+	settingsButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("settings")
 
-		void visibleProvider
-			.postMessageToWebview({ type: "action", action: "settingsButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
-		// Also explicitly post the visibility message to trigger scroll reliably
-		void visibleProvider
-			.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
-			.catch((error) => outputChannel.appendLine(`[settingsButtonClicked] postMessageToWebview failed: ${error}`))
+		postActions(
+			outputChannel,
+			tabProvider,
+			["settingsButtonClicked", "didBecomeVisible"],
+			"settingsButtonClickedInTab",
+		)
 	},
 	historyButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
+		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		if (!visibleProvider) {
+		postActions(outputChannel, provider, ["historyButtonClicked"], "historyButtonClicked")
+	},
+	historyButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
 			return
 		}
 
 		TelemetryService.instance.captureTitleButtonClicked("history")
 
-		void visibleProvider
-			.postMessageToWebview({ type: "action", action: "historyButtonClicked" })
-			.catch((error) => outputChannel.appendLine(`[historyButtonClicked] postMessageToWebview failed: ${error}`))
+		postActions(outputChannel, tabProvider, ["historyButtonClicked"], "historyButtonClickedInTab")
 	},
 	marketplaceButtonClicked: () => {
-		const visibleProvider = getVisibleProviderOrLog(outputChannel)
-		if (!visibleProvider) return
-		void visibleProvider
-			.postMessageToWebview({ type: "action", action: "marketplaceButtonClicked" })
-			.catch((error) =>
-				outputChannel.appendLine(`[marketplaceButtonClicked] postMessageToWebview failed: ${error}`),
-			)
+		postActions(outputChannel, provider, ["marketplaceButtonClicked"], "marketplaceButtonClicked")
+	},
+	marketplaceButtonClickedInTab: () => {
+		const tabProvider = getTabProvider()
+		if (!tabProvider) {
+			return
+		}
+		postActions(outputChannel, tabProvider, ["marketplaceButtonClicked"], "marketplaceButtonClickedInTab")
 	},
 	newTask: (params: { prompt?: string } | null | undefined) => handleNewTask(params, provider.webviewFocusTracker),
 	setCustomStoragePath: async () => {
@@ -180,8 +256,15 @@ const getCommandsMap = ({
 		try {
 			await focusPanel(tabPanel, sidebarPanel)
 
-			// Send focus input message only for sidebar panels
-			if (sidebarPanel && getPanel() === sidebarPanel) {
+			// Post to the surface focusPanel selected: the tab takes
+			// selection priority, so the sidebar is targeted only when no
+			// tab panel is tracked.
+			if (tabPanel) {
+				const tabProvider = getTabProvider()
+				if (tabProvider) {
+					await tabProvider.postMessageToWebview({ type: "action", action: "focusInput" })
+				}
+			} else if (sidebarPanel) {
 				await provider.postMessageToWebview({ type: "action", action: "focusInput" })
 			}
 		} catch (error) {
@@ -231,9 +314,76 @@ type OpenClineInNewTabOptions = {
 	context: vscode.ExtensionContext
 	outputChannel: vscode.OutputChannel
 	webviewFocusTracker: WebviewFocusTracker
+	// `startNewTask({ newTab: true })` asks for a tab because it has just closed the editors; the
+	// title-bar buttons ask for one only to reveal what is already there. Only the first must
+	// bypass the tracked-panel reuse, so the caller states it instead of the factory guessing.
+	forceNew?: boolean
 }
 
-export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTracker }: OpenClineInNewTabOptions) => {
+export const openClineInNewTab = async (options: OpenClineInNewTabOptions) => {
+	// Serialize overlapping "Open in editor" calls: a double-click starts
+	// before the first call tracks its new panel, so without a shared
+	// in-flight creation both calls would race to create two tab panels.
+	// The shared promise is stored before the creation body awaits
+	// ContextProxy.getInstance, so every caller started while the creation
+	// is in flight — openInNewTab and popoutButtonClicked both dispatch
+	// through here — awaits it instead of creating a second panel: exactly
+	// one panel is created and every caller receives the same provider.
+	// A forced call must not join somebody else's in-flight creation. forceNew means
+	// "this caller has just closed the editors and needs its own provider", so two
+	// overlapping startNewTask({ newTab: true }) calls must each get a distinct provider:
+	// sharing one would make both evict and re-create the task on the same webview. The
+	// non-forced callers - the title-bar reveal buttons - keep reusing the pending panel.
+	if (pendingTabPanelCreation && !options.forceNew) {
+		return pendingTabPanelCreation
+	}
+
+	const creation = createTabPanelUnlocked(options)
+	// The forced call creates its own provider but only occupies the shared slot when the
+	// slot is free. A forced call that arrives while an ordinary creation is in flight must
+	// not evict it: an ordinary caller that starts afterwards is asking for the panel that
+	// creation is building, and giving it the forced promise would reject it for a failure of
+	// somebody else's creation while its own creation still opens a panel nobody awaits.
+	if (!pendingTabPanelCreation) {
+		pendingTabPanelCreation = creation
+	}
+
+	try {
+		return await creation
+	} finally {
+		// Clear once settled (success or failure) so the next call starts
+		// fresh: the reuse path in createTabPanelUnlocked then takes over
+		// for the tracked panel. The equality check keeps this settlement from
+		// clearing a slot it does not own, which is the normal outcome for a
+		// forced call that started while an ordinary creation held the slot: that
+		// forced call never stored anything, so the ordinary creation stays.
+		if (pendingTabPanelCreation === creation) {
+			pendingTabPanelCreation = undefined
+		}
+	}
+}
+
+// The unserialized tab-creation body. Only openClineInNewTab may call it,
+// after it has stored the shared in-flight promise.
+const createTabPanelUnlocked = async ({
+	context,
+	outputChannel,
+	webviewFocusTracker,
+	forceNew,
+}: OpenClineInNewTabOptions) => {
+	// Reuse the tracked tab instead of opening a second one: a repeated
+	// "Open in editor" click reveals the existing tab's panel. A caller that
+	// needs a genuinely new tab (startNewTask closes the editors first) passes
+	// `forceNew` and skips the reveal.
+	if (tabPanel && !forceNew) {
+		const existingProvider = ClineProvider.getInstanceForView(tabPanel)
+		if (existingProvider) {
+			await tabPanel.reveal()
+			await existingProvider.postMessageToWebview({ type: "action", action: "didBecomeVisible" })
+			return existingProvider
+		}
+	}
+
 	// (This example uses webviewProvider activation event which is necessary to
 	// deserialize cached webview, but since we use retainContextWhenHidden, we
 	// don't need to use that event).
@@ -244,8 +394,9 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	let mdmService: MdmService | undefined
 	try {
 		mdmService = MdmService.getInstance()
-	} catch {
-		// MDM service not initialized, which is fine - extension can work without it
+	} catch (error) {
+		// MDM service unavailable: log the fallback and continue without it.
+		outputChannel.appendLine(`[openClineInNewTab] MDM service unavailable, continuing without it: ${error}`)
 		mdmService = undefined
 	}
 
@@ -291,6 +442,13 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 	newPanel.onDidChangeViewState(
 		(e) => {
 			const panel = e.webviewPanel
+			// Re-point the tracked tab ref at the panel the user is actually
+			// looking at: several tab panels can stay visible at once, but
+			// only the active one is the current tab, and the title-bar
+			// commands must resolve that instance, not the last created one.
+			if (panel.active) {
+				setPanel(panel, "tab")
+			}
 			if (panel.visible) {
 				panel.webview.postMessage({ type: "action", action: "didBecomeVisible" }) // Use the same message type as in SettingsView.tsx
 			}
@@ -299,7 +457,9 @@ export const openClineInNewTab = async ({ context, outputChannel, webviewFocusTr
 		context.subscriptions, // Register listener for disposal
 	)
 
-	// Handle panel closing events.
+	// Handle panel closing events: clear the tracked ref only if this panel
+	// is still the tracked one, so a late disposal of an already-replaced
+	// panel cannot clobber the replacement's ref.
 	newPanel.onDidDispose(
 		() => {
 			// A recovery may already have installed a replacement panel.
