@@ -657,16 +657,20 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				// Queue message if:
 				// - Task is busy (sendingDisabled)
 				// - API request in progress (isStreaming)
+				// - Context condensation in progress (isCondensing) - the queued
+				//   message drains via processQueuedMessages once it finishes
 				// - Queue has items (preserve message order during drain)
 				// - Command is running (command_output) - user's message should be queued for AI, not sent to terminal
 				if (
 					sendingDisabled ||
 					isStreaming ||
+					isCondensing ||
 					messageQueue.length > 0 ||
 					clineAskRef.current === "command_output"
 				) {
 					try {
-						console.log("queueMessage", text, images)
+						// Diagnostic only: never log message text or image data.
+						console.log("queueMessage", { textLength: text.length, imageCount: images.length })
 						vscode.postMessage({ type: "queueMessage", text, images })
 						setInputValue("")
 						setSelectedImages([])
@@ -723,6 +727,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			markFollowUpAsAnswered,
 			sendingDisabled,
 			isStreaming,
+			isCondensing,
 			messageQueue.length,
 			apiConfiguration.apiProvider,
 		], // messagesRef and clineAskRef are stable
@@ -739,6 +744,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			setInputValue(newValue)
 			setSelectedImages([...selectedImages, ...images])
+			// Parent-owned input edits never fire the textarea's onChange, so
+			// the armed idle-condense countdown must be restarted here.
+			vscode.postMessage({ type: "idleCondenseReset" })
 		},
 		[inputValue, selectedImages],
 	)
@@ -954,20 +962,23 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "condenseTaskContextStarted":
-					// Handle both manual and automatic condensation start
-					// We don't check the task ID because:
-					// 1. There can only be one active task at a time
-					// 2. Task switching resets isCondensing to false (see useEffect with currentTaskId dependency)
-					// 3. For new tasks, currentTaskItem may not be populated yet due to async state updates
-					if (message.text) {
+					// Handle both manual and automatic condensation start.
+					// The cue is tagged with the task it belongs to: ignore one
+					// from another task (e.g. a late cue from a task the user
+					// switched away from) so it can't toggle this view's
+					// condensing indicator.
+					if (message.text && message.text === currentTaskIdRef.current) {
 						setIsCondensing(true)
 						// Note: sendingDisabled is only set for manual condensation via handleCondenseContext
 						// Automatic condensation doesn't disable sending since the task is already running
 					}
 					break
 				case "condenseTaskContextResponse":
-					// Same reasoning as above - we trust this is for the current task
-					if (message.text) {
+					// Same task-identity guard as the started cue: a response
+					// from a previously condensing task must not clear the
+					// indicator (or re-enable sending) while the current
+					// task's condense is still in flight.
+					if (message.text && message.text === currentTaskIdRef.current) {
 						if (isCondensing && sendingDisabled) {
 							setSendingDisabled(false)
 						}
@@ -1468,6 +1479,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				setInputValue((currentValue: string) => {
 					return currentValue !== "" ? `${currentValue} \n${answer}` : answer
 				})
+				// "Copy to input" rewrites the prompt without a textarea onChange,
+				// so the armed idle-condense countdown must be restarted here.
+				vscode.postMessage({ type: "idleCondenseReset" })
 			} else {
 				// Don't clear the input value when sending a follow-up choice
 				// The message should be sent but the text area should preserve what the user typed

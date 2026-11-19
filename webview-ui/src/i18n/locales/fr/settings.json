@@ -767,6 +767,18 @@
 			"profileDescription": "Seuil personnalisé pour ce profil uniquement (remplace le défaut global)",
 			"usesGlobal": "(utilise global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensation en veille",
+			"description": "Un seuil plus bas pour condenser le contexte pendant les moments de veille, afin d’avoir toujours un contexte propre quand tu reviens au clavier.",
+			"thresholdDescription": "Un seuil plus bas pour condenser le contexte, qui s'applique uniquement lorsque le modèle est inactif.",
+			"thresholdProfileDescription": "Seuil de veille personnalisé pour ce profil uniquement (remplace le défaut global, plafonné au seuil de condensation du profil)",
+			"idleTime": {
+				"label": "Temps de veille",
+				"seconds": "secondes",
+				"description": "Durée pendant laquelle le modèle doit rester inactif."
+			},
+			"useGlobal": "Utiliser les paramètres globaux"
+		},
 		"includeCurrentTime": {
 			"label": "Inclure l'heure actuelle dans le contexte",
 			"description": "Lorsque cette option est activée, l'heure actuelle et les informations de fuseau horaire seront incluses dans le prompt système. Désactivez cette option si les modèles cessent de fonctionner en raison de problèmes liés à l'heure."

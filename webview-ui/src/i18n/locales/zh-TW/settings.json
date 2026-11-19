@@ -792,6 +792,18 @@
 			"profileDescription": "僅此設定檔的自訂閾值（覆寫全域預設）",
 			"usesGlobal": "（使用全域 {{threshold}}%）"
 		},
+		"idleCondensing": {
+			"name": "空閒時壓縮",
+			"description": "在空閒時段以更低的閾值壓縮上下文，讓你回到鍵盤前時始終擁有乾淨的上下文。",
+			"thresholdDescription": "僅在模型空閒時適用的、用於壓縮上下文的更低閾值。",
+			"thresholdProfileDescription": "僅此設定檔的自訂空閒閾值（覆寫全域預設，上限為該設定檔的壓縮閾值）",
+			"idleTime": {
+				"label": "空閒時間",
+				"seconds": "秒",
+				"description": "模型必須空閒多久。"
+			},
+			"useGlobal": "使用全域設定"
+		},
 		"includeCurrentTime": {
 			"label": "在上下文中包含目前時間",
 			"description": "啟用後，目前時間和時區資訊將包含在系統提示中。如果模型因時間問題停止工作，請停用此選項。"

@@ -743,6 +743,18 @@
 			"profileDescription": "Ambang batas kustom untuk profil ini saja (menimpa default global)",
 			"usesGlobal": "(menggunakan global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Kondensasi saat idle",
+			"description": "Ambang batas lebih rendah untuk mengkondensasi konteks saat idle, sehingga kamu selalu memiliki konteks bersih saat kembali ke keyboard.",
+			"thresholdDescription": "Ambang batas lebih rendah untuk mengkondensasi konteks yang hanya berlaku saat model idle.",
+			"thresholdProfileDescription": "Ambang batas idle kustom hanya untuk profil ini (menimpa default global, dibatasi pada ambang kondensasi profil)",
+			"idleTime": {
+				"label": "Waktu idle",
+				"seconds": "detik",
+				"description": "Berapa lama model harus tidak aktif."
+			},
+			"useGlobal": "Gunakan pengaturan global"
+		},
 		"openTabs": {
 			"label": "Batas konteks tab terbuka",
 			"description": "Jumlah maksimum tab VSCode terbuka yang disertakan dalam konteks. Nilai yang lebih tinggi memberikan lebih banyak konteks tetapi meningkatkan penggunaan token."

@@ -110,6 +110,17 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const normalizedInputValue = typeof inputValue === "string" ? inputValue : ""
 
 		const { t } = useAppTranslation()
+
+		// Every user-driven prompt mutation must restart the idle-condense
+		// countdown. Programmatic setInputValue calls (URL paste, dropped
+		// paths, menu selections, history recall) never fire the textarea's
+		// onChange, so each mutation site signals the reset itself. The host
+		// ignores the signal unless a timer is armed, so extra signals are
+		// harmless.
+		const signalIdleCondenseReset = useCallback(() => {
+			vscode.postMessage({ type: "idleCondenseReset" })
+		}, [])
+
 		const {
 			filePaths,
 			openedTabs,
@@ -180,6 +191,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						} catch {
 							setInputValue(message.text)
 						}
+
+						// execCommand fires a native input event (and thus the
+						// textarea onChange) only in real browsers, and the
+						// setInputValue fallback never does; signal unconditionally.
+						signalIdleCondenseReset()
 					}
 
 					setIsEnhancingPrompt(false)
@@ -203,6 +219,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							" " +
 							currentValue.slice(cursorPos)
 						setInputValue(newValue)
+						signalIdleCondenseReset()
 
 						// Set cursor position after the inserted text
 						const newCursorPos = cursorPos + prefix.length + message.text.length + 1
@@ -233,7 +250,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			window.addEventListener("message", messageHandler)
 			return () => window.removeEventListener("message", messageHandler)
-		}, [setInputValue, searchRequestId, normalizedInputValue])
+		}, [setInputValue, signalIdleCondenseReset, searchRequestId, normalizedInputValue])
 
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
@@ -350,6 +367,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					// Handle mode selection.
 					setMode(value)
 					setInputValue("")
+					signalIdleCondenseReset()
 					setShowContextMenu(false)
 					vscode.postMessage({ type: "mode", text: value })
 					return
@@ -364,6 +382,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					// Insert the command mention into the textarea
 					const commandMention = `/${value}`
 					setInputValue(commandMention + " ")
+					signalIdleCondenseReset()
 					setCursorPosition(commandMention.length + 1)
 					setIntendedCursorPosition(commandMention.length + 1)
 
@@ -420,6 +439,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					)
 
 					setInputValue(newValue)
+					signalIdleCondenseReset()
 					const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
 					setCursorPosition(newCursorPosition)
 					setIntendedCursorPosition(newCursorPosition)
@@ -434,7 +454,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				}
 			},
 			// eslint-disable-next-line react-hooks/exhaustive-deps
-			[setInputValue, cursorPosition],
+			[setInputValue, cursorPosition, signalIdleCondenseReset],
 		)
 
 		const handleKeyDown = useCallback(
@@ -512,6 +532,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 				// Handle prompt history navigation using custom hook
 				if (handleHistoryNavigation(event, showContextMenu, isComposing)) {
+					// Recalling a prompt rewrites the input without an onChange.
+					signalIdleCondenseReset()
 					return
 				}
 
@@ -569,6 +591,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						if (newText !== normalizedInputValue) {
 							event.preventDefault()
 							setInputValue(newText)
+							signalIdleCondenseReset()
 							setIntendedCursorPosition(newPosition) // Store the new cursor position in state
 						}
 
@@ -597,6 +620,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				resetHistoryNavigation,
 				commands,
 				enterBehavior,
+				signalIdleCondenseReset,
 			],
 		)
 
@@ -617,6 +641,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 				// Reset history navigation when user types
 				resetOnInputChange()
+
+				// Typing in the prompt area resets the idle-condense timer.
+				// Signal on every edit: a throttled signal can let condensing
+				// start less than one idle window after a suppressed keystroke.
+				signalIdleCondenseReset()
 
 				const newCursorPosition = e.target.selectionStart
 				setCursorPosition(newCursorPosition)
@@ -675,7 +704,14 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([]) // Clear file search results.
 				}
 			},
-			[setInputValue, setSearchRequestId, setFileSearchResults, setSearchLoading, resetOnInputChange],
+			[
+				setInputValue,
+				setSearchRequestId,
+				setFileSearchResults,
+				setSearchLoading,
+				resetOnInputChange,
+				signalIdleCondenseReset,
+			],
 		)
 
 		useEffect(() => {
@@ -710,6 +746,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						" " +
 						normalizedInputValue.slice(cursorPosition)
 					setInputValue(newValue)
+					signalIdleCondenseReset()
 					const newCursorPosition = cursorPosition + trimmedUrl.length + 1
 					setCursorPosition(newCursorPosition)
 					setIntendedCursorPosition(newCursorPosition)
@@ -771,7 +808,15 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					}
 				}
 			},
-			[shouldDisableImages, setSelectedImages, cursorPosition, setInputValue, normalizedInputValue, t],
+			[
+				shouldDisableImages,
+				setSelectedImages,
+				cursorPosition,
+				setInputValue,
+				normalizedInputValue,
+				t,
+				signalIdleCondenseReset,
+			],
 		)
 
 		const handleMenuMouseDown = useCallback(() => {
@@ -879,6 +924,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						const newCursorPosition = cursorPosition + totalLength
 						setCursorPosition(newCursorPosition)
 						setIntendedCursorPosition(newCursorPosition)
+						signalIdleCondenseReset()
 					}
 
 					return
@@ -940,6 +986,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				shouldDisableImages,
 				setSelectedImages,
 				t,
+				signalIdleCondenseReset,
 			],
 		)
 

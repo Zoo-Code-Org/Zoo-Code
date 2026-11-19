@@ -766,6 +766,18 @@
 			"profileDescription": "Aangepaste drempelwaarde alleen voor dit profiel (overschrijft globale standaard)",
 			"usesGlobal": "(gebruikt globaal {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Comprimeren bij inactiviteit",
+			"description": "Een lagere drempel om de context tijdens inactieve momenten te comprimeren, zodat je altijd een schone context hebt als je terugkomt naar het toetsenbord.",
+			"thresholdDescription": "Een lagere drempel om de context te comprimeren, die alleen geldt wanneer het model inactief is.",
+			"thresholdProfileDescription": "Aangepaste inactiviteitsdrempel alleen voor dit profiel (overschrijft globale standaard, beperkt tot de compressiedrempel van het profiel)",
+			"idleTime": {
+				"label": "Inactiviteitstijd",
+				"seconds": "seconden",
+				"description": "Hoe lang het model inactief moet zijn."
+			},
+			"useGlobal": "Globale instellingen gebruiken"
+		},
 		"includeCurrentTime": {
 			"label": "Huidige tijd opnemen in context",
 			"description": "Indien ingeschakeld, worden de huidige tijd en tijdzone-informatie opgenomen in de systeemprompt. Schakel dit uit als modellen stoppen met werken vanwege tijdproblemen."

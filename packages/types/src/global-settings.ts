@@ -190,6 +190,38 @@ export const globalSettingsSchema = z.object({
 	allowedMaxCost: z.number().nullish(),
 	autoCondenseContext: z.boolean().optional(),
 	autoCondenseContextPercent: z.number().optional(),
+	/**
+	 * Master toggle for idle condensing: opportunistically condense the context
+	 * while the task is waiting on the user, once the context exceeds the
+	 * (typically lower) idle trigger threshold and the idle time has elapsed.
+	 * @default false
+	 */
+	idleCondenseContext: z.boolean().optional(),
+	/**
+	 * Context-window percentage (relative to the condensing context window) at
+	 * or above which an idle condense is allowed to run. Must not exceed the
+	 * effective autoCondenseContextPercent.
+	 * @default 50
+	 */
+	idleCondenseContextPercent: z.number().optional(),
+	/**
+	 * Seconds of waiting-on-user (idle) time before an idle condense runs.
+	 * The countdown restarts when the user types in the prompt input.
+	 * @default 180
+	 */
+	idleCondenseTimeInSeconds: z.number().optional(),
+	/**
+	 * Per-model-profile overrides for idleCondenseContextPercent. A value of -1
+	 * inherits the global idleCondenseContextPercent; values outside
+	 * [MIN_CONDENSE_THRESHOLD, MAX_CONDENSE_THRESHOLD] fall back to global.
+	 */
+	profileIdleThresholds: z.record(z.string(), z.number()).optional(),
+	/**
+	 * Per-model-profile overrides for idleCondenseTimeInSeconds. A value of -1
+	 * inherits the global idleCondenseTimeInSeconds; negative values other than
+	 * -1 fall back to global.
+	 */
+	profileIdleCondenseTimes: z.record(z.string(), z.number()).optional(),
 
 	/**
 	 * Whether to include current time in the environment details

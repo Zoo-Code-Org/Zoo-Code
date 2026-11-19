@@ -767,6 +767,18 @@
 			"profileDescription": "Umbral personalizado solo para este perfil (anula el predeterminado global)",
 			"usesGlobal": "(usa global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensación en reposo",
+			"description": "Un umbral más bajo para condensar el contexto durante los momentos de reposo, para que siempre tengas un contexto limpio cuando vuelvas al teclado.",
+			"thresholdDescription": "Un umbral más bajo para condensar el contexto que se aplica solo cuando el modelo está inactivo.",
+			"thresholdProfileDescription": "Umbral de reposo personalizado solo para este perfil (anula el predeterminado global, limitado al umbral de condensación del perfil)",
+			"idleTime": {
+				"label": "Tiempo de reposo",
+				"seconds": "segundos",
+				"description": "Cuánto tiempo debe estar el modelo inactivo."
+			},
+			"useGlobal": "Usar ajustes globales"
+		},
 		"includeCurrentTime": {
 			"label": "Incluir hora actual en el contexto",
 			"description": "Cuando está habilitado, la hora actual y la información de la zona horaria se incluirán en el prompt del sistema. Deshabilítelo si los modelos dejan de funcionar por problemas de tiempo."

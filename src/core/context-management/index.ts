@@ -47,7 +47,7 @@ export async function estimateTokenCount(
  * (window minus reserved output); an unknown/unlimited reserve (maxTokens -1) falls back to the
  * full window. Shared by `willManageContext` and `manageContext` so the two stay in lockstep.
  */
-function computeContextPercent({
+export function computeContextPercent({
 	prevContextTokens,
 	contextWindow,
 	maxTokens,
@@ -156,6 +156,40 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 		truncationId,
 		messagesRemoved: messagesToRemove,
 	}
+}
+
+/**
+ * Resolves the effective condense threshold percent for the current model
+ * profile, mirroring the semantics used by `willManageContext`/`manageContext`:
+ * a profile value of -1 inherits the global percent, a value within
+ * [MIN_CONDENSE_THRESHOLD, MAX_CONDENSE_THRESHOLD] overrides it, and any other
+ * value falls back to the global percent with a warning.
+ */
+export function computeEffectiveCondenseThreshold({
+	globalPercent,
+	profileThresholds,
+	currentProfileId,
+	label = "threshold",
+}: {
+	globalPercent: number
+	profileThresholds: Record<string, number>
+	currentProfileId: string
+	label?: string
+}): number {
+	const profileThreshold = profileThresholds[currentProfileId]
+	if (profileThreshold === undefined) {
+		return globalPercent
+	}
+	if (profileThreshold === -1) {
+		return globalPercent
+	}
+	if (profileThreshold >= MIN_CONDENSE_THRESHOLD && profileThreshold <= MAX_CONDENSE_THRESHOLD) {
+		return profileThreshold
+	}
+	console.warn(
+		`Invalid profile ${label} ${profileThreshold} for profile "${currentProfileId}". Using global default of ${globalPercent}%`,
+	)
+	return globalPercent
 }
 
 /**

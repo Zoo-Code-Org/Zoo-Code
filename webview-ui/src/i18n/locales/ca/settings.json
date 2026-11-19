@@ -757,6 +757,18 @@
 			"profileDescription": "Llindar personalitzat només per a aquest perfil (substitueix el per defecte global)",
 			"usesGlobal": "(utilitza global {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensació en repòs",
+			"description": "Un llindar més baix per condensar el context durant els moments de repòs, així sempre tens un context net quan tornes al teclat.",
+			"thresholdDescription": "Un llindar més baix per condensar el context que s'aplica només quan el model està inactiu.",
+			"thresholdProfileDescription": "Llindar de repòs personalitzat només per a aquest perfil (substitueix el per defecte global, limitat al llindar de condensació del perfil)",
+			"idleTime": {
+				"label": "Temps de repòs",
+				"seconds": "segons",
+				"description": "Quant de temps ha d'estar el model inactiu."
+			},
+			"useGlobal": "Usa la configuració global"
+		},
 		"maxImageFileSize": {
 			"label": "Mida màxima d'arxiu d'imatge",
 			"mb": "MB",

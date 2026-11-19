@@ -757,6 +757,18 @@
 			"profileDescription": "Soglia personalizzata solo per questo profilo (sovrascrive il predefinito globale)",
 			"usesGlobal": "(usa globale {{threshold}}%)"
 		},
+		"idleCondensing": {
+			"name": "Condensazione inattiva",
+			"description": "Una soglia più bassa per condensare il contesto durante i momenti di inattività, così avrai sempre un contesto pulito quando torni alla tastiera.",
+			"thresholdDescription": "Una soglia più bassa per condensare il contesto, che si applica solo quando il modello è inattivo.",
+			"thresholdProfileDescription": "Soglia di inattività personalizzata solo per questo profilo (sovrascrive il predefinito globale, limitata alla soglia di condensazione del profilo)",
+			"idleTime": {
+				"label": "Tempo di inattività",
+				"seconds": "secondi",
+				"description": "Quanto a lungo il modello deve restare inattivo."
+			},
+			"useGlobal": "Usa le impostazioni globali"
+		},
 		"maxImageFileSize": {
 			"label": "Dimensione massima file immagine",
 			"mb": "MB",
