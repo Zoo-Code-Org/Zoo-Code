@@ -15,7 +15,7 @@ Property: No bundle is visible before its mode check. Failed builds leave
 no pending file. Tests cover success, compiler, validation, and rename errors.
 Findings: The known review bug is present. No new bug or false alarm found.
 The model does not prove the code. Stop can leave an unpublished temp file.
-Gate: Run all configs and both property tables by hand on each fix.
+Gate: Run all configs against CustomToolCacheMC and both property tables on each fix.
 Sandbox note: TLC needs a local RMI socket. Host tests avoid mapped root uid.
 Review ratchet: PR #2485 threads PRRT_kwDOSK-bwM64vzgN (ownership test),
 PRRT_kwDOSK-bwM64vzgR (defaults), PRRT_kwDOSK-bwM64vzgV (publication).
@@ -35,12 +35,22 @@ The path property checks both routes with the real filesystem and registry.
 Round 2 validation: All 54 registry tests, type checking, and package lint pass.
 The compiler and file checks are oracles. Two writers use distinct pending names.
 A reader can run after each step. Stop leaves the last file state on disk.
+Round 3: PR #2485, thread PRRT_kwDOSK-bwM65T3Dd, comment 4623919335.
+Failure: The protocol fixes the writer count. The MC module must set the bound.
+Expectation: Move the bound without changing the states or counterexamples.
+Gap: 1. Added: 0. Covered: 0. A state invariant cannot check module placement.
+The MC module supplies Writers. The protocol has no fixed writer count.
+Round 3 cost: One agent, about 4 minutes; no delegate.
+TLC: Fixed passes (49 states, depth 11). Direct fails VisibleIsReady (2 states).
+RawPath fails OwnershipMockReachesRoot. Final runs took 27 to 42s.
+Replay: Both existing property tables pass on the host (6 cases).
+Findings: No new bug or false alarm. The model checks the same states.
+Run: java -cp <jar> tlc2.TLC -metadir <tmp> -config <cfg> CustomToolCacheMC
 *)
 EXTENDS Naturals, TLC
-CONSTANTS AtomicPublish, CanonicalMatch
+CONSTANTS AtomicPublish, CanonicalMatch, Writers
 VARIABLES phase, published, pending
 vars == <<phase, published, pending>>
-Writers == {1, 2}
 Init == /\ phase = [w \in Writers |-> "idle"]
         /\ published = "absent"
         /\ pending = {}
