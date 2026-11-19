@@ -2138,6 +2138,223 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		mockResponsesCreate.mockClear()
 	})
 
+	it.each([true, false, undefined])("preserves streaming=%s and Extra Body request precedence", async (streaming) => {
+		const handler = new OpenAiHandler({
+			...baseOptions,
+			openAiStreamingEnabled: streaming,
+			openAiExtraBody: JSON.stringify({ service_tier: "flex", model: "wrong", stream: !streaming }),
+		})
+		if (streaming === false) {
+			mockResponsesCreate.mockResolvedValueOnce({
+				output: [
+					{ type: "message", content: [{ type: "output_text", text: "Answer" }] },
+					{ type: "reasoning", summary: [{ type: "summary_text", text: "Thinking" }] },
+					{ type: "function_call", call_id: "call-1", name: "read_file", arguments: "{}" },
+				],
+				usage: { input_tokens: 10, output_tokens: 5 },
+			})
+		}
+		const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
+		expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({
+			model: baseOptions.openAiModelId,
+			stream: streaming !== false,
+			service_tier: "flex",
+		})
+		if (streaming === false) {
+			expect(chunks).toContainEqual({ type: "text", text: "Answer" })
+			expect(chunks).toContainEqual({ type: "reasoning", text: "Thinking" })
+			expect(chunks).toContainEqual({ type: "tool_call", id: "call-1", name: "read_file", arguments: "{}" })
+			expect(chunks).toContainEqual(expect.objectContaining({ type: "usage", inputTokens: 10, outputTokens: 5 }))
+		}
+	})
+
+	it.each(["plain", "😀", "\ud800", "\udfff", "a\ud800b", "\ud800\ud801\udc00"])(
+		"sends well-formed prompt, history, and JSON tool arguments for %j",
+		async (text) => {
+			const history: Anthropic.Messages.MessageParam[] = [
+				{ role: "user", content: text },
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call-1", name: "read_file", input: { path: text } }],
+				},
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "call-1", content: text }] },
+			]
+			await collectStream(new OpenAiHandler(baseOptions).createMessage(text, history))
+			const body = mockResponsesCreate.mock.calls[0][0]
+			expectNoLoneSurrogates(body)
+			for (const item of body.input) {
+				if (item.type === "function_call") expectNoLoneSurrogates(JSON.parse(item.arguments))
+			}
+			expect(history[0].content).toBe(text)
+			if (text === "😀" || text === "plain") expect(body.instructions).toBe(text)
+		},
+	)
+
+	const optionCases = [true, false, undefined].flatMap((responses) =>
+		[true, false, undefined].flatMap((streaming) =>
+			[true, false].map((reasoning) => ({ responses, streaming, reasoning })),
+		),
+	)
+	it.each(optionCases)(
+		"preserves routing, tools, and reasoning for %j",
+		async ({ responses, streaming, reasoning }) => {
+			const handler = new OpenAiHandler({
+				...baseOptions,
+				openAiUseResponsesApi: responses,
+				openAiStreamingEnabled: streaming,
+				enableReasoningEffort: reasoning,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: true,
+					reasoningEffort: "high",
+				},
+			})
+			if (responses && streaming === false) mockResponsesCreate.mockResolvedValueOnce({ output: [] })
+			await collectStream(
+				handler.createMessage(systemPrompt, messages, makeCreateMessageMetadata({ tools: [functionTool] })),
+			)
+			expect(mockResponsesCreate.mock.calls.length).toBe(responses ? 1 : 0)
+			expect(mockCreate.mock.calls.length).toBe(responses ? 0 : 1)
+			if (responses) {
+				const body = mockResponsesCreate.mock.calls[0][0]
+				expect(body.stream).toBe(streaming !== false)
+				expect(body.reasoning?.effort).toBe(reasoning ? "high" : undefined)
+				expect(body.tools[0].name).toBe("read_file")
+			}
+		},
+	)
+
+	const units = [0x61, 0xd800, 0xdbff, 0xdc00, 0xdfff, 0xfffd]
+	const textCases = units.flatMap((first) =>
+		units.flatMap((second) => units.map((third) => String.fromCharCode(first, second, third))),
+	)
+	it.each(textCases)("sends well-formed text for generated UTF-16 input %j", async (text) => {
+		await collectStream(new OpenAiHandler(baseOptions).createMessage(text, [{ role: "user", content: text }]))
+		expectNoLoneSurrogates(mockResponsesCreate.mock.calls[0][0])
+	})
+
+	it("keeps distinct tool IDs paired after sanitization", async () => {
+		const history: Anthropic.Messages.MessageParam[] = [
+			{
+				role: "assistant",
+				content: [
+					{ type: "tool_use", id: "call\ud800", name: "read_file", input: { path: "a" } },
+					{ type: "tool_use", id: "call\ud801", name: "read_file", input: { path: "b" } },
+				],
+			},
+			{
+				role: "user",
+				content: [
+					{ type: "tool_result", tool_use_id: "call\ud800", content: "a" },
+					{ type: "tool_result", tool_use_id: "call\ud801", content: "b" },
+				],
+			},
+		]
+		await collectStream(new OpenAiHandler(baseOptions).createMessage(systemPrompt, history))
+		const input = mockResponsesCreate.mock.calls[0][0].input
+		expectNoLoneSurrogates(input)
+		expect(input[0].call_id).not.toBe(input[1].call_id)
+		expect(input[2].call_id).toBe(input[0].call_id)
+		expect(input[3].call_id).toBe(input[1].call_id)
+	})
+
+	it.each([true, false])("releases the listener on completion with streaming=%s", async (streaming) => {
+		const controller = new AbortController()
+		const add = vi.spyOn(controller.signal, "addEventListener")
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		if (!streaming) mockResponsesCreate.mockResolvedValueOnce({ output: [], usage: null })
+		await collectStream(
+			new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: streaming }).createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			),
+		)
+		expect(add).toHaveBeenCalledOnce()
+		expect(remove).toHaveBeenCalledWith("abort", add.mock.calls[0][1])
+	})
+
+	it.each(["request", "iteration", "close"])("releases the listener on %s exit", async (exit) => {
+		const controller = new AbortController()
+		const add = vi.spyOn(controller.signal, "addEventListener")
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		const failure = new Error("Request was aborted.")
+		if (exit === "request") mockResponsesCreate.mockRejectedValueOnce(failure)
+		if (exit === "iteration")
+			mockResponsesCreate.mockResolvedValueOnce(
+				(async function* () {
+					controller.abort()
+					yield { type: "response.output_text.delta", delta: "partial" }
+					throw failure
+				})(),
+			)
+		const stream = new OpenAiHandler(baseOptions).createMessage(
+			systemPrompt,
+			messages,
+			makeCreateMessageMetadata({ abortSignal: controller.signal }),
+		)
+		if (exit === "close") {
+			await stream.next()
+			await stream.return(undefined)
+		} else {
+			await expect(collectStream(stream)).rejects.toMatchObject({ name: "AbortError" })
+		}
+		expect(remove).toHaveBeenCalledWith("abort", add.mock.calls[0][1])
+	})
+
+	it("preserves HTTP failures and releases the listener", async () => {
+		const controller = new AbortController()
+		const remove = vi.spyOn(controller.signal, "removeEventListener")
+		mockResponsesCreate.mockRejectedValueOnce(Object.assign(new Error("rate limited"), { status: 429 }))
+		await expect(
+			collectStream(
+				new OpenAiHandler(baseOptions).createMessage(
+					systemPrompt,
+					messages,
+					makeCreateMessageMetadata({ abortSignal: controller.signal }),
+				),
+			),
+		).rejects.toMatchObject({ status: 429 })
+		expect(remove).toHaveBeenCalledOnce()
+	})
+
+	it.each([
+		{ type: "function" as const, function: { name: "read_file" } },
+		{ type: "custom" as const, custom: { name: "read_file" } },
+	])("maps named $type tool choices", async (choice) => {
+		await collectStream(
+			new OpenAiHandler(baseOptions).createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ tools: [functionTool], tool_choice: choice, parallelToolCalls: false }),
+			),
+		)
+		expect(mockResponsesCreate.mock.calls[0][0]).toMatchObject({
+			tool_choice: { type: choice.type, name: "read_file" },
+			parallel_tool_calls: false,
+		})
+	})
+
+	it.each([true, false])("honors temperature and output limits with support=%s", async (supportsTemperature) => {
+		await collectStream(
+			new OpenAiHandler({
+				...baseOptions,
+				modelTemperature: 0.4,
+				includeMaxTokens: true,
+				modelMaxTokens: 456,
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					maxTokens: 1000,
+					supportsPromptCache: false,
+					supportsTemperature,
+				},
+			}).createMessage(systemPrompt, messages),
+		)
+		expect(mockResponsesCreate.mock.calls[0][0].temperature).toBe(supportsTemperature ? 0.4 : undefined)
+		expect(mockResponsesCreate.mock.calls[0][0].max_output_tokens).toBe(456)
+	})
+
 	it("routes createMessage to the Responses API and not Chat Completions", async () => {
 		const handler = new OpenAiHandler(baseOptions)
 		const chunks = await collectStream(handler.createMessage(systemPrompt, messages))

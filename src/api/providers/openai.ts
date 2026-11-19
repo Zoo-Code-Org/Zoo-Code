@@ -19,7 +19,11 @@ import type { ApiHandlerOptions } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
 
 import { convertToOpenAiMessages } from "../transform/openai-format"
-import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
+import {
+	sanitizeSurrogates,
+	sanitizeSurrogatesDeep,
+	sanitizeIdentifierSurrogates,
+} from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
 import { convertToResponsesApiInput } from "../transform/responses-api-input"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
@@ -311,19 +315,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	/**
-	 * Responses API path (POST {baseURL}/responses), opt-in via the
-	 * `openAiUseResponsesApi` setting.
-	 *
-	 * Some OpenAI-compatible endpoints — notably Azure OpenAI deployments of
-	 * reasoning models such as GPT-6.1 Terra behind corporate API gateways —
-	 * reject `reasoning_effort` combined with function tools on
-	 * /chat/completions and require the Responses API instead. This path keeps
-	 * the provider's custom base URL, custom model/deployment ID, custom
-	 * headers, and custom model info, while translating the request and stream
-	 * through the shared Responses API transforms (the same ones the xAI
-	 * provider uses). Reasoning and tools are both forwarded, never dropped.
-	 */
+	/** Sends the opt-in Responses request through the shared input and stream transforms. */
 	private async *handleResponsesApiMessage(
 		modelId: string,
 		systemPrompt: string,
@@ -337,11 +329,27 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 
-		const requestBody: OpenAI.Responses.ResponseCreateParamsStreaming = {
+		// Sanitize before conversion, including strings inside JSON tool arguments.
+		// Encode IDs first so distinct tool calls remain distinct after sanitization.
+		const history = messages.map((message) => ({
+			...message,
+			content:
+				typeof message.content === "string"
+					? message.content
+					: message.content.map((part) => {
+							if (part.type === "tool_use") return { ...part, id: sanitizeIdentifierSurrogates(part.id) }
+							if (part.type === "tool_result")
+								return { ...part, tool_use_id: sanitizeIdentifierSurrogates(part.tool_use_id) }
+							return part
+						}),
+		}))
+		// The deep sanitizer preserves the message structure and only replaces strings.
+		const sanitizedHistory = sanitizeSurrogatesDeep(history) as Anthropic.Messages.MessageParam[]
+		const requestBody: OpenAI.Responses.ResponseCreateParams = {
 			model: modelId,
-			instructions: systemPrompt,
-			input: convertToResponsesApiInput(messages),
-			stream: true,
+			instructions: sanitizeSurrogates(systemPrompt),
+			input: convertToResponsesApiInput(sanitizedHistory),
+			stream: this.options.openAiStreamingEnabled ?? true,
 			// Stateless operation: don't store responses server-side.
 			store: false,
 		}
@@ -367,8 +375,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 		// Mirror the Chat Completions max-tokens policy: only cap output when the
 		// user opted in via includeMaxTokens.
-		if (this.options.includeMaxTokens === true && model.maxTokens) {
-			requestBody.max_output_tokens = model.maxTokens
+		if (this.options.includeMaxTokens === true) {
+			requestBody.max_output_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
 		}
 
 		// convertToolsForOpenAI already applies the strict/non-strict schema
@@ -400,35 +408,31 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		)
 
 		try {
-			let stream: AsyncIterable<OpenAI.Responses.ResponseStreamEvent>
-			try {
-				stream = await this.client.responses.create(
-					requestBody,
-					abortSignal ? { signal: abortSignal } : undefined,
-				)
-			} catch (error) {
-				// Normalize cancellations to the contract error: the OpenAI SDK's
-				// APIUserAbortError carries name "Error" and message "Request was
-				// aborted.", which would otherwise leak a non-conforming shape.
-				if (isRequestAborted(error, abortSignal)) {
-					throw createAbortError(this.providerName)
-				}
-				throw handleOpenAIError(error, this.providerName)
-			}
-
-			try {
+			const body = this.withExtraBody(requestBody)
+			const requestOptions = abortSignal ? { signal: abortSignal } : undefined
+			if (requestBody.stream) {
+				const stream = await this.client.responses.create({ ...body, stream: true }, requestOptions)
 				yield* processResponsesApiStream(stream, createUsageNormalizer())
-			} catch (error) {
-				// An abort landing after responses.create resolved surfaces here as
-				// the SDK's APIUserAbortError thrown from stream iteration.
-				if (isRequestAborted(error, abortSignal)) {
-					throw createAbortError(this.providerName)
+			} else {
+				const response = await this.client.responses.create({ ...body, stream: false }, requestOptions)
+				for (const item of response.output) {
+					if (item.type === "message") {
+						for (const content of item.content) {
+							if (content.type === "output_text") yield { type: "text", text: content.text }
+						}
+					} else if (item.type === "function_call") {
+						yield { type: "tool_call", id: item.call_id, name: item.name, arguments: item.arguments }
+					} else if (item.type === "reasoning") {
+						for (const summary of item.summary) yield { type: "reasoning", text: summary.text }
+					}
 				}
-				throw error
+				const usage = createUsageNormalizer()(response.usage)
+				if (usage) yield usage
 			}
+		} catch (error) {
+			if (isRequestAborted(error, abortSignal)) throw createAbortError(this.providerName)
+			throw handleOpenAIError(error, this.providerName)
 		} finally {
-			// Release the listener once the stream is consumed, whether the
-			// request completed, failed, or the generator was closed early.
 			removeExternalAbortListener()
 		}
 	}

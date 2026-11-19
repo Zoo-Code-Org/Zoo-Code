@@ -525,6 +525,8 @@
 		"openAiBaseUrl": "ベースURL",
 		"openAiStrictToolSchemas": "厳格なツールスキーマ（strict: true）",
 		"openAiStrictToolSchemasDescription": "スキーマの厳密な準拠を有効にするため、ツールスキーマに strict: true を付与して送信します。非厳密なツール呼び出しを使う場合は無効にしてください。",
+		"openAiUseResponsesApi": "Responses API を使用",
+		"openAiUseResponsesApiDescription": "/chat/completions の代わりに /responses にリクエストを送信します。OpenAI 互換エンドポイントの一部の推論モデルで必要です。推論とツールの両方が有効なままになります。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure デプロイ名",
 		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",

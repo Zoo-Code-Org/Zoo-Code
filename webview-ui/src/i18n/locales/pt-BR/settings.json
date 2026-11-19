@@ -527,6 +527,8 @@
 		"openAiBaseUrl": "URL Base",
 		"openAiStrictToolSchemas": "Schemas de ferramentas estritos (strict: true)",
 		"openAiStrictToolSchemasDescription": "Envia strict: true com os schemas de ferramentas para ativar a aderência estrita ao schema. Desative para usar chamada de ferramentas não estrita.",
+		"openAiUseResponsesApi": "Usar a API Responses",
+		"openAiUseResponsesApiDescription": "Envia solicitações para /responses em vez de /chat/completions. Necessário para alguns modelos de raciocínio em endpoints compatíveis com OpenAI. O raciocínio e as ferramentas permanecem ativos.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome da implantação do Azure",
 		"azureOpenAiDeploymentNameDescription": "Insira o nome da implantação configurado no Azure AI Studio, não o nome do modelo subjacente.",

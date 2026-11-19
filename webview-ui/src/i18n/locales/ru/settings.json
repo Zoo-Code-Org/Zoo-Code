@@ -528,6 +528,8 @@
 		"openAiBaseUrl": "Базовый URL",
 		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
 		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
+		"openAiUseResponsesApi": "Использовать API Responses",
+		"openAiUseResponsesApiDescription": "Отправляет запросы в /responses вместо /chat/completions. Требуется для некоторых моделей рассуждения на совместимых с OpenAI конечных точках. Рассуждение и инструменты остаются включены.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",

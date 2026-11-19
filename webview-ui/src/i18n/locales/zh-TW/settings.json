@@ -552,6 +552,8 @@
 		"openAiBaseUrl": "基礎 URL",
 		"openAiStrictToolSchemas": "嚴格工具 schema（strict: true）",
 		"openAiStrictToolSchemasDescription": "向工具 schema 一併傳送 strict: true 以啟用嚴格的 schema 遵循。停用以使用非嚴格工具呼叫。",
+		"openAiUseResponsesApi": "使用 Responses API",
+		"openAiUseResponsesApiDescription": "將請求傳送至 /responses，而非 /chat/completions。部分 OpenAI 相容端點上的推理模型需要此選項。推理與工具皆保持啟用。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名稱",
 		"azureOpenAiDeploymentNameDescription": "請輸入 Azure AI Studio 中的部署名稱，而不是底層模型名稱。",
