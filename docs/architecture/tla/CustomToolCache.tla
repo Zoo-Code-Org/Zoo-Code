@@ -15,17 +15,29 @@ Property: No bundle is visible before its mode check. Failed builds leave
 no pending file. Tests cover success, compiler, validation, and rename errors.
 Findings: The known review bug is present. No new bug or false alarm found.
 The model does not prove the code. Stop can leave an unpublished temp file.
-Gate: Run both configs and the publication table test by hand on each fix.
+Gate: Run all configs and both property tables by hand on each fix.
 Sandbox note: TLC needs a local RMI socket. Host tests avoid mapped root uid.
 Review ratchet: PR #2485 threads PRRT_kwDOSK-bwM64vzgN (ownership test),
 PRRT_kwDOSK-bwM64vzgR (defaults), PRRT_kwDOSK-bwM64vzgV (publication).
 Added: 1 (publication). Gap: 2 (test routing and path defaults). Covered: 0.
-The gaps use direct table tests. This model checks write order only.
+The original gaps use direct table tests.
+Round 2: PR #2485, thread PRRT_kwDOSK-bwM64vzgN, reply 4622881580.
+Failure: A raw path match misses the cache root after parent alias resolution.
+Invariant: The ownership double matches the resolved root for each path.
+Expectation: Raw matching fails for an alias. Canonical matching passes.
+Added: 1. Covered: 0. Gap: 0. The compiler and path lookup remain oracles.
+Round 2 cost: One agent, about 3 minutes; no delegate.
+TLC: RawPath fails OwnershipMockReachesRoot. Direct fails VisibleIsReady.
+Fixed passes all three invariants (49 states). Each run took under 1s.
+Replay: The raw comparison passes the direct case and fails the alias case.
+Findings: The known path mismatch is real. No new bug or false alarm found.
+The path property checks both routes with the real filesystem and registry.
+Round 2 validation: All 54 registry tests, type checking, and package lint pass.
 The compiler and file checks are oracles. Two writers use distinct pending names.
 A reader can run after each step. Stop leaves the last file state on disk.
 *)
 EXTENDS Naturals, TLC
-CONSTANT AtomicPublish
+CONSTANTS AtomicPublish, CanonicalMatch
 VARIABLES phase, published, pending
 vars == <<phase, published, pending>>
 Writers == {1, 2}
@@ -58,4 +70,9 @@ Next == \E w \in Writers : Start(w) \/ Finish(w) \/ Restrict(w) \/ Check(w) \/ P
 Spec == Init /\ [][Next]_vars
 VisibleIsReady == published \in {"absent", "ready"}
 FailedIsClean == \A w \in Writers : phase[w] = "failed" => w \notin pending
+(* Source: configured cache path. Sink: lstatSync ownership test double. *)
+CachePaths == {"cache", "alias/cache"}
+Canonical(p) == IF p = "alias/cache" THEN "cache" ELSE p
+MockTarget(p) == IF CanonicalMatch THEN Canonical(p) ELSE p
+OwnershipMockReachesRoot == \A p \in CachePaths : MockTarget(p) = Canonical(p)
 =============================================================================

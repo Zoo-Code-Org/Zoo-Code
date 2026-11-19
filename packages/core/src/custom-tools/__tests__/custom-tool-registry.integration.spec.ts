@@ -92,18 +92,27 @@ describe.sequential("CustomToolRegistry integration", () => {
 			},
 		)
 
-		it("rejects a cache owned by another account", async () => {
+		it.each(["direct", "symlink-parent"])("rejects a cache owned by another account via %s", async (kind) => {
 			fs.mkdirSync(cacheDir, { mode: 0o700 })
-			const stat = fs.lstatSync(cacheDir)
+			if (kind === "symlink-parent") {
+				const alias = path.join(sandbox, "alias")
+				fs.symlinkSync(sandbox, alias)
+				cacheDir = path.join(alias, "cache")
+				registry = new CustomToolRegistry({ cacheDir })
+			}
+			const resolvedCacheDir = fs.realpathSync(cacheDir)
+			const stat = fs.lstatSync(resolvedCacheDir)
 			stat.uid += 1
 			const originalLstat = fs.lstatSync
 			const spy = vi.spyOn(fs, "lstatSync").mockImplementation((location, options) => {
-				return location === cacheDir ? stat : originalLstat(location, options)
+				return location === resolvedCacheDir ? stat : originalLstat(location, options)
 			})
 			try {
-				expect((await registry.loadFromDirectory(toolDir)).failed[0]?.error).toContain(
-					"Unsafe custom tool cache",
-				)
+				const result = await registry.loadFromDirectory(toolDir)
+				expect(result.loaded).toEqual([])
+				expect(result.failed).toEqual([
+					{ file: "safe.ts", error: `Unsafe custom tool cache path: ${resolvedCacheDir}` },
+				])
 			} finally {
 				spy.mockRestore()
 			}
