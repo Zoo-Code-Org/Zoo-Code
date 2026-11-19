@@ -56,7 +56,6 @@ import {
 	providerIdentifiers,
 	type MentionSegment,
 	attachedMcpToolNamesSchema,
-	resolveMcpDynamicLoadSettings,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -101,8 +100,7 @@ import { SYSTEM_PROMPT } from "../prompts/system"
 import type { InstructionFailureCollector } from "../prompts/sections/custom-instructions"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
-import { ToolRouter } from "../../services/tools/ToolRouter"
-import { buildMcpToolName, isMcpTool, normalizeMcpToolName } from "../../utils/mcp-name"
+import { McpToolSelection } from "./mcpToolSelection"
 import type { ToolDoc } from "../../services/tools/types"
 
 // core modules
@@ -302,10 +300,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
-	readonly attachedMcpToolNames = new Set<string>()
-	private mcpToolsInitialized = false
-	private restoredMcpToolsNeedValidation = false
-	private mcpToolsInitialization?: Promise<void>
+	private readonly mcpToolSelection: McpToolSelection
+
+	get attachedMcpToolNames(): Set<string> {
+		return this.mcpToolSelection.names
+	}
 
 	// The observed on-disk version of each file this task has read. Declared here so the
 	// read tools can record it; a write guard later compares a token against this registry.
@@ -785,11 +784,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this._isHistoryTask = !!historyItem && !task && !images
 		const savedMcpToolNames = attachedMcpToolNamesSchema.parse(historyItem?.attachedMcpToolNames)
-		if (savedMcpToolNames !== undefined) {
-			for (const name of savedMcpToolNames) this.attachedMcpToolNames.add(name)
-			this.mcpToolsInitialized = true
-			this.restoredMcpToolsNeedValidation = savedMcpToolNames.length > 0
-		}
+		this.mcpToolSelection = new McpToolSelection(savedMcpToolNames)
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1887,7 +1882,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
-				attachedMcpToolNames: this.mcpToolsInitialized ? [...this.attachedMcpToolNames] : undefined,
+				attachedMcpToolNames: this.mcpToolSelection.initialized ? [...this.attachedMcpToolNames] : undefined,
 			})
 
 			// Emit token/tool usage updates using debounced function
@@ -3098,62 +3093,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._runPromise
 	}
 
-	/** Select once, preserve historical calls, and attempt to persist before use. */
+	/** Revalidate the current scope and persist additions before use. */
 	public async initializeAttachedMcpTools(scopedTools: ToolDoc[], initialK: number): Promise<void> {
-		if (this.mcpToolsInitialization) return this.mcpToolsInitialization
-
-		this.mcpToolsInitialization = (async () => {
-			if (this.restoredMcpToolsNeedValidation) {
-				const available = new Set(scopedTools.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))
-				// Scope can change when a server reconnects or the task changes mode.
-				// Keep saved names, and rerank only when none is currently available.
-				this.mcpToolsInitialized = [...this.attachedMcpToolNames].some((name) => available.has(name))
-				this.restoredMcpToolsNeedValidation = false
-			}
-
-			const historicalNames = new Set<string>()
-			for (const message of this.apiConversationHistory) {
-				if (message.role !== "assistant" || !Array.isArray(message.content)) continue
-				for (const block of message.content) {
-					if (block.type === "tool_use" && typeof block.name === "string" && isMcpTool(block.name)) {
-						historicalNames.add(normalizeMcpToolName(block.name))
-					}
+		await this.mcpToolSelection.initialize(
+			scopedTools,
+			initialK,
+			this.metadata.task ?? "",
+			this.apiConversationHistory,
+			async () => {
+				try {
+					if (!(await this.saveClineMessages(true, true)))
+						throw new Error("Failed to save MCP tool selection")
+				} catch (error) {
+					// Keep the selection on failure. Normal history saves retry it.
+					console.error("[Task] Failed to persist MCP tool selection; keeping in-memory selection:", error)
 				}
-			}
-
-			if (this.mcpToolsInitialized) {
-				const missing = [...historicalNames].filter((name) => !this.attachedMcpToolNames.has(name))
-				if (missing.length === 0) return
-				for (const name of missing) this.attachedMcpToolNames.add(name)
-			} else {
-				const taskText = this.metadata.task?.trim() ?? ""
-				const { initialK: limit } = resolveMcpDynamicLoadSettings(undefined, initialK)
-				// Images-only tasks have no searchable text. Use a bounded, stable
-				// selection instead of permanently attaching no tools.
-				const names = taskText
-					? await ToolRouter.getInstance().attachInitial(taskText, scopedTools, limit)
-					: [...new Set(scopedTools.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))].slice(
-							0,
-							limit,
-						)
-				if (!taskText && names.length === 0 && historicalNames.size === 0) return
-				// History compatibility may require more than initialK definitions.
-				for (const name of [...historicalNames, ...names]) this.attachedMcpToolNames.add(name)
-				this.mcpToolsInitialized = true
-			}
-			try {
-				if (!(await this.saveClineMessages(true, true))) throw new Error("Failed to save MCP tool selection")
-			} catch (error) {
-				// Storage failure must not enter the API stream's retry loop. Keep
-				// routing stable; every subsequent normal history save includes it.
-				console.error("[Task] Failed to persist MCP tool selection; keeping in-memory selection:", error)
-			}
-		})()
-		try {
-			await this.mcpToolsInitialization
-		} finally {
-			this.mcpToolsInitialization = undefined
-		}
+			},
+		)
 	}
 
 	private async startTask(task?: string, images?: string[]): Promise<void> {

@@ -309,6 +309,7 @@ describe("Task persistence", () => {
 	})
 
 	describe("MCP tool attachments", () => {
+		const scope = [{ serverName: "github", toolName: "issues", description: "" }]
 		afterEach(() => vi.restoreAllMocks())
 		it.each([{ names: [] }, { names: ["mcp--github--issues"] }])(
 			"persists a single initial selection: $names",
@@ -320,15 +321,64 @@ describe("Task persistence", () => {
 					task: "find tickets",
 					startTask: false,
 				})
-				await Promise.all([task.initializeAttachedMcpTools([], 30), task.initializeAttachedMcpTools([], 30)])
-				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", [], 30)
+				await Promise.all([
+					task.initializeAttachedMcpTools(scope, 30),
+					task.initializeAttachedMcpTools(scope, 30),
+				])
+				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
 				expect([...task.attachedMcpToolNames]).toEqual(names)
 				expect(mockTaskMetadata).toHaveBeenCalledWith(expect.objectContaining({ attachedMcpToolNames: names }))
-				await task.initializeAttachedMcpTools([], 10)
+				await task.initializeAttachedMcpTools(scope, 10)
 				expect(rank).toHaveBeenCalledTimes(1)
 				rank.mockRestore()
 			},
 		)
+
+		it("checks a waiting caller's scope after an earlier selection completes", async () => {
+			const gate = createDeferred<string[]>()
+			const rank = vi
+				.spyOn(ToolRouter.getInstance(), "attachInitial")
+				.mockReturnValueOnce(gate.promise)
+				.mockResolvedValueOnce(["mcp--other--search"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "find tickets",
+				startTask: false,
+			})
+			const first = task.initializeAttachedMcpTools(scope, 1)
+			const second = task.initializeAttachedMcpTools(
+				[{ serverName: "other", toolName: "search", description: "tickets" }],
+				1,
+			)
+			gate.resolve(["mcp--github--issues"])
+			await Promise.all([first, second])
+			expect(rank).toHaveBeenCalledTimes(2)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues", "mcp--other--search"])
+		})
+
+		it("revalidates an active task when its entire selection leaves the live scope", async () => {
+			vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+				.mockResolvedValueOnce(["mcp--github--issues"])
+				.mockResolvedValueOnce(["mcp--other--search"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "find tickets",
+				startTask: false,
+			})
+			await task.initializeAttachedMcpTools(scope, 1)
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "other", toolName: "search", description: "tickets" }],
+				1,
+			)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues", "mcp--other--search"])
+			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					attachedMcpToolNames: ["mcp--github--issues", "mcp--other--search"],
+				}),
+			)
+		})
 
 		it.each([
 			{ names: [], savedNames: [] },
@@ -402,7 +452,7 @@ describe("Task persistence", () => {
 				if (stage === "history")
 					vi.mocked(mockProvider.updateTaskHistory).mockRejectedValueOnce(new Error("disk full"))
 				if (stage === "messages") mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
-				await expect(task.initializeAttachedMcpTools([], 30)).resolves.toBeUndefined()
+				await expect(task.initializeAttachedMcpTools(scope, 30)).resolves.toBeUndefined()
 				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
 				expect(log).toHaveBeenCalledWith(
 					expect.stringContaining("keeping in-memory selection"),
@@ -415,7 +465,7 @@ describe("Task persistence", () => {
 							message.startsWith("[Task] Failed to persist MCP tool selection"),
 					).length
 				expect(persistenceFailures()).toBe(1)
-				await task.initializeAttachedMcpTools([], 30)
+				await task.initializeAttachedMcpTools(scope, 30)
 				expect(rank).toHaveBeenCalledTimes(1)
 				expect(persistenceFailures()).toBe(1)
 				lostProvider?.mockRestore()
@@ -459,9 +509,9 @@ describe("Task persistence", () => {
 					historyItem,
 					startTask: false,
 				})
-				await task.initializeAttachedMcpTools([], 30)
+				await task.initializeAttachedMcpTools(scope, 30)
 				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
-				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", [], 30)
+				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
 				rank.mockRestore()
 			},
 		)

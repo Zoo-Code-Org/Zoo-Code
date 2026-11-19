@@ -1,4 +1,4 @@
-import { buildMcpToolName, toolNamesMatch } from "../../utils/mcp-name"
+import { getMcpToolCatalog, resolveMcpToolFromCatalog } from "../prompts/tools/native-tools/mcp_server"
 import { markToolRejected } from "../task/toolExecutionContext"
 import { DispatchState, transitionDispatch } from "../task/dispatchState"
 import { serializeError } from "serialize-error"
@@ -332,22 +332,27 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				}
 			}
 
-			// Truncated generated names cannot be reversed by splitting separators.
-			// Recover the original pair from the catalog; normal policy checks still apply.
+			// Use the enabled, mode-scoped catalog that builds declarations. Canonical
+			// collisions keep the same first entry at declaration and dispatch.
 			if (mcpHub && mcpBlock.name.length === 64) {
-				const matches = mcpHub
-					.getAllServers()
-					.flatMap((server) =>
-						(server.tools ?? [])
-							.filter((tool) => toolNamesMatch(buildMcpToolName(server.name, tool.name), mcpBlock.name))
-							.map((tool) => ({ serverName: server.name, toolName: tool.name })),
-					)
-				if (matches.length === 1 && matches[0]) {
-					resolvedServerName = matches[0].serverName
-					resolvedToolName = matches[0].toolName
+				const mode = await cline.getTaskMode()
+				const allowedServers = getModeBySlug(
+					mode ?? defaultModeSlug,
+					policySnapshot.customModes,
+				)?.allowedMcpServers
+				const catalog = getMcpToolCatalog(mcpHub, allowedServers)
+				const resolved = resolveMcpToolFromCatalog(catalog, mcpBlock.name)
+				if (resolved) {
+					resolvedServerName = resolved.serverName
+					resolvedToolName = resolved.tool.name
+				} else {
+					if (!mcpBlock.partial) {
+						pushToolResult(formatResponse.toolError("MCP tool is unavailable in the current catalog."))
+						cline.recordToolError("use_mcp_tool", "MCP tool is unavailable in the current catalog.")
+					}
+					break
 				}
 			}
-
 			// Execute the MCP tool using the same handler as use_mcp_tool
 			// Create a synthetic ToolUse block that the useMcpToolTool can handle
 			const syntheticToolUse: ToolUse<"use_mcp_tool"> = {

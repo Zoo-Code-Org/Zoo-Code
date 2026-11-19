@@ -5983,7 +5983,10 @@ describe("Cline", () => {
 
 				it.each(
 					(["manual", "recovery", "automatic"] as const).flatMap((path) =>
-						(["none", "build", "environment", "summary"] as const).map((cancelAt) => ({ path, cancelAt })),
+						(["none", "build", "environment", "prompt", "summary"] as const).map((cancelAt) => ({
+							path,
+							cancelAt,
+						})),
 					),
 				)(
 					"passes tools and handles cancellation in $path condensation ($cancelAt)",
@@ -6047,6 +6050,13 @@ describe("Cline", () => {
 								setAbortLatch(task, true)
 								return ""
 							})
+						// Late-start and late-commit invariants in check-mcp-request-preparation.ts:
+						// cancellation at any preparation boundary prevents later effects.
+						if (cancelAt === "prompt")
+							vi.mocked(access.getSystemPrompt).mockImplementationOnce(async () => {
+								setAbortLatch(task, true)
+								return "mock prompt"
+							})
 						if (cancelAt === "summary")
 							vi.mocked(summarizeConversation).mockImplementationOnce(async ({ metadata }) => {
 								expect(metadata?.abortSignal).toBeDefined()
@@ -6058,8 +6068,12 @@ describe("Cline", () => {
 						try {
 							if (path === "manual") await task.condenseContext()
 							else if (path === "recovery") await access.handleContextWindowExceededError(model)
+							else if (cancelAt === "prompt")
+								await expect(task.attemptApiRequest(0).next()).rejects.toThrow(
+									"aborted during request construction",
+								)
 							else await task.attemptApiRequest(0).next()
-							if (path !== "manual") {
+							if (path !== "manual" && !(path === "automatic" && cancelAt === "prompt")) {
 								const notifications = vi
 									.mocked(mockProvider.postMessageToWebview)
 									.mock.calls.map(([message]) => message)

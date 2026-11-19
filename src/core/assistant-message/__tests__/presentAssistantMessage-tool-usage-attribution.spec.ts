@@ -355,7 +355,7 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 						getState: vi.fn().mockResolvedValue({ mode: "code", customModes: [] }),
 						getMcpHub: () => ({
 							findServerNameBySanitizedName: () => undefined,
-							getAllServers: () => [
+							getServers: () => [
 								{ name: serverName, tools: [{ name: toolName, enabledForPrompt: true }] },
 							],
 						}),
@@ -374,6 +374,69 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					}),
 					expect.anything(),
 				)
+				handle.mockRestore()
+			},
+		)
+
+		it.each([false, true])(
+			"uses the scoped first catalog entry for a truncated collision (allowed: %s)",
+			async (allowed) => {
+				const serverName = "s".repeat(70)
+				const getAllServers = vi.fn(() => [{ name: serverName, tools: [{ name: "global" }] }])
+				mockTask.getTaskMode = vi.fn().mockResolvedValue("scoped")
+				mockTask.providerRef = {
+					deref: () => ({
+						getState: vi.fn().mockResolvedValue({ mode: "scoped" }),
+						getMcpHub: () => ({
+							findServerNameBySanitizedName: () => undefined,
+							getServers: () => [
+								{
+									name: serverName,
+									tools: [
+										{ name: "hidden", enabledForPrompt: false },
+										{ name: "first" },
+										{ name: "collision" },
+									],
+								},
+							],
+							getAllServers,
+						}),
+					}),
+				}
+				const name = buildMcpToolName(serverName, "first")
+				const parsed = NativeToolCallParser.parseDynamicMcpTool({ id: "collision", name, arguments: "{}" })
+				expect(parsed).not.toBeNull()
+				mockTask.assistantMessageContent = [parsed]
+				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
+				// The task double provides the request state and presenter callbacks.
+				await presentAssistantMessage(mockTask as unknown as Task, {
+					...baseSnapshot,
+					customModes: [
+						{
+							slug: "scoped",
+							name: "Scoped",
+							roleDefinition: "Scoped",
+							groups: ["mcp"],
+							allowedMcpServers: allowed ? [serverName] : [],
+						},
+					],
+				})
+				if (allowed) {
+					expect(handle).toHaveBeenCalledWith(
+						expect.anything(),
+						expect.objectContaining({
+							params: expect.objectContaining({ server_name: serverName, tool_name: "first" }),
+						}),
+						expect.anything(),
+					)
+				} else {
+					expect(handle).not.toHaveBeenCalled()
+					expect(mockTask.recordToolError).toHaveBeenCalledWith(
+						"use_mcp_tool",
+						expect.stringContaining("unavailable"),
+					)
+				}
+				expect(getAllServers).not.toHaveBeenCalled()
 				handle.mockRestore()
 			},
 		)
