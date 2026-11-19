@@ -6,6 +6,7 @@ import {
 	type ModelRecord,
 	type ReasoningEffortExtended,
 	litellmDefaultModelId,
+	isLiteLLMThoughtSignatureModel,
 	litellmDefaultModelInfo,
 	providerIdentifiers,
 } from "@roo-code/types"
@@ -108,31 +109,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 
 		const fallback = info.reasoningEffort
 		return fallback && supported.includes(fallback) ? fallback : undefined
-	}
-
-	/**
-	 * Detect if the model is a Gemini model that requires thought signature handling.
-	 * Gemini 3 models validate thought signatures for tool/function calling steps.
-	 */
-	private isGeminiModel(modelId: string): boolean {
-		// Match various Gemini model patterns:
-		// - gemini-3-pro, gemini-3-flash, gemini-3-*
-		// - gemini 3 pro, Gemini 3 Pro (space-separated, case-insensitive)
-		// - gemini/gemini-3-*, google/gemini-3-*
-		// - vertex_ai/gemini-3-*, vertex/gemini-3-*
-		// Also match Gemini 2.5+ models which use similar validation
-		const lowerModelId = modelId.toLowerCase()
-		return (
-			// Match hyphenated versions: gemini-3, gemini-2.5
-			lowerModelId.includes("gemini-3") ||
-			lowerModelId.includes("gemini-2.5") ||
-			// Match space-separated versions: "gemini 3", "gemini 2.5"
-			// This handles model names like "Gemini 3 Pro" from LiteLLM model groups
-			lowerModelId.includes("gemini 3") ||
-			lowerModelId.includes("gemini 2.5") ||
-			// Also match provider-prefixed versions
-			/\b(gemini|google|vertex_ai|vertex)\/gemini[-\s](3|2\.5)/i.test(modelId)
-		)
 	}
 
 	override async *createMessage(
@@ -256,7 +232,10 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// Gemini validates thought signatures on function calls. A tool call without a signature
 		// from this backend gets the bypass token: calls from other models (like Claude) for
 		// Gemini models, and `__thought__` ids whose embedded signature the history sanitized.
-		const isGemini = this.isGeminiModel(modelId)
+		// A non-Gemini backend can reject the field (BerriAI/litellm#19739), so the `__thought__`
+		// fallback applies only to a model missing from the catalog.
+		const isGemini = info.requiresThoughtSignatures || isLiteLLMThoughtSignatureModel(modelId)
+		const listed = Object.hasOwn(this.models, modelId)
 		this.thoughtSignatureOrigin = thoughtSignatureOrigin(
 			this.options.litellmBaseUrl || LITELLM_DEFAULT_BASE_URL,
 			modelId,
@@ -265,7 +244,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			origin: this.thoughtSignatureOrigin,
 			normalizeToolCallId: sanitizeOpenAiCallId,
 			fallback: (toolCallId) =>
-				isGemini || toolCallId.includes(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+				isGemini || (!listed && toolCallId.includes(LITELLM_THOUGHT_SIGNATURE_ID_MARKER))
 					? GEMINI_THOUGHT_SIGNATURE_BYPASS
 					: undefined,
 		})

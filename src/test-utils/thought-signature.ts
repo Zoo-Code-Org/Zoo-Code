@@ -12,9 +12,14 @@ export const SANITIZED_LITELLM_TOOL_CALL_ID =
 
 export function signedAssistantMessage(
 	toolUseIds: string[],
-	{ signature = TEST_THOUGHT_SIGNATURE, origin }: { signature?: string; origin?: string } = {},
+	{
+		signature = TEST_THOUGHT_SIGNATURE,
+		origin,
+		leadingBlocks = [],
+	}: { signature?: string; origin?: string; leadingBlocks?: ExtendedContentBlockParam[] } = {},
 ): Anthropic.Messages.MessageParam {
 	const content: ExtendedContentBlockParam[] = [
+		...leadingBlocks,
 		...toolUseIds.map((id) => ({ type: "tool_use" as const, id, name: "read_file", input: {} })),
 		{ type: "thoughtSignature", thoughtSignature: signature, ...(origin ? { origin } : {}) },
 	]
@@ -30,7 +35,10 @@ export function toolResultsMessage(toolUseIds: string[]): Anthropic.Messages.Mes
 }
 
 export function sentToolCalls(create: Mock): OpenAI.Chat.ChatCompletionMessageToolCall[] | undefined {
-	const sent: OpenAI.Chat.ChatCompletionMessageParam[] = create.mock.calls.at(-1)?.[0].messages
-	const assistant = sent.find((msg) => msg.role === "assistant" && msg.tool_calls?.length)
+	const request: OpenAI.Chat.ChatCompletionCreateParams | undefined = create.mock.calls.at(-1)?.[0]
+	if (!request) {
+		throw new Error("sentToolCalls: the mocked create() was never called")
+	}
+	const assistant = request.messages.find((msg) => msg.role === "assistant" && msg.tool_calls?.length)
 	return assistant?.role === "assistant" ? assistant.tool_calls : undefined
 }

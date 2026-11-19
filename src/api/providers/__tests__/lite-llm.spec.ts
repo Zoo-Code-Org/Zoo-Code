@@ -553,59 +553,6 @@ describe("LiteLLMHandler", () => {
 	})
 
 	describe("Gemini thought signature injection", () => {
-		describe("isGeminiModel detection", () => {
-			it("should detect Gemini 3 models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("gemini-3-flash")).toBe(true)
-				expect(isGeminiModel("gemini-3-pro-preview")).toBe(true)
-			})
-
-			it("should detect Gemini 2.5 models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gemini-2.5-pro")).toBe(true)
-				expect(isGeminiModel("gemini-2.5-flash")).toBe(true)
-			})
-
-			it("should detect Gemini models with spaces (LiteLLM model groups)", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				// LiteLLM model groups often use space-separated names with title case
-				expect(isGeminiModel("Gemini 3 Pro")).toBe(true)
-				expect(isGeminiModel("Gemini 3 Flash")).toBe(true)
-				expect(isGeminiModel("gemini 3 pro")).toBe(true)
-				expect(isGeminiModel("Gemini 2.5 Pro")).toBe(true)
-				expect(isGeminiModel("gemini 2.5 flash")).toBe(true)
-			})
-
-			it("should detect provider-prefixed Gemini models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("google/gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("vertex_ai/gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("vertex/gemini-2.5-pro")).toBe(true)
-				// Space-separated variants with provider prefix
-				expect(isGeminiModel("google/gemini 3 pro")).toBe(true)
-				expect(isGeminiModel("vertex_ai/gemini 2.5 pro")).toBe(true)
-			})
-
-			it("should not detect non-Gemini models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gpt-4")).toBe(false)
-				expect(isGeminiModel("claude-3-opus")).toBe(false)
-				expect(isGeminiModel("gemini-1.5-pro")).toBe(false)
-				expect(isGeminiModel("gemini-2.0-flash")).toBe(false)
-			})
-		})
-
 		describe("createMessage integration with Gemini models", () => {
 			// Base64 encoded "skip_thought_signature_validator"
 			const dummySignature = Buffer.from("skip_thought_signature_validator").toString("base64")
@@ -698,11 +645,10 @@ describe("LiteLLMHandler", () => {
 					})
 				}
 
-				function useModel(id: string, preserveReasoning?: boolean) {
-					vi.spyOn(handler, "fetchModel").mockResolvedValue({
-						id,
-						info: { ...litellmDefaultModelInfo, preserveReasoning },
-					})
+				function useModel(id: string, info: Partial<ModelInfo> = {}, listed = true) {
+					const modelInfo = { ...litellmDefaultModelInfo, ...info }
+					vi.spyOn(handler, "fetchModel").mockResolvedValue({ id, info: modelInfo })
+					handler["models"] = listed ? { [id]: modelInfo } : {}
 				}
 
 				const signedToolCallStream = [
@@ -727,6 +673,20 @@ describe("LiteLLMHandler", () => {
 					{ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"a.ts"}' } }] } }] },
 					{ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
 				]
+
+				it.each([
+					["a configured base URL", "http://gateway:4000", "http://gateway:4000"],
+					["no base URL", undefined, "http://localhost:4000"],
+				])("names the origin and the client endpoint from %s", async (_case, litellmBaseUrl, endpoint) => {
+					handler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl })
+					useModel("gemini-3-pro")
+					mockStream(signedToolCallStream)
+
+					await collectStream(handler.createMessage("system", [{ role: "user", content: "Hi" }], metadata))
+
+					expect(vi.mocked(OpenAI)).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL: endpoint }))
+					expect(handler.getThoughtSignatureOrigin()).toBe(thoughtSignatureOrigin(endpoint, "gemini-3-pro"))
+				})
 
 				it("captures the signature from a streamed tool call and resets it per request", async () => {
 					useModel("gemini-3-pro")
@@ -800,7 +760,7 @@ describe("LiteLLMHandler", () => {
 						preserveReasoning: undefined,
 						storedBy: "this backend",
 						storedOrigin: thoughtSignatureOrigin("http://localhost:4000/", "gemini-4-pro"),
-						expected: [real, untouched],
+						expected: [real, bypassed],
 					},
 					{
 						modelId: "gemini-3-pro",
@@ -819,7 +779,7 @@ describe("LiteLLMHandler", () => {
 				])(
 					"writes signatures for $modelId with a signature from $storedBy (preserveReasoning=$preserveReasoning)",
 					async ({ modelId, preserveReasoning, storedOrigin, expected }) => {
-						useModel(modelId, preserveReasoning)
+						useModel(modelId, { preserveReasoning })
 						const historyIds = ["call_1", "call_2"]
 						mockStream([{ choices: [{ delta: { content: "ok" } }] }])
 
@@ -839,8 +799,11 @@ describe("LiteLLMHandler", () => {
 					},
 				)
 
-				it("sends the bypass for a sanitized __thought__ id on an alias that isGeminiModel does not match", async () => {
-					useModel("my-gateway-model")
+				it.each([
+					{ catalog: "a model missing from the catalog", listed: false, expected: [bypassed] },
+					{ catalog: "an unflagged model in the catalog", listed: true, expected: [untouched] },
+				])("handles a sanitized __thought__ id on $catalog", async ({ listed, expected }) => {
+					useModel("my-gateway-model", {}, listed)
 					const historyId = SANITIZED_LITELLM_TOOL_CALL_ID
 					mockStream([{ choices: [{ delta: { content: "ok" } }] }])
 
@@ -859,7 +822,176 @@ describe("LiteLLMHandler", () => {
 						),
 					)
 
-					expect(sentToolCalls(mockCreate)).toEqual([bypassed])
+					expect(sentToolCalls(mockCreate)).toEqual(expected)
+				})
+
+				it.each([
+					{ flag: true, expected: [bypassed, bypassed] },
+					{ flag: undefined, expected: [untouched, untouched] },
+				])(
+					"sends the bypass for calls from another model on an alias when requiresThoughtSignatures is $flag",
+					async ({ flag, expected }) => {
+						useModel("team-model", { requiresThoughtSignatures: flag })
+						const historyIds = ["toolu_1", "toolu_2"]
+						mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+						await collectStream(
+							handler.createMessage(
+								"system",
+								[
+									{ role: "user", content: "Hello" },
+									{
+										role: "assistant",
+										content: historyIds.map((id) => ({
+											type: "tool_use",
+											id,
+											name: "read_file",
+											input: {},
+										})),
+									},
+									toolResultsMessage(historyIds),
+								],
+								metadata,
+							),
+						)
+
+						expect(sentToolCalls(mockCreate)).toEqual(expected)
+					},
+				)
+
+				// Mirrors docs/architecture/tla/ThoughtSignature.tla: no backend rejects a tool call in the history.
+				describe("never sends a call that a backend rejects", () => {
+					// flagged: the catalog sets requiresThoughtSignatures. The fetcher spec covers that mapping.
+					type Backend = { name: string; url?: string; model: string; flagged: boolean; runsGemini: boolean }
+					const g1: Backend = {
+						name: "g1",
+						url: "http://u1:4000",
+						model: "gemini-3-pro",
+						flagged: true,
+						runsGemini: true,
+					}
+					const g2: Backend = { ...g1, name: "g2", url: "http://u2:4000" }
+					const g4: Backend = { ...g1, name: "g4", model: "gemini-4-pro" }
+					const alias: Backend = { ...g1, name: "alias", model: "team-model" }
+					const other: Backend = {
+						...g1,
+						name: "other",
+						model: "team-claude",
+						flagged: false,
+						runsGemini: false,
+					}
+					const native: Backend = { name: "native", model: "gemini-3-pro", flagged: true, runsGemini: true }
+					const targets = [g1, g2, g4, alias, other]
+					const cases = [...targets, native].flatMap((source) =>
+						(source.runsGemini ? [true, false] : [false]).flatMap((minted) =>
+							[1, 2].flatMap((n) =>
+								targets.flatMap((target) =>
+									[true, false].map((listed) => ({ source, minted, n, target, listed })),
+								),
+							),
+						),
+					)
+
+					// A model missing from the catalog gets the default info, as in RouterProvider.getModel.
+					function useCatalog(target: LiteLLMHandler, backend: Backend, listed = true) {
+						const requiresThoughtSignatures = listed && backend.flagged ? true : undefined
+						const info = { ...litellmDefaultModelInfo, requiresThoughtSignatures }
+						vi.spyOn(target, "fetchModel").mockResolvedValue({ id: backend.model, info })
+						target["models"] = listed ? { [backend.model]: info } : {}
+					}
+
+					async function historyMessage(source: Backend, minted: boolean, n: number) {
+						const signature = `AY89sig${source.name}`
+						const mintedId = `call_0__thought__${signature}`
+						const viaLiteLlm = minted && source.url !== undefined
+						const ids = Array.from({ length: n }, (_, i) =>
+							sanitizeToolUseId(i === 0 && viaLiteLlm ? mintedId : `call_${i}`),
+						)
+						const toolUses: Anthropic.Messages.ToolUseBlockParam[] = ids.map((id) => ({
+							type: "tool_use",
+							id,
+							name: "read_file",
+							input: {},
+						}))
+						if (!minted) {
+							return { ids, signature, message: { role: "assistant" as const, content: toolUses } }
+						}
+						if (!viaLiteLlm) {
+							return { ids, signature, message: signedAssistantMessage(ids, { signature }) }
+						}
+						const sourceHandler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl: source.url })
+						useCatalog(sourceHandler, source)
+						mockStream([
+							{
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													id: mintedId,
+													function: { name: "read_file", arguments: "{}" },
+													provider_specific_fields: { thought_signature: signature },
+												},
+											],
+										},
+									},
+								],
+							},
+						])
+						await collectStream(
+							sourceHandler.createMessage("system", [{ role: "user", content: "Hi" }], metadata),
+						)
+						const message = prepareApiConversationMessage({
+							message: { role: "assistant", content: toolUses },
+							api: sourceHandler,
+							apiConfiguration: {
+								apiProvider: providerIdentifiers.litellm,
+								litellmModelId: source.model,
+							},
+							apiConversationHistory: [],
+						})
+						return { ids, signature, message }
+					}
+
+					it.each(cases)(
+						"$source.name history (minted=$minted, $n calls) sent to $target.name (listed=$listed)",
+						async ({ source, minted, n, target, listed }) => {
+							const { ids, signature, message } = await historyMessage(source, minted, n)
+							handler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl: target.url })
+							useCatalog(handler, target, listed)
+							mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+							await collectStream(
+								handler.createMessage(
+									"system",
+									[{ role: "user", content: "Hello" }, message, toolResultsMessage(ids)],
+									metadata,
+								),
+							)
+
+							const sent = (sentToolCalls(mockCreate) ?? []).map((call, i) => {
+								const fields = (call as { provider_specific_fields?: { thought_signature?: string } })
+									.provider_specific_fields
+								return { i, id: call.id, sig: fields?.thought_signature }
+							})
+							// NoCorruptIdDecode holds for every catalog outcome. NoRejectedCall needs a listed model.
+							// A non-Gemini backend can reject the field (BerriAI/litellm#19739).
+							const decodesCorruptId = ({ sig, id }: (typeof sent)[number]) =>
+								sig === undefined && id.includes("__thought__")
+							const invalidOrMissing = ({ i, sig }: (typeof sent)[number]) =>
+								sig === undefined
+									? i === 0
+									: sig !== dummySignature && !(sig === signature && source === target && i === 0)
+							const rejected = sent.filter((call) =>
+								target.runsGemini
+									? decodesCorruptId(call) || (listed && invalidOrMissing(call))
+									: listed && call.sig !== undefined,
+							)
+							expect(sent).toHaveLength(n)
+							expect(rejected).toEqual([])
+						},
+					)
 				})
 			})
 

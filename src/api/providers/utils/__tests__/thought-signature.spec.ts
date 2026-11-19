@@ -114,6 +114,27 @@ describe("applyThoughtSignatures", () => {
 		])
 	})
 
+	it("ignores a signed message without tool calls", () => {
+		const history = [signedAssistantMessage([], { origin, leadingBlocks: [{ type: "text", text: "Done." }] })]
+
+		const result = applyThoughtSignatures(history, [assistantWith("call_1")], {
+			origin,
+			normalizeToolCallId: sanitizeOpenAiCallId,
+		})
+
+		expect(result).toEqual([assistantWith("call_1")])
+	})
+
+	it("puts the signature on the tool call, not on a reasoning block with an id", () => {
+		// The history stores reasoning blocks with the Responses API item id.
+		const reasoning = { type: "reasoning" as const, text: "Thinking.", id: "rs_1" }
+		const history = [signedAssistantMessage(["call_1"], { origin, leadingBlocks: [reasoning] })]
+
+		const result = applyThoughtSignatures(history, [assistantWith("call_1")], { origin })
+
+		expect(result).toEqual([{ role: "assistant", content: null, tool_calls: [signed("call_1", signature)] }])
+	})
+
 	it("uses the fallback for every tool call without a stored signature", () => {
 		const fallback = (id: string) => (id === "call_2" ? bypass : undefined)
 
