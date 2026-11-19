@@ -965,6 +965,12 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		caughtBy: /rejection changed state/,
 		useTable: false,
 	},
+	"settle-ignored-after-dispose": {
+		step: (state, event) =>
+			event.tag === "askSettled" && state.latches.disposed ? { ok: state } : nextRunState(state, event),
+		caughtBy: /missing event-source interleavings between state changes: dispose->ask$/,
+		useTable: false,
+	},
 	"mutates-its-state": {
 		step: (state, event) => {
 			if (event.tag === "abortRequested") state.latches.abort = true
