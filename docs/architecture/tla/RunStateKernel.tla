@@ -12,23 +12,29 @@
 \* Properties: LatchesMonotone, NoAskAfterAbort, CompletedNoStream, GenerationMonotone.
 \* A rejected event is a stutter, so the spec does not model it. The turn region has no guard and no reader here.
 \* Expected before the run: Kernel holds. Each sabotage config fails the invariant of its failure. Reuse fails NewestShown.
-\* Result: RunStateKernel.cfg holds (5160 states). Each of the 11 other configs fails, 10 of them on the expected invariant.
+\* Result: RunStateKernelMC.cfg holds (5160 states). Each of the 11 other configs fails, 10 of them on the expected invariant.
 \* NoStreamPhaseGuard fails AcceptCurrent first. CompletedNoStream alone also fails on it, so it is not vacuous.
 \* Null result: the Kernel config found no new bug in the table.
-\* Review ratchet, PR 2244 (findings before this spec):
+\* Run each config on RunStateKernelMC.tla. The MC module holds the sabotage overrides of the named guards and effects.
+\* Review ratchet, PR 2244, round 1 (findings before this spec):
 \* covered: CodeRabbit 4498864158 (a stale settle must come from a replaced ask). Settle(k) needs k open, so a stale settle is a replaced ask.
-\* added: taltas 4499201597 (a reused askTs). Ts = "Reuse" shows a stale settle that hides the newest ask (issue 2365).
+\* added: taltas 4499201597 (a reused askTs). The Reuse config shows a stale settle that hides the newest ask (issue 2365).
 \* gap: taltas 4499201605 (a result with both ok and rejected). The result shape is TypeScript, and the spec has no result.
 \* gap: taltas 4499201579 (cross-region effects). The spec writes each action, so it cannot see an effect that the code adds.
 \* gap: CodeRabbit 4519561241 (no negative test for source pairs). TLC tries every order, so the spec needs no pair rule.
 \* The TS checker got the test instead: the settle-ignored-after-dispose unsafe kernel.
-\* Counts: covered 1, added 1, gap 3. Findings about the spec files: 0.
+\* Round 1 counts: covered 1, added 1, gap 3. Findings about the spec files: 0.
+\* Round 2 (CodeRabbit on 0c808b53a): 7 findings. 1 is about the spec files: 4633780176 (move the sabotage to an MC module). Done.
+\* gap: 4633780180, 4633780186, 4633780209 and 4633780232 are about the coverage and the traces of the TS explorer.
+\* gap: 4633780197 (an own property with an undefined value). The spec has no JavaScript objects.
+\* gap: 4633780165 (a stale count in task-lifecycle-model.md). It is prose.
+\* Round 2 counts: covered 0, added 0, gap 6. Findings about the spec files: 1.
 \* Code check (step 10): scripts/check-run-state-kernel.ts runs the same invariants on the real nextRunState.
 \* Cost: TLC takes under 10 seconds per config. Agent time is not measured.
 
 EXTENDS Naturals
 
-CONSTANTS Mode, Ts, MaxAsks, MaxGen
+CONSTANTS MaxAsks, MaxGen
 
 Reasons == {"user_cancelled", "streaming_failed"}
 AskIds == 1..MaxAsks
@@ -41,20 +47,29 @@ vars == <<phase, gen, stream, ask, lastComp, abort, abandoned, disposed, reason,
 ghosts == <<n, tsOf, open, fresh, done>>
 latches == <<abort, abandoned, disposed, reason>>
 
+\* The guards and effects of the Transitions table. RunStateKernelMC.tla overrides one of them in each sabotage config.
+\* Input rule: Task gives each ask a new askTs. Issue 2365 tracks that Task does not make sure of this.
+AskTsFresh(t) == t = n + 1
+InitializedLatches == UNCHANGED <<abort, abandoned, disposed>>
+StreamStartGuard == phase = "running"
+StreamEndGen == gen
+AskStartGuard == phase = "running" /\ ~abort
+SettleMatches(k) == ask.ts = tsOf[k]
+AcceptGuard(k) == phase = "running" /\ ~abort /\ lastComp = tsOf[k]
+AcceptAsk == NoAsk
+ReasonGuard == reason = ""
+AbandonGuard == abort
+DisposeAbort == TRUE
+
 Init == /\ phase = "uninitialized" /\ gen = 0 /\ stream = "none" /\ ask = NoAsk /\ lastComp = 0
         /\ abort = FALSE /\ abandoned = FALSE /\ disposed = FALSE /\ reason = ""
         /\ n = 0 /\ tsOf = [k \in AskIds |-> 0] /\ open = {} /\ fresh = 0 /\ done = 0
 
-\* Sabotage ResumeResetsLatches: the first start clears the latches, as resumeAfterDelegation did before.
-Initialized == /\ phase = "uninitialized"
-               /\ phase' = "running"
-               /\ IF Mode = "ResumeResetsLatches"
-                  THEN abort' = FALSE /\ abandoned' = FALSE /\ disposed' = FALSE /\ UNCHANGED reason
-                  ELSE UNCHANGED latches
-               /\ UNCHANGED <<gen, stream, ask, lastComp, ghosts>>
+Initialized == /\ phase = "uninitialized" /\ phase' = "running"
+               /\ InitializedLatches
+               /\ UNCHANGED <<gen, stream, ask, lastComp, reason, ghosts>>
 
-StreamStarted == /\ phase = "running" \/ Mode = "NoStreamPhaseGuard"
-                 /\ stream = "none" /\ gen < MaxGen
+StreamStarted == /\ StreamStartGuard /\ stream = "none" /\ gen < MaxGen
                  /\ gen' = gen + 1 /\ stream' = "live" /\ lastComp' = 0 /\ fresh' = 0
                  /\ UNCHANGED <<phase, ask, latches, n, tsOf, open, done>>
 
@@ -62,15 +77,12 @@ StreamStarted == /\ phase = "running" \/ Mode = "NoStreamPhaseGuard"
 StreamCleanupFinished == /\ stream # "none" /\ stream' = "clean"
                          /\ UNCHANGED <<phase, gen, ask, lastComp, latches, ghosts>>
 
-StreamEnded == /\ stream # "none" /\ stream' = "none"
-               /\ gen' = IF Mode = "EndResetsGen" THEN 0 ELSE gen
+StreamEnded == /\ stream # "none" /\ stream' = "none" /\ gen' = StreamEndGen
                /\ UNCHANGED <<phase, ask, lastComp, latches, ghosts>>
 
 \* Approval and other asks have the same effect, so the spec merges them.
-\* Ts = "Unique": each ask gets a new askTs. Ts = "Reuse": an ask can carry the askTs of an earlier ask.
 AskStarted(tag, t) ==
-    /\ n < MaxAsks /\ phase = "running" /\ (~abort \/ Mode = "NoAskAbortGuard")
-    /\ IF Ts = "Unique" THEN t = n + 1 ELSE TRUE
+    /\ n < MaxAsks /\ AskStartGuard /\ AskTsFresh(t)
     /\ n' = n + 1 /\ tsOf' = [tsOf EXCEPT ![n + 1] = t] /\ open' = open \cup {n + 1}
     /\ ask' = [id |-> n + 1, tag |-> tag, ts |-> t]
     /\ lastComp' = IF tag = "completion" THEN t ELSE 0
@@ -80,29 +92,24 @@ AskStarted(tag, t) ==
 \* Each started ask exits once: the abort throw, superseded or the return. Each exit sends askSettled.
 AskSettled(k) == /\ k \in open
                  /\ open' = open \ {k}
-                 /\ ask' = IF ask.tag # "none" /\ (ask.ts = tsOf[k] \/ Mode = "SettleAny") THEN NoAsk ELSE ask
+                 /\ ask' = IF ask.tag # "none" /\ SettleMatches(k) THEN NoAsk ELSE ask
                  /\ UNCHANGED <<phase, gen, stream, lastComp, latches, n, tsOf, fresh, done>>
 
 \* The accept carries the askTs of an ask that started. The guard decides if it is current.
-CompletionAccepted(k) ==
-    /\ k \in 1..n /\ phase = "running" /\ ~abort
-    /\ lastComp = tsOf[k] \/ Mode = "AcceptNoTs"
-    /\ phase' = "completed" /\ done' = k
-    /\ ask' = IF Mode = "AcceptKeepsAsk" THEN ask ELSE NoAsk
-    /\ UNCHANGED <<gen, stream, lastComp, latches, n, tsOf, open, fresh>>
+CompletionAccepted(k) == /\ k \in 1..n /\ AcceptGuard(k)
+                         /\ phase' = "completed" /\ done' = k /\ ask' = AcceptAsk
+                         /\ UNCHANGED <<gen, stream, lastComp, latches, n, tsOf, open, fresh>>
 
-ReasonSet(r) == /\ reason = "" \/ Mode = "ReasonOverwrite"
-                /\ reason' = r
+ReasonSet(r) == /\ ReasonGuard /\ reason' = r
                 /\ UNCHANGED <<phase, gen, stream, ask, lastComp, abort, abandoned, disposed, ghosts>>
 
 AbortRequested(b) == /\ abort' = TRUE /\ abandoned' = (abandoned \/ b)
                      /\ UNCHANGED <<phase, gen, stream, ask, lastComp, disposed, reason, ghosts>>
 
-AbandonRequested == /\ abort \/ Mode = "AbandonNoGuard"
-                    /\ abandoned' = TRUE
+AbandonRequested == /\ AbandonGuard /\ abandoned' = TRUE
                     /\ UNCHANGED <<phase, gen, stream, ask, lastComp, abort, disposed, reason, ghosts>>
 
-DisposeRequested == /\ abort' = (abort \/ Mode # "DisposeNoAbort") /\ disposed' = TRUE
+DisposeRequested == /\ abort' = DisposeAbort /\ disposed' = TRUE
                     /\ UNCHANGED <<phase, gen, stream, ask, lastComp, abandoned, reason, ghosts>>
 
 Next == \/ Initialized \/ StreamStarted \/ StreamCleanupFinished \/ StreamEnded

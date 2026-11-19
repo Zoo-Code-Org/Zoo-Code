@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import { readFileSync } from "node:fs"
+import { isDeepStrictEqual } from "node:util"
 import { fileURLToPath } from "node:url"
 
 import { nextRunState, initialRunState } from "../src/core/task/run-state/runState"
@@ -36,6 +37,11 @@ interface Options {
 	maxDepth: number
 	maxStates: number
 	allTurnStates: boolean
+}
+
+interface SearchNode {
+	state: ModelState
+	trace: TraceStep[]
 }
 
 interface Applied {
@@ -274,7 +280,7 @@ const semanticWitnesses = {
 		event.tag === "streamStarted" &&
 		prev.run.phase === "running" &&
 		prev.run.generation === 0 &&
-		prev.run.ask.tag === "none" &&
+		prev.askCount === 0 &&
 		next.run.stream.tag === "live",
 	"approval-before-first-stream": ({ prev, next, event }: WitnessContext) =>
 		event.tag === "askStarted" &&
@@ -325,9 +331,10 @@ function eventsFor({ run, askCount }: ModelState): ModelEvent[] {
 		{ name: "streamCleanupFinished()", source: "stream", event: { tag: "streamCleanupFinished" } },
 		{ name: "streamEnded()", source: "stream", event: { tag: "streamEnded" } },
 	)
-	if (askCount < MAX_ASK_TS) {
+	const askStartRejects = run.phase !== "running" || run.latches.abort
+	if (askCount < MAX_ASK_TS || askStartRejects) {
 		for (const [kind, build] of Object.entries(askBuilders)) {
-			const ask = build(askCount + 1)
+			const ask = build(Math.min(askCount + 1, MAX_ASK_TS))
 			events.push({ name: `askStarted(${kind}, ${ask.askTs})`, source: "ask", event: { tag: "askStarted", ask } })
 		}
 	}
@@ -426,8 +433,8 @@ function apply(options: Options, state: ModelState, { event }: ModelEvent): Appl
 	}
 
 	const problems: string[] = []
-	if (canonical(input) !== canonical(state.run)) problems.push(`${event.tag} mutated its state`)
-	if (canonical(eventInput) !== canonical(event)) problems.push(`${event.tag} mutated its event`)
+	if (!isDeepStrictEqual(input, state.run)) problems.push(`${event.tag} mutated its state`)
+	if (!isDeepStrictEqual(eventInput, event)) problems.push(`${event.tag} mutated its event`)
 	const accepted = "ok" in result
 	const actual = "ok" in result ? result.ok : result.rejected
 	if (options.useTable) {
@@ -482,7 +489,7 @@ const shapeOf = ({ run, askCount }: ModelState) =>
 		ask: run.ask.tag,
 		askTs: run.ask.tag === "none" ? undefined : run.ask.askTs,
 		latches: run.latches,
-		lastCompletionAskTs: run.lastCompletionAskTs !== undefined,
+		lastCompletionAskTs: run.lastCompletionAskTs ?? null,
 	})
 
 const everyTurn = Array.from({ length: 32 }, (_, bits) => ({
@@ -495,17 +502,18 @@ const everyTurn = Array.from({ length: 32 }, (_, bits) => ({
 const allFalseTurn = everyTurn[0]!
 const allTrueTurn = everyTurn[31]!
 
-function checkTurnRegion(options: Options, searched: ModelState[], reachedActions: Set<string>): void {
-	const shapes = new Map(searched.map((state) => [shapeOf(state), state]))
+function checkTurnRegion(options: Options, searched: SearchNode[], reachedActions: Set<string>): void {
+	const shapes = new Map(searched.map((node) => [shapeOf(node.state), node]))
 	const turns = options.allTurnStates ? everyTurn : [allFalseTurn, allTrueTurn]
-	const cases = [...shapes.values()].flatMap((state) =>
+	const cases = [...shapes.values()].flatMap((node) =>
 		turns.map((turn) => ({
-			state: { ...state, run: { ...state.run, turn } },
-			events: [...eventsFor(state), ...turnTags.map(turnEvent)],
+			trace: node.trace,
+			state: { ...node.state, run: { ...node.state.run, turn } },
+			events: [...eventsFor(node.state), ...turnTags.map(turnEvent)],
 		})),
 	)
 
-	for (const { state, events } of cases) {
+	for (const { trace: reached, state, events } of cases) {
 		for (const modelEvent of events) {
 			const applied = apply(options, state, modelEvent)
 			const turnEventRejected = modelEvent.source === "turn" && !applied.accepted
@@ -516,7 +524,8 @@ function checkTurnRegion(options: Options, searched: ModelState[], reachedAction
 			]
 			if (problems.length) {
 				const trace = [
-					{ action: "initial", source: "initial" as const, state },
+					...reached,
+					{ action: `fixture: turn = ${JSON.stringify(state.run.turn)}`, source: "turn" as const, state },
 					{ action: modelEvent.name, source: modelEvent.source, state: applied.next },
 				]
 				throw new Error(formatCounterexample(problems.join("; "), trace, options))
@@ -537,7 +546,7 @@ function runModelCheck(options: Options): CheckResult {
 	const startProblems = stateViolations(start)
 	if (startProblems.length) throw new Error(formatCounterexample(startProblems.join("; "), startTrace, options))
 
-	const queue = [{ state: start, trace: startTrace }]
+	const queue: SearchNode[] = [{ state: start, trace: startTrace }]
 	const visited = new Set([canonical(start)])
 	const reachedActions = new Set<string>()
 	const reachedRejections = new Set<string>()
@@ -592,11 +601,7 @@ function runModelCheck(options: Options): CheckResult {
 		}
 	}
 
-	checkTurnRegion(
-		options,
-		queue.map((node) => node.state),
-		reachedActions,
-	)
+	checkTurnRegion(options, queue, reachedActions)
 
 	const assertNoneMissing = (label: string, names: string[]) => {
 		if (names.length) throw new Error(`Run-state kernel model has ${label}: ${names.join(", ")}`)
@@ -978,6 +983,39 @@ const unsafeKernels: Record<string, UnsafeKernel> = {
 		},
 		caughtBy: /abortRequested mutated its state/,
 		useTable: false,
+	},
+	"adds-undefined-approval-id": {
+		step: (state, event) => {
+			if (event.tag === "askStarted" && event.ask.tag === "approval" && !("approvalId" in event.ask)) {
+				event.ask.approvalId = undefined
+			}
+			return nextRunState(state, event)
+		},
+		caughtBy: /askStarted mutated its event/,
+		useTable: false,
+	},
+	"ask-after-abort-at-ask-cap": {
+		step: (state, event) =>
+			event.tag === "askStarted" &&
+			state.latches.abort &&
+			state.ask.tag !== "none" &&
+			state.ask.askTs === MAX_ASK_TS
+				? { ok: { ...state, ask: event.ask } }
+				: nextRunState(state, event),
+		caughtBy: differsFor("askStarted"),
+		useTable: true,
+	},
+	"settled-accept-rejected-with-tool-used-at-marker-1": {
+		step: (state, event) =>
+			event.tag === "completionAccepted" &&
+			event.askTs === 1 &&
+			state.lastCompletionAskTs === 1 &&
+			state.turn.toolUsed &&
+			state.ask.tag === "none"
+				? { rejected: state }
+				: nextRunState(state, event),
+		caughtBy: differsFor("completionAccepted"),
+		useTable: true,
 	},
 	"mutates-its-event": {
 		step: (state, event) => {

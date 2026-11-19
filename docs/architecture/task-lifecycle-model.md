@@ -273,7 +273,7 @@ Completion-readiness changes belong in `scripts/check-completion-persistence.ts`
 
 Parser request scoping is one such independent bounded submodel within the umbrella suite. Extend `scripts/check-native-tool-call-parser-scoping.ts` and its focused architecture document instead of adding parser state or transitions to `taskLifecycle.ts` or the persisted lifecycle state graph.
 
-Run-state kernel changes belong in `scripts/check-run-state-kernel.ts`. Update the guard and effect table in the checker together with the Transitions table in the target-architecture document, and add a known-unsafe kernel for each new check. Add the same check to `docs/architecture/tla/RunStateKernel.tla` and run `check.sh RunStateKernel`.
+Run-state kernel changes belong in `scripts/check-run-state-kernel.ts`. Update the guard and effect table in the checker together with the Transitions table in the target-architecture document, and add a known-unsafe kernel for each new check. Add the same check to `docs/architecture/tla/RunStateKernel.tla` and run `check.sh RunStateKernelMC`.
 
 ## Test layering
 
@@ -300,7 +300,7 @@ The checker also requires:
 - named witnesses, each tied to an event and the states around it: abort during a pending approval in a live stream, an ask after the stream ends, abandon after the stream ends, dispose after completion, a new stream after a failure cleanup without abort, a stream that starts without user input, an approval before the first stream, and a rejected late completion accept after a newer ask;
 - every ordered pair of the stream, ask, cancel, and dispose event sources to follow each other, where both events change the state;
 - no unseen successor at the depth bound;
-- forty-two known-unsafe kernels. The checker must reject each of them. They include a throwing kernel, a kernel that returns nothing and a kernel that returns both `ok` and `rejected`. There is also one kernel for each check that runs at every search step without the table; and
+- known-unsafe kernels. The checker must reject each of them. They include a throwing kernel, a kernel that returns nothing and a kernel that returns both `ok` and `rejected`. There is also one kernel for each check that runs at every search step without the table; and
 - self-tests that a small depth bound and a small state budget each fail the checker.
 
 The kernel has no resume event. A resumed task is `initialized` followed by `streamStarted` or `askStarted`. The witnesses `first-stream-without-ask` and `approval-before-first-stream` cover those paths.
