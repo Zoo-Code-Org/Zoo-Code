@@ -1,9 +1,22 @@
 import type OpenAI from "openai"
-import type { McpServer } from "@roo-code/types"
+import { providerIdentifiers, type McpServer } from "@roo-code/types"
 import type { ClineProvider } from "../../webview/ClineProvider"
-import { makeExtensionContext } from "../../../test-utils/vscode"
+import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import { TelemetryService } from "@roo-code/telemetry"
+import { Task } from "../Task"
+import { RooIgnoreController } from "../../ignore/RooIgnoreController"
 import { ToolRouter } from "../../../services/tools/ToolRouter"
 import { buildNativeToolsArrayWithRestrictions } from "../build-tools"
+
+vi.mock("vscode", async (importOriginal) => ({
+	...(await importOriginal<typeof import("vscode")>()),
+	RelativePattern: class {
+		constructor(
+			readonly base: string,
+			readonly pattern: string,
+		) {}
+	},
+}))
 
 vi.mock("../../../services/code-index/code-index-manager-registry", () => ({
 	CodeIndexManagerRegistry: { getOrCreate: () => undefined },
@@ -15,7 +28,18 @@ function names(tools: OpenAI.Chat.ChatCompletionTool[]) {
 	return tools.flatMap((tool) => ("function" in tool ? [tool.function.name] : []))
 }
 
-function setup(count: number) {
+const tasks: Task[] = []
+beforeEach(() => {
+	if (!TelemetryService.hasInstance()) TelemetryService.createInstance([])
+	vi.spyOn(RooIgnoreController.prototype, "initialize").mockResolvedValue(undefined)
+})
+afterEach(() => {
+	for (const task of tasks) task.rooIgnoreController?.dispose()
+	tasks.length = 0
+	vi.restoreAllMocks()
+})
+
+function setup(count: number, savedNames?: string[]) {
 	const server: McpServer = {
 		name: "catalog",
 		config: "{}",
@@ -23,21 +47,40 @@ function setup(count: number) {
 		tools: Array.from({ length: count }, (_, index) => ({ name: `tool_${index}`, description: "search tickets" })),
 	}
 	const servers = [server]
-	// Tool construction only uses context and the hub's getServers method.
+	// Task construction reads context, state, log, and the hub. The builder uses
+	// the same hub. This partial double cannot implement the full provider, which
+	// owns unrelated webview and task services; cast once at construction.
 	const provider = {
-		context: makeExtensionContext(),
+		context: makeExtensionContext({ globalStorageUri: makeUri("/test-storage") }),
 		getMcpHub: () => ({ getServers: () => servers }),
-	} as ClineProvider
-	let initialized = false
-	const task: NonNullable<Options["task"]> = {
-		attachedMcpToolNames: new Set<string>(),
-		initializeAttachedMcpTools: vi.fn(async (scope, k) => {
-			if (initialized) return
-			const selected = await ToolRouter.getInstance().attachInitial("search tickets", scope, k)
-			for (const name of selected) task.attachedMcpToolNames.add(name)
-			initialized = true
-		}),
-	}
+		getState: async () => ({ mode: "code", currentApiConfigName: "default" }),
+		log: vi.fn(),
+	} as unknown as ClineProvider
+	const task = new Task({
+		provider,
+		apiConfiguration: { apiProvider: providerIdentifiers.anthropic, apiKey: "test-key" },
+		task: savedNames === undefined ? "search tickets" : undefined,
+		historyItem:
+			savedNames === undefined
+				? undefined
+				: {
+						id: "restored-selection",
+						number: 1,
+						ts: 1,
+						task: "search tickets",
+						tokensIn: 0,
+						tokensOut: 0,
+						totalCost: 0,
+						attachedMcpToolNames: savedNames,
+					},
+		startTask: false,
+		workspacePath: "/test",
+		enableCheckpoints: false,
+	})
+	// Stub disk I/O, keeping Task's selection, restore, and builder wiring real.
+	task["saveClineMessages"] = vi.fn().mockResolvedValue(true)
+	vi.spyOn(task, "initializeAttachedMcpTools")
+	tasks.push(task)
 	const options: Options = {
 		provider,
 		task,
@@ -79,6 +122,37 @@ describe.each([false, true])("MCP dynamic loading (all definitions: %s)", (inclu
 			expect(result.allowedFunctionNames?.filter((name) => name.startsWith("mcp--"))).toEqual(attached)
 		}
 	})
+
+	it.each([undefined, [], ["mcp--catalog--tool_99"]])(
+		"preserves the real Task selection across repeated builds (saved: %j)",
+		async (savedNames) => {
+			const { task, options } = setup(100, savedNames)
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+			const build = () =>
+				buildNativeToolsArrayWithRestrictions({
+					...options,
+					mcpDynamicLoadInitialK: 7,
+					includeAllToolsWithRestrictions,
+				})
+			const first = await build()
+			const second = await build()
+			const declarations = names(first.tools).filter((name) => name.startsWith("mcp--"))
+			expect(names(second.tools)).toEqual(names(first.tools))
+			expect(new Set(declarations)).toEqual(task.attachedMcpToolNames)
+			if (savedNames !== undefined) {
+				expect(declarations).toEqual(savedNames)
+				expect(rank).not.toHaveBeenCalled()
+				expect(task["saveClineMessages"]).not.toHaveBeenCalled()
+			} else {
+				expect(declarations).toHaveLength(7)
+				expect(rank).toHaveBeenCalledTimes(1)
+				expect(task["saveClineMessages"]).toHaveBeenCalledExactlyOnceWith(true, true)
+			}
+			if (includeAllToolsWithRestrictions) {
+				expect(second.allowedFunctionNames?.filter((name) => name.startsWith("mcp--"))).toEqual(declarations)
+			}
+		},
+	)
 
 	it("starts routing at exactly 51 tools", async () => {
 		const { task, options } = setup(51)

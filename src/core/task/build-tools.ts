@@ -8,7 +8,7 @@ import { customToolRegistry, formatNative } from "@roo-code/core"
 
 import type { ClineProvider } from "../webview/ClineProvider"
 import type { Task } from "./Task"
-import { buildMcpToolName } from "../../utils/mcp-name"
+import { getMcpToolCatalog } from "../prompts/tools/native-tools/mcp_server"
 import { getRooDirectoriesForCwd } from "../../services/roo-config/index.js"
 import { getModeBySlug, defaultModeSlug } from "../../shared/modes"
 
@@ -151,21 +151,9 @@ export async function buildNativeToolsArrayWithRestrictions(options: BuildToolsO
 	)
 	if (options.task && filteredMcpTools.length > threshold) {
 		const scopedNames = new Set(filteredMcpTools.map(getToolName))
-		const scopedTools = (mcpHub?.getServers() ?? [])
-			.filter((server) => !allowedMcpServers || allowedMcpServers.includes(server.name))
-			.flatMap((server) =>
-				(server.tools ?? [])
-					.filter(
-						(tool) =>
-							tool.enabledForPrompt !== false &&
-							scopedNames.has(buildMcpToolName(server.name, tool.name)),
-					)
-					.map((tool) => ({
-						serverName: server.name,
-						toolName: tool.name,
-						description: tool.description ?? "",
-					})),
-			)
+		const scopedTools = getMcpToolCatalog(mcpHub, allowedMcpServers)
+			.filter(({ name }) => scopedNames.has(name))
+			.map(({ serverName, tool }) => ({ serverName, toolName: tool.name, description: tool.description ?? "" }))
 		await options.task.initializeAttachedMcpTools(scopedTools, initialK)
 		// This gate limits advertised definitions. Existing execution authorization
 		// still decides whether a requested tool call is permitted.

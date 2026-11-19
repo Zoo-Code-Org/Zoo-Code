@@ -1,75 +1,44 @@
 import type OpenAI from "openai"
-import { McpHub } from "../../../../services/mcp/McpHub"
-import { buildMcpToolName } from "../../../../utils/mcp-name"
+import type { McpTool } from "@roo-code/types"
+import type { McpHub } from "../../../../services/mcp/McpHub"
+import { buildMcpToolName, toolNamesMatch } from "../../../../utils/mcp-name"
 import { normalizeToolSchema, type JsonSchema } from "../../../../utils/json-schema"
 
-/**
- * Dynamically generates native tool definitions for all enabled tools across connected MCP servers.
- * Tools are deduplicated by name to prevent API errors. When the same server exists in both
- * global and project configs, project servers take priority (handled by McpHub.getServers()).
- *
- * @param mcpHub The McpHub instance containing connected servers.
- * @returns An array of OpenAI.Chat.ChatCompletionTool definitions.
- */
-export function getMcpServerTools(mcpHub?: McpHub, allowedServers?: string[]): OpenAI.Chat.ChatCompletionTool[] {
-	if (!mcpHub) {
-		return []
-	}
-
-	let servers = mcpHub.getServers()
-
-	// Filter servers by allowlist if provided
-	if (allowedServers) {
-		const allowSet = new Set(allowedServers)
-		servers = servers.filter((s) => allowSet.has(s.name))
-	}
-	const tools: OpenAI.Chat.ChatCompletionTool[] = []
-	// Track seen tool names to prevent duplicates (e.g., when same server exists in both global and project configs)
-	const seenToolNames = new Set<string>()
-
-	for (const server of servers) {
-		if (!server.tools) {
-			continue
-		}
-		for (const tool of server.tools) {
-			// Filter tools where tool.enabledForPrompt is not explicitly false
-			if (tool.enabledForPrompt === false) {
-				continue
-			}
-
-			// Build sanitized tool name for API compliance
-			// The name is sanitized to conform to API requirements (e.g., Gemini's function name restrictions)
-			const toolName = buildMcpToolName(server.name, tool.name)
-
-			// Skip duplicate tool names - first occurrence wins (project servers come before global servers)
-			if (seenToolNames.has(toolName)) {
-				continue
-			}
-			seenToolNames.add(toolName)
-
-			const originalSchema = tool.inputSchema as Record<string, unknown> | undefined
-
-			// Normalize schema for JSON Schema 2020-12 compliance (type arrays → anyOf)
-			let parameters: JsonSchema
-			if (originalSchema) {
-				parameters = normalizeToolSchema(originalSchema) as JsonSchema
-			} else {
-				// No schema provided - create a minimal valid schema
-				parameters = { type: "object", additionalProperties: false } as JsonSchema
-			}
-
-			const toolDefinition: OpenAI.Chat.ChatCompletionTool = {
-				type: "function",
-				function: {
-					name: toolName,
-					description: tool.description,
-					parameters: parameters as OpenAI.FunctionParameters,
-				},
-			}
-
-			tools.push(toolDefinition)
+/** The enabled catalog uses hub project priority and first-wins canonical names. */
+export function getMcpToolCatalog(mcpHub?: Pick<McpHub, "getServers">, allowedServers?: string[]) {
+	const entries = new Map<string, { name: string; serverName: string; tool: McpTool }>()
+	for (const server of mcpHub?.getServers() ?? []) {
+		if (allowedServers && !allowedServers.includes(server.name)) continue
+		for (const tool of server.tools ?? []) {
+			if (tool.enabledForPrompt === false) continue
+			const name = buildMcpToolName(server.name, tool.name)
+			if (!entries.has(name)) entries.set(name, { name, serverName: server.name, tool })
 		}
 	}
+	return [...entries.values()]
+}
 
-	return tools
+/** Build definitions from the same catalog used to resolve truncated names. */
+export function getMcpServerTools(
+	mcpHub?: Pick<McpHub, "getServers">,
+	allowedServers?: string[],
+): OpenAI.Chat.ChatCompletionTool[] {
+	return getMcpToolCatalog(mcpHub, allowedServers).map(({ name, tool }) => {
+		const originalSchema = tool.inputSchema as Record<string, unknown> | undefined
+		const parameters = originalSchema
+			? (normalizeToolSchema(originalSchema) as JsonSchema)
+			: ({ type: "object", additionalProperties: false } as JsonSchema)
+		return {
+			type: "function",
+			function: { name, description: tool.description, parameters: parameters as OpenAI.FunctionParameters },
+		}
+	})
+}
+
+/** Exact names win. An altered separator is accepted only when its match is unique. */
+export function resolveMcpToolFromCatalog(catalog: ReturnType<typeof getMcpToolCatalog>, name: string) {
+	const exact = catalog.find((entry) => entry.name === name)
+	if (exact) return exact
+	const aliases = catalog.filter((entry) => toolNamesMatch(entry.name, name))
+	return aliases.length === 1 ? aliases[0] : undefined
 }
