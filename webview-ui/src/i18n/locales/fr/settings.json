@@ -6,7 +6,8 @@
 		"cancel": "Annuler",
 		"select": "Sélectionner",
 		"add": "Ajouter un en-tête",
-		"remove": "Supprimer"
+		"remove": "Supprimer",
+		"reset": "Réinitialiser"
 	},
 	"search": {
 		"placeholder": "Rechercher les paramètres...",
@@ -249,7 +250,9 @@
 			"bedrockRegionRequired": "La région AWS est requise",
 			"ollamaBaseUrlRequired": "L'URL de base Ollama est requise",
 			"baseUrlRequired": "L'URL de base est requise",
-			"openRouterApiKeyRequired": "Clé API OpenRouter est requise"
+			"openRouterApiKeyRequired": "Clé API OpenRouter est requise",
+			"bedrockProfileRequired": "Le profil AWS est requis",
+			"modelDimensionMinValue": "La dimension du modèle doit être supérieure à 0"
 		},
 		"optional": "optionnel",
 		"advancedConfigLabel": "Configuration avancée",
@@ -263,7 +266,21 @@
 		"workspaceToggleLabel": "Activer l'indexation pour cet espace de travail",
 		"workspaceDisabledMessage": "L'indexation est configurée mais non activée pour cet espace de travail.",
 		"autoEnableDefaultLabel": "Activer automatiquement l'indexation pour les nouveaux espaces de travail",
-		"sembleProvider": "Semble - Local"
+		"sembleProvider": "Semble - Local",
+		"settingsTitle": "Paramètres d'indexation",
+		"disabledMessage": "L'indexation de la base de code est actuellement désactivée. Activez-la dans les paramètres globaux pour configurer les options d'indexation.",
+		"providerLabel": "Fournisseur d'embeddings",
+		"selectProviderPlaceholder": "Sélectionner un fournisseur",
+		"openAiCompatibleModelDimensionLabel": "Dimension d'Embedding :",
+		"openAiCompatibleModelDimensionPlaceholder": "ex., 1536",
+		"openAiCompatibleModelDimensionDescription": "La dimension d'embedding (taille de sortie) pour votre modèle. Consultez la documentation de votre fournisseur pour cette valeur. Valeurs courantes : 384, 768, 1536, 3072.",
+		"selectModelPlaceholder": "Sélectionner un modèle",
+		"ollamaUrlLabel": "URL Ollama :",
+		"qdrantKeyLabel": "Clé Qdrant :",
+		"unsavedSettingsMessage": "Merci d'enregistrer tes paramètres avant de démarrer le processus d'indexation.",
+		"saveSuccess": "Paramètres sauvegardés avec succès",
+		"close": "Fermer",
+		"searchMinScoreResetTooltip": "Réinitialiser à la valeur par défaut (0.4)"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Vous pouvez configurer un raccourci global pour ce paramètre <SettingsLink>dans les préférences de votre IDE</SettingsLink>.",
@@ -288,7 +305,8 @@
 			"protected": {
 				"label": "Inclure les fichiers protégés",
 				"description": "Permettre à Zoo de créer et modifier des fichiers protégés (comme .rooignore et les fichiers de configuration .roo/) sans nécessiter d'approbation."
-			}
+			},
+			"delayLabel": "Délai après les écritures pour permettre aux diagnostics de détecter les problèmes potentiels"
 		},
 		"allowlists": {
 			"label": "Listes d'autorisation",
@@ -338,7 +356,8 @@
 			"deniedCommandsDescription": "Préfixes de commandes qui seront automatiquement refusés sans demander d'approbation. En cas de conflit avec les commandes autorisées, la correspondance de préfixe la plus longue prend la priorité. Ajoutez * pour refuser toutes les commandes.",
 			"commandPlaceholder": "Entrez le préfixe de commande (ex. 'git ')",
 			"deniedCommandPlaceholder": "Entrez le préfixe de commande à refuser (ex. 'rm -rf')",
-			"addButton": "Ajouter"
+			"addButton": "Ajouter",
+			"autoDenied": "Les commandes avec le préfixe `{{prefix}}` ont été interdites par l'utilisateur. Ne contourne pas cette restriction en exécutant une autre commande."
 		},
 		"apiRequestLimit": {
 			"title": "Requêtes maximales",
@@ -350,7 +369,9 @@
 		},
 		"maxLimits": {
 			"description": "Effectuer automatiquement des requêtes jusqu'à ces limites avant de demander une autorisation pour continuer."
-		}
+		},
+		"disabledAriaLabel": "Approbation automatique désactivée - sélectionnez d'abord les options",
+		"selectOptionsFirst": "Sélectionnez au moins une option ci-dessous pour activer l'approbation automatique"
 	},
 	"providers": {
 		"configProfile": "Profil de configuration",
@@ -461,7 +482,8 @@
 			"label": "Actualiser les modèles",
 			"loading": "Actualisation de la liste des modèles...",
 			"success": "Liste des modèles actualisée avec succès !",
-			"error": "Échec de l'actualisation de la liste des modèles. Veuillez réessayer."
+			"error": "Échec de l'actualisation de la liste des modèles. Veuillez réessayer.",
+			"hint": "Veuillez rouvrir les paramètres pour voir les modèles les plus récents."
 		},
 		"getRequestyApiKey": "Obtenir la clé API Requesty",
 		"getRequestyBaseUrl": "URL de base",
@@ -590,7 +612,10 @@
 			"speculativeDecoding": "Activer le décodage spéculatif",
 			"draftModelId": "ID du modèle brouillon",
 			"draftModelDesc": "Le modèle brouillon doit être de la même famille de modèles pour que le décodage spéculatif fonctionne correctement.",
-			"description": "LM Studio vous permet d'exécuter des modèles localement sur votre ordinateur. Pour obtenir des instructions sur la mise en route, consultez leur <a>guide de démarrage rapide</a>. Vous devrez également démarrer la fonction <b>serveur local</b> de LM Studio pour l'utiliser avec cette extension. <span>Remarque :</span> Zoo Code utilise des prompts complexes et fonctionne mieux avec les modèles Claude. Les modèles moins performants peuvent ne pas fonctionner comme prévu."
+			"description": "LM Studio vous permet d'exécuter des modèles localement sur votre ordinateur. Pour obtenir des instructions sur la mise en route, consultez leur <a>guide de démarrage rapide</a>. Vous devrez également démarrer la fonction <b>serveur local</b> de LM Studio pour l'utiliser avec cette extension. <span>Remarque :</span> Zoo Code utilise des prompts complexes et fonctionne mieux avec les modèles Claude. Les modèles moins performants peuvent ne pas fonctionner comme prévu.",
+			"modelId": "ID du modèle",
+			"selectDraftModel": "Sélectionner le modèle brouillon",
+			"noModelsFound": "Aucun modèle brouillon trouvé. Veuillez vous assurer que LM Studio est en cours d'exécution avec le mode serveur activé."
 		},
 		"ollama": {
 			"baseUrl": "URL de base (optionnel)",
@@ -601,7 +626,8 @@
 			"thinking": "Activer le raisonnement",
 			"thinkingHelp": "Active le raisonnement natif d'Ollama pour les modèles de raisonnement (par ex. qwen3, deepseek-r1). Lorsqu'il est activé, le raisonnement du modèle est diffusé et affiché séparément. Les modèles non compatibles ignoreront ce paramètre.",
 			"description": "Ollama vous permet d'exécuter des modèles localement sur votre ordinateur. Pour obtenir des instructions sur la mise en route, consultez le guide de démarrage rapide.",
-			"warning": "Remarque : Zoo Code utilise des prompts complexes et fonctionne mieux avec les modèles Claude. Les modèles moins performants peuvent ne pas fonctionner comme prévu."
+			"warning": "Remarque : Zoo Code utilise des prompts complexes et fonctionne mieux avec les modèles Claude. Les modèles moins performants peuvent ne pas fonctionner comme prévu.",
+			"modelId": "ID du modèle"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -646,7 +672,11 @@
 					"description": "Coût par million de tokens pour l'écriture dans le cache. C'est le prix facturé lors de la première mise en cache d'un prompt."
 				}
 			},
-			"resetDefaults": "Réinitialiser les valeurs par défaut"
+			"resetDefaults": "Réinitialiser les valeurs par défaut",
+			"computerUse": {
+				"label": "Utilisation de l'ordinateur",
+				"description": "Ce modèle est-il capable d'interagir avec un navigateur ?"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "Limite de débit",
@@ -686,6 +716,19 @@
 			"signInDescription": "Connectez-vous pour utiliser Zoo Gateway avec votre compte",
 			"authenticated": "Authentifié",
 			"authenticatedAs": "Authentifié en tant que {{name}}"
+		},
+		"providerDocumentation": "Documentation {{provider}}",
+		"model": "Modèle",
+		"useHostHeader": "Utiliser un en-tête Host personnalisé",
+		"awsServiceTierStandardDesc": "Performances et coûts équilibrés",
+		"awsServiceTierFlexDesc": "Coût inférieur, latence plus élevée pour les tâches non critiques",
+		"awsServiceTierPriorityDesc": "Performances optimales pour les applications critiques",
+		"claudeCode": {
+			"pathLabel": "Chemin du code Claude",
+			"description": "Chemin facultatif vers votre CLI Claude Code. La valeur par défaut est 'claude' si non défini.",
+			"placeholder": "Défaut : claude",
+			"maxTokensLabel": "Jetons de sortie max",
+			"maxTokensDescription": "Nombre maximum de jetons de sortie pour les réponses de Claude Code. La valeur par défaut est 8000."
 		}
 	},
 	"checkpoints": {
@@ -713,7 +756,8 @@
 	"contextManagement": {
 		"description": "Contrôlez quelles informations sont incluses dans la fenêtre de contexte de l'IA, affectant l'utilisation de token et la qualité des réponses",
 		"autoCondenseContext": {
-			"name": "Déclencher automatiquement la condensation intelligente du contexte"
+			"name": "Déclencher automatiquement la condensation intelligente du contexte",
+			"description": "Lorsque cette option est activée, Zoo condensera automatiquement le contexte lorsque le seuil est atteint. Lorsqu'elle est désactivée, vous pouvez toujours déclencher manuellement la condensation du contexte."
 		},
 		"openTabs": {
 			"label": "Limite de contexte des onglets ouverts",
@@ -765,7 +809,8 @@
 			"defaultProfile": "Par défaut global (tous les profils)",
 			"defaultDescription": "Lorsque le contexte atteint ce pourcentage, il sera automatiquement condensé pour tous les profils sauf s'ils ont des paramètres personnalisés",
 			"profileDescription": "Seuil personnalisé pour ce profil uniquement (remplace le défaut global)",
-			"usesGlobal": "(utilise global {{threshold}}%)"
+			"usesGlobal": "(utilise global {{threshold}}%)",
+			"inheritDescription": "Ce profil hérite du seuil par défaut global ({{threshold}}%)"
 		},
 		"includeCurrentTime": {
 			"label": "Inclure l'heure actuelle dans le contexte",
@@ -782,6 +827,32 @@
 		"enableSubfolderRules": {
 			"label": "Activer les règles des sous-dossiers",
 			"description": "Découvrir et charger récursivement les fichiers .roo/rules et AGENTS.md depuis les sous-répertoires. Utile pour les monorepos avec des règles par package."
+		},
+		"autoCondenseContextPercent": {
+			"label": "Seuil de déclenchement de la condensation intelligente du contexte",
+			"description": "Lorsque la fenêtre de contexte atteint ce seuil, Zoo la condensera automatiquement."
+		},
+		"condensingApiConfiguration": {
+			"label": "Configuration API pour la condensation du contexte",
+			"description": "Sélectionnez quelle configuration API utiliser pour les opérations de condensation du contexte. Laissez non sélectionné pour utiliser la configuration active actuelle.",
+			"useCurrentConfig": "Par défaut"
+		},
+		"customCondensingPrompt": {
+			"label": "Prompt personnalisé de condensation du contexte",
+			"description": "Personnalisez le prompt système utilisé pour la condensation du contexte. Laissez vide pour utiliser le prompt par défaut.",
+			"placeholder": "Entrez votre prompt de condensation personnalisé ici...\n\nVous pouvez utiliser la même structure que le prompt par défaut :\n- Conversation précédente\n- Travail en cours\n- Concepts techniques clés\n- Fichiers et code pertinents\n- Résolution de problèmes\n- Tâches en attente et prochaines étapes",
+			"reset": "Réinitialiser par défaut",
+			"hint": "Vide = utiliser le prompt par défaut"
+		},
+		"maxReadFile": {
+			"label": "Seuil d'auto-troncature de lecture de fichier",
+			"description": "Zoo lit ce nombre de lignes lorsque le modèle omet les valeurs de début/fin. Si ce nombre est inférieur au total du fichier, Zoo génère un index des numéros de ligne des définitions de code. Cas spéciaux : -1 indique à Zoo de lire le fichier entier (sans indexation), et 0 indique de ne lire aucune ligne et de fournir uniquement les index de ligne pour un contexte minimal. Des valeurs plus basses minimisent l'utilisation initiale du contexte, permettant des lectures ultérieures de plages de lignes précises. Les requêtes avec début/fin explicites ne sont pas limitées par ce paramètre.",
+			"lines": "lignes",
+			"always_full_read": "Toujours lire le fichier entier"
+		},
+		"maxConcurrentFileReads": {
+			"label": "Limite de lectures simultanées",
+			"description": "Nombre maximum de fichiers que l'outil 'read_file' peut traiter simultanément. Des valeurs plus élevées peuvent accélérer la lecture de plusieurs petits fichiers mais augmentent l'utilisation de la mémoire."
 		}
 	},
 	"terminal": {
@@ -790,7 +861,8 @@
 			"description": "Replie la sortie des commandes, y compris celle du terminal intégré. Dépliez-la manuellement si nécessaire. Cela ne change pas leur exécution."
 		},
 		"basic": {
-			"label": "Paramètres du terminal : Base"
+			"label": "Paramètres du terminal : Base",
+			"description": "Paramètres de base du terminal"
 		},
 		"advanced": {
 			"label": "Paramètres du terminal : Avancé",
@@ -847,6 +919,14 @@
 			"description": "Par défaut, Zoo Code utilise le shell configuré dans VS Code. Sélectionnez un profil shell dans la liste pour choisir un profil shell avec chemin exposé par VS Code. Les profils source uniquement (ex. : l'entrée PowerShell intégrée) ne peuvent pas être listés ici. <0>En savoir plus</0>",
 			"configureButton": "Choisir le profil par défaut dans VS Code",
 			"noProfiles": "(aucun profil avec chemin trouvé dans terminal.integrated.profiles)"
+		},
+		"outputLineLimit": {
+			"label": "Limite de sortie du terminal",
+			"description": "Conserve les premières et dernières lignes et supprime celles du milieu pour rester sous la limite. Réduire pour économiser des jetons ; augmenter pour donner à Zoo plus de détails intermédiaires. Zoo voit un espace réservé là où le contenu est ignoré.<0>En savoir plus</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "Limite de caractères du terminal",
+			"description": "Remplace la limite de lignes pour éviter les problèmes de mémoire en imposant un plafond strict sur la taille de sortie. Si dépassé, conserve le début et la fin et affiche un espace réservé à Zoo là où le contenu est ignoré. <0>En savoir plus</0>"
 		}
 	},
 	"advancedSettings": {
@@ -856,6 +936,23 @@
 		"todoList": {
 			"label": "Activer l'outil de liste de tâches",
 			"description": "Lorsqu'activé, Zoo peut créer et gérer des listes de tâches pour suivre la progression. Cela aide à organiser les tâches complexes en étapes gérables."
+		},
+		"diff": {
+			"label": "Activer l'édition via des diffs",
+			"description": "Lorsque cette option est activée, Zoo pourra éditer des fichiers plus rapidement et rejettera automatiquement les écritures de fichiers complets tronqués",
+			"strategy": {
+				"label": "Stratégie de diff",
+				"options": {
+					"standard": "Standard (Bloc unique)",
+					"multiBlock": "Expérimental : Diff multi-blocs",
+					"unified": "Expérimental : Diff unifié"
+				},
+				"descriptions": {
+					"standard": "La stratégie de diff standard applique les modifications à un seul bloc de code à la fois.",
+					"unified": "La stratégie de diff unifié prend plusieurs approches pour appliquer les diffs et choisit la meilleure approche.",
+					"multiBlock": "La stratégie de diff multi-blocs permet de mettre à jour plusieurs blocs de code dans un fichier en une seule requête."
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -995,7 +1092,8 @@
 			"reservedKeys": "Le corps supplémentaire ne peut pas remplacer les champs gérés par Zoo Code : {{keys}}."
 		},
 		"arn": {
-			"regionMismatch": "Attention : La région dans votre ARN ({{arnRegion}}) ne correspond pas à votre région sélectionnée ({{region}}). Cela peut causer des problèmes d'accès. Le fournisseur utilisera la région de l'ARN."
+			"regionMismatch": "Attention : La région dans votre ARN ({{arnRegion}}) ne correspond pas à votre région sélectionnée ({{region}}). Cela peut causer des problèmes d'accès. Le fournisseur utilisera la région de l'ARN.",
+			"invalidFormat": "Format ARN invalide. Veuillez vérifier les exigences de format."
 		},
 		"modelAvailability": "L'ID de modèle ({{modelId}}) que vous avez fourni n'est pas disponible. Veuillez choisir un modèle différent.",
 		"modelDeprecated": "Ce modèle n'est plus disponible. Veuillez sélectionner un modèle différent.",
@@ -1022,6 +1120,11 @@
 			"inputPrice": "ex. 0.0001",
 			"outputPrice": "ex. 0.0002",
 			"cacheWritePrice": "ex. 0.00005"
+		},
+		"modelId": {
+			"lmStudio": "ex. meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "ex. lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "ex. llama3.1"
 		}
 	},
 	"defaults": {
@@ -1051,7 +1154,9 @@
 			"input": "Entrée",
 			"output": "Sortie",
 			"cacheReads": "Lectures du cache"
-		}
+		},
+		"label": "Niveau de service",
+		"tooltip": "Pour un traitement plus rapide des demandes d'API, essayez le niveau de service de traitement prioritaire. Pour des prix plus bas avec une latence plus élevée, essayez le niveau de traitement flexible."
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1101,7 +1206,8 @@
 			"intro": "Pour garder votre contexte léger, nous vous recommandons de ne mettre les skills à disposition que pour les modes qui en ont besoin.",
 			"anyMode": "N'importe quel mode (disponible partout)",
 			"save": "Enregistrer",
-			"cancel": "Annuler"
+			"cancel": "Annuler",
+			"description": "Choisissez les modes qui peuvent utiliser cette skill"
 		},
 		"createDialog": {
 			"title": "Créer une Nouvelle Skill",
@@ -1111,7 +1217,11 @@
 			"sourceLabel": "Emplacement",
 			"modeLabel": "Mode (optionnel)",
 			"create": "Créer",
-			"cancel": "Annuler"
+			"cancel": "Annuler",
+			"descriptionLabel": "Description",
+			"modePlaceholder": "N'importe quel mode",
+			"modeHint": "Restreindre cette skill à un mode spécifique",
+			"modeAny": "N'importe quel mode"
 		},
 		"source": {
 			"global": "Globale (disponible dans tous les projets)",
@@ -1124,7 +1234,13 @@
 			"descriptionRequired": "La description est obligatoire",
 			"descriptionTooLong": "La description doit contenir au maximum 1024 caractères"
 		},
-		"footer": "Créez vos propres skills avec le mode Skill Writer, disponible dans le <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Créez vos propres skills avec le mode Skill Writer, disponible dans le <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"modeAny": "N'importe quel mode",
+		"modeCount": "{{count}} modes",
+		"diagnostics": {
+			"title": "Certaines skills n'ont pas pu être chargées",
+			"description": "Corrigez le frontmatter YAML des fichiers SKILL.md listés, puis rouvrez ou actualisez cette page."
+		}
 	},
 	"language": {
 		"description": "Langue et affichage de la date et de l'heure.",
@@ -1161,5 +1277,12 @@
 			"relative": "il y a 5 min",
 			"hover": "(survol : {{value}})"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "Désactiver la mise en cache des prompts",
+		"description": "Lorsque cette option est cochée, Zoo n'utilisera pas la mise en cache des prompts pour ce modèle."
+	},
+	"limitMaxTokensDescription": "Limiter le nombre maximum de tokens dans la réponse",
+	"maxOutputTokensLabel": "Tokens de sortie maximum",
+	"maxTokensGenerateDescription": "Tokens maximum à générer dans la réponse"
 }

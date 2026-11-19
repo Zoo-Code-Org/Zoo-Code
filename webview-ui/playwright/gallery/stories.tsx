@@ -518,4 +518,81 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+
+	"skills-settings-diagnostics": async () => {
+		const [{ AppProviders }, { SkillsSettings }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/SkillsSettings"),
+		])
+		// Deterministic diagnostics: one project skill with a YAML location, one global
+		// skill without position data, so the alert's path/location/message rendering is
+		// fully covered by the screenshot.
+		const skills = [
+			{
+				name: "diagnostics-demo",
+				description: "Demo skill that loads successfully next to the broken ones",
+				path: "/workspace/.roo/skills/diagnostics-demo/SKILL.md",
+				source: "project" as const,
+			},
+		]
+		const skillDiagnostics = [
+			{
+				path: "/workspace/.roo/skills/broken-skill/SKILL.md",
+				source: "project" as const,
+				message: "Invalid YAML frontmatter: unexpected end of the stream",
+				line: 3,
+				column: 12,
+			},
+			{
+				path: "/home/user/.roo/skills/legacy-mode/SKILL.md",
+				source: "global" as const,
+				message: "Missing required 'description' field",
+			},
+		]
+		return (
+			<AppProviders initialState={{ cwd: "/workspace", skills, skillDiagnostics }}>
+				<div
+					className="flex h-full w-full flex-col bg-vscode-editor-background p-4 text-vscode-foreground"
+					data-testid="skills-settings-story">
+					<SkillsSettings />
+				</div>
+			</AppProviders>
+		)
+	},
+	"skills-settings-many-diagnostics": async () => {
+		const [{ AppProviders }, { SkillsSettings }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/SkillsSettings"),
+		])
+		// Fourteen diagnostics so the alert list is taller than the bounded height the
+		// header gives it. Every third one carries position data and the rest do not, so
+		// both row shapes are laid out while the header competes with the skills list for
+		// the height of the pane.
+		const skills = [
+			{
+				name: "healthy-skill",
+				description: "Skill that loads successfully next to the broken ones",
+				path: "/workspace/.roo/skills/healthy-skill/SKILL.md",
+				source: "project" as const,
+			},
+		]
+		const skillDiagnostics = Array.from({ length: 14 }, (_, index) => ({
+			path: `/workspace/.roo/skills/skill-${index + 1}/SKILL.md`,
+			source: index % 2 === 0 ? ("project" as const) : ("global" as const),
+			message:
+				index % 3 === 0
+					? `Invalid YAML frontmatter: unexpected end of the stream at line ${index + 1}`
+					: "Missing required 'description' field",
+			...(index % 3 === 0 ? { line: index + 1, column: 12 } : {}),
+		}))
+		return (
+			<AppProviders initialState={{ cwd: "/workspace", skills, skillDiagnostics }}>
+				<div
+					className="flex h-[680px] w-full flex-col overflow-hidden bg-vscode-editor-background p-4 text-vscode-foreground"
+					data-testid="skills-settings-story">
+					<SkillsSettings />
+				</div>
+			</AppProviders>
+		)
+	},
 }

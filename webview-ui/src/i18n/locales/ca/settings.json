@@ -6,7 +6,8 @@
 		"cancel": "Cancel·lar",
 		"select": "Seleccionar",
 		"add": "Afegir capçalera",
-		"remove": "Eliminar"
+		"remove": "Eliminar",
+		"reset": "Restablir"
 	},
 	"search": {
 		"placeholder": "Cercar configuració...",
@@ -249,7 +250,9 @@
 			"bedrockRegionRequired": "Es requereix la regió d'AWS",
 			"ollamaBaseUrlRequired": "Cal una URL base d'Ollama",
 			"baseUrlRequired": "Cal una URL base",
-			"openRouterApiKeyRequired": "Clau API d'OpenRouter és requerida"
+			"openRouterApiKeyRequired": "Clau API d'OpenRouter és requerida",
+			"bedrockProfileRequired": "Es requereix el perfil d'AWS",
+			"modelDimensionMinValue": "La dimensió del model ha de ser superior a 0"
 		},
 		"optional": "opcional",
 		"advancedConfigLabel": "Configuració avançada",
@@ -263,7 +266,21 @@
 		"workspaceToggleLabel": "Activar la indexació per a aquest espai de treball",
 		"workspaceDisabledMessage": "La indexació està configurada però no habilitada per a aquest espai de treball.",
 		"autoEnableDefaultLabel": "Habilitar automàticament la indexació per a nous espais de treball",
-		"sembleProvider": "Semble - Local"
+		"sembleProvider": "Semble - Local",
+		"providerLabel": "Proveïdor d'embeddings",
+		"selectProviderPlaceholder": "Seleccionar proveïdor",
+		"openAiCompatibleModelDimensionLabel": "Dimensió d'Embedding:",
+		"openAiCompatibleModelDimensionPlaceholder": "p. ex., 1536",
+		"openAiCompatibleModelDimensionDescription": "La dimensió d'embedding (mida de sortida) per al teu model. Consulta la documentació del teu proveïdor per a aquest valor. Valors comuns: 384, 768, 1536, 3072.",
+		"selectModelPlaceholder": "Seleccionar model",
+		"ollamaUrlLabel": "URL d'Ollama:",
+		"qdrantKeyLabel": "Clau de Qdrant:",
+		"unsavedSettingsMessage": "Si us plau, deseu la configuració abans d'iniciar el procés d'indexació.",
+		"settingsTitle": "Configuració d'indexació",
+		"disabledMessage": "La indexació de la base de codi està actualment deshabilitada. Habiliteu-la a la configuració global per configurar les opcions d'indexació.",
+		"saveSuccess": "Configuració desada correctament",
+		"close": "Tancar",
+		"searchMinScoreResetTooltip": "Restablir al valor per defecte (0.4)"
 	},
 	"autoApprove": {
 		"toggleShortcut": "Pots configurar una drecera global per a aquesta configuració <SettingsLink>a les preferències del teu IDE</SettingsLink>.",
@@ -288,7 +305,8 @@
 			"protected": {
 				"label": "Incloure fitxers protegits",
 				"description": "Permetre a Zoo crear i editar fitxers protegits (com .rooignore i fitxers de configuració .roo/) sense requerir aprovació."
-			}
+			},
+			"delayLabel": "Retard després d'escriptura per permetre que els diagnòstics detectin possibles problemes"
 		},
 		"allowlists": {
 			"label": "Llistes de permisos",
@@ -338,7 +356,8 @@
 			"deniedCommandsDescription": "Prefixos de comandes que es rebutjaran automàticament sense requerir aprovació. En cas de conflicte amb comandes permeses, la coincidència de prefix més llarga té prioritat. Afegeix * per denegar totes les comandes.",
 			"commandPlaceholder": "Introduïu prefix de comanda (ex. 'git ')",
 			"deniedCommandPlaceholder": "Introduïu prefix de comanda a denegar (ex. 'rm -rf')",
-			"addButton": "Afegir"
+			"addButton": "Afegir",
+			"autoDenied": "Les comandes amb el prefix `{{prefix}}` han estat prohibides per l'usuari. No eludeixis aquesta restricció executant una altra comanda."
 		},
 		"apiRequestLimit": {
 			"title": "Màximes Sol·licituds",
@@ -350,7 +369,9 @@
 		},
 		"maxLimits": {
 			"description": "Fes sol·licituds automàticament fins a aquests límits abans de demanar aprovació per continuar."
-		}
+		},
+		"disabledAriaLabel": "Aprovació automàtica desactivada: seleccioneu primer les opcions",
+		"selectOptionsFirst": "Seleccioneu almenys una opció a continuació per activar l'aprovació automàtica"
 	},
 	"providers": {
 		"configProfile": "Perfil de configuració",
@@ -461,7 +482,8 @@
 			"label": "Actualitzar models",
 			"loading": "Actualitzant la llista de models...",
 			"success": "Llista de models actualitzada correctament!",
-			"error": "No s'ha pogut actualitzar la llista de models. Si us plau, torneu-ho a provar."
+			"error": "No s'ha pogut actualitzar la llista de models. Si us plau, torneu-ho a provar.",
+			"hint": "Si us plau, torneu a obrir la configuració per veure els models més recents."
 		},
 		"getRequestyApiKey": "Obtenir clau API de Requesty",
 		"getRequestyBaseUrl": "URL base",
@@ -590,7 +612,10 @@
 			"speculativeDecoding": "Habilitar descodificació especulativa",
 			"draftModelId": "ID del model d'esborrany",
 			"draftModelDesc": "El model d'esborrany ha de ser de la mateixa família de models perquè la descodificació especulativa funcioni correctament.",
-			"description": "LM Studio permet executar models localment al vostre ordinador. Per a instruccions sobre com començar, consulteu la seva <a>Guia d'inici ràpid</a>. També necessitareu iniciar la funció de <b>Servidor Local</b> de LM Studio per utilitzar-la amb aquesta extensió. <span>Nota:</span> Zoo Code utilitza prompts complexos i funciona millor amb models Claude. Els models menys capaços poden no funcionar com s'espera."
+			"description": "LM Studio permet executar models localment al vostre ordinador. Per a instruccions sobre com començar, consulteu la seva <a>Guia d'inici ràpid</a>. També necessitareu iniciar la funció de <b>Servidor Local</b> de LM Studio per utilitzar-la amb aquesta extensió. <span>Nota:</span> Zoo Code utilitza prompts complexos i funciona millor amb models Claude. Els models menys capaços poden no funcionar com s'espera.",
+			"modelId": "ID del model",
+			"selectDraftModel": "Seleccionar model d'esborrany",
+			"noModelsFound": "No s'han trobat models d'esborrany. Assegureu-vos que LM Studio s'està executant amb el mode servidor habilitat."
 		},
 		"ollama": {
 			"baseUrl": "URL base (opcional)",
@@ -601,7 +626,8 @@
 			"thinking": "Activa el raonament",
 			"thinkingHelp": "Activa el raonament natiu d'Ollama per a models de raonament (p. ex. qwen3, deepseek-r1). Quan està activat, el raonament del model es transmet i es mostra per separat. Els models no compatibles ignoraran aquesta configuració.",
 			"description": "Ollama permet executar models localment al vostre ordinador. Per a instruccions sobre com començar, consulteu la Guia d'inici ràpid.",
-			"warning": "Nota: Zoo Code utilitza prompts complexos i funciona millor amb models Claude. Els models menys capaços poden no funcionar com s'espera."
+			"warning": "Nota: Zoo Code utilitza prompts complexos i funciona millor amb models Claude. Els models menys capaços poden no funcionar com s'espera.",
+			"modelId": "ID del model"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -646,7 +672,11 @@
 					"description": "Cost per milió de tokens per escriure a la caché. Aquest és el preu cobrat quan s'emmagatzema un prompt per primera vegada."
 				}
 			},
-			"resetDefaults": "Restablir als valors per defecte"
+			"resetDefaults": "Restablir als valors per defecte",
+			"computerUse": {
+				"label": "Ús de l'ordinador",
+				"description": "Aquest model és capaç d'interactuar amb un navegador?"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "Límit de freqüència",
@@ -686,6 +716,19 @@
 			"signInDescription": "Inicia sessió per utilitzar Zoo Gateway amb el teu compte",
 			"authenticated": "Autenticat",
 			"authenticatedAs": "Autenticat com a {{name}}"
+		},
+		"providerDocumentation": "Documentació de {{provider}}",
+		"model": "Model",
+		"useHostHeader": "Utilitzar capçalera Host personalitzada",
+		"awsServiceTierStandardDesc": "Rendiment i cost equilibrats",
+		"awsServiceTierFlexDesc": "Cost menor, latència més alta per a tasques no crítiques",
+		"awsServiceTierPriorityDesc": "Rendiment més ràpid per a aplicacions crítiques",
+		"claudeCode": {
+			"pathLabel": "Ruta del Codi Claude",
+			"description": "Ruta opcional al teu CLI de Claude Code. Per defecte, 'claude' si no s'estableix.",
+			"placeholder": "Per defecte: claude",
+			"maxTokensLabel": "Tokens màxims de sortida",
+			"maxTokensDescription": "Nombre màxim de tokens de sortida per a les respostes de Claude Code. El valor per defecte és 8000."
 		}
 	},
 	"checkpoints": {
@@ -713,7 +756,8 @@
 	"contextManagement": {
 		"description": "Controleu quina informació s'inclou a la finestra de context de la IA, afectant l'ús de token i la qualitat de resposta",
 		"autoCondenseContext": {
-			"name": "Activar automàticament la condensació intel·ligent de context"
+			"name": "Activar automàticament la condensació intel·ligent de context",
+			"description": "Quan està activat, Zoo condensarà automàticament el context quan s'assoleixi el llindar. Quan està desactivat, encara pots activar manualment la condensació de context."
 		},
 		"openTabs": {
 			"label": "Límit de context de pestanyes obertes",
@@ -755,7 +799,8 @@
 			"defaultProfile": "Per defecte global (tots els perfils)",
 			"defaultDescription": "Quan el context arribi a aquest percentatge, es condensarà automàticament per a tots els perfils tret que tinguin configuracions personalitzades",
 			"profileDescription": "Llindar personalitzat només per a aquest perfil (substitueix el per defecte global)",
-			"usesGlobal": "(utilitza global {{threshold}}%)"
+			"usesGlobal": "(utilitza global {{threshold}}%)",
+			"inheritDescription": "Aquest perfil hereta el llindar per defecte global ({{threshold}}%)"
 		},
 		"maxImageFileSize": {
 			"label": "Mida màxima d'arxiu d'imatge",
@@ -782,6 +827,32 @@
 		"enableSubfolderRules": {
 			"label": "Activa les regles dels subdirectoris",
 			"description": "Descobreix i carrega recursivament fitxers .roo/rules i AGENTS.md des de subdirectoris. Útil per a monorepos amb regles per paquet."
+		},
+		"autoCondenseContextPercent": {
+			"label": "Llindar per activar la condensació intel·ligent de context",
+			"description": "Quan la finestra de context assoleix aquest llindar, Zoo la condensarà automàticament."
+		},
+		"condensingApiConfiguration": {
+			"label": "Configuració d'API per a la condensació de context",
+			"description": "Seleccioneu quina configuració d'API utilitzar per a les operacions de condensació de context. Deixeu-ho sense seleccionar per utilitzar la configuració activa actual.",
+			"useCurrentConfig": "Per defecte"
+		},
+		"customCondensingPrompt": {
+			"label": "Indicació personalitzada de condensació de context",
+			"description": "Personalitzeu la indicació del sistema utilitzada per a la condensació de context. Deixeu-ho buit per utilitzar la indicació per defecte.",
+			"placeholder": "Introduïu aquí la vostra indicació de condensació personalitzada...\n\nPodeu utilitzar la mateixa estructura que la indicació per defecte:\n- Conversa anterior\n- Treball actual\n- Conceptes tècnics clau\n- Fitxers i codi rellevants\n- Resolució de problemes\n- Tasques pendents i següents passos",
+			"reset": "Restablir als valors per defecte",
+			"hint": "Buit = utilitzar indicació per defecte"
+		},
+		"maxReadFile": {
+			"label": "Llindar d'auto-truncament de lectura de fitxers",
+			"description": "Zoo llegeix aquest nombre de línies quan el model omet els valors d'inici/final. Si aquest nombre és menor que el total del fitxer, Zoo genera un índex de números de línia de les definicions de codi. Casos especials: -1 indica a Zoo que llegeixi tot el fitxer (sense indexació), i 0 indica que no llegeixi cap línia i proporcioni només índexs de línia per a un context mínim. Valors més baixos minimitzen l'ús inicial de context, permetent lectures posteriors de rangs de línies precisos. Les sol·licituds amb inici/final explícits no estan limitades per aquesta configuració.",
+			"lines": "línies",
+			"always_full_read": "Llegeix sempre el fitxer sencer"
+		},
+		"maxConcurrentFileReads": {
+			"label": "Límit de lectures simultànies",
+			"description": "Nombre màxim de fitxers que l'eina 'read_file' pot processar simultàniament. Els valors més alts poden accelerar la lectura de múltiples fitxers petits però augmenten l'ús de memòria."
 		}
 	},
 	"terminal": {
@@ -790,7 +861,8 @@
 			"description": "Mostra replegada la sortida de les ordres, inclosa la del terminal en línia. Podeu desplegar-la manualment. Això no canvia com s’executen les ordres."
 		},
 		"basic": {
-			"label": "Configuració del terminal: Bàsica"
+			"label": "Configuració del terminal: Bàsica",
+			"description": "Configuració bàsica del terminal"
 		},
 		"advanced": {
 			"label": "Configuració del terminal: Avançat",
@@ -847,6 +919,14 @@
 			"description": "Per defecte, Zoo Code utilitza la shell que VS Code té configurada. Seleccioneu un perfil de la llista per triar un perfil de shell amb ruta explícita exposat per VS Code. Els perfils de només font (p. ex., l'entrada integrada de PowerShell) no es poden llistar aquí. <0>Més informació</0>",
 			"configureButton": "Trieu el perfil predeterminat a VS Code",
 			"noProfiles": "(no s'han trobat perfils amb ruta a terminal.integrated.profiles)"
+		},
+		"outputLineLimit": {
+			"label": "Límit de sortida del terminal",
+			"description": "Conserva les primeres i últimes línies i descarta les del mig per mantenir-se sota el límit. Redueix per estalviar tokens; augmenta per donar a Zoo més detalls del mig. Zoo veu un marcador on s'ha omès el contingut.<0>Aprèn-ne més</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "Límit de caràcters del terminal",
+			"description": "Anul·la el límit de línies per evitar problemes de memòria imposant un límit dur a la mida de sortida. Si se supera, manté l'inici i el final i mostra un marcador a Zoo on s'ha omès el contingut. <0>Aprèn-ne més</0>"
 		}
 	},
 	"advancedSettings": {
@@ -856,6 +936,23 @@
 		"todoList": {
 			"label": "Habilitar eina de llista de tasques",
 			"description": "Quan està habilitat, Zoo pot crear i gestionar llistes de tasques per fer el seguiment del progrés de les tasques. Això ajuda a organitzar tasques complexes en passos manejables."
+		},
+		"diff": {
+			"label": "Habilitar edició mitjançant diffs",
+			"description": "Quan està habilitat, Zoo podrà editar fitxers més ràpidament i rebutjarà automàticament escriptures completes de fitxers truncats",
+			"strategy": {
+				"label": "Estratègia de diff",
+				"options": {
+					"standard": "Estàndard (Bloc únic)",
+					"multiBlock": "Experimental: Diff multi-bloc",
+					"unified": "Experimental: Diff unificat"
+				},
+				"descriptions": {
+					"standard": "L'estratègia de diff estàndard aplica canvis a un sol bloc de codi alhora.",
+					"unified": "L'estratègia de diff unificat pren múltiples enfocaments per aplicar diffs i tria el millor enfocament.",
+					"multiBlock": "L'estratègia de diff multi-bloc permet actualitzar múltiples blocs de codi en un fitxer en una sola sol·licitud."
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -995,7 +1092,8 @@
 			"reservedKeys": "El cos addicional no pot sobreescriure els camps gestionats per Zoo Code: {{keys}}."
 		},
 		"arn": {
-			"regionMismatch": "Avís: La regió del vostre ARN ({{arnRegion}}) no coincideix amb la regió seleccionada ({{region}}). Això pot causar problemes d'accés. El proveïdor utilitzarà la regió de l'ARN."
+			"regionMismatch": "Avís: La regió del vostre ARN ({{arnRegion}}) no coincideix amb la regió seleccionada ({{region}}). Això pot causar problemes d'accés. El proveïdor utilitzarà la regió de l'ARN.",
+			"invalidFormat": "Format ARN no vàlid. Si us plau, comproveu els requisits del format."
 		},
 		"modelAvailability": "L'ID de model ({{modelId}}) que heu proporcionat no està disponible. Si us plau, trieu un altre model.",
 		"modelDeprecated": "Aquest model ja no està disponible. Si us plau, seleccioneu un model diferent.",
@@ -1022,6 +1120,11 @@
 			"inputPrice": "p. ex. 0.0001",
 			"outputPrice": "p. ex. 0.0002",
 			"cacheWritePrice": "p. ex. 0.00005"
+		},
+		"modelId": {
+			"lmStudio": "p. ex. meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "p. ex. lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "p. ex. llama3.1"
 		}
 	},
 	"defaults": {
@@ -1051,7 +1154,9 @@
 			"input": "Entrada",
 			"output": "Sortida",
 			"cacheReads": "Lectures de memòria cau"
-		}
+		},
+		"label": "Nivell de servei",
+		"tooltip": "Per a un processament més ràpid de les sol·licituds de l'API, proveu el nivell de servei de processament prioritari. Per a preus més baixos amb una latència més alta, proveu el nivell de processament flexible."
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1101,7 +1206,8 @@
 			"intro": "Per mantenir el teu context lleuger, et recomanem que només facis disponibles skills per als modes que les necessiten.",
 			"anyMode": "Qualsevol mode (disponible a tot arreu)",
 			"save": "Desar",
-			"cancel": "Cancel·lar"
+			"cancel": "Cancel·lar",
+			"description": "Tria quins modes poden usar aquesta skill"
 		},
 		"createDialog": {
 			"title": "Crear Nova Skill",
@@ -1111,7 +1217,11 @@
 			"sourceLabel": "Ubicació",
 			"modeLabel": "Mode (opcional)",
 			"create": "Crear",
-			"cancel": "Cancel·lar"
+			"cancel": "Cancel·lar",
+			"descriptionLabel": "Descripció",
+			"modePlaceholder": "Qualsevol mode",
+			"modeHint": "Restringeix aquesta skill a un mode específic",
+			"modeAny": "Qualsevol mode"
 		},
 		"source": {
 			"global": "Global (disponible en tots els projectes)",
@@ -1124,7 +1234,13 @@
 			"descriptionRequired": "La descripció és obligatòria",
 			"descriptionTooLong": "La descripció ha de tenir com a màxim 1024 caràcters"
 		},
-		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Crea les teves pròpies skills amb el mode Skill Writer, disponible al <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"modeAny": "Qualsevol mode",
+		"modeCount": "{{count}} modes",
+		"diagnostics": {
+			"title": "No s'han pogut carregar algunes skills",
+			"description": "Corrigeu el frontmatter YAML dels fitxers SKILL.md esmentats i, a continuació, torneu a obrir o actualitzar aquesta pàgina."
+		}
 	},
 	"language": {
 		"description": "Idioma i visualització de data i hora.",
@@ -1161,5 +1277,12 @@
 			"relative": "fa 5 min",
 			"hover": "(en passar el cursor: {{value}})"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "Desactivar la memòria cau de prompts",
+		"description": "Quan està marcat, Zoo no utilitzarà la memòria cau de prompts per a aquest model."
+	},
+	"limitMaxTokensDescription": "Limitar el nombre màxim de tokens en la resposta",
+	"maxOutputTokensLabel": "Tokens màxims de sortida",
+	"maxTokensGenerateDescription": "Tokens màxims a generar en la resposta"
 }

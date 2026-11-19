@@ -6,7 +6,8 @@
 		"cancel": "Annuleren",
 		"select": "Selecteren",
 		"add": "Header toevoegen",
-		"remove": "Verwijderen"
+		"remove": "Verwijderen",
+		"reset": "Resetten"
 	},
 	"search": {
 		"placeholder": "Instellingen zoeken...",
@@ -248,7 +249,9 @@
 			"bedrockRegionRequired": "AWS-regio is vereist",
 			"ollamaBaseUrlRequired": "Ollama basis-URL is vereist",
 			"baseUrlRequired": "Basis-URL is vereist",
-			"openRouterApiKeyRequired": "OpenRouter API-sleutel is vereist"
+			"openRouterApiKeyRequired": "OpenRouter API-sleutel is vereist",
+			"bedrockProfileRequired": "AWS-profiel is vereist",
+			"modelDimensionMinValue": "Modelafmeting moet groter zijn dan 0"
 		},
 		"optional": "optioneel",
 		"advancedConfigLabel": "Geavanceerde configuratie",
@@ -262,7 +265,21 @@
 		"workspaceToggleLabel": "Indexering inschakelen voor deze werkruimte",
 		"workspaceDisabledMessage": "Indexering is geconfigureerd maar niet ingeschakeld voor deze werkruimte.",
 		"autoEnableDefaultLabel": "Indexering automatisch inschakelen voor nieuwe werkruimtes",
-		"sembleProvider": "Semble - Lokaal"
+		"sembleProvider": "Semble - Lokaal",
+		"providerLabel": "Embeddings provider",
+		"selectProviderPlaceholder": "Selecteer provider",
+		"openAiCompatibleModelDimensionLabel": "Embedding Dimensie:",
+		"openAiCompatibleModelDimensionPlaceholder": "bijv., 1536",
+		"openAiCompatibleModelDimensionDescription": "De embedding dimensie (uitvoergrootte) voor uw model. Controleer de documentatie van uw provider voor deze waarde. Veelvoorkomende waarden: 384, 768, 1536, 3072.",
+		"selectModelPlaceholder": "Selecteer model",
+		"ollamaUrlLabel": "Ollama URL:",
+		"qdrantKeyLabel": "Qdrant-sleutel:",
+		"unsavedSettingsMessage": "Sla je instellingen op voordat je het indexeringsproces start.",
+		"settingsTitle": "Indexeringsinstellingen",
+		"disabledMessage": "Codebase-indexering is momenteel uitgeschakeld. Schakel het in de algemene instellingen in om indexeringsopties te configureren.",
+		"saveSuccess": "Instellingen succesvol opgeslagen",
+		"close": "Sluiten",
+		"searchMinScoreResetTooltip": "Reset naar standaardwaarde (0.4)"
 	},
 	"autoApprove": {
 		"toggleShortcut": "U kunt een globale sneltoets voor deze instelling configureren <SettingsLink>in de voorkeuren van uw IDE</SettingsLink>.",
@@ -287,7 +304,8 @@
 			"protected": {
 				"label": "Inclusief beschermde bestanden",
 				"description": "Sta Zoo toe om beschermde bestanden (zoals .rooignore en .roo/ configuratiebestanden) aan te maken en te bewerken zonder goedkeuring."
-			}
+			},
+			"delayLabel": "Vertraging na schrijven om diagnostiek de kans te geven mogelijke problemen te detecteren"
 		},
 		"allowlists": {
 			"label": "Toelatingslijsten",
@@ -337,7 +355,8 @@
 			"deniedCommandsDescription": "Commando-prefixen die automatisch worden geweigerd zonder om goedkeuring te vragen. Bij conflicten met toegestane commando's heeft de langste prefixovereenkomst voorrang. Voeg * toe om alle commando's te weigeren.",
 			"commandPlaceholder": "Voer commando-prefix in (bijv. 'git ')",
 			"deniedCommandPlaceholder": "Voer te weigeren commando-prefix in (bijv. 'rm -rf')",
-			"addButton": "Toevoegen"
+			"addButton": "Toevoegen",
+			"autoDenied": "Commando's met het prefix `{{prefix}}` zijn verboden door de gebruiker. Omzeil deze beperking niet door een ander commando uit te voeren."
 		},
 		"apiRequestLimit": {
 			"title": "Maximale verzoeken",
@@ -349,7 +368,9 @@
 		},
 		"maxLimits": {
 			"description": "Automatisch verzoeken indienen tot aan deze limieten voordat om goedkeuring wordt gevraagd om door te gaan."
-		}
+		},
+		"disabledAriaLabel": "Automatisch goedkeuren uitgeschakeld - selecteer eerst opties",
+		"selectOptionsFirst": "Selecteer ten minste één optie hieronder om automatische goedkeuring in te schakelen"
 	},
 	"providers": {
 		"configProfile": "Configuratieprofiel",
@@ -460,7 +481,8 @@
 			"label": "Modellen verversen",
 			"loading": "Modellenlijst wordt vernieuwd...",
 			"success": "Modellenlijst succesvol vernieuwd!",
-			"error": "Kan modellenlijst niet vernieuwen. Probeer het opnieuw."
+			"error": "Kan modellenlijst niet vernieuwen. Probeer het opnieuw.",
+			"hint": "Open de instellingen opnieuw om de nieuwste modellen te zien."
 		},
 		"getRequestyApiKey": "Requesty API-sleutel ophalen",
 		"getRequestyBaseUrl": "Basis-URL",
@@ -589,7 +611,10 @@
 			"speculativeDecoding": "Speculatieve decodering inschakelen",
 			"draftModelId": "Draft Model-ID",
 			"draftModelDesc": "Draft-model moet uit dezelfde modelfamilie komen voor correcte speculatieve decodering.",
-			"description": "LM Studio laat je modellen lokaal op je computer draaien. Zie hun <a>quickstart-gids</a> voor instructies. Je moet ook de <b>lokale server</b>-functie van LM Studio starten om het met deze extensie te gebruiken. <span>Let op:</span> Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht."
+			"description": "LM Studio laat je modellen lokaal op je computer draaien. Zie hun <a>quickstart-gids</a> voor instructies. Je moet ook de <b>lokale server</b>-functie van LM Studio starten om het met deze extensie te gebruiken. <span>Let op:</span> Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht.",
+			"modelId": "Model-ID",
+			"selectDraftModel": "Selecteer draft-model",
+			"noModelsFound": "Geen draft-modellen gevonden. Zorg dat LM Studio draait met Server Mode ingeschakeld."
 		},
 		"ollama": {
 			"baseUrl": "Basis-URL (optioneel)",
@@ -600,7 +625,8 @@
 			"thinking": "Redeneren inschakelen",
 			"thinkingHelp": "Schakel Ollama's native redeneren in voor redeneringsmodellen (bijv. qwen3, deepseek-r1). Indien ingeschakeld, wordt de redenering van het model apart gestreamd en weergegeven. Niet-ondersteunde modellen negeren deze instelling.",
 			"description": "Ollama laat je modellen lokaal op je computer draaien. Zie hun quickstart-gids voor instructies.",
-			"warning": "Let op: Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht."
+			"warning": "Let op: Zoo Code gebruikt complexe prompts en werkt het beste met Claude-modellen. Minder krachtige modellen werken mogelijk niet zoals verwacht.",
+			"modelId": "Model-ID"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -645,7 +671,11 @@
 					"description": "Kosten per miljoen tokens voor het schrijven naar de cache. Dit is de prijs die wordt gerekend wanneer een prompt voor het eerst wordt gecachet."
 				}
 			},
-			"resetDefaults": "Standaardwaarden herstellen"
+			"resetDefaults": "Standaardwaarden herstellen",
+			"computerUse": {
+				"label": "Computergebruik",
+				"description": "Kan dit model met een browser werken?"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "Snelheidslimiet",
@@ -685,6 +715,19 @@
 			"signInDescription": "Log in om Zoo Gateway met je account te gebruiken",
 			"authenticated": "Geauthenticeerd",
 			"authenticatedAs": "Geauthenticeerd als {{name}}"
+		},
+		"providerDocumentation": "{{provider}} documentatie",
+		"model": "Model",
+		"useHostHeader": "Aangepaste Host-header gebruiken",
+		"awsServiceTierStandardDesc": "Gebalanceerde prestaties en kosten",
+		"awsServiceTierFlexDesc": "Lagere kosten, hogere latency voor niet-kritieke taken",
+		"awsServiceTierPriorityDesc": "Snelste prestaties voor kritieke toepassingen",
+		"claudeCode": {
+			"pathLabel": "Claude Code Pad",
+			"description": "Optioneel pad naar uw Claude Code CLI. Standaard 'claude' als niet ingesteld.",
+			"placeholder": "Standaard: claude",
+			"maxTokensLabel": "Max Output Tokens",
+			"maxTokensDescription": "Maximaal aantal output-tokens voor Claude Code-reacties. Standaard is 8000."
 		}
 	},
 	"checkpoints": {
@@ -712,7 +755,8 @@
 	"contextManagement": {
 		"description": "Bepaal welke informatie wordt opgenomen in het contextvenster van de AI, wat invloed heeft op tokengebruik en antwoordkwaliteit",
 		"autoCondenseContext": {
-			"name": "Automatisch intelligente contextcompressie activeren"
+			"name": "Automatisch intelligente contextcompressie activeren",
+			"description": "Wanneer ingeschakeld, zal Zoo automatisch de context comprimeren wanneer de drempel wordt bereikt. Wanneer uitgeschakeld, kun je nog steeds handmatig contextcompressie activeren."
 		},
 		"openTabs": {
 			"label": "Limiet geopende tabbladen in context",
@@ -764,7 +808,8 @@
 			"defaultProfile": "Globale standaard (alle profielen)",
 			"defaultDescription": "Wanneer de context dit percentage bereikt, wordt het automatisch gecomprimeerd voor alle profielen tenzij ze aangepaste instellingen hebben",
 			"profileDescription": "Aangepaste drempelwaarde alleen voor dit profiel (overschrijft globale standaard)",
-			"usesGlobal": "(gebruikt globaal {{threshold}}%)"
+			"usesGlobal": "(gebruikt globaal {{threshold}}%)",
+			"inheritDescription": "Dit profiel erft de globale standaard drempelwaarde ({{threshold}}%)"
 		},
 		"includeCurrentTime": {
 			"label": "Huidige tijd opnemen in context",
@@ -781,6 +826,32 @@
 		"enableSubfolderRules": {
 			"label": "Submap-regels inschakelen",
 			"description": "Recursief .roo/rules en AGENTS.md-bestanden uit submappen ontdekken en laden. Handig voor monorepo's met regels per pakket."
+		},
+		"autoCondenseContextPercent": {
+			"label": "Drempelwaarde om intelligente contextcompressie te activeren",
+			"description": "Wanneer het contextvenster deze drempelwaarde bereikt, zal Zoo het automatisch comprimeren."
+		},
+		"condensingApiConfiguration": {
+			"label": "API-configuratie voor contextcondensatie",
+			"description": "Selecteer welke API-configuratie gebruikt moet worden voor contextcondensatie. Laat leeg om de huidige actieve configuratie te gebruiken.",
+			"useCurrentConfig": "Standaard"
+		},
+		"customCondensingPrompt": {
+			"label": "Aangepaste contextcondensatieprompt",
+			"description": "Aangepaste systeemprompt voor contextcondensatie. Laat leeg om de standaardprompt te gebruiken.",
+			"placeholder": "Voer hier je aangepaste condensatieprompt in...\n\nJe kunt dezelfde structuur gebruiken als de standaardprompt:\n- Vorig gesprek\n- Huidig werk\n- Belangrijke technische concepten\n- Relevante bestanden en code\n- Probleemoplossing\n- Openstaande taken en volgende stappen",
+			"reset": "Herstellen naar standaard",
+			"hint": "Leeg = gebruik standaardprompt"
+		},
+		"maxReadFile": {
+			"label": "Automatisch afkappen bij bestandslezen",
+			"description": "Zoo leest dit aantal regels wanneer het model geen begin/eindwaarden opgeeft. Als dit aantal lager is dan het totaal, genereert Zoo een index van codelijnen. Speciale gevallen: -1 laat Zoo het hele bestand lezen (zonder indexering), 0 leest geen regels en geeft alleen een minimale index. Lagere waarden minimaliseren het initiële contextgebruik en maken precieze vervolg-leesopdrachten mogelijk. Expliciete begin/eind-aanvragen worden niet door deze instelling beperkt.",
+			"lines": "regels",
+			"always_full_read": "Altijd volledig bestand lezen"
+		},
+		"maxConcurrentFileReads": {
+			"label": "Limiet gelijktijdige bestandslezingen",
+			"description": "Maximum aantal bestanden dat de 'read_file' tool tegelijkertijd kan verwerken. Hogere waarden kunnen het lezen van meerdere kleine bestanden versnellen maar verhogen het geheugengebruik."
 		}
 	},
 	"terminal": {
@@ -789,7 +860,8 @@
 			"description": "Toon opdrachtuitvoer ingeklapt, ook van de inline-terminal. Klap deze indien nodig handmatig uit. Dit verandert de uitvoering van opdrachten niet."
 		},
 		"basic": {
-			"label": "Terminalinstellingen: Basis"
+			"label": "Terminalinstellingen: Basis",
+			"description": "Basis terminalinstellingen"
 		},
 		"advanced": {
 			"label": "Terminalinstellingen: Geavanceerd",
@@ -846,6 +918,14 @@
 			"description": "Standaard gebruikt Zoo Code de shell die in VS Code is geconfigureerd. Selecteer een shell-profiel uit de lijst om een pad-gebaseerd shell-profiel te gebruiken dat VS Code beschikbaar stelt. Uitsluitend op bron gebaseerde profielen (bijv. de ingebouwde PowerShell-vermelding) kunnen hier niet worden vermeld. <0>Meer informatie</0>",
 			"configureButton": "Standaardprofiel kiezen in VS Code",
 			"noProfiles": "(geen profielen met pad gevonden in terminal.integrated.profiles)"
+		},
+		"outputLineLimit": {
+			"label": "Terminaluitvoerlimiet",
+			"description": "Behoudt eerste en laatste regels en verwijdert middelste om onder de limiet te blijven. Verlaag om tokens te besparen; verhoog om Zoo meer tussendetails te geven. Zoo ziet een placeholder waar inhoud wordt overgeslagen.<0>Meer informatie</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "Terminal-tekenlimiet",
+			"description": "Overschrijft de regellimiet om geheugenproblemen te voorkomen door een harde limiet op uitvoergrootte af te dwingen. Bij overschrijding behoudt het begin en einde en toont een placeholder aan Zoo waar inhoud wordt overgeslagen. <0>Meer informatie</0>"
 		}
 	},
 	"advancedSettings": {
@@ -855,6 +935,23 @@
 		"todoList": {
 			"label": "Takenlijst-tool inschakelen",
 			"description": "Wanneer ingeschakeld, kan Zoo takenlijsten maken en beheren om de voortgang van taken bij te houden. Dit helpt complexe taken te organiseren in beheersbare stappen."
+		},
+		"diff": {
+			"label": "Bewerken via diffs inschakelen",
+			"description": "Indien ingeschakeld kan Zoo sneller bestanden bewerken en worden afgekorte volledige-bestandswijzigingen automatisch geweigerd",
+			"strategy": {
+				"label": "Diff-strategie",
+				"options": {
+					"standard": "Standaard (één blok)",
+					"multiBlock": "Experimenteel: Multi-block diff",
+					"unified": "Experimenteel: Unified diff"
+				},
+				"descriptions": {
+					"standard": "Standaard diff-strategie past wijzigingen toe op één codeblok tegelijk.",
+					"unified": "Unified diff-strategie gebruikt meerdere methoden om diffs toe te passen en kiest de beste aanpak.",
+					"multiBlock": "Multi-block diff-strategie laat toe om meerdere codeblokken in één verzoek bij te werken."
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -993,7 +1090,8 @@
 			"reservedKeys": "De extra body kan door Zoo Code beheerde velden niet overschrijven: {{keys}}."
 		},
 		"arn": {
-			"regionMismatch": "Waarschuwing: De regio in je ARN ({{arnRegion}}) komt niet overeen met je geselecteerde regio ({{region}}). Dit kan toegangsfouten veroorzaken. De provider gebruikt de regio uit de ARN."
+			"regionMismatch": "Waarschuwing: De regio in je ARN ({{arnRegion}}) komt niet overeen met je geselecteerde regio ({{region}}). Dit kan toegangsfouten veroorzaken. De provider gebruikt de regio uit de ARN.",
+			"invalidFormat": "Ongeldig ARN-formaat. Controleer de formaatvereisten."
 		},
 		"modelAvailability": "Het opgegeven model-ID ({{modelId}}) is niet beschikbaar. Kies een ander model.",
 		"modelDeprecated": "Dit model is niet meer beschikbaar. Kies een ander model.",
@@ -1020,6 +1118,11 @@
 			"inputPrice": "bijv. 0.0001",
 			"outputPrice": "bijv. 0.0002",
 			"cacheWritePrice": "bijv. 0.00005"
+		},
+		"modelId": {
+			"lmStudio": "bijv. meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "bijv. lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "bijv. llama3.1"
 		}
 	},
 	"defaults": {
@@ -1049,7 +1152,9 @@
 			"input": "Invoer",
 			"output": "Uitvoer",
 			"cacheReads": "Cache leest"
-		}
+		},
+		"label": "Serviceniveau",
+		"tooltip": "Voor snellere verwerking van API-verzoeken, probeer het prioriteitsverwerkingsniveau. Voor lagere prijzen met hogere latentie, probeer het flexverwerkingsniveau."
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1099,7 +1204,8 @@
 			"intro": "Om je context licht te houden, raden we aan skills alleen beschikbaar te maken voor de modi die ze nodig hebben.",
 			"anyMode": "Elke modus (overal beschikbaar)",
 			"save": "Opslaan",
-			"cancel": "Annuleren"
+			"cancel": "Annuleren",
+			"description": "Kies welke modi deze skill kunnen gebruiken"
 		},
 		"createDialog": {
 			"title": "Nieuwe Skill maken",
@@ -1109,7 +1215,11 @@
 			"sourceLabel": "Locatie",
 			"modeLabel": "Modus (optioneel)",
 			"create": "Maken",
-			"cancel": "Annuleren"
+			"cancel": "Annuleren",
+			"descriptionLabel": "Beschrijving",
+			"modePlaceholder": "Elke modus",
+			"modeHint": "Beperk deze skill tot een specifieke modus",
+			"modeAny": "Elke modus"
 		},
 		"source": {
 			"global": "Globaal (beschikbaar in alle projecten)",
@@ -1122,7 +1232,13 @@
 			"descriptionRequired": "Beschrijving is verplicht",
 			"descriptionTooLong": "Beschrijving moet maximaal 1024 tekens zijn"
 		},
-		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>."
+		"footer": "Maak je eigen skills met de Skill Writer modus, beschikbaar in de <MarketplaceLink>Modes Marketplace</MarketplaceLink>.",
+		"modeAny": "Elke modus",
+		"modeCount": "{{count}} modus",
+		"diagnostics": {
+			"title": "Sommige skills konden niet worden geladen",
+			"description": "Corrigeer de YAML-frontmatter in de opgesomde SKILL.md-bestanden en open daarna deze pagina opnieuw of vernieuw deze."
+		}
 	},
 	"language": {
 		"description": "Taal en weergave van datum en tijd.",
@@ -1159,5 +1275,12 @@
 			"relative": "5 min geleden",
 			"hover": "(bij aanwijzen: {{value}})"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "Prompt caching uitschakelen",
+		"description": "Indien aangevinkt, gebruikt Zoo geen prompt caching voor dit model."
+	},
+	"limitMaxTokensDescription": "Beperk het maximale aantal tokens in het antwoord",
+	"maxOutputTokensLabel": "Maximale output tokens",
+	"maxTokensGenerateDescription": "Maximale tokens om te genereren in het antwoord"
 }

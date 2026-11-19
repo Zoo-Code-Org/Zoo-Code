@@ -16,15 +16,16 @@ export async function handleRequestSkills(provider: ClineProvider): Promise<Skil
 		const skillsManager = provider.getSkillsManager()
 		if (skillsManager) {
 			const skills = skillsManager.getSkillsMetadata()
-			await provider.postMessageToWebview({ type: "skills", skills })
+			const skillDiagnostics = skillsManager.getSkillDiagnostics()
+			await provider.postMessageToWebview({ type: "skills", skills, skillDiagnostics })
 			return skills
 		} else {
-			await provider.postMessageToWebview({ type: "skills", skills: [] })
+			await provider.postMessageToWebview({ type: "skills", skills: [], skillDiagnostics: [] })
 			return []
 		}
 	} catch (error) {
 		provider.log(`Error fetching skills: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
-		await provider.postMessageToWebview({ type: "skills", skills: [] })
+		await provider.postMessageToWebview({ type: "skills", skills: [], skillDiagnostics: [] })
 		return []
 	}
 }
@@ -59,7 +60,8 @@ export async function handleCreateSkill(
 
 		// Send updated skills list
 		const skills = skillsManager.getSkillsMetadata()
-		await provider.postMessageToWebview({ type: "skills", skills })
+		const skillDiagnostics = skillsManager.getSkillDiagnostics()
+		await provider.postMessageToWebview({ type: "skills", skills, skillDiagnostics })
 		return skills
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
@@ -95,7 +97,8 @@ export async function handleDeleteSkill(
 
 		// Send updated skills list
 		const skills = skillsManager.getSkillsMetadata()
-		await provider.postMessageToWebview({ type: "skills", skills })
+		const skillDiagnostics = skillsManager.getSkillDiagnostics()
+		await provider.postMessageToWebview({ type: "skills", skills, skillDiagnostics })
 		return skills
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
@@ -131,7 +134,8 @@ export async function handleMoveSkill(
 
 		// Send updated skills list
 		const skills = skillsManager.getSkillsMetadata()
-		await provider.postMessageToWebview({ type: "skills", skills })
+		const skillDiagnostics = skillsManager.getSkillDiagnostics()
+		await provider.postMessageToWebview({ type: "skills", skills, skillDiagnostics })
 		return skills
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)
@@ -166,7 +170,8 @@ export async function handleUpdateSkillModes(
 
 		// Send updated skills list
 		const skills = skillsManager.getSkillsMetadata()
-		await provider.postMessageToWebview({ type: "skills", skills })
+		const skillDiagnostics = skillsManager.getSkillDiagnostics()
+		await provider.postMessageToWebview({ type: "skills", skills, skillDiagnostics })
 		return skills
 	} catch (error) {
 		const errorMessage = error instanceof Error ? error.message : String(error)

@@ -6,7 +6,8 @@
 		"cancel": "取消",
 		"select": "选择",
 		"add": "添加标头",
-		"remove": "移除"
+		"remove": "移除",
+		"reset": "恢复默认设置"
 	},
 	"search": {
 		"placeholder": "搜索设置...",
@@ -247,7 +248,9 @@
 			"bedrockRegionRequired": "AWS 区域为必填项",
 			"ollamaBaseUrlRequired": "需要 Ollama 基础 URL",
 			"baseUrlRequired": "需要基础 URL",
-			"openRouterApiKeyRequired": "OpenRouter API 密钥是必需的"
+			"openRouterApiKeyRequired": "OpenRouter API 密钥是必需的",
+			"bedrockProfileRequired": "AWS 配置文件为必填项",
+			"modelDimensionMinValue": "模型维度必须大于 0"
 		},
 		"optional": "可选",
 		"advancedConfigLabel": "高级配置",
@@ -261,7 +264,21 @@
 		"workspaceToggleLabel": "为此工作区启用索引",
 		"workspaceDisabledMessage": "索引已配置，但尚未为此工作区启用。",
 		"autoEnableDefaultLabel": "自动为新工作区启用索引",
-		"sembleProvider": "Semble - 本地"
+		"sembleProvider": "Semble - 本地",
+		"settingsTitle": "索引设置",
+		"disabledMessage": "代码库索引当前已禁用。在全局设置中启用它以配置索引选项。",
+		"providerLabel": "嵌入提供商",
+		"selectProviderPlaceholder": "选择提供商",
+		"openAiCompatibleModelDimensionLabel": "嵌入维度：",
+		"openAiCompatibleModelDimensionPlaceholder": "例如，1536",
+		"openAiCompatibleModelDimensionDescription": "模型的嵌入维度（输出大小）。请查阅您的提供商文档获取此值。常见值：384、768、1536、3072。",
+		"selectModelPlaceholder": "选择模型",
+		"ollamaUrlLabel": "Ollama URL：",
+		"qdrantKeyLabel": "Qdrant 密钥：",
+		"unsavedSettingsMessage": "请先保存设置再开始索引过程。",
+		"saveSuccess": "设置保存成功",
+		"close": "关闭",
+		"searchMinScoreResetTooltip": "恢复默认值 (0.4)"
 	},
 	"autoApprove": {
 		"toggleShortcut": "您可以<SettingsLink>在 IDE 首选项中</SettingsLink>为此设置配置全局快捷方式。",
@@ -286,7 +303,8 @@
 			"protected": {
 				"label": "包含受保护的文件",
 				"description": "允许 Zoo 创建和编辑受保护的文件（如 .rooignore 和 .roo/ 配置文件），无需批准。"
-			}
+			},
+			"delayLabel": "写入后延迟一小段时间，以便诊断工具检测潜在问题"
 		},
 		"allowlists": {
 			"label": "允许列表",
@@ -336,7 +354,8 @@
 			"deniedCommandsDescription": "将自动拒绝的命令前缀，无需用户批准。与允许命令冲突时，最长前缀匹配优先。添加 * 拒绝所有命令。",
 			"commandPlaceholder": "输入命令前缀（例如 'git '）",
 			"deniedCommandPlaceholder": "输入要拒绝的命令前缀（例如 'rm -rf'）",
-			"addButton": "添加"
+			"addButton": "添加",
+			"autoDenied": "前缀为 `{{prefix}}` 的命令已被用户禁止。不要通过运行其他命令来绕过此限制。"
 		},
 		"apiRequestLimit": {
 			"title": "最大请求数",
@@ -348,7 +367,9 @@
 		},
 		"maxLimits": {
 			"description": "在请求批准继续之前，自动发出请求，最多不超过这些限制。"
-		}
+		},
+		"disabledAriaLabel": "自动批准已禁用 - 请先选择选项",
+		"selectOptionsFirst": "请至少选择以下一个选项以启用自动批准"
 	},
 	"providers": {
 		"configProfile": "配置文件",
@@ -459,7 +480,8 @@
 			"label": "刷新模型",
 			"loading": "正在刷新模型列表...",
 			"success": "模型列表刷新成功！",
-			"error": "刷新模型列表失败。请重试。"
+			"error": "刷新模型列表失败。请重试。",
+			"hint": "请重新打开设置以查看最新模型。"
 		},
 		"getRequestyApiKey": "获取 Requesty API 密钥",
 		"getRequestyBaseUrl": "基础 URL",
@@ -588,7 +610,10 @@
 			"speculativeDecoding": "启用推测性解码",
 			"draftModelId": "草稿模型 ID",
 			"draftModelDesc": "草稿模型必须来自相同的模型系列，推测性解码才能正常工作。",
-			"description": "LM Studio 允许您在本地计算机上运行模型。要了解如何开始，请参阅他们的 <a>快速入门指南</a>。您还需要启动 LM Studio 的 <b>本地服务器</b> 功能，以便与此扩展一起使用。<span>注意：</span>Zoo Code 使用复杂的提示，并且在 Claude 模型上效果最佳。功能较弱的模型可能无法正常工作。"
+			"description": "LM Studio 允许您在本地计算机上运行模型。要了解如何开始，请参阅他们的 <a>快速入门指南</a>。您还需要启动 LM Studio 的 <b>本地服务器</b> 功能，以便与此扩展一起使用。<span>注意：</span>Zoo Code 使用复杂的提示，并且在 Claude 模型上效果最佳。功能较弱的模型可能无法正常工作。",
+			"modelId": "模型 ID",
+			"selectDraftModel": "选择草稿模型",
+			"noModelsFound": "未找到草稿模型。请确保 LM Studio 已启用服务器模式运行。"
 		},
 		"ollama": {
 			"baseUrl": "基础 URL（可选）",
@@ -599,7 +624,8 @@
 			"thinking": "启用思考",
 			"thinkingHelp": "为推理模型（例如 qwen3、deepseek-r1）启用 Ollama 的原生思考。启用后，模型的推理将单独流式传输和显示。不支持的模型将忽略此设置。",
 			"description": "Ollama 允许您在本地计算机上运行模型。有关如何开始使用的说明，请参阅其快速入门指南。",
-			"warning": "注意：Zoo Code 使用复杂的提示，与 Claude 模型配合最佳。功能较弱的模型可能无法按预期工作。"
+			"warning": "注意：Zoo Code 使用复杂的提示，与 Claude 模型配合最佳。功能较弱的模型可能无法按预期工作。",
+			"modelId": "模型 ID"
 		},
 		"openRouter": {
 			"providerRouting": {
@@ -644,7 +670,11 @@
 					"description": "向缓存写入每百万Token的成本。这是首次缓存提示时收取的费用。"
 				}
 			},
-			"resetDefaults": "重置为默认值"
+			"resetDefaults": "重置为默认值",
+			"computerUse": {
+				"label": "计算机功能调用",
+				"description": "此模型是否能够与浏览器交互？（例如 Claude Sonnet）。"
+			}
 		},
 		"rateLimitSeconds": {
 			"label": "API 请求频率限制",
@@ -684,6 +714,19 @@
 			"signInDescription": "登录以使用您的账户访问 Zoo Gateway",
 			"authenticated": "已认证",
 			"authenticatedAs": "已认证为 {{name}}"
+		},
+		"providerDocumentation": "{{provider}} 文档",
+		"model": "模型",
+		"useHostHeader": "使用自定义 Host 标头",
+		"awsServiceTierStandardDesc": "性能和成本均衡",
+		"awsServiceTierFlexDesc": "低成本，非关键任务的延迟较高",
+		"awsServiceTierPriorityDesc": "为关键业务应用提供最快性能",
+		"claudeCode": {
+			"pathLabel": "Claude Code 路径",
+			"description": "您的 Claude Code CLI 的可选路径。如果未设置，则默认为 “claude”。",
+			"placeholder": "默认：claude",
+			"maxTokensLabel": "最大输出 Token",
+			"maxTokensDescription": "Claude Code 响应的最大输出 Token 数量。默认为 8000。"
 		}
 	},
 	"checkpoints": {
@@ -711,7 +754,8 @@
 	"contextManagement": {
 		"description": "管理AI上下文信息（影响token用量和回答质量）",
 		"autoCondenseContext": {
-			"name": "自动触发智能上下文压缩"
+			"name": "自动触发智能上下文压缩",
+			"description": "启用时，Zoo 将在达到阈值时自动压缩上下文。禁用时，您仍可以手动触发上下文压缩。"
 		},
 		"openTabs": {
 			"label": "标签页数量限制",
@@ -753,7 +797,8 @@
 			"defaultProfile": "全局默认（所有配置文件）",
 			"defaultDescription": "当上下文达到此百分比时，将自动为所有配置文件压缩，除非它们有自定义设置",
 			"profileDescription": "仅此配置文件的自定义阈值（覆盖全局默认）",
-			"usesGlobal": "（使用全局 {{threshold}}%）"
+			"usesGlobal": "（使用全局 {{threshold}}%）",
+			"inheritDescription": "此配置文件继承全局默认阈值（{{threshold}}%）"
 		},
 		"maxImageFileSize": {
 			"label": "最大图像文件大小",
@@ -780,6 +825,32 @@
 		"enableSubfolderRules": {
 			"label": "启用子文件夹规则",
 			"description": "递归发现并加载子目录中的 .roo/rules 和 AGENTS.md 文件。适用于具有每包规则的 monorepo。"
+		},
+		"autoCondenseContextPercent": {
+			"label": "触发智能上下文压缩的阈值",
+			"description": "当上下文窗口达到此阈值时，Zoo 将自动压缩它。"
+		},
+		"condensingApiConfiguration": {
+			"label": "上下文压缩的API配置",
+			"description": "选择用于上下文压缩操作的API配置。留空则使用当前活动的配置。",
+			"useCurrentConfig": "使用当前配置"
+		},
+		"customCondensingPrompt": {
+			"label": "自定义上下文压缩提示词",
+			"description": "自定义用于上下文压缩的系统提示词。留空则使用默认提示词。",
+			"placeholder": "在此输入您的自定义压缩提示词...\n\n您可以使用与默认提示词相同的结构：\n- 之前的对话\n- 当前工作\n- 关键技术概念\n- 相关文件和代码\n- 问题解决\n- 待处理任务和下一步",
+			"reset": "重置为默认值",
+			"hint": "留空 = 使用默认提示词"
+		},
+		"maxReadFile": {
+			"label": "文件读取自动截断阈值",
+			"description": "自动读取文件行数设置：-1=完整读取 0=仅生成行号索引，较小值可节省token，支持后续使用行号进行读取。 <0>了解更多</0>",
+			"lines": "行",
+			"always_full_read": "始终读取整个文件"
+		},
+		"maxConcurrentFileReads": {
+			"label": "并发文件读取限制",
+			"description": "read_file 工具可以同时处理的最大文件数。较高的值可能会加快读取多个小文件的速度，但会增加内存使用量。"
 		}
 	},
 	"terminal": {
@@ -788,7 +859,8 @@
 			"description": "默认折叠命令输出，包括内联终端输出。需要时可手动展开。此设置不会改变命令执行方式。"
 		},
 		"basic": {
-			"label": "终端设置：基础"
+			"label": "终端设置：基础",
+			"description": "基础终端设置"
 		},
 		"advanced": {
 			"label": "终端设置：高级",
@@ -845,6 +917,14 @@
 			"description": "Zoo Code 默认使用 VS Code 配置的 Shell。选择一个终端配置文件来覆盖此行为。此处仅列出 terminal.integrated.profiles 中的路径型配置文件。<0>了解更多</0>",
 			"configureButton": "在 VS Code 中选择默认配置文件",
 			"noProfiles": "(在 terminal.integrated.profiles 中未找到路径型配置文件)"
+		},
+		"outputLineLimit": {
+			"label": "终端输出限制",
+			"description": "保留首尾行并丢弃中间行以保持在限制内。降低可节省 token；提高可为 Zoo 提供更多中间细节。Zoo 看到内容被跳过的占位符。<0>了解更多</0>"
+		},
+		"outputCharacterLimit": {
+			"label": "终端字符限制",
+			"description": "通过强制限制输出大小来覆盖行限制以防止内存问题。如果超出，保留开头和结尾并向 Zoo 显示内容被跳过的占位符。<0>了解更多</0>"
 		}
 	},
 	"advancedSettings": {
@@ -854,6 +934,23 @@
 		"todoList": {
 			"label": "启用任务清单工具",
 			"description": "启用后，Zoo 可以创建和管理任务清单来跟踪任务进度。这有助于将复杂任务组织成可管理的步骤。"
+		},
+		"diff": {
+			"label": "启用diff更新",
+			"description": "启用后，Zoo 将能够通过差异算法写入，避免模型输出完整文件，以降低Token消耗",
+			"strategy": {
+				"label": "Diff 策略",
+				"options": {
+					"standard": "标准（单块）",
+					"multiBlock": "实验性：多块 diff",
+					"unified": "实验性：统一 diff"
+				},
+				"descriptions": {
+					"standard": "标准 diff 策略一次对一个代码块应用更改。",
+					"unified": "统一 diff 策略采用多种方法应用差异并选择最佳方法。",
+					"multiBlock": "多块 diff 策略允许在一个请求中更新文件中的多个代码块。"
+				}
+			}
 		}
 	},
 	"experimental": {
@@ -991,7 +1088,8 @@
 			"reservedKeys": "附加请求体无法覆盖由 Zoo Code 管理的字段：{{keys}}。"
 		},
 		"arn": {
-			"regionMismatch": "警告：您的 ARN 中的区域 ({{arnRegion}}) 与您选择的区域 ({{region}}) 不匹配。这可能会导致访问问题。提供程序将使用 ARN 中的区域。"
+			"regionMismatch": "警告：您的 ARN 中的区域 ({{arnRegion}}) 与您选择的区域 ({{region}}) 不匹配。这可能会导致访问问题。提供程序将使用 ARN 中的区域。",
+			"invalidFormat": "ARN 格式无效。请检查格式要求。"
 		},
 		"modelAvailability": "模型ID {{modelId}} 不可用，请重新选择",
 		"modelDeprecated": "此模型不再可用，请选择其他模型。",
@@ -1018,6 +1116,11 @@
 			"inputPrice": "例：0.0001",
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
+		},
+		"modelId": {
+			"lmStudio": "例：meta-llama-3.1-8b-instruct",
+			"lmStudioDraft": "例：lmstudio-community/llama-3.2-1b-instruct",
+			"ollama": "例：llama3.1"
 		}
 	},
 	"defaults": {
@@ -1047,7 +1150,9 @@
 			"input": "输入",
 			"output": "输出",
 			"cacheReads": "缓存读取"
-		}
+		},
+		"label": "服务等级",
+		"tooltip": "为加快API请求处理速度，请尝试优先处理服务等级。为获得更低价格但延迟较高，请尝试灵活处理等级。"
 	},
 	"ui": {
 		"collapseThinking": {
@@ -1097,7 +1202,8 @@
 			"intro": "为了保持上下文简洁，我们建议只在需要的模式中提供技能。",
 			"anyMode": "任何模式（随处可用）",
 			"save": "保存",
-			"cancel": "取消"
+			"cancel": "取消",
+			"description": "选择哪些模式可以使用此技能"
 		},
 		"createDialog": {
 			"title": "创建新技能",
@@ -1107,7 +1213,11 @@
 			"sourceLabel": "位置",
 			"modeLabel": "模式（可选）",
 			"create": "创建",
-			"cancel": "取消"
+			"cancel": "取消",
+			"descriptionLabel": "描述",
+			"modePlaceholder": "任何模式",
+			"modeHint": "将此技能限制为特定模式",
+			"modeAny": "任何模式"
 		},
 		"source": {
 			"global": "全局（在所有项目中可用）",
@@ -1120,7 +1230,13 @@
 			"descriptionRequired": "描述为必填项",
 			"descriptionTooLong": "描述不得超过1024个字符"
 		},
-		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。"
+		"footer": "使用技能编写器模式创建您自己的技能，可在 <MarketplaceLink>模式市集</MarketplaceLink> 中获得。",
+		"modeAny": "任意模式",
+		"modeCount": "{{count}} 种模式",
+		"diagnostics": {
+			"title": "部分技能加载失败",
+			"description": "请修复所列 SKILL.md 文件中的 YAML frontmatter，然后重新打开或刷新此页面。"
+		}
 	},
 	"language": {
 		"description": "语言和日期/时间显示。",
@@ -1157,5 +1273,12 @@
 			"relative": "5 分钟前",
 			"hover": "（悬停：{{value}}）"
 		}
-	}
+	},
+	"promptCaching": {
+		"label": "禁用提示词缓存",
+		"description": "选中后，Zoo 将不会为此模型使用提示词缓存。"
+	},
+	"limitMaxTokensDescription": "限制响应中的最大 Token 数量",
+	"maxOutputTokensLabel": "最大输出 Token 数",
+	"maxTokensGenerateDescription": "响应中生成的最大 Token 数"
 }
