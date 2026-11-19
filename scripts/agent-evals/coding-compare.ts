@@ -12,6 +12,7 @@ import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.t
 import { createSideProcessGuard, type SideProcessGuard } from "./side-process-guard.ts"
 import { acquireSideOutputLock, prepareOutputDirectory } from "./output-lock.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
+import { publishGeneration } from "./publication.ts"
 
 export { buildComparisonReport, renderMarkdownReport }
 export type { ComparisonReport, SideResult }
@@ -547,23 +548,16 @@ export async function publishComparisonReport(
 	const markdownPath = path.join(outDir, COMPARISON_REPORT_MD)
 	const markerPath = path.join(outDir, COMPARISON_REPORT_COMPLETE)
 	await fs.rm(markerPath, { force: true })
-	const checkInterrupted = (): void => {
-		if (isInterrupted()) throw new Error("comparison report publication interrupted")
-	}
-	try {
-		checkInterrupted()
-		await writeJsonAtomic(jsonPath, { ...report, generation })
-		checkInterrupted()
-		await writeFileAtomic(markdownPath, renderMarkdownReport(report))
-		checkInterrupted()
-		await writeFileAtomic(markerPath, `${generation}\n`)
-		checkInterrupted()
-	} catch (error) {
-		await fs.rm(jsonPath, { force: true }).catch(() => {})
-		await fs.rm(markdownPath, { force: true }).catch(() => {})
-		await fs.rm(markerPath, { force: true }).catch(() => {})
-		throw error
-	}
+	const completed = await publishGeneration({
+		steps: [
+			() => writeJsonAtomic(jsonPath, { ...report, generation }),
+			() => writeFileAtomic(markdownPath, renderMarkdownReport(report)),
+		],
+		commit: () => writeFileAtomic(markerPath, `${generation}\n`),
+		isInterrupted,
+		rollback: () => removeComparisonReport(outDir),
+	})
+	if (!completed) throw new Error("comparison report publication interrupted")
 }
 
 // Reads the generation a complete publication carries. undefined means the

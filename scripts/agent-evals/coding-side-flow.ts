@@ -12,6 +12,7 @@ import { buildRunMetrics } from "./coding-metrics.ts"
 import { acquireSideOutputLock } from "./output-lock.ts"
 import { invalidateSideArtifacts } from "./coding-compare.ts"
 import { writeJsonAtomic } from "./fs-atomic.ts"
+import { publishGeneration } from "./publication.ts"
 
 export interface SideRepetition {
 	fixtureName: string
@@ -111,29 +112,29 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 	// The completion marker must never exist for an interrupted side, so the
 	// publication stays gated even when the loop itself finished.
 	if (inputs.isInterrupted()) return abortPublication()
-	try {
-		// Per-run artifacts are published atomically as each record exists.
+	let result: SideResultFile
+	function* publicationSteps(): Generator<() => Promise<void>> {
 		for (const record of runs) {
 			if (!record.trace) continue
 			const artifactDir = path.join(inputs.out, "artifacts", `${record.fixtureName}-rep${record.repIndex}`)
-			await fs.mkdir(artifactDir, { recursive: true })
-			if (inputs.isInterrupted()) return abortPublication()
-			await writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
-			if (inputs.isInterrupted()) return abortPublication()
+			yield () => fs.mkdir(artifactDir, { recursive: true }).then(() => {})
+			yield () => writeJsonAtomic(path.join(artifactDir, "run-record.json"), record)
 		}
-		const result = await inputs.buildResult(runs)
-		if (inputs.isInterrupted()) return abortPublication()
-		await writeJsonAtomic(path.join(inputs.out, "side-results.json"), result)
-		if (inputs.isInterrupted()) return abortPublication()
-		return { runs, completed: true }
-	} catch (error) {
-		try {
-			await abortPublication()
-		} catch (cleanupError) {
-			throw new AggregateError([error, cleanupError], "publication failed and cleanup failed")
+		// Result construction can await pin collection. Check interruption
+		// again before the completion marker is written.
+		yield async () => {
+			result = await inputs.buildResult(runs)
 		}
-		throw error
 	}
+	const completed = await publishGeneration({
+		steps: publicationSteps(),
+		commit: () => writeJsonAtomic(path.join(inputs.out, "side-results.json"), result),
+		isInterrupted: inputs.isInterrupted,
+		rollback: async () => {
+			await abortPublication()
+		},
+	})
+	return { runs, completed }
 }
 
 // Own the entire standalone side generation, including preparation and final

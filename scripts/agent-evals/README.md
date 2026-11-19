@@ -126,6 +126,10 @@ release process: a maintainer runs it locally or on demand.
 | `coding-trust.ts`      | The comparison trust policy: approved full commit SHAs, resolution, the approval gate, and the side environment allowlist.                               |
 | `fs-atomic.ts`         | Atomic file publication through same-directory temp files and renames.                                                                                   |
 
+The side and comparison publishers share a spec-driven publication protocol.
+See [the output contract](../../docs/architecture/agent-evals-publication.md)
+for its invariants, code boundaries, model checks, and review gate.
+
 ### Grading
 
 - The grader is model-free and credential-free. It judges the final workspace state only.
