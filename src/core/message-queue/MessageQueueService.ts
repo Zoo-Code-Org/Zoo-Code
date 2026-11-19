@@ -73,18 +73,18 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 		return true
 	}
 
-	public dequeueMessage(): QueuedMessage | undefined {
-		const index = this._messages.findIndex((message) => !this.claimedMessageIds.has(message.id))
-		if (index === -1) {
-			return undefined
-		}
-		const [message] = this._messages.splice(index, 1)
-		this.emit("stateChanged", this._messages)
-		return message
-	}
-
-	public claimNextMessage(): QueuedMessage | undefined {
-		const message = this._messages.find((candidate) => !this.claimedMessageIds.has(candidate.id))
+	/**
+	 * Claims the first message that is neither already claimed nor listed in
+	 * `excludeIds`.
+	 *
+	 * `excludeIds` lets a consumer that must not take certain messages skip them
+	 * without removing them: an execution-gating ask passes the IDs a drain has
+	 * already submitted so stale feedback can never stand in for an approval.
+	 */
+	public claimNextMessage(excludeIds?: ReadonlySet<string>): QueuedMessage | undefined {
+		const message = this._messages.find(
+			(candidate) => !this.claimedMessageIds.has(candidate.id) && !excludeIds?.has(candidate.id),
+		)
 		if (message) {
 			this.claimedMessageIds.add(message.id)
 		}
@@ -115,9 +115,13 @@ export class MessageQueueService extends EventEmitter<QueueEvents> {
 	 * report a non-empty queue. Consumers that are about to take a message need
 	 * this instead: it answers "is there anything I may take", which is false
 	 * when every remaining message is already spoken for.
+	 *
+	 * `excludeIds` mirrors `claimNextMessage`: a message the caller may not take
+	 * is not available, so an execution-gating ask does not report availability
+	 * for a message only a conversational ask may consume.
 	 */
-	public hasUnclaimed(): boolean {
-		return this._messages.some((message) => !this.claimedMessageIds.has(message.id))
+	public hasUnclaimed(excludeIds?: ReadonlySet<string>): boolean {
+		return this._messages.some((message) => !this.claimedMessageIds.has(message.id) && !excludeIds?.has(message.id))
 	}
 
 	public dispose(): void {
