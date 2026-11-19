@@ -2687,6 +2687,23 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		},
 	)
 
+	it("rejects EOF without a terminal completion and does not publish partial reasoning", async () => {
+		const handler = new OpenAiHandler(baseOptions)
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([
+				{
+					type: "response.output_item.done",
+					item: { type: "reasoning", id: "rs1", encrypted_content: "opaque", summary: [] },
+				},
+				{ type: "response.output_text.delta", delta: "partial" },
+			]),
+		)
+		await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow(
+			"before a completed response",
+		)
+		expect(handler.getReasoningDetails()).toBeUndefined()
+	})
+
 	it("routes createMessage to the Responses API and not Chat Completions", async () => {
 		const handler = new OpenAiHandler(baseOptions)
 		const chunks = await collectStream(handler.createMessage(systemPrompt, messages))

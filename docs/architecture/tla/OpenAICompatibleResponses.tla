@@ -46,10 +46,10 @@
 \* These are manual TLC and real-code gates. No script proves code/model correspondence.
 \* Review gate: routing/cleanup holds in 6912 states. Ten sabotage configs and the unfixed config fail.
 \* Option rules are in ResponsesRequestParameters.tla; protocol rules are in ResponsesProtocol.tla.
-\* All 25 sabotage cases across the three models fail in separate real-code tests.
-\* The unfixed code failed 24 focused regression cases. All 861 focused tests now pass.
+\* All 26 sabotage cases across the three models fail in separate real-code tests.
+\* The unfixed code failed 24 focused regression cases. All 862 focused tests now pass.
 \* New findings: completion routing, terminal failures, subclass flags, and reasoning replay were missing.
-\* Cost: about 30 agent minutes for this review round. The final 29-config TLC gate takes about 25 seconds.
+\* Cost: about 30 agent minutes for this review round. The final 30-config TLC gate takes about 25 seconds.
 CONSTANTS RequestBoundary, CleanupBoundary, InitialListenerBoundary
 VARIABLES source, phase, listener, aborted
 vars == <<source, phase, listener, aborted>>

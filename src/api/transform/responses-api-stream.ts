@@ -21,7 +21,11 @@ import type { ApiStream, ApiStreamUsageChunk } from "./stream"
 export async function* processResponsesApiStream(
 	stream: AsyncIterable<any>,
 	normalizeUsage: (usage: any) => ApiStreamUsageChunk | undefined,
-	observer?: { onOutputItem?: (item: unknown) => void; onCompletedOutput?: (output: readonly unknown[]) => void },
+	observer?: {
+		onOutputItem?: (item: unknown) => void
+		onCompletedOutput?: (output: readonly unknown[]) => void
+		onCompleted?: () => void
+	},
 ): ApiStream {
 	// Track call_ids that were streamed via delta events so we don't double-execute
 	// when response.output_item.done arrives for the same function call.
@@ -112,6 +116,7 @@ export async function* processResponsesApiStream(
 		// Completion events — extract usage
 		if (event?.type === "response.completed" || event?.type === "response.done") {
 			assertResponsesApiSuccess(event.response)
+			observer?.onCompleted?.()
 			if (Array.isArray(event.response?.output)) {
 				if (observer?.onCompletedOutput) observer.onCompletedOutput(event.response.output)
 				else for (const item of event.response.output) observer?.onOutputItem?.(item)

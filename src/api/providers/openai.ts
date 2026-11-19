@@ -386,13 +386,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			const requestOptions = abortSignal ? { signal: abortSignal } : undefined
 			if (body.stream) {
 				const stream = await this.client.responses.create({ ...body, stream: true }, requestOptions)
+				let completed = false
 				yield* processResponsesApiStream(stream, createUsageNormalizer(), {
 					onOutputItem: captureReasoning,
+					onCompleted: () => {
+						completed = true
+					},
 					onCompletedOutput: (output) => {
 						reasoningItems.clear()
 						output.forEach(captureReasoning)
 					},
 				})
+				if (!completed) throw new Error("Responses API stream ended before a completed response")
 			} else {
 				const response = await this.client.responses.create({ ...body, stream: false }, requestOptions)
 				assertResponsesApiSuccess(response)

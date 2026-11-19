@@ -10,10 +10,11 @@
 \* Review PR 2498: added rules for findings 1, 2, 5, 7, 9, 10, 11.
 \* Domain: compatible provider with Responses enabled. SDK events and storage are oracles.
 \* The domain has two opaque reasoning items. Their contents are not parsed.
-\* Manual gate: 2880 states pass. All nine sabotage configs fail with invariant error 12.
+\* Final review added premature EOF: ended means SDK EOF without a completion event.
+\* Manual gate: 3456 states pass. All ten sabotage configs fail with invariant error 12.
 \* Each sabotage was replayed by removing its code guard and running the matching focused tests.
 \* New inspection finding: use completed output order, not item arrival order, for saved reasoning.
-\* Self-review ratchet: 0 covered, 2 added, 0 gap (saved order and replay oracle domain).
+\* Self-review ratchet: 0 covered, 3 added, 0 gap (saved order, replay domain, and premature EOF).
 \* Model setup: the replay oracle domain was extended to include a reordered sample.
 \* No real-code replay false alarm remains. The model does not prove the code correct.
 \* Cost: each config runs in less than 1 second. Agent cost is in OpenAICompatibleResponses.tla.
@@ -23,7 +24,7 @@ CONSTANTS ReasoningSamples, AcceptBoundary, SaveBoundary, ReplayBoundary,
           ResetBoundary, PublishFailedBoundary, ChoiceBoundary, ClientBoundary
 VARIABLES source, phase, received, saved, replayed, accepted
 vars == <<source, phase, received, saved, replayed, accepted>>
-Domain == [status : {"completed", "failed", "incomplete", "cancelled", "error"},
+Domain == [status : {"completed", "failed", "incomplete", "cancelled", "error", "ended"},
            reasoning : ReasoningSamples, choice : {"none", "auto", "restricted", "malformed"},
            endpoint : {"generic", "azureLegacy", "azureV1", "inferenceLegacy", "inferenceV1"},
            explicitVersion : BOOLEAN]
