@@ -964,9 +964,13 @@ describe("webviewMessageHandler - image mentions", () => {
 		})
 
 		expect(vi.mocked(resolveImageMentions)).toHaveBeenCalled()
-		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "See @/img.png", [
-			"data:image/png;base64,from-mention",
-		])
+		// Omitted segments fail closed, so the text is all generated.
+		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith(
+			"messageResponse",
+			"See @/img.png",
+			["data:image/png;base64,from-mention"],
+			[{ text: "See @/img.png", source: "generated" }],
+		)
 	})
 })
 
