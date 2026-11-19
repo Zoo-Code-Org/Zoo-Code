@@ -1,4 +1,5 @@
 import { vi } from "vitest"
+import type { Mock } from "vitest"
 import type * as vscode from "vscode"
 
 export function makePosition(line = 0, character = 0): vscode.Position {
@@ -130,17 +131,89 @@ export function makeWorkspaceConfiguration(values: Record<string, unknown> = {})
 	} as unknown as vscode.WorkspaceConfiguration
 }
 
-export function makeExtensionContext(overrides: Partial<vscode.ExtensionContext> = {}): vscode.ExtensionContext {
-	const makeMemento = () => ({
-		get: vi.fn(),
-		update: vi.fn().mockResolvedValue(undefined),
-		keys: vi.fn(() => []),
-	})
+export type MementoDouble = vscode.Memento & {
+	get: Mock
+	update: Mock
+	keys: Mock
+	// This repo types ExtensionContext.globalState as Memento plus setKeysForSync, so the double
+	// carries it: typing the double to the interface is what keeps the call sites unmodified.
+	setKeysForSync: Mock
+}
 
+// This repo's vscode typings have no top-level vscode.Secrets; the secrets shape is the one
+// ExtensionContext already declares, so the double is built from that rather than a name that
+// does not exist in this declaration file.
+export type SecretsDouble = vscode.ExtensionContext["secrets"] & {
+	get: Mock
+	store: Mock
+	delete: Mock
+	onDidChange: Mock
+}
+
+/**
+ * A VS Code Memento double. Every call returns a NEW object with NEW spies, so a value stored
+ * through one double is invisible to the next: a module-scope Memento in a shared test helper is a
+ * silent cross-test leak, and freshness is the helper's contract rather than an inference.
+ */
+export function makeFreshMemento(overrides: Partial<MementoDouble> = {}): MementoDouble {
+	// Each call gets its own store, so a value written through one double cannot be read back through
+	// the next. A shared Memento would leak, and only an assertion that writes and re-reads can show it.
+	const store = new Map<string, unknown>()
+	const get = vi.fn((key: string, defaultValue?: unknown) => (store.has(key) ? store.get(key) : defaultValue))
+	const update = vi.fn((key: string, value: unknown) => {
+		if (value === undefined) {
+			store.delete(key)
+		} else {
+			store.set(key, value)
+		}
+		return Promise.resolve(undefined)
+	})
+	const keys = vi.fn(() => [...store.keys()])
+	return {
+		get,
+		update,
+		keys,
+		setKeysForSync: vi.fn(),
+		...overrides,
+	}
+}
+
+/** Same freshness rule as makeFreshMemento: a new object and new spies on every call. */
+export function makeFreshSecrets(overrides: Partial<SecretsDouble> = {}): SecretsDouble {
+	return {
+		get: vi.fn(),
+		store: vi.fn().mockResolvedValue(undefined),
+		delete: vi.fn().mockResolvedValue(undefined),
+		onDidChange: vi.fn(() => makeDisposable()),
+		...overrides,
+	}
+}
+
+/**
+ * An Extension double for the fields a test actually reads. Extension is class-backed in VS Code,
+ * so the structural cast stays here with this reason instead of spreading to each call site.
+ */
+export function makeExtensionDouble(overrides: Partial<vscode.Extension<unknown>> = {}): vscode.Extension<unknown> {
+	const extensionUri = overrides.extensionUri ?? makeUri("/mock/extension")
+	return {
+		extensionKind: 1 as vscode.ExtensionKind,
+		id: "mock.extension",
+		extensionUri,
+		extensionPath: overrides.extensionPath ?? "/mock/extension",
+		isActive: false,
+		manifest: {},
+		packageJSON: { name: "mock-extension", version: "0.0.0" },
+		activate: vi.fn().mockResolvedValue(undefined),
+		exports: undefined,
+		...overrides,
+	} as unknown as vscode.Extension<unknown>
+}
+
+export function makeExtensionContext(overrides: Partial<vscode.ExtensionContext> = {}): vscode.ExtensionContext {
 	return {
 		subscriptions: [],
-		workspaceState: makeMemento(),
-		globalState: makeMemento(),
+		workspaceState: makeFreshMemento(),
+		globalState: makeFreshMemento(),
 		secrets: {
 			get: vi.fn(),
 			store: vi.fn().mockResolvedValue(undefined),

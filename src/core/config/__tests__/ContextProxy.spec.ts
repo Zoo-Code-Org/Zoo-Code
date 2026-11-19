@@ -5,7 +5,15 @@ import * as vscode from "vscode"
 import { GLOBAL_STATE_KEYS, SECRET_STATE_KEYS, GLOBAL_SECRET_KEYS } from "@roo-code/types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
-import { makeExtensionContext, makeUri } from "../../../test-utils/vscode"
+import {
+	makeExtensionContext,
+	makeExtensionDouble,
+	makeFreshMemento,
+	makeFreshSecrets,
+	makeUri,
+	type MementoDouble,
+	type SecretsDouble,
+} from "../../../test-utils/vscode"
 
 import { logger } from "../../../utils/logging"
 import { ContextProxy, SettingsWriteError } from "../ContextProxy"
@@ -24,26 +32,26 @@ vi.mock("vscode", () => ({
 
 describe("ContextProxy", () => {
 	let proxy: ContextProxy
-	let mockContext: any
-	let mockGlobalState: any
-	let mockSecrets: any
+	let mockContext: vscode.ExtensionContext
+	let mockGlobalState: MementoDouble
+	let mockSecrets: SecretsDouble
 
 	beforeEach(async () => {
 		// Reset mocks
 		clearAllMocks()
 
 		// Mock globalState
-		mockGlobalState = {
+		mockGlobalState = makeFreshMemento({
 			get: vi.fn(),
 			update: vi.fn().mockResolvedValue(undefined),
-		}
+		})
 
 		// Mock secrets
-		mockSecrets = {
+		mockSecrets = makeFreshSecrets({
 			get: vi.fn().mockResolvedValue("test-secret"),
 			store: vi.fn().mockResolvedValue(undefined),
 			delete: vi.fn().mockResolvedValue(undefined),
-		}
+		})
 
 		// Mock the extension context
 		mockContext = {
@@ -56,12 +64,28 @@ describe("ContextProxy", () => {
 			}),
 			globalStorageUri: makeUri("/test/storage"),
 			logUri: makeUri("/test/logs"),
-			extension: { packageJSON: { version: "1.0.0" } },
+			extension: makeExtensionDouble({ packageJSON: { version: "1.0.0" } }),
 		}
 
 		// Create proxy instance
 		proxy = new ContextProxy(mockContext)
 		await proxy.initialize()
+	})
+
+	describe("shared test-utils doubles", () => {
+		it("gives each Memento double its own stored values", () => {
+			// Freshness is the helper's contract: a module-scope Memento in a shared test helper leaks
+			// stored values between cases, and nothing else in this run would notice. The read-back on the
+			// writing double is what keeps the second double's emptiness from being vacuous: with a no-op
+			// update both second-double assertions pass against a store that never stored anything.
+			const first = makeFreshMemento()
+			void first.update("leakProbe", "stored-in-first")
+			expect(first.get("leakProbe")).toBe("stored-in-first")
+			expect(first.keys()).toEqual(["leakProbe"])
+			const second = makeFreshMemento()
+			expect(second.get("leakProbe")).toBeUndefined()
+			expect(second.keys()).toEqual([])
+		})
 	})
 
 	describe("read-only pass-through properties", () => {
@@ -119,6 +143,86 @@ describe("ContextProxy", () => {
 			// No value in cache
 			const result = proxy.getGlobalState("apiProvider", "deepseek")
 			expect(result).toBe("deepseek")
+		})
+
+		it("should restore the cache when a global state write rejects", async () => {
+			// A rejected write is corrected from the Memento, so the fixture has to model what the Memento
+			// holds: the value storage already carries for this key. Left as a bare vi.fn() the
+			// read-back has nothing to restore and the assertion below would measure the mock, not
+			// the code.
+			mockGlobalState.get.mockImplementation((key: string) => (key === "apiProvider" ? "anthropic" : undefined))
+			await proxy.initialize()
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			mockGlobalState.update.mockRejectedValueOnce(new Error("write failed"))
+
+			await expect(proxy.updateGlobalState("apiProvider", "openrouter")).rejects.toThrow("write failed")
+
+			// The rejected write never reached storage: getGlobalState must not report it.
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+		})
+
+		it("should not roll the cache back over a newer write for the same key", async () => {
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			let rejectOlderWrite: (error: Error) => void = () => {}
+			mockGlobalState.update
+				.mockReturnValueOnce(
+					new Promise<void>((_, reject) => {
+						rejectOlderWrite = reject
+					}),
+				)
+				.mockResolvedValueOnce(undefined)
+
+			const olderWrite = proxy.updateGlobalState("apiProvider", "openrouter")
+			// A newer write stores the same value and succeeds while the older one is pending.
+			await proxy.updateGlobalState("apiProvider", "openrouter")
+			rejectOlderWrite(new Error("older write failed"))
+			await expect(olderWrite).rejects.toThrow("older write failed")
+
+			// The older rejection must not restore the cache to the previous value.
+			expect(proxy.getGlobalState("apiProvider")).toBe("openrouter")
+		})
+
+		it("does not resurrect a pre-reset value when a write rejects after resetAllState", async () => {
+			// The owner-token design (ContextProxy.ts:401-432) corrects a rejected write by re-reading the
+			// Memento while the writer is still the owner of the key. resetAllState writes undefined for
+			// every global key before it re-initializes, so a write that is still in flight when the reset
+			// runs reads back undefined on its rejection instead of putting the pre-reset value back.
+			// The fixture models a Memento whose get and update agree, so the read-back sees what the
+			// reset actually stored rather than a value the mock kept on its own.
+			const store = new Map<string, unknown>()
+			let holdNextWrite = false
+			let heldWrite: { reject?: (error: Error) => void } = {}
+			mockGlobalState.get = vi.fn((key: string) => store.get(key))
+			mockGlobalState.update = vi.fn((key: string, value: unknown) => {
+				if (holdNextWrite) {
+					holdNextWrite = false
+					const slot: { reject?: (error: Error) => void } = {}
+					heldWrite = slot
+					return new Promise<void>((resolve, reject) => {
+						slot.reject = reject
+					})
+				}
+				store.set(key, value)
+				return Promise.resolve(undefined)
+			})
+			await proxy.initialize()
+			await proxy.updateGlobalState("apiProvider", "anthropic")
+			expect(proxy.getGlobalState("apiProvider")).toBe("anthropic")
+
+			holdNextWrite = true
+			const pendingWrite = proxy.updateGlobalState("apiProvider", "openrouter")
+
+			// The reset runs while that write is still in flight.
+			await proxy.resetAllState()
+			expect(mockGlobalState.update).toHaveBeenCalledWith("apiProvider", undefined)
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
+
+			heldWrite.reject!(new Error("write failed after reset"))
+			await expect(pendingWrite).rejects.toThrow("write failed after reset")
+
+			// The rejection handler is still the owner of the key, so it writes back what the Memento now
+			// holds - undefined - rather than the value the cache carried before the reset.
+			expect(proxy.getGlobalState("apiProvider")).toBeUndefined()
 		})
 
 		it("should bypass cache for pass-through state keys", async () => {
@@ -1168,6 +1272,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })

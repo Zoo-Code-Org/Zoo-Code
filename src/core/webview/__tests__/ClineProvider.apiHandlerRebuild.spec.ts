@@ -242,9 +242,15 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
 		provider["initialModeConfigIds"] = Promise.resolve({})
 
-		// Mock providerSettingsManager
+		// Mock providerSettingsManager. saveConfig repoints the CURRENT getProfile mock at
+		// the record it wrote: the real manager reads back the stored record, and
+		// persistProviderProfile builds its activation writes from that read-back.
+		const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
 		;(provider as any).providerSettingsManager = {
-			saveConfig: vi.fn().mockResolvedValue("test-id"),
+			saveConfig: vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			}),
 			listConfig: vi.fn().mockResolvedValue([
 				{
 					name: "test-config",
@@ -635,11 +641,25 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		test("reports a partial state when the previous profile cannot be restored", async () => {
 			const manager = provider["providerSettingsManager"]
 			vi.mocked(manager.setModeConfig).mockRejectedValue(new Error("activation failed"))
+			// The restore is a record write and not a profile switch, so it can only fail where it
+			// actually writes: reject the second saveConfig - the one that puts the stored profile back -
+			// and let the forward save land.
+			const currentGetProfile = () => provider["providerSettingsManager"].getProfile as ReturnType<typeof vi.fn>
+			let saves = 0
+			vi.mocked(manager.saveConfig).mockImplementation(async (name, config) => {
+				saves++
+				if (saves > 1) {
+					throw new Error("record store refused the restore write")
+				}
+				currentGetProfile().mockResolvedValue({ name, id: "test-id", ...config })
+				return "test-id"
+			})
 
 			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
 				openRouterModelId: "anthropic/claude",
 			})
 
+			expect(saves).toBe(2)
 			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.update_profile_model_partial")
 		})
 
@@ -818,6 +838,88 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
+
+		test("restores the stored record without re-activating the profile after a failed save", async () => {
+			// Two profiles, so activating the saved one is a visible move: this view, the shared
+			// selection and the mode mapping this window opened with all name the other profile, and the
+			// shared provider settings are that profile's settings.
+			const records: Record<string, Record<string, unknown> | undefined> = {
+				"test-config": { ...storedProfile },
+				"other-config": {
+					name: "other-config",
+					id: "other-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterApiKey: "mock-key",
+					openRouterModelId: "openai/gpt-4o",
+				},
+			}
+			const modeMap: Record<string, string | undefined> = { code: "other-id" }
+			const events: string[] = []
+			const manager = provider["providerSettingsManager"]
+			// The double stands in for the manager store so the record, the profile list and the mode
+			// mapping are readable after the rollback instead of only observable through call counts.
+			manager.getProfile = vi.fn().mockImplementation(async ({ name }: { name: string }) => {
+				const record = records[name]
+				if (!record) {
+					throw new Error(`Profile '${name}' not found`)
+				}
+				return { ...record }
+			})
+			manager.saveConfig = vi.fn().mockImplementation(async (name: string, config: Record<string, unknown>) => {
+				events.push(`save:${String(config.openRouterModelId)}`)
+				records[name] = { ...records[name], ...config, name, id: "test-id" }
+				return records[name]?.id as string
+			})
+			manager.listConfig = vi.fn().mockResolvedValue([
+				{ name: "test-config", id: "test-id", apiProvider: providerIdentifiers.openrouter },
+				{ name: "other-config", id: "other-id", apiProvider: providerIdentifiers.openrouter },
+			])
+			manager.setModeConfig = vi.fn().mockImplementation(async (mode: string, id: string) => {
+				modeMap[mode] = id
+			})
+			manager.getModeConfigId = vi.fn().mockImplementation(async (mode: string) => modeMap[mode])
+			provider["initialModeConfigIds"] = Promise.resolve({ code: "other-id" })
+
+			await provider.setValue("currentApiConfigName", "other-config")
+			await provider.contextProxy.setProviderSettings({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "mock-key",
+				openRouterModelId: "openai/gpt-4o",
+			})
+			const selectionBefore = provider.contextProxy.getValue("currentApiConfigName")
+			const mappingBefore = { ...modeMap }
+			const sharedBefore = provider.contextProxy.getProviderSettings()
+
+			// The failed forward persist: the record write lands and the shared provider-settings write
+			// the activation pairs with it rejects, so the group compensates and rethrows.
+			vi.spyOn(provider.contextProxy, "setProviderSettings").mockRejectedValueOnce(
+				new Error("shared provider settings write failed"),
+			)
+			const postSpy = vi.spyOn(provider, "postStateToWebview").mockImplementation(async () => {
+				events.push("post")
+			})
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			// The recovery did its job: the stored record is back, so the model the failed save wrote is
+			// gone from the profile store.
+			await expect(manager.getProfile({ name: "test-config" })).resolves.toMatchObject({
+				openRouterModelId: "openai/gpt-4",
+				rateLimitSeconds: 5,
+			})
+			// And the recovery is a record restore, not a profile switch: the selection, this window's
+			// mode mapping and the shared provider settings are what they were before the failed save.
+			expect(provider.contextProxy.getValue("currentApiConfigName")).toBe(selectionBefore)
+			expect(modeMap).toEqual(mappingBefore)
+			expect(provider.contextProxy.getProviderSettings()).toEqual(sharedBefore)
+			// The error handling and the view refresh are intact: the failed save still surfaces, and the
+			// recovery still posts the state it restored.
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("errors.create_api_config")
+			expect(postSpy).toHaveBeenCalled()
+			expect(events.lastIndexOf("post")).toBeGreaterThan(events.lastIndexOf("save:openai/gpt-4"))
+		})
 	})
 
 	describe("activateProviderProfile", () => {
@@ -853,8 +955,10 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			const first = provider.activateProviderProfile({ name: "first-profile" })
 			const second = provider.activateProviderProfile({ name: "second-profile" })
 
-			await Promise.resolve()
-			expect(events).toEqual(["first:start"])
+			// The mutation now reads the manager selection snapshot before the
+			// manager write, so the first call lands a few microtasks later than a
+			// single tick would assume; wait for it deterministically instead.
+			await vi.waitFor(() => expect(events).toEqual(["first:start"]))
 
 			resolveFirst()
 			await first
@@ -882,7 +986,58 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
 		})
 
-		test("timed-out mutations abort before writing state and advance the queue", async () => {
+		test("an activation that times out while queued behind another never starts", async () => {
+			vi.useFakeTimers()
+			let releaseFirst!: () => void
+			const firstActivation = new Promise<void>((resolve) => {
+				releaseFirst = resolve
+			})
+			provider["providerSettingsManager"].activateProfile = vi
+				.fn()
+				.mockImplementationOnce(async () => {
+					await firstActivation
+					return {
+						name: "first-profile",
+						id: "first-id",
+						apiProvider: providerIdentifiers.openrouter,
+						openRouterModelId: "openai/gpt-4",
+					}
+				})
+				.mockResolvedValueOnce({
+					name: "second-profile",
+					id: "second-id",
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4.1-mini",
+				})
+			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
+
+			try {
+				// The first activation outlives the second call's timeout window: the
+				// second caller rejects while its callback is still queued.
+				const first = provider.activateProviderProfile({ name: "first-profile" })
+				const firstResult = expect(first).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(1000)
+				const second = provider.activateProviderProfile({ name: "second-profile" })
+				const secondResult = expect(second).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await firstResult
+				await secondResult
+
+				// The first activation settles and the queue advances: the second must
+				// not start after its caller already saw a timeout, or it would change
+				// the selected profile while reporting failure.
+				releaseFirst()
+				// The queue tail settles only after the second run has been evaluated.
+				await provider["providerProfileMutationQueue"].catch(() => undefined)
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("first-profile")
+				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
+				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "second-profile")
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		test("timed-out activations run to completion and hold the queue", async () => {
 			vi.useFakeTimers()
 			const logSpy = vi.spyOn(provider, "log")
 			const setValueSpy = vi.spyOn(provider.contextProxy, "setValue")
@@ -914,20 +1069,26 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
 				await firstResult
 
-				// Queue advanced immediately on timeout — second enqueues now.
+				// The queue stays owned until the hung activation settles: the second
+				// activation waits, so the late rollback cannot land on top of it.
 				const second = provider.activateProviderProfile({ name: "second-profile" })
-				// activateProfile not yet called for second (it runs in the next microtask).
+				await vi.advanceTimersByTimeAsync(0)
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(1)
 
-				// Resolve the first activation's inner promise so its in-flight mock can return.
-				// The aborted signal prevents it from writing any state.
+				// The first activation was not aborted: it completes its writes before
+				// the queue advances to the second.
 				resolveFirst()
+				await vi.advanceTimersByTimeAsync(0)
 				await expect(second).resolves.toBeUndefined()
 				expect(provider["providerSettingsManager"].activateProfile).toHaveBeenCalledTimes(2)
-				// Aborted first activation wrote nothing; only second profile is set.
-				expect(setValueSpy).not.toHaveBeenCalledWith("currentApiConfigName", "first-profile")
+				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "first-profile")
 				expect(setValueSpy).toHaveBeenCalledWith("currentApiConfigName", "second-profile")
-				expect(logSpy).toHaveBeenCalledWith("Provider profile mutation timed out; aborting in-flight mutation")
+				// The final shared selection is the second profile: no late write puts
+				// the first profile back on top.
+				expect(provider.contextProxy.getValue("currentApiConfigName")).toBe("second-profile")
+				expect(logSpy).toHaveBeenCalledWith(
+					"Provider profile mutation timed out; waiting for it to finish before the next mutation",
+				)
 			} finally {
 				vi.useRealTimers()
 			}

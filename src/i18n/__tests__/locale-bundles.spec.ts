@@ -26,7 +26,7 @@ import vi from "../locales/vi/common.json"
 import zhCn from "../locales/zh-CN/common.json"
 import zhTw from "../locales/zh-TW/common.json"
 
-const bundles: Record<string, { errors: Record<string, unknown> }> = {
+const bundles: Record<string, { errors: Record<string, unknown>; warnings: Record<string, unknown> }> = {
 	ca,
 	de,
 	en,
@@ -49,12 +49,25 @@ const bundles: Record<string, { errors: Record<string, unknown> }> = {
 
 // Keys this unit adds to the common namespace (the openFile workspace
 // containment error posted by webviewMessageHandler).
-const addedKeys = ["path_outside_workspace"]
+// Keys this unit adds to the common namespace: the openFile workspace containment
+// error, and the warning shown when a profile deletion landed but the replacement
+// activation failed (webviewMessageHandler). Both lists are asserted below.
+const addedErrorKeys = ["path_outside_workspace"]
+const addedWarningKeys = ["profile_deleted_activation_failed"]
 
 describe("common locale bundles", () => {
 	it.each(Object.keys(bundles))("%s defines every key this unit adds", (locale) => {
-		for (const key of addedKeys) {
+		for (const key of addedErrorKeys) {
 			expect(bundles[locale].errors[key]).toEqual(expect.any(String))
+		}
+		for (const key of addedWarningKeys) {
+			const warning: unknown = bundles[locale].warnings[key]
+			// expect.any(String) accepts an empty string, and a message with no interpolation slot is a
+			// different message: the handler builds its expected text through t(...) too, so nothing else
+			// in this unit would notice a bundle that dropped the placeholder.
+			expect(typeof warning).toBe("string")
+			expect(String(warning).trim().length).toBeGreaterThan(0)
+			expect(warning).toEqual(expect.stringContaining("{{name}}"))
 		}
 	})
 })

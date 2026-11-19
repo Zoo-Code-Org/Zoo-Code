@@ -62,6 +62,12 @@ async function runCreate(api: RooCodeAPI): Promise<void> {
 		await waitForMarkedCompletion(api, createdTaskId)
 		await waitFor(async () => (await api.getTaskHistoryItem(createdTaskId)) !== undefined)
 
+		// history_item.json is written outside the ui_messages.json flush as well: wait for the
+		// task to appear in history with its completed status stored rather than merely existing.
+		// ClineProvider swallows a failed completed-status write and still reports the task as
+		// completed, so existence alone is not proof the status reached disk.
+		await waitFor(async () => (await api.getTaskHistoryItem(createdTaskId))?.status === "completed")
+
 		const result: PhaseResult = {
 			version: PHASE_RESULT_VERSION,
 			phase: "create",
@@ -104,6 +110,9 @@ async function runVerify(api: RooCodeAPI): Promise<void> {
 		const historyItem = await api.getTaskHistoryItem(taskId)
 		assert.ok(historyItem, "Task history item should be available after restart")
 		assert.ok(historyItem.task.includes("RESTART_PERSISTENCE_SMOKE"), "History title should persist after restart")
+		// The status the create phase waited for must still be the one on disk after the
+		// restart, which is what this smoke test exists to prove.
+		assert.strictEqual(historyItem.status, "completed", "Completed status should persist across restart")
 		await waitForMarkedCompletion(api, taskId)
 
 		await api.resumeTask(taskId)
