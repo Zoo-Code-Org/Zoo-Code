@@ -49,3 +49,120 @@ it.each(cases)(
 		expect(buildResponsesRequest(input)).toEqual(body)
 	},
 )
+
+function makeInput(overrides: Partial<RequestInput> = {}): RequestInput {
+	return {
+		options: { openAiModelId: "custom" },
+		modelInfo: { ...openAiModelInfoSaneDefaults, maxTokens: 1000 },
+		reasoning: undefined,
+		systemPrompt: "system",
+		messages: [],
+		tools: undefined,
+		extraBody: {},
+		...overrides,
+	}
+}
+
+it.each([
+	{ include: true, custom: 0, model: 1000, expected: 1000 },
+	{ include: true, custom: undefined, model: 1000, expected: 1000 },
+	{ include: true, custom: 456, model: 1000, expected: 456 },
+	{ include: false, custom: 456, model: 1000, expected: undefined },
+	{ include: undefined, custom: 456, model: 1000, expected: undefined },
+	{ include: true, custom: undefined, model: undefined, expected: undefined },
+])("honors output limit defaults and omission: %j", ({ include, custom, model, expected }) => {
+	const body = buildResponsesRequest(
+		makeInput({
+			options: { includeMaxTokens: include, modelMaxTokens: custom },
+			modelInfo: { ...openAiModelInfoSaneDefaults, maxTokens: model },
+		}),
+	)
+	if (expected === undefined) expect(body).not.toHaveProperty("max_output_tokens")
+	else expect(body).toHaveProperty("max_output_tokens", expected)
+})
+
+it.each([
+	{ supports: true, temperature: 0, expected: 0 },
+	{ supports: undefined, temperature: 0, expected: 0 },
+	{ supports: false, temperature: 0, expected: undefined },
+	{ supports: true, temperature: undefined, expected: undefined },
+	{ supports: undefined, temperature: undefined, expected: undefined },
+	{ supports: undefined, temperature: 0.4, expected: 0.4 },
+	{ supports: false, temperature: 0.4, expected: undefined },
+])("honors temperature capability, zero, and omission: %j", ({ supports, temperature, expected }) => {
+	const body = buildResponsesRequest(
+		makeInput({
+			options: { modelTemperature: temperature },
+			modelInfo: { ...openAiModelInfoSaneDefaults, supportsTemperature: supports },
+		}),
+	)
+	if (expected === undefined) expect(body).not.toHaveProperty("temperature")
+	else expect(body).toHaveProperty("temperature", expected)
+})
+
+it.each([undefined, [], [{ type: "custom" as const, custom: { name: "custom", format: { type: "text" as const } } }]])(
+	"omits tool controls when no function tools remain: %j",
+	(tools) => {
+		const body = buildResponsesRequest(
+			makeInput({ tools, metadata: { taskId: "task", tool_choice: "required", parallelToolCalls: false } }),
+		)
+		expect(body).not.toHaveProperty("tools")
+		expect(body).not.toHaveProperty("tool_choice")
+		expect(body).not.toHaveProperty("parallel_tool_calls")
+	},
+)
+
+it.each(["auto", "required"] as const)("preserves allowed_tools mode %s and flattens function references", (mode) => {
+	const body = buildResponsesRequest(
+		makeInput({
+			tools: [{ type: "function", function: { name: "read_file" } }],
+			metadata: {
+				taskId: "task",
+				tool_choice: {
+					type: "allowed_tools",
+					allowed_tools: {
+						mode,
+						tools: [
+							{ type: "function", function: { name: "read_file" } },
+							{ type: "custom", name: "other" },
+						],
+					},
+				},
+			},
+		}),
+	)
+	expect(body.tool_choice).toEqual({
+		type: "allowed_tools",
+		mode,
+		tools: [
+			{ type: "function", name: "read_file" },
+			{ type: "custom", name: "other" },
+		],
+	})
+})
+
+it.each([{}, { function: null }, { function: { name: 42 } }, { function: { name: "" } }])(
+	"rejects malformed function restrictions: %j",
+	(entry) => {
+		expect(() =>
+			buildResponsesRequest(
+				makeInput({
+					tools: [{ type: "function", function: { name: "read_file" } }],
+					metadata: {
+						taskId: "task",
+						tool_choice: {
+							type: "allowed_tools",
+							allowed_tools: { mode: "auto", tools: [{ type: "function", ...entry }] },
+						},
+					},
+				}),
+			),
+		).toThrow("function name")
+	},
+)
+
+it("preserves standalone reasoning items before sanitizing legacy history", () => {
+	const item = { type: "reasoning" as const, id: "rs1", encrypted_content: "opaque", summary: [] }
+	const body = buildResponsesRequest(makeInput({ messages: [item] }))
+	expect(body.input).toEqual([item])
+})

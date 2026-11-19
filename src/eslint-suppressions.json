@@ -404,11 +404,6 @@
 			"count": 2
 		}
 	},
-	"api/transform/__tests__/responses-api-stream.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
 	"api/transform/__tests__/zai-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3

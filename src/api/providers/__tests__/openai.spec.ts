@@ -1,3 +1,7 @@
+import { KimiCodeHandler } from "../kimi-code"
+import { MoonshotHandler } from "../moonshot"
+import { MimoHandler } from "../mimo"
+import { prepareApiConversationMessage } from "../../../core/task/apiConversationHistory"
 // npx vitest run api/providers/__tests__/openai.spec.ts
 
 import { OpenAiHandler, getOpenAiModels } from "../openai"
@@ -9,6 +13,7 @@ import {
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
 	azureOpenAiDefaultApiVersion,
 	type ModelInfo,
+	providerIdentifiers,
 } from "@roo-code/types"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-utils/api"
@@ -2409,6 +2414,278 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		expect(mockResponsesCreate.mock.calls[0][0].temperature).toBe(supportsTemperature ? 0.4 : undefined)
 		expect(mockResponsesCreate.mock.calls[0][0].max_output_tokens).toBe(456)
 	})
+
+	it.each(["o1-mini", "o3-mini", "o4-mini"])(
+		"routes %s to Responses before model-family dispatch",
+		async (openAiModelId) => {
+			await collectStream(
+				new OpenAiHandler({ ...baseOptions, openAiModelId }).createMessage(systemPrompt, messages),
+			)
+			expect(mockResponsesCreate).toHaveBeenCalledOnce()
+			expect(mockCreate).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each([true, false, undefined])(
+		"routes single completions with streaming setting %s",
+		async (openAiStreamingEnabled) => {
+			const handler = new OpenAiHandler({
+				...baseOptions,
+				openAiStreamingEnabled,
+				openAiExtraBody: '{"service_tier":"flex"}',
+			})
+			mockResponsesCreate.mockResolvedValueOnce({
+				status: "completed",
+				output: [
+					{
+						type: "message",
+						content: [
+							{ type: "output_text", text: "first" },
+							{ type: "refusal", refusal: "ignored" },
+							{ type: "output_text", text: "second" },
+						],
+					},
+				],
+			})
+			const controller = new AbortController()
+			expect(
+				await handler.completePrompt("prompt\ud800", { abortSignal: controller.signal, timeoutMs: 1234 }),
+			).toBe("firstsecond")
+			expect(mockCreate).not.toHaveBeenCalled()
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: baseOptions.openAiModelId,
+					stream: false,
+					store: false,
+					service_tier: "flex",
+				}),
+				{ signal: controller.signal, timeout: 1234 },
+			)
+			expectNoLoneSurrogates(mockResponsesCreate.mock.calls[0][0])
+		},
+	)
+
+	const terminalCases = ["message", "completion"].flatMap((entry) =>
+		["failed", "incomplete", "cancelled"].map((status) => ({ entry, status })),
+	)
+	it.each(terminalCases)("rejects terminal $status from $entry", async ({ entry, status }) => {
+		const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: false })
+		mockResponsesCreate.mockResolvedValueOnce({
+			status,
+			output: [{ type: "message", content: [{ type: "output_text", text: "partial" }] }],
+			error: { message: "server rejected", code: "server_error" },
+		})
+		const request =
+			entry === "completion"
+				? handler.completePrompt("prompt")
+				: collectStream(handler.createMessage(systemPrompt, messages))
+		await expect(request).rejects.toMatchObject({
+			code: "server_error",
+			message: expect.stringContaining("server rejected"),
+		})
+	})
+
+	it.each(["message", "completion"])("preserves token-limit classification from $s", async (entry) => {
+		const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: false })
+		mockResponsesCreate.mockResolvedValueOnce({
+			status: "incomplete",
+			incomplete_details: { reason: "max_output_tokens" },
+			output: [],
+		})
+		await expect(
+			entry === "completion"
+				? handler.completePrompt("prompt")
+				: collectStream(handler.createMessage(systemPrompt, messages)),
+		).rejects.toMatchObject({ name: "OutputTokenLimitError" })
+	})
+
+	it.each([KimiCodeHandler, MoonshotHandler, MimoHandler])(
+		"isolates the inherited Responses flag in %s",
+		async (Provider) => {
+			const handler = new Provider({
+				...baseOptions,
+				apiModelId: "custom-model",
+				kimiCodeAuthMethod: "api-key",
+				kimiCodeApiKey: "key",
+			})
+			await collectStream(OpenAiHandler.prototype.createMessage.call(handler, systemPrompt, messages))
+			await OpenAiHandler.prototype.completePrompt.call(handler, "prompt")
+			expect(mockCreate).toHaveBeenCalledTimes(2)
+			expect(mockResponsesCreate).not.toHaveBeenCalled()
+		},
+	)
+
+	it.each([true, false])("round-trips all encrypted reasoning items with streaming=%s", async (streaming) => {
+		const handler = new OpenAiHandler({ ...baseOptions, openAiStreamingEnabled: streaming })
+		const reasoningItems = ["rs1", "rs2"].map((id, index) => ({
+			type: "reasoning",
+			id,
+			summary: index === 0 ? undefined : [],
+			encrypted_content: `opaque-${id}`,
+		}))
+		const expected = reasoningItems.map((item) => ({ ...item, summary: [] }))
+		const output = [
+			...reasoningItems,
+			{ type: "function_call", call_id: "call1", name: "read_file", arguments: "{}" },
+		]
+		mockResponsesCreate.mockResolvedValueOnce(
+			streaming
+				? asyncStreamFrom([
+						...[...reasoningItems].reverse().map((item) => ({ type: "response.output_item.done", item })),
+						{ type: "response.completed", response: { status: "completed", output } },
+					])
+				: { status: "completed", output },
+		)
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		expect(handler.getReasoningDetails()).toEqual(expected)
+		const saved = prepareApiConversationMessage({
+			message: { role: "assistant", content: [{ type: "tool_use", id: "call1", name: "read_file", input: {} }] },
+			api: handler,
+			apiConfiguration: { ...baseOptions, apiProvider: providerIdentifiers.openai },
+			apiConversationHistory: [],
+		})
+		const reloaded: typeof saved = JSON.parse(JSON.stringify(saved))
+		mockResponsesCreate.mockResolvedValueOnce(
+			streaming
+				? asyncStreamFrom([{ type: "response.completed", response: { status: "completed" } }])
+				: { status: "completed", output: [] },
+		)
+		await collectStream(
+			handler.createMessage(systemPrompt, [
+				reloaded,
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "call1", content: "result" }] },
+			]),
+		)
+		const input = mockResponsesCreate.mock.calls[1][0].input
+		expect(input.slice(0, 2)).toEqual(expected)
+		expect(input[2]).toMatchObject({ type: "function_call", call_id: "call1" })
+		expect(input[3]).toMatchObject({ type: "function_call_output", call_id: "call1" })
+		expect(handler.getReasoningDetails()).toBeUndefined()
+	})
+
+	it.each(["failure", "close", "construction"])("clears prior reasoning on $s", async (exit) => {
+		const handler = new OpenAiHandler(baseOptions)
+		const item = { type: "reasoning", id: "rs1", summary: [], encrypted_content: "opaque" }
+		mockResponsesCreate.mockResolvedValueOnce(
+			asyncStreamFrom([{ type: "response.completed", response: { status: "completed", output: [item] } }]),
+		)
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		expect(handler.getReasoningDetails()).toEqual([item])
+		if (exit === "construction") {
+			vi.spyOn(handler, "getModel").mockImplementationOnce(() => {
+				throw new Error("construction failed")
+			})
+			await expect(collectStream(handler.createMessage(systemPrompt, messages))).rejects.toThrow()
+		} else {
+			mockResponsesCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{ type: "response.output_item.done", item },
+					{ type: "response.output_text.delta", delta: "partial" },
+					{ type: "response.failed", response: { error: { message: "failed" } } },
+				]),
+			)
+			const stream = handler.createMessage(systemPrompt, messages)
+			if (exit === "close") {
+				await stream.next()
+				await stream.return(undefined)
+			} else await expect(collectStream(stream)).rejects.toThrow()
+		}
+		expect(handler.getReasoningDetails()).toBeUndefined()
+	})
+
+	it("passes the strict-schema setting through the Responses tool mapper", async () => {
+		await collectStream(
+			new OpenAiHandler({ ...baseOptions, openAiStrictToolSchemas: false }).createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ tools: [functionTool] }),
+			),
+		)
+		expect(mockResponsesCreate.mock.calls[0][0].tools[0]).toMatchObject({
+			strict: false,
+			parameters: functionTool.function.parameters,
+		})
+	})
+
+	it.each(["none", "max"] as const)("preserves model-specific reasoning effort %s", async (reasoningEffort) => {
+		const handler = new OpenAiHandler({
+			...baseOptions,
+			enableReasoningEffort: true,
+			openAiCustomModelInfo: {
+				contextWindow: 128000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: true,
+				reasoningEffort,
+			},
+		})
+		await collectStream(handler.createMessage(systemPrompt, messages))
+		expect(mockResponsesCreate.mock.calls[0][0].reasoning.effort).toBe(reasoningEffort)
+		if (reasoningEffort === "none") expect(mockResponsesCreate.mock.calls[0][0]).not.toHaveProperty("include")
+	})
+
+	it.each(["openai.azure.com", "services.ai.azure.com"])("preserves Azure v1 endpoint on %s", (host) => {
+		new OpenAiHandler({
+			...baseOptions,
+			openAiBaseUrl: `https://resource.${host}/openai/v1/`,
+			openAiUseAzure: true,
+		})
+		expect(vi.mocked(OpenAI)).toHaveBeenLastCalledWith(
+			expect.objectContaining({ baseURL: `https://resource.${host}/openai/v1/` }),
+		)
+	})
+
+	it("uses Azure v1 for Responses when no dated version was selected", () => {
+		new OpenAiHandler({ ...baseOptions, openAiBaseUrl: "https://resource.openai.azure.com/openai" })
+		expect(vi.mocked(OpenAI)).toHaveBeenLastCalledWith(
+			expect.objectContaining({ baseURL: "https://resource.openai.azure.com/openai/v1" }),
+		)
+	})
+
+	it("preserves an explicit Azure API version", () => {
+		new OpenAiHandler({
+			...baseOptions,
+			openAiBaseUrl: "https://resource.openai.azure.com",
+			azureApiVersion: "custom-version",
+		})
+		expect(vi.mocked(AzureOpenAI)).toHaveBeenLastCalledWith(
+			expect.objectContaining({
+				apiVersion: "custom-version",
+				baseURL: "https://resource.openai.azure.com/openai",
+			}),
+		)
+	})
+
+	it("rejects the legacy Azure AI Inference Responses combination", () => {
+		expect(
+			() => new OpenAiHandler({ ...baseOptions, openAiBaseUrl: "https://resource.services.ai.azure.com" }),
+		).toThrow("/openai/v1")
+	})
+
+	it.each([0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined, 1.2])(
+		"normalizes completion timeout %s",
+		async (timeoutMs) => {
+			const handler = new OpenAiHandler(baseOptions)
+			mockResponsesCreate.mockResolvedValueOnce({ status: "completed", output: [] })
+			await handler.completePrompt("prompt", { timeoutMs })
+			const options = mockResponsesCreate.mock.calls[0][1]
+			if (timeoutMs === 1.2) expect(options).toHaveProperty("timeout", 2)
+			else expect(options).not.toHaveProperty("timeout")
+		},
+	)
+
+	it.each(["openai.azure.com", "services.ai.azure.com"])(
+		"uses the chat path under the explicit Azure v1 root on %s",
+		async (host) => {
+			const handler = new OpenAiHandler({
+				...baseOptions,
+				openAiUseResponsesApi: false,
+				openAiBaseUrl: `https://resource.${host}/openai/v1/`,
+			})
+			await collectStream(handler.createMessage(systemPrompt, messages))
+			expect(mockCreate).toHaveBeenCalledOnce()
+			expect(mockCreate.mock.calls[0][1]).not.toHaveProperty("path")
+		},
+	)
 
 	it("routes createMessage to the Responses API and not Chat Completions", async () => {
 		const handler = new OpenAiHandler(baseOptions)

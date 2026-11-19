@@ -1,4 +1,8 @@
+import type OpenAI from "openai"
+import { readResponsesReasoningItem } from "./responses-api-reasoning"
 import { Anthropic } from "@anthropic-ai/sdk"
+
+export type ResponsesApiMessage = Anthropic.Messages.MessageParam | OpenAI.Responses.ResponseReasoningItem
 
 /**
  * Converts Anthropic-format messages to the OpenAI Responses API input format.
@@ -13,10 +17,26 @@ import { Anthropic } from "@anthropic-ai/sdk"
  * @param messages - Array of Anthropic MessageParam objects
  * @returns Array of Responses API input items
  */
-export function convertToResponsesApiInput(messages: Anthropic.Messages.MessageParam[]): any[] {
+export function convertToResponsesApiInput(messages: ResponsesApiMessage[]): any[] {
 	const input: any[] = []
 
 	for (const message of messages) {
+		const reasoning = readResponsesReasoningItem(message)
+		if (reasoning) {
+			input.push(reasoning)
+			continue
+		}
+		if (!("role" in message)) continue
+		if (
+			message.role === "assistant" &&
+			"reasoning_details" in message &&
+			Array.isArray(message.reasoning_details)
+		) {
+			for (const detail of message.reasoning_details) {
+				const item = readResponsesReasoningItem(detail)
+				if (item) input.push(item)
+			}
+		}
 		if (typeof message.content === "string") {
 			if (message.role === "assistant") {
 				// Assistant messages use output_text in the Responses API format

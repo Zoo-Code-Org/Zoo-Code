@@ -1,3 +1,4 @@
+import { assertResponsesApiSuccess } from "./responses-api-error"
 import type { ApiStream, ApiStreamUsageChunk } from "./stream"
 
 /**
@@ -20,12 +21,23 @@ import type { ApiStream, ApiStreamUsageChunk } from "./stream"
 export async function* processResponsesApiStream(
 	stream: AsyncIterable<any>,
 	normalizeUsage: (usage: any) => ApiStreamUsageChunk | undefined,
+	observer?: { onOutputItem?: (item: unknown) => void; onCompletedOutput?: (output: readonly unknown[]) => void },
 ): ApiStream {
 	// Track call_ids that were streamed via delta events so we don't double-execute
 	// when response.output_item.done arrives for the same function call.
 	const streamedCallIds = new Set<string>()
 
 	for await (const event of stream) {
+		if (
+			event?.type === "response.failed" ||
+			event?.type === "response.incomplete" ||
+			event?.type === "response.cancelled"
+		) {
+			assertResponsesApiSuccess(event.response ?? event, event.type.slice("response.".length))
+		}
+		if (event?.type === "error" || event?.type === "response.error") {
+			assertResponsesApiSuccess(event, "failed")
+		}
 		// Text content deltas
 		if (event?.type === "response.output_text.delta" || event?.type === "response.text.delta") {
 			if (event?.delta) {
@@ -50,6 +62,7 @@ export async function* processResponsesApiStream(
 		// Output item events — handle completed function calls and fallback text
 		if (event?.type === "response.output_item.done") {
 			const item = event?.item
+			observer?.onOutputItem?.(item)
 			if (item?.type === "function_call" || item?.type === "tool_call") {
 				const callId = item.call_id || item.tool_call_id || item.id
 				const name = item.name || item.function?.name
@@ -98,6 +111,11 @@ export async function* processResponsesApiStream(
 
 		// Completion events — extract usage
 		if (event?.type === "response.completed" || event?.type === "response.done") {
+			assertResponsesApiSuccess(event.response)
+			if (Array.isArray(event.response?.output)) {
+				if (observer?.onCompletedOutput) observer.onCompletedOutput(event.response.output)
+				else for (const item of event.response.output) observer?.onOutputItem?.(item)
+			}
 			const usage = event?.response?.usage || event?.usage
 			const usageData = normalizeUsage(usage)
 			if (usageData) {

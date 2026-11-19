@@ -1,10 +1,9 @@
 import type OpenAI from "openai"
-import type { Anthropic } from "@anthropic-ai/sdk"
 import type { ModelInfo } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 import type { OpenAiReasoningParams } from "../../transform/reasoning"
-import { convertToResponsesApiInput } from "../../transform/responses-api-input"
+import { convertToResponsesApiInput, type ResponsesApiMessage } from "../../transform/responses-api-input"
 import {
 	sanitizeSurrogates,
 	sanitizeSurrogatesDeep,
@@ -16,7 +15,7 @@ type ResponsesRequestInput = {
 	modelInfo: ModelInfo
 	reasoning: OpenAiReasoningParams | undefined
 	systemPrompt: string
-	messages: Anthropic.Messages.MessageParam[]
+	messages: ResponsesApiMessage[]
 	metadata?: ApiHandlerCreateMessageMetadata
 	tools: OpenAI.Chat.Completions.ChatCompletionTool[] | undefined
 	extraBody: Readonly<Record<string, unknown>>
@@ -35,20 +34,23 @@ export function buildResponsesRequest({
 }: ResponsesRequestInput): OpenAI.Responses.ResponseCreateParams {
 	// Sanitize before conversion, including strings inside JSON tool arguments.
 	// Encode IDs first so distinct tool calls remain distinct after sanitization.
-	const history = messages.map((message) => ({
-		...message,
-		content:
-			typeof message.content === "string"
-				? message.content
-				: message.content.map((part) => {
-						if (part.type === "tool_use") return { ...part, id: sanitizeIdentifierSurrogates(part.id) }
-						if (part.type === "tool_result")
-							return { ...part, tool_use_id: sanitizeIdentifierSurrogates(part.tool_use_id) }
-						return part
-					}),
-	}))
+	const history = messages.map((message) => {
+		if (!("role" in message)) return message
+		return {
+			...message,
+			content:
+				typeof message.content === "string"
+					? message.content
+					: message.content.map((part) => {
+							if (part.type === "tool_use") return { ...part, id: sanitizeIdentifierSurrogates(part.id) }
+							if (part.type === "tool_result")
+								return { ...part, tool_use_id: sanitizeIdentifierSurrogates(part.tool_use_id) }
+							return part
+						}),
+		}
+	})
 	// The deep sanitizer preserves the message structure and only replaces strings.
-	const sanitizedHistory = sanitizeSurrogatesDeep(history) as Anthropic.Messages.MessageParam[]
+	const sanitizedHistory = sanitizeSurrogatesDeep(history) as ResponsesApiMessage[]
 	const requestBody: OpenAI.Responses.ResponseCreateParams = {
 		model: options.openAiModelId ?? "",
 		instructions: sanitizeSurrogates(systemPrompt),
@@ -67,7 +69,7 @@ export function buildResponsesRequest({
 			effort: reasoning.reasoning_effort,
 		}
 		// Only request encrypted reasoning content when reasoning is active.
-		requestBody.include = ["reasoning.encrypted_content"]
+		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
 	}
 
 	// Mirror the Chat Completions temperature policy: omit it unless the
@@ -79,8 +81,9 @@ export function buildResponsesRequest({
 
 	// Mirror the Chat Completions max-tokens policy: only cap output when the
 	// user opted in via includeMaxTokens.
-	if (options.includeMaxTokens === true) {
-		requestBody.max_output_tokens = options.modelMaxTokens || modelInfo.maxTokens
+	const maxTokens = options.modelMaxTokens || modelInfo.maxTokens
+	if (options.includeMaxTokens === true && maxTokens !== undefined) {
+		requestBody.max_output_tokens = maxTokens
 	}
 
 	// convertToolsForOpenAI already applies the strict/non-strict schema
@@ -110,8 +113,7 @@ export function buildResponsesRequest({
  * Maps a Chat Completions tool choice to the Responses API shape. String
  * options (auto/required/none) are identical in both APIs; named-tool
  * choices nest the name under `function`/`custom` in Chat Completions but
- * keep it at the top level in the Responses API. The Chat Completions
- * `allowed_tools` shape has no equivalent mapping here and is omitted.
+ * keep it at the top level in the Responses API. Allowed function references are flattened while retaining their restriction mode.
  */
 function mapToolChoiceForResponsesApi(
 	toolChoice: NonNullable<OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]>,
@@ -124,7 +126,18 @@ function mapToolChoiceForResponsesApi(
 			return { type: "function", name: toolChoice.function.name }
 		case "custom":
 			return { type: "custom", name: toolChoice.custom.name }
-		default:
-			return undefined
+		case "allowed_tools":
+			return {
+				type: "allowed_tools",
+				mode: toolChoice.allowed_tools.mode,
+				tools: toolChoice.allowed_tools.tools.map((entry) => {
+					if (entry.type !== "function") return entry
+					const ref = entry.function
+					const name = ref && typeof ref === "object" && "name" in ref ? ref.name : undefined
+					if (typeof name !== "string" || !name)
+						throw new Error("Responses allowed_tools entry requires a function name")
+					return { type: "function", name }
+				}),
+			}
 	}
 }
