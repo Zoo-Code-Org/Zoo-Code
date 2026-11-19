@@ -7,6 +7,7 @@ import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/ap
 import { TagMatcher } from "../../utils/tag-matcher"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { convertToOpenAiMessages } from "../transform/openai-format"
+import { normalizeChatUsage } from "../transform/chat-usage-normalization"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { DEFAULT_HEADERS } from "./constants"
@@ -193,10 +194,14 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 	}
 
 	protected processUsageMetrics(usage: any, modelInfo?: any): ApiStreamUsageChunk {
-		const inputTokens = usage?.prompt_tokens || 0
-		const outputTokens = usage?.completion_tokens || 0
-		const cacheWriteTokens = usage?.prompt_tokens_details?.cache_write_tokens || 0
-		const cacheReadTokens = usage?.prompt_tokens_details?.cached_tokens || 0
+		// The normalizer resolves one value per field across the OpenAI-compatible
+		// cache shapes. It is the only reader here, so nothing is mapped twice and
+		// two shapes describing the same quantity are never summed.
+		const normalized = normalizeChatUsage(usage)
+		const inputTokens = normalized?.inputTokens ?? 0
+		const outputTokens = normalized?.outputTokens ?? 0
+		const cacheWriteTokens = normalized?.cacheWriteTokens ?? 0
+		const cacheReadTokens = normalized?.cacheReadTokens ?? 0
 
 		const { totalCost } = modelInfo
 			? calculateApiCostOpenAI(modelInfo, inputTokens, outputTokens, cacheWriteTokens, cacheReadTokens)

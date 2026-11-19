@@ -93,6 +93,11 @@ function calculateApiCostInternal(
 	const writes12h = Math.min(Math.max(0, cacheCreation12hInputTokens), writesTotal - writes1h)
 	const writes5m = Math.max(0, writesTotal - writes1h - writes12h)
 
+	// A cache price the catalog does not declare bills at $0 by design: an
+	// undeclared read discount is never re-priced at the input price, and an
+	// unpriced model must not leak `undefined * 0` as `NaN`. The `|| 0` on the
+	// resolved rates is the kernel's declared-write fallback, not a re-pricing
+	// of undeclared reads.
 	const writes5mRate = modelInfo.cacheWritesPrice || 0
 	const writes1hRate = resolveCacheWriteRate(modelInfo, modelInfo.cacheWritesPrice1h, CACHE_WRITE_MULTIPLIER_1H) || 0
 	const writes12hRate =
