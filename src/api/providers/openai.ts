@@ -609,7 +609,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 }
 
-export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiHeaders?: Record<string, string>) {
+export async function getOpenAiModels(
+	baseUrl?: string,
+	apiKey?: string,
+	openAiHeaders?: Record<string, string>,
+	options: { throwOnError?: boolean } = {},
+) {
 	try {
 		if (!baseUrl) {
 			return []
@@ -639,7 +644,9 @@ export async function getOpenAiModels(baseUrl?: string, apiKey?: string, openAiH
 		const response = await axios.get(`${trimmedBaseUrl}/models`, config)
 		const modelsArray = response.data?.data?.map((model: any) => model.id) || []
 		return [...new Set<string>(modelsArray)]
-	} catch {
+	} catch (error) {
+		// The provider-info broker needs failures; legacy Settings callers expect an empty list.
+		if (options.throwOnError) throw error
 		return []
 	}
 }

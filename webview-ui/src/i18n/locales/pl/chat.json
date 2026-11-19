@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "Profil:",
+		"selectProfile": "Wybierz profil",
+		"loadingProfile": "Ładowanie profilu…",
+		"searchModels": "Szukaj modeli",
+		"providerModels": "Modele bieżącego dostawcy",
+		"modelSettingsHint": "Wybierz model w ustawieniach profilu.",
+		"clearSearch": "Wyczyść wyszukiwanie",
+		"reasoningEffort": "Intensywność rozumowania",
+		"reasoningEffortValue": "Intensywność rozumowania: {{effort}}",
+		"off": "Wył.",
+		"effort": {
+			"none": "Brak",
+			"minimal": "Minimalna",
+			"low": "Niska",
+			"medium": "Średnia",
+			"high": "Wysoka",
+			"xhigh": "Bardzo wysoka",
+			"max": "Maksymalna"
+		}
+	},
 	"task": {
 		"title": "Zadanie",
 		"expand": "Rozwiń zadanie",

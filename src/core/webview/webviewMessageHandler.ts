@@ -28,6 +28,7 @@ import {
 	OllamaModelsMessageType,
 	OpenAiModelsMessageType,
 	RouterModelsMessageType,
+	providerSettingsSchema,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 } from "@roo-code/types"
@@ -1178,7 +1179,11 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case RouterModelsMessageType.requestRouterModels: {
-			const { apiConfiguration } = await provider.getState()
+			// A scoped picker request owns its configuration, even if the active profile changes
+			// while discovery is in flight. Do not merge absent credentials from global state.
+			const apiConfiguration = message.apiConfiguration
+				? providerSettingsSchema.parse(message.apiConfiguration)
+				: (await provider.getState()).apiConfiguration
 
 			// Optional single provider filter from webview
 			const requestedProvider = message?.values?.provider
@@ -1482,6 +1487,7 @@ export const webviewMessageHandler = async (
 
 			await provider.postMessageToWebview({
 				type: RouterModelsMessageType.routerModels,
+				requestId: message.requestId,
 				routerModels,
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})

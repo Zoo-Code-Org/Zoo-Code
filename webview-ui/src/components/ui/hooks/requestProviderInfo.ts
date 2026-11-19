@@ -9,24 +9,26 @@ const TIMEOUT_MS = 20_000
 export const requestProviderInfo = <K extends ProviderInfoKind>(
 	kind: K,
 	params: ProviderInfoParams,
+	signal?: AbortSignal,
 ): Promise<ProviderInfoResultMap[K]> =>
 	new Promise<ProviderInfoResultMap[K]>((resolve, reject) => {
+		if (signal?.aborted) return reject(new DOMException("Provider info request aborted", "AbortError"))
 		const requestId = crypto.randomUUID()
 
-		const cleanup = () => {
+		const cleanup = (error?: unknown) => {
 			clearTimeout(timeout)
 			window.removeEventListener("message", handler)
+			signal?.removeEventListener("abort", onAbort)
+			if (error !== undefined) reject(error)
 		}
+		const onAbort = () => cleanup(new DOMException("Provider info request aborted", "AbortError"))
 
-		const timeout = setTimeout(() => {
-			cleanup()
-			reject(new Error("Provider info request timed out"))
-		}, TIMEOUT_MS)
+		const timeout = setTimeout(() => cleanup(new Error("Provider info request timed out")), TIMEOUT_MS)
 
 		const handler = (event: MessageEvent) => {
 			const message: ExtensionMessage = event.data
 
-			if (message.type !== "providerInfo" || message.requestId !== requestId) return
+			if (message?.type !== "providerInfo" || message.requestId !== requestId) return
 
 			cleanup()
 
@@ -38,5 +40,10 @@ export const requestProviderInfo = <K extends ProviderInfoKind>(
 		}
 
 		window.addEventListener("message", handler)
-		vscode.postMessage({ type: "requestProviderInfo", requestId, values: { kind, ...params } })
+		signal?.addEventListener("abort", onAbort, { once: true })
+		try {
+			vscode.postMessage({ type: "requestProviderInfo", requestId, values: { kind, ...params } })
+		} catch (error) {
+			cleanup(error)
+		}
 	})

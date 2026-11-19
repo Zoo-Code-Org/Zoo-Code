@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "Profiel:",
+		"selectProfile": "Profiel kiezen",
+		"loadingProfile": "Profiel laden…",
+		"searchModels": "Modellen zoeken",
+		"providerModels": "Modellen van de huidige aanbieder",
+		"modelSettingsHint": "Kies een model in de profielinstellingen.",
+		"clearSearch": "Zoekopdracht wissen",
+		"reasoningEffort": "Redeneerinspanning",
+		"reasoningEffortValue": "Redeneerinspanning: {{effort}}",
+		"off": "Uit",
+		"effort": {
+			"none": "Geen",
+			"minimal": "Minimaal",
+			"low": "Laag",
+			"medium": "Gemiddeld",
+			"high": "Hoog",
+			"xhigh": "Zeer hoog",
+			"max": "Maximaal"
+		}
+	},
 	"task": {
 		"title": "Taak",
 		"expand": "Taak uitvouwen",

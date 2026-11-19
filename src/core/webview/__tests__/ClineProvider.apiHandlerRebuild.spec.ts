@@ -5,7 +5,13 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import {
+	getModelId,
+	openAiModelInfoSaneDefaults,
+	reasoningEffortSettingValues,
+	RooCodeEventName,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -442,6 +448,126 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		beforeEach(() => {
 			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(storedProfile)
 			vi.mocked(vscode.window.showErrorMessage).mockClear()
+		})
+
+		test.each(reasoningEffortSettingValues)("persists a reasoning-only update: %s", async (reasoningEffort) => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { reasoningEffort })
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4", rateLimitSeconds: 5, reasoningEffort }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test.each([true, false])("persists enableReasoningEffort=%s", async (enableReasoningEffort) => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, { enableReasoningEffort })
+			expect(provider["providerSettingsManager"].saveConfig).toHaveBeenCalledWith(
+				"test-config",
+				expect.objectContaining({ openRouterModelId: "openai/gpt-4", enableReasoningEffort }),
+			)
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("applies reasoning-only changes to the current task even when its model stays the same", async () => {
+			const task = new Task({ ...defaultTaskOptions })
+			await provider.addClineToStack(task)
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				reasoningEffort: "disable",
+				enableReasoningEffort: false,
+			})
+			expect(task.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({
+					openRouterModelId: "openai/gpt-4",
+					reasoningEffort: "disable",
+					enableReasoningEffort: false,
+				}),
+			)
+		})
+
+		test("merges queued effort into the profile written by the preceding model update", async () => {
+			const manager = provider["providerSettingsManager"]
+			let latest: ProviderSettings & { name: string } = {
+				name: "test-config",
+				apiProvider: providerIdentifiers.openai,
+				openAiModelId: "old-model",
+				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, description: "original" },
+			}
+			manager.getProfile = vi.fn().mockImplementation(async () => latest)
+			vi.mocked(manager.saveConfig).mockImplementation(async (name, config) => {
+				latest = {
+					...config,
+					name,
+					openAiCustomModelInfo: {
+						...(config.openAiCustomModelInfo ?? openAiModelInfoSaneDefaults),
+						description: "newer metadata",
+					},
+				}
+				return "test-id"
+			})
+			await Promise.all([
+				provider.updateProfileModel("test-config", providerIdentifiers.openai, { openAiModelId: "new-model" }),
+				provider.updateProfileModel("test-config", providerIdentifiers.openai, {
+					openAiCustomModelInfo: { reasoningEffort: "high" },
+				}),
+			])
+			expect(manager.saveConfig).toHaveBeenCalledTimes(2)
+			expect(vi.mocked(manager.saveConfig).mock.calls[1][1]).toMatchObject({
+				openAiModelId: "new-model",
+				openAiCustomModelInfo: { description: "newer metadata", reasoningEffort: "high" },
+			})
+		})
+
+		test.each(["high", null] as const)(
+			"merges nested custom effort %s into stored metadata",
+			async (reasoningEffort) => {
+				const info = { ...openAiModelInfoSaneDefaults, contextWindow: 12345, description: "custom metadata" }
+				const profile: ProviderSettings & { name: string } = {
+					name: "test-config",
+					apiProvider: providerIdentifiers.openai,
+					openAiModelId: "custom-model",
+					openAiApiKey: "secret",
+					openAiCustomModelInfo: { ...info, reasoningEffort: "low" },
+				}
+				provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(profile)
+				await provider.updateProfileModel("test-config", providerIdentifiers.openai, {
+					openAiCustomModelInfo: { reasoningEffort },
+				})
+				const saved = vi.mocked(provider["providerSettingsManager"].saveConfig).mock.calls[0][1]
+				expect(saved).toMatchObject({ openAiModelId: "custom-model", openAiApiKey: "secret" })
+				if (reasoningEffort === null) expect(saved.openAiCustomModelInfo).toEqual(info)
+				else expect(saved.openAiCustomModelInfo).toEqual({ ...info, reasoningEffort })
+				expect(profile.openAiCustomModelInfo?.reasoningEffort).toBe("low")
+			},
+		)
+
+		test.each([
+			{ apiModelId: "wrong-provider-field" },
+			{ reasoningEffort: "invalid" },
+			{ reasoningEffort: true },
+			{ enableReasoningEffort: "false" },
+			{ enableReasoningEffort: 1 },
+			{ openAiCustomModelInfo: { reasoningEffort: "high" } },
+		])("rejects invalid partial updates without persisting: %j", async (patch) => {
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, patch)
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test.each([
+			{ reasoningEffort: "disable" },
+			{ reasoningEffort: 1 },
+			{ reasoningEffort: "high", contextWindow: 1 },
+			{ openAiApiKey: "replacement" },
+			null,
+			[],
+		])("rejects unsafe nested metadata updates: %j", async (openAiCustomModelInfo) => {
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue({
+				name: "test-config",
+				apiProvider: providerIdentifiers.openai,
+			})
+			await provider.updateProfileModel("test-config", providerIdentifiers.openai, { openAiCustomModelInfo })
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
 		})
 
 		test("merges the patch into the latest stored profile, keeping newer settings and clearing null keys", async () => {

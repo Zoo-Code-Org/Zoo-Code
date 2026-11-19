@@ -30,10 +30,12 @@ export interface ProviderInfoParams {
 	apiKey?: string
 	baseUrl?: string
 	modelId?: string
+	headers?: Record<string, string>
 }
 
 /** Result of each lookup. The host and the webview share it, so the kind fixes the result type. */
 export interface ProviderInfoResultMap {
+	openAiModels: string[]
 	openRouterKeyInfo: {
 		label: string
 		usage: number

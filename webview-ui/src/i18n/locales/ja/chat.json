@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "プロファイル:",
+		"selectProfile": "プロファイルを選択",
+		"loadingProfile": "プロファイルを読み込み中…",
+		"searchModels": "モデルを検索",
+		"providerModels": "現在のプロバイダーのモデル",
+		"modelSettingsHint": "プロファイル設定でモデルを選択してね。",
+		"clearSearch": "検索をクリア",
+		"reasoningEffort": "推論の深さ",
+		"reasoningEffortValue": "推論の深さ: {{effort}}",
+		"off": "オフ",
+		"effort": {
+			"none": "なし",
+			"minimal": "最小",
+			"low": "低",
+			"medium": "中",
+			"high": "高",
+			"xhigh": "非常に高い",
+			"max": "最大"
+		}
+	},
 	"task": {
 		"title": "タスク",
 		"expand": "タスクを展開",

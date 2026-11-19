@@ -1129,6 +1129,36 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
+	it.each([
+		{ litellmBaseUrl: "https://profile-b.test/v1", litellmApiKey: "profile-b-secret" },
+		{ litellmBaseUrl: "https://profile-b.test/v1" },
+	])("uses only request-owned configuration and echoes correlation", async (apiConfiguration) => {
+		mockGetModels.mockResolvedValue({})
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			requestId: "profile-b-request",
+			apiConfiguration: { apiProvider: providerIdentifiers.litellm, ...apiConfiguration },
+			values: { provider: providerIdentifiers.litellm },
+		})
+		expect(mockClineProvider.getState).not.toHaveBeenCalled()
+		if (apiConfiguration.litellmApiKey) {
+			expect(mockGetModels).toHaveBeenCalledWith(
+				{
+					provider: providerIdentifiers.litellm,
+					apiKey: apiConfiguration.litellmApiKey,
+					baseUrl: apiConfiguration.litellmBaseUrl,
+				},
+				expect.anything(),
+			)
+		} else expect(mockGetModels).not.toHaveBeenCalled()
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			requestId: "profile-b-request",
+			values: { provider: providerIdentifiers.litellm },
+			routerModels: apiConfiguration.litellmApiKey ? { litellm: {} } : {},
+		})
+	})
+
 	it("successfully fetches models from all providers", async () => {
 		const mockModels: ModelRecord = {
 			"model-1": {

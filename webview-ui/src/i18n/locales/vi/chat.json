@@ -1,4 +1,25 @@
 {
+	"modelPicker": {
+		"profile": "Hồ sơ:",
+		"selectProfile": "Chọn hồ sơ",
+		"loadingProfile": "Đang tải hồ sơ…",
+		"searchModels": "Tìm mô hình",
+		"providerModels": "Mô hình của nhà cung cấp hiện tại",
+		"modelSettingsHint": "Chọn mô hình trong phần cài đặt hồ sơ.",
+		"clearSearch": "Xóa tìm kiếm",
+		"reasoningEffort": "Mức độ suy luận",
+		"reasoningEffortValue": "Mức độ suy luận: {{effort}}",
+		"off": "Tắt",
+		"effort": {
+			"none": "Không",
+			"minimal": "Tối thiểu",
+			"low": "Thấp",
+			"medium": "Trung bình",
+			"high": "Cao",
+			"xhigh": "Rất cao",
+			"max": "Tối đa"
+		}
+	},
 	"task": {
 		"title": "Nhiệm vụ",
 		"expand": "Mở rộng nhiệm vụ",

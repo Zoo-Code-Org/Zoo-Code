@@ -1,10 +1,35 @@
 import type { WebviewMessage } from "@roo-code/types"
+import axios, { AxiosError, AxiosHeaders } from "axios"
 
 import type { ClineProvider } from "../ClineProvider"
 import { getOpenRouterModelEndpoints } from "../../../api/providers/fetchers/openrouter"
+import { getOpenAiModels } from "../../../api/providers/openai"
 import { handleRequestProviderInfo } from "../providerInfoHandler"
 
 vi.mock("../../../api/providers/fetchers/openrouter", () => ({ getOpenRouterModelEndpoints: vi.fn() }))
+
+const OPENAI_FAILURES = [
+	[
+		"HTTP 401",
+		new AxiosError(
+			"Authorization: secret https://private.test returned 401",
+			"ERR_BAD_REQUEST",
+			undefined,
+			undefined,
+			{
+				status: 401,
+				statusText: "Unauthorized",
+				data: { error: "secret" },
+				headers: {},
+				config: {
+					url: "https://private.test/v1/models",
+					headers: new AxiosHeaders({ Authorization: "Bearer secret" }),
+				},
+			},
+		),
+	],
+	["network rejection", new Error("Authorization: secret https://private.test refused")],
+] as const
 
 const KEY_INFO = {
 	label: "sk-or-v1-...abc",
@@ -35,13 +60,126 @@ describe("handleRequestProviderInfo", () => {
 
 	beforeEach(() => {
 		postMessageToWebview.mockReset()
+		vi.mocked(provider.log).mockReset()
 		vi.mocked(getOpenRouterModelEndpoints).mockReset()
+		vi.spyOn(axios, "get").mockResolvedValue({ data: { data: [{ id: "model" }, { id: "model" }] } })
 		fetchSpy = vi.spyOn(globalThis, "fetch")
 		vi.spyOn(console, "error").mockImplementation(() => {})
 	})
 
 	afterEach(() => {
 		vi.restoreAllMocks()
+	})
+
+	it("rejects a request with no values without contacting a provider", async () => {
+		await send(undefined)
+
+		expect(fetchSpy).not.toHaveBeenCalled()
+		expect(axios.get).not.toHaveBeenCalled()
+		expect(getOpenRouterModelEndpoints).not.toHaveBeenCalled()
+		expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			error: "Invalid provider info request",
+		})
+	})
+
+	it.each([undefined, {}, { Authorization: "custom-token", "X-Provider": "custom" }])(
+		"fetches OpenAI models with caller credentials and headers %j",
+		async (headers) => {
+			await send({ kind: "openAiModels", baseUrl: "https://compatible.test/v1", apiKey: "secret", headers })
+			expect(axios.get).toHaveBeenCalledExactlyOnceWith("https://compatible.test/v1/models", {
+				headers: expect.objectContaining({ ...headers, Authorization: "Bearer secret" }),
+			})
+			expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "providerInfo",
+				requestId: "req-1",
+				values: { data: ["model"] },
+			})
+		},
+	)
+
+	it.each([null, "invalid", ["header"], { custom: 42 }])("rejects malformed OpenAI headers %j", async (headers) => {
+		await send({ kind: "openAiModels", headers })
+		expect(axios.get).not.toHaveBeenCalled()
+		expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			error: "Invalid provider info request",
+		})
+	})
+
+	it.each(OPENAI_FAILURES)(
+		"sanitizes OpenAI %s from the real helper while retaining correlation",
+		async (_name, error) => {
+			vi.mocked(axios.get).mockRejectedValueOnce(error)
+			await send({ kind: "openAiModels", baseUrl: "https://private.test/v1", apiKey: "secret" })
+			expect(axios.get).toHaveBeenCalledExactlyOnceWith("https://private.test/v1/models", {
+				headers: expect.objectContaining({ Authorization: "Bearer secret" }),
+			})
+			expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+				type: "providerInfo",
+				requestId: "req-1",
+				error: "Provider info request failed",
+			})
+			expect(provider.log).toHaveBeenCalledExactlyOnceWith("Failed to fetch provider info (openAiModels)")
+			expect(console.error).toHaveBeenCalledExactlyOnceWith(
+				"Error fetching provider info (openAiModels):",
+				error.name,
+			)
+			const exposed = JSON.stringify([
+				postMessageToWebview.mock.calls,
+				vi.mocked(provider.log).mock.calls,
+				vi.mocked(console.error).mock.calls,
+			])
+			expect(exposed).not.toContain("secret")
+			expect(exposed).not.toContain("private.test")
+		},
+	)
+
+	it("sanitizes a non-Error provider rejection without leaking its credentials", async () => {
+		vi.mocked(axios.get).mockRejectedValueOnce("secret https://private.test refused")
+
+		await send({ kind: "openAiModels", baseUrl: "https://private.test/v1", apiKey: "secret" })
+
+		expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			error: "Provider info request failed",
+		})
+		expect(provider.log).toHaveBeenCalledExactlyOnceWith("Failed to fetch provider info (openAiModels)")
+		expect(console.error).toHaveBeenCalledExactlyOnceWith("Error fetching provider info (openAiModels):", "unknown")
+	})
+
+	it("returns a successful empty OpenAI catalog rather than a broker error", async () => {
+		vi.mocked(axios.get).mockResolvedValueOnce({ data: { data: [] } })
+		await send({ kind: "openAiModels", baseUrl: "https://compatible.test/v1" })
+		expect(axios.get).toHaveBeenCalledExactlyOnceWith("https://compatible.test/v1/models", {
+			headers: expect.not.objectContaining({ Authorization: expect.anything() }),
+		})
+		expect(postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "providerInfo",
+			requestId: "req-1",
+			values: { data: [] },
+		})
+		expect(provider.log).not.toHaveBeenCalled()
+		expect(console.error).not.toHaveBeenCalled()
+	})
+
+	it.each(OPENAI_FAILURES)("preserves legacy empty-list behavior on %s", async (_name, error) => {
+		vi.mocked(axios.get).mockRejectedValue(error)
+		await expect(getOpenAiModels("https://compatible.test/v1", "secret")).resolves.toEqual([])
+		await expect(
+			getOpenAiModels("https://compatible.test/v1", "secret", undefined, { throwOnError: false }),
+		).resolves.toEqual([])
+		expect(axios.get).toHaveBeenCalledTimes(2)
+	})
+
+	it.each(OPENAI_FAILURES)("propagates the original %s only when strict mode is enabled", async (_name, error) => {
+		vi.mocked(axios.get).mockRejectedValueOnce(error)
+		await expect(
+			getOpenAiModels("https://compatible.test/v1", "secret", undefined, { throwOnError: true }),
+		).rejects.toBe(error)
 	})
 
 	it("fetches OpenRouter key info from the default endpoint with a bearer token", async () => {
