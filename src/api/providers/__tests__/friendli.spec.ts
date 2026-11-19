@@ -25,6 +25,14 @@ vi.mock("../fetchers/friendli", () => ({ getFriendliModels: mockGetFriendliModel
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
+	// 1311 adds an APIUserAbortError import at api/providers/utils/error-handler.ts:12 and reads
+	// it in handleOpenAIRequestError at :150 and :160, so a mock without that named export lets
+	// vitest's missing-export error replace the 401 job 129957461109 saw asserted at
+	// friendli.spec.ts:104:29 (2 failed of 66 twice at this head against 66 passed twice at
+	// main tip 18861b2e3572, CI ubuntu and local Windows agreeing exactly). Ten sibling
+	// provider specs already stub the export; this mock joins them rather than bending
+	// production error handling around a test double.
+	APIUserAbortError: class extends Error {},
 	default: vi.fn(function () {
 		return {
 			chat: {

@@ -159,8 +159,8 @@ export function isRequestAborted(error: unknown, signal?: AbortSignal): boolean 
  * message "Request was aborted."), so raw SDK abort errors must be
  * normalized instead of rethrown.
  */
-export function createAbortError(providerName: string): Error {
-	const abortError = new Error(`The ${providerName} request was aborted`)
+export function createAbortError(providerName: string, cause?: unknown): Error {
+	const abortError = new Error(`The ${providerName} request was aborted`, cause === undefined ? undefined : { cause })
 	abortError.name = "AbortError"
 	return abortError
 }
