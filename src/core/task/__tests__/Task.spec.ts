@@ -5968,7 +5968,8 @@ describe("Cline", () => {
 						try {
 							const request = task.attemptApiRequest(0).next()
 							await building
-							task[flag] = true
+							if (flag === "abort") setAbortLatch(task, true)
+							else task[flag] = true
 							release()
 							await expect(request).rejects.toThrow("aborted during request construction")
 							expect(createMessage).not.toHaveBeenCalled()
@@ -6038,18 +6039,18 @@ describe("Cline", () => {
 						const overwrite = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
 						if (cancelAt === "build")
 							build.mockImplementationOnce(async () => {
-								task["abort"] = true
+								setAbortLatch(task, true)
 								return { tools }
 							})
 						if (cancelAt === "environment")
 							vi.mocked(getEnvironmentDetails).mockImplementationOnce(async () => {
-								task["abort"] = true
+								setAbortLatch(task, true)
 								return ""
 							})
 						if (cancelAt === "summary")
 							vi.mocked(summarizeConversation).mockImplementationOnce(async ({ metadata }) => {
 								expect(metadata?.abortSignal).toBeDefined()
-								task["abort"] = true
+								setAbortLatch(task, true)
 								task["currentRequestAbortController"]?.abort()
 								expect(metadata?.abortSignal?.aborted).toBe(true)
 								return { messages: [], summary: "canceled", cost: 0, newContextTokens: 1 }
