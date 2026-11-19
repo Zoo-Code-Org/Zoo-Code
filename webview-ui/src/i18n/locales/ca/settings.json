@@ -696,6 +696,10 @@
 		"enable": {
 			"label": "Habilitar punts de control automàtics",
 			"description": "Quan està habilitat, Zoo crearà automàticament punts de control durant l'execució de tasques, facilitant la revisió de canvis o la reversió a estats anteriors. <0>Més informació</0>"
+		},
+		"perWrite": {
+			"label": "Punt de control després de cada escriptura de fitxer",
+			"description": "Registra un punt de verificació després de cada escriptura correcta de les eines write_to_file, edit_file o apply_patch de l'agent; un pegat de diversos fitxers produeix un únic punt de verificació. Desar un fitxer des de l'editor no en registra cap."
 		}
 	},
 	"notifications": {

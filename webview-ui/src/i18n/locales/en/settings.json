@@ -768,6 +768,10 @@
 		"enable": {
 			"label": "Enable automatic checkpoints",
 			"description": "When enabled, Zoo will automatically create checkpoints during task execution, making it easy to review changes or revert to earlier states. <0>Learn more</0>"
+		},
+		"perWrite": {
+			"label": "Checkpoint after each file write",
+			"description": "Record a checkpoint after each successful write by the agent's write_to_file, edit_file or apply_patch tools; a multi-file patch produces a single checkpoint. Saving a file from the editor does not record one."
 		}
 	},
 	"notifications": {
