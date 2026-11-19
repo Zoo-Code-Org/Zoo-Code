@@ -316,7 +316,7 @@
 	},
 	"api/providers/poe.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/requesty.ts": {
