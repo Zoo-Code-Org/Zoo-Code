@@ -96,8 +96,10 @@ describe.sequential("CustomToolRegistry integration", () => {
 			fs.mkdirSync(cacheDir, { mode: 0o700 })
 			const stat = fs.lstatSync(cacheDir)
 			stat.uid += 1
-			// The first lstat is the existing parent, then the cache root.
-			const spy = vi.spyOn(fs, "lstatSync").mockReturnValueOnce(fs.statSync(sandbox)).mockReturnValueOnce(stat)
+			const originalLstat = fs.lstatSync
+			const spy = vi.spyOn(fs, "lstatSync").mockImplementation((location, options) => {
+				return location === cacheDir ? stat : originalLstat(location, options)
+			})
 			try {
 				expect((await registry.loadFromDirectory(toolDir)).failed[0]?.error).toContain(
 					"Unsafe custom tool cache",
@@ -106,6 +108,47 @@ describe.sequential("CustomToolRegistry integration", () => {
 				spy.mockRestore()
 			}
 		})
+
+		it.each(["success", "build failure", "validation failure", "publish failure"])(
+			"publishes only complete private bundles and removes pending files: %s",
+			async (outcome) => {
+				const bundle = path.join(entryDir, "bundle.mjs")
+				const originalChmod = fs.chmodSync
+				const originalRename = fs.renameSync
+				const chmod = vi.spyOn(fs, "chmodSync").mockImplementation((location, mode) => {
+					if (String(location).endsWith(".mjs")) {
+						expect(fs.existsSync(bundle)).toBe(false)
+						expect(fs.readFileSync(location, "utf8")).toContain('name: "safe"')
+						if (outcome === "validation failure") return originalChmod(location, 0o644)
+					}
+					return originalChmod(location, mode)
+				})
+				const rename = vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+					expect(destination).toBe(bundle)
+					expect(fs.statSync(source).mode & 0o777).toBe(0o600)
+					if (outcome === "publish failure") throw new Error("Synthetic publish failure")
+					originalRename(source, destination)
+				})
+				if (outcome === "build failure") fs.writeFileSync(path.join(toolDir, "safe.ts"), "export default {")
+				try {
+					const result = await registry.loadFromDirectory(toolDir)
+					expect(result.loaded).toEqual(outcome === "success" ? ["safe"] : [])
+					expect(result.failed).toHaveLength(outcome === "success" ? 0 : 1)
+					// A source change creates a new hash, so inspect all entries.
+					const entries = fs.readdirSync(cacheDir)
+					for (const entry of entries) {
+						expect(
+							fs.readdirSync(path.join(cacheDir, entry)).filter((name) => name.endsWith(".tmp.mjs")),
+						).toEqual([])
+					}
+					expect(fs.existsSync(bundle)).toBe(outcome === "success")
+					expect(rename).toHaveBeenCalledTimes(outcome === "success" || outcome === "publish failure" ? 1 : 0)
+				} finally {
+					chmod.mockRestore()
+					rename.mockRestore()
+				}
+			},
+		)
 
 		it("creates nested configured cache directories privately", async () => {
 			const nested = path.join(cacheDir, "nested", "cache")
