@@ -254,7 +254,8 @@ export class CustomToolRegistry {
 
 	private prepareCacheDirectory(): void {
 		// Resolve platform aliases (e.g. /var on macOS), then check ancestors before writing.
-		let ancestor = path.dirname(path.resolve(this.cacheDir))
+		const normalizedCacheDir = path.resolve(this.cacheDir)
+		let ancestor = path.dirname(normalizedCacheDir)
 		const missing: string[] = []
 		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
 			missing.unshift(path.basename(ancestor))
@@ -277,7 +278,7 @@ export class CustomToolRegistry {
 			fs.mkdirSync(parent, { recursive: true, mode: 0o700 })
 			this.validateCachePath(parent, true)
 		}
-		this.cacheDir = path.join(parent, path.basename(this.cacheDir))
+		this.cacheDir = path.join(parent, path.basename(normalizedCacheDir))
 		fs.mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 })
 		this.validateCachePath(this.cacheDir, true)
 	}

@@ -1,54 +1,40 @@
 ------------------------- MODULE CustomToolCache -------------------------
-(*
-Source: CustomToolRegistry.import calls runEsbuild. Sink: import(bundle.mjs).
-Failure: A reader sees a bundle before the write and mode checks finish.
-Invariant: Each visible bundle is complete, private, and checked.
-Failure: A failed writer leaves a pending file. Invariant: Failed writers clean up.
-Expectation: Direct publication fails. Private staging passes. No new bug expected.
-The review was read before this spec. The first-invariant blind step was missed.
-Cost: One agent, about 6 minutes for the model and checks; no delegate.
-TLC: Direct config fails VisibleIsReady at Start (2 states). Fixed config
-passes both invariants (49 distinct states, depth 11). Each run took under 1s.
-Replay: The four-case publication property fails 3 cases on the old code.
-The fixed code passes all 53 focused tests. Type and lint checks pass.
-Property: No bundle is visible before its mode check. Failed builds leave
-no pending file. Tests cover success, compiler, validation, and rename errors.
-Findings: The known review bug is present. No new bug or false alarm found.
-The model does not prove the code. Stop can leave an unpublished temp file.
-Gate: Run all configs against CustomToolCacheMC and both property tables on each fix.
-Sandbox note: TLC needs a local RMI socket. Host tests avoid mapped root uid.
-Review ratchet: PR #2485 threads PRRT_kwDOSK-bwM64vzgN (ownership test),
-PRRT_kwDOSK-bwM64vzgR (defaults), PRRT_kwDOSK-bwM64vzgV (publication).
-Added: 1 (publication). Gap: 2 (test routing and path defaults). Covered: 0.
-The original gaps use direct table tests.
-Round 2: PR #2485, thread PRRT_kwDOSK-bwM64vzgN, reply 4622881580.
-Failure: A raw path match misses the cache root after parent alias resolution.
-Invariant: The ownership double matches the resolved root for each path.
-Expectation: Raw matching fails for an alias. Canonical matching passes.
-Added: 1. Covered: 0. Gap: 0. The compiler and path lookup remain oracles.
-Round 2 cost: One agent, about 3 minutes; no delegate.
-TLC: RawPath fails OwnershipMockReachesRoot. Direct fails VisibleIsReady.
-Fixed passes all three invariants (49 states). Each run took under 1s.
-Replay: The raw comparison passes the direct case and fails the alias case.
-Findings: The known path mismatch is real. No new bug or false alarm found.
-The path property checks both routes with the real filesystem and registry.
-Round 2 validation: All 54 registry tests, type checking, and package lint pass.
-The compiler and file checks are oracles. Two writers use distinct pending names.
-A reader can run after each step. Stop leaves the last file state on disk.
-Round 3: PR #2485, thread PRRT_kwDOSK-bwM65T3Dd, comment 4623919335.
-Failure: The protocol fixes the writer count. The MC module must set the bound.
-Expectation: Move the bound without changing the states or counterexamples.
-Gap: 1. Added: 0. Covered: 0. A state invariant cannot check module placement.
-The MC module supplies Writers. The protocol has no fixed writer count.
-Round 3 cost: One agent, about 4 minutes; no delegate.
-TLC: Fixed passes (49 states, depth 11). Direct fails VisibleIsReady (2 states).
-RawPath fails OwnershipMockReachesRoot. Final runs took 27 to 42s.
-Replay: Both existing property tables pass on the host (6 cases).
-Findings: No new bug or false alarm. The model checks the same states.
-Run: java -cp <jar> tlc2.TLC -metadir <tmp> -config <cfg> CustomToolCacheMC
-*)
+(* Sources: CustomToolRegistry.import/runEsbuild and RegistryOptions.cacheDir.
+Sinks: import(bundle.mjs), the lstatSync test double, and clearCache. *)
+(* VisibleIsReady: Readers see only complete, private, checked bundles.
+FailedIsClean: Failed writers leave no pending file. *)
+(* OwnershipMockReachesRoot: The ownership double matches the resolved cache root.
+CleanupSelectsRoot: Cleanup selects the configured root for each input path. *)
+(* UnsafeRootIsUntouched: Cleanup preserves roots that fail validation.
+Compiler, path results, and filesystem checks are oracles. MC sets the bounds. *)
+(* Expectation: Each faulty variant fails its invariant. Fixed variants pass.
+The reviews preceded the new invariants. The blind step was missed. *)
+(* Findings: Replays confirm the reported bugs. No new bug or false alarm found.
+The model does not prove the code. A stopped process can leave a pending file. *)
+(* TLC: Fixed passes all five invariants (49 states, depth 11).
+Direct fails VisibleIsReady after Start (2 states). RawPath fails at the start. *)
+(* MixedPath fails CleanupSelectsRoot. NoCleanupGuard fails UnsafeRootIsUntouched.
+Latest runs took under 1s each. Round 3 runs took 27 to 42s. *)
+(* Replay: Old publication fails 3 of 4 cases. Raw ownership matching fails aliases.
+Old cleanup fails 4 of 7 cases. Guard sabotage deletes all 3 unsafe sentinels. *)
+(* Validation: Fixed code passes 40 integration and 21 unit tests.
+Both type checks and focused lint pass. Suppression counts do not increase. *)
+(* Review ratchet, PR #2485: Added 4, covered 0, gap 4 across four rounds.
+Gaps cover test routing, defaults, module placement, and PR metadata. *)
+(* Round 1: Threads PRRT_kwDOSK-bwM64vzgN, PRRT_kwDOSK-bwM64vzgR, PRRT_kwDOSK-bwM64vzgV. Added 1, gap 2.
+Publication became an invariant. Test routing and defaults use direct tests. *)
+(* Round 2: Thread PRRT_kwDOSK-bwM64vzgN, reply 4622881580. Added 1.
+Canonical ownership matching became an invariant. *)
+(* Round 3: Thread PRRT_kwDOSK-bwM65T3Dd, comment 4623919335. Gap 1.
+Writer bounds moved to MC. A state invariant cannot check module placement. *)
+(* Round 4: Review 5968844313. Added 2, gap 1.
+Cleanup gained two invariants. PR metadata is outside the model. *)
+(* Cost: One agent, no delegates. Rounds 1/2/3/4 took about 6/3/4/6 minutes.
+Header cleanup took about 2 minutes. These are work estimates. *)
+(* Gate: Run all five configs against CustomToolCacheMC and the property tables.
+Use -metadir outside the repo. TLC needs a local socket. Run file tests on the host. *)
 EXTENDS Naturals, TLC
-CONSTANTS AtomicPublish, CanonicalMatch, Writers
+CONSTANTS AtomicPublish, CanonicalMatch, Writers, NormalizeCache, GuardCleanup, CleanupCases
 VARIABLES phase, published, pending
 vars == <<phase, published, pending>>
 Init == /\ phase = [w \in Writers |-> "idle"]
@@ -85,4 +71,9 @@ CachePaths == {"cache", "alias/cache"}
 Canonical(p) == IF p = "alias/cache" THEN "cache" ELSE p
 MockTarget(p) == IF CanonicalMatch THEN Canonical(p) ELSE p
 OwnershipMockReachesRoot == \A p \in CachePaths : MockTarget(p) = Canonical(p)
+(* Path results are input oracles. The model does not copy Node path parsing. *)
+CleanupTarget(c) == IF NormalizeCache THEN c.normalizedTarget ELSE c.mixedTarget
+CleanupSelectsRoot == \A c \in CleanupCases : CleanupTarget(c) = c.root
+MayClear(safe) == IF GuardCleanup THEN safe ELSE TRUE
+UnsafeRootIsUntouched == \A safe \in BOOLEAN : ~safe => ~MayClear(safe)
 =============================================================================

@@ -63,6 +63,40 @@ describe.sequential("CustomToolRegistry integration", () => {
 			expect(fs.readdirSync(cacheDir)).toEqual([])
 		})
 
+		it.each(["", "/.", "/./.", "/nested/.."])("clears only the configured cache with suffix %s", (suffix) => {
+			fs.mkdirSync(cacheDir, { mode: 0o700 })
+			fs.mkdirSync(path.join(cacheDir, "nested"))
+			const cachedBundle = path.join(cacheDir, "bundle.mjs")
+			const sibling = path.join(toolDir, "sentinel")
+			fs.writeFileSync(cachedBundle, "cached")
+			fs.writeFileSync(sibling, "keep")
+			new CustomToolRegistry({ cacheDir: `${cacheDir}${suffix}` }).clearCache()
+			expect(fs.existsSync(cachedBundle)).toBe(false)
+			expect(fs.readFileSync(sibling, "utf8")).toBe("keep")
+		})
+
+		it.each(["permissions", "symlink", "symlink-dot"])("does not clear an unsafe cache root: %s", (kind) => {
+			fs.mkdirSync(cacheDir, { mode: 0o700 })
+			let sentinel: string
+			if (kind.startsWith("symlink")) {
+				fs.rmdirSync(cacheDir)
+				fs.symlinkSync(toolDir, cacheDir)
+				sentinel = path.join(toolDir, "bundle.mjs")
+			} else {
+				fs.chmodSync(cacheDir, 0o777)
+				sentinel = path.join(cacheDir, "bundle.mjs")
+			}
+			fs.writeFileSync(sentinel, "keep")
+			const error = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				new CustomToolRegistry({ cacheDir: kind === "symlink-dot" ? `${cacheDir}/.` : cacheDir }).clearCache()
+				expect(fs.readFileSync(sentinel, "utf8")).toBe("keep")
+				expect(error).toHaveBeenCalledWith(expect.stringContaining("clearCache failed to clean disk cache"))
+			} finally {
+				error.mockRestore()
+			}
+		})
+
 		it.each(["root", "entry", "bundle", "symlink-root", "symlink-entry", "symlink-bundle", "hardlink-bundle"])(
 			"rejects an unsafe %s before importing attacker code",
 			async (kind) => {
