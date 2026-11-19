@@ -16,6 +16,9 @@ export class ClineProviderFactory {
 			context: this.context,
 			outputChannel: this.outputChannel,
 			webviewFocusTracker: this.webviewFocusTracker,
+			// The API's startNewTask closes the editors before asking for a tab, so it must not be
+			// handed back a panel that still has a provider: that would silence the new task.
+			forceNew: true,
 		})
 	}
 }

@@ -121,6 +121,8 @@ vi.mock("@roo-code/cloud", () => ({
 		get instance() {
 			return {
 				isAuthenticated: vi.fn().mockReturnValue(false),
+				on: vi.fn(),
+				off: vi.fn(),
 			}
 		},
 	},
@@ -324,6 +326,14 @@ describe("ClineProvider - Sticky Mode", () => {
 		})
 	})
 
+	afterEach(async () => {
+		// The beforeEach above hands every test a fresh provider and the file had no hook that
+		// released it: dispose() removes the instance from the static list that the claimed-id
+		// check in setViewStateId and the fan-out methods iterate. It returns early once
+		// _disposed is set, so a test that already disposed its provider is unaffected.
+		await provider.dispose()
+	})
+
 	describe("handleModeSwitch", () => {
 		beforeEach(async () => {
 			await provider.resolveWebviewView(mockWebviewView)
@@ -466,6 +476,191 @@ describe("ClineProvider - Sticky Mode", () => {
 				}),
 			)
 		})
+
+		it("should sync the view-local mode buffer when switching modes after a restored view state", async () => {
+			// Simulate the history-restore path: saveViewState is what
+			// createTaskWithHistoryItem uses to pin a saved mode into the
+			// view-local buffer, leaving a stale mode there until the next mutation.
+			await provider.saveViewState("mode", "code")
+
+			// Global-only mode switch with no active task.
+			await provider.handleModeSwitch("architect")
+
+			// The durable global write still happens...
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+
+			// ...and the in-memory buffer must not keep serving the stale restored
+			// mode: getValues() merges viewLocalState on top of the ContextProxy
+			// values, so an unsynced buffer would hide the fresh mode from consumers.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
+			// The durable per-view write must land too: a regression that left the
+			// persisted entry on the stale restored mode would reload it on restart.
+			// setValue awaits the serialized write queue, so the entry is settled here.
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted.mode).toBe("architect")
+			expect(provider.getValues().mode).toBe("architect")
+		})
+
+		it("leaves no mode pin behind when a view without a pin fails the same way", async () => {
+			// Only the TaskModeSwitched emit may throw: addClineToStack emits other events
+			// during setup, and a listener failure is what the rollback covers. Kept as an
+			// untyped Mock<Procedure> so the object literal still overlaps Partial<Task>.
+			const emit = vi.fn()
+			emit.mockImplementation((event: string) => {
+				if (event === "taskModeSwitched") {
+					throw new Error("listener failed")
+				}
+			})
+
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: "code",
+					emit,
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "code",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "code")
+			// No saveViewState: this view has no pin, so the forward write creates one.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+
+			await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow("listener failed")
+
+			expect(provider.getValue("mode")).toBe("code")
+			// The pin the failed switch created must be cleared again rather than left
+			// holding the restored shared mode.
+			expect(provider["viewLocalState"].mode).toBeUndefined()
+			expect(provider.getValues().mode).toBe("code")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]] ?? {}
+			// Either no entry was written for this view or the entry carries no mode key; what
+			// must not happen is a persisted pin holding the restored shared mode.
+			expect(persisted.mode).toBeUndefined()
+		})
+
+		// The listener-failure case above rethrows before handleModeSwitchUnlocked reaches
+		// setValue("mode", newMode), so it cannot reach the rollback branch. This case fails
+		// the durable mode write inside that call, from a view that already had a pin, so the
+		// rollback has something to undo on every surface it touched.
+		it("reverts the pin, the persisted entry and the task mode when the durable mode write fails", async () => {
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "architect",
+					_taskMode: "architect",
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+			const historyItem: HistoryItem = {
+				id: "test-task-id",
+				ts: Date.now(),
+				task: "Test task",
+				mode: "architect",
+				number: 1,
+				tokensIn: 0,
+				tokensOut: 0,
+				cacheWrites: 0,
+				cacheReads: 0,
+				totalCost: 0,
+			}
+			vi.spyOn(provider.taskHistoryStore, "get").mockReturnValue(historyItem)
+			const historyWrites: HistoryItem[] = []
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation((item) => {
+				historyWrites.push(item)
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+			await provider.contextProxy.setValue("mode", "architect")
+			// A view that already pins the mode it is switching away from: the rollback must
+			// restore that pin instead of leaving the forward one behind.
+			await provider.saveViewState("mode", "architect")
+
+			const originalUpdate = mockContext.globalState.update
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
+				if (key === "mode") {
+					return Promise.reject(new Error("storage unavailable"))
+				}
+				return originalUpdate(key, value)
+			})
+
+			try {
+				await expect(provider["handleModeSwitchUnlocked"]("ask", mockTask)).rejects.toThrow(
+					"storage unavailable",
+				)
+			} finally {
+				mockContext.globalState.update = originalUpdate
+			}
+
+			expect(provider.getValue("mode")).toBe("architect")
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			const persisted = provider["getPersistedViewStates"]()[provider["viewStateId"]]
+			expect(persisted.mode).toBe("architect")
+			expect(mockTask.taskMode).toBe("architect")
+			// The compensation covers the shared selection, this view's pin and the task's mode.
+			// The history row is rewritten only by a switch that completes, so the write the
+			// failed switch attempted carries the new mode while the stored row still names the
+			// mode the task was on before it.
+			expect(historyWrites.at(-1)?.mode).toBe("ask")
+			expect(historyItem.mode).toBe("architect")
+		})
+
+		it("proceeds normally when no cancellation state exists", async () => {
+			// A minimal typed double keeps the test focused on the mode-switch contract.
+			// The literal is asserted as Partial<Task> so its private members (_taskMode,
+			// saveClineMessages) stay out of the Object.assign intersection type, which
+			// would otherwise collapse to never.
+			const mockTask = Object.assign(
+				{} as Task,
+				{
+					taskId: "test-task-id",
+					taskMode: "code",
+					_taskMode: undefined as string | undefined,
+					emit: vi.fn(),
+					saveClineMessages: vi.fn(),
+					clineMessages: [],
+					apiConversationHistory: [],
+					updateApiConfiguration: vi.fn(),
+				} as Partial<Task>,
+			)
+
+			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
+				return Promise.resolve([])
+			})
+			await provider.addClineToStack(mockTask)
+
+			await provider["handleModeSwitchUnlocked"]("architect", mockTask)
+
+			expect(mockTask.emit).toHaveBeenCalledWith("taskModeSwitched", mockTask.taskId, "architect")
+			expect(mockTask["_taskMode"]).toBe("architect")
+			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "architect")
+		})
 	})
 
 	describe("createTaskWithHistoryItem", () => {
@@ -486,14 +681,15 @@ describe("ClineProvider - Sticky Mode", () => {
 				mode: "architect", // Saved mode
 			}
 
-			// Mock updateGlobalState to track mode updates
-			const updateGlobalStateSpy = vi.spyOn(provider as any, "updateGlobalState").mockResolvedValue(undefined)
+			// Register a stable view id so the durable per-view write is persisted
+			await provider["setViewStateId"]("stable-test-view")
 
 			// Initialize task with history item
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify mode was restored via updateGlobalState
-			expect(updateGlobalStateSpy).toHaveBeenCalledWith("mode", "architect")
+			// Verify mode was restored into the view-local pin (no shared global write)
+			expect(provider["viewLocalState"].mode).toBe("architect")
+			expect(mockContext.globalState.update).not.toHaveBeenCalledWith("mode", "architect")
 		})
 
 		it("should use current mode if history item has no saved mode", async () => {
@@ -770,7 +966,9 @@ describe("ClineProvider - Sticky Mode", () => {
 			// Restore the task from history
 			await provider.createTaskWithHistoryItem(historyItem)
 
-			// Verify that the mode was restored
+			// Verify that history restoration reaches both the view-local pin and public state.
+			expect(provider["viewLocalState"].mode).toBe("architect")
+
 			const state = await provider.getState()
 			expect(state.mode).toBe("architect")
 
@@ -967,72 +1165,6 @@ describe("ClineProvider - Sticky Mode", () => {
 
 			// The mode WILL be updated to invalid-mode (this is the actual behavior)
 			expect(mockContext.globalState.update).toHaveBeenCalledWith("mode", "invalid-mode")
-		})
-
-		it("should handle errors during mode switch gracefully", async () => {
-			await provider.resolveWebviewView(mockWebviewView)
-
-			// Create a mock task that throws on emit only for specific events
-			let emitCallCount = 0
-			const mockTask = {
-				taskId: "test-task-id",
-				_taskMode: "code",
-				emit: vi.fn().mockImplementation((event) => {
-					emitCallCount++
-					// Only throw on the second emit call (taskModeSwitched event)
-					// The first call is for TaskFocused in addClineToStack
-					if (emitCallCount === 2 && event === "taskModeSwitched") {
-						throw new Error("Emit failed")
-					}
-				}),
-				saveClineMessages: vi.fn(),
-				clineMessages: [],
-				apiConversationHistory: [],
-				updateApiConfiguration: vi.fn(),
-			}
-
-			// Add task to provider stack
-			await provider.addClineToStack(mockTask as any)
-
-			// Seed the authoritative file-backed task history.
-			await seedTaskHistory([
-				{
-					id: mockTask.taskId,
-					ts: Date.now(),
-					task: "Test task",
-					number: 1,
-					tokensIn: 0,
-					tokensOut: 0,
-					cacheWrites: 0,
-					cacheReads: 0,
-					totalCost: 0,
-				},
-			])
-
-			// Mock updateTaskHistory
-			vi.spyOn(provider, "updateTaskHistory").mockImplementation(() => {
-				return Promise.resolve([])
-			})
-
-			// Mock console.error to suppress error output
-			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
-
-			// Clear previous mock calls to isolate this test
-			vi.mocked(mockContext.globalState.update).mockClear()
-
-			// The handleModeSwitch method doesn't catch errors from emit, so it will throw
-			// The error is thrown before the task's mode is updated
-			await expect(provider.handleModeSwitch("architect")).rejects.toThrow("Emit failed")
-
-			// Since the error is thrown before updating the task's _taskMode,
-			// neither the task mode nor global state are updated
-			const modeCalls = vi.mocked(mockContext.globalState.update).mock.calls.filter((call) => call[0] === "mode")
-			expect(modeCalls.length).toBe(0)
-
-			// The task's mode should NOT have been updated since the error occurred first
-			expect(mockTask._taskMode).toBe("code")
-
-			consoleErrorSpy.mockRestore()
 		})
 
 		it("should handle updateTaskHistory failures", async () => {
@@ -1273,6 +1405,177 @@ describe("ClineProvider - Sticky Mode", () => {
 			tasks.forEach((task) => {
 				expect(task.emit).toHaveBeenCalled()
 			})
+		})
+	})
+
+	describe("persisted view state keys", () => {
+		it("does not resolve a view id that names an Object.prototype key through the chain", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Seed through the durable write path so later writes land in the same
+			// backing map the assertions read: a frozen get() literal would make every
+			// post-write assertion read the seed no matter what the provider wrote.
+			await provider.contextProxy.setValue("viewStates", { "stable-test-view": { mode: "architect" } })
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(Object.getPrototypeOf(states)).toBeNull()
+			// A view id such as "constructor" must read as an absent entry, not as the
+			// inherited Object function, otherwise the rekey deletes the temporary entry
+			// and never writes it under the stable key.
+			expect(states["constructor"]).toBeUndefined()
+			expect(states["stable-test-view"]).toEqual({ mode: "architect" })
+
+			// Registering such an id must not make an inherited member look like a
+			// persisted entry: the lookup still reports an absent entry, so the rekey keeps the
+			// temporary entry instead of deleting it.
+			await provider["setViewStateId"]("constructor")
+			expect(provider["getPersistedViewStates"]({ fresh: true })["constructor"]).toBeUndefined()
+		})
+
+		it("does not load a temporary-id entry that an earlier session wrote", async () => {
+			// Declared outside the try so the finally can still reach the instance.
+			let fresh: ClineProvider | undefined
+			try {
+				// Temporary names restart from 0 on every host start, so storage can still hold
+				// an entry under this instance's name from a previous session. Seed the entry
+				// through the ContextProxy before the provider is constructed so the ordinary
+				// loadViewState read (which goes through the proxy cache) actually sees it.
+				const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+				const proxy = new ContextProxy(mockContext)
+				await proxy.setValue("viewStates", {
+					[tempId]: { mode: "architect", currentApiConfigName: "stale-profile" },
+				})
+
+				fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+				expect(fresh.viewId).toBe(tempId)
+
+				// Await the load itself instead of a fixed timer: the negative
+				// assertion must run after the load has definitely finished.
+				await fresh["loadViewState"]()
+
+				// The unowned temporary-id entry must not be adopted...
+				expect(fresh["viewLocalState"]).toStrictEqual({})
+
+				// ...and the shared values still win, so the stale entry cannot reach getState().
+				const state = await fresh.getState()
+				expect(state.mode).toBe("code")
+				expect(state.currentApiConfigName).not.toBe("stale-profile")
+			} finally {
+				// dispose() drops the instance from the static list that the claimed-id check and
+				// the fan-out methods iterate; without it a leaked provider can affect a later
+				// test in this file.
+				await fresh?.dispose()
+			}
+		})
+
+		it("does not merge a stale temporary-id entry into this instance's first durable write", async () => {
+			// Declared outside the try so the finally can still reach the instance.
+			let fresh: ClineProvider | undefined
+			try {
+				// A first write under an unowned temporary id claims the slot: fields left by an
+				// earlier session under the same name must not be adopted (and later re-keyed to
+				// the stable id) by merging into the colliding entry.
+				const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+				const proxy = new ContextProxy(mockContext)
+				await proxy.setValue("viewStates", { [tempId]: { currentApiConfigName: "old-profile", updatedAt: 1 } })
+
+				fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+				expect(fresh.viewId).toBe(tempId)
+
+				await fresh.saveViewState("mode", "code")
+
+				const states = fresh["getPersistedViewStates"]({ fresh: true })
+				expect(states[tempId]).toEqual({ mode: "code", updatedAt: expect.any(Number) })
+				expect(fresh["viewLocalState"].currentApiConfigName).toBeUndefined()
+			} finally {
+				// dispose() drops the instance from the static list that the claimed-id check and
+				// the fan-out methods iterate; without it a leaked provider can affect a later
+				// test in this file.
+				await fresh?.dispose()
+			}
+		})
+
+		it("does not mark the temporary id as authored when the durable write fails", async () => {
+			// Declared outside the try so the finally can still reach the instance.
+			let fresh: ClineProvider | undefined
+			try {
+				// Authorship must be recorded only after the write lands: a failed persistence
+				// that still marked the id owned would let a later load adopt an entry that was
+				// never actually stored.
+				const tempId = `sidebar-${ClineProvider["nextViewId"]}`
+				const proxy = new ContextProxy(mockContext)
+				fresh = new ClineProvider(mockContext, mockOutputChannel, "sidebar", proxy, new WebviewFocusTracker())
+				expect(fresh.viewId).toBe(tempId)
+
+				const originalUpdate = mockContext.globalState.update
+				mockContext.globalState.update = vi.fn().mockImplementation((key: string, _value: unknown) => {
+					if (key === "viewStates") {
+						return Promise.reject(new Error("storage unavailable"))
+					}
+					return Promise.resolve()
+				})
+
+				await expect(fresh.saveViewState("mode", "code")).rejects.toThrow("storage unavailable")
+				expect(fresh["wroteUnderTemporaryViewStateId"]).toBe(false)
+
+				mockContext.globalState.update = originalUpdate
+			} finally {
+				// dispose() drops the instance from the static list that the claimed-id check and
+				// the fan-out methods iterate; without it a leaked provider can affect a later
+				// test in this file.
+				await fresh?.dispose()
+			}
+		})
+
+		it("does not adopt an entry under the temporary name that this instance never wrote", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// Temporary ids restart from 0 on every host start, so the same name can
+			// belong to a different session. An entry this instance never wrote must not
+			// be adopted as this view's state.
+			// Seed through the durable write path so the assertions below read the
+			// same backing map a re-key adoption would write to: a frozen get()
+			// literal made the negative assertion unable to fail.
+			await provider.contextProxy.setValue("viewStates", { [provider.viewId]: { mode: "architect" } })
+
+			await provider["setViewStateId"]("stable-test-view")
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+			expect(states[provider.viewId]).toEqual({ mode: "architect" })
+			expect(states["stable-test-view"]).toBeUndefined()
+		})
+	})
+
+	describe("setViewStateId input validation", () => {
+		it("ignores a non-string viewStateId from a crafted message", async () => {
+			const before = provider["viewStateId"]
+			// A crafted postMessage can carry any JSON value despite the declared type.
+			await provider.setViewStateId(42 as unknown as string)
+			expect(provider["viewStateId"]).toBe(before)
+		})
+
+		it("ignores an oversized viewStateId", async () => {
+			const before = provider["viewStateId"]
+			await provider.setViewStateId("x".repeat(200))
+			expect(provider["viewStateId"]).toBe(before)
+		})
+
+		it("refuses a viewStateId already claimed by another live view", async () => {
+			const other = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			try {
+				await other.setViewStateId("claimed-by-other-view")
+				await provider.setViewStateId("claimed-by-other-view")
+				expect(provider["viewStateId"]).not.toBe("claimed-by-other-view")
+				expect(other["viewStateId"]).toBe("claimed-by-other-view")
+			} finally {
+				await other.dispose()
+			}
 		})
 	})
 })
