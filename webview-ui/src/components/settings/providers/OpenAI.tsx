@@ -24,6 +24,10 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 		!!apiConfiguration.openAiNativeBaseUrl,
 	)
 
+	const [openAiNativeDeploymentNameSelected, setOpenAiNativeDeploymentNameSelected] = useState(
+		!!apiConfiguration.openAiNativeDeploymentName,
+	)
+
 	const handleInputChange = useCallback(
 		<K extends keyof ProviderSettings, E>(
 			field: K,
@@ -57,6 +61,35 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 						placeholder="https://api.openai.com/v1"
 						className="w-full mt-1"
 					/>
+				</>
+			)}
+			<Checkbox
+				checked={openAiNativeDeploymentNameSelected}
+				onChange={(checked: boolean) => {
+					setOpenAiNativeDeploymentNameSelected(checked)
+
+					if (!checked) {
+						setApiConfigurationField("openAiNativeDeploymentName", "")
+					}
+				}}>
+				{t("settings:providers.useCustomDeploymentName")}
+			</Checkbox>
+			{openAiNativeDeploymentNameSelected && (
+				<>
+					<VSCodeTextField
+						value={apiConfiguration.openAiNativeDeploymentName || ""}
+						type="text"
+						data-testid="openai-native-deployment-name-input"
+						onInput={handleInputChange("openAiNativeDeploymentName")}
+						placeholder={t("settings:providers.openAiNativeDeploymentNamePlaceholder")}
+						className="w-full mt-1">
+						<label className="block font-medium mb-1">
+							{t("settings:providers.openAiNativeDeploymentName")}
+						</label>
+					</VSCodeTextField>
+					<div className="text-sm text-vscode-descriptionForeground -mt-2">
+						{t("settings:providers.openAiNativeDeploymentNameDescription")}
+					</div>
 				</>
 			)}
 			<VSCodeTextField

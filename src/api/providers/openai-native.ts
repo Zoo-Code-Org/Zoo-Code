@@ -386,7 +386,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const promptCacheKey = this.getPromptCacheKey(model, metadata)
 
 		const body: ResponsesRequestBody = {
-			model: model.id,
+			model: this.getOutboundModelId(model),
 			input: formattedInput,
 			stream: true,
 			// Always use stateless operation with encrypted reasoning
@@ -1773,6 +1773,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 	// Removed isResponsesApiModel method as ALL models now use the Responses API
 
+	/**
+	 * Resolves the model value sent on the wire. An optional custom deployment
+	 * name (for example an Azure AI Foundry deployment) replaces the catalog
+	 * model id in outbound Responses API requests, while getModel() keeps the
+	 * catalog model for capabilities, pricing, and metadata.
+	 */
+	private getOutboundModelId(model: OpenAiNativeModel): string {
+		const deploymentName = this.options.openAiNativeDeploymentName?.trim()
+		return deploymentName ? deploymentName : model.id
+	}
+
 	override getModel() {
 		const modelId = this.options.apiModelId
 
@@ -1852,7 +1863,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 			// Build request body for Responses API
 			const requestBody: any = {
-				model: model.id,
+				model: this.getOutboundModelId(model),
 				input: [
 					{
 						role: "user",

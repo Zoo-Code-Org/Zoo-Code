@@ -449,6 +449,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Özel temel URL kullan",
+		"useCustomDeploymentName": "Özel dağıtım adı kullan",
+		"openAiNativeDeploymentName": "Dağıtım adı",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "API isteklerinde seçili model yerine model olarak gönderilir. Uç noktanız Azure AI Foundry gibi modelleri dağıtım adıyla adresliyorsa kullanın. Özellikler ve fiyatlandırma yine seçili modelden gelir.",
 		"useReasoning": "Akıl yürütmeyi etkinleştir",
 		"customHeaders": "Özel Başlıklar",
 		"headerName": "Başlık adı",

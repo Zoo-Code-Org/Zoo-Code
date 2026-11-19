@@ -448,6 +448,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Sử dụng URL cơ sở tùy chỉnh",
+		"useCustomDeploymentName": "Sử dụng tên triển khai tùy chỉnh",
+		"openAiNativeDeploymentName": "Tên triển khai",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Được gửi dưới dạng mô hình trong các yêu cầu API thay cho mô hình đã chọn. Sử dụng khi endpoint của bạn định địa chỉ mô hình theo tên triển khai, chẳng hạn như Azure AI Foundry. Khả năng và giá vẫn lấy từ mô hình đã chọn.",
 		"useReasoning": "Bật lý luận",
 		"customHeaders": "Tiêu đề tùy chỉnh",
 		"headerName": "Tên tiêu đề",

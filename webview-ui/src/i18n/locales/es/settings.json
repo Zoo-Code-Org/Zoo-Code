@@ -450,6 +450,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Usar URL base personalizada",
+		"useCustomDeploymentName": "Usar nombre de implementación personalizado",
+		"openAiNativeDeploymentName": "Nombre de implementación",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Se envía como modelo en las solicitudes de API en lugar del modelo seleccionado. Úselo cuando su punto de conexión direccione los modelos por nombre de implementación, como Azure AI Foundry. Las capacidades y los precios siguen proveniendo del modelo seleccionado.",
 		"useReasoning": "Habilitar razonamiento",
 		"customHeaders": "Encabezados personalizados",
 		"headerName": "Nombre del encabezado",

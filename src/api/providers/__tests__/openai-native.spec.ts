@@ -13,7 +13,13 @@ vitest.mock("@roo-code/telemetry", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } from "@roo-code/types"
+import {
+	ApiProviderError,
+	OpenAiServiceTier,
+	SERVICE_TIER_KEY,
+	openAiNativeModels,
+	serviceTiers,
+} from "@roo-code/types"
 
 import { OpenAiNativeHandler } from "../openai-native"
 import type { ApiStreamChunk, ApiStreamTextChunk } from "../../../api/transform/stream"
@@ -133,6 +139,98 @@ describe("OpenAiNativeHandler", () => {
 						"User-Agent": expect.stringContaining(`zoo-code/${Package.version}`),
 					}),
 				}),
+			)
+		})
+	})
+
+	describe("custom deployment name", () => {
+		const deploymentName = "terra-prod-deployment"
+
+		it("sends the deployment name as the model on SDK streaming requests while keeping catalog metadata", async () => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-6-astra",
+				reasoningEffort: "high",
+				openAiNativeDeploymentName: deploymentName,
+			})
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expectRequestObjectContaining({
+					model: deploymentName,
+					reasoning: { effort: "high", summary: "auto" },
+				}),
+				expect.any(Object),
+			)
+
+			// The catalog model still drives capabilities, pricing, and metadata.
+			const resolvedModel = handler.getModel()
+			expect(resolvedModel.id).toBe("gpt-6-astra")
+			expect(resolvedModel.info).toBe(openAiNativeModels["gpt-6-astra"])
+		})
+
+		it("sends the deployment name on the manual SSE fallback request", async () => {
+			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
+			const mockFetch = vitest.fn().mockResolvedValue({
+				ok: true,
+				body: new ReadableStream<Uint8Array>({
+					start(controller) {
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			})
+			global.fetch = mockFetch
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-5.6-sol",
+				openAiNativeDeploymentName: deploymentName,
+			})
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			const [, request] = mockFetch.mock.calls[0]
+			expect(JSON.parse(request.body).model).toBe(deploymentName)
+		})
+
+		it("sends the deployment name as the model on non-streaming completePrompt requests", async () => {
+			mockResponsesCreate.mockResolvedValue({
+				output: [{ type: "message", content: [{ type: "output_text", text: "done" }] }],
+			})
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-5.6-sol",
+				openAiNativeDeploymentName: deploymentName,
+			})
+
+			const result = await handler.completePrompt("Say hi")
+
+			expect(result).toBe("done")
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expectRequestObjectContaining({ model: deploymentName }),
+				expect.any(Object),
+			)
+		})
+
+		it.each([
+			["unset", undefined],
+			["an empty string", ""],
+			["whitespace only", "   "],
+		])("keeps the catalog model id when the deployment name is %s", async (_description, override) => {
+			mockResponsesCreate.mockResolvedValue(asyncStreamFrom([]))
+			handler = new OpenAiNativeHandler({
+				...mockOptions,
+				apiModelId: "gpt-5.6-sol",
+				openAiNativeDeploymentName: override,
+			})
+
+			await collectStream(handler.createMessage(systemPrompt, messages))
+
+			expect(mockResponsesCreate).toHaveBeenCalledWith(
+				expectRequestObjectContaining({ model: "gpt-5.6-sol" }),
+				expect.any(Object),
 			)
 		})
 	})

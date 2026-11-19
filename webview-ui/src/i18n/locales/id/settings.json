@@ -448,6 +448,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Gunakan base URL kustom",
+		"useCustomDeploymentName": "Gunakan nama deployment kustom",
+		"openAiNativeDeploymentName": "Nama deployment",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Dikirim sebagai model dalam permintaan API menggantikan model yang dipilih. Gunakan saat endpoint Anda mengalamatkan model berdasarkan nama deployment, seperti Azure AI Foundry. Kemampuan dan harga tetap berasal dari model yang dipilih.",
 		"useReasoning": "Aktifkan reasoning",
 		"customHeaders": "Header Kustom",
 		"headerName": "Nama header",

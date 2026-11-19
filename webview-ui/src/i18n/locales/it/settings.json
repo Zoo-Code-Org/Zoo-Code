@@ -450,6 +450,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Usa URL base personalizzato",
+		"useCustomDeploymentName": "Usa nome di distribuzione personalizzato",
+		"openAiNativeDeploymentName": "Nome della distribuzione",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Inviato come modello nelle richieste API al posto del modello selezionato. Usalo quando il tuo endpoint indirizza i modelli in base al nome della distribuzione, come Azure AI Foundry. Le funzionalità e i prezzi provengono comunque dal modello selezionato.",
 		"useReasoning": "Abilita ragionamento",
 		"customHeaders": "Intestazioni personalizzate",
 		"headerName": "Nome intestazione",

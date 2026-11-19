@@ -451,6 +451,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Использовать пользовательский базовый URL",
+		"useCustomDeploymentName": "Использовать пользовательское имя развертывания",
+		"openAiNativeDeploymentName": "Имя развертывания",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Отправляется как модель в запросах API вместо выбранной модели. Используйте, когда конечная точка адресует модели по имени развертывания, например Azure AI Foundry. Возможности и цены по-прежнему определяются выбранной моделью.",
 		"useReasoning": "Включить рассуждения",
 		"customHeaders": "Пользовательские заголовки",
 		"headerName": "Имя заголовка",

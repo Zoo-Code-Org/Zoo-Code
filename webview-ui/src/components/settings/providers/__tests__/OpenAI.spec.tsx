@@ -11,7 +11,20 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 }))
 
 vi.mock("vscrui", () => ({
-	Checkbox: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+	Checkbox: ({
+		children,
+		checked,
+		onChange,
+	}: {
+		children: React.ReactNode
+		checked?: boolean
+		onChange?: (checked: boolean) => void
+	}) => (
+		<label>
+			<input type="checkbox" checked={checked} onChange={(event) => onChange?.(event.target.checked)} />
+			{children}
+		</label>
+	),
 }))
 
 vi.mock("@src/components/ui", () => ({
@@ -89,5 +102,50 @@ describe("OpenAI service tier selector", () => {
 		)
 
 		expect(screen.queryByTestId("openai-service-tier")).not.toBeInTheDocument()
+	})
+})
+
+describe("OpenAI custom deployment name", () => {
+	const baseConfiguration: ProviderSettings = {
+		apiProvider: providerIdentifiers.openaiNative,
+		openAiNativeApiKey: "sk-test-key",
+	}
+
+	it("keeps the input hidden until the checkbox is checked", () => {
+		render(
+			<OpenAI
+				apiConfiguration={baseConfiguration}
+				setApiConfigurationField={vi.fn()}
+				selectedModelInfo={baseModelInfo}
+			/>,
+		)
+
+		expect(screen.queryByTestId("openai-native-deployment-name-input")).not.toBeInTheDocument()
+
+		fireEvent.click(screen.getByRole("checkbox", { name: "settings:providers.useCustomDeploymentName" }))
+
+		expect(screen.getByTestId("openai-native-deployment-name-input")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.openAiNativeDeploymentNameDescription")).toBeInTheDocument()
+	})
+
+	it("persists typed deployment names and clears the saved value when the checkbox is unchecked", () => {
+		const setApiConfigurationField = vi.fn()
+		render(
+			<OpenAI
+				apiConfiguration={{ ...baseConfiguration, openAiNativeDeploymentName: "existing-deployment" }}
+				setApiConfigurationField={setApiConfigurationField}
+				selectedModelInfo={baseModelInfo}
+			/>,
+		)
+
+		// A saved deployment name selects the checkbox and fills the input.
+		const input = screen.getByTestId("openai-native-deployment-name-input")
+		expect(input).toHaveValue("existing-deployment")
+
+		fireEvent.input(input, { target: { value: "my-azure-deployment" } })
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("openAiNativeDeploymentName", "my-azure-deployment")
+
+		fireEvent.click(screen.getByRole("checkbox", { name: "settings:providers.useCustomDeploymentName" }))
+		expect(setApiConfigurationField).toHaveBeenLastCalledWith("openAiNativeDeploymentName", "")
 	})
 })
