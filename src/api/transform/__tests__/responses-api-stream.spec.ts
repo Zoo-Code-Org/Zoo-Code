@@ -502,4 +502,20 @@ describe("Responses terminal failure contract", () => {
 		)
 		expect(capture.mock.calls).toEqual([[item], [item]])
 	})
+	it.each([undefined, null, [], [{ type: "reasoning", id: "r1" }]])(
+		"reports completion and its optional output snapshot once: %j",
+		async (output) => {
+			const completed = vi.fn()
+			const capture = vi.fn()
+			await collectChunks(
+				processResponsesApiStream(
+					mockStream([{ type: "response.completed", response: { status: "completed", output } }]),
+					noopUsage,
+					{ onCompleted: completed, onOutputItem: capture },
+				),
+			)
+			expect(completed.mock.calls).toEqual([[output ?? undefined]])
+			expect(capture).not.toHaveBeenCalled()
+		},
+	)
 })

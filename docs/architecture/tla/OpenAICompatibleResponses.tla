@@ -25,7 +25,7 @@
 \* These are manual gates. No script or CI step proves code/model correspondence.
 \* Findings: completion routing, terminal failure, subclass flags, and replay were missing before fixes.
 \* The latest model found no additional defect. No real-code replay false alarm remains.
-\* Cost: about 75 agent minutes across the PR; the 33-config TLC gate takes about 30 seconds.
+\* Cost: about 85 agent minutes across the PR; the 33-config TLC gate takes about 30 seconds.
 \* Run each config with OpenAICompatibleResponsesMC.tla. Metadata must be outside the repo.
 \* Unit gate: openai.spec.ts, openai-compatible-responses.spec.ts, and responses-api-contract.spec.ts.
 \* The model checks the request boundary. It does not prove the code correct.

@@ -15,13 +15,20 @@
 \* Review 6385d18512: expect cross-endpoint replay. Added NoForeignReasoning for finding 3.
 \* Sources: saved reasoning scope. Sinks: Responses input and Chat Completions conversion.
 \* Failure: reasoning reaches a different endpoint or Chat Completions.
-\* Cost: about 15 agent minutes for ownership rules and tests.
 \* Each sabotage was replayed by removing its code guard and running the matching focused tests.
 \* New inspection finding: use completed output order, not item arrival order, for saved reasoning.
 \* Self-review ratchet: 0 covered, 3 added, 0 gap (saved order, replay domain, and premature EOF).
 \* Model setup: the replay oracle domain was extended to include a reordered sample.
 \* No real-code replay false alarm remains. The model does not prove the code correct.
 \* Cost: about 15 agent minutes this round; each config runs in about 1 second.
+\* Simplification expectation: no new defect; one completion callback must retain snapshot and item fallback behavior.
+\* Existing SavedComplete, NoFailedReasoning, and TerminalFailuresVisible rules cover this change.
+\* Zoomote threads 4631255963 and 4631288743: 2 covered, 0 added, 0 gap.
+\* The same-profile toggle-off replay uses the existing NoForeignReasoning rule.
+\* Local fingerprint calculation adds no stored state. EndpointPolicy covers the removed duplicate Azure guard.
+\* Simplification gate: all 33 TLC configs retain their pass or invariant-failure result.
+\* The focused tests retain snapshot order, missing-snapshot fallback, and explicit-empty clearing.
+\* No new runtime defect or replay false alarm was found. Cost: about 8 more agent minutes.
 \* Run with -config ResponsesProtocol.cfg ResponsesProtocolMC.tla, and repeat for each variant.
 EXTENDS Naturals, Sequences
 CONSTANTS ReasoningSamples, AcceptBoundary, SaveBoundary, ReplayBoundary,

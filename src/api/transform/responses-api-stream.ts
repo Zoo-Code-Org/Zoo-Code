@@ -23,8 +23,7 @@ export async function* processResponsesApiStream(
 	normalizeUsage: (usage: any) => ApiStreamUsageChunk | undefined,
 	observer?: {
 		onOutputItem?: (item: unknown) => void
-		onCompletedOutput?: (output: readonly unknown[]) => void
-		onCompleted?: () => void
+		onCompleted?: (output?: readonly unknown[]) => void
 	},
 ): ApiStream {
 	// Track call_ids that were streamed via delta events so we don't double-execute
@@ -116,11 +115,9 @@ export async function* processResponsesApiStream(
 		// Completion events — extract usage
 		if (event?.type === "response.completed" || event?.type === "response.done") {
 			assertResponsesApiSuccess(event.response)
-			observer?.onCompleted?.()
-			if (Array.isArray(event.response?.output)) {
-				if (observer?.onCompletedOutput) observer.onCompletedOutput(event.response.output)
-				else for (const item of event.response.output) observer?.onOutputItem?.(item)
-			}
+			const output = Array.isArray(event.response?.output) ? event.response.output : undefined
+			if (observer?.onCompleted) observer.onCompleted(output)
+			else if (output) for (const item of output) observer?.onOutputItem?.(item)
 			const usage = event?.response?.usage || event?.usage
 			const usageData = normalizeUsage(usage)
 			if (usageData) {

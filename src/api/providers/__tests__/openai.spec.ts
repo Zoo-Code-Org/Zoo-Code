@@ -2573,6 +2573,22 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		expect(handler.getReasoningDetails()).toBeUndefined()
 	})
 
+	it.each([undefined, null, []])(
+		"uses item fallback only when the completion snapshot is missing: %j",
+		async (output) => {
+			const handler = new OpenAiHandler(baseOptions)
+			const item = { type: "reasoning", id: "rs1", summary: [], encrypted_content: "opaque" }
+			mockResponsesCreate.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{ type: "response.output_item.done", item },
+					{ type: "response.completed", response: { status: "completed", output } },
+				]),
+			)
+			await collectStream(handler.createMessage(systemPrompt, messages))
+			expect(handler.getReasoningDetails()).toEqual(output ? undefined : [expect.objectContaining(item)])
+		},
+	)
+
 	it.each(["endpoint", "chat"])("does not forward saved reasoning after switching %s", async (destination) => {
 		const handler = new OpenAiHandler(baseOptions)
 		const item = { type: "reasoning", id: "rs1", summary: [], encrypted_content: "private-opaque" }
@@ -2590,7 +2606,7 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		const next = new OpenAiHandler({
 			...baseOptions,
 			openAiUseResponsesApi: destination !== "chat",
-			openAiBaseUrl: "https://other.example/v1",
+			openAiBaseUrl: destination === "chat" ? baseOptions.openAiBaseUrl : "https://other.example/v1",
 		})
 		mockCreate.mockClear()
 		mockResponsesCreate.mockClear()

@@ -10,7 +10,6 @@
 \* Review 6385d18512: expect null-default mutants to pass old tests (finding 2).
 \* Failure: absent function strictness or parameters become false or an empty schema.
 \* Added null source values and ToolParameters. The SDK is an oracle.
-\* Cost: about 5 agent minutes for null defaults and their regression test.
 \* Each sabotage was replayed on the real code. Tests cover accept and reject cases.
 \* No new code bug was found here; the tests now make zero and omission rules explicit.
 \* Cost: about 5 agent minutes this round; each config runs in about 1 second.

@@ -92,7 +92,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 
 		const isAzureV1 = isAzureV1BaseUrl(baseURL)
-		if (isAzureAiInference && this.options.openAiUseResponsesApi && !isAzureV1) {
+		if (isAzureAiInference && this.options.openAiUseResponsesApi) {
 			throw new Error(
 				"Responses API requires an /openai/v1 base URL for Azure AI Inference. Update the Base URL or disable Use Responses API.",
 			)
@@ -395,12 +395,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				let completed = false
 				yield* processResponsesApiStream(stream, createUsageNormalizer(), {
 					onOutputItem: captureReasoning,
-					onCompleted: () => {
+					onCompleted: (output) => {
 						completed = true
-					},
-					onCompletedOutput: (output) => {
-						reasoningItems.clear()
-						output.forEach(captureReasoning)
+						if (output) {
+							reasoningItems.clear()
+							output.forEach(captureReasoning)
+						}
 					},
 				})
 				if (!completed) throw new Error("Responses API stream ended before a completed response")
@@ -433,14 +433,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	getReasoningDetails(): ScopedResponsesReasoningItem[] | undefined {
-		return this.options.openAiUseResponsesApi && this.responsesReasoning.length
-			? structuredClone(this.responsesReasoning).map((item) => ({
-					...item,
-					format: "openai-responses-v1" as const,
-					provider: providerIdentifiers.openai,
-					endpoint: responsesReasoningScope(this.client.baseURL),
-				}))
-			: undefined
+		if (!this.options.openAiUseResponsesApi || !this.responsesReasoning.length) return undefined
+		const endpoint = responsesReasoningScope(this.client.baseURL)
+		return structuredClone(this.responsesReasoning).map((item) => ({
+			...item,
+			format: "openai-responses-v1" as const,
+			provider: providerIdentifiers.openai,
+			endpoint,
+		}))
 	}
 
 	protected processUsageMetrics(usage: OpenAiUsage, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
