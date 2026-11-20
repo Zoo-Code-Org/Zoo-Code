@@ -4086,6 +4086,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			// Token Circuit Breaker: Halt runaway loops if cumulative tokens exceed configured limit
 			if (this.tokenCircuitBreakerLimit > 0) {
+				await this.saveClineMessages()
+
 				const metrics = this.getTokenUsage()
 				const totalTokens = (metrics.totalTokensIn || 0) + (metrics.totalTokensOut || 0)
 				if (totalTokens >= this.tokenCircuitBreakerLimit) {
