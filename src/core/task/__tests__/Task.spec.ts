@@ -823,7 +823,7 @@ describe("Cline", () => {
 
 			const askSpy = vi.spyOn(task, "ask").mockImplementation(async (type) => {
 				if (type === "mistake_limit_reached") {
-					task.abort = true
+					vi.spyOn(task, "abort", "get").mockReturnValue(true)
 					return { response: "yesButtonClicked" } satisfies TaskAskResult
 				}
 				throw new Error(`unexpected ask: ${type}`)
@@ -833,7 +833,7 @@ describe("Cline", () => {
 
 			await expect(
 				task.recursivelyMakeClineRequests([{ type: "text", text: "original request" }]),
-			).rejects.toThrow("aborted")
+			).rejects.toThrow(new Error(`[RooCode#say] task ${task.taskId}.${task.instanceId} aborted`))
 
 			expect(askSpy).toHaveBeenCalledWith("mistake_limit_reached", expect.any(String))
 			expect(mistakeEventSpy).toHaveBeenCalledWith(task.taskId, "unknown", 3, task.consecutiveMistakeLimit)
