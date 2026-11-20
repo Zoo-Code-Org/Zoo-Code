@@ -34,7 +34,12 @@ import { NOT_PROVIDED } from "./constants"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { isMcpTool } from "../../utils/mcp-name"
 import { sanitizeOpenAiCallId } from "../../utils/tool-id"
-import { createAbortError, isRequestAborted, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+} from "./utils/abort-signal"
 import { createTimeoutError, getRequestTimeoutMs } from "./utils/request-timeout"
 import { getNumericHttpStatus, hasNumericHttpStatus } from "./utils/error-handler"
 
@@ -449,32 +454,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	}
 
 	/**
-	 * Bridges an external abort signal (e.g. task cancellation) onto a request-local
-	 * controller using the Bedrock pattern: a pre-aborted signal aborts the controller
-	 * immediately and registers no listener; otherwise a once-only listener forwards
-	 * the abort. Returns a cleanup function that detaches the listener (or undefined
-	 * when no listener was registered) so the caller can release it in its finally
-	 * block and a late abort can never reach a later request's controller.
-	 */
-	private attachExternalAbort(
-		externalAbortSignal: AbortSignal | undefined,
-		requestController: AbortController,
-	): (() => void) | undefined {
-		if (!externalAbortSignal) {
-			return undefined
-		}
-		if (externalAbortSignal.aborted) {
-			requestController.abort()
-			return undefined
-		}
-		const abortListener = () => requestController.abort()
-		externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-		return () => {
-			externalAbortSignal.removeEventListener("abort", abortListener)
-		}
-	}
-
-	/**
 	 * Streams a Responses API request through the official OpenAI SDK.
 	 *
 	 * The task's external abort signal is bridged onto a request-local
@@ -500,20 +479,19 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		systemPrompt?: string,
 		messages?: Anthropic.Messages.MessageParam[],
 	): ApiStream {
-		// Create a request-local AbortController for cancellation. The field is still
-		// assigned so the finally can tell which request still owns it, but all bridging
-		// below captures the local reference so a late abort from an earlier request can
-		// never reach a later request's controller. The field is not a cancellation
-		// entry point and is not how a stop is delivered: the only reads of it in this
-		// file are the two ownership checks in the finallys, and a cancellation arrives
-		// from the caller's signal, bridged by attachExternalAbort below.
+		// Create a request-local AbortController for cancellation. The field is still assigned so
+		// the finally can tell which request still owns it, and so the stop-button path keeps
+		// observing the one controller this request is cancelled through: the bridge below is
+		// handed this controller instead of making its own. The field is not a cancellation entry
+		// point - the only reads of it in this file are the two ownership checks in the finallys -
+		// and a cancellation arrives from the caller's signal.
 		const requestController = new AbortController()
 		this.abortController = requestController
 
-		// Bridge the external abort signal onto the request controller; the returned
-		// cleanup detaches the listener in the finally block so a late abort from this
-		// request cannot cancel a later request's controller.
-		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
+		// Bridge the external abort signal onto the request controller. A pre-aborted signal
+		// aborts it immediately and registers no listener; dispose() in the finally block detaches
+		// the listener so a late abort from this request cannot cancel a later request's controller.
+		const bridge = bridgeExternalAbortSignal(metadata?.abortSignal, { controller: requestController })
 
 		// Build per-request headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
@@ -616,7 +594,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
-			detach?.()
+			bridge.dispose()
 			// Only clear the field if this request still owns it (the fallback path may
 			// have installed its own controller, which it clears itself).
 			if (this.abortController === requestController) {
@@ -751,19 +729,17 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		const baseUrl = this.options.openAiNativeBaseUrl || "https://api.openai.com"
 		const url = `${baseUrl}/v1/responses`
 
-		// Create a request-local AbortController for cancellation. The field is still
-		// assigned for the ownership check in the finally below, but the bridging
-		// listener captures the local reference so a late abort from an earlier request
-		// can never reach a later request's controller. Cancellation arrives through
-		// the caller's signal via attachExternalAbort; nothing aborts a request by
-		// reading this field.
+		// Create a request-local AbortController for cancellation. The field is still assigned for
+		// the ownership check in the finally below, and the bridge below is handed this same
+		// controller so the stop-button handle and the SSE fallback observe the controller that is
+		// actually cancelled. Nothing aborts a request by reading the field.
 		const requestController = new AbortController()
 		this.abortController = requestController
 
-		// Bridge the external abort signal onto the request controller; the returned
-		// cleanup detaches the listener in the finally block so a late abort from this
-		// request cannot cancel a later request's controller.
-		const detach = this.attachExternalAbort(metadata?.abortSignal, requestController)
+		// Bridge the external abort signal onto the request controller; dispose() in the finally
+		// block detaches the listener so a late abort from this request cannot cancel a later
+		// request's controller.
+		const bridge = bridgeExternalAbortSignal(metadata?.abortSignal, { controller: requestController })
 
 		// Build per-request headers for API tracking and debugging
 		const userAgent = `zoo-code/${Package.version} (${os.platform()} ${os.release()}; ${os.arch()}) node/${process.version.slice(1)}`
@@ -894,7 +870,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
 			// cancel a later request's controller.
-			detach?.()
+			bridge.dispose()
 			if (this.abortController === requestController) {
 				this.abortController = undefined
 			}
