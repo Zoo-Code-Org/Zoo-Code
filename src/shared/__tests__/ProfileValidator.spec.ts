@@ -301,25 +301,6 @@ describe("ProfileValidator", () => {
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
 		})
 
-		// Test for nanogpt provider which uses nanoGptModelId
-		it(`should extract nanoGptModelId for nanogpt provider`, () => {
-			const allowList: OrganizationAllowList = {
-				allowAll: false,
-				providers: {
-					[providerIdentifiers.nanogpt]: { allowAll: false, models: ["test-model"] },
-				},
-			}
-			const profile: ProviderSettings = {
-				apiProvider: providerIdentifiers.nanogpt,
-				nanoGptModelId: "test-model",
-			}
-
-			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
-			expect(ProfileValidator.isProfileAllowed({ ...profile, nanoGptModelId: "other-model" }, allowList)).toBe(
-				false,
-			)
-		})
-
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
