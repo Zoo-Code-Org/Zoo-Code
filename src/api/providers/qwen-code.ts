@@ -15,6 +15,7 @@ import { BaseProvider } from "./base-provider"
 import { RequestConfigBuilder } from "./config-builder/request-config-builder"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import {
+	bridgeExternalAbortSignal,
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
 	createAbortError,
@@ -282,16 +283,15 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		// Fast-fail if the caller’s stop signal already fired before we started.
 		throwIfAborted(metadata?.abortSignal)
 
-		// Request-local abort controller — a class field would outlive this
-		// request and let concurrent requests abort each other.
-		const requestController = new AbortController()
-		const onExternalAbort = () => {
-			requestController.abort()
-		}
+		// Request-local cancellation scope — a class field would outlive this request and
+		// let concurrent requests abort each other. The bridge relays the caller's signal
+		// into the controller (a caller that already aborted reaches it the same way) and
+		// hands back a request-local signal even when the caller passed none, which the auth
+		// wait and the SDK request options below both need.
+		const { controller: requestController, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
 		const externalSignal = metadata?.abortSignal
-		if (externalSignal) {
-			externalSignal.addEventListener("abort", onExternalAbort)
-		}
 
 		try {
 			// A stop can land while the credential load or the token refresh
@@ -432,11 +432,11 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 		} finally {
 			// Cancel the in-flight SDK request if the consumer stopped iterating
 			// early (break or return): the external signal may never fire in that
-			// case, and only the request-local signal reaches the SDK.
+			// case, and only the request-local signal reaches the SDK. Detaching the
+			// bridge's listener runs on the same three paths, so a completed request
+			// never leaves one attached to the caller's long-lived signal.
 			requestController.abort()
-			if (externalSignal) {
-				externalSignal.removeEventListener("abort", onExternalAbort)
-			}
+			removeExternalAbortListener()
 		}
 	}
 
