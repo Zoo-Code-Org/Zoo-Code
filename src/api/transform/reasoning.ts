@@ -29,7 +29,7 @@ export type AnthropicReasoningParams = BetaThinkingConfigParam
  * full thinking tokens, not the summary).
  */
 export type AnthropicProviderReasoningParams =
-	AnthropicReasoningParams | { type: "adaptive"; display?: "summarized" | "omitted" }
+	AnthropicReasoningParams | { type: "adaptive"; display?: "summarized" | "omitted" } | { type: "between_tools" }
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
@@ -127,12 +127,18 @@ export const getAnthropicReasoning = ({
 	shouldUseReasoningBudget({ model, settings }) ? { type: "enabled", budget_tokens: reasoningBudget! } : undefined
 
 export const getAnthropicProviderReasoning = ({
+	modelId,
 	model,
 	reasoningBudget,
 	settings,
-}: GetModelReasoningOptions): AnthropicProviderReasoningParams | undefined => {
+}: GetModelReasoningOptions & { modelId?: string }): AnthropicProviderReasoningParams | undefined => {
 	if (model.supportsReasoningBinary && settings.enableReasoningEffort) {
 		return { type: "adaptive", display: "summarized" }
+	}
+
+	// Sonnet 5.5 enables adaptive thinking when this field is absent.
+	if (modelId === "claude-sonnet-5-5") {
+		return { type: "between_tools" }
 	}
 
 	return getAnthropicReasoning({ model, reasoningBudget, settings })

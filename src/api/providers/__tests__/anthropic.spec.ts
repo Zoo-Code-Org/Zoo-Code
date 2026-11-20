@@ -581,11 +581,11 @@ describe("AnthropicHandler", () => {
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")
 		})
 
-		it("should use adaptive thinking for Claude Sonnet 5.5 when reasoning is enabled", async () => {
+		it.each([true, false, undefined])("maps Sonnet 5.5 reasoning selection %s", async (enableReasoningEffort) => {
 			const sonnetHandler = new AnthropicHandler({
 				apiKey: "test-api-key",
 				apiModelId: "claude-sonnet-5-5",
-				enableReasoningEffort: true,
+				enableReasoningEffort,
 			})
 
 			const stream = sonnetHandler.createMessage(systemPrompt, [
@@ -599,7 +599,9 @@ describe("AnthropicHandler", () => {
 
 			const requestBody = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
 			const requestOptions = mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[1]
-			expect(requestBody?.thinking).toEqual({ type: "adaptive", display: "summarized" })
+			expect(requestBody?.thinking).toEqual(
+				enableReasoningEffort ? { type: "adaptive", display: "summarized" } : { type: "between_tools" },
+			)
 			expect(requestBody?.temperature).toBeUndefined()
 			expect(requestBody?.max_tokens).toBe(128_000)
 			expect(requestOptions?.headers?.["anthropic-beta"]).toContain("prompt-caching-2024-07-31")

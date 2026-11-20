@@ -362,7 +362,7 @@ export const parseOpenRouterModel = ({
 		modelInfo.supportsTemperature = false
 	}
 
-	if (id === "anthropic/claude-sonnet-5-5") {
+	if (id === "anthropic/claude-sonnet-5.5") {
 		modelInfo.maxTokens = anthropicModels["claude-sonnet-5-5"].maxTokens
 		modelInfo.supportsReasoningBinary = true
 		modelInfo.supportsTemperature = false

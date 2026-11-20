@@ -463,6 +463,35 @@ describe("reasoning.ts", () => {
 	})
 
 	describe("getAnthropicProviderReasoning", () => {
+		// Property: each Sonnet 5.5 selection sends a supported mode, without a manual budget.
+		it.each(
+			[true, false, undefined].flatMap((enabled) =>
+				[undefined, 1024, 32768].map((budget) => ({ enabled, budget })),
+			),
+		)("maps Sonnet 5.5 enabled=$enabled budget=$budget", ({ enabled, budget }) => {
+			const result = getAnthropicProviderReasoning({
+				modelId: "claude-sonnet-5-5",
+				model: { ...baseModel, supportsReasoningBinary: true, supportsReasoningBudget: true },
+				reasoningBudget: budget,
+				settings: { enableReasoningEffort: enabled },
+			})
+			expect(result).toEqual(enabled ? { type: "adaptive", display: "summarized" } : { type: "between_tools" })
+		})
+
+		it.each(["claude-sonnet-5", "claude-opus-5-5", "claude-sonnet-5-50", undefined])(
+			"does not apply the Sonnet 5.5 off mode to %s",
+			(modelId) => {
+				expect(
+					getAnthropicProviderReasoning({
+						modelId,
+						model: { ...baseModel, supportsReasoningBinary: true },
+						reasoningBudget: undefined,
+						settings: { enableReasoningEffort: false },
+					}),
+				).toBeUndefined()
+			},
+		)
+
 		it("should use adaptive thinking for Claude Opus 4.7 when reasoning is enabled", () => {
 			const modelWithBinaryReasoning: ModelInfo = {
 				...baseModel,

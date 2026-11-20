@@ -1864,12 +1864,12 @@ describe("VertexHandler", () => {
 			expect(request.temperature).toBeUndefined()
 		})
 
-		it("should use adaptive thinking for Claude Sonnet 5.5", async () => {
+		it.each([true, false, undefined])("maps Sonnet 5.5 reasoning selection %s", async (enableReasoningEffort) => {
 			const sonnetHandler = new AnthropicVertexHandler({
 				apiModelId: "claude-sonnet-5-5",
 				vertexProjectId: "test-project",
 				vertexRegion: "us-central1",
-				enableReasoningEffort: true,
+				enableReasoningEffort,
 			})
 
 			const mockCreate = vitest
@@ -1888,7 +1888,9 @@ describe("VertexHandler", () => {
 
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
-					thinking: { type: "adaptive", display: "summarized" },
+					thinking: enableReasoningEffort
+						? { type: "adaptive", display: "summarized" }
+						: { type: "between_tools" },
 				}),
 				undefined,
 			)

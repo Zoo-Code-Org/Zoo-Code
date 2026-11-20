@@ -25,6 +25,31 @@ function makeRawModel(overrides: Record<string, unknown>) {
 }
 
 describe("getRequestyModels", () => {
+	// Property: exact members receive all overrides. Other models keep catalog capabilities.
+	it.each(
+		[
+			{ id: "anthropic/claude-fable-5.1", overridden: true },
+			{ id: "anthropic/claude-fable-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5-5", overridden: true },
+			{ id: "anthropic/claude-opus-5", overridden: true },
+			{ id: "anthropic/claude-opus-5-5", overridden: true },
+			{ id: "anthropic/claude-haiku-5-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-4", overridden: false },
+			{ id: "anthropic/claude-sonnet-5-50", overridden: false },
+			{ id: "anthropic/claude-sonnet-5.5", overridden: false },
+		].flatMap((model) => [true, false, undefined].map((supports_reasoning) => ({ ...model, supports_reasoning }))),
+	)(
+		"preserves overrides for $id with catalog reasoning $supports_reasoning",
+		async ({ id, overridden, supports_reasoning }) => {
+			mockAxiosGet.mockResolvedValueOnce({ data: { data: [makeRawModel({ id, supports_reasoning })] } })
+			const model = (await getRequestyModels())[id]
+			expect(model.supportsReasoningBudget).toBe(overridden ? true : supports_reasoning)
+			expect(model.supportsReasoningBinary).toBe(overridden ? true : undefined)
+			expect(model.supportsTemperature).toBe(overridden ? false : undefined)
+		},
+	)
+
 	it("applies Fable 5.1 overrides when parsing anthropic/claude-fable-5.1", async () => {
 		const rawFable51 = makeRawModel({
 			id: "anthropic/claude-fable-5.1",
@@ -101,14 +126,14 @@ describe("getRequestyModels", () => {
 		expect(sonnet5.supportsTemperature).toBe(false)
 	})
 
-	it("applies Sonnet 5.5 overrides when parsing anthropic/claude-sonnet-5-5", async () => {
+	it.each([true, false])("applies Sonnet 5.5 overrides with supports_reasoning %s", async (supports_reasoning) => {
 		const rawSonnet55 = makeRawModel({
 			id: "anthropic/claude-sonnet-5-5",
 			max_output_tokens: 128000,
 			context_window: 1000000,
 			supports_caching: true,
 			supports_vision: true,
-			supports_reasoning: true,
+			supports_reasoning,
 			input_price: "0.000002",
 			output_price: "0.00001",
 			caching_price: "0.0000025",

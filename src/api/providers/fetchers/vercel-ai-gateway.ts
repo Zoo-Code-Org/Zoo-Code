@@ -9,6 +9,16 @@ import { parseApiPrice } from "../../../shared/cost"
 
 import { throwIfAborted } from "../utils/abort-signal"
 
+const VERCEL_ANTHROPIC_NO_TEMPERATURE_MODELS = new Set([
+	"anthropic/claude-fable-5.1",
+	"anthropic/claude-fable-5",
+	"anthropic/claude-sonnet-5",
+	"anthropic/claude-sonnet-5.5",
+	"anthropic/claude-opus-5",
+	"anthropic/claude-opus-5-5",
+	"anthropic/claude-haiku-5.5",
+])
+
 /**
  * VercelAiGatewayPricing
  */
@@ -145,27 +155,7 @@ export const parseVercelAiGatewayModel = ({ id, model }: { id: string; model: Ve
 		modelInfo.supportsTemperature = false
 	}
 
-	if (id === "anthropic/claude-fable-5.1" || id === "anthropic/claude-fable-5") {
-		modelInfo.supportsTemperature = false
-	}
-
-	if (id === "anthropic/claude-sonnet-5") {
-		modelInfo.supportsTemperature = false
-	}
-
-	if (id === "anthropic/claude-sonnet-5-5") {
-		modelInfo.supportsTemperature = false
-	}
-
-	if (id === "anthropic/claude-opus-5") {
-		modelInfo.supportsTemperature = false
-	}
-
-	if (id === "anthropic/claude-opus-5-5") {
-		modelInfo.supportsTemperature = false
-	}
-
-	if (id === "anthropic/claude-haiku-5.5") {
+	if (VERCEL_ANTHROPIC_NO_TEMPERATURE_MODELS.has(id)) {
 		modelInfo.supportsTemperature = false
 	}
 

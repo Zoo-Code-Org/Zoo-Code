@@ -2004,10 +2004,25 @@ describe("AwsBedrockHandler", () => {
 		})
 
 		it.each([
-			"anthropic.claude-fable-5",
-			"anthropic.claude-fable-5-1",
 			"anthropic.claude-sonnet-5-5",
 			"global.anthropic.claude-sonnet-5-5",
+			"us.anthropic.claude-sonnet-5-5",
+		])("uses between_tools for %s when reasoning is off", async (apiModelId) => {
+			const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort: false })
+			await collectStream(provider.createMessage("System prompt", messages))
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: { type: "between_tools" },
+					output_config: { effort: "high" },
+				}),
+			)
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-fable-5",
+			"anthropic.claude-fable-5-1",
 			"anthropic.claude-opus-5-5",
 			"global.anthropic.claude-opus-5-5",
 		])("omits thinking for adaptive-only %s when reasoning is disabled", async (apiModelId) => {

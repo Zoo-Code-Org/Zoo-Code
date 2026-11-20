@@ -7,7 +7,7 @@ import * as path from "path"
 
 import { back as nockBack } from "nock"
 
-import type { ModelInfo } from "@roo-code/types"
+import { type ModelInfo, OPEN_ROUTER_PROMPT_CACHING_MODELS, OPEN_ROUTER_REASONING_BUDGET_MODELS } from "@roo-code/types"
 
 import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../modelCache"
 
@@ -593,9 +593,9 @@ describe("OpenRouter API", () => {
 			expect(result.supportsReasoningBinary).toBe(true)
 		})
 
-		it("sets claude-sonnet-5-5 model to Anthropic max tokens and omits temperature", () => {
+		it("sets claude-sonnet-5.5 model to Anthropic max tokens and omits temperature", () => {
 			const result = parseOpenRouterModel({
-				id: "anthropic/claude-sonnet-5-5",
+				id: "anthropic/claude-sonnet-5.5",
 				model: {
 					name: "Claude Sonnet 5.5",
 					description: "Test model",
@@ -608,6 +608,9 @@ describe("OpenRouter API", () => {
 				maxTokens: 128000,
 				supportedParameters: ["reasoning", "include_reasoning"],
 			})
+
+			expect(OPEN_ROUTER_PROMPT_CACHING_MODELS.has("anthropic/claude-sonnet-5.5")).toBe(true)
+			expect(OPEN_ROUTER_REASONING_BUDGET_MODELS.has("anthropic/claude-sonnet-5.5")).toBe(true)
 
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)
