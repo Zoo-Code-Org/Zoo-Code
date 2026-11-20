@@ -6,6 +6,7 @@ import os from "node:os"
 import { promisify } from "node:util"
 import type { SidePins } from "./coding-pins.ts"
 import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, type SideResult } from "./coding-report.ts"
+import { codingRepetitionPlan } from "./coding-suite.ts"
 import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
 import type { CodingRunRecord } from "./coding-run.ts"
 import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
@@ -257,13 +258,14 @@ export const runCompareSide = async (
 				})
 		}
 		child.once("error", () => finish(1))
-		child.once("exit", (code) => finish(code ?? 1))
+		// Close follows queued IPC delivery, so cleanup sees every preparation PID.
+		child.once("close", (code) => finish(code ?? 1))
 	})
 	if (exit !== 0) throw new Error(`${side} side failed with exit code ${exit}`)
 	const parsed: unknown = JSON.parse(await fs.readFile(path.join(sideOut, sideResultFileName()), "utf8"))
 	// The side output must describe exactly this side and its approved commit,
 	// or the pair is invalid.
-	return validateSideResultFile(parsed, side, commit)
+	return validateSideResultFile(parsed, side, commit, wiring.reps)
 }
 
 // The comparison body after the trust gates: both sides, one report
@@ -318,7 +320,7 @@ const executeOwnedComparisonFlow = async (wiring: ComparisonFlowWiring): Promise
 		)
 	}
 	try {
-		return await executeLockedComparisonFlow(wiring)
+		return await executeLockedComparisonFlow({ ...wiring, out: canonicalOut })
 	} finally {
 		await fs.rmdir(lock)
 	}
@@ -453,7 +455,8 @@ export interface SideResultFile {
 // Validates one side result file before the report builder consumes it. The
 // file is data, so its shape is checked, and it must record exactly the
 // expected side label and the approved commit of that side. The pins must be
-// complete, and every run must carry object metrics. Anything else aborts the
+// complete, and run keys must match the full plan and their metrics.
+// Anything else aborts the
 // comparison instead of producing a report from partial output.
 const PIN_STRING_FIELDS = [
 	"side",
@@ -470,6 +473,7 @@ export function validateSideResultFile(
 	parsed: unknown,
 	expectedSide: SidePins["side"],
 	expectedCommit: string,
+	repetitions = DEFAULT_REPETITIONS,
 ): SideResultFile {
 	if (typeof parsed !== "object" || parsed === null) throw new Error("side result is not a JSON object")
 	const record = parsed as Record<string, unknown>
@@ -499,11 +503,23 @@ export function validateSideResultFile(
 	}
 	const runs = record["runs"]
 	if (!Array.isArray(runs)) throw new Error("side result has no runs array")
+	const expected = new Set(
+		codingRepetitionPlan(repetitions).map(({ fixtureName, repIndex }) => JSON.stringify([fixtureName, repIndex])),
+	)
 	for (const run of runs) {
 		if (typeof run !== "object" || run === null) throw new Error("side result run is not an object")
 		const metrics = (run as Record<string, unknown>)["metrics"]
 		if (typeof metrics !== "object" || metrics === null) throw new Error("side result run lacks metrics")
+		const key = JSON.stringify([run.fixtureName, run.repIndex])
+		if (!expected.delete(key)) throw new Error("side result has an unexpected or duplicate repetition key")
+		if (
+			(metrics as Record<string, unknown>)["fixtureName"] !== run.fixtureName ||
+			(metrics as Record<string, unknown>)["repIndex"] !== run.repIndex
+		) {
+			throw new Error("side result run and metrics keys differ")
+		}
 	}
+	if (expected.size) throw new Error("side result is missing expected repetitions")
 	return parsed as SideResultFile
 }
 
@@ -578,16 +594,22 @@ export const publishedComparisonGeneration = async (outDir: string): Promise<str
 export async function readPublishedComparisonReport(outDir: string): Promise<ComparisonReport | undefined> {
 	const generation = await publishedComparisonGeneration(outDir)
 	if (generation === undefined) return undefined
-	const parsed: unknown = JSON.parse(await fs.readFile(path.join(outDir, COMPARISON_REPORT_JSON), "utf8"))
-	if (typeof parsed !== "object" || parsed === null) throw new Error("comparison report is not a JSON object")
-	if ((parsed as Record<string, unknown>)["generation"] !== generation) {
-		throw new Error("comparison report generation does not match the completion marker")
+	try {
+		const parsed: unknown = JSON.parse(await fs.readFile(path.join(outDir, COMPARISON_REPORT_JSON), "utf8"))
+		if (typeof parsed !== "object" || parsed === null) throw new Error("comparison report is not a JSON object")
+		if ((parsed as Record<string, unknown>)["generation"] !== generation) {
+			throw new Error("comparison report generation does not match the completion marker")
+		}
+		const markdown = await fs.readFile(path.join(outDir, COMPARISON_REPORT_MD), "utf8")
+		if (!markdown.includes(generation)) {
+			throw new Error("comparison report Markdown does not match the completion marker")
+		}
+		if ((await publishedComparisonGeneration(outDir)) !== generation) return undefined
+		return parsed as ComparisonReport
+	} catch (error) {
+		if ((await publishedComparisonGeneration(outDir)) !== generation) return undefined
+		throw error
 	}
-	const markdown = await fs.readFile(path.join(outDir, COMPARISON_REPORT_MD), "utf8")
-	if (!markdown.includes(generation)) {
-		throw new Error("comparison report Markdown does not match the completion marker")
-	}
-	return parsed as ComparisonReport
 }
 
 // Removes the previous side generation before a side executes. The

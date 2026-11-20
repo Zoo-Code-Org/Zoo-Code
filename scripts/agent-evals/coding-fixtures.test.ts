@@ -2,7 +2,7 @@ import assert from "node:assert/strict"
 import { describe, it } from "node:test"
 import { configurationMatchesToolPolicy, validateFixture } from "./contract.ts"
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
-import { CODING_SUITE_ID, codingBundle, codingSuiteDigest } from "./coding-suite.ts"
+import { CODING_SUITE_ID, codingBundle, codingSuiteDigest, codingRepetitionPlan } from "./coding-suite.ts"
 import { GRADER_VERSION } from "./coding-grader.ts"
 
 const CREDENTIAL = "sk-test-credential-for-projection-check"
@@ -93,4 +93,23 @@ describe("coding fixture suite", () => {
 		assert.equal(CODING_SUITE_ID, "coding-basic-v1")
 		assert.equal(GRADER_VERSION, "coding-grader-v10")
 	})
+})
+
+// Keep this expectation independent of the production plan and fixture loop.
+it("builds the complete frozen repetition plan with fresh entries", () => {
+	const names = ["clamp-range", "slugify-text", "parse-csv-line", "format-bytes", "deep-get"]
+	for (const repetitions of [1, 2, 3]) {
+		const plan = codingRepetitionPlan(repetitions)
+		assert.equal(plan.length, names.length * repetitions)
+		for (let i = 0; i < plan.length; i++) {
+			assert.deepEqual(plan[i], {
+				fixtureName: names[Math.floor(i / repetitions)],
+				fixtureVersion: "1.0.0",
+				repIndex: i % repetitions,
+			})
+		}
+		const second = codingRepetitionPlan(repetitions)
+		assert.notEqual(plan, second)
+		for (let i = 0; i < plan.length; i++) assert.notEqual(plan[i], second[i])
+	}
 })

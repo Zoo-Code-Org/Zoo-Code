@@ -75,3 +75,31 @@ describe("generation publication properties", () => {
 		}
 	})
 })
+
+// An iterator can interrupt after the last yielded write.
+it("refuses commit when the iterator ends with an interrupt", async () => {
+	for (const count of [0, 1, 2]) {
+		let interrupted = false
+		let committed = false
+		let rolledBack = false
+		function* steps() {
+			for (let i = 0; i < count; i++) yield async () => {}
+			interrupted = true
+		}
+		assert.equal(
+			await publishGeneration({
+				steps: steps(),
+				commit: async () => {
+					committed = true
+				},
+				isInterrupted: () => interrupted,
+				rollback: async () => {
+					rolledBack = true
+				},
+			}),
+			false,
+		)
+		assert.equal(committed, false)
+		assert.equal(rolledBack, true)
+	}
+})

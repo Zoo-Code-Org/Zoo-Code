@@ -1,5 +1,7 @@
+import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
 import { createHash } from "node:crypto"
-import { spawn } from "node:child_process"
+import { syncBuiltinESMExports } from "node:module"
+import childProcess, { spawn, ChildProcess } from "node:child_process"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import os from "node:os"
@@ -130,7 +132,7 @@ const sideScriptFixture = (commit: string, exitCode: number): string =>
 		`fs.mkdirSync(out, { recursive: true })`,
 		`fs.writeFileSync(path.join(out, "side-results.json"), JSON.stringify({`,
 		`  pins,`,
-		`  runs: [{ fixtureName: "fixture", fixtureVersion: "1.0.0", repIndex: 0, outcome: { outcome: "correct", reason: "hiddenTestsPassed" }, metrics: {} }],`,
+		`  runs: ${JSON.stringify(CODING_FIXTURE_BUNDLES.map(({ fixture }) => ({ fixtureName: fixture.identity.name, fixtureVersion: fixture.identity.version, repIndex: 0, outcome: { outcome: "correct", reason: "hiddenTestsPassed" }, metrics: runMetrics(fixture.identity.name, 0) })))},`,
 		`}))`,
 		`process.exit(${exitCode})`,
 	].join("\n")
@@ -184,7 +186,7 @@ describe("compare side interruption gate", () => {
 			const result = await runCompareSide("baseline", COMMIT, dir, wiring)
 			assert.equal(result.pins.side, "baseline")
 			assert.equal(result.pins.commit, COMMIT)
-			assert.equal(result.runs.length, 1)
+			assert.equal(result.runs.length, CODING_FIXTURE_BUNDLES.length)
 			// The real child was tracked and left nothing tracked behind.
 			assert.equal(tracked.length >= 1, true)
 			assert.equal(tracked.at(-1), undefined)
@@ -892,3 +894,112 @@ setInterval(() => fs.appendFileSync(${JSON.stringify(heartbeat)}, '.'), 10)
 		},
 	)
 }
+
+for (const interrupted of [false, true]) {
+	it(`keeps comparison output in the locked directory after alias retarget (interrupt: ${interrupted})`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "compare-alias-"))
+		const a = path.join(dir, "a"),
+			b = path.join(dir, "b"),
+			alias = path.join(dir, "current")
+		const flag = createInterruptFlag()
+		try {
+			await fs.mkdir(a)
+			await fs.mkdir(b)
+			await fs.symlink(a, alias)
+			await fs.writeFile(path.join(b, "comparison-report.json"), "other owner")
+			await executeComparisonFlow(
+				flowWiring({
+					flag,
+					out: alias,
+					scratchDir: path.join(dir, "scratch"),
+					runSide: async (side) => {
+						if (side === "baseline") {
+							await fs.unlink(alias)
+							await fs.symlink(b, alias)
+						}
+						if (interrupted) flag.signal("SIGTERM")
+						return record(side, COMMIT)
+					},
+				}),
+			)
+			assert.equal(await fs.readFile(path.join(b, "comparison-report.json"), "utf8"), "other owner")
+			assert.equal((await publishedComparisonGeneration(a)) !== undefined, !interrupted)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+	it(`passes the locked side path through writes and cleanup (interrupt: ${interrupted})`, async () => {
+		const dir = await fs.mkdtemp(path.join(os.tmpdir(), "side-alias-"))
+		const a = path.join(dir, "a"),
+			b = path.join(dir, "b"),
+			alias = path.join(dir, "current")
+		try {
+			await fs.mkdir(a)
+			await fs.mkdir(b)
+			await fs.symlink(a, alias)
+			await fs.writeFile(path.join(b, "side-results.json"), "other owner")
+			await executeSideGeneration({
+				out: alias,
+				isInterrupted: () => interrupted,
+				cleanup: async () => {},
+				run: async (out) => {
+					await fs.unlink(alias)
+					await fs.symlink(b, alias)
+					assert.equal(out, a)
+					await fs.mkdir(path.join(out, "artifacts"))
+					await fs.writeFile(path.join(out, "side-results.json"), "this owner")
+				},
+			})
+			assert.equal(await fs.readFile(path.join(b, "side-results.json"), "utf8"), "other owner")
+			assert.equal(
+				await fs.access(path.join(a, "side-results.json")).then(
+					() => true,
+					() => false,
+				),
+				!interrupted,
+			)
+		} finally {
+			await fs.rm(dir, { recursive: true, force: true })
+		}
+	})
+}
+
+it("drains preparation IPC after exit before finishing the side", async (t) => {
+	const child = new ChildProcess()
+	const signals: (NodeJS.Signals | number | undefined)[] = []
+	t.mock.method(childProcess, "spawn", () => {
+		setImmediate(() => {
+			child.emit("exit", 1)
+			setImmediate(() => {
+				child.emit("message", { type: "coding-preparation", pid: 123456789 })
+				child.emit("close", 1)
+			})
+		})
+		return child
+	})
+	t.mock.method(process, "kill", (_pid: number, signal?: NodeJS.Signals | number) => {
+		signals.push(signal)
+		if (signal === 0) throw Object.assign(new Error("gone"), { code: "ESRCH" })
+		return true
+	})
+	syncBuiltinESMExports()
+	t.after(() => {
+		t.mock.restoreAll()
+		syncBuiltinESMExports()
+	})
+	await assert.rejects(
+		runCompareSide(
+			"baseline",
+			COMMIT,
+			"/unused",
+			sideWiring({
+				flag: createInterruptFlag(),
+				tracked: [],
+				sideScript: "unused",
+				createSideOutDir: async () => {},
+			}),
+		),
+		/side failed/,
+	)
+	assert.ok(signals.includes("SIGTERM"))
+})

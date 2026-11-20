@@ -1,3 +1,4 @@
+import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
 import assert from "node:assert/strict"
 import fs from "node:fs/promises"
 import { existsSync } from "node:fs"
@@ -241,7 +242,19 @@ describe("comparison orchestration", () => {
 
 describe("side result validation", () => {
 	const validatedFile = (side: "baseline" | "candidate", commit: string, overrides: Record<string, unknown> = {}) =>
-		JSON.parse(JSON.stringify({ pins: pins(side, commit), runs: [], ...overrides }))
+		JSON.parse(
+			JSON.stringify({
+				pins: pins(side, commit),
+				runs: CODING_FIXTURE_BUNDLES.flatMap(({ fixture }) =>
+					Array.from({ length: 3 }, (_, repIndex) => ({
+						fixtureName: fixture.identity.name,
+						repIndex,
+						metrics: metrics(fixture.identity.name, repIndex, "correct", 0.1),
+					})),
+				),
+				...overrides,
+			}),
+		)
 
 	it("accepts a result that records exactly the expected side and commit", () => {
 		const validated = validateSideResultFile(validatedFile("baseline", "a".repeat(40)), "baseline", "a".repeat(40))
@@ -251,12 +264,8 @@ describe("side result validation", () => {
 
 	it("accepts a well-formed run with object metrics and keeps it", () => {
 		const run = { fixtureName: "clamp-range", repIndex: 0, metrics: metrics("clamp-range", 0, "correct", 0.1) }
-		const validated = validateSideResultFile(
-			validatedFile("baseline", "a".repeat(40), { runs: [run] }),
-			"baseline",
-			"a".repeat(40),
-		)
-		assert.equal(validated.runs.length, 1)
+		const validated = validateSideResultFile(validatedFile("baseline", "a".repeat(40)), "baseline", "a".repeat(40))
+		assert.equal(validated.runs.length, CODING_FIXTURE_BUNDLES.length * 3)
 		assert.deepEqual(validated.runs[0], run)
 	})
 
@@ -629,3 +638,85 @@ for (const boundary of ["before", "json", "markdown", "marker"] as const) {
 		}
 	})
 }
+
+// Every accepted set contains each planned key exactly once, in any order.
+it("checks bounded repetition sets and metrics key agreement", () => {
+	for (const repetitions of [1, 2, 3]) {
+		const runs = CODING_FIXTURE_BUNDLES.flatMap(({ fixture }) =>
+			Array.from({ length: repetitions }, (_, repIndex) => ({
+				fixtureName: fixture.identity.name,
+				repIndex,
+				metrics: metrics(fixture.identity.name, repIndex, "correct", 0.1),
+			})),
+		)
+		const validate = (values: unknown[]) =>
+			validateSideResultFile(
+				{ pins: pins("baseline", "a".repeat(40)), runs: values },
+				"baseline",
+				"a".repeat(40),
+				repetitions,
+			)
+		assert.equal(validate([...runs].reverse()).runs.length, runs.length)
+		for (let i = 0; i < runs.length; i++) {
+			const run = runs[i]!
+			assert.throws(() => validate(runs.filter((_, j) => j !== i)), /missing expected repetitions/)
+			assert.throws(() => validate([...runs, run]), /duplicate repetition/)
+			for (const change of [{ repIndex: repetitions }, { fixtureName: "unknown" }, { repIndex: "0" }]) {
+				assert.throws(
+					() => validate(runs.map((value, j) => (j === i ? { ...value, ...change } : value))),
+					/repetition key/,
+				)
+			}
+			for (const change of [{ repIndex: repetitions }, { fixtureName: "unknown" }]) {
+				assert.throws(
+					() =>
+						validate(
+							runs.map((value, j) =>
+								j === i ? { ...value, metrics: { ...value.metrics, ...change } } : value,
+							),
+						),
+					/metrics keys differ/,
+				)
+			}
+		}
+	}
+})
+
+it("checks report availability across read boundaries", async (t) => {
+	const dir = await fs.mkdtemp(path.join(os.tmpdir(), "report-read-race-"))
+	const report = buildComparisonReport({
+		baseline: sideResult("baseline", "a".repeat(40), []),
+		candidate: sideResult("candidate", "b".repeat(40), []),
+	})
+	const readFile = fs.readFile.bind(fs)
+	try {
+		for (const boundary of ["comparison-report.complete", "comparison-report.json", "comparison-report.md"]) {
+			for (const replacement of [undefined, "next-generation"]) {
+				await publishComparisonReport(dir, report)
+				let changed = false
+				const read = t.mock.method(fs, "readFile", async (...args: Parameters<typeof fs.readFile>) => {
+					const value = await readFile(...args)
+					if (!changed && args[0] === path.join(dir, boundary)) {
+						changed = true
+						await fs.rm(path.join(dir, "comparison-report.complete"))
+						if (replacement) await fs.writeFile(path.join(dir, "comparison-report.complete"), replacement)
+						if (boundary === "comparison-report.complete")
+							await fs.rm(path.join(dir, "comparison-report.json"))
+					}
+					return value
+				})
+				assert.equal(await readPublishedComparisonReport(dir), undefined)
+				read.mock.restore()
+			}
+		}
+		await publishComparisonReport(dir, report)
+		assert.ok(await readPublishedComparisonReport(dir))
+		await fs.rm(path.join(dir, "comparison-report.json"))
+		await assert.rejects(readPublishedComparisonReport(dir), { code: "ENOENT" })
+		await fs.writeFile(path.join(dir, "comparison-report.json"), "invalid JSON")
+		await assert.rejects(readPublishedComparisonReport(dir), SyntaxError)
+	} finally {
+		t.mock.restoreAll()
+		await fs.rm(dir, { recursive: true, force: true })
+	}
+})

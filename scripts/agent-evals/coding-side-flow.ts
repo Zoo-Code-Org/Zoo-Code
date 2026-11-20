@@ -14,11 +14,8 @@ import { invalidateSideArtifacts } from "./coding-compare.ts"
 import { writeJsonAtomic } from "./fs-atomic.ts"
 import { publishGeneration } from "./publication.ts"
 
-export interface SideRepetition {
-	fixtureName: string
-	fixtureVersion: string
-	repIndex: number
-}
+import type { SideRepetition } from "./coding-suite.ts"
+export type { SideRepetition } from "./coding-suite.ts"
 
 export interface SideFlowInputs {
 	// The full repetition plan of this invocation, in execution order.
@@ -142,21 +139,21 @@ export async function executeSideFlow(inputs: SideFlowInputs): Promise<SideFlowO
 export async function executeSideGeneration(inputs: {
 	out: string
 	isInterrupted: () => boolean
-	run: () => Promise<void>
+	run: (out: string) => Promise<void>
 	cleanup: () => Promise<void>
 }): Promise<void> {
 	const release = await acquireSideOutputLock(inputs.out)
 	try {
-		await invalidateSideArtifacts(inputs.out)
+		await invalidateSideArtifacts(release.out)
 		try {
-			await inputs.run()
+			await inputs.run(release.out)
 		} finally {
 			try {
 				await inputs.cleanup()
 			} finally {
 				// Signals during final worktree cleanup invalidate a published
 				// generation too. Keep the lock until rollback has finished.
-				if (inputs.isInterrupted()) await invalidateSideArtifacts(inputs.out)
+				if (inputs.isInterrupted()) await invalidateSideArtifacts(release.out)
 			}
 		}
 	} finally {

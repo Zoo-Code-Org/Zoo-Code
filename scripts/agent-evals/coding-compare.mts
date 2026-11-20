@@ -88,8 +88,8 @@ const readArgs = (): {
 	const reps = Number(read("reps") ?? "3")
 	if (!Number.isInteger(reps) || reps < 1) throw new Error("--reps must be a positive integer")
 	const sideTimeoutMinutes = Number(read("side-timeout-minutes") ?? String(DEFAULT_SIDE_TIMEOUT_MINUTES))
-	if (!Number.isInteger(sideTimeoutMinutes) || sideTimeoutMinutes < 1) {
-		throw new Error("--side-timeout-minutes must be a positive integer")
+	if (!Number.isInteger(sideTimeoutMinutes) || sideTimeoutMinutes < 1 || sideTimeoutMinutes > 35_791) {
+		throw new Error("--side-timeout-minutes must be an integer from 1 to 35791")
 	}
 	const credentialEnv = read("credential-env") ?? "SOLHEIM_API_KEY"
 	// The variable name must be one the framework supports. An arbitrary name

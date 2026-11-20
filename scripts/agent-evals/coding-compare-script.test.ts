@@ -410,3 +410,30 @@ for (const alias of [false, true]) {
 		}
 	})
 }
+
+it("bounds side timeout minutes before any side starts", async () => {
+	for (const minutes of ["0", "1", "120", "35791", "35792", "1e100"]) {
+		const result = await runCompareScript(
+			[
+				"--baseline",
+				"a".repeat(40),
+				"--candidate",
+				"b".repeat(40),
+				"--out",
+				"/unused",
+				"--trust-file",
+				"/unused",
+				"--side-timeout-minutes",
+				minutes,
+			],
+			minimalEnv(),
+		)
+		assert.notEqual(result.code, 0)
+		assert.match(
+			result.stderr,
+			["1", "120", "35791"].includes(minutes)
+				? /provider credential.*unset or empty/
+				: /must be an integer from 1 to 35791/,
+		)
+	}
+})

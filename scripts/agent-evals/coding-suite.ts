@@ -1,4 +1,4 @@
-import { registerFixture, getFixture, listFixtures } from "./registry.ts"
+import { registerFixture, listFixtures } from "./registry.ts"
 import { validateFixture } from "./contract.ts"
 import { digestValue } from "./coding-digest.ts"
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
@@ -8,6 +8,23 @@ import { GRADER_VERSION } from "./coding-grader.ts"
 // tests, reference solutions, and grader version. Any edit changes the digest
 // and marks cross-commit comparisons incompatible.
 export const CODING_SUITE_ID = "coding-basic-v1"
+
+export interface SideRepetition {
+	fixtureName: string
+	fixtureVersion: string
+	repIndex: number
+}
+
+// Execution and result validation consume the same fixture and repetition plan.
+export function codingRepetitionPlan(repetitions: number): SideRepetition[] {
+	return CODING_FIXTURE_BUNDLES.flatMap(({ fixture }) =>
+		Array.from({ length: repetitions }, (_, repIndex) => ({
+			fixtureName: fixture.identity.name,
+			fixtureVersion: fixture.identity.version,
+			repIndex,
+		})),
+	)
+}
 
 let registered = false
 

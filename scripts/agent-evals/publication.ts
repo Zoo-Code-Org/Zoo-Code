@@ -26,6 +26,7 @@ export async function publishGeneration(publication: GenerationPublication): Pro
 			await step()
 			check()
 		}
+		check()
 		await publication.commit()
 		check()
 		return true

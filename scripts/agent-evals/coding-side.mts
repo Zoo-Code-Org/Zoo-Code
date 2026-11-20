@@ -36,7 +36,8 @@ import {
 	loadTrustPolicy,
 	resolveCommit,
 } from "./coding-trust.ts"
-import { executeSideGeneration, executeSideFlow, type SideRepetition } from "./coding-side-flow.ts"
+import { codingRepetitionPlan } from "./coding-suite.ts"
+import { executeSideGeneration, executeSideFlow } from "./coding-side-flow.ts"
 import { createInterruptFlag, createSideProcessGuard, watchParentConnection } from "./side-process-guard.ts"
 
 const execFileAsync = promisify(execFile)
@@ -183,7 +184,7 @@ await executeSideGeneration({
 	out,
 	isInterrupted: isSideInterrupted,
 	cleanup: () => cleanupPreparedTree(),
-	run: async () => {
+	run: async (out) => {
 		const sideScratch = await fs.mkdtemp(path.join(scratchParent, "coding-evals-side-"))
 		const evaluatedWorktree = path.join(sideScratch, "worktree")
 		const downloadVSCode = createPrivateVSCodeDownloader(path.join(sideScratch, "vscode-cache"))
@@ -211,13 +212,7 @@ await executeSideGeneration({
 
 		const projection = CODING_FIXTURE_BUNDLES[0]?.fixture.settingsProjection ?? {}
 
-		const repetitions: SideRepetition[] = CODING_FIXTURE_BUNDLES.flatMap((bundle) =>
-			Array.from({ length: reps }, (_, repIndex) => ({
-				fixtureName: bundle.fixture.identity.name,
-				fixtureVersion: bundle.fixture.identity.version,
-				repIndex,
-			})),
-		)
+		const repetitions = codingRepetitionPlan(reps)
 
 		// Pins are recorded when the side publishes, so they describe what actually
 		// executed: the approved evaluated commit and, when the container runtime
