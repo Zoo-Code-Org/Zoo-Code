@@ -1,0 +1,43 @@
+title: "[MCP Server] "
+body:
+    - type: markdown
+      attributes:
+          value: |
+              Thank you for proposing a new MCP server listing for Zoo Code.
+
+              This Discussion is a forum, not an application form. Every question below is optional. Users and maintainers give feedback in the thread, and a maintainer decides when to merge a listing PR. The outcome can be "not listed".
+
+              A listing is not an endorsement or a certification of security or functionality.
+    - type: input
+      id: operator
+      attributes:
+          label: Who runs the service?
+          description: Name the company or person that operates the service.
+      validations:
+          required: false
+    - type: textarea
+      id: public-artifacts
+      attributes:
+          label: Is there a public repo, a license, docs, and an issue tracker?
+      validations:
+          required: false
+    - type: textarea
+      id: maintenance
+      attributes:
+          label: Who maintains it, and when was the last update?
+      validations:
+          required: false
+    - type: textarea
+      id: mcp-data-flow
+      attributes:
+          label: What data leaves the machine, and are the tools read-only?
+          description: Link the privacy policy and terms of service if they exist.
+      validations:
+          required: false
+    - type: input
+      id: author-affiliation
+      attributes:
+          label: Does the author have a link to the operator?
+          description: For example, you work for the operator, or you are an unaffiliated user.
+      validations:
+          required: false
