@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Returns the value to pass as a client/SDK request timeout option, or undefined.
  *
  * Per the abort-signal series contract, timeoutMs <= 0, non-finite values

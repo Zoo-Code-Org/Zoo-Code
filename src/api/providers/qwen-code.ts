@@ -1,4 +1,4 @@
-﻿import { promises as fs } from "node:fs"
+import { promises as fs } from "node:fs"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 import * as os from "os"

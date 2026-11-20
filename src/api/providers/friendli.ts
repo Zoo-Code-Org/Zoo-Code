@@ -1,4 +1,4 @@
-﻿import { Anthropic } from "@anthropic-ai/sdk"
+import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import {
