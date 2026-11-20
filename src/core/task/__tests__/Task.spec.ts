@@ -4367,7 +4367,15 @@ describe("Cline", () => {
 				expect(settleSpy).toHaveBeenCalledOnce()
 				expect(responseOrder).toEqual(["delivered"])
 				// ...and the pending ask is still answered, so the submitted text is not lost.
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
+				// The trunk added structured mention segments to the delivery call, so the shipped
+				// fourth argument carries the segments derived from the submitted text (no mentions in
+				// it, hence a single generated segment). Assert it rather than omitting it.
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"still delivered",
+					[],
+					[{ source: "generated", text: "still delivered" }],
+				)
 				consoleErrorSpy.mockRestore()
 			})
 
@@ -4390,7 +4398,12 @@ describe("Cline", () => {
 				await task.submitUserMessage("delivered in old mode", undefined, "architect")
 
 				// The message is still delivered in the previous mode...
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "delivered in old mode", [])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"delivered in old mode",
+					[],
+					[{ source: "generated", text: "delivered in old mode" }],
+				)
 				// ...and the dropped selection leaves a trace.
 				expect(warnSpy).toHaveBeenCalledWith(
 					`[Task#submitUserMessage] Mode switch to architect was not applied (taskId=${task.taskId})`,

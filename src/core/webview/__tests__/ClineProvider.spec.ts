@@ -29,7 +29,6 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
 
 import { defaultModeSlug, type Mode } from "../../../shared/modes"
-import { defaultModeSlug } from "../../../shared/modes"
 import { joinSegments } from "../../../shared/mentionSegments"
 import type { MentionSegment } from "@roo-code/types"
 import { experimentDefault } from "../../../shared/experiments"
@@ -554,7 +553,6 @@ function expectMixedPayload(call: unknown[], context: string, sources: MentionSe
 	expect(segments.filter((s) => s.source === "user")).toEqual([{ text: "@/allowed", source: "user" }])
 	expect(segments.filter((s) => s.source === "generated").some((s) => s.text.includes(context))).toBe(true)
 	expect(segments.filter((s) => s.source === "user").some((s) => s.text.includes("@/generated"))).toBe(false)
-}
 }
 
 describe("ClineProvider", () => {
