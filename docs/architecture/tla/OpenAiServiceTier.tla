@@ -1,5 +1,5 @@
 ---- MODULE OpenAiServiceTier ----
-\* Source: response service_tier in createResponseStream and processEvent.
+\* Source: response service_tier in handleStreamResponse and processEvent.
 \* Sink: normalizeUsage sends one tier to applyServiceTierPricing and calculateApiCostOpenAI.
 \* Failure: Fast uses base rates or skips the long-context rate.
 \* Invariant: Fast uses priority at both cost readers. Other tiers keep their meaning.
@@ -11,24 +11,43 @@
 \* Replay: both real stream paths bill Sol at 0.439 instead of 0.878 at 272000 input tokens.
 \* Cost: each TLC run takes less than 1 second. Agent work takes about 6 minutes.
 \* Scope: price math and response transport are outside this model. The property test checks both.
-\* Gate: run both configs and the property test. Raw must fail. Fixed and the test must pass.
+\* Gate: run all configs and the property test. Raw and DroppedStatus must fail. Fixed and the test must pass.
 \* Property test: src/api/providers/__tests__/openai-service-tier.spec.ts.
+
+\* Simplification expect: one capture rule keeps status, core and legacy tiers before usage.
+\* Failure: removal of fallback capture loses a status tier before a later usage event.
+\* Invariant: capture precedes billing for every event shape. DroppedStatus must fail.
+\* Simplification result: Fixed holds in 180 states. Raw and DroppedStatus fail as expected.
+\* Replay: removal of fallback capture bills Fast at 0.439 instead of 0.878 and loses the response id.
+\* Simplification cost: each TLC run takes less than 1 second. Agent work takes about 6 minutes.
+\* No new failure was found in the shared capture design. The status counterexample rejects naive removal.
 
 EXTENDS TLC
 CONSTANT Variant
-VARIABLE input
+VARIABLES input, phase, captured
 
 Inputs == [actual : {"fast", "priority", "default", "flex", "absent"},
-           requested : {"priority", "default", "flex", "absent"}]
-Normalize(t) == IF Variant = "Fixed" /\ t = "fast" THEN "priority" ELSE t
-Actual == Normalize(input.actual)
+           requested : {"priority", "default", "flex", "absent"},
+           shape : {"core", "status", "legacy"}]
+Normalize(t) == IF Variant # "Raw" /\ t = "fast" THEN "priority" ELSE t
+Actual == captured
 Effective == IF Actual = "absent" THEN input.requested ELSE Actual
 Expected == IF input.actual = "fast" THEN "priority"
             ELSE IF input.actual = "absent" THEN input.requested ELSE input.actual
 
-Init == input \in Inputs
-Next == UNCHANGED input
-Spec == Init /\ [][Next]_input
-FastUsesPriority == input.actual = "fast" => Effective = "priority"
-OtherTiersKeepMeaning == input.actual # "fast" => Effective = Expected
+Init == /\ input \in Inputs
+        /\ phase = "source"
+        /\ captured = "absent"
+Capture == /\ phase = "source"
+           /\ captured' = IF Variant = "DroppedStatus" /\ input.shape # "core"
+                          THEN "absent" ELSE Normalize(input.actual)
+           /\ phase' = "captured"
+           /\ UNCHANGED input
+Bill == /\ phase = "captured"
+        /\ phase' = "billed"
+        /\ UNCHANGED <<input, captured>>
+Next == Capture \/ Bill
+Spec == Init /\ [][Next]_<<input, phase, captured>>
+FastUsesPriority == phase = "billed" /\ input.actual = "fast" => Effective = "priority"
+OtherTiersKeepMeaning == phase = "billed" /\ input.actual # "fast" => Effective = Expected
 ====

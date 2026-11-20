@@ -18,7 +18,15 @@ const cases = (["gpt-6.2-sol", "gpt-6.2-astra"] as const).flatMap((apiModelId) =
 	),
 )
 
-describe.each(["sdk", "fetch"] as const)("OpenAI service tier costs via %s", (transport) => {
+const paths = [
+	{ transport: "sdk", shape: "core" },
+	{ transport: "sdk", shape: "status" },
+	{ transport: "fetch", shape: "core" },
+	{ transport: "fetch", shape: "status" },
+	{ transport: "fetch", shape: "legacy" },
+] as const
+
+describe.each(paths)("OpenAI service tier costs via $transport ($shape)", ({ transport, shape }) => {
 	afterEach(() => {
 		vi.unstubAllGlobals()
 		clearAllMocks()
@@ -36,18 +44,35 @@ describe.each(["sdk", "fetch"] as const)("OpenAI service tier costs via %s", (tr
 					cache_write_tokens_details: { ttl_12h_tokens: 20_000 },
 				},
 			}
-			const event = { type: "response.completed", response: { service_tier: actual, usage, output: [] } }
+			const response = {
+				service_tier: actual,
+				id: "resp_tier",
+				output: [{ type: "reasoning", encrypted_content: "encrypted-reasoning" }],
+			}
+			const events =
+				shape === "status"
+					? [
+							{ type: "response.created", response },
+							{ type: "response.completed", response: { usage } },
+						]
+					: shape === "legacy"
+						? [{ response: { ...response, usage } }]
+						: [{ type: "response.completed", response: { ...response, usage } }]
 			if (transport === "sdk") {
-				create.mockImplementation(() => asyncStreamFrom([event]))
+				create.mockImplementation(() => asyncStreamFrom<unknown>(events))
 			} else {
 				create.mockRejectedValue(new Error("Use fetch fallback"))
 				vi.stubGlobal(
 					"fetch",
 					vi.fn().mockImplementation(
 						async () =>
-							new Response(`data: ${JSON.stringify(event)}\n\ndata: [DONE]\n\n`, {
-								headers: { "Content-Type": "text/event-stream" },
-							}),
+							new Response(
+								events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") +
+									"data: [DONE]\n\n",
+								{
+									headers: { "Content-Type": "text/event-stream" },
+								},
+							),
 					),
 				)
 			}
@@ -68,6 +93,9 @@ describe.each(["sdk", "fetch"] as const)("OpenAI service tier costs via %s", (tr
 				1_000_000
 			const result = chunks.find((chunk) => chunk.type === "usage")
 			expect(result?.totalCost, JSON.stringify({ requested, actual, inputTokens })).toBeCloseTo(expected, 8)
+			expect(handler.getResponseId()).toBe("resp_tier")
+			expect(handler.getEncryptedContent()).toEqual({ encrypted_content: "encrypted-reasoning" })
+			expect(chunks.filter((chunk) => chunk.type === "usage")).toHaveLength(1)
 		},
 	)
 })
