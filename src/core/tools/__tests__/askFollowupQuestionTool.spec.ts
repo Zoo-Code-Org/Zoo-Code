@@ -11,19 +11,26 @@ describe("AskFollowupQuestionTool", () => {
 	let tool: AskFollowupQuestionTool
 	let mockTask: Task
 	let mockCallbacks: ToolCallbacks
+	// Kept outside the Task double so tests can re-stub answers without casts.
+	let askMock: ReturnType<typeof vi.fn>
+	let userInputContent: ReturnType<typeof vi.fn>
+	const expandedContent = [{ type: "text", text: "expanded" }]
 
 	beforeEach(() => {
 		vi.clearAllMocks()
-
 		tool = new AskFollowupQuestionTool()
 
+		askMock = vi.fn().mockResolvedValue({ text: "User answer", images: [] })
+		userInputContent = vi.fn().mockResolvedValue(expandedContent)
 		mockTask = {
+			userMessageContent: [],
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			didToolFailInCurrentTurn: false,
 			sayAndCreateMissingParamError: vi.fn().mockResolvedValue("Missing parameter error"),
-			ask: vi.fn().mockResolvedValue({ text: "User answer", images: [] }),
+			ask: askMock,
 			say: vi.fn().mockResolvedValue(undefined),
+			userInputContent,
 		} as unknown as Task
 
 		mockCallbacks = {
@@ -209,6 +216,28 @@ describe("AskFollowupQuestionTool", () => {
 		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
 			formatResponse.toolResult(`<user_message>\nI'll go with Approach 1\n</user_message>`, []),
 		)
+	})
+
+	it.each([
+		{ label: "user segments", text: "@/allowed", segments: [{ text: "@/allowed", source: "user" }] },
+		{
+			label: "mixed segments",
+			text: "@/secret @/mine",
+			segments: [
+				{ text: "@/secret ", source: "generated" },
+				{ text: "@/mine", source: "user" },
+			],
+		},
+		{ label: "missing segments", text: "@/secret", segments: undefined },
+		{ label: "a null answer", text: null, segments: undefined },
+	])("hands the answer with $label to Task.userInputContent", async ({ text, segments }) => {
+		const params = { question: "What?", follow_up: [{ text: "A" }] }
+		askMock.mockResolvedValue({ text, images: [], segments })
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		expect(userInputContent).toHaveBeenCalledWith(text ?? "", segments)
+		expect(mockTask.userMessageContent).toEqual(expandedContent)
 	})
 
 	it("should pass images from user response to toolResult", async () => {

@@ -160,7 +160,7 @@ export const CustomToolsSettings = ({ enabled, onChange }: CustomToolsSettingsPr
 													</span>
 													{param.required && (
 														<span className="text-vscode-errorForeground text-[10px] uppercase">
-															required
+															{t("settings:experimental.CUSTOM_TOOLS.required")}
 														</span>
 													)}
 													{param.description && (

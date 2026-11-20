@@ -32,8 +32,10 @@ import {
 	IpcMessageType,
 	TASK_START_FAILURE_ERROR_CODE,
 	TASK_START_FAILURE_ERROR_MESSAGE,
+	type MentionSegment,
 } from "@roo-code/types"
 import { IpcServer } from "@roo-code/ipc"
+import { userSegments } from "../shared/mentionSegments"
 
 import { Package } from "../shared/package"
 import { getAllModes, type Mode } from "../shared/modes"
@@ -331,9 +333,11 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		// effectively unlimited. The soft repetition tier is disabled too:
 		// without a reachable hard stop it would reject every identical call
 		// with no escalation.
-		const options: CreateTaskOptions = {
+		const options: CreateTaskOptions & { segments?: MentionSegment[] } = {
 			consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
 			toolRepetitionSoftLimit: 0,
+			// The API caller authored the task text.
+			segments: userSegments(text ?? ""),
 		}
 
 		const task = await provider.createTask(text, images, undefined, options, configuration)
@@ -490,11 +494,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				return
 			}
 
-			await currentTask.submitUserMessage(text ?? "", images)
+			await currentTask.submitUserMessage(text ?? "", images, undefined, undefined, userSegments(text ?? ""))
 			return
 		}
 
-		await this.sidebarProvider.postMessageToWebview({ type: "invoke", invoke: "sendMessage", text, images })
+		await this.sidebarProvider.postMessageToWebview({
+			type: "invoke",
+			invoke: "sendMessage",
+			text,
+			images,
+			segments: userSegments(text ?? ""),
+		})
 	}
 
 	public deleteQueuedMessage(messageId: string) {

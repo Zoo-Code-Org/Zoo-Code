@@ -20,7 +20,8 @@
 	"unpin": "取消釘選",
 	"pin": "釘選",
 	"fileChangesInConversation": {
-		"header_other": "此對話中已變更 {{count}} 個檔案"
+		"header_other": "此對話中已變更 {{count}} 個檔案",
+		"lineStatsAriaLabel": "新增行數：{{added}}，刪除行數：{{removed}}"
 	},
 	"retry": {
 		"title": "重試",
@@ -263,7 +264,8 @@
 		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
 		"didSearch_other": "找到 {{count}} 個結果",
-		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
+		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）",
+		"displayError": "顯示搜尋結果時發生錯誤。"
 	},
 	"commandExecution": {
 		"abort": "中止",
@@ -275,7 +277,9 @@
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
 		"addToDenied": "新增至拒絕清單",
-		"removeFromDenied": "從拒絕清單中移除"
+		"removeFromDenied": "從拒絕清單中移除",
+		"pid": "（PID：{{pid}}）",
+		"clickToEditPattern": "點擊以編輯模式"
 	},
 	"text": {
 		"rooSaid": "Zoo 說"
@@ -335,7 +339,9 @@
 		"triggerLabelOffShort": "關閉",
 		"triggerLabel_zero": "0 個自動核准",
 		"triggerLabel_other": "{{count}} 個自動核准",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "已啟用",
+		"toggleAriaLabel": "切換自動核准"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} 已發布",
@@ -413,12 +419,43 @@
 		"noResults": "找不到結果",
 		"problems": "問題",
 		"terminal": "終端機",
-		"url": "貼上 URL 以擷取內容"
+		"url": "貼上 URL 以擷取內容",
+		"gitCommits": "Git 提交",
+		"gitCommitsDescription": "搜尋儲存庫歷史",
+		"workingChanges": "工作區變更",
+		"workingChangesDescription": "目前尚未提交的變更",
+		"commit": "提交 {{hash}}",
+		"commitHashDescription": "Git 提交雜湊",
+		"addFile": "新增檔案",
+		"addFolder": "新增資料夾",
+		"commands": "命令",
+		"modes": "模式"
 	},
 	"todo": {
 		"partial": "已完成 {{completed}}／{{total}} 個待辦事項",
 		"complete": "已完成 {{total}} 個待辦事項",
-		"updated": "已更新待辦事項清單"
+		"updated": "已更新待辦事項清單",
+		"listUpdated": "待辦清單已更新",
+		"userEdit": "使用者編輯",
+		"userEdits": "使用者編輯",
+		"edit": "編輯",
+		"done": "完成",
+		"itemPlaceholder": "輸入待辦事項",
+		"newItemPlaceholder": "輸入待辦事項，按 Enter 新增",
+		"remove": "移除",
+		"add": "新增",
+		"cancel": "取消",
+		"addTodo": "+ 新增待辦",
+		"status": {
+			"notStarted": "未開始",
+			"inProgress": "進行中",
+			"completed": "已完成"
+		},
+		"deleteDialog": {
+			"title": "刪除待辦事項",
+			"description": "確定要刪除此待辦事項嗎？",
+			"confirm": "刪除"
+		}
 	},
 	"tooManyTools": {
 		"title": "啟用的工具過多",
@@ -438,5 +475,24 @@
 		"title": "供應商不再受支援",
 		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
 		"openSettings": "開啟設定"
+	},
+	"zooCodeAuth": {
+		"signIn": "登入 Zoo Code",
+		"goToDashboard": "前往儀表板",
+		"signOut": "登出",
+		"avatarAlt": "大頭貼",
+		"accountTitle": "Zoo Code：{{account}}",
+		"connected": "已連線"
+	},
+	"arguments": "參數：",
+	"copyAsMarkdown": "複製為 Markdown",
+	"openInPreview": "在預覽中開啟",
+	"codeAccordion": {
+		"userEdits": "使用者編輯",
+		"consoleLogs": "主控台記錄",
+		"openFileAriaLabel": "開啟檔案：{{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "已隱藏 {{count}} 行"
 	}
 }

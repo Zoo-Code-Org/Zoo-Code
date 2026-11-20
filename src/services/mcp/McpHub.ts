@@ -1,5 +1,6 @@
 import * as fs from "fs/promises"
 import * as path from "path"
+import { EventEmitter } from "node:events"
 
 import * as vscode from "vscode"
 import { Client } from "@modelcontextprotocol/sdk/client/index.js"
@@ -43,6 +44,7 @@ import { arePathsEqual, getWorkspacePath } from "../../utils/path"
 import { injectVariables } from "../../utils/config"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { sanitizeMcpName, toolNamesMatch } from "../../utils/mcp-name"
+import { ToolRouter } from "../tools/ToolRouter"
 
 // Discriminated union for connection states
 export type ConnectedMcpConnection = {
@@ -163,6 +165,27 @@ const McpSettingsSchema = z.object({
 })
 
 export class McpHub {
+	private readonly serverListEvents = new EventEmitter()
+	private serverListKey?: string
+
+	public onServerListChanged(listener: () => void): { dispose(): void } {
+		const safeListener = () => {
+			try {
+				void Promise.resolve(listener()).catch((error: unknown) => {
+					console.error("[McpHub] Server-list change listener failed:", error)
+				})
+			} catch (error) {
+				console.error("[McpHub] Server-list change listener failed:", error)
+			}
+		}
+		this.serverListEvents.on("changed", safeListener)
+		return {
+			dispose: () => {
+				this.serverListEvents.off("changed", safeListener)
+			},
+		}
+	}
+
 	private providerRef: WeakRef<ClineProvider>
 	private disposables: vscode.Disposable[] = []
 	private settingsWatcher?: vscode.FileSystemWatcher
@@ -183,6 +206,7 @@ export class McpHub {
 
 	constructor(provider: ClineProvider, secretStorage?: SecretStorageService) {
 		this.providerRef = new WeakRef(provider)
+		this.disposables.push(ToolRouter.getInstance().registerHub(this))
 		if (secretStorage) {
 			this.secretStorage = secretStorage
 		}
@@ -1855,6 +1879,21 @@ export class McpHub {
 	}
 
 	private async notifyWebviewOfServerChanges(): Promise<void> {
+		// Notify internal consumers before filesystem or webview work can fail.
+		const key = JSON.stringify(
+			this.connections.map(({ server }) => ({
+				name: server.name,
+				source: server.source,
+				config: server.config,
+				status: server.status,
+				disabled: server.disabled,
+				tools: server.tools,
+			})),
+		)
+		if (key !== this.serverListKey) {
+			this.serverListKey = key
+			this.serverListEvents.emit("changed")
+		}
 		// Get global server order from settings file
 		const settingsPath = await this.getMcpSettingsFilePath()
 		const content = await fs.readFile(settingsPath, "utf-8")
@@ -2537,6 +2576,8 @@ export class McpHub {
 		}
 
 		this.connections = []
+		this.serverListEvents.emit("changed")
+		this.serverListEvents.removeAllListeners()
 
 		if (this.settingsWatcher) {
 			this.settingsWatcher.dispose()

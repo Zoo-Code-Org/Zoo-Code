@@ -35,6 +35,18 @@ type SelectMockProps = ChildrenProps & {
 	onValueChange?: (value: string) => void
 }
 
+type VSCodeDropdownMockProps = ChildrenProps & {
+	value?: string
+	onChange?: (event: Event) => void
+	id?: string
+	"aria-label"?: string
+	className?: string
+}
+
+type VSCodeOptionMockProps = ChildrenProps & {
+	value: string
+}
+
 type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<string, never> }
 
 const { modelPickerMock, useOpenRouterModelProvidersMock, useRouterModelsMock, useSelectedModelMock } = vi.hoisted(
@@ -151,6 +163,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		</label>
 	),
 	VSCodeLink: ({ children }: ChildrenProps) => <span>{children}</span>,
+	VSCodeDropdown: ({ children, value, onChange, ...props }: VSCodeDropdownMockProps) => (
+		<select value={value} onChange={(event) => onChange?.(event.nativeEvent)} {...props}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value }: VSCodeOptionMockProps) => <option value={value}>{children}</option>,
 }))
 
 vi.mock("@/components/ui", () => ({

@@ -73,9 +73,11 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			}
 
 			task.consecutiveMistakeCount = 0
-			const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
+			const { text, images, segments } = await task.ask("followup", JSON.stringify(follow_up_json), false)
 			const safeText = text ?? ""
 			await task.say("user_feedback", safeText, images)
+			// Only user segments expand. The tool result repeats the text by design.
+			task.userMessageContent.push(...(await task.userInputContent(safeText, segments)))
 			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)

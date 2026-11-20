@@ -158,11 +158,17 @@ describe("API task controls", () => {
 				webviewFocusTracker: focusTrackerDouble,
 			})
 			expect(newTabProvider.evictCurrentTask).toHaveBeenCalledOnce()
+			// main's mention-segmenting change (#2421) passes the submitted text as segments on the
+			// createTask options; the assertion adopts that shipped shape rather than loosening itself.
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
 				"new task",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ text: "new task", source: "user" }],
+				},
 				configuration,
 			)
 		})
@@ -185,11 +191,17 @@ describe("API task controls", () => {
 				outputChannel,
 				webviewFocusTracker: focusTrackerDouble,
 			})
+			// Same segment metadata as the assertion above: preserveOpenTabs changes the editor
+			// commands, not the payload the task is created from.
 			expect(newTabProvider.createTask).toHaveBeenCalledWith(
 				"keep editors",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ text: "keep editors", source: "user" }],
+				},
 				configuration,
 			)
 		})
