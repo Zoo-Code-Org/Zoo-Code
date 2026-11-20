@@ -26,6 +26,7 @@ interface ModelEvent {
 }
 
 interface TraceStep {
+	event?: RunEvent
 	action: string
 	source: Source | "initial"
 	state: ModelState
@@ -321,7 +322,20 @@ function canonical(value: unknown): string {
 	return JSON.stringify(stable(value))
 }
 
-function eventsFor({ run, askCount }: ModelState): ModelEvent[] {
+// PR 2244, discussion_r4498864158: coverage needs a pending replacement, not just an older timestamp.
+function replacedAsksIn(trace: TraceStep[]): Set<number> {
+	const replaced = new Set<number>()
+	for (let index = 1; index < trace.length; index++) {
+		const { event } = trace[index]!
+		const before = trace[index - 1]!.state.run.ask
+		if (event?.tag === "askStarted" && before.tag !== "none") replaced.add(before.askTs)
+		if (event?.tag === "askSettled") replaced.delete(event.askTs)
+	}
+	return replaced
+}
+
+function eventsFor({ run, askCount }: ModelState, trace: TraceStep[]): ModelEvent[] {
+	const replaced = replacedAsksIn(trace)
 	const events: ModelEvent[] = [{ name: "initialized()", source: "init", event: { tag: "initialized" } }]
 	const streamStartRejects = run.phase !== "running" || run.stream.tag !== "none"
 	if (run.generation < MAX_GENERATION || streamStartRejects) {
@@ -339,7 +353,7 @@ function eventsFor({ run, askCount }: ModelState): ModelEvent[] {
 		}
 	}
 	for (let askTs = 1; askTs <= MAX_ASK_TS; askTs++) {
-		const supersededByNewerAsk = run.ask.tag !== "none" && run.ask.askTs > askTs
+		const supersededByNewerAsk = run.ask.tag !== "none" && run.ask.askTs > askTs && replaced.has(askTs)
 		events.push(
 			{
 				name: `${supersededByNewerAsk ? "askSettledStale" : "askSettled"}(${askTs})`,
@@ -509,7 +523,7 @@ function checkTurnRegion(options: Options, searched: SearchNode[], reachedAction
 		turns.map((turn) => ({
 			trace: node.trace,
 			state: { ...node.state, run: { ...node.state.run, turn } },
-			events: [...eventsFor(node.state), ...turnTags.map(turnEvent)],
+			events: [...eventsFor(node.state, node.trace), ...turnTags.map(turnEvent)],
 		})),
 	)
 
@@ -526,7 +540,12 @@ function checkTurnRegion(options: Options, searched: SearchNode[], reachedAction
 				const trace = [
 					...reached,
 					{ action: `fixture: turn = ${JSON.stringify(state.run.turn)}`, source: "turn" as const, state },
-					{ action: modelEvent.name, source: modelEvent.source, state: applied.next },
+					{
+						action: modelEvent.name,
+						source: modelEvent.source,
+						state: applied.next,
+						event: modelEvent.event,
+					},
 				]
 				throw new Error(formatCounterexample(problems.join("; "), trace, options))
 			}
@@ -540,6 +559,35 @@ interface CheckResult {
 	deepest: number
 }
 
+class SourceEdges {
+	private incoming = new Map<string, Set<Source>>()
+	private outgoing = new Map<string, Set<Source>>()
+
+	record(from: string, to: string, source: Source): void {
+		if (from === to) return
+		for (const [map, key] of [
+			[this.incoming, to],
+			[this.outgoing, from],
+		] as const) {
+			const sources = map.get(key) ?? new Set<Source>()
+			sources.add(source)
+			map.set(key, sources)
+		}
+	}
+
+	pairs(): Set<string> {
+		const pairs = new Set<string>()
+		for (const [key, incoming] of this.incoming) {
+			for (const from of incoming) {
+				for (const to of this.outgoing.get(key) ?? []) {
+					if (from !== to) pairs.add(`${from}->${to}`)
+				}
+			}
+		}
+		return pairs
+	}
+}
+
 function runModelCheck(options: Options): CheckResult {
 	const start = initialState()
 	const startTrace: TraceStep[] = [{ action: "initial", source: "initial", state: start }]
@@ -551,20 +599,20 @@ function runModelCheck(options: Options): CheckResult {
 	const reachedActions = new Set<string>()
 	const reachedRejections = new Set<string>()
 	const reachedWitnesses = new Set<string>()
-	const reachedInterleavings = new Set<string>()
+	const sourceEdges = new SourceEdges()
 	let deepest = 0
 
 	for (let index = 0; index < queue.length; index++) {
 		const node = queue[index]!
 		const depth = node.trace.length - 1
 		deepest = Math.max(deepest, depth)
-		const previousStep = node.trace[depth]!
-		const previousChangedState =
-			depth > 0 && canonical(previousStep.state.run) !== canonical(node.trace[depth - 1]!.state.run)
 
-		for (const modelEvent of eventsFor(node.state)) {
+		for (const modelEvent of eventsFor(node.state, node.trace)) {
 			const applied = apply(options, node.state, modelEvent)
-			const trace = [...node.trace, { action: modelEvent.name, source: modelEvent.source, state: applied.next }]
+			const trace = [
+				...node.trace,
+				{ action: modelEvent.name, source: modelEvent.source, state: applied.next, event: modelEvent.event },
+			]
 			const problems = [...applied.problems, ...(applied.accepted ? stateViolations(applied.next) : [])]
 			if (problems.length) throw new Error(formatCounterexample(problems.join("; "), trace, options))
 
@@ -579,9 +627,9 @@ function runModelCheck(options: Options): CheckResult {
 				continue
 			}
 			reachedActions.add(modelEvent.name.slice(0, modelEvent.name.indexOf("(")))
-			const changesState = canonical(applied.next.run) !== canonical(node.state.run)
-			if (previousChangedState && changesState && previousStep.source !== modelEvent.source) {
-				reachedInterleavings.add(`${previousStep.source}->${modelEvent.source}`)
+			// Record every edge, including edges to states that BFS has already visited.
+			if (!isDeepStrictEqual(node.state.run, applied.next.run)) {
+				sourceEdges.record(canonical(node.state), canonical(applied.next), modelEvent.source)
 			}
 
 			const key = canonical(applied.next)
@@ -618,6 +666,7 @@ function runModelCheck(options: Options): CheckResult {
 		"unreachable semantic witnesses",
 		Object.keys(semanticWitnesses).filter((name) => !reachedWitnesses.has(name)),
 	)
+	const reachedInterleavings = sourceEdges.pairs()
 	assertNoneMissing(
 		"missing event-source interleavings between state changes",
 		eventSources
@@ -1074,8 +1123,88 @@ function runRepresentativeScenarios(): void {
 	assert.deepEqual(nextRunState(asked.ok, { tag: "askSettled", askTs: 2 }), { ok: asked.ok })
 }
 
+function checkReplacementCoverage(): void {
+	const options = {
+		step: nextRunState,
+		useTable: true,
+		maxDepth: MAX_DEPTH,
+		maxStates: MAX_STATES,
+		allTurnStates: true,
+	}
+	for (const first of Object.values(askBuilders)) {
+		for (const second of Object.values(askBuilders)) {
+			for (const settleFirst of [false, true]) {
+				let state = initialState()
+				const trace: TraceStep[] = [{ action: "initial", source: "initial", state }]
+				const send = (event: RunEvent) => {
+					const modelEvent = { name: event.tag, source: "ask" as const, event }
+					const applied = apply(options, state, modelEvent)
+					assert.deepEqual(applied.problems, [])
+					assert.ok(applied.accepted)
+					state = applied.next
+					trace.push({ action: event.tag, source: "ask", state, event })
+				}
+				send({ tag: "initialized" })
+				send({ tag: "askStarted", ask: first(1) })
+				if (settleFirst) send({ tag: "askSettled", askTs: 1 })
+				send({ tag: "askStarted", ask: second(2) })
+				const isStale = () => eventsFor(state, trace).some((event) => event.name === "askSettledStale(1)")
+				assert.equal(isStale(), !settleFirst, "only a replaced pending ask counts as stale coverage")
+				const newest = structuredClone(state.run.ask)
+				send({ tag: "askSettled", askTs: 1 })
+				assert.deepEqual(state.run.ask, newest, "settling an older ask must preserve the newest ask")
+				assert.equal(isStale(), false, "a replaced ask exits only once")
+			}
+		}
+	}
+}
+
+function checkSourceEdgeCoverage(): void {
+	for (const incomingFirst of [false, true]) {
+		const edges = new SourceEdges()
+		const initialized = nextRunState(structuredClone(initialRunState), { tag: "initialized" })
+		assert.ok("ok" in initialized)
+		const ask: RunEvent = { tag: "askStarted", ask: { tag: "approval", askTs: 1 } }
+		const cancel: RunEvent = { tag: "reasonSet", reason: "user_cancelled" }
+		const paths = [
+			[ask, cancel],
+			[cancel, ask],
+		]
+		let join: RunState | undefined
+		const recordIncoming = () => {
+			for (const path of paths) {
+				let state: RunState = initialized.ok
+				for (const event of path) {
+					const result = nextRunState(state, event)
+					assert.ok("ok" in result)
+					edges.record(canonical(state), canonical(result.ok), event.tag === "askStarted" ? "ask" : "cancel")
+					state = result.ok
+				}
+				if (join) assert.deepEqual(state, join)
+				join = state
+			}
+		}
+		// Build the join before recording its edges, so both insertion orders use real states.
+		const first = nextRunState(initialized.ok, ask)
+		assert.ok("ok" in first)
+		const second = nextRunState(first.ok, cancel)
+		assert.ok("ok" in second)
+		const stream = nextRunState(second.ok, { tag: "streamStarted" })
+		assert.ok("ok" in stream)
+		if (incomingFirst) recordIncoming()
+		edges.record(canonical(second.ok), canonical(stream.ok), "stream")
+		if (!incomingFirst) recordIncoming()
+		assert.ok(edges.pairs().has("ask->stream"))
+		assert.ok(edges.pairs().has("cancel->stream"))
+		edges.record(canonical(second.ok), canonical(second.ok), "dispose")
+		assert.ok(!edges.pairs().has("dispose->stream"), "a no-op must not contribute an incoming source")
+	}
+}
+
 assertKernelHandlesTableEvents()
 runRepresentativeScenarios()
+checkReplacementCoverage()
+checkSourceEdgeCoverage()
 const { states, deepest } = runModelCheck({
 	step: nextRunState,
 	useTable: true,

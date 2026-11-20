@@ -29,15 +29,27 @@
 \* gap: 4633780197 (an own property with an undefined value). The spec has no JavaScript objects.
 \* gap: 4633780165 (a stale count in task-lifecycle-model.md). It is prose.
 \* Round 2 counts: covered 0, added 0, gap 6. Findings about the spec files: 1.
+\* Round 3, PR 2244: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2244#discussion_r4498864158
+\* covered: NewestShown still requires an open replaced ask. The TS checker now derives replacement from its BFS trace.
+\* Replay: the old TS classification fails the settle-before-replacement property. The fixed classifier passes all 32 cases.
+\* https://github.com/Zoo-Code-Org/Zoo-Code/pull/2244#discussion_r4633780176
+\* gap: exploration limits were still in this module. This is a file-layout rule, not a state invariant.
+\* MaxAsks, MaxGen, the timestamp domain and the bounded next action now live in RunStateKernelMC.
+\* gap: the round 2 review summary loses source pairs on edges to visited states. The spec does not model the TS explorer.
+\* The TS property replays ask/cancel in both orders, then starts a stream. It requires both incoming source pairs.
+\* A sabotage that keeps one incoming source fails this property. The fixed code passes in both edge insertion orders.
+\* Replay: the Reuse counterexample still clears the replacement in nextRunState. Issue 2365 owns that runtime fix.
+\* Round 3 counts: covered 1, added 0, gap 2. Findings about the spec files: 1.
+\* Expected before round 3: the same invariants and sabotage failures. No new runtime bug is expected.
+\* Result: MCSpec holds (5160 states). All 11 variants fail with the same state counts as before. Null result: no new model bug.
+\* The 32-case code property checks NewestShown with distinct timestamps. It also checks the coverage source and label.
+\* Cost for round 3: TLC takes about 20 seconds for all 12 configs. Agent time is not measured.
 \* Code check (step 10): scripts/check-run-state-kernel.ts runs the same invariants on the real nextRunState.
 \* Cost: TLC takes under 10 seconds per config. Agent time is not measured.
 
 EXTENDS Naturals
 
-CONSTANTS MaxAsks, MaxGen
-
 Reasons == {"user_cancelled", "streaming_failed"}
-AskIds == 1..MaxAsks
 NoAsk == [id |-> 0, tag |-> "none", ts |-> 0]
 
 \* ask.id, tsOf, open, n, fresh and done are ghost data. The kernel reads only ask.tag and ask.ts.
@@ -45,6 +57,7 @@ NoAsk == [id |-> 0, tag |-> "none", ts |-> 0]
 VARIABLES phase, gen, stream, ask, lastComp, abort, abandoned, disposed, reason, n, tsOf, open, fresh, done
 vars == <<phase, gen, stream, ask, lastComp, abort, abandoned, disposed, reason, n, tsOf, open, fresh, done>>
 ghosts == <<n, tsOf, open, fresh, done>>
+AskTimestamps == {n + 1}
 latches == <<abort, abandoned, disposed, reason>>
 
 \* The guards and effects of the Transitions table. RunStateKernelMC.tla overrides one of them in each sabotage config.
@@ -63,13 +76,13 @@ DisposeAbort == TRUE
 
 Init == /\ phase = "uninitialized" /\ gen = 0 /\ stream = "none" /\ ask = NoAsk /\ lastComp = 0
         /\ abort = FALSE /\ abandoned = FALSE /\ disposed = FALSE /\ reason = ""
-        /\ n = 0 /\ tsOf = [k \in AskIds |-> 0] /\ open = {} /\ fresh = 0 /\ done = 0
+        /\ n = 0 /\ tsOf = [k \in {} |-> 0] /\ open = {} /\ fresh = 0 /\ done = 0
 
 Initialized == /\ phase = "uninitialized" /\ phase' = "running"
                /\ InitializedLatches
                /\ UNCHANGED <<gen, stream, ask, lastComp, reason, ghosts>>
 
-StreamStarted == /\ StreamStartGuard /\ stream = "none" /\ gen < MaxGen
+StreamStarted == /\ StreamStartGuard /\ stream = "none"
                  /\ gen' = gen + 1 /\ stream' = "live" /\ lastComp' = 0 /\ fresh' = 0
                  /\ UNCHANGED <<phase, ask, latches, n, tsOf, open, done>>
 
@@ -82,8 +95,8 @@ StreamEnded == /\ stream # "none" /\ stream' = "none" /\ gen' = StreamEndGen
 
 \* Approval and other asks have the same effect, so the spec merges them.
 AskStarted(tag, t) ==
-    /\ n < MaxAsks /\ AskStartGuard /\ AskTsFresh(t)
-    /\ n' = n + 1 /\ tsOf' = [tsOf EXCEPT ![n + 1] = t] /\ open' = open \cup {n + 1}
+    /\ AskStartGuard /\ AskTsFresh(t)
+    /\ n' = n + 1 /\ tsOf' = [k \in 1..(n + 1) |-> IF k = n + 1 THEN t ELSE tsOf[k]] /\ open' = open \cup {n + 1}
     /\ ask' = [id |-> n + 1, tag |-> tag, ts |-> t]
     /\ lastComp' = IF tag = "completion" THEN t ELSE 0
     /\ fresh' = IF tag = "completion" THEN n + 1 ELSE 0
@@ -113,17 +126,17 @@ DisposeRequested == /\ abort' = DisposeAbort /\ disposed' = TRUE
                     /\ UNCHANGED <<phase, gen, stream, ask, lastComp, abandoned, reason, ghosts>>
 
 Next == \/ Initialized \/ StreamStarted \/ StreamCleanupFinished \/ StreamEnded
-        \/ \E tag \in {"completion", "other"}, t \in AskIds : AskStarted(tag, t)
-        \/ \E k \in AskIds : AskSettled(k) \/ CompletionAccepted(k)
+        \/ \E tag \in {"completion", "other"}, t \in AskTimestamps : AskStarted(tag, t)
+        \/ \E k \in 1..n : AskSettled(k) \/ CompletionAccepted(k)
         \/ \E r \in Reasons : ReasonSet(r)
         \/ \E b \in BOOLEAN : AbortRequested(b)
         \/ AbandonRequested \/ DisposeRequested
 
 Spec == Init /\ [][Next]_vars
 
-TypeOK == /\ phase \in {"uninitialized", "running", "completed"} /\ gen \in 0..MaxGen
-          /\ stream \in {"none", "live", "clean"} /\ lastComp \in 0..MaxAsks
-          /\ reason \in Reasons \cup {""} /\ n \in 0..MaxAsks /\ open \subseteq 1..n
+TypeOK == /\ phase \in {"uninitialized", "running", "completed"} /\ gen \in Nat
+          /\ stream \in {"none", "live", "clean"} /\ lastComp \in Nat
+          /\ reason \in Reasons \cup {""} /\ n \in Nat /\ open \subseteq 1..n
 
 \* Design-doc invariants 1, 2, 5 and 7.
 AbandonImpliesAbort == abandoned => abort
