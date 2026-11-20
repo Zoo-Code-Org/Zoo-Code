@@ -122,7 +122,14 @@ export function buildResponsesRequest({
 		}
 		requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
 	}
-	return { ...extraBody, ...requestBody }
+	const request = { ...extraBody, ...requestBody }
+	// Mirror the Chat Completions o-series path, which owns
+	// `temperature: undefined`: because the guard above leaves
+	// requestBody.temperature absent for o-series models, an Extra Body
+	// temperature would otherwise survive the spread and reach a model that
+	// rejects the parameter outright. Remove it explicitly.
+	if (isOSeriesModel) delete request.temperature
+	return request
 }
 
 /**

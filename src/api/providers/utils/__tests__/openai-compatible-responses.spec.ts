@@ -193,6 +193,22 @@ it.each(["o1", "o3", "o4-mini"])(
 	},
 )
 
+it.each([
+	{ modelId: "o1", expected: undefined },
+	{ modelId: "o3", expected: undefined },
+	{ modelId: "o4-mini", expected: undefined },
+	{ modelId: "gpt-5.1", expected: 0.4 },
+])("handles Extra Body temperature for model $modelId", ({ modelId, expected }) => {
+	const body = buildResponsesRequest(
+		makeInput({
+			options: { openAiModelId: modelId },
+			extraBody: { temperature: 0.4 },
+		}),
+	)
+	if (expected === undefined) expect(body).not.toHaveProperty("temperature")
+	else expect(body).toHaveProperty("temperature", expected)
+})
+
 it("normalizes both history ID fields to the Responses call_id length limit", () => {
 	// History recorded through another provider (e.g. Gemini) can carry tool
 	// IDs longer than the Responses call_id limit; both fields must be
