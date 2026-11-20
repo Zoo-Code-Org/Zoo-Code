@@ -12,6 +12,34 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"litellm-reasoning-settings": async () => {
+		const [{ AppProviders }, { default: ApiOptions }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ApiOptions"),
+			import("@roo-code/types"),
+		])
+		const apiConfiguration: import("@roo-code/types").ProviderSettings = {
+			apiProvider: providerIdentifiers.litellm,
+			litellmBaseUrl: "http://localhost:4000",
+			litellmApiKey: "sk-litellm-example",
+			litellmModelId: "custom-alias",
+		}
+		return (
+			<AppProviders initialState={{ apiConfiguration }}>
+				<div
+					className="w-[480px] max-w-full p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="litellm-reasoning-settings-story">
+					<ApiOptions
+						uriScheme="vscode"
+						apiConfiguration={apiConfiguration}
+						setApiConfigurationField={() => undefined}
+						errorMessage={undefined}
+						setErrorMessage={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"terminal-settings": async () => {
 		const [{ AppProviders }, { TerminalSettings }] = await Promise.all([
 			import("../AppProviders"),
