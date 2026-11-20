@@ -22,6 +22,7 @@ const expectedModelIdKeys = [
 	"kenariModelId",
 	"nanoGptModelId",
 	"ioIntelligenceModelId",
+	"standardComputeModelId",
 	"zooGatewayModelId",
 ] as const
 

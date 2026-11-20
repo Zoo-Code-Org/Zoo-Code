@@ -196,6 +196,11 @@ function validateModelsAndKeysProvided(
 				return t("settings:validation.apiKey")
 			}
 			break
+		case providerIdentifiers.standardCompute:
+			if (!apiConfiguration.standardComputeApiKey) {
+				return i18next.t("settings:validation.apiKey")
+			}
+			break
 		case providerIdentifiers.nanogpt:
 			if (!apiConfiguration.nanoGptApiKey) {
 				return t("settings:validation.apiKey")

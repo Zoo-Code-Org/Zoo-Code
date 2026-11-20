@@ -87,6 +87,7 @@ import {
 	OpenCodeGo,
 	Kenari,
 	IOIntelligence,
+	StandardCompute,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -718,6 +719,17 @@ const ApiOptions = ({
 
 					{selectedProvider === providerIdentifiers.ioIntelligence && (
 						<IOIntelligence
+							apiConfiguration={apiConfiguration}
+							setApiConfigurationField={setApiConfigurationField}
+							routerModels={routerModels}
+							organizationAllowList={organizationAllowList}
+							modelValidationError={modelValidationError}
+							simplifySettings={fromWelcomeView}
+						/>
+					)}
+
+					{selectedProvider === providerIdentifiers.standardCompute && (
+						<StandardCompute
 							apiConfiguration={apiConfiguration}
 							setApiConfigurationField={setApiConfigurationField}
 							routerModels={routerModels}

@@ -101,6 +101,7 @@ export const dynamicProviders = [
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,
 	providerIdentifiers.ioIntelligence,
+	providerIdentifiers.standardCompute,
 	providerIdentifiers.kimiCode,
 	providerIdentifiers.friendli,
 ] as const
@@ -317,6 +318,7 @@ export const modelIdKeys = [
 	"kenariModelId",
 	"nanoGptModelId",
 	"ioIntelligenceModelId",
+	"standardComputeModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
@@ -561,6 +563,11 @@ export const MODELS_BY_PROVIDER: Record<
 	[providerIdentifiers.ioIntelligence]: {
 		id: providerIdentifiers.ioIntelligence,
 		label: "IO Intelligence",
+		models: [],
+	},
+	[providerIdentifiers.standardCompute]: {
+		id: providerIdentifiers.standardCompute,
+		label: "Standard Compute",
 		models: [],
 	},
 	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },

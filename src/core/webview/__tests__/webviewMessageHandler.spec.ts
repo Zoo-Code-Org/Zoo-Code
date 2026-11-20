@@ -1191,6 +1191,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			{ provider: providerIdentifiers.ioIntelligence, apiKey: undefined },
 			expect.anything(),
 		)
+		// Standard Compute's /models catalog is public and may optionally be scoped by a key.
+		expect(mockGetModels).toHaveBeenCalledWith(
+			{ provider: providerIdentifiers.standardCompute, apiKey: undefined },
+			expect.anything(),
+		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1215,6 +1220,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1515,6 +1521,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1544,6 +1551,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
 			.mockResolvedValueOnce(mockModels) // io-intelligence
+			.mockResolvedValueOnce(mockModels) // standard-compute
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1583,6 +1591,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				"opencode-go": mockModels,
 				kenari: mockModels,
 				"io-intelligence": mockModels,
+				"standard-compute": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,

@@ -505,6 +505,10 @@ export async function initializeModelCacheRefresh(buildHandler: (provider: Route
 				provider: providerIdentifiers.ioIntelligence,
 				options: { provider: providerIdentifiers.ioIntelligence },
 			},
+			{
+				provider: providerIdentifiers.standardCompute,
+				options: { provider: providerIdentifiers.standardCompute },
+			},
 		]
 
 		// Refresh each provider in background (fire and forget)

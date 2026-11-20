@@ -20,6 +20,8 @@ import {
 	litellmDefaultModelInfo,
 	ioIntelligenceDefaultModelId,
 	ioIntelligenceDefaultModelInfo,
+	standardComputeDefaultModelId,
+	standardComputeDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelId,
@@ -1381,6 +1383,102 @@ describe("useSelectedModel", () => {
 
 			expect(result.current.id).toBe("zai-org/GLM-4.6")
 			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
+			expect(result.current.isError).toBe(true)
+		})
+	})
+
+	describe("standard-compute provider", () => {
+		it("uses dynamic metadata for the configured Standard Compute model", () => {
+			const dynamicInfo: ModelInfo = {
+				maxTokens: 8_192,
+				contextWindow: 131_072,
+				supportsPromptCache: true,
+				description: "Dynamic Standard Compute model",
+			}
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ "standard-compute": { "z-ai/glm-5.3": dynamicInfo } }),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.standardCompute,
+						standardComputeModelId: "z-ai/glm-5.3",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("z-ai/glm-5.3")
+			expect(result.current.info).toEqual(dynamicInfo)
+		})
+
+		it("uses Standard Compute's shared fallback when its dynamic catalog is empty", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ "standard-compute": {} }))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.standardCompute,
+						// standardComputeModelId intentionally omitted
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(standardComputeDefaultModelId)
+			expect(result.current.info).toEqual(standardComputeDefaultModelInfo)
+		})
+
+		it("preserves a configured model ID that is absent from the fetched catalog", () => {
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					"standard-compute": {
+						"moonshotai/kimi-k3": {
+							maxTokens: 8_192,
+							contextWindow: 131_072,
+							supportsPromptCache: false,
+						},
+					},
+				}),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.standardCompute,
+						standardComputeModelId: "custom-org/custom-model",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			// The stored id is what requests are sent with, so the picker must show it
+			// rather than the default; only the metadata falls back.
+			expect(result.current.id).toBe("custom-org/custom-model")
+			expect(result.current.info).toEqual(standardComputeDefaultModelInfo)
+		})
+
+		it("preserves the configured model ID when the catalog fetch errors", () => {
+			// A cold /models failure settles the router query with no data. The
+			// hook must still resolve and keep the configured ID (the handler
+			// sends requests with it) instead of resetting to the provider default.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.standardCompute,
+						standardComputeModelId: "z-ai/glm-5.3",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("z-ai/glm-5.3")
+			expect(result.current.info).toEqual(standardComputeDefaultModelInfo)
 			expect(result.current.isError).toBe(true)
 		})
 	})

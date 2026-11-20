@@ -29,6 +29,7 @@ import {
 	opencodeGoDefaultModelId,
 	kenariDefaultModelId,
 	ioIntelligenceDefaultModelId,
+	standardComputeDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
 	getZAiModels,
@@ -147,6 +148,10 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	[providerIdentifiers.ioIntelligence]: {
 		field: "ioIntelligenceModelId",
 		default: ioIntelligenceDefaultModelId,
+	},
+	[providerIdentifiers.standardCompute]: {
+		field: "standardComputeModelId",
+		default: standardComputeDefaultModelId,
 	},
 	[providerIdentifiers.nanogpt]: { field: "nanoGptModelId", default: nanoGptDefaultModelId },
 	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
