@@ -427,6 +427,20 @@ export const vertexModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"claude-sonnet-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheReadsPrice: 0.1,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description: "Claude Sonnet 5.5 is the best combination of speed and intelligence for everyday tasks.",
+	},
 	"claude-haiku-4-5@20251001": {
 		maxTokens: 8192,
 		contextWindow: 200_000,
