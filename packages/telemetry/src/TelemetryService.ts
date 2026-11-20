@@ -32,9 +32,11 @@ const CIRCUIT_BREAKER_COOLDOWN_MS = 10 * 60 * 1000
  * How long an exception fingerprint is remembered for the single-capture
  * policy below. Provider retry loops re-enter the provider per attempt and each
  * attempt builds a fresh error, so identical errors re-thrown across attempts
- * collapse into the first capture within this window. A recurring identical
- * error keeps the window alive while it keeps happening, so one persistent
- * failure surfaces as one $exception event instead of one per retry.
+ * collapse into the first capture within this window. Each fresh identical
+ * error refreshes the window. A gap of 30 seconds or more permits a new event.
+ * Exponential backoff, server retry delays, and request duration can exceed
+ * this window, so a persistent retry chain can emit again after such a gap.
+ * This bounds bursts; it does not identify an entire retry chain.
  */
 const EXCEPTION_DEDUPE_WINDOW_MS = 30 * 1000
 
@@ -52,17 +54,17 @@ const EXCEPTION_DEDUPE_CACHE_LIMIT = 100
  */
 function exceptionFingerprint(error: Error): string {
 	if (isApiProviderError(error)) {
-		return [
+		return JSON.stringify([
 			"ApiProviderError",
 			error.provider,
 			error.modelId,
 			error.operation,
 			error.errorCode ?? "",
 			error.message,
-		].join("|")
+		])
 	}
 
-	return [error.name, error.message].join("|")
+	return JSON.stringify([error.name, error.message])
 }
 
 /**

@@ -126,3 +126,79 @@ describe("TelemetryService.captureException single-capture policy", () => {
 		expect(mockClient.captureException).toHaveBeenCalledTimes(1)
 	})
 })
+
+// FieldsDistinct: delimiters in real provider fields must not merge distinct errors.
+it.each(["|", "||", "model|suffix"])("keeps field boundaries for %s", (separator) => {
+	const client = makeRecordingClient()
+	const service = new TelemetryService([client])
+	service.captureException(new ApiProviderError("failure", `a${separator}b`, "c", "createMessage"))
+	service.captureException(new ApiProviderError("failure", "a", `b${separator}c`, "createMessage"))
+	expect(client.captureException).toHaveBeenCalledTimes(2)
+})
+
+it.each([29_999, 30_000, 40_000, 600_000])("applies the window at a %i ms retry gap", (gap) => {
+	vi.useFakeTimers()
+	try {
+		const client = makeRecordingClient()
+		const service = new TelemetryService([client])
+		service.captureException(makeApiProviderError())
+		vi.advanceTimersByTime(gap)
+		service.captureException(makeApiProviderError())
+		expect(client.captureException).toHaveBeenCalledTimes(gap < 30_000 ? 1 : 2)
+	} finally {
+		vi.useRealTimers()
+	}
+})
+
+it("bounds the cache and evicts the least recently observed fingerprint", () => {
+	const client = makeRecordingClient()
+	const service = new TelemetryService([client])
+	for (let i = 0; i < 100; i++) service.captureException(makeApiProviderError(`failure ${i}`))
+	service.captureException(makeApiProviderError("failure 0"))
+	service.captureException(makeApiProviderError("failure 100"))
+	expect(service["recentExceptionFingerprints"].size).toBe(100)
+	service.captureException(makeApiProviderError("failure 0"))
+	expect(client.captureException).toHaveBeenCalledTimes(101)
+	service.captureException(makeApiProviderError("failure 1"))
+	expect(client.captureException).toHaveBeenCalledTimes(102)
+	expect(service["recentExceptionFingerprints"].size).toBe(100)
+})
+
+it("does not consume an error during shutdown", async () => {
+	const client = makeRecordingClient()
+	const service = new TelemetryService([client])
+	await service.shutdown()
+	const error = makeApiProviderError()
+	service.captureException(error)
+	expect(error.captured).toBeUndefined()
+	expect(service["recentExceptionFingerprints"].size).toBe(0)
+	expect(client.captureException).not.toHaveBeenCalled()
+})
+
+// WindowDecision: enumerate all short traces over equal, distinct, and expired fresh errors.
+it("matches the sliding-window invariant over every four-call trace", () => {
+	vi.useFakeTimers()
+	try {
+		for (let trace = 0; trace < 256; trace++) {
+			const client = makeRecordingClient()
+			const service = new TelemetryService([client])
+			const lastSeen = new Map<string, number>()
+			let expected = 0
+			let choices = trace
+			for (let step = 0; step < 4; step++) {
+				const choice = choices % 4
+				choices = Math.floor(choices / 4)
+				const message = choice === 1 ? "different" : "failure"
+				vi.advanceTimersByTime(choice === 2 ? 30_000 : choice === 3 ? 10_000 : 0)
+				const now = Date.now()
+				const previous = lastSeen.get(message)
+				if (previous === undefined || now - previous >= 30_000) expected++
+				lastSeen.set(message, now)
+				service.captureException(makeApiProviderError(message))
+				expect(client.captureException, `trace ${trace}, step ${step}`).toHaveBeenCalledTimes(expected)
+			}
+		}
+	} finally {
+		vi.useRealTimers()
+	}
+})

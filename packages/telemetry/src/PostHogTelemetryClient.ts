@@ -119,8 +119,11 @@ export class PostHogTelemetryClient extends BaseTelemetryClient {
 			mergedProperties = { ...extractedProperties, ...additionalProperties }
 		}
 
-		// Override the error message with the extracted error message.
-		error.message = errorMessage
+		// Normalize a detached error so telemetry cannot change the caller-facing message.
+		const stack = error.stack
+		const telemetryError = Object.defineProperties(new Error(), Object.getOwnPropertyDescriptors(error))
+		telemetryError.stack = stack
+		telemetryError.message = errorMessage
 
 		const provider = this.providerRef?.deref()
 		let telemetryProperties: TelemetryProperties | undefined = undefined
@@ -138,7 +141,7 @@ export class PostHogTelemetryClient extends BaseTelemetryClient {
 			$app_version: telemetryProperties?.appVersion,
 		}
 
-		this.client.captureException(error, this.distinctId, exceptionProperties)
+		this.client.captureException(telemetryError, this.distinctId, exceptionProperties)
 	}
 
 	/**
