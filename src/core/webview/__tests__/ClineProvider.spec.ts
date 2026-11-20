@@ -480,7 +480,6 @@ function stallProviderSettingsProfile(provider: ClineProvider) {
 // that whenever no other view holds the section.
 const runManagerSectionInline = <T>(cb: () => Promise<T>): Promise<T> => cb()
 
-
 // Matches a non-empty segment list that holds only generated text.
 const noUserSegments = {
 	asymmetricMatch: (value: unknown) =>
