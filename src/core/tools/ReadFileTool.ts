@@ -814,8 +814,8 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					continue
 				}
 
-				// Read text file
-				const fileData = await fs.readFile(fullPath, "utf8")
+				// Read text file (mirrors executeNew: read as Buffer, then decode as UTF-8)
+				const fileData = await fs.readFile(fullPath)
 				const rawContent =
 					typeof fileData === "string"
 						? fileData
