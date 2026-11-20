@@ -106,8 +106,7 @@ function AppInner({ createExtensionHost, ...extensionHostOptions }: TUIAppProps)
 		taskHistory,
 		currentMode,
 		tokenUsage,
-		routerModels,
-		apiConfiguration,
+		contextWindow: reportedContextWindow,
 		currentTodos,
 	} = useCLIStore()
 
@@ -122,10 +121,8 @@ function AppInner({ createExtensionHost, ...extensionHostOptions }: TUIAppProps)
 		setIsTransitioningToCustomInput,
 	} = useUIStateStore()
 
-	// Compute context window from router models and API configuration
-	const contextWindow = useMemo(() => {
-		return getContextWindow(routerModels, apiConfiguration)
-	}, [routerModels, apiConfiguration])
+	// Context window reported by the extension, falling back to the default
+	const contextWindow = getContextWindow(reportedContextWindow)
 
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	const autocompleteRef = useRef<AutocompleteInputHandle<any>>(null)

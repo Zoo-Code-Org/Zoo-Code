@@ -1,32 +1,20 @@
-import { getModelId, type ProviderSettings } from "@roo-code/types"
-
-import type { RouterModels } from "@/ui/store.js"
-
 const DEFAULT_CONTEXT_WINDOW = 200_000
 
 /**
- * Looks up the context window size for the current model from routerModels.
+ * Resolves the context window to display for the current model.
  *
- * @param routerModels - The router models data containing model info per provider
- * @param apiConfiguration - The current API configuration with provider and model ID
- * @returns The context window size, or DEFAULT_CONTEXT_WINDOW (200K) if not found
+ * The extension resolves the model through its provider handler and posts the result as
+ * `ExtensionState.contextWindow`, so this covers static and router providers alike.
+ *
+ * @param contextWindow - The context window reported by the extension state, if any
+ * @returns The reported context window, or DEFAULT_CONTEXT_WINDOW (200K) when it is missing or invalid
  */
-export function getContextWindow(routerModels: RouterModels | null, apiConfiguration: ProviderSettings | null): number {
-	if (!routerModels || !apiConfiguration) {
-		return DEFAULT_CONTEXT_WINDOW
-	}
-
-	const provider = apiConfiguration.apiProvider
-	const modelId = getModelId(apiConfiguration)
-
-	if (!provider || !modelId) {
-		return DEFAULT_CONTEXT_WINDOW
-	}
-
-	const providerModels = routerModels[provider]
-	const modelInfo = providerModels?.[modelId]
-
-	return modelInfo?.contextWindow ?? DEFAULT_CONTEXT_WINDOW
+export function getContextWindow(contextWindow: number | null | undefined): number {
+	// Reject non-finite values (NaN, Infinity) as well as non-positive ones, so the
+	// progress bar never divides by an infinite window and reports 0% usage.
+	return typeof contextWindow === "number" && Number.isInteger(contextWindow) && contextWindow > 0
+		? contextWindow
+		: DEFAULT_CONTEXT_WINDOW
 }
 
 export { DEFAULT_CONTEXT_WINDOW }
