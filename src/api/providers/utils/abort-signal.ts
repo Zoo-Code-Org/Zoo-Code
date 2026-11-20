@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Whether a timeout value is usable as an SDK `timeout` option: a finite
  * number greater than zero.
  *
