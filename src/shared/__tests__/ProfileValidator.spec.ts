@@ -416,10 +416,31 @@ describe("ProfileValidator", () => {
 			).toBe(false)
 		})
 
-		it("enforces the model allow-list for retired providers using legacy model ID precedence", () => {
-			// The removed local switch returned `undefined` for retired providers, so they
-			// could only pass via a provider-level `allowAll`. `getModelId()` resolves them
-			// through the legacy `modelIdKeys` precedence, so the model list now applies.
+		it("enforces the model allow-list for retired providers using their own model ID field", () => {
+			// `getModelId()` resolves retired providers through the retired-provider model ID
+			// map, so the model list applies instead of only the provider-level `allowAll`.
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[retiredProviderIdentifiers.groq]: { allowAll: false, models: ["allowed-model"] },
+				},
+			}
+
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: retiredProviderIdentifiers.groq, apiModelId: "allowed-model" },
+					allowList,
+				),
+			).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed(
+					{ apiProvider: retiredProviderIdentifiers.groq, apiModelId: "other-model" },
+					allowList,
+				),
+			).toBe(false)
+		})
+
+		it("does not borrow another provider's model ID field for a retired provider", () => {
 			const allowList: OrganizationAllowList = {
 				allowAll: false,
 				providers: {
@@ -430,12 +451,6 @@ describe("ProfileValidator", () => {
 			expect(
 				ProfileValidator.isProfileAllowed(
 					{ apiProvider: retiredProviderIdentifiers.groq, requestyModelId: "allowed-model" },
-					allowList,
-				),
-			).toBe(true)
-			expect(
-				ProfileValidator.isProfileAllowed(
-					{ apiProvider: retiredProviderIdentifiers.groq, requestyModelId: "other-model" },
 					allowList,
 				),
 			).toBe(false)

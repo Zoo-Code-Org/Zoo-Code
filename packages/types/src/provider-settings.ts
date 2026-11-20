@@ -295,58 +295,26 @@ export type ProviderSettingsWithId = z.infer<typeof providerSettingsWithIdSchema
 export const PROVIDER_SETTINGS_KEYS = providerSettingsSchema.keyof().options
 
 /**
- * @deprecated Use `getModelId()` to resolve the model ID for the active provider.
+ * Model ID field each retired provider used before it was removed.
+ *
+ * Retired profiles are preserved verbatim (see `ProviderSettingsManager`), so
+ * `getModelId()` still needs to read the model the user had selected.
  */
-export type ModelIdKey = Extract<keyof ProviderSettingsShape, `${string}ModelId`>
+const retiredProviderModelIdKeys: Record<RetiredProviderName, string> = {
+	[retiredProviderIdentifiers.cerebras]: "apiModelId",
+	[retiredProviderIdentifiers.chutes]: "apiModelId",
+	[retiredProviderIdentifiers.deepinfra]: "deepInfraModelId",
+	[retiredProviderIdentifiers.doubao]: "apiModelId",
+	[retiredProviderIdentifiers.featherless]: "apiModelId",
+	[retiredProviderIdentifiers.groq]: "apiModelId",
+	[retiredProviderIdentifiers.huggingface]: "huggingFaceModelId",
+	[retiredProviderIdentifiers.roo]: "apiModelId",
+}
 
-/**
- * @deprecated Use `getModelId()` to resolve the model ID for the active provider.
- */
-export const modelIdKeys = [
-	"apiModelId",
-	"openRouterModelId",
-	"openAiModelId",
-	"ollamaModelId",
-	"lmStudioModelId",
-	"lmStudioDraftModelId",
-	"requestyModelId",
-	"unboundModelId",
-	"litellmModelId",
-	"vercelAiGatewayModelId",
-	"opencodeGoModelId",
-	"kenariModelId",
-	"nanoGptModelId",
-	"ioIntelligenceModelId",
-	"zooGatewayModelId",
-] as const satisfies readonly ModelIdKey[]
-
-/**
- * @deprecated Provider categories should use the specific provider type guards.
- */
-export type TypicalProvider = Exclude<ProviderName, InternalProvider | CustomProvider | FauxProvider>
-
-/**
- * @deprecated Use the specific provider type guards instead.
- */
-export const isTypicalProvider = (key: unknown): key is TypicalProvider =>
-	isProviderName(key) && !isInternalProvider(key) && !isCustomProvider(key) && !isFauxProvider(key)
-
-/**
- * @deprecated Use `getModelId()` instead. This map is retained for API compatibility.
- */
-export const modelIdKeysByProvider = Object.fromEntries(
-	providerDefinitionList.flatMap((definition) => {
-		if (!isTypicalProvider(definition.apiProvider)) {
-			return []
-		}
-
-		if (!definition.modelIdKey) {
-			throw new Error(`Missing model ID key for provider definition: ${definition.apiProvider}`)
-		}
-
-		return [[definition.apiProvider, definition.modelIdKey] as const]
-	}),
-) as Record<TypicalProvider, ModelIdKey>
+const readStringField = (settings: ProviderSettings, field: string): string | undefined => {
+	const value = (settings as Record<string, unknown>)[field]
+	return typeof value === "string" ? value : undefined
+}
 
 export function getModelId(settings: ProviderSettings): string | undefined {
 	if (isProviderName(settings.apiProvider)) {
@@ -354,8 +322,7 @@ export function getModelId(settings: ProviderSettings): string | undefined {
 	}
 
 	if (typeof settings.apiProvider === "string" && isRetiredProvider(settings.apiProvider)) {
-		const modelIdKey = modelIdKeys.find((key) => settings[key])
-		return modelIdKey ? settings[modelIdKey] : undefined
+		return readStringField(settings, retiredProviderModelIdKeys[settings.apiProvider])
 	}
 
 	return undefined
