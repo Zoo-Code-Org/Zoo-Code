@@ -324,9 +324,9 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 	})
 
 	describe("native mcp_tool_use block", () => {
-		it.each([55, 57, 58, 59, 70])(
-			"resolves generated names truncated within a %s-character server",
-			async (length) => {
+		it.each([55, 57, 58, 59, 70].flatMap((length) => [false, true].map((alias) => ({ length, alias }))))(
+			"resolves generated names truncated within a $length-character server (alias: $alias)",
+			async ({ length, alias }) => {
 				const serverName = "s".repeat(length)
 				const toolName = "original_tool"
 				const name = buildMcpToolName(serverName, toolName)
@@ -341,7 +341,11 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 						}),
 					}),
 				}
-				const parsed = NativeToolCallParser.parseDynamicMcpTool({ id: "truncated", name, arguments: "{}" })
+				const parsed = NativeToolCallParser.parseDynamicMcpTool({
+					id: "truncated",
+					name: alias ? name.replace(/-/g, "_") : name,
+					arguments: "{}",
+				})
 				expect(parsed).not.toBeNull()
 				mockTask.assistantMessageContent = [parsed]
 				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
@@ -385,11 +389,12 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 				}
 				const name = buildMcpToolName(serverName, "first")
 				const parsed = NativeToolCallParser.parseDynamicMcpTool({ id: "collision", name, arguments: "{}" })
-				expect(parsed).not.toBeNull()
+				if (!parsed) throw new Error("Expected the generated MCP name to parse")
 				mockTask.assistantMessageContent = [parsed]
 				const handle = vi.spyOn(useMcpToolTool, "handle").mockResolvedValue(undefined)
 				// The task double provides the request state and presenter callbacks.
-				await presentAssistantMessage(mockTask as unknown as Task, {
+				const task = mockTask as unknown as Task
+				const snapshot: RequestPolicySnapshot = {
 					...baseSnapshot,
 					customModes: [
 						{
@@ -400,7 +405,17 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 							allowedMcpServers: allowed ? [serverName] : [],
 						},
 					],
-				})
+				}
+				if (!allowed) {
+					parsed.partial = true
+					await presentAssistantMessage(task, snapshot)
+					expect(handle).not.toHaveBeenCalled()
+					expect(mockTask.pushToolResultToUserContent).not.toHaveBeenCalled()
+					expect(mockTask.userMessageContent).toEqual([])
+					expect(mockTask.recordToolError).not.toHaveBeenCalled()
+					parsed.partial = false
+				}
+				await presentAssistantMessage(task, snapshot)
 				if (allowed) {
 					expect(handle).toHaveBeenCalledWith(
 						expect.anything(),
@@ -411,10 +426,22 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 					)
 				} else {
 					expect(handle).not.toHaveBeenCalled()
+					expect(mockTask.recordToolError).toHaveBeenCalledTimes(1)
 					expect(mockTask.recordToolError).toHaveBeenCalledWith(
 						"use_mcp_tool",
-						expect.stringContaining("unavailable"),
+						"MCP tool is unavailable in the current catalog.",
 					)
+					const result = {
+						type: "tool_result",
+						tool_use_id: "collision",
+						content: JSON.stringify({
+							status: "error",
+							message: "The tool execution failed",
+							error: "MCP tool is unavailable in the current catalog.",
+						}),
+					}
+					expect(mockTask.pushToolResultToUserContent).toHaveBeenCalledExactlyOnceWith(result)
+					expect(mockTask.userMessageContent).toEqual([result])
 				}
 				expect(getAllServers).not.toHaveBeenCalled()
 				handle.mockRestore()

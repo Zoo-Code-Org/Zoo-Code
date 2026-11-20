@@ -2,10 +2,9 @@ import { z } from "zod"
 
 /** Canonical generated names, including prefixes cut off at the provider's 64-character limit. */
 export function isCanonicalMcpToolName(name: string): boolean {
-	return (
-		/^mcp--[A-Za-z_][\w-]*--[A-Za-z_][\w-]*$/.test(name) ||
-		(name.length === 64 && /^mcp--[A-Za-z_][\w-]*$/.test(name))
-	)
+	if (name.length > 64 || !/^mcp--[A-Za-z_][\w-]*$/.test(name)) return false
+	// Check the separator separately so two overlapping repetitions cannot backtrack.
+	return name.length === 64 || /--[A-Za-z_]/.test(name.slice(6))
 }
 
 export const DEFAULT_MCP_DYNAMIC_LOAD_THRESHOLD = 50
