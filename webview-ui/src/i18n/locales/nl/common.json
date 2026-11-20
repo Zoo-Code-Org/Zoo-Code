@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "Zoeken...",
-		"no_results": "Geen resultaten gevonden"
+		"no_results": "Geen resultaten gevonden",
+		"close": "Sluiten",
+		"clear_search_aria_label": "Zoekopdracht wissen"
 	},
 	"mermaid": {
 		"loading": "Mermaid-diagram genereren...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "Afbeelding"
 		},
-		"noData": "Geen afbeeldingsgegevens"
+		"noData": "Geen afbeeldingsgegevens",
+		"generatedAlt": "Door AI gegenereerde afbeelding",
+		"thumbnailAlt": "Miniatuur {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "Bericht Verwijderen",

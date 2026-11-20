@@ -713,6 +713,23 @@ describe("ProviderSettingsManager", () => {
 			},
 		)
 
+		it.each([undefined, "auto", "on", "off"] as const)(
+			"round-trips LiteLLM reasoning preservation %s through profile storage",
+			async (litellmPreserveReasoning) => {
+				const configuration: ProviderSettings = {
+					apiProvider: providerIdentifiers.litellm,
+					litellmModelId: "custom-alias",
+					litellmPreserveReasoning,
+				}
+				await providerSettingsManager.saveConfig("litellm", configuration)
+				const serializedProfiles: string = mockSecrets.store.mock.calls.at(-1)![1]
+				mockSecrets.get.mockResolvedValue(serializedProfiles)
+				const reloaded = new ProviderSettingsManager(mockContext)
+				const profile = await reloaded.getProfile({ name: "litellm" })
+				expect(profile.litellmPreserveReasoning).toBe(litellmPreserveReasoning)
+			},
+		)
+
 		it.each([true, false, undefined])(
 			"round-trips OpenAI-compatible reasoning settings through profile storage when enabled is %s",
 			async (enableReasoningEffort) => {

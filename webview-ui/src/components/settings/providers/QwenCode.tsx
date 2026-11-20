@@ -3,6 +3,8 @@ import { VSCodeTextField, VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 
 import { type ProviderSettings } from "@roo-code/types"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
+
 interface QwenCodeProps {
 	apiConfiguration: ProviderSettings
 	setApiConfigurationField: (field: keyof ProviderSettings, value: ProviderSettings[keyof ProviderSettings]) => void
@@ -10,6 +12,7 @@ interface QwenCodeProps {
 }
 
 export const QwenCode: React.FC<QwenCodeProps> = ({ apiConfiguration, setApiConfigurationField }) => {
+	const { t } = useAppTranslation()
 	const defaultPath = "~/.qwen/oauth_creds.json"
 
 	const handleInputChange = (e: Event | React.FormEvent<HTMLElement>) => {
@@ -35,32 +38,31 @@ export const QwenCode: React.FC<QwenCodeProps> = ({ apiConfiguration, setApiConf
 					onInput={handleInputChange}
 					onBlur={handleBlur}
 					placeholder={defaultPath}>
-					OAuth Credentials Path
+					{t("settings:providers.qwenCode.oauthPathLabel")}
 				</VSCodeTextField>
 
 				<p className="text-xs mt-1 text-vscode-descriptionForeground">
-					Path to your Qwen OAuth credentials file. Defaults to ~/.qwen/oauth_creds.json if left empty.
+					{t("settings:providers.qwenCode.oauthPathDescription", { defaultPath })}
 				</p>
 
 				<div className="text-xs text-vscode-descriptionForeground mt-3">
-					Qwen Code is an OAuth-based API that requires authentication through the official Qwen client.
-					You&apos;ll need to set up OAuth credentials first.
+					{t("settings:providers.qwenCode.description")}
 				</div>
 
 				<div className="text-xs text-vscode-descriptionForeground mt-2">
-					To get started:
+					{t("settings:providers.qwenCode.gettingStarted")}
 					<br />
-					1. Install the official Qwen client
+					{t("settings:providers.qwenCode.step1")}
 					<br />
-					2. Authenticate using your account
+					{t("settings:providers.qwenCode.step2")}
 					<br />
-					3. OAuth credentials will be stored automatically
+					{t("settings:providers.qwenCode.step3")}
 				</div>
 
 				<VSCodeLink
 					href="https://github.com/QwenLM/qwen-code/blob/main/README.md"
 					className="text-vscode-textLink-foreground mt-2 inline-block text-xs">
-					Setup Instructions
+					{t("settings:providers.qwenCode.setupInstructions")}
 				</VSCodeLink>
 			</div>
 		</div>

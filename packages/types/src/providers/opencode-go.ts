@@ -499,7 +499,7 @@ export const opencodeGoModels: Record<string, ModelInfo> = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsMaxTokens: true,
-		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh"],
+		supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh", "max"],
 		preserveReasoning: true,
 		reasoningEffort: "high",
 		// Go has weekday peak/off-peak pricing; use peak rates until ModelInfo can express schedules.

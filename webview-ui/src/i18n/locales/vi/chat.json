@@ -20,7 +20,8 @@
 	"unpin": "Bỏ ghim khỏi đầu",
 	"pin": "Ghim lên đầu",
 	"fileChangesInConversation": {
-		"header_other": "{{count}} tệp đã thay đổi trong cuộc hội thoại này"
+		"header_other": "{{count}} tệp đã thay đổi trong cuộc hội thoại này",
+		"lineStatsAriaLabel": "Dòng đã thêm: {{added}}, dòng đã xóa: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Không gian khả dụng: {{amount}} tokens",
@@ -232,7 +233,9 @@
 		"addToAllowed": "Thêm vào danh sách cho phép",
 		"removeFromAllowed": "Xóa khỏi danh sách cho phép",
 		"addToDenied": "Thêm vào danh sách từ chối",
-		"removeFromDenied": "Xóa khỏi danh sách từ chối"
+		"removeFromDenied": "Xóa khỏi danh sách từ chối",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Nhấp để sửa mẫu"
 	},
 	"text": {
 		"rooSaid": "Zoo đã nói"
@@ -289,7 +292,9 @@
 		"triggerLabelOffShort": "Tắt",
 		"triggerLabel_zero": "0 được tự động phê duyệt",
 		"triggerLabel_other": "{{count}} được tự động phê duyệt",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Đã bật",
+		"toggleAriaLabel": "Bật/tắt tự động phê duyệt"
 	},
 	"reasoning": {
 		"thinking": "Đang suy nghĩ",
@@ -363,7 +368,8 @@
 		"wantsToSearch": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo muốn tìm kiếm trong cơ sở mã cho <code>{{query}}</code> trong <code>{{path}}</code>",
 		"didSearch_other": "Đã tìm thấy {{count}} kết quả",
-		"resultTooltip": "Điểm tương tự: {{score}} (nhấp để mở tệp)"
+		"resultTooltip": "Điểm tương tự: {{score}} (nhấp để mở tệp)",
+		"displayError": "Lỗi khi hiển thị kết quả tìm kiếm."
 	},
 	"read-batch": {
 		"approve": {
@@ -415,7 +421,17 @@
 		"noResults": "Không có kết quả",
 		"problems": "Vấn đề",
 		"terminal": "Terminal",
-		"url": "Dán URL để lấy nội dung"
+		"url": "Dán URL để lấy nội dung",
+		"gitCommits": "Commit Git",
+		"gitCommitsDescription": "Tìm trong lịch sử kho mã",
+		"workingChanges": "Thay đổi đang làm",
+		"workingChangesDescription": "Các thay đổi chưa commit hiện tại",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Mã hash commit Git",
+		"addFile": "Thêm tệp",
+		"addFolder": "Thêm thư mục",
+		"commands": "Lệnh",
+		"modes": "Chế độ"
 	},
 	"queuedMessages": {
 		"title": "Tin nhắn trong hàng đợi",
@@ -428,7 +444,28 @@
 	"todo": {
 		"partial": "{{completed}} trong tổng số {{total}} công việc đã hoàn thành",
 		"complete": "{{total}} công việc đã hoàn thành",
-		"updated": "Đã cập nhật danh sách công việc"
+		"updated": "Đã cập nhật danh sách công việc",
+		"listUpdated": "Đã cập nhật danh sách việc cần làm",
+		"userEdit": "Chỉnh sửa của người dùng",
+		"userEdits": "Các chỉnh sửa của người dùng",
+		"edit": "Sửa",
+		"done": "Xong",
+		"itemPlaceholder": "Nhập việc cần làm",
+		"newItemPlaceholder": "Nhập việc cần làm, nhấn Enter để thêm",
+		"remove": "Xóa",
+		"add": "Thêm",
+		"cancel": "Hủy",
+		"addTodo": "+ Thêm việc cần làm",
+		"status": {
+			"notStarted": "Chưa bắt đầu",
+			"inProgress": "Đang thực hiện",
+			"completed": "Đã hoàn thành"
+		},
+		"deleteDialog": {
+			"title": "Xóa việc cần làm",
+			"description": "Bạn có chắc muốn xóa việc cần làm này không?",
+			"confirm": "Xóa"
+		}
 	},
 	"tooManyTools": {
 		"title": "Đã bật quá nhiều công cụ",
@@ -448,5 +485,24 @@
 		"title": "Nhà cung cấp không còn được hỗ trợ",
 		"message": "Nhà cung cấp này không còn khả dụng. Hãy chọn một nhà cung cấp được hỗ trợ để tiếp tục.",
 		"openSettings": "Mở cài đặt"
+	},
+	"zooCodeAuth": {
+		"signIn": "Đăng nhập Zoo Code",
+		"goToDashboard": "Đi tới bảng điều khiển",
+		"signOut": "Đăng xuất",
+		"avatarAlt": "Ảnh đại diện",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Đã kết nối"
+	},
+	"arguments": "Đối số:",
+	"copyAsMarkdown": "Sao chép dạng Markdown",
+	"openInPreview": "Mở trong bản xem trước",
+	"codeAccordion": {
+		"userEdits": "Các chỉnh sửa của người dùng",
+		"consoleLogs": "Nhật ký bảng điều khiển",
+		"openFileAriaLabel": "Mở tệp: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "{{count}} dòng bị ẩn"
 	}
 }
