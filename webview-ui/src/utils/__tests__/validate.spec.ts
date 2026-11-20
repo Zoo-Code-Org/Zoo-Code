@@ -62,6 +62,7 @@ describe("Model Validation Functions", () => {
 		"kimi-code": {},
 		friendli: {},
 		moonshot: {},
+		mimo: {},
 	}
 
 	const allowAllOrganization: OrganizationAllowList = {

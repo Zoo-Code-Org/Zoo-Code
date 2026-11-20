@@ -15,34 +15,78 @@ vi.mock("@src/utils/vscode", () => ({
 	},
 }))
 
+const postMessageMock = vi.mocked(vscode.postMessage)
+
+const postResponse = (requestId: string | undefined, routerModels: Record<string, unknown>) => {
+	window.dispatchEvent(
+		new MessageEvent("message", {
+			data: {
+				type: RouterModelsMessageType.routerModels,
+				routerModels,
+				values: { requestId },
+			},
+		}),
+	)
+}
+
+const startRequest = (provider?: string, signal?: AbortSignal) => {
+	const promise = fetchRouterModels(provider, signal)
+	const requestId = postMessageMock.mock.calls.at(-1)?.[0]?.values?.requestId as string
+	return { promise, requestId }
+}
+
 describe("fetchRouterModels", () => {
 	afterEach(() => {
 		vi.restoreAllMocks()
 		vi.useRealTimers()
 	})
 
-	const handlerOf = (spy: { mock: { calls: unknown[][] } }) =>
-		spy.mock.calls.find((args) => args[0] === "message")?.[1] as EventListener
+	test("posts a provider-filtered request with a request ID and resolves on the matching response", async () => {
+		const { promise, requestId } = startRequest(providerIdentifiers.mimo)
 
-	test("resolves with the router models of the matching provider and removes its listener", async () => {
-		const addSpy = vi.spyOn(window, "addEventListener")
-		const removeSpy = vi.spyOn(window, "removeEventListener")
+		expect(requestId).toBeTruthy()
+		expect(postMessageMock).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId, provider: providerIdentifiers.mimo },
+		})
 
-		const promise = fetchRouterModels(providerIdentifiers.openrouter)
-		const handler = handlerOf(addSpy)
+		postResponse(requestId, { [providerIdentifiers.mimo]: {} })
+		await expect(promise).resolves.toEqual({ [providerIdentifiers.mimo]: {} })
+	})
 
-		handler(
-			new MessageEvent("message", {
-				data: {
-					type: RouterModelsMessageType.routerModels,
-					values: { provider: providerIdentifiers.openrouter },
-					routerModels: { [providerIdentifiers.openrouter]: {} },
-				},
-			}),
-		)
+	test("posts an aggregate request without a provider filter", async () => {
+		const { promise, requestId } = startRequest()
 
-		await expect(promise).resolves.toEqual({ [providerIdentifiers.openrouter]: {} })
-		expect(removeSpy).toHaveBeenCalledWith("message", handler)
+		expect(postMessageMock).toHaveBeenCalledWith({
+			type: RouterModelsMessageType.requestRouterModels,
+			values: { requestId },
+		})
+
+		postResponse(requestId, {})
+		await expect(promise).resolves.toEqual({})
+	})
+
+	test("ignores responses carrying a different or missing request ID", async () => {
+		const { promise, requestId } = startRequest(providerIdentifiers.mimo)
+
+		postResponse("stale-request-id", { [providerIdentifiers.mimo]: { stale: {} } })
+		postResponse(undefined, { [providerIdentifiers.mimo]: {} })
+
+		postResponse(requestId, { [providerIdentifiers.mimo]: { fresh: {} } })
+		await expect(promise).resolves.toEqual({ [providerIdentifiers.mimo]: { fresh: {} } })
+	})
+
+	test("resolves concurrent same-provider requests independently by request ID", async () => {
+		const first = startRequest(providerIdentifiers.mimo)
+		const second = startRequest(providerIdentifiers.mimo)
+
+		expect(first.requestId).not.toBe(second.requestId)
+
+		postResponse(second.requestId, { [providerIdentifiers.mimo]: { second: {} } })
+		postResponse(first.requestId, { [providerIdentifiers.mimo]: { first: {} } })
+
+		await expect(first.promise).resolves.toEqual({ [providerIdentifiers.mimo]: { first: {} } })
+		await expect(second.promise).resolves.toEqual({ [providerIdentifiers.mimo]: { second: {} } })
 	})
 
 	test("on abort, rejects, removes the same message listener, and clears the timeout", async () => {
@@ -51,9 +95,8 @@ describe("fetchRouterModels", () => {
 		const removeSpy = vi.spyOn(window, "removeEventListener")
 		const controller = new AbortController()
 
-		const promise = fetchRouterModels(providerIdentifiers.openrouter, controller.signal)
-		const handler = handlerOf(addSpy)
-		expect(typeof handler).toBe("function")
+		const { promise, requestId } = startRequest(providerIdentifiers.mimo, controller.signal)
+		const handler = addSpy.mock.calls.find((args) => args[0] === "message")?.[1]
 		expect(vi.getTimerCount()).toBe(1)
 
 		controller.abort()
@@ -61,19 +104,26 @@ describe("fetchRouterModels", () => {
 		await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		expect(removeSpy).toHaveBeenCalledWith("message", handler)
 		expect(vi.getTimerCount()).toBe(0)
+
+		// A stale response for the aborted request must find no listener.
+		postResponse(requestId, { [providerIdentifiers.mimo]: {} })
 	})
 
 	test("rejects at once without adding a listener when the signal is already aborted", async () => {
 		vi.useFakeTimers()
 		const addSpy = vi.spyOn(window, "addEventListener")
+
 		const controller = new AbortController()
 		controller.abort()
+		postMessageMock.mockClear()
 
-		await expect(fetchRouterModels(providerIdentifiers.openrouter, controller.signal)).rejects.toMatchObject({
+		await expect(fetchRouterModels(providerIdentifiers.mimo, controller.signal)).rejects.toMatchObject({
 			name: "AbortError",
 		})
-		expect(handlerOf(addSpy)).toBeUndefined()
+		expect(addSpy.mock.calls.find((args) => args[0] === "message")?.[1]).toBeUndefined()
 		expect(vi.getTimerCount()).toBe(0)
+		// The already-aborted signal must not even post the request.
+		expect(postMessageMock).not.toHaveBeenCalled()
 	})
 
 	test("on timeout, rejects and removes the same message listener", async () => {
@@ -81,8 +131,8 @@ describe("fetchRouterModels", () => {
 		const addSpy = vi.spyOn(window, "addEventListener")
 		const removeSpy = vi.spyOn(window, "removeEventListener")
 
-		const promise = fetchRouterModels(providerIdentifiers.openrouter)
-		const handler = handlerOf(addSpy)
+		const promise = fetchRouterModels(providerIdentifiers.mimo)
+		const handler = addSpy.mock.calls.find((args) => args[0] === "message")?.[1]
 		const assertion = expect(promise).rejects.toThrow("timed out")
 
 		await vi.advanceTimersByTimeAsync(10_000)
@@ -106,12 +156,17 @@ describe("useRouterModels", () => {
 				`{"${provider}": {"__proto__": {"contextWindow": 1000}, "vendor/model": {"contextWindow": 2000}}}`,
 			),
 		]
-		vi.mocked(vscode.postMessage).mockImplementation(() => {
+		postMessageMock.mockImplementation(() => {
 			const routerModels = responses.shift()
+			const requestId = postMessageMock.mock.calls.at(-1)?.[0]?.values?.requestId as string
 			queueMicrotask(() =>
 				window.dispatchEvent(
 					new MessageEvent("message", {
-						data: { type: RouterModelsMessageType.routerModels, values: { provider }, routerModels },
+						data: {
+							type: RouterModelsMessageType.routerModels,
+							values: { requestId, provider },
+							routerModels,
+						},
 					}),
 				),
 			)

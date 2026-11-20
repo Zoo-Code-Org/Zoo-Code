@@ -201,6 +201,16 @@ export const getStaticModelsForProvider = (
 
 	const models = MODELS_BY_PROVIDER[provider] ?? {}
 
+	// MiMo ships new model generations frequently (the V2.5 line is EOL), so the
+	// host-fetched catalog is merged on top of the static list: the generic picker
+	// (MiMo has no dedicated picker component) stays populated before the router
+	// response arrives and post-V2.6 releases become selectable without an
+	// extension update. Fetched entries win so catalog metadata stays current.
+	const mimoRouterModels = routerModels?.mimo
+	if (provider === providerIdentifiers.mimo && mimoRouterModels && Object.keys(mimoRouterModels).length > 0) {
+		return { ...models, ...mimoRouterModels }
+	}
+
 	// Add custom-arn option for Bedrock
 	if (provider === providerIdentifiers.bedrock) {
 		return {

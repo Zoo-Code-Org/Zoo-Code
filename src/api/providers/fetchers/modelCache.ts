@@ -18,7 +18,6 @@ import type { RouterName } from "../../../shared/api"
 import { createAbortError, mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 
 import { GetModelsOptions } from "../../../shared/api"
-
 import type { ApiHandler } from "../../index"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
@@ -81,8 +80,13 @@ function captureModelCacheEmptyResponseOnce(
 	TelemetryService.instance.captureEvent(TelemetryEventName.MODEL_CACHE_EMPTY_RESPONSE, { provider, ...properties })
 }
 
-// Memoize derived digests so the deliberately-structureless KDF runs at most once per
-// distinct input per session (getCacheKey / cacheKeyToFilename run on every cache lookup).
+// Recently derived digests, so the 10k-iteration KDF does not run per request:
+// getCacheKey/deriveApiKeyDiscriminator sit on the per-message hot path (e.g.
+// PoeHandler.getModel -> getModelsFromCache -> getCacheKey). Bounded FIFO: once
+// more than MAX_CACHED_DIGESTS distinct inputs have been seen, the oldest entry
+// is dropped, so at most this many raw key strings are retained beyond their
+// original owners.
+const MAX_CACHED_DIGESTS = 16
 const cacheDigestCache = new Map<string, string>()
 
 // Fixed, non-secret application salt. This is NOT credential storage: it derives short,
@@ -105,13 +109,29 @@ const CACHE_DIGEST_ITERATIONS = 10_000
  * ~ n^2 / 2^(8*bytes)), while the truncated output is small enough that any preimage search
  * yields an astronomically large set of candidate inputs -- so a value written to an on-disk
  * cache filename cannot be reversed to identify the API key it was derived from.
+ *
+ * No fast-hash memo key: the map is keyed by the raw input because the API key is
+ * already resident in memory as handler options, and bounding the map keeps the extra
+ * retention window tiny. A fast hash of key-tainted input would only re-introduce the
+ * CodeQL js/insufficient-password-hash sink. PBKDF2 remains the only derivation whose
+ * output leaves this process (cache keys and on-disk filenames).
  */
 function deriveCacheDigest(value: string, bytes: number): string {
 	const memoKey = `${bytes}:${value}`
 	const cached = cacheDigestCache.get(memoKey)
-	if (cached) return cached
+	if (cached) {
+		return cached
+	}
 	const digest = pbkdf2Sync(value, CACHE_DIGEST_SALT, CACHE_DIGEST_ITERATIONS, bytes, "sha256").toString("hex")
 	cacheDigestCache.set(memoKey, digest)
+	// FIFO eviction: bound the retention window so plaintext keys never accumulate
+	// for the whole session.
+	if (cacheDigestCache.size > MAX_CACHED_DIGESTS) {
+		const oldest = cacheDigestCache.keys().next().value
+		if (oldest !== undefined) {
+			cacheDigestCache.delete(oldest)
+		}
+	}
 	return digest
 }
 
