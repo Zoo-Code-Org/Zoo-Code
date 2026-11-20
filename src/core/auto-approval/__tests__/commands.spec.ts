@@ -1,4 +1,10 @@
-import { containsDangerousSubstitution, getCommandDecision, getCommandDecisionDetailed } from "../commands"
+import { resolveEffectiveCommandLists } from "../commandScope"
+import {
+	containsDangerousSubstitution,
+	getCommandDecision,
+	getCommandDecisionDetailed,
+	isShadowedByAnyEntry,
+} from "../commands"
 
 describe("containsDangerousSubstitution", () => {
 	describe("zsh array assignments (should NOT be flagged)", () => {
@@ -214,4 +220,73 @@ describe("getCommandDecisionDetailed", () => {
 			)
 		}
 	})
+})
+
+it("isShadowedByAnyEntry: shadows an entry whose every match a prefixing entry also matches", () => {
+	expect(isShadowedByAnyEntry("git push", ["git"])).toBe(true)
+	expect(isShadowedByAnyEntry("git push", ["git push"])).toBe(true)
+})
+
+it("isShadowedByAnyEntry: keeps an entry that decides matches no shadowing entry covers", () => {
+	expect(isShadowedByAnyEntry("git", ["git push"])).toBe(false)
+})
+
+it("isShadowedByAnyEntry: shadows every entry behind the universal wildcard", () => {
+	expect(isShadowedByAnyEntry("git push", ["*"])).toBe(true)
+	expect(isShadowedByAnyEntry("anything at all", ["*"])).toBe(true)
+})
+
+it("isShadowedByAnyEntry: compares case-insensitively, the way the matcher matches", () => {
+	expect(isShadowedByAnyEntry("Git Push", ["git"])).toBe(true)
+	expect(isShadowedByAnyEntry("git push", ["GIT"])).toBe(true)
+})
+
+it("isShadowedByAnyEntry: compares entries as stored, the way the matcher compares them", () => {
+	// The matcher trims commands, never entries; shadowing must compare as stored.
+	expect(isShadowedByAnyEntry(" git push ", ["git"])).toBe(false)
+	expect(isShadowedByAnyEntry("git push", [" git "])).toBe(false)
+})
+
+it("layered decisions: a padded global deny entry cannot erase a workspace deny entry", () => {
+	// The inert padded entry must not shadow the workspace deny the matcher honors.
+	const scopes = (globalList: string[], workspaceList: string[]) => ({
+		global: globalList,
+		workspace: workspaceList,
+		merged: [...new Set([...globalList, ...workspaceList])],
+	})
+	const effective = resolveEffectiveCommandLists(scopes([" git"], []), scopes([], ["git push"]), true)
+
+	expect(getCommandDecision("git push origin", effective.allowed, effective.denied)).toBe("auto_deny")
+})
+
+it("layered decisions: a padded global allow entry cannot erase a workspace allow entry", () => {
+	// Mirror of the deny side: the inert padded entry leaves the workspace allow effective.
+	const scopes = (globalList: string[], workspaceList: string[]) => ({
+		global: globalList,
+		workspace: workspaceList,
+		merged: [...new Set([...globalList, ...workspaceList])],
+	})
+	const effective = resolveEffectiveCommandLists(scopes([" git"], ["git push"]), scopes([], []), true)
+
+	expect(getCommandDecision("git push origin", effective.allowed, effective.denied)).toBe("auto_approve")
+})
+
+it("isShadowedByAnyEntry: never treats an empty entry as covered", () => {
+	// An empty entry prefix-matches everything; the guard keeps it from
+	// shadowing itself. Layers sanitize blanks first, so this pins the contract.
+	expect(isShadowedByAnyEntry("", [""])).toBe(false)
+	expect(isShadowedByAnyEntry("", ["git"])).toBe(false)
+})
+
+it("layered decisions: reproduces the global-decides precedence through the scope-blind matcher", () => {
+	// Global deny "git" shadows workspace allow "git push" at composition, so the
+	// scope-blind matcher returns the deny.
+	const scopes = (globalList: string[], workspaceList: string[]) => ({
+		global: globalList,
+		workspace: workspaceList,
+		merged: [...new Set([...globalList, ...workspaceList])],
+	})
+	const effective = resolveEffectiveCommandLists(scopes([], ["git push"]), scopes(["git"], []), true)
+
+	expect(getCommandDecision("git push origin", effective.allowed, effective.denied)).toBe("auto_deny")
 })

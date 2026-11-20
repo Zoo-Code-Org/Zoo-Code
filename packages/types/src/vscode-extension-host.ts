@@ -336,6 +336,7 @@ export type ExtensionState = Pick<
 	| "followupAutoApproveTimeoutMs"
 	| "allowedCommands"
 	| "deniedCommands"
+	| "workspaceCommandListsEnabled"
 	| "allowedMaxRequests"
 	| "allowedMaxCost"
 	| "ttsEnabled"
@@ -421,6 +422,15 @@ export type ExtensionState = Pick<
 	toolRequirements?: Record<string, boolean> // Map of tool names to their requirements (e.g. {"apply_diff": true})
 
 	cwd?: string // Current working directory
+
+	/**
+	 * User-scope command lists from extension global state, before workspace
+	 * composition. Auto-approval enforces these raw layers plus the task's
+	 * folder; the merged pair follows only the window's first folder. Runtime
+	 * state, not user settings: the provider writes it, never the dialog.
+	 */
+	globalAllowedCommands?: string[]
+	globalDeniedCommands?: string[]
 	telemetrySetting: TelemetrySetting
 	telemetryKey?: string
 	machineId?: string
@@ -709,9 +719,7 @@ export interface WebviewMessage {
 		| "getDismissedUpsells"
 		| "openMarkdownPreview"
 		| "updateSettings"
-		| "allowedCommands"
 		| "getTaskWithAggregatedCosts"
-		| "deniedCommands"
 		| "openDebugApiHistory"
 		| "openDebugUiHistory"
 		| "downloadErrorDiagnostics"
@@ -769,7 +777,6 @@ export interface WebviewMessage {
 	stepIndex?: number
 	isLaunchAction?: boolean
 	forceShow?: boolean
-	commands?: string[]
 	audioType?: AudioType
 	serverName?: string
 	toolName?: string
@@ -858,6 +865,22 @@ export interface WebviewMessage {
 		codebaseIndexOpenRouterApiKey?: string
 	}
 	updatedSettings?: RooCodeSettings
+	/**
+	 * The lists as the dialog last displayed them, sent with the save that rewrites
+	 * them. Without it the save cannot tell a file-side addition from a user
+	 * deletion: both look like "in the file, absent from the submission". Senders
+	 * that display no lists omit it.
+	 */
+	commandListBaseline?: {
+		allowedCommands?: string[]
+		deniedCommands?: string[]
+		/**
+		 * The gate as the dialog last displayed it. A gate flip between display and
+		 * save hides workspace entries; this lets the save treat an already-shown
+		 * entry as known workspace knowledge, not a new promotion to global.
+		 */
+		workspaceCommandListsEnabled?: boolean
+	}
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
 	/** Origin of each part of `text`. Absent or not matching `text` means all generated. */

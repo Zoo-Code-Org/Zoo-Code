@@ -20,6 +20,8 @@ import {
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
 import { CustomModesManager } from "../CustomModesManager"
+import { Package } from "../../../shared/package"
+import { makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import type { Mock } from "vitest"
@@ -48,6 +50,11 @@ vi.mock("vscode", () => ({
 	},
 	Uri: {
 		file: vi.fn((filePath) => ({ fsPath: filePath })),
+	},
+	ConfigurationTarget: {
+		Global: 1,
+		Workspace: 2,
+		WorkspaceFolder: 3,
 	},
 }))
 
@@ -661,6 +668,141 @@ describe("importExport", () => {
 			expect(showErrorMessageSpy).toHaveBeenCalledWith(expect.stringContaining("errors.settings_import_failed"))
 
 			showErrorMessageSpy.mockRestore()
+		})
+
+		// A save classifies a displayed command-list entry as externally
+		// removed unless a configuration layer holds it, so an import that
+		// carries command lists must write them into the global layer;
+		// an import that never runs or never carried a list must not write.
+		function mockCommandListConfig() {
+			// The shared structurally complete double keeps the configuration
+			// type correct; update() records the mirror's calls.
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			return update
+		}
+
+		function stubValidProviderProfiles() {
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { apiProvider: providerIdentifiers.anthropic, id: "default-id" } },
+			})
+			mockProviderSettingsManager.listConfig.mockResolvedValue([
+				{ name: "valid-profile", id: "valid-id", apiProvider: providerIdentifiers.openai },
+			])
+		}
+
+		const validProfileFile = (globalSettings: Record<string, unknown>) =>
+			JSON.stringify({
+				providerProfiles: {
+					currentApiConfigName: "valid-profile",
+					apiConfigs: {
+						"valid-profile": {
+							apiProvider: providerIdentifiers.openai,
+							apiKey: "test-key",
+							id: "valid-id",
+						},
+					},
+				},
+				globalSettings,
+			})
+
+		const feedbackProvider = () => ({
+			settingsImportedAt: 0,
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		})
+
+		const runFeedback = async (filePath?: string) =>
+			importSettingsWithFeedback(
+				{
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider: feedbackProvider(),
+				},
+				filePath,
+			)
+
+		it("mirrors the command lists a successful import carried into the global configuration", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(
+				validProfileFile({ allowedCommands: ["git", "imported"], deniedCommands: ["rm -rf"] }),
+			)
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			// The state copy holds the same lists after setValues: the mirror
+			// and a state-copy source agree here, so this test pins that the
+			// success path writes both keys at all.
+			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
+				key === "allowedCommands" ? ["git", "imported"] : key === "deniedCommands" ? ["rm -rf"] : undefined,
+			)
+			const update = mockCommandListConfig()
+
+			await runFeedback(filePath)
+
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name)
+			expect(update).toHaveBeenCalledWith(
+				"allowedCommands",
+				["git", "imported"],
+				vscode.ConfigurationTarget.Global,
+			)
+			expect(update).toHaveBeenCalledWith("deniedCommands", ["rm -rf"], vscode.ConfigurationTarget.Global)
+		})
+
+		it("writes no command-list configuration when the file dialog is cancelled", async () => {
+			;(vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			// The state copy holds lists from an earlier session: a mirror that
+			// runs on the cancel path would write this stale state over the
+			// user's settings file for an import that never happened.
+			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
+				key === "allowedCommands" ? ["git", "stale"] : key === "deniedCommands" ? ["rm -rf"] : undefined,
+			)
+			const update = mockCommandListConfig()
+			const showErrorMessageSpy = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+
+			await runFeedback()
+
+			expect(update).not.toHaveBeenCalled()
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(expect.stringContaining("errors.settings_import_failed"))
+			showErrorMessageSpy.mockRestore()
+		})
+
+		it("writes no command-list configuration when the import fails", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.access as Mock).mockRejectedValue(new Error("ENOENT: no such file or directory"))
+			// Same stale-state script as the cancel test: a failed import must
+			// not mirror the state copy either.
+			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
+				key === "allowedCommands" ? ["git", "stale"] : key === "deniedCommands" ? ["rm -rf"] : undefined,
+			)
+			const update = mockCommandListConfig()
+			const showErrorMessageSpy = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+
+			await runFeedback(filePath)
+
+			expect(update).not.toHaveBeenCalled()
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(expect.stringContaining("errors.settings_import_failed"))
+			showErrorMessageSpy.mockRestore()
+		})
+
+		it("mirrors only the keys the import file carried, never the state copy's lists", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ mode: "code" }))
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			// The state copy holds command lists the file never carried: a
+			// mirror sourcing the state copy would write them over the user's
+			// settings file on an import that says nothing about them.
+			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
+				key === "allowedCommands" ? ["git", "stale"] : undefined,
+			)
+			const update = mockCommandListConfig()
+
+			await runFeedback(filePath)
+
+			expect(update).not.toHaveBeenCalled()
 		})
 
 		it("should handle import when reasoning budget fields are missing from config", async () => {

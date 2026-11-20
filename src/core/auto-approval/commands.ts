@@ -114,6 +114,30 @@ export function findLongestPrefixMatch(command: string, prefixes: string[]): str
 }
 
 /**
+ * Whether one command-list entry is covered by any entry of `shadowing`.
+ *
+ * Coverage uses the matcher's own comparison — case-insensitive `startsWith`,
+ * `"*"` universal — on the stored entries, untrimmed, because the matcher
+ * trims commands but never entries. Dropping covered entries when composing
+ * layers reproduces global-decides precedence without the matcher knowing
+ * about layers.
+ *
+ * @param entry - The entry that may be covered.
+ * @param shadowing - The entries whose match coverage decides.
+ * @returns true if some `shadowing` entry covers `entry`. An empty `entry`
+ * is covered only by `"*"`: it cannot be enforced, so the guard keeps it
+ * visible.
+ */
+export function isShadowedByAnyEntry(entry: string, shadowing: string[]): boolean {
+	const lowerEntry = entry.toLowerCase()
+
+	return shadowing.some((shadow) => {
+		const lowerShadow = shadow.toLowerCase()
+		return lowerShadow === "*" || (lowerEntry !== "" && lowerEntry.startsWith(lowerShadow))
+	})
+}
+
+/**
  * Command approval decision types
  */
 export type CommandDecision = "auto_approve" | "auto_deny" | "ask_user" | "malformed_command"

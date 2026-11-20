@@ -2,7 +2,9 @@
 
 import type { ToolUsage } from "@roo-code/types"
 import fs from "fs/promises"
-import { constants as fsConstants, type Stats } from "fs"
+import { constants as fsConstants, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, type Stats } from "fs"
+import * as os from "os"
+import * as path from "path"
 import * as vscode from "vscode"
 
 import { Task } from "../../task/Task"
@@ -23,6 +25,9 @@ vitest.mock("fs/promises", () => ({
 	default: {
 		access: vitest.fn().mockResolvedValue(undefined),
 		stat: vitest.fn().mockResolvedValue({ isDirectory: () => true }),
+		// The default double resolves every path to itself, so a test sees
+		// symlink behavior only when it scripts this mock.
+		realpath: vitest.fn().mockImplementation((p: string) => Promise.resolve(p)),
 	},
 }))
 
@@ -77,6 +82,32 @@ const { executeCommandTool } = executeCommandModule
 // so a delegating spy must call the real policy captured at import time:
 // capturing inside a test can capture another test's leaked spy and recurse.
 const realCheckAutoApproval = autoApprovalModule.checkAutoApproval
+
+// A Windows directory symlink needs developer mode or elevation; a junction does
+// not, and `realpath` resolves it like a POSIX link. Try a symlink first, then a
+// junction. Skip the fixture where neither can be created.
+function createDirectoryLink(target: string, linkPath: string): void {
+	try {
+		symlinkSync(target, linkPath, "dir")
+	} catch {
+		symlinkSync(target, linkPath, "junction")
+	}
+}
+
+function canCreateDirectoryLink(): boolean {
+	const probeDir = mkdtempSync(path.join(os.tmpdir(), "execute-command-symlink-probe-"))
+	try {
+		const target = path.join(probeDir, "target")
+		mkdirSync(target)
+		createDirectoryLink(target, path.join(probeDir, "link"))
+		return true
+	} catch {
+		return false
+	} finally {
+		rmSync(probeDir, { recursive: true, force: true })
+	}
+}
+const directoryLinksAvailable = canCreateDirectoryLink()
 
 describe("executeCommandTool", () => {
 	// Setup common test variables
@@ -206,7 +237,9 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/test/workspace",
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 			// The exact message depends on the terminal mock's behavior
 			const result = mockPushToolResult.mock.calls[0][0]
@@ -228,12 +261,173 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify - command approved, result pushed, and custom cwd passed to terminal
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			// The approval context carries the directory the terminal spawns in.
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/custom/path",
+			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 			const { TerminalRegistry } = await import("../../../integrations/terminal/TerminalRegistry")
 			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
 			expect(firstArg).toBe("/custom/path")
 		})
+
+		it("reports a relative custom cwd resolved against the task's workspace", async () => {
+			// The policy lookup matches against workspace folders, which a
+			// relative path never names, so the approval must carry the
+			// resolved absolute path.
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "sub/dir"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "sub/dir" }
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockAskApproval).toHaveBeenCalledWith(
+				"command",
+				"echo test",
+				undefined,
+				false,
+				expect.objectContaining({
+					commandCwd: path.resolve("/test/workspace", "sub/dir"),
+				}),
+			)
+		})
+	})
+
+	// The folder policy matches by string containment, so a link would be judged
+	// by its own folder while the process starts in the target. The tool
+	// canonicalizes the working directory before any approval decision, so
+	// every consumer (ask, DCG, re-checks, spawn) sees the physical directory.
+	describe("Working directory canonicalization", () => {
+		it("forwards the physical directory behind a symlinked custom cwd to the approval ask", async () => {
+			mockToolUse.params.command = "echo test"
+			mockToolUse.params.cwd = "/mock/link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/link" }
+			vi.mocked(fs.realpath).mockResolvedValueOnce("/physical/target")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(fs.realpath).toHaveBeenCalledWith("/mock/link")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/physical/target",
+			})
+		})
+
+		it("runs the destructive-command guard in the physical directory behind a symlinked custom cwd", async () => {
+			const provider = await mockCline.providerRef.deref()
+			provider.context = { globalStorageUri: { fsPath: "/test/storage" } }
+			provider.contextProxy.getValue.mockReturnValue(true)
+			mockToolUse.params.cwd = "/mock/link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/link" }
+			vi.mocked(fs.realpath).mockResolvedValueOnce("/physical/target")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(mockRunDcg).toHaveBeenCalledWith("/test/storage/dcg", "echo test", "/physical/target")
+		})
+
+		it("fails closed on a broken symlink without reaching approval", async () => {
+			mockToolUse.params.cwd = "/mock/broken-link"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/broken-link" }
+			vi.mocked(fs.realpath).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(fs.stat).mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+			vi.mocked(formatResponse.toolError).mockReturnValueOnce("formatted broken-link error")
+
+			await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+
+			// The failure reports through the working-directory error channel.
+			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+				"Working directory '/mock/broken-link' does not exist.",
+			)
+			expect(mockPushToolResult).toHaveBeenCalledExactlyOnceWith("formatted broken-link error")
+			expect(mockAskApproval).not.toHaveBeenCalled()
+			expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+		})
+
+		it.each([
+			{ thrown: Object.assign(new Error("ELOOP: too many symbolic links"), { code: "ELOOP" }) },
+			{ thrown: "ELOOP: too many symbolic links" },
+		])(
+			"fails closed when canonicalization fails although the lexical directory validates (%s)",
+			async ({ thrown }) => {
+				mockToolUse.params.cwd = "/mock/loop"
+				mockToolUse.nativeArgs = { command: "echo test", cwd: "/mock/loop" }
+				vi.mocked(fs.realpath).mockRejectedValueOnce(thrown)
+
+				await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "test-tool-call-id",
+				})
+
+				// An unresolvable link names no judgeable directory, even when the
+				// lexical `stat` check passes. The message names the
+				// canonicalization failure whatever the rejection's shape.
+				expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
+					expect.stringContaining("Unable to resolve working directory '/mock/loop': ELOOP"),
+				)
+				expect(mockAskApproval).not.toHaveBeenCalled()
+				expect(mockCline.didToolFailInCurrentTurn).toBe(true)
+			},
+		)
+
+		// The scripted tests above pin the contract; this one uses a real link.
+		// The physical path reaching `commandCwd` makes a link judged by its
+		// target's folder.
+		it.skipIf(!directoryLinksAvailable)(
+			"forwards the real target of a directory link created on disk",
+			async () => {
+				const baseDir = mkdtempSync(path.join(os.tmpdir(), "execute-command-canonicalize-"))
+				try {
+					const folderA = path.join(baseDir, "folder-a")
+					const folderB = path.join(baseDir, "folder-b")
+					mkdirSync(folderA)
+					mkdirSync(folderB)
+					const link = path.join(folderA, "link")
+					createDirectoryLink(folderB, link)
+					// Delegate to the real filesystem. Once-only: a leaked
+					// delegate would resolve later tests' fake paths for real.
+					vi.mocked(fs.realpath).mockImplementationOnce(async (target) => realpathSync(String(target)))
+
+					mockToolUse.params.cwd = link
+					mockToolUse.nativeArgs = { command: "echo test", cwd: link }
+					await executeCommandTool.handle(mockCline as Task, mockToolUse, {
+						askApproval: mockAskApproval,
+						handleError: mockHandleError,
+						pushToolResult: mockPushToolResult,
+						toolCallId: "test-tool-call-id",
+					})
+
+					// Compare against the independently resolved target: temp paths
+					// themselves contain links on some platforms.
+					expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+						commandCwd: realpathSync(folderB),
+					})
+				} finally {
+					rmSync(baseDir, { recursive: true, force: true })
+				}
+			},
+		)
 	})
 
 	describe("Error handling", () => {
@@ -342,7 +536,9 @@ describe("executeCommandTool", () => {
 				"error",
 				"executeCommand.destructiveCommandGuard.blockedWithReasonAndRule",
 			)
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("requests normal approval when DCG allows the command", async () => {
@@ -366,6 +562,7 @@ describe("executeCommandTool", () => {
 			// the verdict itself rather than inferring it from settings alone.
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
 				dcgDecision: { decision: "allow" },
+				commandCwd: "/test/workspace",
 			})
 			expect(mockPushToolResult).toHaveBeenCalled()
 		})
@@ -395,6 +592,7 @@ describe("executeCommandTool", () => {
 			// an automatic denial carrying the DCG reason instead of prompting.
 			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
 				dcgDecision: { decision: "deny", reason: "matches a destructive pattern" },
+				commandCwd: "/test/workspace",
 			})
 		})
 
@@ -419,7 +617,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("keeps the protected prompt when blanket auto-deny is on but command auto-approval is off", async () => {
@@ -443,7 +643,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("keeps the protected prompt when blanket auto-deny is on but execute auto-approval is off", async () => {
@@ -471,7 +673,9 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 		})
 
 		it("denies an approved command at execute time when blanket deny engages during the approval dwell", async () => {
@@ -621,7 +825,9 @@ describe("executeCommandTool", () => {
 
 			// The prompt shown was the protected one — the blanket setting was off
 			// when the ask was built.
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true)
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/test/workspace",
+			})
 
 			// The blanket denial wins over the affirmative approval: the command
 			// never reaches the terminal. The provider-level assertion is the
@@ -659,6 +865,49 @@ describe("executeCommandTool", () => {
 			// evaluating the now-engaged blanket denial.
 			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ ask: "command", isProtected: false }))
 			expect(TerminalRegistry.getOrCreateTerminal).not.toHaveBeenCalled()
+		})
+
+		it("re-checks the command policy against the custom working directory", async () => {
+			// The policy re-check must judge the command's own directory: folder
+			// A's allow entry must not approve a command running in folder B.
+			await setupProtectedDwellFlip()
+			mockToolUse.params.cwd = "/custom/path"
+			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
+			// Delegate to the import-time real check; reading the module property
+			// here would capture this file's leaked spy and recurse.
+			const recheckSpy = vitest
+				.spyOn(autoApprovalModule, "checkAutoApproval")
+				.mockImplementation((args) => realCheckAutoApproval(args))
+
+			await executeCommandTool.handle(mockCline, mockToolUse, {
+				askApproval: mockAskApproval,
+				handleError: mockHandleError,
+				pushToolResult: mockPushToolResult,
+				toolCallId: "test-tool-call-id",
+			})
+			expect(recheckSpy).toHaveBeenCalledTimes(1)
+			expect(recheckSpy).toHaveBeenCalledWith(expect.objectContaining({ cwd: "/custom/path" }))
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, true, {
+				commandCwd: "/custom/path",
+			})
+		})
+
+		it("spawns in the approval's working directory rather than re-deriving from the raw custom cwd", async () => {
+			// The executor must spawn in the directory the policy approved.
+			// Re-deriving from the raw `customCwd` could spawn elsewhere.
+			vitest.spyOn(executeCommandModule, "executeCommandInTerminal").mockRestore()
+
+			const [rejected] = await executeCommandModule.executeCommandInTerminal(mockCline, {
+				executionId: "test-exec",
+				command: "echo test",
+				customCwd: "sub/dir",
+				workingDirectory: "/approved/folder",
+				toolCallId: "test-tool-call-id",
+			})
+
+			expect(rejected).toBe(false)
+			const firstArg = (TerminalRegistry.getOrCreateTerminal as ReturnType<typeof vitest.fn>).mock.calls[0][0]
+			expect(firstArg).toBe("/approved/folder")
 		})
 
 		it("fails closed when the execute-time recheck returns a non-approval other than deny", async () => {
@@ -961,7 +1210,9 @@ describe("executeCommandTool", () => {
 			})
 
 			// Verify
-			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test")
+			expect(mockAskApproval).toHaveBeenCalledWith("command", "echo test", undefined, false, {
+				commandCwd: "/test/workspace",
+			})
 			// executeCommandInTerminal should not be called since approval was denied
 			expect(mockPushToolResult).not.toHaveBeenCalled()
 		})

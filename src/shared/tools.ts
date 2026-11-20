@@ -19,6 +19,12 @@ export type AutoApprovalContext = {
 	 * produce a verdict — they surface as a retryable tool error beforehand.
 	 */
 	dcgDecision?: DcgDecision
+	/**
+	 * Directory the command actually runs in (`execute_command` only). Command
+	 * lists judge this directory, so a command in another workspace folder is
+	 * judged by that folder's policy, never the task folder's.
+	 */
+	commandCwd?: string
 }
 
 export type AskApproval = (
