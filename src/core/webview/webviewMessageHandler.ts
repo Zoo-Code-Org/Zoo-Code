@@ -2831,12 +2831,20 @@ export const webviewMessageHandler = async (
 			break
 		case "updateCustomMode":
 			if (message.modeConfig) {
+				// Two failures look alike here but must not be treated alike. A manager failure has already
+				// been shown to the user by updateCustomMode; a failure after the manager write means the
+				// mode FILE is saved while the selection - this view's pin, the shared key, or the refresh - did
+				// not land. The flags keep those outcomes apart in the catch below.
+				let modeFileSaved = false
+				let selectionApplied = false
+				const modeSlug = message.modeConfig.slug
 				try {
 					// Check if this is a new mode or an update to an existing mode
 					const existingModes = await provider.customModesManager.getCustomModes()
 					const isNewMode = !existingModes.some((mode) => mode.slug === message.modeConfig?.slug)
 
 					await provider.customModesManager.updateCustomMode(message.modeConfig.slug, message.modeConfig)
+					modeFileSaved = true
 					// Update state after saving the mode. Both keys go through provider.setValue so
 					// this view's mode pin and local buffer follow the slug this call just wrote, as in
 					// the updateSettings path; a direct ContextProxy write moves the shared store and
@@ -2846,6 +2854,10 @@ export const webviewMessageHandler = async (
 					await provider.setValue("customModes", customModes)
 					await provider.setValue("mode", message.modeConfig.slug)
 					await provider.postStateToWebview()
+					// The file is saved and the selection landed; anything failing from here on is
+					// telemetry for a change the user already got.
+					modeFileSaved = true
+					selectionApplied = true
 
 					// Track telemetry for custom mode creation or update
 					if (TelemetryService.hasInstance()) {
@@ -2871,9 +2883,30 @@ export const webviewMessageHandler = async (
 							}
 						}
 					}
-				} catch {
-					// Error already shown to user by updateCustomMode
-					// Just prevent unhandled rejection and skip state updates
+				} catch (error) {
+					if (!modeFileSaved) {
+						// Error already shown to user by updateCustomMode
+						// Just prevent unhandled rejection and skip state updates
+					} else if (!selectionApplied) {
+						// The mode file is on disk while the selection did not move. Without a notice the user
+						// sees the editor succeed and the mode list keeps offering the previous mode, so say
+						// which half failed, then re-post the state so the webview reads back what was
+						// actually stored.
+						const errorMessage = error instanceof Error ? error.message : String(error)
+						provider.log(`[updateCustomMode] mode ${modeSlug} saved but not selected: ${errorMessage}`)
+						await vscode.window.showErrorMessage(
+							`Custom mode saved, but it could not be selected: ${errorMessage}`,
+						)
+						try {
+							await provider.postStateToWebview()
+						} catch {
+							// The failed selection is already reported above; a broken refresh must not reject the
+							// handler a second time for a different reason.
+						}
+					} else {
+						// The file saved and the selection landed, so only the telemetry below failed.
+						console.error("[updateCustomMode] custom mode saved and selected, telemetry failed:", error)
+					}
 				}
 			}
 			break

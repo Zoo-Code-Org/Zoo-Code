@@ -6319,14 +6319,19 @@ describe("ClineProvider", () => {
 				throw new Error("view write down")
 			})
 
-			await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("view write down")
+			try {
+				await expect(provider.setValues({ mode: "architect" })).rejects.toThrow("view write down")
 
-			// The rollback replays only keys that still hold what this call wrote, so the sibling's
-			// newer shared value survives instead of being reverted to the captured "code".
-			expect(provider.contextProxy.getValue("mode")).toBe("programmer")
-			expect(sibling.contextProxy.getValue("mode")).toBe("programmer")
-
-			saveSpy.mockRestore()
+				// The rollback replays only keys that still hold what this call wrote, so the sibling's
+				// newer shared value survives instead of being reverted to the captured "code".
+				expect(provider.contextProxy.getValue("mode")).toBe("programmer")
+				expect(sibling.contextProxy.getValue("mode")).toBe("programmer")
+			} finally {
+				// Restored from a finally block: the spy replaces a prototype method, so a failing
+				// assertion above would otherwise leave every later test in this file writing through
+				// this mock implementation.
+				saveSpy.mockRestore()
+			}
 			await provider.dispose()
 			await sibling.dispose()
 		})

@@ -7,7 +7,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import { ClineProvider } from "../ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { Task } from "../../task/Task"
-import type { HistoryItem } from "@roo-code/types"
+import type { HistoryItem, RooCodeSettings } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 vi.mock("vscode", () => ({
@@ -2423,6 +2423,30 @@ describe("ClineProvider - Sticky Mode", () => {
 			// temporary entry instead of deleting it.
 			await provider["setViewStateId"]("constructor")
 			expect(provider["getPersistedViewStates"]({ fresh: true })["constructor"]).toBeUndefined()
+		})
+
+		it("drops a persisted entry whose fields hydration cannot use", async () => {
+			await provider.resolveWebviewView(mockWebviewView)
+
+			// A crafted globalState can hold any JSON shape despite the declared type - a numeric
+			// profile name or a bare string entry are what a corrupted or third-party-written
+			// store carries. Asserted through the same durable backing map the ordinary reads use.
+			const crafted = {
+				"stable-test-view": { mode: "architect" },
+				"bad-field-view": { currentApiConfigName: 42 },
+				"not-an-object-view": "architect",
+			} as unknown as RooCodeSettings["viewStates"]
+			await provider.contextProxy.setValue("viewStates", crafted)
+
+			const states = provider["getPersistedViewStates"]({ fresh: true })
+
+			expect(states["stable-test-view"]).toEqual({ mode: "architect" })
+			// An object-only check let { currentApiConfigName: 42 } through hydration, where getState
+			// reported 42 as a profile name. The schema the settings layer already applies to
+			// viewStates drops it here instead, together with the entry that is not an object.
+			expect(states["bad-field-view"]).toBeUndefined()
+			expect(states["not-an-object-view"]).toBeUndefined()
+			expect(Object.keys(states)).toEqual(["stable-test-view"])
 		})
 
 		it("does not load a temporary-id entry that an earlier session wrote", async () => {

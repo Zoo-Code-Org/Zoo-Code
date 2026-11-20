@@ -4013,6 +4013,49 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await provider.dispose()
 		})
 
+		it("leaves a foreign task's sticky profile alone when the activation succeeds", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["resolveWebviewView"](createMockWebviewView())
+			await provider["setViewStateId"]("foreign-sticky-view")
+
+			// The same foreign task as the failed-write test above, on the success path: the pin
+			// repair leaves this task following its own sticky profile.
+			const foreignTask = {
+				taskApiConfigName: "sticky-profile",
+				apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+				updateApiConfiguration: vi.fn(),
+				setTaskApiConfigName: vi.fn(),
+			}
+			vi.spyOn(provider, "getCurrentTask").mockReturnValue(
+				foreignTask as unknown as ReturnType<typeof provider.getCurrentTask>,
+			)
+			vi.spyOn(provider.providerSettingsManager, "activateProfile").mockResolvedValue({
+				name: "activated-profile",
+				id: "activated-id",
+				apiProvider: providerIdentifiers.anthropic,
+			} satisfies ActivatedProfile)
+			vi.spyOn(provider.providerSettingsManager, "listConfig").mockResolvedValue([
+				{ id: "activated-id", name: "activated-profile", apiProvider: providerIdentifiers.anthropic },
+			])
+			vi.spyOn(provider.customModesManager, "getCustomModes").mockResolvedValue([])
+
+			await provider.activateProviderProfile({ name: "activated-profile" }, { preserveForeignTask: true })
+
+			// The repair preserves this task's sticky profile, so the success path must not write this
+			// activation's name into it: the task would end up pinned to the activated profile while
+			// its handler and credentials stay on the profile it actually follows.
+			expect(foreignTask.setTaskApiConfigName).not.toHaveBeenCalled()
+			expect(foreignTask.updateApiConfiguration).not.toHaveBeenCalled()
+
+			await provider.dispose()
+		})
+
 		it("restores the shared value that was current when its own write began", async () => {
 			// The value a failed write rolls back to is read after the sibling-overlay snapshot awaits, immediately
 			// before this call writes its own key: another view can complete a write to that same key inside that

@@ -78,6 +78,7 @@ import {
 	modelIdKeys,
 	providerIdentifiers,
 	PROVIDER_SETTINGS_KEYS,
+	viewStateSchema,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -812,8 +813,14 @@ export class ClineProvider
 		let dropped = 0
 
 		for (const [viewId, entry] of Object.entries(viewStates)) {
-			if (entry && typeof entry === "object" && !Array.isArray(entry)) {
-				states[viewId] = entry
+			// Validate the fields, not only the shape: an entry such as { currentApiConfigName: 42 } is an
+			// object, so an object check let it through hydration and getState then reported 42 as a
+			// profile name. viewStateSchema is the same schema the settings schema applies to
+			// viewStates, so an entry hydration cannot use is dropped and counted here instead of
+			// being reported after hydration.
+			const parsed = viewStateSchema.safeParse(entry)
+			if (parsed.success) {
+				states[viewId] = parsed.data
 			} else {
 				dropped++
 			}
@@ -4387,8 +4394,12 @@ export class ClineProvider
 		// Update the current task's sticky provider profile, unless this activation is
 		// being used purely as a non-persisting restoration (e.g., reopening a task from history).
 		if (persistTaskHistory) {
+			// The same foreign-task guard the handler update above uses. A launch-time pin repair
+			// deliberately leaves the task on the sticky profile it already follows, so writing this
+			// activation's name here would rename the very pin the repair preserves and leave the task
+			// running the other profile's handler under this profile's name.
 			await this.persistStickyProviderProfileToCurrentTask(name, {
-				skipCurrentTaskRebuild,
+				skipCurrentTaskRebuild: skipCurrentTaskRebuild || foreignTaskFollowed,
 				expectedCurrentTaskId,
 			})
 		}

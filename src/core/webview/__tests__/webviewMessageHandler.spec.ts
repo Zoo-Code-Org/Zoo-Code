@@ -4266,3 +4266,53 @@ describe("updateSettings with the display settings", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("constructor", "x")
 	})
 })
+
+describe("webviewMessageHandler - updateCustomMode", () => {
+	const modeConfig = {
+		name: "Reported Mode",
+		slug: "reported-mode",
+		roleDefinition: "Report a failure",
+		groups: [],
+	} as ModeConfig
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		vi.mocked(vscode.window.showErrorMessage).mockResolvedValue(undefined)
+		vi.mocked(mockClineProvider.customModesManager.getCustomModes).mockResolvedValue([])
+		vi.mocked(mockClineProvider.customModesManager.updateCustomMode).mockResolvedValue(undefined)
+		vi.mocked(mockClineProvider.setValue).mockResolvedValue(undefined)
+		vi.mocked(mockClineProvider.postStateToWebview).mockResolvedValue(undefined)
+	})
+
+	it("reports the saved mode when the selection write fails after the mode file landed", async () => {
+		// The manager write lands and the shared selection key rejects afterwards. The single silent
+		// catch treated that like a manager failure and said nothing, so the mode file was saved while
+		// the mode list and this view kept offering the previous mode, with no explanation.
+		vi.mocked(mockClineProvider.setValue).mockImplementation(async (key: string) => {
+			if (key === "mode") {
+				throw new Error("selection write down")
+			}
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "updateCustomMode", modeConfig })
+
+		expect(mockClineProvider.customModesManager.updateCustomMode).toHaveBeenCalledWith(
+			"reported-mode",
+			expect.objectContaining({ slug: "reported-mode" }),
+		)
+		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("could not be selected"))
+		// The refresh still runs so the webview reads back the mode file that actually saved.
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalled()
+	})
+
+	it("says nothing when the manager write itself fails", async () => {
+		// updateCustomMode already reported this failure to the user; a second notice here would tell
+		// the user a mode saved when none did.
+		vi.mocked(mockClineProvider.customModesManager.updateCustomMode).mockRejectedValue(new Error("manager down"))
+
+		await webviewMessageHandler(mockClineProvider, { type: "updateCustomMode", modeConfig })
+
+		expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+})
