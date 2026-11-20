@@ -46,6 +46,15 @@ export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
  */
 const PROMPT_CACHE_KEY_MAX_LENGTH = 64
 
+function normalizeResponseServiceTier(tier: unknown): ServiceTier | undefined {
+	// Fast responses use the catalog's priority rates, including long-context pricing.
+	if (tier === "fast") return OpenAiServiceTier.Priority
+	if (tier === OpenAiServiceTier.Default || tier === OpenAiServiceTier.Flex || tier === OpenAiServiceTier.Priority) {
+		return tier
+	}
+	return undefined
+}
+
 export class OpenAiNativeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -970,7 +979,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 
 							// Capture resolved service tier if present
 							if (parsed.response?.[SERVICE_TIER_KEY]) {
-								this.lastServiceTier = parsed.response[SERVICE_TIER_KEY] as ServiceTier
+								this.lastServiceTier = normalizeResponseServiceTier(parsed.response[SERVICE_TIER_KEY])
 							}
 							// Capture complete output array (includes reasoning items with encrypted_content)
 							if (parsed.response?.output && Array.isArray(parsed.response.output)) {
@@ -1427,7 +1436,7 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 	private async *processEvent(event: any, model: OpenAiNativeModel): ApiStream {
 		// Capture resolved service tier when available
 		if (event?.response?.[SERVICE_TIER_KEY]) {
-			this.lastServiceTier = event.response[SERVICE_TIER_KEY] as ServiceTier
+			this.lastServiceTier = normalizeResponseServiceTier(event.response[SERVICE_TIER_KEY])
 		}
 		// Capture complete output array (includes reasoning items with encrypted_content)
 		if (event?.response?.output && Array.isArray(event.response.output)) {
