@@ -8,12 +8,9 @@ This file provides guidance to agents when working with code in this repository.
 
 ## Published Text Style (STE100)
 
-Write all published and user-facing text in Simplified Technical English (ASD-STE100). This applies to PR titles and descriptions, GitHub Discussion posts, issue and PR comments, and repository templates (for example, files under `.github/DISCUSSION_TEMPLATE/`).
+Write all published and user-facing text in Simplified Technical English (ASD-STE100). This covers PR titles and descriptions, GitHub Discussion posts, issue and PR comments, and repository templates (for example, files under `.github/DISCUSSION_TEMPLATE/`). Follow the Writing Style rules in `CONTRIBUTING.md`.
 
-- Write short sentences. Put one idea in each sentence.
-- Use plain, approved words. Use the active voice and the present tense.
-- Do not use contractions.
-- Keep titles short and specific. Do not add bracketed tags or prefixes unless a maintainer asks for them.
+Do not add bracketed tags or prefixes to titles unless a maintainer asks for them.
 
 ## ESLint Suppressions
 
