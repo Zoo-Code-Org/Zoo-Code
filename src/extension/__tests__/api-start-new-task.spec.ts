@@ -125,7 +125,11 @@ describe("API - startNewTask routing", () => {
 			"no configuration",
 			undefined,
 			undefined,
-			{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+			{
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 0,
+				segments: [{ source: "user", text: "no configuration" }],
+			},
 			undefined,
 		)
 		expect(taskId).toBe("sidebar-task")

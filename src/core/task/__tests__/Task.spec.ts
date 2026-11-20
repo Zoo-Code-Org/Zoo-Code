@@ -4336,7 +4336,12 @@ describe("Cline", () => {
 					switchError,
 				)
 				// ...and the pending ask is still answered, so the submitted text is not lost.
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "still delivered", [])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"still delivered",
+					[],
+					[{ text: "still delivered", source: "generated" }],
+				)
 				consoleErrorSpy.mockRestore()
 			})
 
@@ -4359,7 +4364,12 @@ describe("Cline", () => {
 				await task.submitUserMessage("delivered in old mode", undefined, "architect")
 
 				// The message is still delivered in the previous mode...
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "delivered in old mode", [])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"delivered in old mode",
+					[],
+					[{ text: "delivered in old mode", source: "generated" }],
+				)
 				// ...and the dropped selection leaves a trace.
 				expect(warnSpy).toHaveBeenCalledWith(
 					`[Task#submitUserMessage] Mode switch to architect was not applied (taskId=${task.taskId})`,

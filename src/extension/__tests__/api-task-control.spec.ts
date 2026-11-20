@@ -181,7 +181,11 @@ describe("API task controls", () => {
 				"new task",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ source: "user", text: "new task" }],
+				},
 				configuration,
 			)
 		})
@@ -207,7 +211,11 @@ describe("API task controls", () => {
 				"keep editors",
 				undefined,
 				undefined,
-				{ consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER, toolRepetitionSoftLimit: 0 },
+				{
+					consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+					toolRepetitionSoftLimit: 0,
+					segments: [{ source: "user", text: "keep editors" }],
+				},
 				configuration,
 			)
 		})
