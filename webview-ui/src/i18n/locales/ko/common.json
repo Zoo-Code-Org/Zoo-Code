@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "검색...",
-		"no_results": "결과를 찾을 수 없습니다"
+		"no_results": "결과를 찾을 수 없습니다",
+		"close": "닫기",
+		"clear_search_aria_label": "검색 지우기"
 	},
 	"mermaid": {
 		"loading": "머메이드 다이어그램 생성 중...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "이미지"
 		},
-		"noData": "이미지 데이터 없음"
+		"noData": "이미지 데이터 없음",
+		"generatedAlt": "AI 생성 이미지",
+		"thumbnailAlt": "썸네일 {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "메시지 삭제",

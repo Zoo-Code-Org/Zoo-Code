@@ -55,5 +55,10 @@
 		"running": "Berjalan",
 		"completed": "Selesai",
 		"error": "Error"
-	}
+	},
+	"resource": {
+		"returns": "Mengembalikan",
+		"unknownMimeType": "Tidak diketahui"
+	},
+	"toggleServerAriaLabel": "Aktifkan/nonaktifkan server {{serverName}}"
 }

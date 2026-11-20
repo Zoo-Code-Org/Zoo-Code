@@ -64,6 +64,19 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		return { urlScoped: true, keyScoped: true, authScoped: false }
 	}
 
+	override getModel(): { id: string; info: ModelInfo } {
+		const model = super.getModel()
+		const preserveReasoningSetting = this.options.litellmPreserveReasoning
+		if (!preserveReasoningSetting || preserveReasoningSetting === "auto") {
+			return model
+		}
+
+		// Resolve before Task captures its request metadata and filters history.
+		// RouterProvider.fetchModel also calls this method. Never modify the shared
+		// discovered catalog: other profiles may use different preservation settings.
+		return { ...model, info: { ...model.info, preserveReasoning: preserveReasoningSetting === "on" } }
+	}
+
 	async fetchModels(options: GetModelsOptions, signal?: AbortSignal): Promise<ModelRecord> {
 		const fetchOpts: [] | [{ signal: AbortSignal }] = signal ? [{ signal }] : []
 		return getLiteLLMModels(options.apiKey ?? "", options.baseUrl ?? "", ...fetchOpts)

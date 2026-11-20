@@ -1,7 +1,8 @@
 {
 	"landing": {
 		"greeting": "Selamat datang di Zoo Code!",
-		"introduction": "Dengan berbagai Mode bawaan dan dapat diperluas, Zoo Code memungkinkan Anda merencanakan, merancang, coding, debug, dan meningkatkan produktivitas seperti yang belum pernah terjadi sebelumnya."
+		"introduction": "Dengan berbagai Mode bawaan dan dapat diperluas, Zoo Code memungkinkan Anda merencanakan, merancang, coding, debug, dan meningkatkan produktivitas seperti yang belum pernah terjadi sebelumnya.",
+		"logoAlt": "Logo Roo"
 	},
 	"providerSignup": {
 		"heading": "Pilih penyedia Anda",

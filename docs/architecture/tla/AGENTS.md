@@ -38,7 +38,7 @@ Write the unit tests and do the review as usual. The spec does not replace them.
 | replay         | Run a counterexample on the real code. It shows if the counterexample is real.        |
 | sabotage check | Remove a guard on purpose. The invariant must fail. If not, the invariant is vacuous. |
 | vacuous        | True in all states because of the model, not because of the code.                     |
-| gate           | The check an agent runs by hand on each commit. No script or CI step runs it yet.     |
+| gate           | The check an agent runs on each commit. `check.sh` runs it. No CI step runs it yet.   |
 
 ## Procedure
 
@@ -53,7 +53,7 @@ Write the unit tests and do the review as usual. The spec does not replace them.
 9. Run TLC on the fixed code. The invariant must hold.
 10. Write a property test from the same invariant sentence. Run it on the real code.
 11. Simplify the spec. Use the questions below.
-12. Run each TLC config and the property test by hand on each fix commit. Write the result in the spec header.
+12. On each fix commit, run `TLA_JAR=<jar> ./check.sh <Spec>` for each spec you changed, and the property test. Run `./check.sh all` only for a release or a change to `check.sh`. `Spec.cfg` must pass. Each `Spec.Variant.cfg` must fail. Write the result in the spec header.
 
 ## Review ratchet
 
