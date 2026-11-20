@@ -4752,6 +4752,38 @@ describe("ClineProvider", () => {
 		expect(stateToWebview.allowedMaxTokens).toBe(50_000)
 	})
 
+	it("passes allowedMaxTokens as tokenCircuitBreakerLimit when creating a task", async () => {
+		await provider.resolveWebviewView(mockWebviewView)
+		await provider.contextProxy.setValue("allowedMaxTokens", 75_000)
+
+		vi.mocked(Task).mockClear()
+		await provider.createTask("test task")
+
+		expect(Task).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tokenCircuitBreakerLimit: 75_000,
+			}),
+		)
+
+		vi.mocked(Task).mockClear()
+		const historyItem = {
+			id: "hist-task-1",
+			ts: Date.now(),
+			task: "history task",
+			number: 1,
+			tokensIn: 0,
+			tokensOut: 0,
+			totalCost: 0,
+		}
+		await provider.createTaskWithHistoryItem(historyItem)
+
+		expect(Task).toHaveBeenCalledWith(
+			expect.objectContaining({
+				tokenCircuitBreakerLimit: 75_000,
+			}),
+		)
+	})
+
 	it("loads saved API config when switching modes", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 		const messageHandler = (mockWebviewView.webview.onDidReceiveMessage as any).mock.calls[0][0]

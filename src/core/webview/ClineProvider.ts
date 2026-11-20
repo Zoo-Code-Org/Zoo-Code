@@ -1641,8 +1641,14 @@ export class ClineProvider
 			)
 		}
 
-		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, diffFuzzyThreshold } =
-			await this.getState()
+		const {
+			apiConfiguration,
+			enableCheckpoints,
+			checkpointTimeout,
+			experiments,
+			diffFuzzyThreshold,
+			allowedMaxTokens,
+		} = await this.getState()
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
@@ -1650,6 +1656,7 @@ export class ClineProvider
 			checkpointTimeout,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
 			toolRepetitionSoftLimit: apiConfiguration.toolRepetitionSoftLimit,
+			tokenCircuitBreakerLimit: allowedMaxTokens,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -4428,6 +4435,7 @@ export class ClineProvider
 			experiments,
 			organizationAllowList,
 			diffFuzzyThreshold,
+			allowedMaxTokens,
 		} = await this.getState()
 		const effectiveApiConfiguration = getEffectiveTaskApiConfiguration(
 			apiConfiguration,
@@ -4452,6 +4460,7 @@ export class ClineProvider
 			checkpointTimeout,
 			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,
 			toolRepetitionSoftLimit: effectiveApiConfiguration.toolRepetitionSoftLimit,
+			tokenCircuitBreakerLimit: allowedMaxTokens,
 			task: text,
 			images,
 			experiments,
