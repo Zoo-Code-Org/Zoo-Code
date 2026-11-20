@@ -13,7 +13,7 @@ vi.mock("@/utils/vscode", () => ({
 
 // Mock react-i18next
 vi.mock("react-i18next", () => ({
-	Trans: ({ i18nKey, values }: { i18nKey: string; values?: Record<string, any> }) => (
+	Trans: ({ i18nKey, values }: { i18nKey: string; values?: { count?: string | number } }) => (
 		<span data-i18n={i18nKey}>
 			{i18nKey}
 			{values?.count ? `:${values.count}` : ""}
