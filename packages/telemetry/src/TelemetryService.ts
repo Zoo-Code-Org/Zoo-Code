@@ -244,14 +244,8 @@ export class TelemetryService {
 		const now = Date.now()
 		const lastSeenAt = this.recentExceptionFingerprints.get(fingerprint)
 
-		if (lastSeenAt !== undefined && now - lastSeenAt < EXCEPTION_DEDUPE_WINDOW_MS) {
-			// Re-dating an existing key must move it to the back so the oldest
-			// entry stays the correct eviction candidate.
-			this.recentExceptionFingerprints.delete(fingerprint)
-			this.recentExceptionFingerprints.set(fingerprint, now)
-			return
-		}
-
+		// Every fresh instance refreshes recency, including a duplicate inside the window.
+		// Delete before set so Map iteration keeps the least recently observed key first.
 		this.recentExceptionFingerprints.delete(fingerprint)
 		this.recentExceptionFingerprints.set(fingerprint, now)
 
@@ -263,6 +257,10 @@ export class TelemetryService {
 			}
 
 			this.recentExceptionFingerprints.delete(oldest)
+		}
+
+		if (lastSeenAt !== undefined && now - lastSeenAt < EXCEPTION_DEDUPE_WINDOW_MS) {
+			return
 		}
 
 		this.clients.forEach((client) =>

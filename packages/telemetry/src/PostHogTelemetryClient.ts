@@ -121,7 +121,9 @@ export class PostHogTelemetryClient extends BaseTelemetryClient {
 
 		// Normalize a detached error so telemetry cannot change the caller-facing message.
 		const stack = error.stack
-		const telemetryError = Object.defineProperties(new Error(), Object.getOwnPropertyDescriptors(error))
+		const telemetryError = new Error()
+		Object.setPrototypeOf(telemetryError, Object.getPrototypeOf(error))
+		Object.defineProperties(telemetryError, Object.getOwnPropertyDescriptors(error))
 		telemetryError.stack = stack
 		telemetryError.message = errorMessage
 
