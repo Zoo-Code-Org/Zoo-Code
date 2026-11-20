@@ -501,10 +501,6 @@ export async function initializeModelCacheRefresh(buildHandler: (provider: Route
 				provider: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt },
 			},
-			{
-				provider: providerIdentifiers.ioIntelligence,
-				options: { provider: providerIdentifiers.ioIntelligence },
-			},
 		]
 
 		// Refresh each provider in background (fire and forget)
