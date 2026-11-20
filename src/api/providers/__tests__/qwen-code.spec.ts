@@ -793,6 +793,10 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("TimeoutError")
 			expect((caught as Error).message).toBe("The Qwen Code completion request timed out")
+			// The race inside settleOnAbort rejects with the contract AbortError once the merged
+			// signal fires; the TimeoutError keeps that failure as its cause instead of
+			// discarding it.
+			expect((caught as { cause?: { name?: string } }).cause?.name).toBe("AbortError")
 		})
 
 		it("passes the merged signal through and nothing without options", async () => {

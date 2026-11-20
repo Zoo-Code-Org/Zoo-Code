@@ -337,14 +337,22 @@ describe("FriendliHandler", () => {
 			return {}
 		})
 
-		await expect(handler.completePrompt("a", { timeoutMs: 3000 })).rejects.toMatchObject({ name: "TimeoutError" })
+		// The wait succeeded but consumed the shared deadline: the completion never ran.
+		await expect(handler.completePrompt("a", { timeoutMs: 3000 })).rejects.toMatchObject({
+			name: "TimeoutError",
+			message: "The Friendli completion request timed out",
+		})
 		expect(mockCreate).not.toHaveBeenCalled()
 	})
 
 	it("completePrompt should time out without a chat request when the catalog wait uses the deadline", async () => {
 		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
 
-		await expect(handler.completePrompt("a", { timeoutMs: 20 })).rejects.toMatchObject({ name: "TimeoutError" })
+		// The catalog wait itself hit the deadline: that is model discovery, not a completion.
+		await expect(handler.completePrompt("a", { timeoutMs: 20 })).rejects.toMatchObject({
+			name: "TimeoutError",
+			message: "The Friendli model discovery timed out",
+		})
 		expect(mockCreate).not.toHaveBeenCalled()
 	})
 

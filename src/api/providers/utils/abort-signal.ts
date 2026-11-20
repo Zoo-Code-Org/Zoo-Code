@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Whether a timeout value is usable as an SDK `timeout` option: a finite
  * number greater than zero.
  *
@@ -294,17 +294,6 @@ export function settleOnAbort<T>(
 	// aborted fast path, the listener detach, and the abort normalization are not
 	// maintained twice.
 	return signal ? rejectOnAbort(pending, signal, providerName) : pending
-}
-
-/**
- * A per-request timeout is not a caller cancellation: report it as the distinct TimeoutError so
- * callers can tell a stalled request from a user stop. A caller stop keeps using
- * {@link createAbortError}; this error is only for a deadline the request itself hit.
- */
-export function createTimeoutError(providerName: string): Error {
-	const timeoutError = new Error(`The ${providerName} completion request timed out`)
-	timeoutError.name = "TimeoutError"
-	return timeoutError
 }
 
 /**
