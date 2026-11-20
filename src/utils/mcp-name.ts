@@ -56,6 +56,11 @@ export function normalizeMcpToolName(toolName: string): string {
 		// separator, while "__" may be part of a legal server or tool name
 		const parts = toolName.includes(MCP_TOOL_SEPARATOR) ? toolName.split(MCP_TOOL_SEPARATOR) : toolName.split("__")
 
+		// A truncated server can consume the tool separator. Normalize its lone prefix.
+		if (toolName.length === 64 && parts.length === 2 && parts[0] === MCP_TOOL_PREFIX) {
+			return `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${parts[1]}`
+		}
+
 		if (parts.length >= 3 && parts[0].toLowerCase() === "mcp") {
 			// Reconstruct with proper -- separators
 			const serverName = parts[1]

@@ -3,6 +3,7 @@ import { resolveMcpDynamicLoadSettings } from "@roo-code/types"
 import { ToolRouter } from "../../services/tools/ToolRouter"
 import type { ToolDoc } from "../../services/tools/types"
 import { buildMcpToolName, isMcpTool, normalizeMcpToolName } from "../../utils/mcp-name"
+import { resolveMcpToolFromCatalog } from "../prompts/tools/native-tools/mcp_server"
 
 /** Task selections grow across scope changes. Only current declarations decide availability. */
 export class McpToolSelection {
@@ -43,7 +44,12 @@ export class McpToolSelection {
 		history: Anthropic.MessageParam[],
 		persist: () => Promise<void>,
 	): Promise<void> {
-		const available = new Set(scope.map((tool) => buildMcpToolName(tool.serverName, tool.toolName)))
+		const catalog = scope.map((tool) => ({
+			name: buildMcpToolName(tool.serverName, tool.toolName),
+			serverName: tool.serverName,
+			tool: { name: tool.toolName },
+		}))
+		const available = new Set(catalog.map((entry) => entry.name))
 		// A saved empty selection is deliberate. A nonempty selection must still
 		// contain an available name before it can skip ranking in this scope.
 		const needsRanking =
@@ -53,7 +59,8 @@ export class McpToolSelection {
 			if (message.role !== "assistant" || !Array.isArray(message.content)) continue
 			for (const block of message.content) {
 				if (block.type === "tool_use" && typeof block.name === "string" && isMcpTool(block.name)) {
-					additions.add(normalizeMcpToolName(block.name))
+					const resolved = resolveMcpToolFromCatalog(catalog, block.name)
+					additions.add(resolved?.name ?? normalizeMcpToolName(block.name))
 				}
 			}
 		}
