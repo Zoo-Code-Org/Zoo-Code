@@ -1186,11 +1186,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.objectContaining({ provider: providerIdentifiers.kenari }),
 			expect.anything(),
 		)
-		// IO Intelligence's /models catalog is public and may optionally be scoped by a key.
-		expect(mockGetModels).toHaveBeenCalledWith(
-			{ provider: providerIdentifiers.ioIntelligence, apiKey: undefined },
-			expect.anything(),
-		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1214,7 +1209,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1514,7 +1508,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1543,7 +1536,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
-			.mockResolvedValueOnce(mockModels) // io-intelligence
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1582,7 +1574,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
