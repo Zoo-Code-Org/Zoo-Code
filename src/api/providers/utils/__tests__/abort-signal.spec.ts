@@ -12,9 +12,9 @@ import {
 	throwIfAborted,
 	MAX_TIMEOUT_MS,
 	toSdkTimeoutMs,
-	createTimeoutError,
 	isTimeoutAbort,
 } from "../abort-signal"
+import { createTimeoutError } from "../request-timeout"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
 import { flushMacrotasks } from "../../../../test-utils/timers"
 
@@ -938,13 +938,12 @@ describe("toSdkTimeoutMs", () => {
 	})
 })
 
-describe("createTimeoutError", () => {
-	it("builds a TimeoutError naming the provider", () => {
-		const error = createTimeoutError("LM Studio")
-
-		expect(error).toBeInstanceOf(Error)
-		expect(error.name).toBe("TimeoutError")
-		expect(error.message).toBe("The LM Studio completion request timed out")
+describe("abort-signal module surface", () => {
+	it("does not re-declare the timeout error next to the phase-aware one", async () => {
+		// request-timeout.ts is the error's only home. A second definition here - or a
+		// re-export of it - is what this unit removed, and it would let the two drift again.
+		const abortSignalModule = await import("../abort-signal")
+		expect("createTimeoutError" in abortSignalModule).toBe(false)
 	})
 })
 
@@ -958,7 +957,7 @@ describe("isTimeoutAbort", () => {
 		const timeout = new AbortController()
 		const caller = new AbortController()
 		const merged = mergeAbortSignals(timeout.signal, caller.signal)
-		timeout.abort(createTimeoutError("Qwen Code"))
+		timeout.abort(createTimeoutError("Qwen Code", "completion request"))
 		caller.abort()
 
 		expect(isTimeoutAbort(merged)).toBe(true)
@@ -969,7 +968,7 @@ describe("isTimeoutAbort", () => {
 		const caller = new AbortController()
 		const merged = mergeAbortSignals(timeout.signal, caller.signal)
 		caller.abort(new Error("user stop"))
-		timeout.abort(createTimeoutError("Qwen Code"))
+		timeout.abort(createTimeoutError("Qwen Code", "completion request"))
 
 		expect(isTimeoutAbort(merged)).toBe(false)
 	})
