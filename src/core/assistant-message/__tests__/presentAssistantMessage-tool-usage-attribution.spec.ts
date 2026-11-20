@@ -150,6 +150,30 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			})
 	})
 
+	it.each(["read_file", "mcp_my_server_do_thing"])(
+		"records aggregate usage without per-call events for %s",
+		async (name) => {
+			for (let count = 1; count <= 4; count++) {
+				mockTask.didAlreadyUseTool = false
+				mockTask.currentStreamingContentIndex = 0
+				mockTask.assistantMessageContent = [
+					{
+						type: "tool_use",
+						id: `call_${count}`,
+						name,
+						params: { path: "test.txt" },
+						nativeArgs: { path: "test.txt" },
+						partial: false,
+					},
+				]
+				// The double supplies the presenter fields and callbacks declared in MockTask.
+				await presentAssistantMessage(mockTask as unknown as Task, baseSnapshot)
+				expect(mockTask.recordToolUsage).toHaveBeenCalledTimes(count)
+				expect(TelemetryService.instance.captureEvent).not.toHaveBeenCalled()
+			}
+		},
+	)
+
 	it("records exactly one attempt for a normal static tool", async () => {
 		mockTask.assistantMessageContent = [
 			{

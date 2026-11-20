@@ -546,6 +546,7 @@ export class FileWatcher implements IFileWatcher {
 		this._onDidFinishBatchProcessing.fire({
 			processedFiles: batchResults,
 			batchError: overallBatchError,
+			circuitBreakerOpen: this.circuitBreakerOpen,
 		})
 		this._onBatchProgressUpdate.fire({
 			processedInBatch: totalFilesInBatch,
