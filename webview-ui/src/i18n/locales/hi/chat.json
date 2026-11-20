@@ -21,7 +21,8 @@
 	"pin": "अवपिन करें",
 	"fileChangesInConversation": {
 		"header_one": "इस वार्तालाप में {{count}} फ़ाइल बदली गई",
-		"header_other": "इस वार्तालाप में {{count}} फ़ाइलें बदली गईं"
+		"header_other": "इस वार्तालाप में {{count}} फ़ाइलें बदली गईं",
+		"lineStatsAriaLabel": "जोड़ी गई पंक्तियाँ: {{added}}, हटाई गई पंक्तियाँ: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "उपलब्ध स्थान: {{amount}} tokens",
@@ -232,7 +233,9 @@
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
 		"addToDenied": "अस्वीकृत सूची में जोड़ें",
-		"removeFromDenied": "अस्वीकृत सूची से हटाएँ"
+		"removeFromDenied": "अस्वीकृत सूची से हटाएँ",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "पैटर्न संपादित करने के लिए क्लिक करें"
 	},
 	"text": {
 		"rooSaid": "Zoo ने कहा"
@@ -290,7 +293,9 @@
 		"triggerLabel_zero": "0 स्वतः-अनुमोदन",
 		"triggerLabel_one": "{{count}} स्वतः-अनुमोदित",
 		"triggerLabel_other": "{{count}} स्वतः-अनुमोदित",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "सक्षम",
+		"toggleAriaLabel": "स्वतः-अनुमोदन टॉगल करें"
 	},
 	"reasoning": {
 		"thinking": "विचार कर रहा है",
@@ -367,7 +372,8 @@
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
 		"didSearch_one": "{{count}} परिणाम मिला",
 		"didSearch_other": "{{count}} परिणाम मिले",
-		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)"
+		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)",
+		"displayError": "खोज परिणाम दिखाने में त्रुटि।"
 	},
 	"read-batch": {
 		"approve": {
@@ -419,7 +425,17 @@
 		"noResults": "कोई परिणाम नहीं",
 		"problems": "समस्याएँ",
 		"terminal": "टर्मिनल",
-		"url": "सामग्री लाने के लिए URL पेस्ट करें"
+		"url": "सामग्री लाने के लिए URL पेस्ट करें",
+		"gitCommits": "Git कमिट्स",
+		"gitCommitsDescription": "रिपॉज़िटरी इतिहास खोजें",
+		"workingChanges": "कार्यशील बदलाव",
+		"workingChangesDescription": "मौजूदा बिना कमिट किए बदलाव",
+		"commit": "कमिट {{hash}}",
+		"commitHashDescription": "Git कमिट हैश",
+		"addFile": "फ़ाइल जोड़ें",
+		"addFolder": "फ़ोल्डर जोड़ें",
+		"commands": "कमांड",
+		"modes": "मोड"
 	},
 	"queuedMessages": {
 		"title": "कतार में संदेश",
@@ -432,7 +448,28 @@
 	"todo": {
 		"partial": "{{total}} में से {{completed}} टू-डू हो गए",
 		"complete": "{{total}} टू-डू हो गए",
-		"updated": "टू-डू सूची अपडेट की गई"
+		"updated": "टू-डू सूची अपडेट की गई",
+		"listUpdated": "टू-डू सूची अपडेट की गई",
+		"userEdit": "उपयोगकर्ता का संपादन",
+		"userEdits": "उपयोगकर्ता के संपादन",
+		"edit": "संपादित करें",
+		"done": "हो गया",
+		"itemPlaceholder": "टू-डू आइटम दर्ज करें",
+		"newItemPlaceholder": "टू-डू आइटम दर्ज करें, जोड़ने के लिए Enter दबाएँ",
+		"remove": "हटाएँ",
+		"add": "जोड़ें",
+		"cancel": "रद्द करें",
+		"addTodo": "+ टू-डू जोड़ें",
+		"status": {
+			"notStarted": "शुरू नहीं हुआ",
+			"inProgress": "प्रगति में",
+			"completed": "पूर्ण"
+		},
+		"deleteDialog": {
+			"title": "टू-डू आइटम हटाएँ",
+			"description": "क्या तुम वाकई इस टू-डू आइटम को हटाना चाहते हो?",
+			"confirm": "हटाएँ"
+		}
 	},
 	"tooManyTools": {
 		"title": "बहुत सारे उपकरण सक्षम हैं",
@@ -454,5 +491,25 @@
 		"title": "प्रदाता अब समर्थित नहीं है",
 		"message": "यह प्रदाता अब उपलब्ध नहीं है। जारी रखने के लिए कोई समर्थित प्रदाता चुनें।",
 		"openSettings": "सेटिंग्स खोलें"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code में साइन इन करें",
+		"goToDashboard": "डैशबोर्ड पर जाएँ",
+		"signOut": "साइन आउट करें",
+		"avatarAlt": "अवतार",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "कनेक्टेड"
+	},
+	"arguments": "आर्ग्युमेंट्स:",
+	"copyAsMarkdown": "Markdown के रूप में कॉपी करें",
+	"openInPreview": "प्रीव्यू में खोलें",
+	"codeAccordion": {
+		"userEdits": "उपयोगकर्ता के संपादन",
+		"consoleLogs": "कंसोल लॉग",
+		"openFileAriaLabel": "फ़ाइल खोलें: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} छिपी हुई पंक्ति",
+		"hiddenLines_other": "{{count}} छिपी हुई पंक्तियाँ"
 	}
 }

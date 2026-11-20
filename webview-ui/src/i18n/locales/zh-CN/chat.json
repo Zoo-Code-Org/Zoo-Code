@@ -20,7 +20,8 @@
 	"unpin": "取消置顶",
 	"pin": "置顶",
 	"fileChangesInConversation": {
-		"header_other": "此对话中已更改 {{count}} 个文件"
+		"header_other": "此对话中已更改 {{count}} 个文件",
+		"lineStatsAriaLabel": "新增行数：{{added}}，删除行数：{{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "可用: {{amount}}",
@@ -232,7 +233,9 @@
 		"addToAllowed": "添加到允许列表",
 		"removeFromAllowed": "从允许列表中删除",
 		"addToDenied": "添加到拒绝列表",
-		"removeFromDenied": "从拒绝列表中删除"
+		"removeFromDenied": "从拒绝列表中删除",
+		"pid": "（PID：{{pid}}）",
+		"clickToEditPattern": "点击编辑模式匹配规则"
 	},
 	"text": {
 		"rooSaid": "Zoo 说"
@@ -289,7 +292,9 @@
 		"triggerLabelOffShort": "关闭",
 		"triggerLabel_zero": "0 个自动批准",
 		"triggerLabel_other": "{{count}} 个自动批准",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "已启用",
+		"toggleAriaLabel": "切换自动批准"
 	},
 	"reasoning": {
 		"thinking": "思考中",
@@ -363,7 +368,8 @@
 		"wantsToSearch": "Zoo 需要搜索代码库: <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 需要在 <code>{{path}}</code> 中搜索: <code>{{query}}</code>",
 		"didSearch_other": "找到 {{count}} 个结果",
-		"resultTooltip": "相似度评分: {{score}} (点击打开文件)"
+		"resultTooltip": "相似度评分: {{score}} (点击打开文件)",
+		"displayError": "显示搜索结果时出错。"
 	},
 	"read-batch": {
 		"approve": {
@@ -415,7 +421,17 @@
 		"noResults": "无结果",
 		"problems": "问题",
 		"terminal": "终端",
-		"url": "粘贴URL以获取内容"
+		"url": "粘贴URL以获取内容",
+		"gitCommits": "Git 提交",
+		"gitCommitsDescription": "搜索仓库历史",
+		"workingChanges": "工作区更改",
+		"workingChangesDescription": "当前未提交的更改",
+		"commit": "提交 {{hash}}",
+		"commitHashDescription": "Git 提交哈希",
+		"addFile": "添加文件",
+		"addFolder": "添加文件夹",
+		"commands": "命令",
+		"modes": "模式"
 	},
 	"queuedMessages": {
 		"title": "队列消息",
@@ -428,7 +444,28 @@
 	"todo": {
 		"partial": "已完成 {{completed}} / {{total}} 个待办事项",
 		"complete": "已完成 {{total}} 个待办事项",
-		"updated": "已更新待办事项列表"
+		"updated": "已更新待办事项列表",
+		"listUpdated": "待办列表已更新",
+		"userEdit": "用户编辑",
+		"userEdits": "用户编辑",
+		"edit": "编辑",
+		"done": "完成",
+		"itemPlaceholder": "输入待办事项",
+		"newItemPlaceholder": "输入待办事项，按 Enter 添加",
+		"remove": "移除",
+		"add": "添加",
+		"cancel": "取消",
+		"addTodo": "+ 添加待办",
+		"status": {
+			"notStarted": "未开始",
+			"inProgress": "进行中",
+			"completed": "已完成"
+		},
+		"deleteDialog": {
+			"title": "删除待办事项",
+			"description": "确认删除此待办事项？",
+			"confirm": "删除"
+		}
 	},
 	"tooManyTools": {
 		"title": "启用的工具过多",
@@ -448,5 +485,24 @@
 		"title": "供应商不再受支持",
 		"message": "此提供商已不可用。请选择受支持的提供商以继续。",
 		"openSettings": "打开设置"
+	},
+	"zooCodeAuth": {
+		"signIn": "登录 Zoo Code",
+		"goToDashboard": "前往控制台",
+		"signOut": "退出登录",
+		"avatarAlt": "头像",
+		"accountTitle": "Zoo Code：{{account}}",
+		"connected": "已连接"
+	},
+	"arguments": "参数：",
+	"copyAsMarkdown": "复制为 Markdown",
+	"openInPreview": "在预览中打开",
+	"codeAccordion": {
+		"userEdits": "用户编辑",
+		"consoleLogs": "控制台日志",
+		"openFileAriaLabel": "打开文件：{{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "已隐藏 {{count}} 行"
 	}
 }

@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configuración de API",
-		"select": "Selecciona qué configuración de API usar para este modo"
+		"select": "Selecciona qué configuración de API usar para este modo",
+		"pinnedGroupAriaLabel": "Configuraciones fijadas",
+		"allGroupAriaLabel": "Todas las configuraciones"
 	},
 	"tools": {
 		"title": "Herramientas disponibles",
@@ -47,7 +49,8 @@
 		"title": "Instrucciones personalizadas para el modo (opcional)",
 		"resetToDefault": "Restablecer a valores predeterminados",
 		"description": "Agrega directrices de comportamiento específicas para el modo {{modeName}}.",
-		"loadFromFile": "Las instrucciones personalizadas para el modo {{mode}} también se pueden cargar desde la carpeta <span>.roo/rules-{{slug}}/</span> en tu espacio de trabajo o desde el global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} y .clinerules-{{slug}} están obsoletos y dejarán de funcionar pronto)."
+		"loadFromFile": "Las instrucciones personalizadas para el modo {{mode}} también se pueden cargar desde la carpeta <span>.roo/rules-{{slug}}/</span> en tu espacio de trabajo o desde el global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} y .clinerules-{{slug}} están obsoletos y dejarán de funcionar pronto).",
+		"loadFromFileAriaLabel": "Más información sobre las instrucciones personalizadas globales para modos"
 	},
 	"exportMode": {
 		"title": "Exportar modo",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instrucciones personalizadas para todos los modos",
 		"description": "Estas instrucciones se aplican a todos los modos. Proporcionan un conjunto base de comportamientos que pueden ser mejorados por instrucciones específicas de cada modo a continuación. <0>Más información</0>",
-		"loadFromFile": "Las instrucciones también se pueden cargar desde la carpeta <span>.roo/rules/</span> en tu espacio de trabajo o desde el global <0>.roo/rules/</0> (.roorules y .clinerules están obsoletos y dejarán de funcionar pronto)."
+		"loadFromFile": "Las instrucciones también se pueden cargar desde la carpeta <span>.roo/rules/</span> en tu espacio de trabajo o desde el global <0>.roo/rules/</0> (.roorules y .clinerules están obsoletos y dejarán de funcionar pronto).",
+		"learnMoreAriaLabel": "Más información sobre las instrucciones personalizadas globales",
+		"loadFromFileAriaLabel": "Aprende a configurar instrucciones personalizadas globales"
 	},
 	"systemPrompt": {
 		"preview": "Vista previa de la solicitud del sistema",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Este modo tiene una carpeta de reglas en {{folderPath}} que también se eliminará.",
 		"confirm": "Eliminar",
 		"cancel": "Cancelar"
+	},
+	"mcpServers": {
+		"restrict": "Limitar a servidores MCP específicos",
+		"noneConnected": "No hay servidores MCP conectados",
+		"notConnected": "{{serverName}} (no conectado)"
 	}
 }

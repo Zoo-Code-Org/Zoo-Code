@@ -70,7 +70,8 @@
 		"goToModes": "Перейти в настройки Режимов",
 		"moreInfoMcp": "Просмотреть документацию MCP {{name}}",
 		"validationRequired": "Пожалуйста, укажите значение для {{paramName}}",
-		"prerequisites": "Предварительные требования"
+		"prerequisites": "Предварительные требования",
+		"optional": "(необязательно)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Нашли проблему с элементом marketplace или есть предложения для новых элементов? <0>Откройте issue на GitHub</0>, чтобы сообщить нам!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Режимы"
 	}
 }

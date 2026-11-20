@@ -90,7 +90,7 @@ describe("ChatRow - runSlashCommand tool", () => {
 
 		expect(getByText("Roo wants to run slash command:")).toBeInTheDocument()
 		expect(getByText("/test")).toBeInTheDocument()
-		expect(getByText("Arguments:")).toBeInTheDocument()
+		expect(getByText("chat:arguments")).toBeInTheDocument()
 		expect(getByText("focus on unit tests")).toBeInTheDocument()
 		expect(getByText("Run project tests")).toBeInTheDocument()
 		expect(getByText("project")).toBeInTheDocument()
