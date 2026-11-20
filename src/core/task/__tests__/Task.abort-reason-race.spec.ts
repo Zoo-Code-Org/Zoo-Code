@@ -53,13 +53,6 @@ vi.mock("../../mentions", () => ({
 	getLatestTerminalOutput: vi.fn(),
 }))
 
-vi.mock("../../mentions/processUserContentMentions", () => ({
-	processUserContentMentions: vi.fn().mockImplementation(async ({ userContent }: { userContent: unknown[] }) => ({
-		content: userContent,
-		mode: undefined,
-	})),
-}))
-
 vi.mock("../../../integrations/misc/extract-text", () => ({
 	extractTextFromFile: vi.fn().mockResolvedValue(""),
 }))

@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} arquivo alterado nesta conversa",
 		"header_many": "{{count}} arquivos alterados nesta conversa",
-		"header_other": "{{count}} arquivos alterados nesta conversa"
+		"header_other": "{{count}} arquivos alterados nesta conversa",
+		"lineStatsAriaLabel": "Linhas adicionadas: {{added}}, linhas removidas: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espaço disponível: {{amount}} tokens",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Adicionar à lista de permitidos",
 		"removeFromAllowed": "Remover da lista de permitidos",
 		"addToDenied": "Adicionar à lista de negados",
-		"removeFromDenied": "Remover da lista de negados"
+		"removeFromDenied": "Remover da lista de negados",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Clique para editar o padrão"
 	},
 	"text": {
 		"rooSaid": "Zoo disse"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} aprovado automaticamente",
 		"triggerLabel_many": "{{count}} aprovados automaticamente",
 		"triggerLabel_other": "{{count}} aprovados automaticamente",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Ativado",
+		"toggleAriaLabel": "Alternar aprovação automática"
 	},
 	"reasoning": {
 		"thinking": "Pensando",
@@ -372,7 +377,8 @@
 		"didSearch_one": "Encontrado {{count}} resultado",
 		"didSearch_many": "Encontrados {{count}} resultados",
 		"didSearch_other": "Encontrados {{count}} resultados",
-		"resultTooltip": "Pontuação de similaridade: {{score}} (clique para abrir o arquivo)"
+		"resultTooltip": "Pontuação de similaridade: {{score}} (clique para abrir o arquivo)",
+		"displayError": "Erro ao exibir os resultados da pesquisa."
 	},
 	"read-batch": {
 		"approve": {
@@ -424,7 +430,17 @@
 		"noResults": "Nenhum resultado",
 		"problems": "Problemas",
 		"terminal": "Terminal",
-		"url": "Cole o URL para buscar o conteúdo"
+		"url": "Cole o URL para buscar o conteúdo",
+		"gitCommits": "Commits do Git",
+		"gitCommitsDescription": "Pesquisar no histórico do repositório",
+		"workingChanges": "Alterações em andamento",
+		"workingChangesDescription": "Alterações atuais sem commit",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash do commit do Git",
+		"addFile": "Adicionar arquivo",
+		"addFolder": "Adicionar pasta",
+		"commands": "Comandos",
+		"modes": "Modos"
 	},
 	"queuedMessages": {
 		"title": "Mensagens na fila",
@@ -437,7 +453,28 @@
 	"todo": {
 		"partial": "{{completed}} de {{total}} tarefas concluídas",
 		"complete": "{{total}} tarefas concluídas",
-		"updated": "A lista de tarefas foi atualizada"
+		"updated": "A lista de tarefas foi atualizada",
+		"listUpdated": "Lista de tarefas atualizada",
+		"userEdit": "Edição do usuário",
+		"userEdits": "Edições do usuário",
+		"edit": "Editar",
+		"done": "Concluído",
+		"itemPlaceholder": "Digite uma tarefa",
+		"newItemPlaceholder": "Digite uma tarefa e pressione Enter para adicionar",
+		"remove": "Remover",
+		"add": "Adicionar",
+		"cancel": "Cancelar",
+		"addTodo": "+ Adicionar tarefa",
+		"status": {
+			"notStarted": "Não iniciada",
+			"inProgress": "Em andamento",
+			"completed": "Concluída"
+		},
+		"deleteDialog": {
+			"title": "Excluir tarefa",
+			"description": "Tem certeza de que deseja excluir esta tarefa?",
+			"confirm": "Excluir"
+		}
 	},
 	"tooManyTools": {
 		"title": "Muitas ferramentas habilitadas",
@@ -461,5 +498,26 @@
 		"title": "Provedor não é mais suportado",
 		"message": "Este provedor não está mais disponível. Selecione um provedor compatível para continuar.",
 		"openSettings": "Abrir configurações"
+	},
+	"zooCodeAuth": {
+		"signIn": "Entrar no Zoo Code",
+		"goToDashboard": "Ir para o painel",
+		"signOut": "Sair",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Conectado"
+	},
+	"arguments": "Argumentos:",
+	"copyAsMarkdown": "Copiar como Markdown",
+	"openInPreview": "Abrir na pré-visualização",
+	"codeAccordion": {
+		"userEdits": "Edições do usuário",
+		"consoleLogs": "Logs do console",
+		"openFileAriaLabel": "Abrir arquivo: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} linha oculta",
+		"hiddenLines_many": "{{count}} de linhas ocultas",
+		"hiddenLines_other": "{{count}} linhas ocultas"
 	}
 }

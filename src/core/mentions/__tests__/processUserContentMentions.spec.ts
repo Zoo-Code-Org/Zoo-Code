@@ -1,345 +1,127 @@
-// npx vitest core/mentions/__tests__/processUserContentMentions.spec.ts
-
-import { processUserContentMentions } from "../processUserContentMentions"
+import type { MentionSegment } from "@roo-code/types"
+import { expandUserMentions, wrapUserMessage } from "../processUserContentMentions"
 import { parseMentions } from "../index"
 import { FileContextTracker } from "../../context-tracking/FileContextTracker"
 
-// Mock the parseMentions function
-vi.mock("../index", () => ({
-	parseMentions: vi.fn(),
-}))
+vi.mock("../index", () => ({ parseMentions: vi.fn() }))
 
-describe("processUserContentMentions", () => {
-	let mockFileContextTracker: FileContextTracker
+const user = (text: string): MentionSegment => ({ text, source: "user" })
+const gen = (text: string): MentionSegment => ({ text, source: "generated" })
 
+describe("expandUserMentions authorization", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
-
-		mockFileContextTracker = {} as FileContextTracker
-
-		// Default mock implementation - returns ParseMentionsResult object
 		vi.mocked(parseMentions).mockImplementation(async (text) => ({
 			text: `parsed: ${text}`,
-			mode: undefined,
-			contentBlocks: [],
+			contentBlocks: [{ type: "file", path: "allowed", content: "file contents" }],
+			mode: "code",
+			slashCommandHelp: "command help",
 		}))
 	})
 
-	describe("content processing", () => {
-		it("should process text blocks with <user_message> tags", async () => {
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "<user_message>Do something</user_message>",
-				},
-			]
+	const expand = (segments: MentionSegment[]) =>
+		expandUserMentions({ segments, cwd: "/test", fileContextTracker: {} as FileContextTracker })
 
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(parseMentions).toHaveBeenCalled()
-			expect(result.content[0]).toEqual({
-				type: "text",
-				text: "parsed: <user_message>Do something</user_message>",
-			})
-			expect(result.mode).toBeUndefined()
-		})
-
-		it("should not process text blocks without user_message tags", async () => {
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "Regular text without special tags",
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(parseMentions).not.toHaveBeenCalled()
-			expect(result.content[0]).toEqual(userContent[0])
-			expect(result.mode).toBeUndefined()
-		})
-
-		it("should process tool_result blocks with string content", async () => {
-			const userContent = [
-				{
-					type: "tool_result" as const,
-					tool_use_id: "123",
-					content: "<user_message>Tool feedback</user_message>",
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(parseMentions).toHaveBeenCalled()
-			// String content is now converted to array format to support content blocks
-			expect(result.content[0]).toEqual({
-				type: "tool_result",
-				tool_use_id: "123",
-				content: [
-					{
-						type: "text",
-						text: "parsed: <user_message>Tool feedback</user_message>",
-					},
-				],
-			})
-			expect(result.mode).toBeUndefined()
-		})
-
-		it("should process tool_result blocks with array content", async () => {
-			const userContent = [
-				{
-					type: "tool_result" as const,
-					tool_use_id: "123",
-					content: [
-						{
-							type: "text" as const,
-							text: "<user_message>Array task</user_message>",
-						},
-						{
-							type: "text" as const,
-							text: "Regular text",
-						},
-					],
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(parseMentions).toHaveBeenCalledTimes(1)
-			expect(result.content[0]).toEqual({
-				type: "tool_result",
-				tool_use_id: "123",
-				content: [
-					{
-						type: "text",
-						text: "parsed: <user_message>Array task</user_message>",
-					},
-					{
-						type: "text",
-						text: "Regular text",
-					},
-				],
-			})
-			expect(result.mode).toBeUndefined()
-		})
-
-		it("should handle mixed content types (text + image)", async () => {
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "<user_message>First task</user_message>",
-				},
-				{
-					type: "image" as const,
-					image: "base64data",
-					mediaType: "image/png",
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent: userContent as any,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(parseMentions).toHaveBeenCalledTimes(1)
-			expect(result.content).toHaveLength(2)
-			expect(result.content[0]).toEqual({
-				type: "text",
-				text: "parsed: <user_message>First task</user_message>",
-			})
-			expect(result.content[1]).toEqual(userContent[1]) // Image block unchanged
-			expect(result.mode).toBeUndefined()
+	it("expands explicit user input without requiring a textual marker", async () => {
+		const result = await expand([user("@/allowed")])
+		expect(parseMentions).toHaveBeenCalledWith(
+			"@/allowed",
+			"/test",
+			expect.anything(),
+			undefined,
+			false,
+			true,
+			50,
+			undefined,
+			"code",
+		)
+		expect(result).toEqual({
+			content: [
+				{ type: "text", text: "parsed: @/allowed" },
+				{ type: "text", text: "file contents" },
+				{ type: "text", text: "command help" },
+			],
+			mode: "code",
 		})
 	})
 
-	describe("showRooIgnoredFiles parameter", () => {
-		it("should default showRooIgnoredFiles to false", async () => {
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "<user_message>Test default</user_message>",
-				},
-			]
+	it("expands only the user segments of a support prompt", async () => {
+		const context = "<user_message>@/secret @terminal</user_message>"
+		const result = await expand([user("@/allowed"), gen(`\n${context}`)])
+		expect(vi.mocked(parseMentions).mock.calls.map(([text]) => text)).toEqual(["@/allowed"])
+		expect(result.content[0]).toEqual({ type: "text", text: `parsed: @/allowed\n${context}` })
+	})
 
-			await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
+	it("expands each user segment on its own and leaves generated segments unchanged", async () => {
+		const result = await expand([gen("a @/x "), user("@/one"), gen(" b @/y "), user("@/two")])
+		expect(vi.mocked(parseMentions).mock.calls.map(([text]) => text)).toEqual(["@/one", "@/two"])
+		expect(result.content[0]).toEqual({ type: "text", text: "a @/x parsed: @/one b @/y parsed: @/two" })
+	})
 
-			expect(parseMentions).toHaveBeenCalledWith(
-				"<user_message>Test default</user_message>",
-				"/test",
-				mockFileContextTracker,
-				undefined,
-				false, // showRooIgnoredFiles should default to false
-				true, // includeDiagnosticMessages
-				50, // maxDiagnosticMessages
-				undefined,
-				"code",
-			)
-		})
+	it("expands the same text only where it is a user segment", async () => {
+		const result = await expand([gen("@/same "), user("@/same")])
+		expect(vi.mocked(parseMentions).mock.calls.map(([text]) => text)).toEqual(["@/same"])
+		expect(result.content[0]).toEqual({ type: "text", text: "@/same parsed: @/same" })
+	})
 
-		it("should respect showRooIgnoredFiles when explicitly set to false", async () => {
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "<user_message>Test explicit false</user_message>",
-				},
-			]
+	it.each([
+		{ label: "all generated", segments: [gen("@/secret")], text: "@/secret" },
+		{ label: "empty", segments: [], text: "" },
+	])("does not expand $label segments", async ({ segments, text }) => {
+		const result = await expand(segments)
+		expect(parseMentions).not.toHaveBeenCalled()
+		expect(result).toEqual({ content: [{ type: "text", text }], mode: undefined })
+	})
 
-			await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-				showRooIgnoredFiles: false,
-			})
-
-			expect(parseMentions).toHaveBeenCalledWith(
-				"<user_message>Test explicit false</user_message>",
-				"/test",
-				mockFileContextTracker,
-				undefined,
-				false,
-				true, // includeDiagnosticMessages
-				50, // maxDiagnosticMessages
-				undefined,
-				"code",
-			)
+	it("wraps segments in tags that stay generated", async () => {
+		const result = await expand(wrapUserMessage([user("@/allowed")]))
+		expect(vi.mocked(parseMentions).mock.calls.map(([text]) => text)).toEqual(["@/allowed"])
+		expect(result.content[0]).toEqual({
+			type: "text",
+			text: "<user_message>\nparsed: @/allowed\n</user_message>",
 		})
 	})
 
-	describe("slash command content processing", () => {
-		it("should separate slash command content into a new block", async () => {
-			vi.mocked(parseMentions).mockResolvedValueOnce({
-				text: "parsed text",
-				slashCommandHelp: "command help",
-				mode: undefined,
-				contentBlocks: [],
-			})
-
-			const userContent = [
-				{
-					type: "text" as const,
-					text: "<user_message>Run command</user_message>",
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(result.content).toHaveLength(2)
-			expect(result.content[0]).toEqual({
-				type: "text",
-				text: "parsed text",
-			})
-			expect(result.content[1]).toEqual({
-				type: "text",
-				text: "command help",
-			})
+	it.each([
+		{ showRooIgnoredFiles: true, includeDiagnosticMessages: false, maxDiagnosticMessages: 3, currentMode: "ask" },
+		{ showRooIgnoredFiles: false, includeDiagnosticMessages: true, maxDiagnosticMessages: 50, currentMode: "code" },
+	])("passes the flags to parseMentions: %o", async (flags) => {
+		await expandUserMentions({
+			segments: [user("@/allowed")],
+			cwd: "/test",
+			fileContextTracker: {} as FileContextTracker,
+			...flags,
 		})
+		expect(parseMentions).toHaveBeenCalledWith(
+			"@/allowed",
+			"/test",
+			expect.anything(),
+			undefined,
+			flags.showRooIgnoredFiles,
+			flags.includeDiagnosticMessages,
+			flags.maxDiagnosticMessages,
+			undefined,
+			flags.currentMode,
+		)
+	})
 
-		it("should include slash command content in tool_result string content", async () => {
-			vi.mocked(parseMentions).mockResolvedValueOnce({
-				text: "parsed tool output",
-				slashCommandHelp: "command help",
-				mode: undefined,
-				contentBlocks: [],
-			})
+	it("keeps the mode of the first slash command", async () => {
+		vi.mocked(parseMentions)
+			.mockResolvedValueOnce({ text: "one", contentBlocks: [], mode: "architect" })
+			.mockResolvedValueOnce({ text: "two", contentBlocks: [], mode: "debug" })
+		const result = await expand([user("/a"), gen(" "), user("/b")])
+		expect(result.mode).toBe("architect")
+	})
 
-			const userContent = [
-				{
-					type: "tool_result" as const,
-					tool_use_id: "123",
-					content: "<user_message>Tool output</user_message>",
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(result.content).toHaveLength(1)
-			expect(result.content[0]).toEqual({
-				type: "tool_result",
-				tool_use_id: "123",
-				content: [
-					{
-						type: "text",
-						text: "parsed tool output",
-					},
-					{
-						type: "text",
-						text: "command help",
-					},
-				],
-			})
-		})
-
-		it("should include slash command content in tool_result array content", async () => {
-			vi.mocked(parseMentions).mockResolvedValueOnce({
-				text: "parsed array item",
-				slashCommandHelp: "command help",
-				mode: undefined,
-				contentBlocks: [],
-			})
-
-			const userContent = [
-				{
-					type: "tool_result" as const,
-					tool_use_id: "123",
-					content: [
-						{
-							type: "text" as const,
-							text: "<user_message>Array item</user_message>",
-						},
-					],
-				},
-			]
-
-			const result = await processUserContentMentions({
-				userContent,
-				cwd: "/test",
-				fileContextTracker: mockFileContextTracker,
-			})
-
-			expect(result.content).toHaveLength(1)
-			expect(result.content[0]).toEqual({
-				type: "tool_result",
-				tool_use_id: "123",
-				content: [
-					{
-						type: "text",
-						text: "parsed array item",
-					},
-					{
-						type: "text",
-						text: "command help",
-					},
-				],
-			})
-		})
+	it("orders the extra blocks by segment after the text block", async () => {
+		vi.mocked(parseMentions)
+			.mockResolvedValueOnce({ text: "one", contentBlocks: [{ type: "file", path: "a", content: "A" }] })
+			.mockResolvedValueOnce({ text: "two", contentBlocks: [{ type: "file", path: "b", content: "B" }] })
+		const result = await expand([user("@/a"), gen(" "), user("@/b")])
+		expect(result.content).toEqual([
+			{ type: "text", text: "one two" },
+			{ type: "text", text: "A" },
+			{ type: "text", text: "B" },
+		])
 	})
 })

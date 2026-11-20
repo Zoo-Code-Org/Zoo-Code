@@ -21,7 +21,8 @@
 	"pin": "Pin",
 	"fileChangesInConversation": {
 		"header_one": "{{count}} file changed in this conversation",
-		"header_other": "{{count}} files changed in this conversation"
+		"header_other": "{{count}} files changed in this conversation",
+		"lineStatsAriaLabel": "Lines added: {{added}}, lines removed: {{removed}}"
 	},
 	"retry": {
 		"title": "Retry",
@@ -263,7 +264,8 @@
 		"wantsToSearchWithPath": "Zoo wants to search the codebase for <code>{{query}}</code> in <code>{{path}}</code>",
 		"didSearch_one": "Found {{count}} result",
 		"didSearch_other": "Found {{count}} results",
-		"resultTooltip": "Similarity score: {{score}} (click to open file)"
+		"resultTooltip": "Similarity score: {{score}} (click to open file)",
+		"displayError": "Error displaying search results."
 	},
 	"commandExecution": {
 		"abort": "Abort",
@@ -275,7 +277,9 @@
 		"addToAllowed": "Add to allowed list",
 		"removeFromAllowed": "Remove from allowed list",
 		"addToDenied": "Add to denied list",
-		"removeFromDenied": "Remove from denied list"
+		"removeFromDenied": "Remove from denied list",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Click to edit pattern"
 	},
 	"text": {
 		"rooSaid": "Zoo said"
@@ -336,7 +340,9 @@
 		"triggerLabel_zero": "0 auto-approve",
 		"triggerLabel_one": "{{count}} auto-approved",
 		"triggerLabel_other": "{{count}} auto-approved",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Enabled",
+		"toggleAriaLabel": "Toggle auto-approval"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} Released",
@@ -415,12 +421,43 @@
 		"noResults": "No results",
 		"problems": "Problems",
 		"terminal": "Terminal",
-		"url": "Paste URL to fetch contents"
+		"url": "Paste URL to fetch contents",
+		"gitCommits": "Git Commits",
+		"gitCommitsDescription": "Search repository history",
+		"workingChanges": "Working changes",
+		"workingChangesDescription": "Current uncommitted changes",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git commit hash",
+		"addFile": "Add File",
+		"addFolder": "Add Folder",
+		"commands": "Commands",
+		"modes": "Modes"
 	},
 	"todo": {
 		"partial": "{{completed}} of {{total}} to-dos done",
 		"complete": "{{total}} to-dos done",
-		"updated": "Updated the to-do list"
+		"updated": "Updated the to-do list",
+		"listUpdated": "Todo List Updated",
+		"userEdit": "User Edit",
+		"userEdits": "User Edits",
+		"edit": "Edit",
+		"done": "Done",
+		"itemPlaceholder": "Enter todo item",
+		"newItemPlaceholder": "Enter todo item, press Enter to add",
+		"remove": "Remove",
+		"add": "Add",
+		"cancel": "Cancel",
+		"addTodo": "+ Add Todo",
+		"status": {
+			"notStarted": "Not Started",
+			"inProgress": "In Progress",
+			"completed": "Completed"
+		},
+		"deleteDialog": {
+			"title": "Delete todo item",
+			"description": "Are you sure you want to delete this todo item?",
+			"confirm": "Delete"
+		}
 	},
 	"tooManyTools": {
 		"title": "Too many tools enabled",
@@ -442,5 +479,25 @@
 		"title": "Provider no longer supported",
 		"message": "This provider is no longer available. Select a supported provider to continue.",
 		"openSettings": "Open Settings"
+	},
+	"zooCodeAuth": {
+		"signIn": "Sign in to Zoo Code",
+		"goToDashboard": "Go to Dashboard",
+		"signOut": "Sign out",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Connected"
+	},
+	"arguments": "Arguments:",
+	"copyAsMarkdown": "Copy as markdown",
+	"openInPreview": "Open in preview",
+	"codeAccordion": {
+		"userEdits": "User Edits",
+		"consoleLogs": "Console Logs",
+		"openFileAriaLabel": "Open file: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} hidden line",
+		"hiddenLines_other": "{{count}} hidden lines"
 	}
 }

@@ -57,6 +57,7 @@ import {
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
+	type MentionSegment,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -135,7 +136,8 @@ import {
 	checkpointRestore,
 	checkpointDiff,
 } from "../checkpoints"
-import { processUserContentMentions } from "../mentions/processUserContentMentions"
+import { joinSegments, normalizeSegments, trimSegments } from "../../shared/mentionSegments"
+import { expandUserMentions, wrapUserMessage } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
@@ -255,6 +257,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
 	task?: string
+	/** Origin of each part of `task`. Absent means all generated, so no mention expands. */
+	segments?: MentionSegment[]
 	images?: string[]
 	historyItem?: HistoryItem
 	experiments?: Record<string, boolean>
@@ -460,6 +464,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	private askResponseSegments?: MentionSegment[]
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -703,7 +708,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
 
+	private readonly segments?: MentionSegment[]
+
 	constructor({
+		segments,
 		provider,
 		apiConfiguration,
 		enableCheckpoints = true,
@@ -728,6 +736,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
+		this.segments = segments
+
 		this.resetAssistantMessagePersistence()
 
 		if (startTask && !task && !images && !historyItem) {
@@ -837,6 +847,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
+		this.messageQueueService.on("drained", (queued) => this.submitQueuedMessage(queued))
 
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
@@ -1261,7 +1272,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
-		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
+		this.handleWebviewAskResponse(resolution.response, message.text, message.images, message.segments)
 		if (resolution.requiresDurableAck) {
 			return message.id
 		}
@@ -1931,6 +1942,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		response: ClineAskResponse
 		text?: string
 		images?: string[]
+		/** Origin of each part of `text`. */
+		segments?: MentionSegment[]
 		queuedMessageId?: string
 		/**
 		 * Present when the ask was resolved by an automatic (policy) denial
@@ -2449,12 +2462,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				response: this.askResponse!,
 				text: this.askResponseText,
 				images: this.askResponseImages,
+				segments: this.askResponseSegments,
 				queuedMessageId,
 				autoDenyDetail: this.pendingAutoDenyDetail,
 			}
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseSegments = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2477,13 +2492,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		segments?: MentionSegment[],
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseSegments = segments
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2624,9 +2645,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
+		segments?: MentionSegment[],
 	): Promise<void> {
 		try {
-			text = (text ?? "").trim()
+			// Trim the text and its segments together so they stay equal.
+			const trimmed = trimSegments(normalizeSegments(text ?? "", segments))
+			text = joinSegments(trimmed)
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {
@@ -2690,7 +2714,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images)
+				this.handleWebviewAskResponse("messageResponse", text, images, trimmed)
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
 			}
@@ -3199,13 +3223,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
 			// Task starting
-			await this.initiateTaskLoop([
-				{
-					type: "text",
-					text: `<user_message>\n${task}\n</user_message>`,
-				},
-				...imageBlocks,
-			]).catch((error) => {
+			// Task text can carry generated context. Without segments
+			// nothing expands. The loop waits for the content after it shows the request row.
+			await this.initiateTaskLoop(
+				this.userInputContent(task ?? "", this.segments).then((content) => [...content, ...imageBlocks]),
+			).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
 				// during delegation or user cancellation to prevent unhandled rejections.
 				if (this.abandoned === true || this.abortReason === "user_cancelled") {
@@ -3343,7 +3365,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.markInitialized()
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, segments } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -3462,29 +3484,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Unexpected: No existing API conversation history")
 			}
 
-			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
+			// Only user segments expand.
+			const preparationGeneration = this.cancellationGeneration
+			const expanded = responseText ? this.userInputContent(responseText, segments) : Promise.resolve([])
+			const newUserContent = expanded.then(async (content) => {
+				// A cancelled preparation must not replace history from a newer run.
+				if (this.abort || this.abandoned || this.cancellationGeneration !== preparationGeneration) {
+					throw new Error(`[Task#resumeTaskFromHistory] task ${this.taskId}.${this.instanceId} aborted`)
+				}
+				// Replace history before the loop appends the combined user content.
+				await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+				const blocks: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent, ...content]
 
-			if (responseText) {
-				newUserContent.push({
-					type: "text",
-					text: `<user_message>\n${responseText}\n</user_message>`,
-				})
-			}
+				if (responseImages && responseImages.length > 0) {
+					blocks.push(...formatResponse.imageBlocks(responseImages))
+				}
 
-			if (responseImages && responseImages.length > 0) {
-				newUserContent.push(...formatResponse.imageBlocks(responseImages))
-			}
+				// Ensure we have at least some content to send to the API.
+				// If blocks is empty, add a minimal resumption message.
+				if (blocks.length === 0) {
+					blocks.push({
+						type: "text",
+						text: "[TASK RESUMPTION] Resuming task...",
+					})
+				}
 
-			// Ensure we have at least some content to send to the API.
-			// If newUserContent is empty, add a minimal resumption message.
-			if (newUserContent.length === 0) {
-				newUserContent.push({
-					type: "text",
-					text: "[TASK RESUMPTION] Resuming task...",
-				})
-			}
-
-			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+				return blocks
+			})
 
 			// Task resuming from history item.
 			await this.initiateTaskLoop(newUserContent)
@@ -3954,13 +3980,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Task Loop
 
-	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
+	/**
+	 * Builds the content blocks for user input. Only user segments expand mentions.
+	 * A slash command in the input can switch the mode.
+	 */
+	public async userInputContent(text: string, segments?: MentionSegment[]): Promise<Anthropic.TextBlockParam[]> {
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+
+		const { content, mode } = await expandUserMentions({
+			segments: wrapUserMessage(normalizeSegments(text, segments)),
+			cwd: this.cwd,
+			fileContextTracker: this.fileContextTracker,
+			rooIgnoreController: this.rooIgnoreController,
+			showRooIgnoredFiles: state?.showRooIgnoredFiles ?? false,
+			includeDiagnosticMessages: state?.includeDiagnosticMessages ?? true,
+			maxDiagnosticMessages: state?.maxDiagnosticMessages ?? 50,
+			skillsManager: provider?.getSkillsManager(),
+			currentMode: await this.getTaskMode(),
+		})
+
+		// A cancelled task must not switch the mode. A listener can cancel while the content loads.
+		if (this.abort || this.abandoned) return content
+
+		// Switch mode if specified in a slash command's frontmatter
+		if (mode && provider && getModeBySlug(mode, state?.customModes)) {
+			await provider.handleModeSwitch(mode, null)
+		}
+
+		return content
+	}
+
+	private async initiateTaskLoop(
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		// `getCheckpointService` wraps its full body in a try/catch and returns
 		// `undefined` on failure (see src/core/checkpoints/index.ts), so the
 		// returned promise cannot reject. `void` is sufficient — no `.catch`
 		// arm needed.
 		void getCheckpointService(this)
+
+		// The loop awaits a pending value later. Mark it handled so an early rejection
+		// does not reach the process as unhandled.
+		if (!Array.isArray(userContent)) userContent.catch(() => {})
 
 		let nextUserContent = userContent
 		let includeFileDetails = true
@@ -3993,17 +4056,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async recursivelyMakeClineRequests(
-		userContent: Anthropic.Messages.ContentBlockParam[],
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
 		includeFileDetails: boolean = false,
 	): Promise<boolean> {
 		interface StackItem {
 			userContent: Anthropic.Messages.ContentBlockParam[]
+			pendingContent?: Promise<Anthropic.Messages.ContentBlockParam[]> // Resolved after the request row shows
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
 		}
 
-		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
+		const stack: StackItem[] = [
+			Array.isArray(userContent)
+				? { userContent, includeFileDetails, retryAttempt: 0 }
+				: { userContent: [], pendingContent: userContent, includeFileDetails, retryAttempt: 0 },
+		]
 
 		while (stack.length > 0) {
 			const currentItem = stack.pop()!
@@ -4075,36 +4143,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}),
 			)
 
-			const provider = this.providerRef.deref()
-			const state = provider ? await provider.getState() : undefined
-
-			const showRooIgnoredFiles = state?.showRooIgnoredFiles ?? false
-			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
-			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
-			const currentMode = await this.getTaskMode()
-
-			const { content: parsedUserContent, mode: slashCommandMode } = await processUserContentMentions({
-				userContent: currentUserContent,
-				cwd: this.cwd,
-				fileContextTracker: this.fileContextTracker,
-				rooIgnoreController: this.rooIgnoreController,
-				showRooIgnoredFiles,
-				includeDiagnosticMessages,
-				maxDiagnosticMessages,
-				skillsManager: provider?.getSkillsManager(),
-				currentMode,
-			})
-
-			// Switch mode if specified in a slash command's frontmatter
-			if (slashCommandMode) {
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const state = await provider.getState()
-					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
-					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode, null)
-					}
-				}
+			// Mention expansion can take time. The request row already shows.
+			if (currentItem.pendingContent) {
+				currentUserContent.push(...(await currentItem.pendingContent))
 			}
 
 			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
@@ -4114,7 +4155,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// where the old user message content may already contain environment details from the previous session.
 			// We check for both opening and closing tags to ensure we're matching complete environment detail blocks,
 			// not just mentions of the tag in regular content.
-			const contentWithoutEnvDetails = parsedUserContent.filter((block) => {
+			const contentWithoutEnvDetails = currentUserContent.filter((block) => {
 				if (block.type === "text" && typeof block.text === "string") {
 					// Check if this text block is a complete environment_details block
 					// by verifying it starts with the opening tag and ends with the closing tag
@@ -4480,6 +4521,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
+										// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4915,7 +4957,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-
+						// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
@@ -6574,6 +6616,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._messageManager
 	}
 
+	private submitQueuedMessage(queued: QueuedMessage): void {
+		setTimeout(() => {
+			this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.segments).catch((err) =>
+				console.error(`[Task] Failed to submit queued message:`, err),
+			)
+		}, 0)
+	}
+
 	/**
 	 * Process any queued messages by dequeuing and submitting them.
 	 * This ensures that queued user messages are sent when appropriate,
@@ -6584,13 +6634,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public processQueuedMessages(): void {
 		try {
 			if (!this.messageQueueService.isEmpty()) {
-				const queued = this.messageQueueService.dequeueMessage()
+				const queued = this.messageQueueService.drain()
 				if (queued) {
-					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images).catch((err) =>
-							console.error(`[Task] Failed to submit queued message:`, err),
-						)
-					}, 0)
+					this.submitQueuedMessage(queued)
 				}
 			}
 		} catch (e) {

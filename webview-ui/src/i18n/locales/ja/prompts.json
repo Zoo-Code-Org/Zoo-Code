@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API設定",
-		"select": "このモードで使用するAPI設定を選択してください"
+		"select": "このモードで使用するAPI設定を選択してください",
+		"pinnedGroupAriaLabel": "ピン留めした設定",
+		"allGroupAriaLabel": "すべての設定"
 	},
 	"tools": {
 		"title": "利用可能なツール",
@@ -47,7 +49,8 @@
 		"title": "モード固有のカスタム指示（オプション）",
 		"resetToDefault": "デフォルトにリセット",
 		"description": "{{modeName}}モードに特化した行動ガイドラインを追加します。",
-		"loadFromFile": "{{mode}}モード固有のカスタム指示は、ワークスペースの<span>.roo/rules-{{slug}}/</span>フォルダまたはグローバル<0>.roo/rules-{{slug}}/</0>からも読み込むことができます（.roorules-{{slug}}と.clinerules-{{slug}}は非推奨で、まもなく動作しなくなります）。"
+		"loadFromFile": "{{mode}}モード固有のカスタム指示は、ワークスペースの<span>.roo/rules-{{slug}}/</span>フォルダまたはグローバル<0>.roo/rules-{{slug}}/</0>からも読み込むことができます（.roorules-{{slug}}と.clinerules-{{slug}}は非推奨で、まもなく動作しなくなります）。",
+		"loadFromFileAriaLabel": "モード用グローバルカスタム指示の詳細"
 	},
 	"exportMode": {
 		"title": "モードをエクスポート",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "すべてのモードのカスタム指示",
 		"description": "これらの指示はすべてのモードに適用されます。モード固有の指示で強化できる基本的な動作セットを提供します。<0>詳細はこちら</0>",
-		"loadFromFile": "指示は、ワークスペースの<span>.roo/rules/</span>フォルダまたはグローバル<0>.roo/rules/</0>からも読み込むことができます（.roorulesと.clinerulesは非推奨で、まもなく動作しなくなります）。"
+		"loadFromFile": "指示は、ワークスペースの<span>.roo/rules/</span>フォルダまたはグローバル<0>.roo/rules/</0>からも読み込むことができます（.roorulesと.clinerulesは非推奨で、まもなく動作しなくなります）。",
+		"learnMoreAriaLabel": "グローバルカスタム指示の詳細",
+		"loadFromFileAriaLabel": "グローバルカスタム指示の設定方法"
 	},
 	"systemPrompt": {
 		"preview": "システムプロンプトのプレビュー",
@@ -199,5 +204,10 @@
 		"rulesFolder": "このモードには{{folderPath}}にルールフォルダがあり、それも削除されます。",
 		"confirm": "削除",
 		"cancel": "キャンセル"
+	},
+	"mcpServers": {
+		"restrict": "特定の MCP サーバーに制限",
+		"noneConnected": "接続中の MCP サーバーはありません",
+		"notConnected": "{{serverName}}（未接続）"
 	}
 }

@@ -72,7 +72,8 @@
 		"goToModes": "Zu den Modi-Einstellungen gehen",
 		"moreInfoMcp": "{{name}} MCP-Dokumentation anzeigen",
 		"validationRequired": "Bitte gib einen Wert für {{paramName}} an",
-		"prerequisites": "Voraussetzungen"
+		"prerequisites": "Voraussetzungen",
+		"optional": "(optional)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -89,5 +90,9 @@
 	},
 	"footer": {
 		"issueText": "Problem mit einem Marketplace-Element gefunden oder Vorschläge für neue? <0>Öffne ein GitHub-Issue</0>, um es uns mitzuteilen!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modi"
 	}
 }

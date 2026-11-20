@@ -1,7 +1,8 @@
 {
 	"landing": {
 		"greeting": "Zoo Code'a Hoş Geldin!",
-		"introduction": "Yerleşik ve genişletilebilir Modlar yelpazesiyle Zoo Code, daha önce hiç olmadığı gibi planlama, mimari tasarım, kodlama, hata ayıklama ve üretkenliğini artırmanı sağlar."
+		"introduction": "Yerleşik ve genişletilebilir Modlar yelpazesiyle Zoo Code, daha önce hiç olmadığı gibi planlama, mimari tasarım, kodlama, hata ayıklama ve üretkenliğini artırmanı sağlar.",
+		"logoAlt": "Roo logosu"
 	},
 	"providerSignup": {
 		"heading": "Sağlayıcınızı seçin",

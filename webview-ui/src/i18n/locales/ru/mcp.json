@@ -55,5 +55,10 @@
 		"running": "Выполняется",
 		"completed": "Завершено",
 		"error": "Ошибка"
-	}
+	},
+	"resource": {
+		"returns": "Возвращает",
+		"unknownMimeType": "Неизвестно"
+	},
+	"toggleServerAriaLabel": "Включить/выключить сервер {{serverName}}"
 }
