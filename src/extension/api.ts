@@ -341,6 +341,30 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				// The API caller authored the task text.
 				segments: userSegments(text ?? ""),
 			}
+
+			const task = await provider.createTask(text, images, undefined, options, configuration)
+
+			if (!task) {
+				throw new Error("Failed to create task due to policy restrictions")
+			}
+
+			return task.taskId
+		} catch (error) {
+			if (createdInNewTab && !provider.isDisposed) {
+				// Only the provider this call created is ours to tear down: the sidebar provider
+				// and any task attached to it are left untouched. Disposal also untracks the
+				// instance, so an aborted open-in-editor call cannot leave a ghost tab behind.
+				try {
+					await provider.dispose()
+				} catch (disposeError) {
+					this.log(
+						`[API#startNewTask] failed to dispose the aborted new-tab provider: ${
+							disposeError instanceof Error ? disposeError.message : String(disposeError)
+						}`,
+					)
+				}
+			}
+			throw error
 		}
 	}
 
