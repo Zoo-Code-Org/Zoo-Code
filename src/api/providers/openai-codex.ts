@@ -30,6 +30,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import { openAiCodexOAuthManager } from "../../integrations/openai-codex/oauth"
 import { t } from "../../i18n"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
@@ -508,22 +509,14 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		effectiveSessionId: string,
 		abortSignal?: AbortSignal,
 	): ApiStream {
-		// Request-local controller: a stale abort arriving after this request finishes must never
-		// reach the controller of a later request, so the bridge listener captures this controller
-		// directly.
-		const abortController = new AbortController()
-
-		// A caller's signal has to be linked rather than used directly, since both transports below
-		// abort through the request controller. Without this the signal never reaches the wire.
-		const abortFromCaller = () => abortController.abort()
-
-		if (abortSignal) {
-			if (abortSignal.aborted) {
-				abortController.abort()
-			} else {
-				abortSignal.addEventListener("abort", abortFromCaller, { once: true })
-			}
-		}
+		// A caller's signal has to be linked rather than used directly, since both transports
+		// below abort through one request-local controller: a stale abort arriving after this
+		// request finishes must never reach the controller of a later one. The bridge hands
+		// back that controller, relays a caller abort into it (a caller that already aborted
+		// reaches it the same way a live one does) and returns the handle the `finally` below
+		// uses to detach it.
+		const { controller: abortController, dispose: removeExternalAbortListener } =
+			bridgeExternalAbortSignal(abortSignal)
 
 		try {
 			// Prefer OpenAI SDK streaming (same approach as openai-native) so event handling
@@ -607,7 +600,11 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 				)
 			}
 		} finally {
-			abortSignal?.removeEventListener("abort", abortFromCaller)
+			// Detach the bridge's listener from the caller's long-lived signal: this runs on
+			// completion, on failure, and on the consumer stopping the iteration early, so a
+			// finished request never leaves a listener (and this request's controller) retained
+			// by a signal that outlives it.
+			removeExternalAbortListener()
 		}
 	}
 
