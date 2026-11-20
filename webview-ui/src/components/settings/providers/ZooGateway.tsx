@@ -74,7 +74,7 @@ export const ZooGateway = ({
 		}
 
 		const current = apiConfiguration.zooGatewayModelId
-		if (!current || !modelIds.includes(current)) {
+		if (!current) {
 			setApiConfigurationField("zooGatewayModelId", resolvedDefaultModelId)
 		}
 	}, [apiConfiguration.zooGatewayModelId, modelIds, resolvedDefaultModelId, setApiConfigurationField])

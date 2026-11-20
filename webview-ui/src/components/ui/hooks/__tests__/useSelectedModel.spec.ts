@@ -52,6 +52,7 @@ import {
 	mainlandZAiDefaultModelId,
 	providerIdentifiers,
 	retiredProviderIdentifiers,
+	zooGatewayDefaultModelId,
 } from "@roo-code/types"
 
 import { useSelectedModel } from "../useSelectedModel"
@@ -1382,6 +1383,119 @@ describe("useSelectedModel", () => {
 			expect(result.current.id).toBe("zai-org/GLM-4.6")
 			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
 			expect(result.current.isError).toBe(true)
+		})
+	})
+
+	describe("zoo-gateway provider", () => {
+		beforeEach(() => {
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+		})
+
+		it("preserves a configured model ID that is absent from the populated catalog", () => {
+			// Regression: the gateway can serve models the fetched catalog may not
+			// list (partial, stale, or renamed entries). The configured ID is what
+			// requests are sent with, so the picker must show it instead of a default.
+			const catalogInfo: ModelInfo = { maxTokens: 32_000, contextWindow: 200_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.zooGateway]: { "anthropic/claude-sonnet-4": catalogInfo },
+				}),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zooGateway,
+						zooGatewayModelId: "zoo/glm-5.3-flash",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.provider).toBe(providerIdentifiers.zooGateway)
+			expect(result.current.id).toBe("zoo/glm-5.3-flash")
+			// No metadata exists for an unlisted ID, so info stays undefined by the
+			// hook's fallback contract rather than describing a different model.
+			expect(result.current.info).toBeUndefined()
+		})
+
+		it("preserves a configured model ID when the router payload is empty", () => {
+			// Gate regression: an empty router payload used to fail the
+			// hasValidRouterData check, which replaced the configured ID with the
+			// provider default. The configured ID must survive the empty payload.
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zooGateway,
+						zooGatewayModelId: "zoo/glm-5.3-flash",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("zoo/glm-5.3-flash")
+			expect(result.current.info).toBeUndefined()
+		})
+
+		it("falls back to the provider default when no model ID is configured", () => {
+			const catalogInfo: ModelInfo = { maxTokens: 32_000, contextWindow: 200_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.zooGateway]: { [zooGatewayDefaultModelId]: catalogInfo },
+				}),
+			)
+
+			const { result } = renderHook(() => useSelectedModel({ apiProvider: providerIdentifiers.zooGateway }), {
+				wrapper: createWrapper(),
+			})
+
+			expect(result.current.id).toBe(zooGatewayDefaultModelId)
+			expect(result.current.info).toEqual(catalogInfo)
+		})
+
+		it("preserves the configured model ID when the catalog fetch errors", () => {
+			// A cold /models failure settles the router query with no data. The
+			// hook must still resolve and keep the configured ID (the handler
+			// sends requests with it) instead of resetting to the provider default.
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zooGateway,
+						zooGatewayModelId: "zoo/glm-5.3-flash",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("zoo/glm-5.3-flash")
+			expect(result.current.info).toBeUndefined()
+			expect(result.current.isError).toBe(true)
+		})
+
+		it("does not resolve an inherited member for a custom model ID", () => {
+			// Own-property reads only: a self-entered ID such as "toString" must
+			// not resolve to Object.prototype's member and leak it as model info.
+			const catalogInfo: ModelInfo = { maxTokens: 32_000, contextWindow: 200_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({
+					[providerIdentifiers.zooGateway]: { "anthropic/claude-sonnet-4": catalogInfo },
+				}),
+			)
+
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.zooGateway,
+						zooGatewayModelId: "toString",
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe("toString")
+			expect(result.current.info).toBeUndefined()
 		})
 	})
 

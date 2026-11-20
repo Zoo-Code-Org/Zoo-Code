@@ -90,11 +90,10 @@ function getStaticCatalogModel(
  *
  * Dynamic providers validate the configured model ID against the fetched
  * router-model list and only resolve the selection once that list is
- * available. LiteLLM is the exception: it fronts arbitrary models and
- * aliases, so a configured `litellmModelId` is the user's explicit
- * selection and is preserved as soon as the fetch settles, even when the
- * router payload has no LiteLLM entry (partial listing, failed fetch, or
- * renamed deployment).
+ * available. LiteLLM, IO Intelligence, and Zoo Gateway may legitimately
+ * have no entry in the router payload (partial listing, failed fetch,
+ * renamed deployment) even though the configured ID is a valid selection,
+ * so they only need the fetch to settle and keep the configured ID.
  */
 export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	const provider = apiConfiguration.apiProvider || providerIdentifiers.openrouter
@@ -126,17 +125,18 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM and IO Intelligence may legitimately have no entry in the router
-	// payload (partial listing, failed fetch, renamed deployment) even though
-	// the configured ID is a valid selection, so they only need the fetch to
-	// settle. Other dynamic providers require a populated provider entry
-	// before the selection is resolved.
+	// LiteLLM, IO Intelligence, and Zoo Gateway may legitimately have no entry
+	// in the router payload (partial listing, failed fetch, renamed deployment)
+	// even though the configured ID is a valid selection, so they only need the
+	// fetch to settle. Other dynamic providers require a populated provider
+	// entry before the selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
 			? dynamicProvider === providerIdentifiers.friendli
 				? true // static friendliModels cover the window before /v1/models data arrives
 				: dynamicProvider === providerIdentifiers.litellm ||
-					  dynamicProvider === providerIdentifiers.ioIntelligence
+					  dynamicProvider === providerIdentifiers.ioIntelligence ||
+					  dynamicProvider === providerIdentifiers.zooGateway
 					? !routerModels.isLoading
 					: routerModels.data &&
 						routerModels.data[dynamicProvider] !== undefined &&
@@ -590,12 +590,13 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.zooGateway: {
-			const id = getValidatedModelId(
-				apiConfiguration.zooGatewayModelId,
-				routerModels[providerIdentifiers.zooGateway],
-				defaultModelId,
-			)
-			const info = routerModels[providerIdentifiers.zooGateway]?.[id]
+			// A configured id is the user's explicit selection and the handler sends
+			// requests with it, so keep it instead of displaying a default model
+			// that requests do not use.
+			const id = apiConfiguration.zooGatewayModelId || defaultModelId
+			// Own-property reads only (an ID such as "toString" must not resolve to an inherited member).
+			const fetched = routerModels[providerIdentifiers.zooGateway]
+			const info = fetched && Object.hasOwn(fetched, id) ? fetched[id] : undefined
 			return { id, info }
 		}
 		case providerIdentifiers.anthropic:
