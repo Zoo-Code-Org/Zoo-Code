@@ -53,7 +53,7 @@ import { shouldUseReasoningBudget } from "../../shared/api"
 import { normalizeToolSchema } from "../../utils/json-schema"
 import { getSystemProxyUrl } from "../../utils/networkProxy"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
-import { mergeAbortSignalAndTimeout } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, mergeAbortSignalAndTimeout } from "./utils/abort-signal"
 import { OutputTokenLimitError } from "./utils/output-token-limit-error"
 
 /************************************************************************************
@@ -569,42 +569,23 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			...(useServiceTier && { [SERVICE_TIER_KEY]: this.options.awsBedrockServiceTier }),
 		}
 
-		// Create a request-local AbortController with 10 minute timeout. Keeping it
-		// request-local (and detaching the bridge listener in the finally block) means
-		// a completed request can never leave a stale listener on the caller's signal.
+		// Bridge the caller's signal onto a request-local AbortController that also carries the
+		// 10 minute deadline, so one controller ends the request whether the caller or the clock
+		// fired. The bridge registers its listener with { once: true }, and it aborts the controller
+		// directly when the caller's signal was already aborted at call time, so a pre-aborted
+		// caller cancels through a path that needs no listener.
 		// A manual setTimeout (rather than AbortSignal.timeout()) is required here
 		// because clearTimeout in the finally block needs a cancelable handle —
 		// AbortSignal.timeout() self-manages its timer and cannot be cleared.
-		const requestController = new AbortController()
+		const bridge = bridgeExternalAbortSignal(metadata?.abortSignal)
 		let timeoutId: NodeJS.Timeout | undefined
 
-		// Bridge external abort signal to the request controller using the standard
-		// abort bridge pattern:
-		// - pre-aborted guard: a listener on an already-aborted signal may never fire,
-		//   so abort the local controller directly in that case
-		// - { once: true }: the listener auto-removes on first abort event
-		let abortListener: (() => void) | undefined
-		const externalAbortSignal = metadata?.abortSignal
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				requestController.abort()
-			} else {
-				abortListener = () => requestController.abort()
-				externalAbortSignal.addEventListener("abort", abortListener, { once: true })
-			}
-		}
-
 		try {
-			timeoutId = setTimeout(
-				() => {
-					requestController.abort()
-				},
-				10 * 60 * 1000,
-			)
+			timeoutId = setTimeout(() => bridge.controller.abort(), 10 * 60 * 1000)
 
 			const command = new ConverseStreamCommand(payload)
 			const response = await this.client.send(command, {
-				abortSignal: requestController.signal,
+				abortSignal: bridge.controller.signal,
 			})
 
 			if (!response.stream) {
@@ -870,12 +851,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			// early termination by the caller (break/destroy), which bypasses the normal
 			// timeout-clearing path after the stream completes.
 			clearTimeout(timeoutId)
-
-			// Detach the bridge listener once the request ends (success or error) so the
-			// external signal keeps no reference to this request's controller.
-			if (abortListener) {
-				externalAbortSignal?.removeEventListener("abort", abortListener)
-			}
+			// Detach the bridge listener once the request ends — completion, failure, or early
+			// generator exit alike — so the caller's long-lived signal keeps no reference to
+			// this request's controller.
+			bridge.dispose()
 		}
 	}
 
