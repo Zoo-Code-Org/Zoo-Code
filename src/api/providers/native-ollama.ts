@@ -8,6 +8,7 @@ import type { ApiHandlerOptions, GetModelsOptions } from "../../shared/api"
 import { getOllamaModels, isSecureOllamaEndpoint } from "./fetchers/ollama"
 import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "./fetchers/modelCache"
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
 	hasUsableTimeout,
 	mergeAbortSignalAndTimeout,
@@ -466,20 +467,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			throw createAbortError("Ollama")
 		}
 
-		const requestController = new AbortController()
-
-		let onExternalAbort: (() => void) | undefined
+		// The client is created inside the try below, so the hook reads it through a
+		// binding: an abort landing before the assignment has no client to cancel yet.
+		let client: Ollama | undefined
+		const bridge = bridgeExternalAbortSignal(externalAbortSignal, {
+			onAbort: () => client?.abort(),
+		})
 		try {
 			// Inside the try so a constructor error gets the same handling as a
 			// request error.
-			const client = this._createOllamaClient(requestController.signal)
-			if (externalAbortSignal) {
-				onExternalAbort = () => {
-					requestController.abort()
-					client.abort()
-				}
-				externalAbortSignal.addEventListener("abort", onExternalAbort)
-			}
+			client = this._createOllamaClient(bridge.controller.signal)
 
 			// Race model discovery against the external signal: the discovery
 			// fetch receives the signal so an aborted request is cancelled at
@@ -642,17 +639,15 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			console.error(`Ollama API error (${statusCode || "unknown"}): ${errorMessage}`)
 			throw error
 		} finally {
-			// Detach the external-signal listener so it cannot outlive this request,
-			// including when model discovery rejects before the chat request starts.
-			if (onExternalAbort && externalAbortSignal) {
-				externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
+			// Detach the bridge listener so it cannot outlive this request, including when
+			// model discovery rejects before the chat request starts.
+			bridge.dispose()
 			// A consumer that stops iterating early (break/return) would otherwise
 			// leave the in-flight response body open, and when metadata.abortSignal
 			// is undefined no abort bridge exists at all. The per-request controller
 			// drives the injected fetch transport, so aborting it here releases the
 			// body; after normal completion the abort is a no-op.
-			requestController.abort()
+			bridge.controller.abort()
 		}
 	}
 
@@ -694,15 +689,26 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 		// per-call signal, so every request uses a per-request client. The
 		// per-request controller drives the abortable transport injected into the
 		// client, so the in-flight POST itself is cancellable.
-		const requestController = new AbortController()
+		const controller = new AbortController()
 		let timeoutId: ReturnType<typeof setTimeout> | undefined
-		let onAbort: (() => void) | undefined
+		let detachBridge: (() => void) | undefined
 		const abortSignal = options?.abortSignal
+		let client: Ollama | undefined
 
 		try {
 			// Inside the try so a constructor error gets the same wrap as a
 			// request error.
-			const client = this._createOllamaClient(requestController.signal)
+			client = this._createOllamaClient(controller.signal)
+
+			// Bridge after the client exists: the helper runs onAbort right away when the caller's
+			// signal was already aborted at call time, so the client-level cancel this path used to
+			// duplicate in its pre-abort branch now arrives through the same hook a live abort
+			// uses. The listener is registered with { once: true } and detachBridge drops it.
+			const bridge = bridgeExternalAbortSignal(abortSignal, {
+				controller,
+				onAbort: () => client?.abort(),
+			})
+			detachBridge = bridge.dispose
 
 			// Handle timeoutMs if provided (the client exists, so the timer can
 			// abort both the per-request transport and the client)
@@ -711,30 +717,16 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				// toSdkTimeoutMs rounds up and caps the delay (Node clamps larger
 				// values to 1 ms), matching mergeAbortSignalAndTimeout.
 				timeoutId = setTimeout(() => {
-					requestController.abort()
-					client.abort()
+					controller.abort()
+					client?.abort()
 				}, toSdkTimeoutMs(timeoutMs))
 			}
 
-			// Propagate abortSignal into the per-request client via client.abort()
-			// and the per-request transport. Set this up before fetchModel() so an
-			// already-aborted signal (or one that aborts during the model-list
-			// fetch) is honored before the request proceeds.
-			if (abortSignal) {
-				if (abortSignal.aborted) {
-					requestController.abort()
-					client.abort()
-					throw createAbortError("Ollama")
-				} else {
-					onAbort = () => {
-						requestController.abort()
-						client.abort()
-						// The per-request timeout is cleared by the finally block when this prompt
-						// settles; an external abort always settles it promptly (the discovery race
-						// or the injected transport rejects), so no timer clear is needed here.
-					}
-					abortSignal.addEventListener("abort", onAbort, { once: true })
-				}
+			// A caller that aborted before this call started: the bridge already cancelled both
+			// the transport and the client through the hook, so only the contract error is
+			// produced here.
+			if (abortSignal?.aborted) {
+				throw createAbortError("Ollama")
 			}
 
 			// Model discovery goes through Axios (getOllamaModels) and never touches
@@ -744,7 +736,7 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// or timed-out request is cancelled at the network level; the race
 			// remains the backstop that rejects a stalled discovery instead of
 			// hanging past the deadline.
-			const discoverySignal = mergeAbortSignalAndTimeout(requestController.signal, options?.timeoutMs)
+			const discoverySignal = mergeAbortSignalAndTimeout(controller.signal, options?.timeoutMs)
 			// mergeAbortSignalAndTimeout yields undefined when neither an external
 			// signal nor a positive timeout applies; no race is needed then.
 			const { id: modelId } = discoverySignal
@@ -776,9 +768,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			throw error
 		} finally {
 			clearTimeout(timeoutId)
-			if (onAbort && abortSignal) {
-				abortSignal.removeEventListener("abort", onAbort)
-			}
+			// Detach the bridge listener whether or not a client was ever created.
+			detachBridge?.()
 		}
 	}
 }
