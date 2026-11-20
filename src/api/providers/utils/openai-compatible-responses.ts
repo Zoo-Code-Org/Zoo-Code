@@ -9,6 +9,7 @@ import {
 	sanitizeSurrogatesDeep,
 	sanitizeIdentifierSurrogates,
 } from "../../transform/sanitize-surrogates"
+import { truncateOpenAiCallId } from "../../../utils/tool-id"
 
 type ResponsesRequestInput = {
 	options: Readonly<ApiHandlerOptions>
@@ -36,6 +37,10 @@ export function buildResponsesRequest({
 }: ResponsesRequestInput): OpenAI.Responses.ResponseCreateParams {
 	// Sanitize before conversion, including strings inside JSON tool arguments.
 	// Encode IDs first so distinct tool calls remain distinct after sanitization.
+	// Both history ID fields are then truncated to the Responses call_id length
+	// limit: history recorded through other providers (e.g. Gemini) can carry
+	// longer IDs, which the endpoint rejects. The transform is deterministic and
+	// identical on both fields, so call/result pairs keep matching.
 	const history = messages.map((message) => {
 		if (!("role" in message)) return message
 		return {
@@ -44,9 +49,13 @@ export function buildResponsesRequest({
 				typeof message.content === "string"
 					? message.content
 					: message.content.map((part) => {
-							if (part.type === "tool_use") return { ...part, id: sanitizeIdentifierSurrogates(part.id) }
+							if (part.type === "tool_use")
+								return { ...part, id: truncateOpenAiCallId(sanitizeIdentifierSurrogates(part.id)) }
 							if (part.type === "tool_result")
-								return { ...part, tool_use_id: sanitizeIdentifierSurrogates(part.tool_use_id) }
+								return {
+									...part,
+									tool_use_id: truncateOpenAiCallId(sanitizeIdentifierSurrogates(part.tool_use_id)),
+								}
 							return part
 						}),
 		}
@@ -74,10 +83,15 @@ export function buildResponsesRequest({
 		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
 	}
 
-	// Omit temperature unless the
-	// model supports it and the user set a custom value, so the server's own
-	// default applies.
-	if (modelInfo.supportsTemperature !== false && options.modelTemperature != null) {
+	// Omit temperature unless the model supports it and the user set a custom
+	// value, so the server's own default applies. Mirror the Chat Completions
+	// o-series handling (handleO3FamilyMessage): o1/o3/o4 models reject the
+	// temperature parameter outright, so never send it for them — otherwise an
+	// existing o-series profile with a custom temperature breaks the moment
+	// the Responses API toggle is enabled.
+	const modelId = options.openAiModelId ?? ""
+	const isOSeriesModel = modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")
+	if (!isOSeriesModel && modelInfo.supportsTemperature !== false && options.modelTemperature != null) {
 		requestBody.temperature = options.modelTemperature
 	}
 

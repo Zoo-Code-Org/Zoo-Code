@@ -1,6 +1,7 @@
 import { openAiModelInfoSaneDefaults, providerIdentifiers } from "@roo-code/types"
 import { buildResponsesRequest } from "../openai-compatible-responses"
 import { expectNoLoneSurrogates } from "../../../../test-utils/surrogates"
+import { OPENAI_CALL_ID_MAX_LENGTH } from "../../../../utils/tool-id"
 
 type RequestInput = Parameters<typeof buildResponsesRequest>[0]
 
@@ -177,4 +178,38 @@ it("preserves API defaults for tools without strictness or parameters", () => {
 	expect(body.tools).toEqual([
 		{ type: "function", name: "no_args", description: undefined, strict: null, parameters: null },
 	])
+})
+
+it.each(["o1", "o3", "o4-mini"])(
+	"omits temperature for o-series model %s even when a custom value is configured",
+	(modelId) => {
+		const body = buildResponsesRequest(
+			makeInput({
+				options: { openAiModelId: modelId, modelTemperature: 0.4 },
+				modelInfo: { ...openAiModelInfoSaneDefaults, supportsTemperature: true },
+			}),
+		)
+		expect(body).not.toHaveProperty("temperature")
+	},
+)
+
+it("normalizes both history ID fields to the Responses call_id length limit", () => {
+	// History recorded through another provider (e.g. Gemini) can carry tool
+	// IDs longer than the Responses call_id limit; both fields must be
+	// normalized identically so the call/result pair keeps matching.
+	const longId = `call_${"x".repeat(100)}`
+	const body = buildResponsesRequest(
+		makeInput({
+			messages: [
+				{ role: "assistant", content: [{ type: "tool_use", id: longId, name: "read_file", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: longId, content: "ok" }] },
+			],
+		}),
+	)
+	const items = body.input as Array<{ type?: string; call_id?: string }>
+	const call = items.find((item) => item.type === "function_call")
+	const output = items.find((item) => item.type === "function_call_output")
+	expect(call?.call_id).toBeDefined()
+	expect(call!.call_id!.length).toBeLessThanOrEqual(OPENAI_CALL_ID_MAX_LENGTH)
+	expect(output?.call_id).toEqual(call?.call_id)
 })
