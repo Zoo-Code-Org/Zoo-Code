@@ -103,10 +103,15 @@ export function unescapeHtmlEntities(text?: string | null): string | undefined {
 }
 
 /**
- * Strips ANSI escape codes from terminal output to eliminate useless tokens.
+ * Strips ANSI escape codes (CSI, OSC, and 2-character sequences) from terminal output to eliminate useless tokens.
  * Constructed dynamically via String.fromCharCode to avoid triggering no-control-regex.
  */
-const ANSI_PATTERN = new RegExp(String.fromCharCode(0x1b) + "(?:[@-Z\\\\-_]|\\[[0-?]*[ -/]*[@-~])", "g")
+const ESC = String.fromCharCode(0x1b)
+const BEL = String.fromCharCode(0x07)
+const ANSI_PATTERN = new RegExp(
+	ESC + "(?:\\][^" + BEL + ESC + "]*(?:" + BEL + "|" + ESC + "\\\\)|\\[[0-?]*[ -/]*[@-~]|[@-Z\\\\-_])",
+	"g",
+)
 
 export function stripAnsi(text: string): string {
 	if (!text) return text

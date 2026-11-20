@@ -119,6 +119,16 @@ describe("Text normalization utilities", () => {
 			expect(stripAnsi(input)).toBe("Red Error and Bold Text")
 		})
 
+		it("removes OSC sequences terminated by BEL", () => {
+			const input = "before \u001b]0;window title\u0007 after"
+			expect(stripAnsi(input)).toBe("before  after")
+		})
+
+		it("removes OSC sequences terminated by ST", () => {
+			const input = "before \u001b]0;window title\u001b\\ after"
+			expect(stripAnsi(input)).toBe("before  after")
+		})
+
 		it("handles empty or clean strings", () => {
 			expect(stripAnsi("")).toBe("")
 			expect(stripAnsi("Clean text")).toBe("Clean text")
