@@ -1,5 +1,8 @@
 // pnpm --filter @roo-code/core test src/custom-tools/__tests__/custom-tool-registry.spec.ts
 
+import os from "os"
+import path from "path"
+
 import { type CustomToolDefinition, parametersSchema as z } from "@roo-code/types"
 
 import { CustomToolRegistry } from "../custom-tool-registry.js"
@@ -9,6 +12,23 @@ describe("CustomToolRegistry", () => {
 
 	beforeEach(() => {
 		registry = new CustomToolRegistry()
+	})
+
+	describe("cache location", () => {
+		afterEach(() => vi.unstubAllGlobals())
+
+		it.each([
+			{ platform: "linux", uid: 1234, options: undefined, base: os.tmpdir(), suffix: "1234" },
+			{ platform: "win32", uid: undefined, options: {}, base: os.homedir(), suffix: "user" },
+			{ platform: "linux", uid: 0, options: {}, base: os.tmpdir(), suffix: "0" },
+			{ platform: "linux", uid: 1234, options: { cacheDir: "custom/cache" }, base: "", suffix: "" },
+		])("uses the expected cache path for $platform/$uid/$options", ({ platform, uid, options, base, suffix }) => {
+			vi.stubGlobal("process", { ...process, platform, getuid: uid === undefined ? undefined : () => uid })
+			const instance = new CustomToolRegistry(options)
+			expect(instance["cacheDir"]).toBe(
+				path.resolve(options?.cacheDir ?? path.join(base, `dynamic-tools-cache-${suffix}`)),
+			)
+		})
 	})
 
 	describe("validation", () => {

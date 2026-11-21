@@ -1,5 +1,8 @@
 // pnpm --filter @roo-code/core test src/custom-tools/__tests__/custom-tool-registry.integration.spec.ts
 
+import fs from "fs"
+import os from "os"
+import { createHash } from "crypto"
 import path from "path"
 import { fileURLToPath } from "url"
 
@@ -15,6 +18,203 @@ describe.sequential("CustomToolRegistry integration", () => {
 
 	beforeEach(() => {
 		registry = new CustomToolRegistry()
+	})
+
+	describe.skipIf(process.platform === "win32")("cache security", () => {
+		let sandbox: string
+		let toolDir: string
+		let cacheDir: string
+		let entryDir: string
+
+		beforeEach(() => {
+			sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "tool-cache-security-"))
+			toolDir = path.join(sandbox, "tools")
+			cacheDir = path.join(sandbox, "cache")
+			fs.mkdirSync(toolDir)
+			const source = path.join(toolDir, "safe.ts")
+			fs.writeFileSync(
+				source,
+				'export default { name: "safe", description: "trusted", execute: async () => "ok" }',
+			)
+			fs.writeFileSync(path.join(toolDir, ".env"), "SYNTHETIC_TEST_VALUE=example")
+			const key = `${source}:${fs.statSync(source).mtimeMs}`
+			entryDir = path.join(cacheDir, createHash("sha256").update(key).digest("hex").slice(0, 16))
+			registry = new CustomToolRegistry({ cacheDir })
+		})
+
+		afterEach(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+
+		it("creates a private cache, reuses bundles across instances, and clears it", async () => {
+			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			for (const location of [
+				cacheDir,
+				entryDir,
+				path.join(entryDir, "bundle.mjs"),
+				path.join(entryDir, ".env"),
+			]) {
+				expect(fs.statSync(location).mode & 0o077).toBe(0)
+			}
+			const bundle = path.join(entryDir, "bundle.mjs")
+			const modified = fs.statSync(bundle).mtimeMs
+			const second = new CustomToolRegistry({ cacheDir })
+			expect((await second.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			expect(fs.statSync(bundle).mtimeMs).toBe(modified)
+			second.clearCache()
+			expect(fs.readdirSync(cacheDir)).toEqual([])
+		})
+
+		it.each(["", "/.", "/./.", "/nested/..", "/missing/.."])(
+			"clears only the configured cache with suffix %s",
+			(suffix) => {
+				fs.mkdirSync(cacheDir, { mode: 0o700 })
+				fs.mkdirSync(path.join(cacheDir, "nested"))
+				const cachedBundle = path.join(cacheDir, "bundle.mjs")
+				const sibling = path.join(toolDir, "sentinel")
+				fs.writeFileSync(cachedBundle, "cached")
+				fs.writeFileSync(sibling, "keep")
+				new CustomToolRegistry({ cacheDir: `${cacheDir}${suffix}` }).clearCache()
+				expect(fs.existsSync(cachedBundle)).toBe(false)
+				expect(fs.readFileSync(sibling, "utf8")).toBe("keep")
+			},
+		)
+
+		it.each(["permissions", "symlink", "symlink-dot"])("does not clear an unsafe cache root: %s", (kind) => {
+			fs.mkdirSync(cacheDir, { mode: 0o700 })
+			let sentinel: string
+			if (kind.startsWith("symlink")) {
+				fs.rmdirSync(cacheDir)
+				fs.symlinkSync(toolDir, cacheDir)
+				sentinel = path.join(toolDir, "bundle.mjs")
+			} else {
+				fs.chmodSync(cacheDir, 0o777)
+				sentinel = path.join(cacheDir, "bundle.mjs")
+			}
+			fs.writeFileSync(sentinel, "keep")
+			const error = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				new CustomToolRegistry({ cacheDir: kind === "symlink-dot" ? `${cacheDir}/.` : cacheDir }).clearCache()
+				expect(fs.readFileSync(sentinel, "utf8")).toBe("keep")
+				expect(error).toHaveBeenCalledWith(expect.stringContaining("clearCache failed to clean disk cache"))
+			} finally {
+				error.mockRestore()
+			}
+		})
+
+		it.each(["root", "entry", "bundle", "symlink-root", "symlink-entry", "symlink-bundle", "hardlink-bundle"])(
+			"rejects an unsafe %s before importing attacker code",
+			async (kind) => {
+				fs.mkdirSync(entryDir, { recursive: true, mode: 0o700 })
+				const payload = path.join(sandbox, "payload.mjs")
+				const marker = path.join(sandbox, "executed")
+				fs.writeFileSync(
+					payload,
+					`import fs from "node:fs"; fs.writeFileSync(${JSON.stringify(marker)}, "bad")`,
+				)
+				const bundle = path.join(entryDir, "bundle.mjs")
+				fs.copyFileSync(payload, bundle)
+				fs.chmodSync(bundle, 0o600)
+				const target = kind.endsWith("root") ? cacheDir : kind.endsWith("entry") ? entryDir : bundle
+				if (kind.startsWith("symlink")) {
+					fs.rmSync(target, { recursive: true, force: true })
+					fs.symlinkSync(kind === "symlink-bundle" ? payload : toolDir, target)
+				} else if (kind === "hardlink-bundle") {
+					fs.linkSync(bundle, path.join(sandbox, "linked.mjs"))
+				} else {
+					fs.chmodSync(target, kind === "bundle" ? 0o666 : 0o777)
+				}
+				const result = await registry.loadFromDirectory(toolDir)
+				expect(result.loaded).toEqual([])
+				expect(result.failed[0]?.error).toContain("Unsafe custom tool cache")
+				expect(fs.existsSync(marker)).toBe(false)
+			},
+		)
+
+		it.each(["direct", "symlink-parent"])("rejects a cache owned by another account via %s", async (kind) => {
+			fs.mkdirSync(cacheDir, { mode: 0o700 })
+			if (kind === "symlink-parent") {
+				const alias = path.join(sandbox, "alias")
+				fs.symlinkSync(sandbox, alias)
+				cacheDir = path.join(alias, "cache")
+				registry = new CustomToolRegistry({ cacheDir })
+			}
+			const resolvedCacheDir = fs.realpathSync(cacheDir)
+			const stat = fs.lstatSync(resolvedCacheDir)
+			stat.uid += 1
+			const originalLstat = fs.lstatSync
+			const spy = vi.spyOn(fs, "lstatSync").mockImplementation((location, options) => {
+				return location === resolvedCacheDir ? stat : originalLstat(location, options)
+			})
+			try {
+				const result = await registry.loadFromDirectory(toolDir)
+				expect(result.loaded).toEqual([])
+				expect(result.failed).toEqual([
+					{ file: "safe.ts", error: `Unsafe custom tool cache path: ${resolvedCacheDir}` },
+				])
+			} finally {
+				spy.mockRestore()
+			}
+		})
+
+		it.each(["success", "build failure", "validation failure", "publish failure"])(
+			"publishes only complete private bundles and removes pending files: %s",
+			async (outcome) => {
+				const bundle = path.join(entryDir, "bundle.mjs")
+				const originalChmod = fs.chmodSync
+				const originalRename = fs.renameSync
+				const chmod = vi.spyOn(fs, "chmodSync").mockImplementation((location, mode) => {
+					if (String(location).endsWith(".mjs")) {
+						expect(fs.existsSync(bundle)).toBe(false)
+						expect(fs.readFileSync(location, "utf8")).toContain('name: "safe"')
+						if (outcome === "validation failure") return originalChmod(location, 0o644)
+					}
+					return originalChmod(location, mode)
+				})
+				const rename = vi.spyOn(fs, "renameSync").mockImplementation((source, destination) => {
+					expect(destination).toBe(bundle)
+					expect(fs.statSync(source).mode & 0o777).toBe(0o600)
+					if (outcome === "publish failure") throw new Error("Synthetic publish failure")
+					originalRename(source, destination)
+				})
+				if (outcome === "build failure") fs.writeFileSync(path.join(toolDir, "safe.ts"), "export default {")
+				try {
+					const result = await registry.loadFromDirectory(toolDir)
+					expect(result.loaded).toEqual(outcome === "success" ? ["safe"] : [])
+					expect(result.failed).toHaveLength(outcome === "success" ? 0 : 1)
+					// A source change creates a new hash, so inspect all entries.
+					const entries = fs.readdirSync(cacheDir)
+					for (const entry of entries) {
+						expect(
+							fs.readdirSync(path.join(cacheDir, entry)).filter((name) => name.endsWith(".tmp.mjs")),
+						).toEqual([])
+					}
+					expect(fs.existsSync(bundle)).toBe(outcome === "success")
+					expect(rename).toHaveBeenCalledTimes(outcome === "success" || outcome === "publish failure" ? 1 : 0)
+				} finally {
+					chmod.mockRestore()
+					rename.mockRestore()
+				}
+			},
+		)
+
+		it("creates nested configured cache directories privately", async () => {
+			const nested = path.join(cacheDir, "nested", "cache")
+			const nestedRegistry = new CustomToolRegistry({ cacheDir: nested })
+			expect((await nestedRegistry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			expect(fs.statSync(nested).mode & 0o077).toBe(0)
+		})
+
+		it("rechecks permissions before using the in-memory cache", async () => {
+			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			fs.chmodSync(entryDir, 0o777)
+			expect((await registry.loadFromDirectory(toolDir)).failed[0]?.error).toContain("Unsafe custom tool cache")
+		})
+
+		it("rejects cache paths beneath a replaceable parent", async () => {
+			fs.chmodSync(sandbox, 0o777)
+			expect((await registry.loadFromDirectory(toolDir)).failed[0]?.error).toContain(
+				"Unsafe custom tool cache parent",
+			)
+		})
 	})
 
 	describe("loadFromDirectory", () => {
