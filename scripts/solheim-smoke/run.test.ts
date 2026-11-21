@@ -167,7 +167,7 @@ describe("provider smoke orchestration", () => {
 		assert.equal(smokeExitCode(verdict), 0)
 		// The teardown hold runs once after the completion message; no other
 		// pause fires in this scenario, so the duration is exactly the hold.
-		assert.equal(verdict.durationMs, SMOKE_TEARDOWN_HOLD_MS)
+		assert.equal(verdict.durationMs, 5_000 + SMOKE_TEARDOWN_HOLD_MS)
 		assert.deepEqual(verdict.gates, {
 			extensionActivated: true,
 			ipcConnected: true,
@@ -214,8 +214,8 @@ describe("provider smoke orchestration", () => {
 		const f = fixture("success", { stuck: true })
 		const verdict = await runSmoke(f.runtime, "private-test-key")
 		assert.equal(verdict.code, "TEARDOWN_FAILED")
-		// The 3 second completion hold plus three 5 second termination windows.
-		assert.equal(verdict.durationMs, 15_000 + SMOKE_TEARDOWN_HOLD_MS)
+		// The bounded usage drain, completion hold, and three termination windows all run.
+		assert.equal(verdict.durationMs, 20_000 + SMOKE_TEARDOWN_HOLD_MS)
 		assert.deepEqual(f.signals, ["SIGTERM", "SIGKILL"])
 		assert.equal(verdict.gates.childExited, false)
 		assert.equal(f.cleaned, false)
