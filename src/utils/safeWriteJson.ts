@@ -4,7 +4,7 @@ import * as path from "path"
 import { JsonStreamStringify } from "json-stream-stringify"
 
 import { getErrorCode } from "./errorCode"
-import { acquireFileLock } from "./fileLock"
+import { acquireFileLock, lockArtefactSpelling } from "./fileLock"
 import { recoverInterruptedReplacement } from "./jsonFileRecovery"
 
 /**
@@ -97,7 +97,16 @@ async function safeWriteJson(filePath: string, data: unknown, options?: SafeWrit
 	// remains a no-op, so the finally block in the main file operations
 	// try-catch-finally won't try to release an unacquired lock if this
 	// path is taken.
-	releaseLock = await acquireFileLock(absoluteFilePath)
+	// The artefact spelling is captured here, before this write moves the leaf. The EPERM fallback
+	// below renames the target itself to a backup, so a spelling taken after that rename names a
+	// different artefact for the same file: a second writer would then acquire while this one
+	// still holds, recover over this writer's in-flight temp file, and leave this writer's
+	// commit rename to fail with ENOENT. This path acquires the lock once, so the spelling
+	// below is the only one this write hands to the lock, fixed for the whole write rather
+	// than recomputed after the rename. The lock names uncommitted callers the same way, so
+	// this changes nothing about which artefact a peer takes; it only fixes the name here.
+	const artefactSpelling = lockArtefactSpelling(absoluteFilePath)
+	releaseLock = await acquireFileLock(absoluteFilePath, { artefactSpelling })
 
 	// Variables to hold the actual paths of temp files if they are created.
 	let actualTempNewFilePath: string | null = null
