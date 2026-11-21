@@ -15,9 +15,16 @@ import { makeApiHandlerOptions, makeCreateMessageMetadata } from "../../../test-
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import axios from "axios"
+import * as fs from "fs"
+import * as path from "path"
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
+}))
+
+// Echo the key and interpolation values so tests can assert what reaches the message.
+vitest.mock("../../../i18n", () => ({
+	t: (key: string, options?: Record<string, unknown>) => (options ? `${key} ${JSON.stringify(options)}` : key),
 }))
 
 const MOCK_TIMEOUT_MS = 300_000
@@ -81,7 +88,9 @@ vitest.mock("openai", () => {
 				},
 			}
 		}),
-		AzureOpenAI: mockAzureConstructor,
+		AzureOpenAI: mockAzureConstructor.mockImplementation(function () {
+			return { chat: { completions: { create: mockCreate } } }
+		}),
 	}
 })
 
@@ -941,6 +950,83 @@ describe("OpenAiHandler", () => {
 		})
 	})
 
+	describe("Azure OpenAI deployment errors", () => {
+		const azureOptions = {
+			openAiApiKey: "test-api-key",
+			openAiBaseUrl: "https://resource.openai.azure.com/",
+		}
+
+		function makeStatusError(message: string, status: number) {
+			return Object.assign(new Error(message), { status })
+		}
+
+		async function request(
+			entryPoint: "streaming" | "non-streaming" | "o3" | "o3-non-streaming" | "completePrompt",
+			options: Partial<ApiHandlerOptions>,
+		) {
+			const requestHandler = new OpenAiHandler(
+				makeApiHandlerOptions({
+					openAiModelId: entryPoint.startsWith("o3") ? "o3-mini" : "gpt-4o",
+					openAiStreamingEnabled: entryPoint !== "non-streaming" && entryPoint !== "o3-non-streaming",
+					...options,
+				}),
+			)
+
+			if (entryPoint === "completePrompt") {
+				return requestHandler.completePrompt("Test prompt")
+			}
+
+			return collectStream(requestHandler.createMessage("system prompt", [{ role: "user", content: "Hello" }]))
+		}
+
+		it.each(["streaming", "non-streaming", "o3", "o3-non-streaming", "completePrompt"] as const)(
+			"names the missing deployment on an Azure 404 (%s)",
+			async (entryPoint) => {
+				mockCreate.mockRejectedValueOnce(makeStatusError("404 Resource not found", 404))
+
+				const error = await request(entryPoint, azureOptions).catch((e: unknown) => e)
+				const deployment = entryPoint.startsWith("o3") ? "o3-mini" : "gpt-4o"
+
+				expect(error).toBeInstanceOf(Error)
+				expect(error).toMatchObject({ status: 404 })
+				expect((error as Error).message).toBe(
+					`OpenAI completion error: common:errors.api.azureDeploymentNotFound ${JSON.stringify({ deployment, message: "404 Resource not found" })}`,
+				)
+			},
+		)
+
+		it("points to the base URL as another cause of Azure 404s in every locale", () => {
+			const localesDir = path.join(__dirname, "../../../i18n/locales")
+			const locales = fs.readdirSync(localesDir)
+
+			expect(locales.length).toBeGreaterThan(1)
+			for (const locale of locales) {
+				const common = JSON.parse(fs.readFileSync(path.join(localesDir, locale, "common.json"), "utf8"))
+				const message: string = common.errors.api.azureDeploymentNotFound
+
+				expect(message, locale).toContain("{{deployment}}")
+				expect(message, locale).toContain("{{message}}")
+				expect(message, locale).toContain("https://<resource>.openai.azure.com")
+				expect(message, locale).toContain("/openai/v1")
+			}
+		})
+
+		it.each([
+			{ name: "a non-404 Azure error", options: azureOptions, status: 401 },
+			{
+				name: "a 404 from a non-Azure endpoint",
+				options: { ...azureOptions, openAiBaseUrl: "https://api.openai.com/v1" },
+				status: 404,
+			},
+		])("keeps the generic error message for $name", async ({ options, status }) => {
+			mockCreate.mockRejectedValueOnce(makeStatusError("Request failed", status))
+
+			const error = await request("streaming", options).catch((e: unknown) => e)
+
+			expect(error).toMatchObject({ status, message: "OpenAI completion error: Request failed" })
+		})
+	})
+
 	describe("completePrompt", () => {
 		it("should complete prompt successfully", async () => {
 			const result = await handler.completePrompt("Test prompt")
@@ -970,7 +1056,9 @@ describe("OpenAiHandler", () => {
 
 		it("should handle API errors", async () => {
 			mockCreate.mockRejectedValueOnce(new Error("API Error"))
-			await expect(handler.completePrompt("Test prompt")).rejects.toThrow("OpenAI completion error: API Error")
+			await expect(handler.completePrompt("Test prompt")).rejects.toMatchObject({
+				message: "OpenAI completion error: API Error",
+			})
 		})
 
 		it("should preserve HTTP status when wrapping completion errors", async () => {
