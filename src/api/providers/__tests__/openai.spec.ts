@@ -1,7 +1,9 @@
 // npx vitest run api/providers/__tests__/openai.spec.ts
 
 import { OpenAiHandler, getOpenAiModels } from "../openai"
+import { buildApiHandler } from "../../index"
 import { ApiHandlerOptions } from "../../../shared/api"
+import { providerIdentifiers, type ProviderSettings } from "@roo-code/types"
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI, { AzureOpenAI } from "openai"
 import {
@@ -590,6 +592,80 @@ describe("OpenAiHandler", () => {
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
 			expect(callArgs.reasoning_effort).toBeUndefined()
+		})
+
+		// The chat quick-switch stores its override in `reasoningEffortOverride` and
+		// `buildApiHandler` folds it into the effective settings, so these tests go
+		// through `buildApiHandler` to cover the shipped request path.
+		describe("chat reasoning effort override", () => {
+			const makeHandlerConfig = (overrides: Partial<ProviderSettings> = {}): ProviderSettings => ({
+				apiProvider: providerIdentifiers.openai,
+				openAiApiKey: "test-key",
+				openAiModelId: "test-model",
+				openAiBaseUrl: "https://api.openai.com/v1",
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					supportsPromptCache: false,
+					supportsReasoningEffort: ["low", "medium", "high"],
+					reasoningEffort: "low",
+				},
+				...overrides,
+			})
+
+			it("override beats the OpenAI-compatible custom model info effort on streaming requests", async () => {
+				const handler = buildApiHandler(makeHandlerConfig({ reasoningEffortOverride: "high" }))
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("high")
+			})
+
+			it("keeps the configured effort when no override is set", async () => {
+				const handler = buildApiHandler(makeHandlerConfig())
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("low")
+			})
+
+			it("override applies to non-streaming requests", async () => {
+				const handler = buildApiHandler(
+					makeHandlerConfig({ reasoningEffortOverride: "medium", openAiStreamingEnabled: false }),
+				)
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("medium")
+			})
+
+			it("override 'disable' omits reasoning_effort even when the model info configures an effort", async () => {
+				const handler = buildApiHandler(makeHandlerConfig({ reasoningEffortOverride: "disable" }))
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBeUndefined()
+			})
+
+			it("override outside the model capability falls back to the model default effort", async () => {
+				const handler = buildApiHandler(makeHandlerConfig({ reasoningEffortOverride: "max" }))
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBe("low")
+			})
+
+			it("does not send reasoning_effort for models without reasoning support", async () => {
+				const handler = buildApiHandler(
+					makeHandlerConfig({
+						reasoningEffortOverride: "high",
+						openAiCustomModelInfo: { contextWindow: 128_000, supportsPromptCache: false },
+					}),
+				)
+				await collectStream(handler.createMessage(systemPrompt, messages))
+
+				expect(mockCreate).toHaveBeenCalled()
+				expect(mockCreate.mock.calls[0][0].reasoning_effort).toBeUndefined()
+			})
 		})
 
 		it("should omit temperature when the model sets supportsTemperature to false", async () => {

@@ -13,9 +13,17 @@ vitest.mock("@roo-code/telemetry", () => ({
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { ApiProviderError, OpenAiServiceTier, SERVICE_TIER_KEY, serviceTiers } from "@roo-code/types"
+import {
+	ApiProviderError,
+	OpenAiServiceTier,
+	SERVICE_TIER_KEY,
+	serviceTiers,
+	providerIdentifiers,
+	type ProviderSettings,
+} from "@roo-code/types"
 
 import { OpenAiNativeHandler } from "../openai-native"
+import { buildApiHandler } from "../../index"
 import type { ApiStreamChunk, ApiStreamTextChunk } from "../../../api/transform/stream"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { Package } from "../../../shared/package"
@@ -225,6 +233,57 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			expect(astraHandler["getReasoningEffort"](astraHandler.getModel())).toBe("medium")
+		})
+
+		// The chat quick-switch stores its override in `reasoningEffortOverride` and
+		// `buildApiHandler` folds it into the effective settings, so these tests go
+		// through `buildApiHandler` to cover the shipped request path (one shared
+		// body shapes the SDK stream and the manual SSE fallback alike).
+		describe("chat reasoning effort override", () => {
+			const makeHandlerConfig = (overrides: Partial<ProviderSettings> = {}): ProviderSettings => ({
+				apiProvider: providerIdentifiers.openaiNative,
+				openAiNativeApiKey: "test-key",
+				apiModelId: "gpt-6-astra",
+				...overrides,
+			})
+
+			function getNativeHandlerEffort(overrides: Partial<ProviderSettings> = {}): string | undefined {
+				const built = buildApiHandler(makeHandlerConfig(overrides))
+
+				if (!(built instanceof OpenAiNativeHandler)) {
+					throw new Error("expected buildApiHandler to return an OpenAiNativeHandler")
+				}
+
+				return built["getReasoningEffort"](built.getModel())
+			}
+
+			it("override beats the configured effort", () => {
+				expect(getNativeHandlerEffort({ reasoningEffort: "high", reasoningEffortOverride: "low" })).toBe("low")
+			})
+
+			it("keeps the configured effort when no override is set", () => {
+				expect(getNativeHandlerEffort({ reasoningEffort: "high" })).toBe("high")
+			})
+
+			it("override outside the model capability falls back to the model default effort", () => {
+				// Astra supports low..max; "none" is outside the capability array.
+				expect(getNativeHandlerEffort({ reasoningEffort: "high", reasoningEffortOverride: "none" })).toBe(
+					"medium",
+				)
+			})
+
+			it("override 'disable' uses the required model default", () => {
+				expect(getNativeHandlerEffort({ reasoningEffort: "high", reasoningEffortOverride: "disable" })).toBe(
+					"medium",
+				)
+			})
+
+			it("keeps request shapes unchanged for models without reasoning support", () => {
+				// No configured effort and no override: no reasoning is sent, exactly as
+				// before the quick switch existed. The chat control is hidden for such
+				// models, so no override is reachable from the UI.
+				expect(getNativeHandlerEffort({ apiModelId: "gpt-4.1" })).toBeUndefined()
+			})
 		})
 
 		it.each(serviceTiers)("should include the selected %s service tier", async (serviceTier) => {

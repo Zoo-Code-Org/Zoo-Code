@@ -3116,6 +3116,53 @@ describe("updateProfileModel", () => {
 	})
 })
 
+describe("updateReasoningEffortOverride", () => {
+	let updateProfileReasoningEffort: Mock<ClineProvider["updateProfileReasoningEffort"]>
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+		updateProfileReasoningEffort = vi.fn()
+		mockClineProvider.updateProfileReasoningEffort = updateProfileReasoningEffort
+	})
+
+	it("delegates a valid override message to the provider", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateReasoningEffortOverride",
+			text: "my-profile",
+			values: { expectedProvider: providerIdentifiers.openrouter, effort: "high" },
+		})
+
+		expect(updateProfileReasoningEffort).toHaveBeenCalledWith("my-profile", providerIdentifiers.openrouter, "high")
+	})
+
+	it("delegates a null effort as a request to clear the override", async () => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateReasoningEffortOverride",
+			text: "my-profile",
+			values: { expectedProvider: providerIdentifiers.openrouter, effort: null },
+		})
+
+		expect(updateProfileReasoningEffort).toHaveBeenCalledWith("my-profile", providerIdentifiers.openrouter, null)
+	})
+
+	it.each([
+		["missing profile name", { values: { expectedProvider: providerIdentifiers.openrouter, effort: "low" } }],
+		["missing expectedProvider", { text: "p", values: { effort: "low" } }],
+		[
+			"unknown effort value",
+			{ text: "p", values: { expectedProvider: providerIdentifiers.openrouter, effort: "bogus" } },
+		],
+		["missing values", { text: "p" }],
+	])("ignores a malformed message: %s", async (_label, partial) => {
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateReasoningEffortOverride",
+			...partial,
+		} as unknown as Parameters<typeof webviewMessageHandler>[1])
+
+		expect(updateProfileReasoningEffort).not.toHaveBeenCalled()
+	})
+})
+
 describe("webviewMessageHandler - renameTaskWithId", () => {
 	beforeEach(() => {
 		vi.mocked(mockClineProvider.renameTaskWithId).mockClear()

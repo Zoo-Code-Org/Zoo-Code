@@ -519,5 +519,12 @@
 		"hiddenLines_one": "{{count}} línia oculta",
 		"hiddenLines_many": "{{count}} de línies ocultes",
 		"hiddenLines_other": "{{count}} línies ocultes"
+	},
+	"reasoningEffortSelector": {
+		"title": "Esforç de raonament",
+		"description": "Canvia l'esforç de raonament utilitzat a les sol·licituds d'aquesta configuració. «Per defecte» restaura el paràmetre del perfil.",
+		"default": "Per defecte",
+		"off": "Desactivat",
+		"overrideActive": "La substitució de l'esforç de raonament és activa"
 	}
 }

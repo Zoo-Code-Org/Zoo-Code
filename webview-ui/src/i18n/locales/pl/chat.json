@@ -527,5 +527,12 @@
 		"hiddenLines_few": "{{count}} ukryte wiersze",
 		"hiddenLines_many": "{{count}} ukrytych wierszy",
 		"hiddenLines_other": "{{count}} ukrytego wiersza"
+	},
+	"reasoningEffortSelector": {
+		"title": "Poziom rozumowania",
+		"description": "Przełącza poziom rozumowania używany w żądaniach tej konfiguracji. „Domyślny” przywraca ustawienie profilu.",
+		"default": "Domyślny",
+		"off": "Wył.",
+		"overrideActive": "Zastąpienie poziomu rozumowania jest aktywne"
 	}
 }

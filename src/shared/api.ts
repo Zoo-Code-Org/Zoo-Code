@@ -84,6 +84,35 @@ export const shouldUseReasoningEffort = ({
 	return !!modelDefaultEffort
 }
 
+/**
+ * Folds the chat quick-switch override (`reasoningEffortOverride`) into the
+ * effective reasoning settings for API requests.
+ *
+ * Precedence: chat override > provider profile setting (`reasoningEffort`) >
+ * model default (`model.reasoningEffort`). The profile's saved `reasoningEffort`
+ * and `enableReasoningEffort` values are never rewritten; the override only
+ * changes what the API layer sees for the handlers built from these settings.
+ *
+ * - A concrete effort (including "none") implies reasoning is enabled, so
+ *   `enableReasoningEffort` is folded to `true`.
+ * - "disable" turns reasoning off (`enableReasoningEffort` folded to `false`).
+ * - Without an override the settings pass through untouched, so providers and
+ *   models without reasoning support keep their exact existing request shapes.
+ */
+export const withReasoningEffortOverride = <T extends ProviderSettings>(settings: T): T => {
+	const override = settings.reasoningEffortOverride
+
+	if (override === undefined) {
+		return settings
+	}
+
+	return {
+		...settings,
+		reasoningEffort: override,
+		enableReasoningEffort: override !== "disable",
+	}
+}
+
 export const DEFAULT_HYBRID_REASONING_MODEL_MAX_TOKENS = 16_384
 export const DEFAULT_HYBRID_REASONING_MODEL_THINKING_TOKENS = 8_192
 export const GEMINI_25_PRO_MIN_THINKING_TOKENS = 128

@@ -519,5 +519,12 @@
 		"hiddenLines_one": "{{count}} línea oculta",
 		"hiddenLines_many": "{{count}} de líneas ocultas",
 		"hiddenLines_other": "{{count}} líneas ocultas"
+	},
+	"reasoningEffortSelector": {
+		"title": "Esfuerzo de razonamiento",
+		"description": "Cambia el esfuerzo de razonamiento usado en las solicitudes de esta configuración. «Predeterminado» restablece el ajuste del perfil.",
+		"default": "Predeterminado",
+		"off": "Desactivado",
+		"overrideActive": "La anulación del esfuerzo de razonamiento está activa"
 	}
 }

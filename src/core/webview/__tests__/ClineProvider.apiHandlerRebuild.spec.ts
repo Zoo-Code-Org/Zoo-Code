@@ -5,7 +5,7 @@ import * as vscode from "vscode"
 import { makeCompositeDisposable } from "../../../test-utils/vscode"
 
 import { TelemetryService } from "@roo-code/telemetry"
-import { getModelId, RooCodeEventName } from "@roo-code/types"
+import { getModelId, RooCodeEventName, type ReasoningEffortSetting } from "@roo-code/types"
 
 import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
@@ -817,6 +817,101 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 
 			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
 			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("clears a stale chat reasoning-effort override when the model changes", async () => {
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockResolvedValue({ ...storedProfile, reasoningEffortOverride: "low" })
+
+			await provider.updateProfileModel("test-config", providerIdentifiers.openrouter, {
+				openRouterModelId: "anthropic/claude",
+			})
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const saved = saveConfig.mock.calls[0][1]
+			expect(saved).toMatchObject({ openRouterModelId: "anthropic/claude" })
+			expect(saved).not.toHaveProperty("reasoningEffortOverride")
+		})
+	})
+
+	describe("updateProfileReasoningEffort", () => {
+		const storedProfile = {
+			name: "test-config",
+			id: "test-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4",
+			rateLimitSeconds: 5,
+			reasoningEffort: "high",
+		}
+
+		beforeEach(() => {
+			provider["providerSettingsManager"].getProfile = vi.fn().mockResolvedValue(storedProfile)
+			vi.mocked(vscode.window.showErrorMessage).mockClear()
+		})
+
+		test("stores the override without rewriting the configured effort", async () => {
+			await provider.updateProfileReasoningEffort("test-config", providerIdentifiers.openrouter, "low")
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const saved = saveConfig.mock.calls[0][1]
+			expect(saved).toMatchObject({
+				id: "test-id",
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterModelId: "openai/gpt-4",
+				rateLimitSeconds: 5,
+				reasoningEffort: "high",
+				reasoningEffortOverride: "low",
+			})
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		test("clears the override when the effort is null", async () => {
+			provider["providerSettingsManager"].getProfile = vi
+				.fn()
+				.mockResolvedValue({ ...storedProfile, reasoningEffortOverride: "low" })
+
+			await provider.updateProfileReasoningEffort("test-config", providerIdentifiers.openrouter, null)
+
+			const saveConfig = vi.mocked(provider["providerSettingsManager"].saveConfig)
+			expect(saveConfig).toHaveBeenCalledTimes(1)
+			const saved = saveConfig.mock.calls[0][1]
+			expect(saved).toMatchObject({ reasoningEffort: "high" })
+			expect(saved).not.toHaveProperty("reasoningEffortOverride")
+		})
+
+		test("rejects an unknown effort value", async () => {
+			await provider.updateProfileReasoningEffort(
+				"test-config",
+				providerIdentifiers.openrouter,
+				"bogus" as ReasoningEffortSetting,
+			)
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("rejects the update when the stored provider differs from the expected provider", async () => {
+			await provider.updateProfileReasoningEffort("test-config", providerIdentifiers.anthropic, "low")
+
+			expect(provider["providerSettingsManager"].saveConfig).not.toHaveBeenCalled()
+			expect(vscode.window.showErrorMessage).toHaveBeenCalled()
+		})
+
+		test("rebuilds the current task API handler with the override", async () => {
+			const mockTask = new Task({ ...defaultTaskOptions })
+			mockTask.api = {
+				getModel: vi.fn().mockReturnValue({ id: "openai/gpt-4", info: { contextWindow: 128000 } }),
+			} as unknown as typeof mockTask.api
+			await provider.addClineToStack(mockTask)
+
+			await provider.updateProfileReasoningEffort("test-config", providerIdentifiers.openrouter, "low")
+
+			expect(mockTask.updateApiConfiguration).toHaveBeenCalledWith(
+				expect.objectContaining({ reasoningEffortOverride: "low", reasoningEffort: "high" }),
+			)
 		})
 	})
 

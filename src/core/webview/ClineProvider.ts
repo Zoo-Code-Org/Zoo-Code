@@ -75,6 +75,8 @@ import {
 	isRetiredProvider,
 	modelIdKeys,
 	providerIdentifiers,
+	reasoningEffortSettingValues,
+	type ReasoningEffortSetting,
 } from "@roo-code/types"
 import { RateLimitClock, createRateLimitClock } from "../task/RateLimitClock"
 import { TaskRegistry } from "../task/TaskRegistry"
@@ -2323,6 +2325,12 @@ export class ClineProvider
 
 					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
 
+					// The chat reasoning-effort override was chosen for the previous model.
+					// A model change starts fresh so the new model never inherits an effort
+					// it may not support; the selector shows the new model's default until
+					// the user picks an override again.
+					delete merged.reasoningEffortOverride
+
 					for (const [key, value] of Object.entries(patch)) {
 						if (PROFILE_MODEL_ID_PATCH_KEYS.has(key)) {
 							if (typeof value !== "string" || value.length === 0) {
@@ -2395,6 +2403,71 @@ export class ClineProvider
 					: error instanceof OrganizationAllowListViolationError
 						? error.message
 						: t("common:errors.create_api_config"),
+			)
+		}
+	}
+
+	/**
+	 * Applies a chat reasoning-effort override to the latest stored profile inside the
+	 * mutation queue, mirroring `updateProfileModel` so a stale webview snapshot cannot
+	 * overwrite newer profile settings. A `null` effort clears the override, restoring
+	 * the profile's configured `reasoningEffort` behavior.
+	 *
+	 * The override is stored as a separate key, so the profile's saved reasoning-effort
+	 * setting is never rewritten by the chat quick switch.
+	 */
+	async updateProfileReasoningEffort(
+		name: string,
+		expectedProvider: string,
+		effort: ReasoningEffortSetting | null,
+	): Promise<void> {
+		try {
+			await this.enqueueProviderProfileMutation(
+				async (signal) => {
+					const { name: _name, ...stored } = await this.providerSettingsManager.getProfile({ name })
+
+					// Unset provider (e.g. the seeded default profile) resolves to anthropic, matching getState().
+					const storedProvider = stored.apiProvider ?? providerIdentifiers.anthropic
+
+					if (storedProvider !== expectedProvider) {
+						throw new Error(
+							`Profile "${name}" provider changed from "${expectedProvider}" to "${storedProvider}"`,
+						)
+					}
+
+					const merged: Record<string, unknown> = { ...stored, apiProvider: storedProvider }
+
+					if (effort === null) {
+						delete merged.reasoningEffortOverride
+					} else {
+						if (!(reasoningEffortSettingValues as readonly string[]).includes(effort)) {
+							throw new Error(`"${effort}" is not a valid reasoning effort`)
+						}
+
+						merged.reasoningEffortOverride = effort
+					}
+
+					const { organizationAllowList } = await this.getState()
+
+					if (!ProfileValidator.isProfileAllowed(merged as ProviderSettings, organizationAllowList)) {
+						throw new OrganizationAllowListViolationError(
+							t("common:errors.violated_organization_allowlist"),
+						)
+					}
+
+					if (signal.aborted) return
+
+					await this.persistProviderProfile(name, merged as ProviderSettings, true, signal)
+				},
+				{ runToCompletion: true },
+			)
+		} catch (error) {
+			this.log(`Error update reasoning effort: ${JSON.stringify(error, Object.getOwnPropertyNames(error), 2)}`)
+
+			vscode.window.showErrorMessage(
+				error instanceof OrganizationAllowListViolationError
+					? error.message
+					: t("common:errors.create_api_config"),
 			)
 		}
 	}
