@@ -2594,6 +2594,23 @@ export const webviewMessageHandler = async (
 					// The rename callback never calls this writer, so the wrap cannot nest on itself.
 					await provider.providerSettingsManager.runExclusiveAcrossInstances(async () => {
 						await provider.providerSettingsManager.saveConfig(profileName, profileSettings)
+						// saveConfig normalises the record (schema parse, legacy downgrades): publish
+						// the stored copy to the pinned views rather than the attempted payload, so a field
+						// the selected provider's schema strips cannot keep shadowing the saved profile in
+						// a sibling view until that view reloads. Same read-back as persistProviderProfile;
+						// if the read fails the caller's settings stand, and the next load re-reads the
+						// stored copy.
+						let savedProfileSettings = profileSettings
+						try {
+							const {
+								name: _savedProfileName,
+								id: _savedProfileId,
+								...storedProfileSettings
+							} = await provider.providerSettingsManager.getProfile({ name: profileName })
+							savedProfileSettings = storedProfileSettings as typeof profileSettings
+						} catch {
+							// Best-effort read-back; see the comment above.
+						}
 						const listApiConfig = await provider.providerSettingsManager.listConfig()
 						await updateGlobalState("listApiConfigMeta", listApiConfig)
 						// The save rewrote this profile's settings in the shared store. Every other
@@ -2602,7 +2619,7 @@ export const webviewMessageHandler = async (
 						// upsert path refreshes those views through this helper, and a save to a
 						// pinned profile owes them the same refresh. Inside the section, so a
 						// competing rename cannot interleave with it.
-						await provider.refreshViewLocalStateForUpdatedProfile(profileName, profileSettings)
+						await provider.refreshViewLocalStateForUpdatedProfile(profileName, savedProfileSettings)
 					})
 				} catch (error) {
 					provider.log(
@@ -2795,16 +2812,20 @@ export const webviewMessageHandler = async (
 
 				const oldName = message.text
 
-				const newName = (await provider.providerSettingsManager.listConfig()).filter(
-					(c) => c.name !== oldName,
-				)[0]?.name
+				const profileEntries = await provider.providerSettingsManager.listConfig()
+				const newName = profileEntries.filter((c) => c.name !== oldName)[0]?.name
 
 				if (!newName) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))
 					return
 				}
 
-				const entry = provider.getProviderProfileEntry(oldName)
+				// The deletion target comes from the same fresh listing that just proved a survivor
+				// exists: the metadata snapshot can lag a committed save, so a profile present
+				// here must not be reported missing merely because no view metadata still held it.
+				// The metadata read stays as the fallback for a record that is already gone.
+				const entry =
+					profileEntries.find((c) => c.name === oldName) ?? provider.getProviderProfileEntry(oldName)
 
 				if (!entry) {
 					vscode.window.showErrorMessage(t("common:errors.delete_api_config"))

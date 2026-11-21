@@ -306,6 +306,87 @@ describe("API task controls", () => {
 			}
 		})
 
+		it("waits on readiness when only the resolved-view flag is set", async () => {
+			// Every term of the barrier condition must be load-bearing on its own: with only this
+			// flag true a webview exists, so the bound is a real failure condition and the task
+			// must not be created against the shared defaults while readiness is pending.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = false
+			sidebarProvider.hasResolvedView = true
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "resolved view task" })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits on readiness when only the launch flag is set", async () => {
+			// A launch message alone proves a webview exists even when the view reference was
+			// cleared, so this term keeps the barrier on its own.
+			vi.useFakeTimers()
+			sidebarProvider.viewLaunched = true
+			sidebarProvider.hasResolvedView = false
+			sidebarProvider.viewStateReadiness = new Promise<void>(() => {})
+
+			const started = api.startNewTask({ configuration, text: "launched view task" })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("waits on readiness when only the new-tab flag is set", async () => {
+			// Both view flags are false on a freshly created tab, so this term alone must hold
+			// the barrier: the tab always creates a view, and creating the task before that
+			// view registered its state would start it against shared defaults.
+			vi.useFakeTimers()
+			const newTabProvider = createProvider("new-tab-unready-task")
+			newTabProvider.viewLaunched = false
+			newTabProvider.hasResolvedView = false
+			newTabProvider.viewStateReadiness = new Promise<void>(() => {})
+			openClineInNewTabMock.mockResolvedValue(newTabProvider)
+
+			const started = api.startNewTask({ configuration, text: "unready tab task", newTab: true })
+			const settled = expect(started).rejects.toThrow("Timed out waiting for the view state to become ready")
+			try {
+				await vi.advanceTimersByTimeAsync(50)
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+				await vi.advanceTimersByTimeAsync(2950)
+				await settled
+				expect(newTabProvider.createTask).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("fails task creation when the provider is disposed while the view is being prepared", async () => {
+			// The readiness-stage check has already passed by the time the state posts run, and a
+			// post against a closed tab resolves without delivering anything: createTask must
+			// not build and register a task on a provider that can no longer deliver it.
+			sidebarProvider.postStateToWebview = vi.fn().mockImplementation(async () => {
+				// The tab closes while the state is being posted to it.
+				sidebarProvider.isDisposed = true
+			})
+
+			await expect(api.startNewTask({ configuration, text: "closed tab task" })).rejects.toThrow(
+				"The provider was disposed while preparing the view for a new task",
+			)
+			expect(sidebarProvider.createTask).not.toHaveBeenCalled()
+		})
 		it("fails task creation when the provider is disposed while the readiness wait is pending", async () => {
 			// Disposal resolves viewStateReadiness to release waiters (see ClineProvider.dispose)
 			// and marks the provider disposed first: the wait must then fail instead of
@@ -442,6 +523,63 @@ describe("API task controls", () => {
 			expect(task.handleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "Continue")
 		})
 
+		it("refuses the answer when the task is torn down while its modes are validated", async () => {
+			// Validating modes awaits a state read. A teardown during that read removes the
+			// registration, and switching the mode on the stale entry would move a replacement
+			// task - or a torn-down one - onto another mode.
+			const task = createTask("task-torn-down-during-validation")
+			let resolveState!: () => void
+			const stateRead = new Promise<Awaited<ReturnType<typeof sidebarProvider.getState>>>((resolve) => {
+				resolveState = () => resolve({ customModes: [] })
+			})
+			sidebarProvider.getState.mockImplementation(() => stateRead)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const selecting = api.selectTaskFollowupSuggestion({
+				taskId: task.taskId,
+				answer: "Use architect",
+				mode: "architect",
+			})
+			for (let i = 0; i < 8; i++) {
+				await Promise.resolve()
+			}
+
+			task.emit(RooCodeEventName.TaskAborted)
+			resolveState()
+
+			await expect(selecting).resolves.toBe(false)
+			expect(sidebarProvider.handleModeSwitch).not.toHaveBeenCalled()
+			expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+		})
+
+		it("refuses the answer when the task is torn down during the mode switch", async () => {
+			// The mode switch awaits as well: once the entry is gone the answer belongs to
+			// whoever registers this id next, so it must be reported as not delivered rather
+			// than handed to the captured instance as a success.
+			const task = createTask("task-torn-down-during-switch")
+			let releaseModeSwitch: () => void = () => {}
+			const modeSwitchSettled = new Promise<void>((resolve) => {
+				releaseModeSwitch = resolve
+			})
+			sidebarProvider.handleModeSwitch.mockImplementation(() => modeSwitchSettled)
+			sidebarProvider.emit(RooCodeEventName.TaskCreated, task)
+
+			const selecting = api.selectTaskFollowupSuggestion({
+				taskId: task.taskId,
+				answer: "Use architect",
+				mode: "architect",
+			})
+			for (let i = 0; i < 8; i++) {
+				await Promise.resolve()
+			}
+			expect(sidebarProvider.handleModeSwitch).toHaveBeenCalledWith("architect", task)
+
+			task.emit(RooCodeEventName.TaskAborted)
+			releaseModeSwitch()
+
+			await expect(selecting).resolves.toBe(false)
+			expect(task.handleWebviewAskResponse).not.toHaveBeenCalled()
+		})
 		it("switches to a valid built-in mode before responding", async () => {
 			const task = createTask("task-built-in-mode")
 			// Deferred mode switch: the follow-up answer must stay pending while the

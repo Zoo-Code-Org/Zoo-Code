@@ -2275,6 +2275,70 @@ describe("ClineProvider - Parallel Mode Support", () => {
 			await caller.dispose()
 			await saver.dispose()
 		})
+
+		it("keeps a sibling save that lands during another sibling reset post", async () => {
+			// The reset posts to both siblings. While the first post is awaiting, the second
+			// sibling saves a mode. Clearing every buffer up front keeps that selection:
+			// clearing on each instance own turn would erase the live state after the save
+			// had already written its durable pin, so the mode would flip back on reload while
+			// the pin stayed put.
+			const stalledView = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const lateSaver = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const caller = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await stalledView.resolveWebviewView(createMockWebviewView())
+			await lateSaver.resolveWebviewView(createMockWebviewView())
+			await caller.resolveWebviewView(createMockWebviewView())
+
+			let resolvePost: () => void = () => {}
+			const postGate = new Promise<void>((resolve) => {
+				resolvePost = resolve
+			})
+			// Assignment rather than spyOn: postStateToWebview is public, and the broadcast
+			// calls it through the instance, so replacing it here is observable.
+			const stalledPost = vi.fn(async () => {
+				await postGate
+			})
+			stalledView.postStateToWebview = stalledPost
+
+			const broadcast = caller.broadcastResetToAllInstances()
+			await vi.waitFor(() => expect(stalledPost).toHaveBeenCalled())
+
+			// The save lands after the durable clear, while the first sibling is still posting.
+			await lateSaver.saveViewState("mode", "architect")
+
+			resolvePost()
+			await broadcast
+
+			// The saving view keeps its selection in the live state instead of reverting to
+			// the cleared buffers, and the pin it wrote after the reset is what survives.
+			expect(lateSaver["viewLocalState"]).toEqual(expect.objectContaining({ mode: "architect" }))
+			const storedViewStates = mockContext.globalState.get("viewStates") as
+				Record<string, { mode?: string }> | undefined
+			expect(Object.values(storedViewStates ?? {})).toEqual([expect.objectContaining({ mode: "architect" })])
+
+			await caller.dispose()
+			await stalledView.dispose()
+			await lateSaver.dispose()
+		})
 	})
 
 	describe("_clearViewLocalState", () => {

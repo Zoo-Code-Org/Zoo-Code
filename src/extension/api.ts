@@ -342,6 +342,13 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 				segments: userSegments(text ?? ""),
 			}
 
+			// The posts above are no-ops on a closed tab, and a view disposed while they were
+			// running has already passed the readiness-stage check: re-check here rather than
+			// build and register a task whose provider can no longer deliver anything.
+			if (provider.isDisposed) {
+				throw new Error("The provider was disposed while preparing the view for a new task")
+			}
+
 			const task = await provider.createTask(text, images, undefined, options, configuration)
 
 			if (!task) {
@@ -619,6 +626,17 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 		if (mode) {
 			try {
 				const { customModes } = await entry.provider.getState()
+
+				// Validating modes awaited a state read: a teardown during it removes the entry,
+				// and switching on a stale one would move a replacement task - or a torn-down one
+				// - onto another mode.
+				if (this.tasksById.get(taskId)?.task !== entry.task) {
+					this.log(
+						`[API#selectTaskFollowupSuggestion] task ${taskId} was replaced or removed while its modes were validated`,
+					)
+					return false
+				}
+
 				const isValidMode = getAllModes(customModes).some((modeConfig) => modeConfig.slug === mode)
 
 				if (isValidMode) {
@@ -636,6 +654,15 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI, RooC
 					`[API#selectTaskFollowupSuggestion] mode switch failed for task ${taskId}: ${error instanceof Error ? error.message : String(error)}`,
 				)
 			}
+		}
+
+		// The mode switch above awaits: a teardown during it removes the entry, and the
+		// answer must not be delivered to an instance that no longer owns this task id.
+		if (this.tasksById.get(taskId)?.task !== entry.task) {
+			this.log(
+				`[API#selectTaskFollowupSuggestion] task ${taskId} was replaced or removed before its follow-up answer was delivered`,
+			)
+			return false
 		}
 
 		entry.task.handleWebviewAskResponse("messageResponse", answer)

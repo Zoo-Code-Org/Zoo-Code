@@ -4710,7 +4710,7 @@ describe("ClineProvider", () => {
 			expect(await settled).toBe(true)
 		})
 
-		it("settles viewStateReadiness when the launch carries no usable view id", async () => {
+		it("settles viewStateReadiness when the launch carries no view-state id", async () => {
 			const provider = new ClineProvider(
 				mockContext,
 				mockOutputChannel,
@@ -4718,17 +4718,40 @@ describe("ClineProvider", () => {
 				new ContextProxy(mockContext),
 				new WebviewFocusTracker(),
 			)
-			const readiness = provider.viewStateReadiness
-
-			const settled = readiness.then(
+			const settled = provider.viewStateReadiness.then(
 				() => true,
 				() => false,
 			)
 
 			// The CLI launch sends the registration message without a view-state id: the
-			// early return must still settle readiness so API-driven task creation does
-			// not fall through to its timeout waiting for a state that never registers.
+			// non-string early return must settle readiness on its own, or API-driven task
+			// creation falls through to its timeout waiting for a state that never registers.
+			// This provider never receives the blank-id call below, so that resolve cannot be
+			// what settles this assertion.
 			await provider["setViewStateId"](undefined)
+
+			expect(await settled).toBe(true)
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+
+			await provider.dispose()
+		})
+
+		it("settles viewStateReadiness when the launch carries a blank view-state id", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const settled = provider.viewStateReadiness.then(
+				() => true,
+				() => false,
+			)
+
+			// An id that normalises away is a different early return, reached by a launch that
+			// did send a string: it needs its own provider so the undefined case above cannot
+			// be what settles this one.
 			await provider["setViewStateId"]("   ")
 
 			expect(await settled).toBe(true)

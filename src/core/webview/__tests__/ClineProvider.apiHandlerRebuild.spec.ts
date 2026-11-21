@@ -960,6 +960,46 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			}
 		})
 
+		test("a timed-out activation stops before the abandoned profile is stored", async () => {
+			// The sibling snapshot runs before the manager write. When the queue times the
+			// activation out during that snapshot, the queue has already released the next
+			// mutation: storing the abandoned profile here would move the shared selection
+			// back to it while the view and ContextProxy report the activation that ran next.
+			vi.useFakeTimers()
+			let releaseSnapshot: () => void = () => {}
+			let snapshotFinished = false
+			const snapshot = new Promise<void>((resolve) => {
+				releaseSnapshot = resolve
+			})
+			// Direct assignment: both members are private, and the bracket access keeps the
+			// substitution compile-time safe without a structural cast.
+			provider["snapshotSiblingOverlaysBeforeSharedSettingsWrite"] = vi.fn(async () => {
+				await snapshot
+				snapshotFinished = true
+			})
+			const activateProfile = vi.fn().mockResolvedValue({
+				name: "stalled-profile",
+				id: "stalled-id",
+				apiProvider: providerIdentifiers.openrouter,
+			})
+			provider["providerSettingsManager"].activateProfile = activateProfile
+
+			try {
+				const activation = provider.activateProviderProfile({ name: "stalled-profile" })
+				const timedOut = expect(activation).rejects.toThrow("Provider profile mutation timed out")
+				await vi.advanceTimersByTimeAsync(ClineProvider.PENDING_OPERATION_TIMEOUT_MS)
+				await timedOut
+
+				// The snapshot finishes after the queue let the next mutation start: the aborted
+				// activation resumes here and must stop before the storage write.
+				releaseSnapshot()
+				await vi.advanceTimersByTimeAsync(10)
+				expect(snapshotFinished).toBe(true)
+				expect(activateProfile).not.toHaveBeenCalled()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
 		test("mode switch preserves its default task when queued behind a profile mutation", async () => {
 			let releaseProfileActivation!: () => void
 			const profileActivation = new Promise<void>((resolve) => {

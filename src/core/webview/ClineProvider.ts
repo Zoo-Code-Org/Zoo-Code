@@ -3863,6 +3863,12 @@ export class ClineProvider
 			await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(activatedProfileName)
 		}
 
+		// A caller that gave up before this point must not claim the shared store: checking only
+		// after activateProfile has already moved the selected profile to the one this activation
+		// no longer intends to apply, while the view and ContextProxy keep reporting the
+		// activation that the queue let finish next.
+		if (signal?.aborted) return
+
 		const { name, id, ...providerSettings } = await this.providerSettingsManager.activateProfile(args)
 
 		// The manager has now written the activated profile: from here on a failure
@@ -5708,13 +5714,19 @@ export class ClineProvider
 		ClineProvider.persistedViewStateWriteQueue = clearWrite.catch(() => {})
 		await clearWrite
 
+		// Clear every buffer synchronously before posting to any instance: a sibling that
+		// saves after the durable clear while an earlier sibling's post is still awaiting
+		// would otherwise be cleared on its own turn, losing its live selection while the
+		// durable pin it just wrote survived, so its mode would change again on reload.
 		for (const instance of allInstances) {
 			// Clear the in-memory buffer only after the queued durable clear has run:
 			// a save enqueued before the clear writes its captured value back into the
 			// buffer when its durable write completes, so an immediate clear would let
 			// that stale pin survive in the live state.
 			instance._clearViewLocalState()
+		}
 
+		for (const instance of allInstances) {
 			if (instance !== this) {
 				// A sibling's post can throw mid-reset (state generation reaches the
 				// settings file through customModesManager.getCustomModes): the failure

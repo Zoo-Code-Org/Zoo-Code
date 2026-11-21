@@ -1185,6 +1185,23 @@ describe("webviewMessageHandler - deleteApiConfiguration", () => {
 		)
 		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
 	})
+
+	it("deletes a listed profile that no view metadata still holds", async () => {
+		// The survivor check reads the manager listing; the deletion target must come from
+		// that same listing. A save can commit while the metadata refresh fails, and then
+		// the profile exists even though no view metadata names it - refusing on the
+		// metadata alone rejects a deletion of a profile that is right there.
+		provider.getProviderProfileEntry = vi.fn().mockReturnValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "deleteApiConfiguration",
+			text: "deleted-profile",
+		})
+
+		expect(provider.deleteProviderProfile).toHaveBeenCalledWith(
+			expect.objectContaining({ name: "deleted-profile", id: "deleted-id" }),
+		)
+	})
 })
 
 describe("webviewMessageHandler - requestLmStudioModels", () => {
@@ -3018,6 +3035,74 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		expect(events.at(-1)).toBe("exit")
 	})
 
+	it("re-points the views back and drops the new record when the forward delete fails", async () => {
+		const events: string[] = []
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances: async (cb: () => Promise<unknown>) => {
+				events.push("enter")
+				try {
+					return await cb()
+				} finally {
+					events.push("exit")
+				}
+			},
+			hasConfig: vi.fn(async () => {
+				events.push("hasConfig")
+				return false
+			}),
+			getProfile: vi.fn(async () => {
+				events.push("getProfile")
+				return { id: "old-id", apiProvider: providerIdentifiers.anthropic }
+			}),
+			saveConfig: vi.fn(async () => {
+				events.push("saveConfig")
+			}),
+			deleteConfig: vi.fn(async (name: string) => {
+				events.push("delete:" + name)
+				// The forward delete is what fails here: another writer removed the old record
+				// for a reason that is not a not-found, so the rename must undo its own work
+				// rather than leave the views pinned to a name nobody owns. The successful
+				// rename above never reaches this path, so it cannot pin it.
+				if (name === "old-profile") {
+					throw new Error("delete rejected")
+				}
+			}),
+		}
+		// The direction is recorded because the forward and the reverse re-point use the same
+		// member: without naming the endpoints, dropping the compensation call entirely still
+		// leaves the forward re-point in the trace and the assertion passes.
+		provider.repointViewLocalStateAfterProfileRename = vi.fn(async (from: string, to: string) => {
+			events.push("repoint:" + from + "->" + to)
+		})
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// Compensation ran inside the section the rename entered: the views re-pointed to
+		// the new name are re-pointed back, and the record written under the new name is
+		// removed, before the section closes.
+		const enter = events.indexOf("enter")
+		const exit = events.indexOf("exit")
+		expect(enter).toBe(0)
+		expect(events.filter((event) => event === "enter")).toHaveLength(1)
+		expect(exit).toBe(events.length - 1)
+		const rolledBack = events.indexOf("repoint:new-profile->old-profile")
+		// The reverse re-point ran (the forward one went the other way), and it ran inside the
+		// section the rename entered, before the record written under the new name was removed.
+		expect(rolledBack).toBeGreaterThan(-1)
+		expect(rolledBack).toBeLessThan(exit)
+		const droppedNew = events.indexOf("delete:new-profile")
+		expect(droppedNew).toBeGreaterThan(-1)
+		expect(droppedNew).toBeLessThan(exit)
+		expect(droppedNew).toBeGreaterThan(rolledBack)
+		// A rename that rolled itself back must not re-activate the new name.
+		expect(provider.activateProviderProfile).not.toHaveBeenCalled()
+	})
+
 	it("re-points views pinned to the old name before the old name is deleted", async () => {
 		const order: string[] = []
 		provider.providerSettingsManager = {
@@ -3403,6 +3488,9 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 	const provider = mockClineProvider as unknown as {
 		providerSettingsManager: {
 			saveConfig: ReturnType<typeof vi.fn>
+			// Optional: the handler reads the stored record back best-effort, so fixtures that
+			// do not exercise the read-back leave it out and the caller payload stands.
+			getProfile?: ReturnType<typeof vi.fn>
 			listConfig: ReturnType<typeof vi.fn>
 			runExclusiveAcrossInstances: (cb: () => Promise<unknown>) => Promise<unknown>
 		}
@@ -3482,6 +3570,13 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 		provider.providerSettingsManager = {
 			runExclusiveAcrossInstances,
 			saveConfig: vi.fn().mockResolvedValue(undefined),
+			// saveConfig normalises what it writes: this is the record that landed, with the
+			// provider-specific field the selected provider schema strips already gone.
+			getProfile: vi.fn().mockResolvedValue({
+				name: "saved-profile",
+				id: "saved-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}),
 			listConfig: vi.fn().mockResolvedValue([{ name: "saved-profile", id: "saved-id" }]),
 		}
 		const refresh = vi.fn().mockResolvedValue(undefined)
@@ -3496,9 +3591,37 @@ describe("webviewMessageHandler - saveApiConfiguration", () => {
 
 		// The save rewrote the shared record. Every other view pinned to that profile is
 		// still shadowing the pre-save settings with its own buffer, so it gets the same
-		// refresh an upsert gives it - with the settings that were just saved.
-		expect(refresh).toHaveBeenCalledWith("saved-profile", profileSettings)
+		// refresh an upsert gives it - with the settings that actually landed. Publishing
+		// the attempted payload instead leaves a pinned view holding a field the store
+		// rejected until that view reloads.
+		expect(refresh).toHaveBeenCalledWith("saved-profile", {
+			apiProvider: providerIdentifiers.anthropic,
+		})
 		expect(refresh).toHaveBeenCalledOnce()
+	})
+
+	it("keeps the caller settings when the stored record cannot be read back", async () => {
+		section = Promise.resolve()
+		provider.providerSettingsManager = {
+			runExclusiveAcrossInstances,
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			getProfile: vi.fn().mockRejectedValue(new Error("read-back failed")),
+			listConfig: vi.fn().mockResolvedValue([{ name: "saved-profile", id: "saved-id" }]),
+		}
+		const refresh = vi.fn().mockResolvedValue(undefined)
+		provider.refreshViewLocalStateForUpdatedProfile = refresh
+		const profileSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "rotated-key" }
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "saveApiConfiguration",
+			text: "saved-profile",
+			apiConfiguration: profileSettings,
+		})
+
+		// The record landed even though reading it back failed, so the pinned views are
+		// still refreshed with the caller settings and the next load re-reads the stored
+		// copy. This is the control for the case above: dropping the fallback reddens it.
+		expect(refresh).toHaveBeenCalledWith("saved-profile", profileSettings)
 	})
 
 	it("does not refresh the pinned siblings when the save itself fails", async () => {
