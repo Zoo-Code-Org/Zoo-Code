@@ -1,5 +1,8 @@
-import type { ModelInfo } from "../model.js"
-import type { NanoGptRoutingPreference } from "../provider-settings/nanogpt.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 export const NANOGPT_BASE_URL = "https://nano-gpt.com/api/v1"
 
@@ -55,3 +58,24 @@ export function applyNanoGptRoutingPreference(modelId: string, preference: NanoG
 		? canonicalId
 		: `${canonicalId}:${ROUTING_SUFFIX_BY_PREFERENCE[preference]}`
 }
+
+const NANOGPT_MODEL_ID_FIELD = "nanoGptModelId"
+
+export const nanoGptRoutingPreferences = ["auto", "fast", "cheap", "latency", "throughput", "tools", "caching"] as const
+
+export const nanoGptRoutingPreferenceSchema = z.enum(nanoGptRoutingPreferences)
+export type NanoGptRoutingPreference = z.infer<typeof nanoGptRoutingPreferenceSchema>
+export const nanoGptDefaultRoutingPreference: NanoGptRoutingPreference = "auto"
+
+export const nanoGptProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.nanogpt,
+	modelIdKey: NANOGPT_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(NANOGPT_MODEL_ID_FIELD),
+	getDefaultModelId: () => nanoGptDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		nanoGptApiKey: z.string().optional(),
+		[NANOGPT_MODEL_ID_FIELD]: z.string().optional(),
+		nanoGptRoutingPreference: nanoGptRoutingPreferenceSchema.optional(),
+	},
+})

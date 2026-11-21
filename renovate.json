@@ -102,6 +102,12 @@
 			"allowedVersions": "22.x"
 		},
 		{
+			"description": "Update Playwright test runners and CI/local browser images together because their versions must match.",
+			"matchPackageNames": ["@playwright/test", "playwright", "playwright-core", "mcr.microsoft.com/playwright"],
+			"groupName": "Playwright",
+			"groupSingleUpdates": true
+		},
+		{
 			"description": "Update extension-host VS Code types only with an intentional minimum-version review.",
 			"matchPackageNames": ["@types/vscode"],
 			"enabled": false

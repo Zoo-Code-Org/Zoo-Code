@@ -41,8 +41,23 @@ function fixture(files, run, includeWebview = false) {
 			}),
 		)
 		if (includeWebview) {
-			write("webview-ui/package.json", JSON.stringify({ name: "fixture-webview", private: true }))
+			write(
+				"webview-ui/package.json",
+				JSON.stringify({
+					name: "fixture-webview",
+					private: true,
+					scripts: { dev: "vite" },
+					devDependencies: { vite: "8.0.0" },
+				}),
+			)
+			write("webview-ui/vite.config.ts", "export default {}\n")
+			write("webview-ui/index.html", '<script type="module" src="/src/index.tsx"></script>\n')
 			write("webview-ui/src/index.tsx", 'console.log("application entry")\n')
+			symlinkSync(
+				path.join(root, "webview-ui/node_modules"),
+				path.join(directory, "webview-ui/node_modules"),
+				"junction",
+			)
 		}
 		write("src/extension.ts", 'import { live } from "./helper"\nconsole.log(live)\n')
 		write("src/helper.ts", "export const live = 1\n")

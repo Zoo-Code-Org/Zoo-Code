@@ -45,11 +45,13 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.90.0의 새로운 기능
+## Zoo Code v3.98.1의 새로운 기능
 
-- ✨ **Provider와 모델:** GitHub Copilot이 이제 provider입니다. 로그인하면 Zoo Code가 Copilot 모델을 불러옵니다. IO Intelligence는 자체 API 키를 쓰는 provider입니다. Gemini 4 Argon은 Gemini와 Vertex에 있습니다. GPT-6 Luna는 OpenCode Go에 있습니다. Gemini 4 Argon과 GPT-6 Luna는 Zoo Gateway에도 있습니다.
-- 🧭 **도구 실행:** 같은 도구 호출을 반복하면 경고가 나오고, 그다음 Zoo Code가 그 루프를 멈춥니다. `attempt_completion`을 꺼도 작업이 끝나지 못하는 상태가 되지 않습니다. 대기 중인 메시지는 직접 보내는 명령과 같은 명령 보호 검사를 거칩니다.
-- ⚡ **추론과 스트리밍:** Anthropic adaptive thinking이 채팅에 표시되고 thinking token이 집계됩니다. R1 토글은 llama.cpp, Ollama, LM Studio의 추론을 유지합니다. Codex는 보이는 요약과 함께 암호화된 추론을 유지합니다. VS Code language model 스트림은 스트림이 실패하면 guarded recovery를 사용합니다.
+- 💫Zoo Gateway 계정에 금액에 관계없이 잔액이 있으면 12월 1일까지 GLM-5.3-Flash를 무제한으로 사용하는 Zoo Pass를 무료로 체험할 수 있습니다.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 모델과 추론: GPT-6.2 Sol, GPT-6.2 Astra, Claude Sonnet 5.5를 사용하세요. 각 LiteLLM 프로필의 추론 수준을 설정하세요.
+- 🛡️ 보안: 스킬 및 명령 메타데이터 분석, 멘션 처리, 제공업체 링크, CLI 승인 검사를 개선했습니다.
+- 🔧 수정: OpenAI 서비스 등급 비용을 수정하고 작업 공간의 심볼릭 링크를 인식하며 UI 번역을 추가했습니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

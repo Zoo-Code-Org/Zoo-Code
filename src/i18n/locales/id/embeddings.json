@@ -1,5 +1,4 @@
 {
-	"unknownError": "Error tidak dikenal",
 	"authenticationFailed": "Gagal membuat embeddings: Autentikasi gagal. Silakan periksa API key Anda.",
 	"failedWithStatus": "Gagal membuat embeddings setelah {{attempts}} percobaan: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "Gagal membuat embeddings setelah {{attempts}} percobaan: {{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "Konfigurasi embedder tidak valid. Harap tinjau pengaturan Anda.",
 		"serviceUnavailable": "Layanan embedder tidak tersedia. Pastikan layanan tersebut berjalan dan dapat diakses.",
 		"invalidEndpoint": "Endpoint API tidak valid. Silakan periksa konfigurasi URL Anda.",
-		"invalidEmbedderConfig": "Konfigurasi embedder tidak valid. Silakan periksa pengaturan Anda.",
-		"invalidApiKey": "Kunci API tidak valid. Silakan periksa konfigurasi kunci API Anda.",
-		"invalidBaseUrl": "URL dasar tidak valid. Silakan periksa konfigurasi URL Anda.",
-		"invalidModel": "Model tidak valid. Silakan periksa konfigurasi model Anda.",
 		"invalidResponse": "Respons tidak valid dari layanan embedder. Silakan periksa konfigurasi Anda.",
 		"apiKeyRequired": "Kunci API diperlukan untuk embedder ini",
 		"baseUrlRequired": "URL dasar diperlukan untuk embedder ini"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "Konfigurasi OpenAI tidak ada untuk membuat embedder",
 		"ollamaConfigMissing": "Konfigurasi Ollama tidak ada untuk membuat embedder",
-		"openAiCompatibleConfigMissing": "Konfigurasi yang kompatibel dengan OpenAI tidak ada untuk membuat embedder",
 		"geminiConfigMissing": "Konfigurasi Gemini tidak ada untuk membuat embedder",
 		"mistralConfigMissing": "Konfigurasi Mistral hilang untuk pembuatan embedder",
 		"openRouterConfigMissing": "Konfigurasi OpenRouter hilang untuk pembuatan embedder",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks. Ini biasanya menunjukkan masalah konfigurasi embedder.",
-		"indexingFailedCritical": "Pengindeksan gagal: Tidak ada blok kode yang berhasil diindeks meskipun menemukan file untuk diproses. Ini menunjukkan kegagalan kritis embedder.",
 		"fileWatcherStarted": "Pemantau file dimulai.",
 		"fileWatcherStopped": "Pemantau file dihentikan.",
 		"failedDuringInitialScan": "Gagal selama pemindaian awal: {{errorMessage}}",

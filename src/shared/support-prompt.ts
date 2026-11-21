@@ -1,7 +1,15 @@
-// Support prompts
-type PromptParams = Record<string, string | any[]>
+import type { MentionSegment } from "@roo-code/types"
 
-const generateDiagnosticText = (diagnostics?: any[]) => {
+// Support prompts
+type PromptDiagnostic = {
+	source?: string
+	message: string
+	code?: string | number | { value: string | number; target: unknown }
+}
+
+type PromptParams = { diagnostics?: PromptDiagnostic[] } & Record<string, string | PromptDiagnostic[] | undefined>
+
+const generateDiagnosticText = (diagnostics?: PromptDiagnostic[]) => {
 	if (!diagnostics?.length) return ""
 	return `\nCurrent problems detected:\n${diagnostics
 		.map((d) => `- [${d.source || "Error"}] ${d.message}${d.code ? ` (${d.code})` : ""}`)
@@ -11,7 +19,7 @@ const generateDiagnosticText = (diagnostics?: any[]) => {
 export const createPrompt = (template: string, params: PromptParams): string => {
 	return template.replace(/\${(.*?)}/g, (_, key) => {
 		if (key === "diagnosticText") {
-			return generateDiagnosticText(params["diagnostics"] as any[])
+			return generateDiagnosticText(params["diagnostics"])
 			// eslint-disable-next-line no-prototype-builtins
 		} else if (params.hasOwnProperty(key)) {
 			// Ensure the value is treated as a string for replacement
@@ -44,6 +52,7 @@ type SupportPromptType =
 	| "TERMINAL_FIX"
 	| "TERMINAL_EXPLAIN"
 	| "NEW_TASK"
+	| "TASK_TITLE"
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
 	ENHANCE: {
@@ -240,16 +249,46 @@ Please provide:
 	NEW_TASK: {
 		template: `\${userInput}`,
 	},
+	TASK_TITLE: {
+		template: `Write a short title (5-10 words) for the task described in the user prompt below. Use the same language as the user prompt. Reply with only the title - no quotes, no trailing punctuation, no explanations.
+
+User prompt:
+\${userInput}`,
+	},
 } as const
 
 export const supportPrompt = {
 	default: Object.fromEntries(Object.entries(supportPromptConfigs).map(([key, config]) => [key, config.template])),
-	get: (customSupportPrompts: Record<string, any> | undefined, type: SupportPromptType): string => {
+	get: (customSupportPrompts: Record<string, string | undefined> | undefined, type: SupportPromptType): string => {
 		return customSupportPrompts?.[type] ?? supportPromptConfigs[type].template
 	},
-	create: (type: SupportPromptType, params: PromptParams, customSupportPrompts?: Record<string, any>): string => {
+	create: (
+		type: SupportPromptType,
+		params: PromptParams,
+		customSupportPrompts?: Record<string, string | undefined>,
+	): string => {
 		const template = supportPrompt.get(customSupportPrompts, type)
 		return createPrompt(template, params)
+	},
+	/**
+	 * Builds the prompt as segments. Only the `userInput` parameter is `user`.
+	 * Every other part of the template and its parameters is `generated`.
+	 */
+	createSegments: (
+		type: SupportPromptType,
+		params: PromptParams,
+		customSupportPrompts?: Record<string, string | undefined>,
+	): MentionSegment[] => {
+		const template = supportPrompt.get(customSupportPrompts, type)
+		const mark = `\u0000${globalThis.crypto.randomUUID()}\u0000`
+		const userInput = typeof params["userInput"] === "string" ? params["userInput"] : ""
+		const parts = createPrompt(template, { ...params, userInput: mark }).split(mark)
+		const segments: MentionSegment[] = []
+		parts.forEach((part, index) => {
+			if (part) segments.push({ text: part, source: "generated" })
+			if (index < parts.length - 1 && userInput) segments.push({ text: userInput, source: "user" })
+		})
+		return segments
 	},
 } as const
 

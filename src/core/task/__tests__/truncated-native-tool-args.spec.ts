@@ -21,7 +21,7 @@
  */
 
 import { isValidToolName } from "../../tools/validateToolUse"
-import type { ToolUse, WriteToFileToolUse } from "../../../shared/tools"
+import type { ToolUse } from "../../../shared/tools"
 
 describe("Truncated native tool-call args on finalize failure (issue #1221)", () => {
 	/**
@@ -60,7 +60,7 @@ describe("Truncated native tool-call args on finalize failure (issue #1221)", ()
 		// A write_to_file call whose `content` was cut off mid-stream - exactly
 		// the scenario in #1221. The streaming phase already populated nativeArgs
 		// from the incomplete partial-json parse before finalize failed.
-		const truncated: WriteToFileToolUse = {
+		const truncated: ToolUse<"write_to_file"> = {
 			type: "tool_use",
 			name: "write_to_file",
 			params: {},
@@ -76,7 +76,7 @@ describe("Truncated native tool-call args on finalize failure (issue #1221)", ()
 	})
 
 	it("companion: without the fix, the same truncated call would NOT have been blocked", () => {
-		const truncated: WriteToFileToolUse = {
+		const truncated: ToolUse<"write_to_file"> = {
 			type: "tool_use",
 			name: "write_to_file",
 			params: {},
@@ -100,7 +100,7 @@ describe("Truncated native tool-call args on finalize failure (issue #1221)", ()
 		// with the freshly-finalized one instead of taking this branch at all -
 		// this test just confirms a complete, valid nativeArgs is never touched
 		// by wouldBeBlocked's guard simulation.
-		const complete: WriteToFileToolUse = {
+		const complete: ToolUse<"write_to_file"> = {
 			type: "tool_use",
 			name: "write_to_file",
 			params: {},

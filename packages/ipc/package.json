@@ -5,6 +5,7 @@
 	"type": "module",
 	"exports": "./src/index.ts",
 	"scripts": {
+		"test": "node --import tsx --test src/__tests__/*.test.ts",
 		"lint": "eslint src --ext=ts --max-warnings=0",
 		"check-types": "tsc --noEmit",
 		"clean": "rimraf .turbo"
@@ -16,7 +17,7 @@
 	"devDependencies": {
 		"@roo-code/config-eslint": "workspace:^",
 		"@roo-code/config-typescript": "workspace:^",
-		"@types/node": "22.20.1",
+		"@types/node": "catalog:",
 		"@types/node-ipc": "9.2.3"
 	}
 }

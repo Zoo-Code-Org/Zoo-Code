@@ -1,5 +1,6 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-unknown-tool.spec.ts
 
+import { DispatchState } from "../../task/dispatchState"
 import { describe, it, expect, beforeEach, vi } from "vitest"
 import { presentAssistantMessage } from "../presentAssistantMessage"
 import { isValidToolName, validateToolUse } from "../../tools/validateToolUse"
@@ -42,8 +43,8 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
@@ -243,7 +244,7 @@ describe("presentAssistantMessage - Unknown Tool Handling", () => {
 		expect(mockTask.say).toHaveBeenCalledTimes(2)
 		expect(mockTask.say).toHaveBeenNthCalledWith(1, "text", "streaming", undefined, true)
 		expect(mockTask.say).toHaveBeenNthCalledWith(2, "text", "updated", undefined, true)
-		expect(mockTask.presentAssistantMessageHasPendingUpdates).toBe(false)
+		expect(mockTask.pendingWork).toBeNull()
 		expect(mockTask.currentStreamingContentIndex).toBe(0)
 	})
 

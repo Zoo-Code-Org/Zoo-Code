@@ -15,12 +15,6 @@ const rooCodeTypesShimImporters = [
 	"/webview-ui/src/components/settings/UISettings.tsx",
 ]
 
-// Every story gets the Vitest toolkit mock, which draws a text field's label
-// below its input. These importers get the real toolkit so the story looks
-// like the extension. Add an importer here only with its own baseline.
-const realToolkitImporters = ["/settings/providers/Ollama.tsx"]
-const toolkitMock = path.resolve(webviewRoot, "src/__mocks__/@vscode/webview-ui-toolkit/react.tsx")
-
 export default defineConfig({
 	root: path.resolve(dirname, "gallery"),
 	plugins: [
@@ -35,15 +29,6 @@ export default defineConfig({
 				) {
 					return rooCodeTypesShim
 				}
-			},
-		},
-		{
-			name: "playwright-gallery-toolkit-mock",
-			enforce: "pre",
-			resolveId(source, importer) {
-				if (source !== "@vscode/webview-ui-toolkit/react") return
-				if (importer && realToolkitImporters.some((suffix) => importer.endsWith(suffix))) return
-				return toolkitMock
 			},
 		},
 		react({
@@ -63,10 +48,6 @@ export default defineConfig({
 				find: "@src/context/ExtensionStateContext",
 				replacement: path.resolve(dirname, "ExtensionStateContext.tsx"),
 			},
-			{
-				find: "@src/i18n/TranslationContext",
-				replacement: path.resolve(dirname, "TranslationContext.ts"),
-			},
 			{ find: "@", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@src", replacement: path.resolve(webviewRoot, "src") },
 			{ find: "@roo", replacement: path.resolve(webviewRoot, "../src/shared") },
@@ -82,8 +63,9 @@ export default defineConfig({
 		"process.env.PKG_RELEASE_CHANNEL": JSON.stringify("stable"),
 	},
 	optimizeDeps: {
-		// Pre-bundle the real toolkit (see realToolkitImporters). If Vite finds it
-		// during the first page load, it re-optimizes and reloads mid-test.
+		// Pre-bundle the real toolkit: every story now renders the same toolkit
+		// custom elements the extension uses. If Vite finds it during the first
+		// page load, it re-optimizes and reloads mid-test.
 		include: ["@vscode/webview-ui-toolkit/react"],
 		exclude: ["@vscode/codicons"],
 	},

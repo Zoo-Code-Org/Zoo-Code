@@ -1,5 +1,6 @@
 import * as fs from "fs"
 import * as path from "path"
+import type { Mock } from "vitest"
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import { clearAllMocks, restoreGlobals } from "../../../test-utils/reset"
@@ -26,7 +27,9 @@ vi.mock("fs", () => ({
 }))
 
 describe("OutputInterceptor", () => {
-	let mockWriteStream: any
+	// WriteStream double provides write()/end(callback)/on() mocks.
+	type MockWriteStream = fs.WriteStream & { write: Mock; end: Mock; on: Mock }
+	let mockWriteStream: MockWriteStream
 	let storageDir: string
 
 	beforeEach(() => {
@@ -42,10 +45,10 @@ describe("OutputInterceptor", () => {
 				if (callback) callback()
 			}),
 			on: vi.fn(),
-		}
+		} as unknown as MockWriteStream
 
 		vi.mocked(fs.existsSync).mockReturnValue(true)
-		vi.mocked(fs.createWriteStream).mockReturnValue(mockWriteStream as any)
+		vi.mocked(fs.createWriteStream).mockReturnValue(mockWriteStream)
 	})
 
 	afterEach(() => {
@@ -356,7 +359,9 @@ describe("OutputInterceptor", () => {
 	describe("Cleanup methods", () => {
 		it("should clean up all artifacts in directory", async () => {
 			const mockFiles = ["cmd-12345.txt", "cmd-67890.txt", "other-file.txt", "cmd-11111.txt"]
-			vi.mocked(fs.promises.readdir).mockResolvedValue(mockFiles as any)
+			vi.mocked(fs.promises.readdir).mockResolvedValue(
+				mockFiles as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>,
+			)
 			vi.mocked(fs.promises.unlink).mockResolvedValue(undefined)
 
 			await OutputInterceptor.cleanup(storageDir)
@@ -378,7 +383,9 @@ describe("OutputInterceptor", () => {
 
 		it("should clean up specific artifacts by executionIds", async () => {
 			const mockFiles = ["cmd-12345.txt", "cmd-67890.txt", "cmd-11111.txt"]
-			vi.mocked(fs.promises.readdir).mockResolvedValue(mockFiles as any)
+			vi.mocked(fs.promises.readdir).mockResolvedValue(
+				mockFiles as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>,
+			)
 			vi.mocked(fs.promises.unlink).mockResolvedValue(undefined)
 
 			// Keep 12345 and 67890, delete 11111
@@ -393,7 +400,9 @@ describe("OutputInterceptor", () => {
 
 		it("should handle unlink errors gracefully", async () => {
 			const mockFiles = ["cmd-12345.txt", "cmd-67890.txt"]
-			vi.mocked(fs.promises.readdir).mockResolvedValue(mockFiles as any)
+			vi.mocked(fs.promises.readdir).mockResolvedValue(
+				mockFiles as unknown as Awaited<ReturnType<typeof fs.promises.readdir>>,
+			)
 			vi.mocked(fs.promises.unlink).mockRejectedValue(new Error("Permission denied"))
 
 			// Should not throw even if unlink fails

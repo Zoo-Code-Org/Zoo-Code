@@ -1,3 +1,5 @@
+import type { ExtensionContext } from "vscode"
+
 import { providerIdentifiers } from "@roo-code/types"
 
 import * as modelCache from "../../../api/providers/fetchers/modelCache"
@@ -7,13 +9,14 @@ const createContext = () => {
 	const values = new Map<string, string>()
 	return {
 		values,
+		// ExtensionContext double provides secrets.get/store/delete only.
 		context: {
 			secrets: {
 				get: vi.fn(async (key: string) => values.get(key)),
 				store: vi.fn(async (key: string, value: string) => void values.set(key, value)),
 				delete: vi.fn(async (key: string) => void values.delete(key)),
 			},
-		} as any,
+		} as unknown as ExtensionContext,
 	}
 }
 

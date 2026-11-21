@@ -174,23 +174,48 @@ describe("convertToVsCodeLmMessages", () => {
 		expect(part.content[0]).toEqual({ data: Buffer.from("image"), mimeType: "image/jpeg" })
 	})
 
-	it("does not silently replace unsupported image URLs when image input is enabled", () => {
-		expect(() =>
-			convertToVsCodeLmMessages(
-				[
-					{
-						role: "user",
-						content: [
-							{
-								type: "image",
-								source: { type: "url", url: "https://example.com/image.png" },
-							},
-						],
-					},
-				],
-				true,
-			),
-		).toThrow("requires base64 image data")
+	describe.each(["message", "tool_result"] as const)("image conversion in %s", (path) => {
+		function convertImage(source: Anthropic.ImageBlockParam["source"]) {
+			const image: Anthropic.ImageBlockParam = { type: "image", source }
+			const content: Anthropic.Messages.ContentBlockParam[] =
+				path === "message" ? [image] : [{ type: "tool_result", tool_use_id: "image-tool", content: [image] }]
+			const result = convertToVsCodeLmMessages([{ role: "user", content }], true)
+			const part = result[0].content[0]
+			return part instanceof vscode.LanguageModelToolResultPart ? part.content[0] : part
+		}
+
+		it.each(["image/png", "image/jpeg", "image/gif", "image/webp"] as const)(
+			"sends decoded bytes for %s",
+			(mediaType) => {
+				const bytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0xff, 0x00])
+				expect(convertImage({ type: "base64", media_type: mediaType, data: bytes.toString("base64") })).toEqual(
+					{ data: bytes, mimeType: mediaType },
+				)
+			},
+		)
+
+		it("keeps a placeholder for URL images", () => {
+			expect(convertImage({ type: "url", url: "https://example.com/image.png" })).toEqual(
+				new vscode.LanguageModelTextPart("[Image (url): not supported by VSCode LM API]"),
+			)
+		})
+
+		it.each(["", "!!!"])("keeps a placeholder when base64 %j decodes to no bytes", (data) => {
+			expect(convertImage({ type: "base64", media_type: "image/png", data })).toEqual(
+				new vscode.LanguageModelTextPart("[Image (base64): image/png not supported by VSCode LM API]"),
+			)
+		})
+
+		it("keeps a placeholder for unsupported media types", () => {
+			expect(
+				convertImage({
+					type: "base64",
+					// Exercise runtime input outside the SDK's supported media-type union.
+					media_type: "image/bmp" as "image/png",
+					data: "aW1hZ2U=",
+				}),
+			).toEqual(new vscode.LanguageModelTextPart("[Image (base64): image/bmp not supported by VSCode LM API]"))
+		})
 	})
 
 	it("should convert simple string messages", () => {
@@ -936,20 +961,22 @@ describe("convertToVsCodeLmMessages surrogate-safe identifiers", () => {
 		expect(codeUnits(sanitizeToolNameSurrogates(`read-${VALID_PAIR}`))).toEqual(codeUnits(`read-${VALID_PAIR}`))
 	})
 
-	it("leaves a valid tool name untouched so it still matches its registry entry", () => {
-		for (const name of ["get_user", "read_file", "apply_diff", "update_todo_list"]) {
+	it.each(["get_user", "read_file", "apply_diff", "update_todo_list"])(
+		"leaves the valid tool name %s untouched so it still matches its registry entry",
+		(name) => {
 			expect(sanitizeToolNameSurrogates(name)).toBe(name)
 			expect(decodeToolNameSurrogates(sanitizeToolNameSurrogates(name))).toBe(name)
-		}
-	})
+		},
+	)
 
-	it("round-trips encoded tool names back to the original registry name", () => {
-		for (const name of [`read${LONE_HIGH}file`, `read${LONE_LOW}file`, "a_uu_b", "x_uD800y", "get_user"]) {
+	it.each([`read${LONE_HIGH}file`, `read${LONE_LOW}file`, "a_uu_b", "x_uD800y", "get_user"])(
+		"round-trips the encoded tool name %j back to the original registry name",
+		(name) => {
 			const declared = sanitizeToolNameSurrogates(name)
 			expect(declared).toMatch(/^[\w-]+$/)
 			expect(codeUnits(decodeToolNameSurrogates(declared))).toEqual(codeUnits(name))
-		}
-	})
+		},
+	)
 
 	it("does not decode a non-marker u+hex sequence", () => {
 		// "queue1234" has "u" followed by hex but no preceding "_", so it must survive untouched.

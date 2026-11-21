@@ -1,30 +1,28 @@
 {
-	"greeting": "Zoo Code'a hoş geldin!",
 	"task": {
 		"title": "Görev",
 		"expand": "Görevi genişlet",
 		"collapse": "Görevi daralt",
 		"seeMore": "Daha fazla gör",
-		"seeLess": "Daha az gör",
 		"tokens": "Tokenlar",
 		"cache": "Önbellek",
 		"apiCost": "API Maliyeti",
 		"size": "Boyut",
 		"contextWindow": "Bağlam Uzunluğu",
-		"closeAndStart": "Görevi kapat ve yeni bir görev başlat",
 		"export": "Görev geçmişini dışa aktar",
 		"delete": "Görevi sil (Onayı atlamak için Shift + Tıkla)",
 		"condenseContext": "Bağlamı akıllıca yoğunlaştır",
 		"openApiHistory": "API Geçmişini Aç",
 		"openUiHistory": "UI Geçmişini Aç",
 		"backToParentTask": "Üst görev",
-		"waitingOnSubtask": "Alt görev bekleniyor",
-		"goToSubtask": "Alt göreve git"
+		"waitingOnSubtask": "Alt görev bekleniyor"
 	},
 	"unpin": "Sabitlemeyi iptal et",
 	"pin": "Sabitle",
 	"fileChangesInConversation": {
-		"header": "Bu sohbette {{count}} dosya değiştirildi"
+		"header_one": "Bu sohbette {{count}} dosya değiştirildi",
+		"header_other": "Bu sohbette {{count}} dosya değiştirildi",
+		"lineStatsAriaLabel": "Eklenen satır: {{added}}, silinen satır: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Kullanılabilir alan: {{amount}} token",
@@ -88,19 +86,16 @@
 		"tooltip": "Mevcut görevi sonlandır"
 	},
 	"stop": {
-		"title": "Durdur",
-		"tooltip": "Mevcut görevi durdur"
+		"title": "Durdur"
 	},
 	"cancel": {
-		"title": "İptal",
-		"tooltip": "Mevcut işlemi iptal et"
+		"title": "İptal"
 	},
 	"enqueueMessage": "Mesajı kuyruğa ekle (mevcut görev tamamlandıktan sonra gönderilecek)",
 	"scrollToBottom": "Sohbetin altına kaydır",
 	"scrollToLatestCheckpoint": "Önceki checkpoint'e kaydır",
 	"about": "Zoo Code, düzenleyicinizdeki bütün bir yapay zeka geliştirme ekibidir.",
 	"docs": "Daha fazla bilgi için <DocsLink>belgelerimize</DocsLink> göz atın.",
-	"onboarding": "Bu çalışma alanındaki görev listeniz boş.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Özelleştirilebilir modlar",
@@ -126,7 +121,6 @@
 	"unlockApiConfigAcrossModes": "Bu çalışma alanındaki tüm modlarda API yapılandırması kilitli (kilidi açmak için tıkla)",
 	"enhancePrompt": "Ek bağlamla istemi geliştir",
 	"addImages": "Mesaja resim ekle",
-	"sendMessage": "Mesaj gönder",
 	"pressToSend": "Göndermek için {{keyCombination}} tuşuna bas",
 	"stopTts": "Metin okumayı durdur",
 	"typeMessage": "Bir mesaj yazın...",
@@ -145,7 +139,6 @@
 	},
 	"errorReadingFile": "Dosya okuma hatası",
 	"noValidImages": "Hiçbir geçerli resim işlenmedi",
-	"separator": "Ayırıcı",
 	"edit": "Düzenle...",
 	"forNextMode": "sonraki mod için",
 	"forPreviousMode": "önceki mod için",
@@ -178,7 +171,6 @@
 	},
 	"checkpoint": {
 		"regular": "Kontrol Noktası",
-		"initializingWarning": "Kontrol noktası hala başlatılıyor... Bu çok uzun sürerse, <settingsLink>ayarlar</settingsLink> bölümünden kontrol noktalarını devre dışı bırakabilir ve görevinizi yeniden başlatabilirsiniz.",
 		"menu": {
 			"viewDiff": "Farkları Görüntüle",
 			"more": "Daha fazla seçenek",
@@ -205,10 +197,8 @@
 		"wantsToEdit": "Zoo bu dosyayı düzenlemek istiyor",
 		"wantsToEditOutsideWorkspace": "Zoo çalışma alanı dışındaki bu dosyayı düzenlemek istiyor",
 		"wantsToEditProtected": "Zoo korumalı bir yapılandırma dosyasını düzenlemek istiyor",
-		"wantsToCreate": "Zoo yeni bir dosya oluşturmak istiyor",
 		"wantsToSearchReplace": "Zoo bu dosyada arama ve değiştirme yapmak istiyor",
 		"didSearchReplace": "Zoo bu dosyada arama ve değiştirme yaptı",
-		"wantsToInsert": "Zoo bu dosyaya içerik eklemek istiyor",
 		"wantsToInsertWithLineNumber": "Zoo bu dosyanın {{lineNumber}}. satırına içerik eklemek istiyor",
 		"wantsToInsertAtEnd": "Zoo bu dosyanın sonuna içerik eklemek istiyor",
 		"wantsToReadAndXMore": "Zoo bu dosyayı ve {{count}} tane daha okumak istiyor",
@@ -231,14 +221,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntülemek istiyor",
 		"didViewTopLevelOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) üst düzey dosyaları görüntüledi",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntülemek istiyor",
-		"didViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi",
-		"wantsToViewMultipleDirectories": "Zoo birden fazla dizini görüntülemek istiyor"
+		"didViewRecursiveOutsideWorkspace": "Zoo bu dizindeki (çalışma alanı dışında) tüm dosyaları özyinelemeli olarak görüntüledi"
 	},
-	"commandOutput": "Komut Çıktısı",
 	"commandExecution": {
 		"running": "Çalışıyor",
 		"abort": "İptal Et",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "{{exitCode}} durumuyla çıkıldı",
 		"malformedCommand": "Hatalı komut: shell sozdizimi hatasi",
 		"manageCommands": "Komut İzinlerini Yönet",
@@ -248,14 +235,9 @@
 		"removeFromAllowed": "İzin verilenler listesinden kaldır",
 		"addToDenied": "Reddedilenler listesine ekle",
 		"removeFromDenied": "Reddedilenler listesinden kaldır",
-		"abortCommand": "Komut yürütmeyi iptal et",
-		"expandOutput": "Çıktıyı genişlet",
-		"collapseOutput": "Çıktıyı daralt",
-		"expandManagement": "Komut yönetimi bölümünü genişlet",
-		"collapseManagement": "Komut yönetimi bölümünü daralt"
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Kalıbı düzenlemek için tıkla"
 	},
-	"response": "Yanıt",
-	"arguments": "Argümanlar",
 	"text": {
 		"rooSaid": "Zoo dedi"
 	},
@@ -275,10 +257,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo <code>{{mode}}</code> modunda yeni bir alt görev oluşturmak istiyor",
 		"wantsToFinish": "Zoo bu alt görevi bitirmek istiyor",
-		"newTaskContent": "Alt Görev Talimatları",
 		"completionContent": "Alt Görev Tamamlandı",
 		"resultContent": "Alt Görev Sonuçları",
-		"defaultResult": "Lütfen sonraki göreve devam edin.",
 		"completionInstructions": "Alt görev tamamlandı! Sonuçları inceleyebilir ve düzeltmeler veya sonraki adımlar önerebilirsiniz. Her şey iyi görünüyorsa, sonucu üst göreve döndürmek için onaylayın.",
 		"goToSubtask": "Görevi görüntüle"
 	},
@@ -301,9 +281,6 @@
 		"diagnostics": "Ayrıntılı hata bilgisi al",
 		"proxyProvider": "Proxy tabanlı bir sağlayıcı kullanıyor gibi görünüyorsun. Günlüklerini kontrol ettiğinden ve Zoo'nun isteklerini yeniden yazmadığından emin ol."
 	},
-	"powershell": {
-		"issues": "Windows PowerShell ile ilgili sorunlar yaşıyor gibi görünüyorsunuz, lütfen şu konuya bakın"
-	},
 	"autoApprove": {
 		"tooltipManage": "Otomatik onay ayarlarını yönet",
 		"tooltipStatus": "Otomatik onay şunlar için etkinleştirildi: {{toggles}}",
@@ -312,15 +289,14 @@
 		"all": "Tümü",
 		"none": "Hiçbiri",
 		"description": "İzin istemeden bu eylemleri gerçekleştirin. Bunu yalnızca tamamen güvendiğiniz eylemler için etkinleştirin.",
-		"selectOptionsFirst": "Otomatik onayı etkinleştirmek için aşağıdan en az bir seçenek seçin",
-		"toggleAriaLabel": "Otomatik onayı aç/kapat",
-		"disabledAriaLabel": "Otomatik onay devre dışı - önce seçenekleri seçin",
 		"triggerLabelOff": "Otomatik onay kapalı",
 		"triggerLabelOffShort": "Kapalı",
 		"triggerLabel_zero": "0 otomatik onaylandı",
-		"triggerLabel_one": "1 otomatik onaylandı",
+		"triggerLabel_one": "{{count}} otomatik onaylandı",
 		"triggerLabel_other": "{{count}} otomatik onaylandı",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Etkin",
+		"toggleAriaLabel": "Otomatik onayı aç/kapat"
 	},
 	"reasoning": {
 		"thinking": "Düşünüyor",
@@ -336,7 +312,7 @@
 		"truncation": {
 			"title": "Bağlam Kısaltıldı",
 			"inProgress": "Bağlam kısaltılıyor...",
-			"messagesRemoved": "{{count}} mesaj kaldırıldı",
+			"messagesRemoved_one": "{{count}} mesaj kaldırıldı",
 			"messagesRemoved_other": "{{count}} mesaj kaldırıldı",
 			"description": "Bağlam penceresi sınırında kalmak için eski mesajlar konuşmadan kaldırıldı. Bu, yoğunlaştırmaya kıyasla hızlı ancak daha az bağlam koruyucu bir yaklaşımdır."
 		}
@@ -353,16 +329,12 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Zoo Code v3.90.0'daki yenilikler",
-			"highlight1": "✨ Sağlayıcılar ve modeller: GitHub Copilot artık bir sağlayıcı: oturum aç, Zoo Code Copilot modellerini yükler. IO Intelligence kendi API anahtarı olan bir sağlayıcıdır. Gemini 4 Argon, Gemini ve Vertex'tedir. GPT-6 Luna, OpenCode Go'dadır. Gemini 4 Argon ve GPT-6 Luna Zoo Gateway'de de vardır.",
-			"highlight2": "🧭 Araç yürütme: Aynı araç çağrısını yinelemek bir uyarı verir, sonra Zoo Code bu döngüyü durdurur. attempt_completion kapatmak artık bir görevi bitiremez halde bırakmaz. Kuyruktaki mesajlar, doğrudan gönderdiğin komutlarla aynı komut koruması kontrollerinden geçer.",
-			"highlight3": "⚡ Akıl yürütme ve akış: Anthropic adaptive thinking sohbette görünür ve thinking token'lar sayılır. R1 anahtarı llama.cpp, Ollama ve LM Studio akıl yürütmesini tutar. Codex, gördüğün özete ek olarak şifreli akıl yürütmeyi saklar. VS Code dil modeli akışları, akış başarısız olunca guarded recovery kullanır."
-		},
-		"cloudAgents": {
-			"heading": "Cloud'daki yenilikler:",
-			"specialized": "<bold>Explainer</bold>, <bold>Planner</bold> ve <bold>Coder</bold> tanıtımı - iş akışlarını geliştirmek için üç özel bulut ajanı.",
-			"description": "Ajanlar bulutta birlikte çalışır ve web'den veya Slack üzerinden tetiklenebilir.",
-			"tryButton": "Bulut Ajanlarını Dene"
+			"heading": "Zoo Code v3.98.1'deki yenilikler",
+			"highlight0": "💫Zoo Gateway hesabındaki herhangi bir tutarla 1 Aralık'a kadar sınırsız GLM-5.3-Flash sunan Zoo Pass'i ücretsiz dene.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modeller ve akıl yürütme: GPT-6.2 Sol, GPT-6.2 Astra ve Claude Sonnet 5.5 kullan. Her LiteLLM profili için akıl yürütme düzeyini ayarla.",
+			"highlight2": "🛡️ Güvenlik: Beceri ve komut meta verilerinin ayrıştırılması, bahsetmeler, sağlayıcı bağlantıları ve CLI onay denetimleri iyileştirildi.",
+			"highlight3": "🔧 Düzeltmeler: OpenAI hizmet katmanı maliyetleri, çalışma alanı sembolik bağlantılarının tanınması ve daha fazla arayüz çevirisi."
 		}
 	},
 	"costs": {
@@ -386,7 +358,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Otomatik Onaylanan İstek Limiti Aşıldı",
-			"description": "Zoo, {{count}} API isteği/istekleri için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_one": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
+			"description_other": "Zoo, {{count}} API isteği için otomatik onaylanan limite ulaştı. Sayacı sıfırlamak ve göreve devam etmek istiyor musunuz?",
 			"button": "Sıfırla ve Devam Et"
 		},
 		"autoApprovedCostLimitReached": {
@@ -398,9 +371,10 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo kod tabanında <code>{{query}}</code> aramak istiyor",
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> içinde kod tabanında <code>{{query}}</code> aramak istiyor",
-		"didSearch_one": "1 sonuç bulundu",
+		"didSearch_one": "{{count}} sonuç bulundu",
 		"didSearch_other": "{{count}} sonuç bulundu",
-		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)"
+		"resultTooltip": "Benzerlik puanı: {{score}} (dosyayı açmak için tıklayın)",
+		"displayError": "Arama sonuçları görüntülenirken hata oluştu."
 	},
 	"read-batch": {
 		"approve": {
@@ -445,34 +419,24 @@
 	"editMessage": {
 		"placeholder": "Mesajını düzenle..."
 	},
-	"command": {
-		"triggerDescription": "{{name}} komutunu tetikle"
-	},
 	"slashCommands": {
-		"tooltip": "Eğik çizgi komutlarını yönet",
-		"title": "Eğik Çizgi Komutları",
-		"description": "Yerleşik eğik çizgi komutlarını kullanın veya sık kullanılan komut istemleri ve iş akışlarına hızlı erişim için özel komutlar oluşturun. <DocsLink>Belgeler</DocsLink>",
-		"manageCommands": "Ayarlarda eğik çizgi komutlarını yönet",
-		"builtInCommands": "Yerleşik Komutlar",
-		"globalCommands": "Genel Komutlar",
-		"workspaceCommands": "Çalışma Alanı Komutları",
-		"globalCommand": "Genel komut",
-		"editCommand": "Komutu düzenle",
-		"deleteCommand": "Komutu sil",
-		"newGlobalCommandPlaceholder": "Yeni genel komut...",
-		"newWorkspaceCommandPlaceholder": "Yeni çalışma alanı komutu...",
-		"deleteDialog": {
-			"title": "Komutu Sil",
-			"description": "\"{{name}}\" komutunu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz.",
-			"cancel": "İptal",
-			"confirm": "Sil"
-		}
+		"manageCommands": "Ayarlarda eğik çizgi komutlarını yönet"
 	},
 	"contextMenu": {
 		"noResults": "Sonuç yok",
 		"problems": "Sorunlar",
 		"terminal": "Terminal",
-		"url": "İçeriği getirmek için URL'yi yapıştırın"
+		"url": "İçeriği getirmek için URL'yi yapıştırın",
+		"gitCommits": "Git commit'leri",
+		"gitCommitsDescription": "Depo geçmişinde ara",
+		"workingChanges": "Çalışma değişiklikleri",
+		"workingChangesDescription": "Commit edilmemiş mevcut değişiklikler",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git commit hash'i",
+		"addFile": "Dosya ekle",
+		"addFolder": "Klasör ekle",
+		"commands": "Komutlar",
+		"modes": "Modlar"
 	},
 	"queuedMessages": {
 		"title": "Sıradaki Mesajlar",
@@ -486,8 +450,27 @@
 		"partial": "{{total}} yapılacaklar listesinden {{completed}} tanesi tamamlandı",
 		"complete": "{{total}} yapılacaklar listesi tamamlandı",
 		"updated": "Yapılacaklar listesi güncellendi",
-		"completed": "Tamamlandı",
-		"started": "Başladı"
+		"listUpdated": "Yapılacaklar listesi güncellendi",
+		"userEdit": "Kullanıcı düzenlemesi",
+		"userEdits": "Kullanıcı düzenlemeleri",
+		"edit": "Düzenle",
+		"done": "Bitti",
+		"itemPlaceholder": "Yapılacak öğe gir",
+		"newItemPlaceholder": "Yapılacak öğe gir, eklemek için Enter'a bas",
+		"remove": "Kaldır",
+		"add": "Ekle",
+		"cancel": "İptal",
+		"addTodo": "+ Yapılacak ekle",
+		"status": {
+			"notStarted": "Başlanmadı",
+			"inProgress": "Devam ediyor",
+			"completed": "Tamamlandı"
+		},
+		"deleteDialog": {
+			"title": "Yapılacak öğeyi sil",
+			"description": "Bu yapılacak öğeyi silmek istediğinden emin misin?",
+			"confirm": "Sil"
+		}
 	},
 	"tooManyTools": {
 		"title": "Çok fazla araç etkinleştirildi",
@@ -509,5 +492,25 @@
 		"title": "Sağlayıcı artık desteklenmiyor",
 		"message": "Bu sağlayıcı artık kullanılamıyor. Devam etmek için desteklenen bir sağlayıcı seçin.",
 		"openSettings": "Ayarları aç"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code'a giriş yap",
+		"goToDashboard": "Panele git",
+		"signOut": "Çıkış yap",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Bağlı"
+	},
+	"arguments": "Argümanlar:",
+	"copyAsMarkdown": "Markdown olarak kopyala",
+	"openInPreview": "Önizlemede aç",
+	"codeAccordion": {
+		"userEdits": "Kullanıcı düzenlemeleri",
+		"consoleLogs": "Konsol günlükleri",
+		"openFileAriaLabel": "Dosyayı aç: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} gizli satır",
+		"hiddenLines_other": "{{count}} gizli satır"
 	}
 }

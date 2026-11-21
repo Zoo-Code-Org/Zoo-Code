@@ -1,6 +1,4 @@
 {
-	"title": "Modes",
-	"done": "Fet",
 	"modes": {
 		"title": "Modes",
 		"createNewMode": "Crear nou mode",
@@ -14,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configuració d'API",
-		"select": "Seleccioneu quina configuració d'API utilitzar per a aquest mode"
+		"select": "Seleccioneu quina configuració d'API utilitzar per a aquest mode",
+		"pinnedGroupAriaLabel": "Configuracions fixades",
+		"allGroupAriaLabel": "Totes les configuracions"
 	},
 	"tools": {
 		"title": "Eines disponibles",
@@ -49,13 +49,12 @@
 		"title": "Instruccions personalitzades específiques del mode (opcional)",
 		"resetToDefault": "Restablir a valors predeterminats",
 		"description": "Afegiu directrius de comportament específiques per al mode {{modeName}}.",
-		"loadFromFile": "Les instruccions personalitzades específiques per al mode {{mode}} també es poden carregar des de la carpeta <span>.roo/rules-{{slug}}/</span> al vostre espai de treball o des del global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} estan obsolets i deixaran de funcionar aviat)."
+		"loadFromFile": "Les instruccions personalitzades específiques per al mode {{mode}} també es poden carregar des de la carpeta <span>.roo/rules-{{slug}}/</span> al vostre espai de treball o des del global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} estan obsolets i deixaran de funcionar aviat).",
+		"loadFromFileAriaLabel": "Més informació sobre les instruccions personalitzades globals per a modes"
 	},
 	"exportMode": {
 		"title": "Exportar mode",
-		"description": "Exporta aquest mode a un fitxer YAML amb totes les regles incloses per compartir fàcilment amb altres.",
-		"export": "Exportar mode",
-		"exporting": "Exportant..."
+		"export": "Exportar mode"
 	},
 	"importMode": {
 		"selectLevel": "Tria on importar aquest mode:",
@@ -73,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instruccions personalitzades per a tots els modes",
 		"description": "Aquestes instruccions s'apliquen a tots els modes. Proporcionen un conjunt bàsic de comportaments que es poden millorar amb instruccions específiques de cada mode a continuació. <0>Més informació</0>",
-		"loadFromFile": "Les instruccions també es poden carregar des de la carpeta <span>.roo/rules/</span> al vostre espai de treball o des del global <0>.roo/rules/</0> (.roorules i .clinerules estan obsolets i deixaran de funcionar aviat)."
+		"loadFromFile": "Les instruccions també es poden carregar des de la carpeta <span>.roo/rules/</span> al vostre espai de treball o des del global <0>.roo/rules/</0> (.roorules i .clinerules estan obsolets i deixaran de funcionar aviat).",
+		"learnMoreAriaLabel": "Més informació sobre les instruccions personalitzades globals",
+		"loadFromFileAriaLabel": "Aprèn a configurar instruccions personalitzades globals"
 	},
 	"systemPrompt": {
 		"preview": "Previsualització del prompt del sistema",
@@ -81,7 +82,6 @@
 		"title": "Prompt del sistema (mode {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompts de suport",
 		"resetPrompt": "Restablir el prompt {{promptType}} a valors predeterminats",
 		"prompt": "Prompt",
 		"enhance": {
@@ -94,10 +94,12 @@
 			"includeTaskHistory": "Inclou l'historial de tasques com a context",
 			"includeTaskHistoryDescription": "Quan està activat, els últims 10 missatges de la conversa actual s'inclouran com a context en millorar els prompts, ajudant a generar suggeriments més rellevants i conscients del context."
 		},
-		"condense": {
-			"apiConfiguration": "Configuració de l'API per a la condensació de context",
-			"apiConfigDescription": "Seleccioneu quina configuració d'API voleu utilitzar per a les operacions de condensació de context. Deixeu-ho sense seleccionar per utilitzar la configuració activa actual.",
-			"useCurrentConfig": "Utilitza la configuració de l'API seleccionada actualment"
+		"taskTitle": {
+			"enabled": "Genera automàticament els títols de les tasques",
+			"enabledDescription": "Resumeix en segon pla el primer missatge de cada tasca nova en un títol curt. Les sol·licituds de títol no s'inclouen al cost de la tasca. Els perfils de GitHub Copilot i VS Code LM consumeixen la teva quota.",
+			"apiConfiguration": "Configuració de l'API",
+			"useTaskConfig": "Utilitza la configuració de l'API de la tasca",
+			"apiConfigDescription": "Es recomana un perfil lleuger sense raonament. Si tries un altre perfil, l'inici del teu missatge s'enviarà a aquest proveïdor."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar nova tasca",
 				"description": "Inicieu una nova tasca amb l'entrada proporcionada. Disponible a la paleta de comandes."
+			},
+			"TASK_TITLE": {
+				"label": "Títol de la tasca",
+				"description": "Genera en segon pla un títol curt per a les tasques noves. Es mostra a l'historial i a la capçalera de la tasca. Configura-ho a sota."
 			}
 		}
 	},
@@ -196,8 +202,12 @@
 		"title": "Suprimeix el mode",
 		"message": "Estàs segur que vols suprimir el mode \"{{modeName}}\"?",
 		"rulesFolder": "Aquest mode té una carpeta de regles a {{folderPath}} que també se suprimirà.",
-		"descriptionNoRules": "Esteu segur que voleu suprimir aquest mode personalitzat?",
 		"confirm": "Suprimeix",
 		"cancel": "Cancel·la"
+	},
+	"mcpServers": {
+		"restrict": "Restringeix a servidors MCP concrets",
+		"noneConnected": "No hi ha cap servidor MCP connectat",
+		"notConnected": "{{serverName}} (no connectat)"
 	}
 }

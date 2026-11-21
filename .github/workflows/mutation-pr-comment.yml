@@ -1,0 +1,428 @@
+name: Mutation report PR comment
+
+on:
+    # The mutation run's own token is read-only for fork PRs, so the PR comment
+    # is posted by this trusted workflow after "Changed-code mutation testing"
+    # completes. This workflow only reads PR metadata and the run's artifact;
+    # it never checks out or executes PR code, and all unspecified permissions,
+    # including contents, are none.
+    workflow_run:
+        workflows: ["Changed-code mutation testing"]
+        types: [completed]
+
+permissions:
+    contents: read
+
+# Each completed mutation run gets its own workflow-level group; the comment
+# shards below serialize per PR so concurrent mutation runs for one PR can
+# never interleave their non-atomic comment writes.
+concurrency:
+    group: mutation-pr-comment-${{ github.event.workflow_run.id }}
+    cancel-in-progress: false
+
+jobs:
+    resolve:
+        name: Zoo Code / resolve mutation comment target
+        # merge_group completions have no pull request to comment on.
+        if: github.event.workflow_run.event == 'pull_request'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            actions: read
+            pull-requests: read
+        outputs:
+            pr_numbers: ${{ steps.resolve.outputs.pr_numbers }}
+            artifact_id: ${{ steps.resolve.outputs.artifact_id }}
+        steps:
+            - name: Resolve pull request and artifact
+              id: resolve
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const { owner, repo } = context.repo;
+                      const run = context.payload.workflow_run;
+
+                      if (run?.event !== 'pull_request') {
+                        core.info(`Ignoring workflow_run with event '${run?.event}'`);
+                        core.setOutput('pr_numbers', '[]');
+                        core.setOutput('artifact_id', '');
+                        return;
+                      }
+
+                      // The PR number comes from trusted event data, never from the
+                      // artifact. Fork runs backfill pull_requests empty, so fall back
+                      // to an exact head owner, branch, and SHA match; the triggering
+                      // workflow runs on pull_request, whose head_repository is the
+                      // real fork, so the owner-and-branch query is safe here (see the
+                      // workflow_run branch of label-pr-review-state.yml).
+                      let prNumbers = [];
+                      if (run.pull_requests?.length > 0) {
+                        prNumbers = run.pull_requests.map(pr => pr.number).filter(Number.isFinite);
+                      } else {
+                        const headOwner = run.head_repository?.owner?.login;
+                        if (headOwner && run.head_branch && run.head_sha) {
+                          const candidates = await github.paginate(github.rest.pulls.list, {
+                            owner,
+                            repo,
+                            state: 'open',
+                            head: `${headOwner}:${run.head_branch}`,
+                            per_page: 100,
+                          });
+                          const baseRepository = `${owner}/${repo}`.toLowerCase();
+                          prNumbers = candidates
+                            .filter(pr =>
+                              pr.head?.sha === run.head_sha &&
+                              pr.base?.repo?.full_name?.toLowerCase() === baseRepository
+                            )
+                            .map(pr => pr.number);
+                          core.info(
+                            `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
+                            `${prNumbers.length} PR(s) by exact head owner, branch, and SHA`
+                          );
+                        }
+                      }
+                      prNumbers = [...new Set(prNumbers)].sort((a, b) => a - b);
+
+                      // listArtifactsForWorkflowRun is absent in the pinned github-script client; use the REST route.
+                      const { data: { artifacts } } = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts', {
+                        owner,
+                        repo,
+                        run_id: run.id,
+                        per_page: 100,
+                      });
+                      const artifact = artifacts.find(candidate =>
+                        candidate.name === 'changed-code-mutation-report' && !candidate.expired
+                      );
+                      if (!artifact) core.info('No mutation report artifact on this run; nothing to comment');
+
+                      core.info(
+                        `Reconciliation targets: ${prNumbers.length > 0 ? prNumbers.join(', ') : '(none)'}`
+                      );
+                      core.setOutput('pr_numbers', JSON.stringify(prNumbers));
+                      core.setOutput('artifact_id', artifact ? String(artifact.id) : '');
+
+    comment:
+        name: Zoo Code / comment mutation survivors
+        needs: resolve
+        if: >-
+            needs.resolve.outputs.pr_numbers != '[]' &&
+            needs.resolve.outputs.artifact_id != ''
+        strategy:
+            fail-fast: false
+            matrix:
+                pr_number: ${{ fromJSON(needs.resolve.outputs.pr_numbers) }}
+        # One mutating shard per PR, serialized per PR across concurrent mutation
+        # runs, so non-atomic list/create/update comment writes can never
+        # interleave. cancel-in-progress stays false: within one PR,
+        # newest-pending-wins is exactly freshest-state-wins. The -comment-
+        # infix keeps shard groups out of the workflow-level run-id namespace.
+        concurrency:
+            group: mutation-pr-comment-comment-${{ matrix.pr_number }}
+            cancel-in-progress: false
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
+        permissions:
+            actions: read
+            pull-requests: write
+        env:
+            PR_NUMBER: ${{ matrix.pr_number }}
+            HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+            TRIGGERING_RUN_URL: ${{ github.event.workflow_run.html_url }}
+        steps:
+            - name: Download mutation report artifact
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: changed-code-mutation-report
+                  github-token: ${{ github.token }}
+                  run-id: ${{ github.event.workflow_run.id }}
+                  path: mutation-report
+
+            - name: Update pull request comment
+              uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+              with:
+                  retries: 3
+                  script: |
+                      const fs = require('fs');
+                      const { owner, repo } = context.repo;
+
+                      const marker = '<!-- zoo-code-mutation-report -->';
+                      const detailsPattern =
+                        /^<!-- zoo-code-mutation-report head:([0-9a-f]{40}) blocking:(\d+) advisories:(\d+) -->$/;
+                      const reportFile = 'mutation-report/pr-comment.md';
+                      const maxReportBytes = 1024 * 1024;
+                      const maxReportChars = 60000;
+
+                      const prNumber = Number(process.env.PR_NUMBER);
+                      const headSha = process.env.HEAD_SHA;
+
+                      // The artifact is produced by a run of PR code, so it is untrusted
+                      // data: validate its size and markers, cross-check the head SHA,
+                      // then strip any forged markers and control characters before the
+                      // text is ever used as a comment body. It is never executed and
+                      // never interpolated into API paths or commands.
+                      function readReport() {
+                        let raw;
+                        try {
+                          const stats = fs.statSync(reportFile);
+                          if (stats.size > maxReportBytes) {
+                            core.warning(`Mutation report exceeds ${maxReportBytes} bytes; ignoring untrusted artifact`);
+                            return null;
+                          }
+                          raw = fs.readFileSync(reportFile, 'utf8');
+                        } catch (error) {
+                          core.warning(`Mutation report artifact is unreadable: ${error.message}`);
+                          return null;
+                        }
+                        const lines = raw.split('\n');
+                        const detailsMatch = detailsPattern.exec((lines[1] ?? '').trim());
+                        if ((lines[0] ?? '').trim() !== marker || !detailsMatch) {
+                          core.warning('Mutation report marker mismatch; ignoring untrusted artifact');
+                          return null;
+                        }
+                        const [, reportHeadSha, blockingCount, advisoryCount] = detailsMatch;
+                        if (reportHeadSha !== headSha) {
+                          core.warning(
+                            `Mutation report head ${reportHeadSha} does not match run head ${headSha}; ignoring`
+                          );
+                          return null;
+                        }
+                        const content = lines.slice(2).join('\n')
+                          .replace(/<!--\s*zoo-code-mutation-report[^>]*-->/g, '')
+                          .replace(/[\u0000-\u0008\u000B\u000C\u000D-\u001F\u007F]/g, '')
+                          .trim();
+                        return {
+                          headSha: reportHeadSha,
+                          blocking: Number(blockingCount),
+                          advisories: Number(advisoryCount),
+                          content,
+                        };
+                      }
+
+                      // Render a small Markdown subset using trusted HTML structure.
+                      // Escape all artifact text. Keep URLs, mentions, and table cells
+                      // in inline code so GitHub cannot turn them into active content.
+                      function renderReport(content) {
+                        const escapeHtml = text => text.replace(/&/g, '&amp;')
+                          .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                        function cells(line) {
+                          if (!line.startsWith('|') || !line.endsWith('|')) return null;
+                          return line.slice(1, -1).replace(/\\\|/g, '\u0000').split('|')
+                            .map(cell => cell.replace(/\u0000/g, '|').trim());
+                        }
+                        const lines = content.split('\n');
+                        const blocks = [];
+                        let length = 0;
+                        let truncated = false;
+                        function append(block) {
+                          if (length + block.length + 2 > maxReportChars) {
+                            truncated = true;
+                            return false;
+                          }
+                          blocks.push(block);
+                          length += block.length + 2;
+                          return true;
+                        }
+                        function plain(text) {
+                          const escaped = escapeHtml(text);
+                          return /@|:\/\/|www\.|!?\[[^\]]*\]\(|#\d|\bGH-\d|\b[0-9a-f]{7,40}\b|:[a-z0-9_+-]+:/i.test(text)
+                            ? '<code>' + escaped + '</code>' : escaped;
+                        }
+                        function inline(text) {
+                          let rendered = '';
+                          let cursor = 0;
+                          for (const match of text.matchAll(/`([^`]+)`|\*\*([^*]+)\*\*/g)) {
+                            rendered += plain(text.slice(cursor, match.index));
+                            rendered += match[1] !== undefined
+                              ? '<code>' + escapeHtml(match[1]) + '</code>'
+                              : '<strong>' + plain(match[2]) + '</strong>';
+                            cursor = match.index + match[0].length;
+                          }
+                          return rendered + plain(text.slice(cursor));
+                        }
+                        const fence = line => /^(`{3,}|~{3,})([a-zA-Z0-9_-]*)\s*$/.exec(line);
+                        function closes(line, opener) {
+                          const match = /^(`{3,}|~{3,})\s*$/.exec(line);
+                          return match && match[1][0] === opener[0] && match[1].length >= opener.length;
+                        }
+                        function prose(text) {
+                          const lines = text.split('\n');
+                          for (let index = 0; index < lines.length && !truncated;) {
+                            const line = lines[index++];
+                            if (!line.trim()) continue;
+                            const opener = fence(line);
+                            const heading = /^(#{1,6})\s+(.+)$/.exec(line);
+                            if (opener) {
+                              const code = [];
+                              while (index < lines.length && !closes(lines[index], opener[1])) code.push(lines[index++]);
+                              if (index < lines.length) index++;
+                              const language = opener[2] ? ' class="language-' + opener[2] + '"' : '';
+                              append('<pre><code' + language + '>' + escapeHtml(code.join('\n')) + '</code></pre>');
+                            } else if (heading) {
+                              const tag = 'h' + heading[1].length;
+                              append('<' + tag + '>' + inline(heading[2]) + '</' + tag + '>');
+                            } else if (line.startsWith('- ')) {
+                              const items = [];
+                              let item = line.slice(2);
+                              while (index < lines.length) {
+                                if (lines[index].startsWith('- ')) {
+                                  items.push('<li>' + inline(item) + '</li>');
+                                  item = lines[index++].slice(2);
+                                } else if (lines[index].startsWith('  ')) {
+                                  item += ' ' + lines[index++].trim();
+                                } else break;
+                              }
+                              items.push('<li>' + inline(item) + '</li>');
+                              append('<ul>' + items.join('') + '</ul>');
+                            } else {
+                              const paragraph = [line];
+                              while (index < lines.length && lines[index].trim() &&
+                                !fence(lines[index]) && !/^(#{1,6})\s|^- /.test(lines[index])) {
+                                paragraph.push(lines[index++]);
+                              }
+                              append('<p>' + inline(paragraph.join(' ')) + '</p>');
+                            }
+                          }
+                        }
+                        let pending = [];
+                        let pendingFence = null;
+                        for (let index = 0; index < lines.length && !truncated;) {
+                          const delimiter = fence(lines[index]);
+                          if (pendingFence || delimiter) {
+                            if (pendingFence) {
+                              if (closes(lines[index], pendingFence)) pendingFence = null;
+                            } else pendingFence = delimiter[1];
+                            pending.push(lines[index++]);
+                            continue;
+                          }
+                          const header = cells(lines[index]);
+                          const separator = cells(lines[index + 1] ?? '');
+                          const isTable = header && header.length <= 8 && separator &&
+                            header.length === separator.length &&
+                            separator.every(cell => /^:?-{3,}:?$/.test(cell));
+                          if (!isTable) {
+                            pending.push(lines[index++]);
+                            continue;
+                          }
+                          if (pending.length) {
+                            prose(pending.join('\n'));
+                            pending = [];
+                            if (truncated) break;
+                          }
+                          const row = (values, tag) => '<tr>' + values.map(value =>
+                            '<' + tag + '><code>' + escapeHtml(value) + '</code></' + tag + '>'
+                          ).join('') + '</tr>';
+                          let table = '<table><thead>' + row(header, 'th') + '</thead><tbody>';
+                          const closing = '</tbody></table>';
+                          if (length + table.length + closing.length > maxReportChars) {
+                            truncated = true;
+                            break;
+                          }
+                          index += 2;
+                          while (index < lines.length) {
+                            const values = cells(lines[index]);
+                            if (!values || values.length !== header.length) break;
+                            const next = row(values, 'td');
+                            if (length + table.length + next.length + closing.length > maxReportChars) {
+                              truncated = true;
+                              break;
+                            }
+                            table += next;
+                            index++;
+                          }
+                          table += closing;
+                          blocks.push(table);
+                          length += table.length + 2;
+                        }
+                        if (pending.length && !truncated) prose(pending.join('\n'));
+                        if (truncated) blocks.push(
+                          '[truncated - download the changed-code-mutation-report artifact for the complete report]'
+                        );
+                        return blocks.join('\n\n');
+                      }
+
+                      // Missing or invalid reports deliberately leave the last valid
+                      // comment intact. Its head marker identifies the reported commit;
+                      // an incomplete run must never publish an all-clear result.
+                      const report = readReport();
+                      if (!report) return;
+
+                      const informative = report.blocking > 0 || report.advisories > 0;
+                      let body;
+                      if (informative) {
+                        const content = renderReport(report.content);
+                        body = [
+                          marker,
+                          `<!-- zoo-code-mutation-report head:${report.headSha} blocking:${report.blocking} advisories:${report.advisories} -->`,
+                          '',
+                          '## Changed-code mutation testing',
+                          '',
+                          `Report for PR head \`${report.headSha.slice(0, 12)}\`.`,
+                          '',
+                          '| Surviving / uncovered mutants | Advisories |',
+                          '| ---: | ---: |',
+                          `| ${report.blocking} | ${report.advisories} |`,
+                          '',
+                          '<details>',
+                          '<summary>Details: mutants, guidance, and reproduction</summary>',
+                          '',
+                          content,
+                          '',
+                          '</details>',
+                          '',
+                        ].join('\n');
+                      } else {
+                        body = [
+                          marker,
+                          `<!-- zoo-code-mutation-report head:${report.headSha} blocking:0 advisories:0 -->`,
+                          '',
+                          '## Changed-code mutation testing',
+                          '',
+                          `No mutants survived the changed-code mutation run for head \`${report.headSha.slice(0, 12)}\`.`,
+                          '',
+                          `The \`changed-code-mutation-report\` artifact on this [workflow run](${process.env.TRIGGERING_RUN_URL}) contains the full reports.`,
+                          '',
+                        ].join('\n');
+                      }
+
+                      const comments = await github.paginate(github.rest.issues.listComments, {
+                        owner,
+                        repo,
+                        issue_number: prNumber,
+                        per_page: 100,
+                      });
+                      const existing = comments.find(comment =>
+                        comment.user?.login === 'github-actions[bot]' && comment.body?.includes(marker)
+                      );
+
+                      const { data: pullRequest } = await github.rest.pulls.get({
+                        owner, repo, pull_number: prNumber,
+                      });
+                      if (pullRequest.state !== 'open' || pullRequest.head.sha !== report.headSha) {
+                        core.info(`PR #${prNumber}: ignoring report for an outdated head or closed PR`);
+                        return;
+                      }
+
+                      if (existing) {
+                        if (existing.body === body) {
+                          core.info(`PR #${prNumber}: mutation comment is already current`);
+                          return;
+                        }
+                        await github.rest.issues.updateComment({
+                          owner,
+                          repo,
+                          comment_id: existing.id,
+                          body,
+                        });
+                        core.info(`PR #${prNumber}: updated the mutation comment`);
+                      } else if (informative) {
+                        await github.rest.issues.createComment({
+                          owner,
+                          repo,
+                          issue_number: prNumber,
+                          body,
+                        });
+                        core.info(`PR #${prNumber}: created the mutation comment`);
+                      } else {
+                        core.info(`PR #${prNumber}: no surviving mutants and no existing comment; nothing posted`);
+                      }

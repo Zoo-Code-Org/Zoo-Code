@@ -93,16 +93,19 @@ export function decodeToolNameSurrogates(name: string): string {
 	return decoded
 }
 
+const SUPPORTED_IMAGE_MEDIA_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"])
+
 function convertImageToVsCodeLmPart(image: Anthropic.Messages.ImageBlockParam, supportsImages: boolean) {
-	if (supportsImages) {
-		if (image.source.type !== "base64") {
-			throw new Error("GitHub Copilot image input requires base64 image data, not an image URL.")
+	if (supportsImages && image.source.type === "base64" && SUPPORTED_IMAGE_MEDIA_TYPES.has(image.source.media_type)) {
+		// Pass decoded bytes, not the base64 string, to avoid encoding the image twice.
+		const bytes = Buffer.from(image.source.data, "base64")
+		if (bytes.length > 0) {
+			const part = createImagePart(bytes, image.source.media_type)
+			if (!part) {
+				throw new Error("Image input requires a newer version of VS Code that can send image data.")
+			}
+			return part
 		}
-		const part = createImagePart(Buffer.from(image.source.data, "base64"), image.source.media_type)
-		if (!part) {
-			throw new Error("Image input requires a newer version of VS Code that can send image data.")
-		}
-		return part
 	}
 	return new vscode.LanguageModelTextPart(
 		image.source.type === "base64"

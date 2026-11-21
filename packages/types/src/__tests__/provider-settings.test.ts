@@ -8,7 +8,7 @@ import {
 	providerSettingsSchemaDiscriminated,
 } from "../provider-settings.js"
 import { OpenAiCodexServiceTier, OpenAiServiceTier } from "../model.js"
-import { providerDefinitionList } from "../provider-settings/index.js"
+import { providerDefinitionList } from "../providers/index.js"
 
 describe("provider settings discriminated union", () => {
 	it("composes exactly one provider-specific definition for every provider", () => {
@@ -18,8 +18,36 @@ describe("provider settings discriminated union", () => {
 		expect(new Set(registeredProviders).size).toBe(providerNames.length)
 	})
 
+	it.each(providerDefinitionList.map((definition) => definition.apiProvider))(
+		"exposes a default model accessor for %s",
+		(apiProvider) => {
+			const definition = providerDefinitionList.find((candidate) => candidate.apiProvider === apiProvider)
+
+			expect(typeof definition?.getDefaultModelId).toBe("function")
+			expect(typeof definition?.getDefaultModelId({})).toBe("string")
+		},
+	)
+
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
+
+describe("LiteLLM reasoning preservation settings", () => {
+	it("includes reasoning preservation in the profile settings keys", () => {
+		expect(PROVIDER_SETTINGS_KEYS).toContain("litellmPreserveReasoning")
+	})
+
+	it.each([undefined, "auto", "on", "off"])("round trips %s through both profile schemas", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.parse(settings)).toEqual(settings)
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+	})
+
+	it.each([true, false, "invalid", null])("rejects invalid preservation value %s", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.safeParse(settings).success).toBe(false)
+		expect(providerSettingsSchemaDiscriminated.safeParse(settings).success).toBe(false)
 	})
 })
 

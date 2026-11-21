@@ -1,4 +1,11 @@
-import type { ModelInfo } from "../model.js"
+import { openAiCodexServiceTierSchema, type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 /**
  * OpenAI Codex Provider
@@ -18,12 +25,56 @@ export type OpenAiCodexModelId = keyof typeof openAiCodexModels
 
 export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
 
+const gpt62CodexModelInfo = {
+	maxTokens: 128_000,
+	// Zoo Code uses the Codex catalog's max_context_window for both models.
+	contextWindow: 872_000,
+	includedTools: ["apply_patch"],
+	excludedTools: ["apply_diff", "write_to_file"],
+	supportsImages: true,
+	supportsPromptCache: true,
+	supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+	requiredReasoningEffort: true,
+	reasoningEffort: "low",
+	supportsVerbosity: true,
+	supportsTemperature: false,
+	inputPrice: 0,
+	outputPrice: 0,
+} as const satisfies ModelInfo
+
 /**
  * Models available through the Codex OAuth flow.
  * These models are accessible to ChatGPT Plus/Pro subscribers.
  * Costs are 0 as they are covered by the subscription.
  */
 export const openAiCodexModels = {
+	"gpt-6.2-sol": {
+		...gpt62CodexModelInfo,
+		description: "GPT-6.2 Sol for everyday coding and agent workflows via ChatGPT subscription",
+	},
+	"gpt-6.2-astra": {
+		...gpt62CodexModelInfo,
+		description: "GPT-6.2 Astra for complex software engineering and professional work via ChatGPT subscription",
+	},
+	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
+	"gpt-6.1-terra": {
+		maxTokens: 128000,
+		// Use Codex's supported maximum rather than its 500K default compaction budget.
+		contextWindow: 872000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+		requiredReasoningEffort: true,
+		reasoningEffort: "low",
+		inputPrice: 0,
+		outputPrice: 0,
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		description:
+			"GPT-6.1 Terra: Fast, efficient visual reasoning, precise computer use, and natural writing via ChatGPT subscription",
+	},
 	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
 	"gpt-6.1-sol": {
 		maxTokens: 128000,
@@ -350,3 +401,17 @@ export const openAiCodexModels = {
 		description: "GPT-5.2: Latest GPT model via ChatGPT subscription",
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const OPEN_AI_CODEX_SERVICE_TIER_KEY = "openAiCodexServiceTier"
+
+export const openAiCodexProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.openaiCodex,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => openAiCodexDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		// Codex "Fast" mode maps to the Responses API priority service tier.
+		[OPEN_AI_CODEX_SERVICE_TIER_KEY]: openAiCodexServiceTierSchema.optional(),
+	},
+})

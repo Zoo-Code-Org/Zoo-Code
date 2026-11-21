@@ -3,7 +3,7 @@ import { ArrowRight } from "lucide-react"
 import { vscode } from "@/utils/vscode"
 import { cn } from "@/lib/utils"
 import type { SubtaskTreeNode } from "./types"
-import { countAllSubtasks } from "./types"
+import { countAllSubtasks, getTaskDisplayTitle } from "./types"
 import { StandardTooltip } from "../ui"
 import SubtaskCollapsibleRow from "./SubtaskCollapsibleRow"
 import { TaskStatusBadge } from "./TaskStatusBadge"
@@ -51,7 +51,7 @@ const SubtaskRow = ({ node, depth, onToggleExpand, className }: SubtaskRowProps)
 					}
 				}}>
 				<StandardTooltip content={item.task} delay={600}>
-					<span className="text-sm line-clamp-1">{item.task}</span>
+					<span className="text-sm line-clamp-1">{getTaskDisplayTitle(item)}</span>
 				</StandardTooltip>
 				{(item.status === "delegated" || item.status === "interrupted") && (
 					<TaskStatusBadge status={item.status} className="text-xs shrink-0" />

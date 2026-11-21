@@ -1,6 +1,4 @@
 {
-	"title": "Modi",
-	"done": "Fatto",
 	"modes": {
 		"title": "Modalità",
 		"createNewMode": "Crea nuova modalità",
@@ -14,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configurazione API",
-		"select": "Seleziona quale configurazione API utilizzare per questa modalità"
+		"select": "Seleziona quale configurazione API utilizzare per questa modalità",
+		"pinnedGroupAriaLabel": "Configurazioni fissate",
+		"allGroupAriaLabel": "Tutte le configurazioni"
 	},
 	"tools": {
 		"title": "Strumenti disponibili",
@@ -49,13 +49,12 @@
 		"title": "Istruzioni personalizzate specifiche per la modalità (opzionale)",
 		"resetToDefault": "Ripristina predefiniti",
 		"description": "Aggiungi linee guida comportamentali specifiche per la modalità {{modeName}}.",
-		"loadFromFile": "Le istruzioni personalizzate specifiche per la modalità {{mode}} possono anche essere caricate dalla cartella <span>.roo/rules-{{slug}}/</span> nel tuo spazio di lavoro o dal globale <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} e .clinerules-{{slug}} sono deprecati e smetteranno di funzionare presto)."
+		"loadFromFile": "Le istruzioni personalizzate specifiche per la modalità {{mode}} possono anche essere caricate dalla cartella <span>.roo/rules-{{slug}}/</span> nel tuo spazio di lavoro o dal globale <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} e .clinerules-{{slug}} sono deprecati e smetteranno di funzionare presto).",
+		"loadFromFileAriaLabel": "Scopri le istruzioni personalizzate globali per le modalità"
 	},
 	"exportMode": {
 		"title": "Esporta modalità",
-		"description": "Esporta questa modalità in un file YAML con tutte le regole incluse per una facile condivisione con altri.",
-		"export": "Esporta modalità",
-		"exporting": "Esportazione..."
+		"export": "Esporta modalità"
 	},
 	"importMode": {
 		"selectLevel": "Scegli dove importare questa modalità:",
@@ -73,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Istruzioni personalizzate per tutte le modalità",
 		"description": "Queste istruzioni si applicano a tutte le modalità. Forniscono un insieme base di comportamenti che possono essere migliorati dalle istruzioni specifiche per modalità qui sotto. <0>Scopri di più</0>",
-		"loadFromFile": "Le istruzioni possono anche essere caricate dalla cartella <span>.roo/rules/</span> nel tuo spazio di lavoro o dal globale <0>.roo/rules/</0> (.roorules e .clinerules sono deprecati e smetteranno di funzionare presto)."
+		"loadFromFile": "Le istruzioni possono anche essere caricate dalla cartella <span>.roo/rules/</span> nel tuo spazio di lavoro o dal globale <0>.roo/rules/</0> (.roorules e .clinerules sono deprecati e smetteranno di funzionare presto).",
+		"learnMoreAriaLabel": "Scopri di più sulle istruzioni personalizzate globali",
+		"loadFromFileAriaLabel": "Scopri come configurare le istruzioni personalizzate globali"
 	},
 	"systemPrompt": {
 		"preview": "Anteprima prompt di sistema",
@@ -81,7 +82,6 @@
 		"title": "Prompt di sistema (modalità {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompt di supporto",
 		"resetPrompt": "Ripristina il prompt {{promptType}} ai valori predefiniti",
 		"prompt": "Prompt",
 		"enhance": {
@@ -94,10 +94,12 @@
 			"includeTaskHistory": "Includi cronologia attività come contesto",
 			"includeTaskHistoryDescription": "Quando abilitato, gli ultimi 10 messaggi della conversazione corrente verranno inclusi come contesto durante il miglioramento dei prompt, aiutando a generare suggerimenti più rilevanti e consapevoli del contesto."
 		},
-		"condense": {
-			"apiConfiguration": "Configurazione API per la condensazione del contesto",
-			"apiConfigDescription": "Seleziona quale configurazione API utilizzare per le operazioni di condensazione del contesto. Lascia deselezionato per utilizzare la configurazione attiva corrente.",
-			"useCurrentConfig": "Usa la configurazione API currently selezionata"
+		"taskTitle": {
+			"enabled": "Genera automaticamente i titoli delle attività",
+			"enabledDescription": "Riassume in background il primo prompt di ogni nuova attività in un titolo breve. Le richieste di titolo non sono incluse nel costo dell'attività. I profili GitHub Copilot e VS Code LM consumano la tua quota.",
+			"apiConfiguration": "Configurazione API",
+			"useTaskConfig": "Usa la configurazione API dell'attività",
+			"apiConfigDescription": "Si consiglia un profilo leggero senza ragionamento. Se scegli un altro profilo, l'inizio del prompt viene inviato a quel provider."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Avvia nuova attività",
 				"description": "Avvia una nuova attività con il tuo input. Disponibile nella palette dei comandi."
+			},
+			"TASK_TITLE": {
+				"label": "Titolo dell'attività",
+				"description": "Genera in background un titolo breve per le nuove attività. Viene mostrato nella cronologia e nell'intestazione dell'attività. Configuralo qui sotto."
 			}
 		}
 	},
@@ -196,8 +202,12 @@
 		"title": "Elimina modalità",
 		"message": "Sei sicuro di voler eliminare la modalità \"{{modeName}}\"?",
 		"rulesFolder": "Questa modalità ha una cartella di regole in {{folderPath}} che verrà eliminata.",
-		"descriptionNoRules": "Sei sicuro di voler eliminare questa modalità personalizzata?",
 		"confirm": "Elimina",
 		"cancel": "Annulla"
+	},
+	"mcpServers": {
+		"restrict": "Limita a server MCP specifici",
+		"noneConnected": "Nessun server MCP connesso",
+		"notConnected": "{{serverName}} (non connesso)"
 	}
 }

@@ -7,6 +7,16 @@ import { toRequestyServiceUrl } from "../../../shared/utils/requesty"
 
 import { throwIfAborted } from "../utils/abort-signal"
 
+const REQUESTY_ADAPTIVE_REASONING_MODELS = new Set([
+	"anthropic/claude-fable-5.1",
+	"anthropic/claude-fable-5",
+	"anthropic/claude-sonnet-5",
+	"anthropic/claude-sonnet-5-5",
+	"anthropic/claude-opus-5",
+	"anthropic/claude-opus-5-5",
+	"anthropic/claude-haiku-5-5",
+])
+
 export async function getRequestyModels(
 	baseUrl?: string,
 	apiKey?: string,
@@ -51,25 +61,7 @@ export async function getRequestyModels(
 				cacheReadsPrice: parseApiPrice(rawModel.cached_price),
 			}
 
-			if (rawModel.id === "anthropic/claude-fable-5.1" || rawModel.id === "anthropic/claude-fable-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-sonnet-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-opus-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-opus-5-5") {
+			if (REQUESTY_ADAPTIVE_REASONING_MODELS.has(rawModel.id)) {
 				modelInfo.supportsReasoningBudget = true
 				modelInfo.supportsReasoningBinary = true
 				modelInfo.supportsTemperature = false

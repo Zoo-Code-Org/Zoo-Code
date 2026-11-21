@@ -21,7 +21,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 	const { t } = useAppTranslation()
 
 	const [openAiNativeBaseUrlSelected, setOpenAiNativeBaseUrlSelected] = useState(
-		!!apiConfiguration?.openAiNativeBaseUrl,
+		!!apiConfiguration.openAiNativeBaseUrl,
 	)
 
 	const handleInputChange = useCallback(
@@ -51,7 +51,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 			{openAiNativeBaseUrlSelected && (
 				<>
 					<VSCodeTextField
-						value={apiConfiguration?.openAiNativeBaseUrl || ""}
+						value={apiConfiguration.openAiNativeBaseUrl || ""}
 						type="url"
 						onInput={handleInputChange("openAiNativeBaseUrl")}
 						placeholder="https://api.openai.com/v1"
@@ -60,7 +60,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 				</>
 			)}
 			<VSCodeTextField
-				value={apiConfiguration?.openAiNativeApiKey || ""}
+				value={apiConfiguration.openAiNativeApiKey || ""}
 				type="password"
 				onInput={handleInputChange("openAiNativeApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -70,7 +70,7 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.openAiNativeApiKey && (
+			{!apiConfiguration.openAiNativeApiKey && (
 				<VSCodeButtonLink href="https://platform.openai.com/api-keys" appearance="secondary">
 					{t("settings:providers.getOpenAiApiKey")}
 				</VSCodeButtonLink>
@@ -85,8 +85,8 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 				return (
 					<div className="flex flex-col gap-1 mt-2" data-testid="openai-service-tier">
 						<div className="flex items-center gap-1">
-							<label className="block font-medium mb-1">Service tier</label>
-							<StandardTooltip content="For faster processing of API requests, try the priority processing service tier. For lower prices with higher latency, try the flex processing tier.">
+							<label className="block font-medium mb-1">{t("settings:serviceTier.label")}</label>
+							<StandardTooltip content={t("settings:serviceTier.tooltip")}>
 								<i className="codicon codicon-info text-vscode-descriptionForeground text-xs" />
 							</StandardTooltip>
 						</div>
@@ -103,12 +103,18 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 								<SelectValue placeholder={t("settings:common.select")} />
 							</SelectTrigger>
 							<SelectContent>
-								<SelectItem value={OpenAiServiceTier.Default}>Standard</SelectItem>
+								<SelectItem value={OpenAiServiceTier.Default}>
+									{t("settings:serviceTier.standard")}
+								</SelectItem>
 								{allowedTiers.includes(OpenAiServiceTier.Flex) && (
-									<SelectItem value={OpenAiServiceTier.Flex}>Flex</SelectItem>
+									<SelectItem value={OpenAiServiceTier.Flex}>
+										{t("settings:serviceTier.flex")}
+									</SelectItem>
 								)}
 								{allowedTiers.includes(OpenAiServiceTier.Priority) && (
-									<SelectItem value={OpenAiServiceTier.Priority}>Priority</SelectItem>
+									<SelectItem value={OpenAiServiceTier.Priority}>
+										{t("settings:serviceTier.priority")}
+									</SelectItem>
 								)}
 							</SelectContent>
 						</Select>

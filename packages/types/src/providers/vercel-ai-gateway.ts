@@ -1,4 +1,8 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import { baseProviderSettingsShape, createModelIdAccessor, createProviderDefinition } from "./common.js"
 
 // https://ai-gateway.vercel.sh/v1/
 export const vercelAiGatewayDefaultModelId = "anthropic/claude-sonnet-4"
@@ -9,6 +13,7 @@ export const VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS = new Set([
 	"anthropic/claude-3.5-haiku",
 	"anthropic/claude-3.5-sonnet",
 	"anthropic/claude-3.7-sonnet",
+	"anthropic/claude-haiku-5.5",
 	"anthropic/claude-opus-4",
 	"anthropic/claude-opus-4.1",
 	"anthropic/claude-opus-4.5",
@@ -20,6 +25,7 @@ export const VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS = new Set([
 	"anthropic/claude-sonnet-4",
 	"anthropic/claude-sonnet-4.6",
 	"anthropic/claude-sonnet-5",
+	"anthropic/claude-sonnet-5.5",
 	"openai/gpt-4.1",
 	"openai/gpt-4.1-mini",
 	"openai/gpt-4.1-nano",
@@ -57,6 +63,7 @@ export const VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS = new Set([
 	"anthropic/claude-3.5-sonnet",
 	"anthropic/claude-3.7-sonnet",
 	"anthropic/claude-haiku-4.5",
+	"anthropic/claude-haiku-5.5",
 	"anthropic/claude-opus-4",
 	"anthropic/claude-opus-4.1",
 	"anthropic/claude-opus-4.5",
@@ -69,6 +76,7 @@ export const VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS = new Set([
 	"anthropic/claude-sonnet-4.5",
 	"anthropic/claude-sonnet-4.6",
 	"anthropic/claude-sonnet-5",
+	"anthropic/claude-sonnet-5.5",
 	"google/gemini-1.5-flash",
 	"google/gemini-1.5-pro",
 	"google/gemini-2.0-flash",
@@ -120,3 +128,17 @@ export const vercelAiGatewayDefaultModelInfo: ModelInfo = {
 }
 
 export const VERCEL_AI_GATEWAY_DEFAULT_TEMPERATURE = 0.7
+
+export const VERCEL_AI_GATEWAY_MODEL_ID_FIELD = "vercelAiGatewayModelId"
+
+export const vercelAiGatewayProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.vercelAiGateway,
+	modelIdKey: VERCEL_AI_GATEWAY_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(VERCEL_AI_GATEWAY_MODEL_ID_FIELD),
+	getDefaultModelId: () => vercelAiGatewayDefaultModelId,
+	schema: {
+		...baseProviderSettingsShape,
+		vercelAiGatewayApiKey: z.string().optional(),
+		[VERCEL_AI_GATEWAY_MODEL_ID_FIELD]: z.string().optional(),
+	},
+})

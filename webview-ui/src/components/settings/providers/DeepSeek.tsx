@@ -30,7 +30,7 @@ export const DeepSeek = ({ apiConfiguration, setApiConfigurationField }: DeepSee
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.deepSeekApiKey || ""}
+				value={apiConfiguration.deepSeekApiKey || ""}
 				type="password"
 				onInput={handleInputChange("deepSeekApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -40,7 +40,7 @@ export const DeepSeek = ({ apiConfiguration, setApiConfigurationField }: DeepSee
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.deepSeekApiKey && (
+			{!apiConfiguration.deepSeekApiKey && (
 				<VSCodeButtonLink href="https://platform.deepseek.com/" appearance="secondary">
 					{t("settings:providers.getDeepSeekApiKey")}
 				</VSCodeButtonLink>

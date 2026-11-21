@@ -205,7 +205,7 @@ describe("CodeIndexPopover OpenRouter provider lookup", () => {
 		},
 		{
 			name: "unset API provider",
-			apiConfiguration: undefined,
+			apiConfiguration: {},
 			expectedRegion: "",
 			expectedProfile: "",
 		},

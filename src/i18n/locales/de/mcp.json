@@ -1,6 +1,5 @@
 {
 	"errors": {
-		"invalid_settings_format": "Ungültiges MCP-Einstellungen-JSON-Format. Bitte stelle sicher, dass deine Einstellungen dem korrekten JSON-Format entsprechen.",
 		"invalid_settings_syntax": "Ungültiges MCP-Einstellungen-JSON-Format. Bitte überprüfe deine Einstellungsdatei auf Syntaxfehler.",
 		"invalid_settings_validation": "Ungültiges MCP-Einstellungen-Format: {{errorMessages}}",
 		"create_json": "Fehler beim Erstellen oder Öffnen von .roo/mcp.json: {{error}}",
@@ -8,7 +7,8 @@
 		"invalidJsonArgument": "Zoo hat versucht, {{toolName}} mit einem ungültigen JSON-Argument zu verwenden. Wiederhole...",
 		"refresh_after_disable": "Fehler beim Aktualisieren der MCP-Verbindungen nach dem Deaktivieren",
 		"refresh_after_enable": "Fehler beim Aktualisieren der MCP-Verbindungen nach dem Aktivieren",
-		"disconnect_servers_partial": "Fehler beim Trennen von {{count}} MCP-Server(n). Überprüfe die Ausgabe für Details.",
+		"disconnect_servers_partial_one": "Fehler beim Trennen von {{count}} MCP-Server. Überprüfe die Ausgabe für Details.",
+		"disconnect_servers_partial_other": "Fehler beim Trennen von {{count}} MCP-Servern. Überprüfe die Ausgabe für Details.",
 		"toolNotFound": "Tool '{{toolName}}' existiert nicht auf Server '{{serverName}}'. Verfügbare Tools: {{availableTools}}",
 		"serverNotFound": "MCP-Server '{{serverName}}' ist nicht konfiguriert. Verfügbare Server: {{availableServers}}",
 		"toolDisabled": "Tool '{{toolName}}' auf Server '{{serverName}}' ist deaktiviert. Verfügbare aktivierte Tools: {{availableTools}}"
@@ -18,11 +18,6 @@
 		"server_connected": "MCP-Server {{serverName}} verbunden",
 		"server_deleted": "MCP-Server gelöscht: {{serverName}}",
 		"server_not_found": "Server \"{{serverName}}\" nicht in der Konfiguration gefunden",
-		"global_servers_active": "Aktive globale MCP-Server: {{mcpServers}}",
-		"project_servers_active": "Aktive Projekt-MCP-Server: {{mcpServers}}",
-		"already_refreshing": "MCP-Server werden bereits aktualisiert.",
-		"refreshing_all": "Alle MCP-Server werden aktualisiert...",
-		"all_refreshed": "Alle MCP-Server wurden aktualisiert.",
 		"project_config_deleted": "Projekt-MCP-Konfigurationsdatei gelöscht. Alle Projekt-MCP-Server wurden getrennt."
 	},
 	"oauth": {
@@ -39,7 +34,6 @@
 		},
 		"flow": {
 			"authenticating": "MCP-Server \"{{name}}\" erfordert Authentifizierung",
-			"waitingForBrowser": "Schließe die Anmeldung in deinem Browser ab...",
 			"clickAuthenticate": "MCP-Server \"{{name}}\" wartet auf Authentifizierung.",
 			"dismissedHint": "Benachrichtigung geschlossen — brich ab und verbinde den Server erneut, um dich zu authentifizieren.",
 			"authenticateButton": "Authentifizieren",

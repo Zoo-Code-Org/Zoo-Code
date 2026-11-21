@@ -1,5 +1,4 @@
 {
-	"unknownError": "알 수 없는 오류",
 	"authenticationFailed": "임베딩 생성 실패: 인증에 실패했습니다. API 키를 확인하세요.",
 	"failedWithStatus": "{{attempts}}번 시도 후 임베딩 생성 실패: HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "{{attempts}}번 시도 후 임베딩 생성 실패: {{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "잘못된 임베더 구성입니다. 설정을 검토하세요.",
 		"serviceUnavailable": "임베더 서비스를 사용할 수 없습니다. 실행 중이고 액세스 가능한지 확인하세요.",
 		"invalidEndpoint": "잘못된 API 엔드포인트입니다. URL 구성을 확인하세요.",
-		"invalidEmbedderConfig": "잘못된 임베더 구성입니다. 설정을 확인하세요.",
-		"invalidApiKey": "잘못된 API 키입니다. API 키 구성을 확인하세요.",
-		"invalidBaseUrl": "잘못된 기본 URL입니다. URL 구성을 확인하세요.",
-		"invalidModel": "잘못된 모델입니다. 모델 구성을 확인하세요.",
 		"invalidResponse": "임베더 서비스에서 잘못된 응답이 왔습니다. 구성을 확인하세요.",
 		"apiKeyRequired": "이 임베더에는 API 키가 필요합니다",
 		"baseUrlRequired": "이 임베더에는 기본 URL이 필요합니다"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "임베더 생성을 위한 OpenAI 구성이 누락되었습니다",
 		"ollamaConfigMissing": "임베더 생성을 위한 Ollama 구성이 누락되었습니다",
-		"openAiCompatibleConfigMissing": "임베더 생성을 위한 OpenAI 호환 구성이 누락되었습니다",
 		"geminiConfigMissing": "임베더 생성을 위한 Gemini 구성이 누락되었습니다",
 		"mistralConfigMissing": "임베더 생성을 위한 Mistral 구성이 없습니다",
 		"openRouterConfigMissing": "임베더 생성을 위한 OpenRouter 구성이 없습니다",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "인덱싱 실패: 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 일반적으로 임베더 구성 문제를 나타냅니다.",
-		"indexingFailedCritical": "인덱싱 실패: 처리할 파일을 찾았음에도 불구하고 코드 블록이 성공적으로 인덱싱되지 않았습니다. 이는 중요한 임베더 오류를 나타냅니다.",
 		"fileWatcherStarted": "파일 감시자가 시작되었습니다.",
 		"fileWatcherStopped": "파일 감시자가 중지되었습니다.",
 		"failedDuringInitialScan": "초기 스캔 중 실패: {{errorMessage}}",

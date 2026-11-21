@@ -1,6 +1,7 @@
 import * as vscode from "vscode"
 import ignore from "ignore"
 import { makeExtensionContext } from "../../../../test-utils/vscode"
+import { clearAllMocks } from "../../../../test-utils/reset"
 import { Package } from "../../../../shared/package"
 import { CacheManager } from "../../cache-manager"
 import { BATCH_SEGMENT_THRESHOLD } from "../../constants"
@@ -30,7 +31,7 @@ vi.mock("../scanner")
 vi.mock("../file-watcher")
 
 describe("processor factories", () => {
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 	afterEach(() => vi.restoreAllMocks())
 
 	function dependencies() {

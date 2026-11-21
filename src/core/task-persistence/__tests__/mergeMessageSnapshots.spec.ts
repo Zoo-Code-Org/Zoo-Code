@@ -121,6 +121,15 @@ describe("mergeClineMessageSnapshots", () => {
 		])
 	})
 
+	it("keeps a disk childTaskId when the matching incoming message omits the key", () => {
+		const result = mergeClineMessageSnapshots(
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "subtask_result", text: "done", childTaskId: "child-1" }],
+			[{ messageId: "msg-1", ts: 1, type: "say", say: "subtask_result", text: "done (updated)" }],
+		)
+
+		expect(result).toEqual([expect.objectContaining({ ts: 1, text: "done (updated)", childTaskId: "child-1" })])
+	})
+
 	it("returns incoming data when either snapshot is not an array", () => {
 		expect(mergeClineMessageSnapshots(null, [{ ts: 1 }])).toEqual([{ ts: 1 }])
 		expect(mergeClineMessageSnapshots([], "invalid")).toBe("invalid")

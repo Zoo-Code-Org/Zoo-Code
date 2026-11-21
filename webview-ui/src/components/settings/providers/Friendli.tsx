@@ -34,7 +34,7 @@ export const Friendli = ({ apiConfiguration, setApiConfigurationField }: Friendl
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.friendliApiKey || ""}
+				value={apiConfiguration.friendliApiKey || ""}
 				type="password"
 				onInput={handleInputChange("friendliApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -44,7 +44,7 @@ export const Friendli = ({ apiConfiguration, setApiConfigurationField }: Friendl
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.friendliApiKey && (
+			{!apiConfiguration.friendliApiKey && (
 				<VSCodeButtonLink href="https://friendli.ai/" appearance="secondary">
 					{t("settings:providers.getFriendliApiKey")}
 				</VSCodeButtonLink>

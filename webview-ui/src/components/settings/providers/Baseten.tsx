@@ -31,7 +31,7 @@ export const Baseten = ({ apiConfiguration, setApiConfigurationField }: BasetenP
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.basetenApiKey || ""}
+				value={apiConfiguration.basetenApiKey || ""}
 				type="password"
 				onInput={handleInputChange("basetenApiKey")}
 				placeholder={t("settings:placeholders.apiKey")}
@@ -41,7 +41,7 @@ export const Baseten = ({ apiConfiguration, setApiConfigurationField }: BasetenP
 			<div className="text-sm text-vscode-descriptionForeground -mt-2">
 				{t("settings:providers.apiKeyStorageNotice")}
 			</div>
-			{!apiConfiguration?.basetenApiKey && (
+			{!apiConfiguration.basetenApiKey && (
 				<VSCodeButtonLink href="https://app.baseten.co/settings/api_keys" appearance="secondary">
 					{t("settings:providers.getBasetenApiKey")}
 				</VSCodeButtonLink>

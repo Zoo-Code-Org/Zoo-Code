@@ -8,6 +8,7 @@ import { useExtensionState } from "@src/context/ExtensionStateContext"
 import { validateApiConfiguration } from "@src/utils/validate"
 import { vscode } from "@src/utils/vscode"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
+import type { TFunction } from "i18next"
 import { Button } from "@src/components/ui"
 
 import ApiOptions from "../settings/ApiOptions"
@@ -21,16 +22,17 @@ const DEFAULT_WELCOME_API_CONFIGURATION: ProviderSettings = {
 }
 
 const getWelcomeApiConfiguration = (
-	apiConfiguration?: ProviderSettings,
+	t: TFunction,
+	apiConfiguration: ProviderSettings,
 	zooCodeIsAuthenticated?: boolean,
 ): ProviderSettings => {
 	// validateApiConfiguration treats a missing apiProvider as valid (no switch case matches),
 	// so we explicitly fall back here before delegating to it for incomplete-but-set configs.
-	if (!apiConfiguration?.apiProvider) {
+	if (!apiConfiguration.apiProvider) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
 
-	const validationError = validateApiConfiguration(apiConfiguration, undefined, undefined, zooCodeIsAuthenticated)
+	const validationError = validateApiConfiguration(apiConfiguration, t, undefined, undefined, zooCodeIsAuthenticated)
 	if (validationError) {
 		return DEFAULT_WELCOME_API_CONFIGURATION
 	}
@@ -46,7 +48,7 @@ const WelcomeViewProvider = () => {
 	const [showProviderSetup, setShowProviderSetup] = useState(false)
 	const [welcomeApiConfiguration, setWelcomeApiConfiguration] = useState<ProviderSettings>()
 	const effectiveApiConfiguration =
-		welcomeApiConfiguration ?? getWelcomeApiConfiguration(apiConfiguration, zooCodeIsAuthenticated)
+		welcomeApiConfiguration ?? getWelcomeApiConfiguration(t, apiConfiguration, zooCodeIsAuthenticated)
 
 	const setApiConfigurationFieldForApiOptions = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K]) => {
@@ -61,7 +63,7 @@ const WelcomeViewProvider = () => {
 
 	const handleGetStarted = useCallback(() => {
 		if (!showProviderSetup) {
-			const initialApiConfiguration = getWelcomeApiConfiguration(apiConfiguration, zooCodeIsAuthenticated)
+			const initialApiConfiguration = getWelcomeApiConfiguration(t, apiConfiguration, zooCodeIsAuthenticated)
 			setWelcomeApiConfiguration(initialApiConfiguration)
 
 			setApiConfiguration(initialApiConfiguration)
@@ -70,7 +72,13 @@ const WelcomeViewProvider = () => {
 			return
 		}
 
-		const error = validateApiConfiguration(effectiveApiConfiguration, undefined, undefined, zooCodeIsAuthenticated)
+		const error = validateApiConfiguration(
+			effectiveApiConfiguration,
+			t,
+			undefined,
+			undefined,
+			zooCodeIsAuthenticated,
+		)
 
 		if (error) {
 			setErrorMessage(error)
@@ -90,6 +98,7 @@ const WelcomeViewProvider = () => {
 		effectiveApiConfiguration,
 		currentApiConfigName,
 		zooCodeIsAuthenticated,
+		t,
 	])
 
 	if (!showProviderSetup) {
@@ -108,7 +117,7 @@ const WelcomeViewProvider = () => {
 				<h2 className="mt-0 mb-0 text-xl">{t("welcome:providerSignup.heading")}</h2>
 
 				<p className="text-base text-vscode-foreground">
-					<Trans i18nKey="welcome:providerSignup.chooseProvider" />
+					<Trans t={t} i18nKey="welcome:providerSignup.chooseProvider" />
 				</p>
 
 				<div className="mb-8">

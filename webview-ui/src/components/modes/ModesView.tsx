@@ -710,15 +710,13 @@ const ModesView = () => {
 					</div>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-3">
-						<Trans i18nKey="prompts:modes.createModeHelpText">
+						<Trans t={t} i18nKey="prompts:modes.createModeHelpText">
 							<VSCodeLink
 								href={buildDocLink("basic-usage/using-modes", "prompts_view_modes")}
-								style={{ display: "inline" }}
-								aria-label="Learn about using modes"></VSCodeLink>
+								style={{ display: "inline" }}></VSCodeLink>
 							<VSCodeLink
 								href={buildDocLink("features/custom-modes", "prompts_view_modes")}
-								style={{ display: "inline" }}
-								aria-label="Learn about customizing modes"></VSCodeLink>
+								style={{ display: "inline" }}></VSCodeLink>
 						</Trans>
 					</div>
 
@@ -1302,6 +1300,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:customInstructions.loadFromFile"
 							values={{
 								mode: getCurrentMode()?.name || "Code",
@@ -1334,7 +1333,7 @@ const ModesView = () => {
 											"prompts_mode_specific_global_rules",
 										)}
 										style={{ display: "inline" }}
-										aria-label="Learn about global custom instructions for modes"
+										aria-label={t("prompts:customInstructions.loadFromFileAriaLabel")}
 									/>
 								),
 							}}
@@ -1382,14 +1381,14 @@ const ModesView = () => {
 					<h3 className="text-vscode-foreground mb-3">{t("prompts:globalCustomInstructions.title")}</h3>
 
 					<div className="text-sm text-vscode-descriptionForeground mb-2">
-						<Trans i18nKey="prompts:globalCustomInstructions.description">
+						<Trans t={t} i18nKey="prompts:globalCustomInstructions.description">
 							<VSCodeLink
 								href={buildDocLink(
 									"features/custom-instructions#setting-up-global-rules",
 									"prompts_global_custom_instructions",
 								)}
 								style={{ display: "inline" }}
-								aria-label="Learn more about global custom instructions"></VSCodeLink>
+								aria-label={t("prompts:globalCustomInstructions.learnMoreAriaLabel")}></VSCodeLink>
 						</Trans>
 					</div>
 					<VSCodeTextArea
@@ -1411,6 +1410,7 @@ const ModesView = () => {
 					/>
 					<div className="text-xs text-vscode-descriptionForeground mt-1.5">
 						<Trans
+							t={t}
 							i18nKey="prompts:globalCustomInstructions.loadFromFile"
 							components={{
 								span: (
@@ -1435,7 +1435,7 @@ const ModesView = () => {
 											"prompts_global_rules",
 										)}
 										style={{ display: "inline" }}
-										aria-label="Learn about setting up global custom instructions"
+										aria-label={t("prompts:globalCustomInstructions.loadFromFileAriaLabel")}
 									/>
 								),
 							}}
@@ -1615,7 +1615,7 @@ const ModesView = () => {
 												const checked = target.checked
 												setNewModeAllowedMcpServers(checked ? [] : undefined)
 											}}>
-											Restrict to specific MCP servers
+											{t("prompts:mcpServers.restrict")}
 										</VSCodeCheckbox>
 										{newModeAllowedMcpServers !== undefined && (
 											<McpServerChecklist

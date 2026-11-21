@@ -1,4 +1,4 @@
-import { render, screen } from "@/utils/test-utils"
+import { fireEvent, render, screen } from "@/utils/test-utils"
 import { describe, expect, test, vi } from "vitest"
 
 import { AutoApproveDropdown } from "../AutoApproveDropdown"
@@ -54,5 +54,14 @@ describe("AutoApproveDropdown", () => {
 		render(<AutoApproveDropdown disabled />)
 
 		expect(screen.getByTestId("auto-approve-dropdown-trigger")).toBeDisabled()
+	})
+
+	test("translates the master toggle label and its aria-label", () => {
+		render(<AutoApproveDropdown />)
+
+		fireEvent.click(screen.getByTestId("auto-approve-dropdown-trigger"))
+
+		expect(screen.getByText("chat:autoApprove.enabled")).toBeInTheDocument()
+		expect(screen.getByRole("switch", { name: "chat:autoApprove.toggleAriaLabel" })).toBeInTheDocument()
 	})
 })

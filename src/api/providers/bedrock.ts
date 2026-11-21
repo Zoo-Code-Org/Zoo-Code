@@ -83,6 +83,7 @@ interface BedrockAdditionalModelFields {
 				display?: "summarized" | "none"
 		  }
 		| { type: "disabled" }
+		| { type: "between_tools" }
 	output_config?: {
 		// Claude 4.7+ effort levels: "low" | "medium" | "high" | "xhigh" | "max"
 		effort: string
@@ -494,6 +495,12 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				modelId: modelConfig.id,
 				thinking: additionalModelRequestFields?.thinking,
 			})
+		} else if (baseModelId === "anthropic.claude-sonnet-5-5") {
+			// Sonnet 5.5 requires between_tools at high effort or below for this selection.
+			additionalModelRequestFields = {
+				thinking: { type: "between_tools" },
+				output_config: { effort: "high" },
+			}
 		} else if ((BEDROCK_THINKING_DISABLE_MODEL_IDS as readonly string[]).includes(baseModelId)) {
 			// Omitting thinking enables it by default on these models. Adaptive-only
 			// models (Fable 5/5.1, Opus 5.5) reject "disabled", so they keep the omit behavior.
@@ -1295,6 +1302,10 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 				inputPrice: tier?.inputPrice ?? modelConfig.info.inputPrice,
 				outputPrice: tier?.outputPrice ?? modelConfig.info.outputPrice,
 				cacheWritesPrice: tier?.cacheWritesPrice ?? modelConfig.info.cacheWritesPrice,
+				// Carry the tier's own TTL rate; the entry-level one was derived from the
+				// 200K input price and would halve a 1M-context 1h write.
+				cacheWritesPrice1h: tier?.cacheWritesPrice1h ?? modelConfig.info.cacheWritesPrice1h,
+				cacheWritesPrice12h: tier?.cacheWritesPrice12h ?? modelConfig.info.cacheWritesPrice12h,
 				cacheReadsPrice: tier?.cacheReadsPrice ?? modelConfig.info.cacheReadsPrice,
 			}
 		}

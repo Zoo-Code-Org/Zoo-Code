@@ -4,7 +4,9 @@ import { retiredProviderIdentifiers, providerIdentifiers } from "@roo-code/types
 import { renderWithExtensionState, screen, fireEvent, within } from "@/utils/test-utils"
 
 import { type ModelInfo, type ProviderSettings, openAiModelInfoSaneDefaults } from "@roo-code/types"
-import { openAiCodexDefaultModelId, zooGatewayDefaultModelId } from "@roo-code/types"
+import { openAiCodexDefaultModelId, opencodeGoModels, zooGatewayDefaultModelId } from "@roo-code/types"
+
+import { useSelectedModel } from "@src/components/ui/hooks/useSelectedModel"
 
 import ApiOptions, { ApiOptionsProps } from "../ApiOptions"
 
@@ -32,6 +34,26 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			/>
 			{children}
 		</label>
+	),
+	VSCodeDropdown: ({
+		children,
+		value,
+		onChange,
+		...props
+	}: {
+		children?: React.ReactNode
+		value?: string
+		onChange?: (event: Event) => void
+		id?: string
+		"aria-label"?: string
+		className?: string
+	}) => (
+		<select value={value} onChange={(e) => onChange?.(e.nativeEvent)} {...props}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value }: { children?: React.ReactNode; value: string }) => (
+		<option value={value}>{children}</option>
 	),
 }))
 
@@ -369,6 +391,71 @@ describe("ApiOptions", () => {
 		expect(screen.queryByTestId("rate-limit-seconds-control")).not.toBeInTheDocument()
 	})
 
+	describe("OpenCode Go Responses temperature (Zoo-Code-Org/Zoo-Code#2055)", () => {
+		const selectOpencodeGoModel = (modelId: string) => {
+			vi.mocked(useSelectedModel).mockImplementation(() => ({
+				provider: providerIdentifiers.opencodeGo,
+				id: modelId,
+				info: opencodeGoModels[modelId],
+				isLoading: false,
+				isError: false,
+			}))
+		}
+
+		const opencodeGoConfig = (modelId: string, settings: ProviderSettings = {}): ProviderSettings => ({
+			apiProvider: providerIdentifiers.opencodeGo,
+			opencodeGoModelId: modelId,
+			modelTemperature: 0.42,
+			...settings,
+		})
+
+		afterEach(() => {
+			vi.mocked(useSelectedModel).mockReset()
+		})
+
+		it("shows the control for a model that always supports temperature", () => {
+			selectOpencodeGoModel("grok-4.6")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("grok-4.6") })
+
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+		})
+
+		it("hides the control for a GPT Luna model on its default reasoning effort", () => {
+			selectOpencodeGoModel("gpt-6-luna")
+			renderApiOptions({ apiConfiguration: opencodeGoConfig("gpt-6-luna") })
+
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+		})
+
+		it("updates visibility when the reasoning effort changes without clearing the saved value", () => {
+			const setApiConfigurationField = vi.fn()
+			selectOpencodeGoModel("gpt-5.6-luna")
+			const renderWithEffort = (reasoningEffort: ProviderSettings["reasoningEffort"]) => (
+				<ApiOptions
+					errorMessage={undefined}
+					setErrorMessage={() => {}}
+					uriScheme={undefined}
+					apiConfiguration={opencodeGoConfig("gpt-5.6-luna", { reasoningEffort })}
+					setApiConfigurationField={setApiConfigurationField}
+				/>
+			)
+			const view = renderWithExtensionState(renderWithEffort("none"))
+			expect(screen.getByTestId("temperature-control")).toBeInTheDocument()
+
+			view.rerender(renderWithEffort("high"))
+			expect(screen.queryByTestId("temperature-control")).not.toBeInTheDocument()
+
+			// Returning to "none" shows the control again with the saved value.
+			view.rerender(renderWithEffort("none"))
+			expect(within(screen.getByTestId("temperature-control")).getByRole("slider")).toHaveValue("0.42")
+
+			const temperatureWrites = setApiConfigurationField.mock.calls.filter(
+				([field]) => field === "modelTemperature",
+			)
+			expect(temperatureWrites).toEqual([])
+		})
+	})
+
 	describe("thinking functionality", () => {
 		it("should show ThinkingBudget for Anthropic models that support thinking", () => {
 			renderApiOptions({
@@ -430,7 +517,6 @@ describe("ApiOptions", () => {
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
 		expect(optionTexts).toContain("NanoGPT")
-		expect(optionTexts).toContain("IO Intelligence")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options
@@ -614,6 +700,34 @@ describe("ApiOptions", () => {
 			expect(screen.getByTestId("litellm-refresh-models")).toBeInTheDocument()
 		})
 
+		it("defaults reasoning preservation to Auto in advanced settings", () => {
+			renderApiOptions({ apiConfiguration: { apiProvider: providerIdentifiers.litellm } })
+
+			const dropdown = screen.getByRole("combobox", {
+				name: "settings:providers.litellmPreserveReasoning.label",
+			})
+			expect(dropdown.closest(".collapsible-content-mock")).not.toBeNull()
+			expect(dropdown).toHaveValue("auto")
+		})
+
+		it("displays saved reasoning preservation and updates it when changed", () => {
+			const mockSetApiConfigurationField = vi.fn()
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.litellm,
+					litellmPreserveReasoning: "off",
+				},
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const dropdown = screen.getByRole("combobox", {
+				name: "settings:providers.litellmPreserveReasoning.label",
+			})
+			expect(dropdown).toHaveValue("off")
+			fireEvent.change(dropdown, { target: { value: "on" } })
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("litellmPreserveReasoning", "on")
+		})
+
 		it("does not render LiteLLM component when other provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
@@ -622,6 +736,9 @@ describe("ApiOptions", () => {
 			})
 
 			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+			expect(
+				screen.queryByRole("combobox", { name: "settings:providers.litellmPreserveReasoning.label" }),
+			).not.toBeInTheDocument()
 		})
 	})
 

@@ -5,7 +5,7 @@ import type { ProviderSettings, ProviderSettingsEntry } from "./provider-setting
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
-import type { ClineMessage, QueuedMessage } from "./message.js"
+import type { ClineMessage, MentionSegment, QueuedMessage } from "./message.js"
 import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
 import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
@@ -22,6 +22,35 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
+
+/** Provider lookups the extension host runs for the webview, keeping provider origins out of the CSP. */
+export type ProviderInfoKind = keyof ProviderInfoResultMap
+
+export interface ProviderInfoParams {
+	apiKey?: string
+	baseUrl?: string
+	modelId?: string
+}
+
+/** Result of each lookup. The host and the webview share it, so the kind fixes the result type. */
+export interface ProviderInfoResultMap {
+	openRouterKeyInfo: {
+		label: string
+		usage: number
+		is_free_tier: boolean
+		is_provisioning_key: boolean
+		rate_limit: { requests: number; interval: string }
+		limit: number | null
+	} | null
+	openRouterModelProviders: Record<string, ModelInfo & { label: string }>
+	requestyKeyInfo: {
+		name: string
+		monthly_limit: string
+		monthly_spend: string
+		org_balance: string
+		config: { aliases?: Record<string, unknown> }
+	} | null
+}
 
 /**
  * ExtensionMessage
@@ -50,6 +79,7 @@ export interface ExtensionMessage {
 		| typeof VsCodeLmModelsMessageType.vsCodeLmModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotModels
 		| typeof VsCodeLmModelsMessageType.githubCopilotSignInResult
+		| "settingsSaveResult"
 		| "vsCodeLmApiAvailable"
 		| "updatePrompt"
 		| "systemPrompt"
@@ -65,6 +95,7 @@ export interface ExtensionMessage {
 		| "ttsStart"
 		| "ttsStop"
 		| "fileSearchResults"
+		| "providerInfo"
 		| "toggleApiConfigPin"
 		| "acceptInput"
 		| "setHistoryPreviewCollapsed"
@@ -111,6 +142,7 @@ export interface ExtensionMessage {
 		| "originalContent"
 		| "rooHistoryImportProgress"
 		| "themeFixtureProbeRequest"
+		| "diagnosticsRequest"
 	text?: string
 	/** For fileContent: { path, content, error? } */
 	fileContent?: { path: string; content: string | null; error?: string }
@@ -131,6 +163,8 @@ export interface ExtensionMessage {
 		| "switchTab"
 		| "toggleAutoApprove"
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
+	/** With `invoke: "setChatBoxMessage"`: origin of each part of `text`. Absent means all generated. */
+	segments?: MentionSegment[]
 	/**
 	 * Partial state updates are allowed to reduce message size (e.g. omit large fields like taskHistory).
 	 * The webview is responsible for merging.
@@ -170,6 +204,7 @@ export interface ExtensionMessage {
 	values?: Record<string, any>
 	requestId?: string
 	themeFixture?: WebviewThemeFixture
+	diagnostics?: WebviewDiagnosticsSnapshot
 	promptText?: string
 	results?:
 		| { path: string; type: "file" | "folder"; label?: string }[]
@@ -337,8 +372,13 @@ export type ExtensionState = Pick<
 	| "imageGenerationProvider"
 	| "openRouterImageGenerationSelectedModel"
 	| "includeTaskHistoryInEnhance"
+	| "taskTitleGenerationEnabled"
+	| "taskTitleApiConfigId"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
+	| "timeFormat"
+	| "dateFormat"
+	| "showRelativeTimes"
 	| "enterBehavior"
 	| "includeCurrentTime"
 	| "includeCurrentCost"
@@ -467,12 +507,54 @@ export type ClineAskResponse = "yesButtonClicked" | "noButtonClicked" | "message
 
 export type AudioType = "notification" | "celebration" | "progress_loop"
 
+export interface WebviewDiagnosticsSnapshot {
+	capturedAt: string
+	didHydrateState?: boolean
+	documentReadyState?: "loading" | "interactive" | "complete"
+	documentVisibilityState?: "hidden" | "visible" | "prerender"
+	activeView?: string
+	rootMounted?: boolean
+	rootChildCount?: number
+	lastReceivedStateSequence?: number
+	lastAppliedStateSequence?: number
+	staleStateRejectionCount?: number
+	unknownMessageUpdateCount?: number
+	currentTaskId?: string
+	chatMessageCount?: number
+	historyItemCount?: number
+	todoCount?: number
+	viewport?: { width: number; height: number; devicePixelRatio: number }
+	theme?: {
+		kind?: number
+		identifier?: string
+		bodyForeground?: string
+		bodyBackground?: string
+		rootForeground?: string
+		rootBackground?: string
+		variables?: Record<string, string>
+	}
+	error?: {
+		name?: string
+		message?: string
+		fingerprint?: string
+		stackLocations?: string[]
+	}
+}
+
 export interface UpdateTodoListPayload {
 	// eslint-disable-next-line @typescript-eslint/no-explicit-any
 	todos: any[]
 }
 
-export type EditQueuedMessagePayload = Pick<QueuedMessage, "id" | "text" | "images">
+// Segments stay unknown. normalizeSegments fails closed on a bad list.
+export const editQueuedMessagePayloadSchema = z.object({
+	id: z.string(),
+	text: z.string(),
+	images: z.array(z.string()).optional(),
+	segments: z.unknown().optional(),
+})
+
+export type EditQueuedMessagePayload = z.infer<typeof editQueuedMessagePayloadSchema>
 
 export interface WebviewMessage {
 	type:
@@ -489,6 +571,7 @@ export interface WebviewMessage {
 		| "getListApiConfiguration"
 		| "customInstructions"
 		| "webviewDidLaunch"
+		| "webviewHeartbeat"
 		| "webviewDidFocus"
 		| "newTask"
 		| "askResponse"
@@ -502,11 +585,13 @@ export interface WebviewMessage {
 		| "deleteTaskWithId"
 		| "abandonSubtaskWithId"
 		| "exportTaskWithId"
+		| "renameTaskWithId"
 		| "importSettings"
 		| "exportSettings"
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
+		| "requestProviderInfo"
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
@@ -668,6 +753,7 @@ export interface WebviewMessage {
 		| "openRuleFile"
 		| "openRulesDirectory"
 		| "themeFixtureProbeResponse"
+		| "diagnosticsResponse"
 	text?: string
 	taskId?: string
 	editedMessageContent?: string
@@ -715,9 +801,11 @@ export interface WebviewMessage {
 	newSkillModeSlugs?: string[] // For updateSkillModes (new mode restrictions)
 	requestId?: string
 	themeFixture?: WebviewThemeFixture
+	diagnostics?: WebviewDiagnosticsSnapshot
 	ids?: string[]
 	terminalOperation?: "continue" | "abort"
 	messageTs?: number
+	timestamp?: number // For webviewHeartbeat
 	messageId?: string
 	restoreCheckpoint?: boolean
 	historyPreviewCollapsed?: boolean
@@ -772,6 +860,8 @@ export interface WebviewMessage {
 	updatedSettings?: RooCodeSettings
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
+	/** Origin of each part of `text`. Absent or not matching `text` means all generated. */
+	segments?: MentionSegment[]
 	// Worktree properties
 	worktreePath?: string
 	worktreeBranch?: string

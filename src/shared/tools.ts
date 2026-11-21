@@ -182,20 +182,6 @@ export interface McpToolUse {
 	partial: boolean
 }
 
-/**
- * @public
- */
-export interface AttemptCompletionToolUse extends ToolUse<"attempt_completion"> {
-	name: "attempt_completion"
-	params: Partial<Pick<Record<ToolParamName, string>, "result">>
-}
-
-/** @internal Type used by tool-argument regression tests. */
-export interface WriteToFileToolUse extends ToolUse<"write_to_file"> {
-	name: "write_to_file"
-	params: Partial<Pick<Record<ToolParamName, string>, "path" | "content">>
-}
-
 // Define tool group configuration
 export type ToolGroupConfig = {
 	tools: readonly string[]
@@ -251,7 +237,7 @@ export const TOOL_ALIASES: Record<string, ToolName> = {
 } as const
 
 export type DiffResult =
-	| { success: true; content: string; failParts?: DiffResult[] }
+	| { success: true; content: string; failParts?: DiffResult[]; blockCount?: number }
 	| ({
 			success: false
 			error?: string
@@ -292,5 +278,5 @@ export interface DiffStrategy {
 		endLine?: number,
 	): Promise<DiffResult>
 
-	getProgressStatus?(toolUse: ToolUse, result?: any): ToolProgressStatus
+	getProgressStatus?(toolUse: ToolUse, result?: DiffResult): ToolProgressStatus
 }

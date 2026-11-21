@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 export const KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1"
 export const kimiCodeDefaultModelId = "kimi-for-coding"
@@ -28,3 +37,18 @@ export const kimiCodeModels = {
 } as const satisfies Record<string, ModelInfo>
 
 export type KimiCodeModelId = keyof typeof kimiCodeModels
+
+export const kimiCodeAuthMethodSchema = z.enum(["oauth", "api-key"])
+export type KimiCodeAuthMethod = z.infer<typeof kimiCodeAuthMethodSchema>
+
+export const kimiCodeProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.kimiCode,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => kimiCodeDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		kimiCodeAuthMethod: kimiCodeAuthMethodSchema.optional(),
+		kimiCodeApiKey: z.string().optional(),
+	},
+})

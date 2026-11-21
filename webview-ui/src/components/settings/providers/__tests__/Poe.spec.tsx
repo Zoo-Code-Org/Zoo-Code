@@ -1,5 +1,4 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { act, fireEvent, screen, waitFor } from "@testing-library/react"
 
 import {
 	allRouterModelsProvider,
@@ -7,6 +6,8 @@ import {
 	type OrganizationAllowList,
 	type ProviderSettings,
 } from "@roo-code/types"
+
+import { createTestQueryClient, renderWithExtensionState } from "@src/utils/test-utils"
 
 import { Poe } from "../Poe"
 
@@ -19,7 +20,8 @@ vi.mock("@src/utils/vscode", () => ({
 	vscode: { postMessage: postMessageMock },
 }))
 
-vi.mock("@src/context/ExtensionStateContext", () => ({
+vi.mock("@src/context/ExtensionStateContext", async (importOriginal) => ({
+	...(await importOriginal<typeof import("@src/context/ExtensionStateContext")>()),
 	useExtensionState: mockUseExtensionState,
 }))
 
@@ -55,19 +57,14 @@ describe("Poe", () => {
 	const organizationAllowList: OrganizationAllowList = { allowAll: true, providers: {} }
 	const setApiConfigurationField = vi.fn()
 
-	const renderComponent = (apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.poe }) => {
-		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
-
-		return render(
-			<QueryClientProvider client={queryClient}>
-				<Poe
-					apiConfiguration={apiConfiguration}
-					setApiConfigurationField={setApiConfigurationField}
-					organizationAllowList={organizationAllowList}
-				/>
-			</QueryClientProvider>,
+	const renderComponent = (apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.poe }) =>
+		renderWithExtensionState(
+			<Poe
+				apiConfiguration={apiConfiguration}
+				setApiConfigurationField={setApiConfigurationField}
+				organizationAllowList={organizationAllowList}
+			/>,
 		)
-	}
 
 	beforeEach(() => {
 		vi.clearAllMocks()
@@ -114,17 +111,16 @@ describe("Poe", () => {
 	})
 
 	it("invalidates only the Poe and shared router-model caches after a successful refresh", async () => {
-		const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+		const queryClient = createTestQueryClient()
 		const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries")
 
-		render(
-			<QueryClientProvider client={queryClient}>
-				<Poe
-					apiConfiguration={{ apiProvider: providerIdentifiers.poe, poeApiKey: "test-key" }}
-					setApiConfigurationField={setApiConfigurationField}
-					organizationAllowList={organizationAllowList}
-				/>
-			</QueryClientProvider>,
+		renderWithExtensionState(
+			<Poe
+				apiConfiguration={{ apiProvider: providerIdentifiers.poe, poeApiKey: "test-key" }}
+				setApiConfigurationField={setApiConfigurationField}
+				organizationAllowList={organizationAllowList}
+			/>,
+			{ queryClient },
 		)
 
 		fireEvent.click(screen.getByTestId("refresh-button"))

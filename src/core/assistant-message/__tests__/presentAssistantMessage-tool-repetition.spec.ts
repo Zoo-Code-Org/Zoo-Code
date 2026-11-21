@@ -1,5 +1,6 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-repetition.spec.ts
 
+import { DispatchState } from "../../task/dispatchState"
 import { providerIdentifiers } from "@roo-code/types"
 
 import type { ToolUse } from "../../../shared/tools"
@@ -153,8 +154,8 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],
@@ -217,8 +218,8 @@ describe("presentAssistantMessage - Tool Repetition Detection", () => {
 	 */
 	function startNextTurn(blocks: ToolUse[]) {
 		mockTask.currentStreamingContentIndex = 0
-		mockTask.presentAssistantMessageLocked = false
-		mockTask.presentAssistantMessageHasPendingUpdates = false
+		mockTask.dispatchState = DispatchState.IDLE
+		mockTask.pendingWork = null
 		mockTask.didAlreadyUseTool = false
 		mockTask.didRejectTool = false
 		mockTask.userMessageContent = []

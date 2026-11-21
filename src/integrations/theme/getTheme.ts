@@ -2,6 +2,7 @@ import * as vscode from "vscode"
 import * as path from "path"
 import * as fs from "fs/promises"
 import { convertTheme } from "monaco-vscode-textmate-theme-converter/lib/cjs"
+import type { IVSCodeTheme } from "monaco-vscode-textmate-theme-converter/lib/cjs"
 
 import { Package } from "../../shared/package"
 
@@ -22,14 +23,20 @@ const defaultThemes: Record<string, string> = {
 	"Visual Studio Light": "light_vs",
 }
 
-function parseThemeString(themeString: string | undefined): any {
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue }
+type JsonObject = { [key: string]: JsonValue }
+
+// Theme JSON is free-form VS Code theme data; model the members this module reads.
+type ParsedTheme = JsonObject & { include?: string }
+
+function parseThemeString(themeString: string | undefined): ParsedTheme {
 	themeString = themeString
 		?.split("\n")
 		.filter((line) => {
 			return !line.trim().startsWith("//")
 		})
 		.join("\n")
-	return JSON.parse(themeString ?? "{}")
+	return JSON.parse(themeString ?? "{}") as ParsedTheme
 }
 
 export async function getTheme() {
@@ -70,18 +77,17 @@ export async function getTheme() {
 				"utf-8",
 			)
 			const includeTheme = parseThemeString(includeThemeString)
-			parsed = mergeJson(parsed, includeTheme)
+			parsed = mergeJson(parsed, includeTheme) as ParsedTheme
 		}
 
-		const converted = convertTheme(parsed)
+		// The converter validates and normalizes free-form theme JSON at runtime.
+		const converted = convertTheme(parsed as unknown as IVSCodeTheme)
 
-		converted.base = (
-			["vs", "hc-black"].includes(converted.base)
-				? converted.base
-				: colorTheme.includes("Light")
-					? "vs"
-					: "vs-dark"
-		) as any
+		converted.base = ["vs", "hc-black"].includes(converted.base)
+			? converted.base
+			: colorTheme.includes("Light")
+				? "vs"
+				: "vs-dark"
 
 		return converted
 	} catch (e) {
@@ -90,14 +96,14 @@ export async function getTheme() {
 	return undefined
 }
 
-type JsonObject = { [key: string]: any }
 export function mergeJson(
 	first: JsonObject,
 	second: JsonObject,
 	mergeBehavior?: "merge" | "overwrite",
-	mergeKeys?: { [key: string]: (a: any, b: any) => boolean },
-): any {
-	const copyOfFirst = JSON.parse(JSON.stringify(first))
+	mergeKeys?: { [key: string]: (a: JsonValue, b: JsonValue) => boolean },
+): JsonObject {
+	// JSON round-trip is the deep clone of free-form theme JSON.
+	const copyOfFirst = JSON.parse(JSON.stringify(first)) as JsonObject
 
 	try {
 		for (const key in second) {
@@ -114,9 +120,9 @@ export function mergeJson(
 				// Array
 				if (mergeKeys?.[key]) {
 					// Merge keys are used to determine whether an item form the second object should override one from the first
-					const keptFromFirst: any[] = []
-					firstValue.forEach((item: any) => {
-						if (!secondValue.some((item2: any) => mergeKeys[key](item, item2))) {
+					const keptFromFirst: JsonValue[] = []
+					firstValue.forEach((item) => {
+						if (!secondValue.some((item2) => mergeKeys[key](item, item2))) {
 							keptFromFirst.push(item)
 						}
 					})
@@ -125,8 +131,8 @@ export function mergeJson(
 					copyOfFirst[key] = [...firstValue, ...secondValue]
 				}
 			} else if (typeof secondValue === "object" && typeof firstValue === "object") {
-				// Object
-				copyOfFirst[key] = mergeJson(firstValue, secondValue, mergeBehavior)
+				// typeof also admits null and arrays; merge failures fall back in the catch below.
+				copyOfFirst[key] = mergeJson(firstValue as JsonObject, secondValue as JsonObject, mergeBehavior)
 			} else {
 				// Other (boolean, number, string)
 				copyOfFirst[key] = secondValue

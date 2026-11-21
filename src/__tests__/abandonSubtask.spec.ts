@@ -10,10 +10,10 @@ import { makeProviderStub } from "./helpers/provider-stub"
  * Minimal taskHistoryStore stub whose atomicUpdatePair calls both updaters
  * against an in-memory item map and resolves, simulating the happy-path atomic write.
  */
-function makeTaskHistoryStoreStub(childItem: Record<string, any>, parentItem: Record<string, any>) {
-	const itemMap = new Map<string, Partial<HistoryItem>>([
-		[childItem.id!, childItem],
-		[parentItem.id!, parentItem],
+function makeTaskHistoryStoreStub(childItem: { id: string }, parentItem: { id: string }) {
+	const itemMap = new Map<string, Partial<HistoryItem> & { id: string }>([
+		[childItem.id, childItem as Partial<HistoryItem> & { id: string }],
+		[parentItem.id, parentItem as Partial<HistoryItem> & { id: string }],
 	])
 
 	const atomicUpdatePair = vi.fn(
@@ -31,7 +31,7 @@ function makeTaskHistoryStoreStub(childItem: Record<string, any>, parentItem: Re
 
 	return {
 		atomicUpdatePair,
-		get: vi.fn((id: string) => itemMap.get(id)),
+		get: vi.fn<(id: string) => unknown>((id) => itemMap.get(id)),
 	}
 }
 
@@ -79,9 +79,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 			taskHistoryStore,
 			isViewLaunched: true,
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
-		} as any)
+		})
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(true)
 		expect(taskHistoryStore.atomicUpdatePair).toHaveBeenCalledTimes(1)
@@ -110,7 +110,7 @@ describe("ClineProvider.abandonSubtask()", () => {
 		)
 
 		// Guarded against a stale in-flight completion reattaching the child.
-		expect((provider as any).cancelledDelegationChildIds.has("child-1")).toBe(true)
+		expect(provider["cancelledDelegationChildIds"].has("child-1")).toBe(true)
 
 		// Both updated items broadcast to the webview with the actual severed-link field values,
 		// not just matching IDs — a stale/pre-abandon payload would still match an id-only assertion.
@@ -178,9 +178,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 			removeClineFromStack,
 			taskHistoryStore,
 			isViewLaunched: false,
-		} as any)
+		})
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(true)
 		expect(removeClineFromStack).toHaveBeenCalledWith()
@@ -214,9 +214,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 			removeClineFromStack,
 			taskHistoryStore,
 			isViewLaunched: false,
-		} as any)
+		})
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(true)
 		expect(removeClineFromStack).not.toHaveBeenCalled()
@@ -238,9 +238,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 		})
 
 		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
-		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore } as any)
+		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore })
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(false)
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
@@ -264,15 +264,15 @@ describe("ClineProvider.abandonSubtask()", () => {
 			throw new Error("Task not found")
 		})
 
-		const taskHistoryStore: any = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
+		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
 		// Simulate the concurrent completion landing right before the in-lock re-check runs.
 		taskHistoryStore.get = vi.fn((id: string) =>
 			id === "child-1" ? { ...childHistoryItem, status: "completed" as const } : parentHistoryItem,
 		)
 
-		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore } as any)
+		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore })
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(false)
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
@@ -280,9 +280,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 
 	it("returns false and does not modify state when the child has no parentTaskId", async () => {
 		const getTaskWithId = vi.fn().mockResolvedValue({ historyItem: { id: "standalone-1", status: "active" } })
-		const provider = makeProviderStub({ getTaskWithId } as any)
+		const provider = makeProviderStub({ getTaskWithId })
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "standalone-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "standalone-1")
 
 		expect(result).toBe(false)
 	})
@@ -298,9 +298,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 		})
 
 		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
-		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore } as any)
+		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore })
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(false)
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()
@@ -317,9 +317,9 @@ describe("ClineProvider.abandonSubtask()", () => {
 		})
 
 		const taskHistoryStore = makeTaskHistoryStoreStub(childHistoryItem, parentHistoryItem)
-		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore } as any)
+		const provider = makeProviderStub({ getTaskWithId, taskHistoryStore })
 
-		const result = await (ClineProvider.prototype as any).abandonSubtask.call(provider, "child-1")
+		const result = await ClineProvider.prototype.abandonSubtask.call(provider, "child-1")
 
 		expect(result).toBe(false)
 		expect(taskHistoryStore.atomicUpdatePair).not.toHaveBeenCalled()

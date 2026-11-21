@@ -1,11 +1,11 @@
 // pnpm --filter @roo-code/vscode-webview test src/components/chat/__tests__/ChatView.clear-approval-buttons.spec.tsx
 
 import React from "react"
-import { renderWithExtensionState, waitFor, act, fireEvent } from "@/utils/test-utils"
+import { renderWithExtensionState, waitFor, act, fireEvent, screen } from "@/utils/test-utils"
 
 import { vscode } from "@src/utils/vscode"
 
-import ChatView, { ChatViewProps } from "../ChatView"
+import ChatView, { ChatViewProps, ChatViewRef } from "../ChatView"
 
 interface ClineMessage {
 	type: "say" | "ask"
@@ -94,19 +94,19 @@ vi.mock("../common/TelemetryBanner", () => ({
 }))
 
 // The i18n mock returns the key itself, so button labels render as their keys.
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => key,
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => <>{children || i18nKey}</>,
 }))
 
 const RUN_BUTTON_LABEL = "chat:runCommand.title"
 const DENY_BUTTON_LABEL = "chat:reject.title"
+const RESUME_BUTTON_LABEL = "chat:resumeTask.title"
 const START_NEW_TASK_BUTTON_LABEL = "chat:startNewTask.title"
 const SEE_NEW_CHANGES_BUTTON_LABEL = "chat:seeNewChanges.title"
 const RESTORE_CHANGES_BUTTON_LABEL = "chat:restoreChanges.title"
@@ -139,10 +139,12 @@ const defaultProps: ChatViewProps = {
 const renderChatView = (props: Partial<ChatViewProps> = {}) =>
 	renderWithExtensionState(<ChatView {...defaultProps} {...props} />)
 
-const commandAsk = (): ClineMessage[] => [
+const askMessages = (ask: string): ClineMessage[] => [
 	{ type: "say", say: "task", ts: 1, text: "Initial task" },
-	{ type: "ask", ask: "command", ts: 2, text: "echo hi", partial: false },
+	{ type: "ask", ask, ts: 2, text: "echo hi", partial: false },
 ]
+
+const commandAsk = (): ClineMessage[] => askMessages("command")
 
 const autoApprovedCommandAsk = (): ClineMessage[] => [
 	{ type: "say", say: "task", ts: 1, text: "Initial task" },
@@ -182,6 +184,61 @@ const askOnlyCompletionWithCheckpoint = (): ClineMessage[] => [
 describe("ChatView approval button behavior", () => {
 	beforeEach(() => vi.clearAllMocks())
 
+	describe("queued message segments", () => {
+		const streaming = (): ClineMessage[] => [
+			{ type: "say", say: "task", ts: 1, text: "Initial task" },
+			{ type: "say", say: "text", ts: 2, text: "working", partial: true },
+		]
+		const fills = [
+			{
+				label: "generated",
+				fill: () =>
+					window.postMessage({ type: "invoke", invoke: "setChatBoxMessage", text: "ctx @/secret" }, "*"),
+				value: "ctx @/secret",
+				source: "generated",
+			},
+			{
+				label: "typed",
+				fill: () => fireEvent.input(screen.getByRole("textbox"), { target: { value: "use @/ok" } }),
+				value: "use @/ok",
+				source: "user",
+			},
+		] as const
+		const queued = () => vi.mocked(vscode.postMessage).mock.calls.find(([m]) => m.type === "queueMessage")?.[0]
+
+		it.each(fills)("the enqueue button sends $label text with its source", async ({ fill, value, source }) => {
+			renderChatView()
+			await act(async () => hydrateState(streaming()))
+			await act(async () => {
+				fill()
+			})
+			await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(value))
+			await act(async () => {
+				fireEvent.click(await screen.findByRole("button", { name: "chat:enqueueMessage" }))
+			})
+
+			expect(queued()).toMatchObject({ text: value, segments: [{ text: value, source }] })
+		})
+
+		it.each(fills)(
+			"acceptInput during command_output sends $label text with its source",
+			async ({ fill, value, source }) => {
+				const ref = React.createRef<ChatViewRef>()
+				renderWithExtensionState(<ChatView ref={ref} {...defaultProps} />)
+				await act(async () => hydrateState(askMessages("command_output")))
+				await act(async () => {
+					fill()
+				})
+				await waitFor(() => expect(screen.getByRole("textbox")).toHaveValue(value))
+				await act(async () => {
+					ref.current!.acceptInput()
+				})
+
+				expect(queued()).toMatchObject({ text: value, segments: [{ text: value, source }] })
+			},
+		)
+	})
+
 	it("shows Run/Deny buttons for a command ask that requires manual approval", async () => {
 		const { queryByText } = renderChatView()
 
@@ -192,6 +249,109 @@ describe("ChatView approval button behavior", () => {
 		await waitFor(() => {
 			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 			expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+		})
+	})
+
+	describe("approval feedback segments", () => {
+		const typed = async (input: HTMLElement) => {
+			fireEvent.input(input, { target: { value: "use @/ok" } })
+		}
+		// The extension fills the box with text that has no user segments.
+		const generated = async () => {
+			window.postMessage({ type: "invoke", invoke: "setChatBoxMessage", text: "ctx @/secret" }, "*")
+		}
+
+		it.each([
+			{ ask: "command", button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+			{ ask: "command", button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+			{ ask: "resume_task", button: RESUME_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+		])("sends user segments for typed text with $ask $askResponse", async ({ ask, button, askResponse }) => {
+			const { getByText, getByRole } = renderChatView()
+
+			await act(async () => {
+				hydrateState(askMessages(ask))
+			})
+			await waitFor(() => expect(getByText(button)).toBeInTheDocument())
+
+			await act(async () => {
+				await typed(getByRole("textbox"))
+			})
+			await act(async () => {
+				fireEvent.click(getByText(button))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					askResponse,
+					text: "use @/ok",
+					segments: [{ text: "use @/ok", source: "user" }],
+				}),
+			)
+		})
+
+		it.each([
+			{ ask: "command", button: RUN_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+			{ ask: "command", button: DENY_BUTTON_LABEL, askResponse: "noButtonClicked" },
+			{ ask: "resume_task", button: RESUME_BUTTON_LABEL, askResponse: "yesButtonClicked" },
+		])("keeps generated text generated with $ask $askResponse", async ({ ask, button, askResponse }) => {
+			const { getByText, getByRole } = renderChatView()
+
+			await act(async () => {
+				hydrateState(askMessages(ask))
+			})
+			await waitFor(() => expect(getByText(button)).toBeInTheDocument())
+
+			await act(async () => {
+				await generated()
+			})
+			await waitFor(() => expect(getByRole("textbox")).toHaveValue("ctx @/secret"))
+			await act(async () => {
+				fireEvent.click(getByText(button))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					askResponse,
+					text: "ctx @/secret",
+					segments: [{ text: "ctx @/secret", source: "generated" }],
+				}),
+			)
+		})
+
+		it("keeps generated text generated after the user deletes it and undoes", async () => {
+			const { getByText, getByRole } = renderChatView()
+
+			await act(async () => {
+				hydrateState(askMessages("command"))
+			})
+			await waitFor(() => expect(getByText(RUN_BUTTON_LABEL)).toBeInTheDocument())
+
+			await act(async () => {
+				await generated()
+			})
+			await waitFor(() => expect(getByRole("textbox")).toHaveValue("ctx @/secret"))
+			await act(async () => {
+				fireEvent.input(getByRole("textbox"), { target: { value: "" }, inputType: "deleteContentBackward" })
+			})
+			await act(async () => {
+				fireEvent.input(getByRole("textbox"), {
+					target: { value: "ctx @/secret" },
+					inputType: "historyUndo",
+				})
+			})
+			await act(async () => {
+				fireEvent.click(getByText(RUN_BUTTON_LABEL))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					text: "ctx @/secret",
+					segments: [{ text: "ctx @/secret", source: "generated" }],
+				}),
+			)
 		})
 	})
 

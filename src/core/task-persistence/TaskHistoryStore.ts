@@ -7,8 +7,10 @@ import deepEqual from "fast-deep-equal"
 import { historyItemSchema, type HistoryItem } from "@roo-code/types"
 
 import { GlobalFileNames } from "../../shared/globalFileNames"
-import { LOCK_STALE_MS, withFileLock } from "../../utils/fileLock"
+import { LOCK_STALE_MS } from "../../utils/fileLock"
 import { safeWriteJson } from "../../utils/safeWriteJson"
+import { deleteJsonFile, recoverMissingJsonFile } from "../../utils/jsonFileRecovery"
+import { getErrorCode, readFileWithMissingRetry } from "./readFileWithMissingRetry"
 import { getStorageBasePath } from "../../utils/storage"
 import { assertValidTransition, settleRejectedCreateSubtaskAction, type HistoryItemStatus } from "./taskLifecycle"
 import { computeHistoryDelta, DeltaRejectedError, mergeHistoryDelta } from "./taskStoreConcurrency"
@@ -69,6 +71,8 @@ interface DelegationRepairIntent {
 /**
  * Options for TaskHistoryStore constructor.
  */
+type AutoTitleDiskRead = { kind: "found"; item: HistoryItem } | { kind: "missing" } | { kind: "unreadable" }
+
 export interface TaskHistoryStoreOptions {
 	/**
 	 * Optional callback invoked inside the write lock after each mutation
@@ -280,8 +284,10 @@ export class TaskHistoryStore {
 			// Remove per-task file (best-effort)
 			try {
 				const filePath = await this.getTaskFilePath(taskId)
-				await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-			} catch {
+				await deleteJsonFile(filePath)
+			} catch (error) {
+				if (getErrorCode(error) !== "ENOENT")
+					console.warn("[TaskHistoryStore] Failed to delete task history:", error)
 				// File may already be deleted
 			}
 
@@ -308,8 +314,10 @@ export class TaskHistoryStore {
 				// Remove per-task file (best-effort)
 				try {
 					const filePath = await this.getTaskFilePath(taskId)
-					await withFileLock(filePath, (absoluteFilePath) => fs.unlink(absoluteFilePath))
-				} catch {
+					await deleteJsonFile(filePath)
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT")
+						console.warn("[TaskHistoryStore] Failed to delete task history:", error)
 					// File may already be deleted
 				}
 			}
@@ -351,7 +359,11 @@ export class TaskHistoryStore {
 			for (const taskId of onDiskIds) {
 				try {
 					const taskFilePath = await this.getTaskFilePath(taskId)
-					const { mtimeMs } = await fs.stat(taskFilePath)
+					const { mtimeMs } = await fs.stat(taskFilePath).catch(async (error: unknown) => {
+						if (getErrorCode(error) !== "ENOENT") throw error
+						await recoverMissingJsonFile(taskFilePath, { waitForStaleLock: false })
+						return fs.stat(taskFilePath)
+					})
 					liveIds.add(taskId)
 					if (
 						!options.forceRefresh &&
@@ -369,7 +381,12 @@ export class TaskHistoryStore {
 							this.cache.set(taskId, item)
 						}
 					}
-				} catch {
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT") {
+						liveIds.add(taskId)
+						console.warn("[TaskHistoryStore] Failed to reconcile task history:", error)
+						continue
+					}
 					// File may be temporarily absent during a peer's atomic
 					// rename window in safeWriteJson. The advisory lock is
 					// held for the entire write, so its presence means a
@@ -660,7 +677,7 @@ export class TaskHistoryStore {
 		const intentPath = await this.getDelegationRepairIntentPath()
 		let parsed: unknown
 		try {
-			parsed = JSON.parse(await fs.readFile(intentPath, "utf8")) as unknown
+			parsed = JSON.parse(await readFileWithMissingRetry(intentPath)) as unknown
 		} catch (error) {
 			if (this.isFileNotFoundError(error)) {
 				return null
@@ -720,7 +737,7 @@ export class TaskHistoryStore {
 
 	private async removeDelegationRepairIntent(): Promise<void> {
 		try {
-			await fs.unlink(await this.getDelegationRepairIntentPath())
+			await deleteJsonFile(await this.getDelegationRepairIntentPath())
 		} catch (error) {
 			console.warn("[TaskHistoryStore] Failed to remove completed delegation repair intent:", error)
 		}
@@ -828,10 +845,21 @@ export class TaskHistoryStore {
 				try {
 					await fs.access(filePath)
 					// File already exists, skip (don't overwrite existing per-task files)
-				} catch {
-					// File doesn't exist, write it
-					await safeWriteJson(filePath, item)
-					this.cache.set(item.id, item)
+				} catch (error) {
+					if (getErrorCode(error) !== "ENOENT") throw error
+					// Recovery or a peer may supply a committed record after the access check.
+					let persisted = item
+					await safeWriteJson(filePath, item, {
+						merge: (existing) => {
+							if (existing !== null) {
+								const recovered = historyItemSchema.parse(existing)
+								if (recovered.id !== item.id) throw new Error("Migration task ID mismatch")
+								persisted = recovered
+							}
+							return persisted
+						},
+					})
+					this.cache.set(item.id, persisted)
 				}
 			}
 
@@ -888,7 +916,7 @@ export class TaskHistoryStore {
 		const filePath = await this.getTaskFilePath(taskId)
 
 		try {
-			const raw = await fs.readFile(filePath, "utf8")
+			const raw = await readFileWithMissingRetry(filePath)
 			const item: HistoryItem = JSON.parse(raw)
 			return item.id ? item : null
 		} catch {
@@ -996,6 +1024,112 @@ export class TaskHistoryStore {
 			}
 			return this.upsertCore(updated)
 		})
+	}
+
+	/**
+	 * Record a generated title unless the task already has one. The persisted record is re-checked
+	 * under the per-file lock, so a task deleted by another host is never resurrected and a title
+	 * written by another host is never overwritten. Only a confirmed missing file evicts the cache:
+	 * a read or parse failure leaves it intact so a later save still merges against a known record.
+	 */
+	public setAutoTitleIfAbsent(taskId: string, autoTitle: string): Promise<{ applied: boolean; item?: HistoryItem }> {
+		return this.withLock(async () => {
+			const title = autoTitle.trim()
+			const disk = await this.readTaskFileForAutoTitle(taskId)
+			if (disk.kind !== "found") {
+				return this.settleSkippedAutoTitle(taskId, disk)
+			}
+			if (disk.item.autoTitle || !title) {
+				return this.settleSkippedAutoTitle(taskId, disk)
+			}
+
+			const skipped = Symbol("auto-title-skipped")
+			let persisted: HistoryItem | undefined
+			try {
+				const filePath = await this.getTaskFilePath(taskId)
+				await safeWriteJson(
+					filePath,
+					{ ...disk.item, autoTitle: title },
+					{
+						merge: (existing) => {
+							const current = existing as Partial<HistoryItem> | null
+							if (!current || current.id !== taskId || current.autoTitle) {
+								throw Object.assign(new Error("auto title skipped"), { [skipped]: true })
+							}
+							persisted = { ...(current as HistoryItem), autoTitle: title }
+							return persisted
+						},
+					},
+				)
+			} catch (error) {
+				if (!(error instanceof Error) || !(skipped in error)) {
+					throw error
+				}
+				// safeWriteJson reports both a missing and an unparsable file as `null`, so re-read to tell them apart.
+				return this.settleSkippedAutoTitle(taskId, await this.readTaskFileForAutoTitle(taskId))
+			}
+
+			if (!persisted) {
+				return { applied: false }
+			}
+			this.cacheAutoTitle(persisted)
+			if (this.onWrite) {
+				await this.onWrite(this.getAll())
+			}
+			return { applied: true, item: persisted }
+		})
+	}
+
+	/**
+	 * Copy only `autoTitle` from the disk record onto the cached one. The cache is the baseline that
+	 * later saves diff against, so taking the peer's other fields here would let a stale snapshot
+	 * from this host write its old values back over them. Callers still return the full disk record
+	 * for display.
+	 */
+	private cacheAutoTitle(disk: HistoryItem): void {
+		const cached = this.cache.get(disk.id)
+		this.cache.set(disk.id, cached ? { ...cached, autoTitle: disk.autoTitle } : disk)
+	}
+
+	private settleSkippedAutoTitle(taskId: string, disk: AutoTitleDiskRead): { applied: false; item?: HistoryItem } {
+		switch (disk.kind) {
+			case "found":
+				this.cacheAutoTitle(disk.item)
+				return { applied: false, item: disk.item }
+			case "missing":
+				this.cache.delete(taskId)
+				return { applied: false }
+			case "unreadable":
+				return { applied: false, item: this.cache.get(taskId) }
+		}
+	}
+
+	private async readTaskFileForAutoTitle(taskId: string): Promise<AutoTitleDiskRead> {
+		let raw: string
+		try {
+			raw = await readFileWithMissingRetry(await this.getTaskFilePath(taskId))
+		} catch (error) {
+			if (getErrorCode(error) === "ENOENT") {
+				return { kind: "missing" }
+			}
+			return this.unreadableForAutoTitle(taskId, error)
+		}
+		try {
+			const item: unknown = JSON.parse(raw)
+			const id = typeof item === "object" && item !== null ? (item as { id?: unknown }).id : undefined
+			if (id !== taskId) {
+				return this.unreadableForAutoTitle(taskId, `task file has id ${JSON.stringify(id)}`)
+			}
+			return { kind: "found", item: item as HistoryItem }
+		} catch (error) {
+			return this.unreadableForAutoTitle(taskId, error)
+		}
+	}
+
+	/** The caller only sees `applied: false`, so the reason is logged here. */
+	private unreadableForAutoTitle(taskId: string, reason: unknown): AutoTitleDiskRead {
+		console.warn(`[TaskHistoryStore] Failed to read task ${taskId} for auto title:`, reason)
+		return { kind: "unreadable" }
 	}
 
 	/**

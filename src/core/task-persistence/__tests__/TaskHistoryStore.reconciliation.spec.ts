@@ -3,6 +3,7 @@
 import * as fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
+import * as recovery from "../../../utils/jsonFileRecovery"
 
 import type { HistoryItem } from "@roo-code/types"
 
@@ -167,10 +168,26 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 	})
 
 	afterEach(async () => {
+		vi.restoreAllMocks()
 		safeWriteJsonMock.mockImplementation(writeJson)
 		for (const disposable of disposables) disposable.dispose()
 		disposables.clear()
 		await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {})
+	})
+
+	it.each(["EACCES", "EIO", "ELOCKED", "missing"])("handles failed startup recovery: %s", async (code) => {
+		const item = makeItem({ id: "recovery-failure", status: "active" })
+		await seedItems([item])
+		await store.initialize()
+		store.dispose()
+		const target = path.join(tmpDir, "tasks", item.id, GlobalFileNames.historyItem)
+		await fs.rename(target, path.join(path.dirname(target), `.${path.basename(target)}.bak_1.tmp`))
+		const recover = vi.spyOn(recovery, "recoverMissingJsonFile")
+		if (code === "missing") recover.mockResolvedValue(false)
+		else recover.mockRejectedValue(Object.assign(new Error("recovery failed"), { code }))
+		await store.reconcile()
+		expect(recover).toHaveBeenCalledWith(target, { waitForStaleLock: false })
+		expect(store.get(item.id)).toEqual(code === "missing" ? undefined : item)
 	})
 
 	it("repairs orphaned delegation: delegated parent whose child does not exist → active", async () => {
@@ -444,26 +461,36 @@ describe("TaskHistoryStore reconcileDelegationState", () => {
 		await expect(fs.access(intentPath)).rejects.toThrow()
 	})
 
-	it("replays a both-at-target intent without writing task files", async () => {
-		const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
-		const parent = makeItem({ id: "parent-at-target", status: "active" })
-		await seedItems([parent, child])
-		const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
-		await fs.writeFile(
-			intentPath,
-			JSON.stringify(makeRepairIntent({ ...parent, status: "delegated", awaitingChildId: child.id }, child)),
-		)
+	it.each([false, true])(
+		"replays a both-at-target intent without writing task files (backup: %s)",
+		async (backup) => {
+			const child = makeItem({ id: "child-at-target", status: "interrupted", parentTaskId: "parent-at-target" })
+			const parent = makeItem({ id: "parent-at-target", status: "active" })
+			await seedItems([parent, child])
+			const intentPath = path.join(tmpDir, "tasks", GlobalFileNames.delegationRepairIntent)
+			await fs.writeFile(
+				intentPath,
+				JSON.stringify(makeRepairIntent({ ...parent, status: "delegated", awaitingChildId: child.id }, child)),
+			)
 
-		const writeCalls: string[] = []
-		safeWriteJsonMock.mockImplementation(async (filePath, data) => {
-			writeCalls.push(filePath)
-			await writeJson(filePath, data)
-		})
-		await store.initialize()
+			if (backup) {
+				await fs.rename(
+					intentPath,
+					path.join(path.dirname(intentPath), `.${path.basename(intentPath)}.bak_1.tmp`),
+				)
+			}
 
-		expect(writeCalls.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
-		await expect(fs.access(intentPath)).rejects.toThrow()
-	})
+			const writeCalls: string[] = []
+			safeWriteJsonMock.mockImplementation(async (filePath, data) => {
+				writeCalls.push(filePath)
+				await writeJson(filePath, data)
+			})
+			await store.initialize()
+
+			expect(writeCalls.filter((filePath) => filePath.endsWith(GlobalFileNames.historyItem))).toEqual([])
+			await expect(fs.access(intentPath)).rejects.toThrow()
+		},
+	)
 
 	it("removes the repair-intent file after successful replay", async () => {
 		const child = makeItem({ id: "child-deferred-index", status: "active", parentTaskId: "parent-deferred-index" })

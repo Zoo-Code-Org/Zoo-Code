@@ -1,5 +1,6 @@
 // npx vitest src/core/assistant-message/__tests__/presentAssistantMessage-tool-usage-attribution.spec.ts
 
+import { DispatchState, type PendingWork } from "../../task/dispatchState"
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryEventName } from "@roo-code/types"
 import { describe, it, expect, beforeEach, vi, type Mock } from "vitest"
@@ -60,8 +61,8 @@ interface MockTask {
 	taskId: string
 	instanceId: string
 	abort: boolean
-	presentAssistantMessageLocked: boolean
-	presentAssistantMessageHasPendingUpdates: boolean
+	dispatchState: DispatchState
+	pendingWork: PendingWork | null
 	currentStreamingContentIndex: number
 	assistantMessageContent: unknown[]
 	userMessageContent: Anthropic.ToolResultBlockParam[]
@@ -100,8 +101,8 @@ describe("presentAssistantMessage - tool usage attribution", () => {
 			taskId: "test-task-id",
 			instanceId: "test-instance",
 			abort: false,
-			presentAssistantMessageLocked: false,
-			presentAssistantMessageHasPendingUpdates: false,
+			dispatchState: DispatchState.IDLE,
+			pendingWork: null,
 			currentStreamingContentIndex: 0,
 			assistantMessageContent: [],
 			userMessageContent: [],

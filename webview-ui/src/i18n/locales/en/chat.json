@@ -1,30 +1,28 @@
 {
-	"greeting": "Welcome to Zoo Code!",
 	"task": {
 		"title": "Task",
 		"expand": "Expand task",
 		"collapse": "Collapse task",
 		"seeMore": "See more",
-		"seeLess": "See less",
 		"tokens": "Tokens",
 		"cache": "Cache",
 		"apiCost": "API Cost",
 		"size": "Size",
 		"condenseContext": "Intelligently condense context",
 		"contextWindow": "Context Length",
-		"closeAndStart": "Close task and start a new one",
 		"export": "Export task history",
 		"delete": "Delete Task (Shift + Click to skip confirmation)",
 		"openApiHistory": "Open API History",
 		"openUiHistory": "Open UI History",
 		"backToParentTask": "Parent task",
-		"waitingOnSubtask": "Waiting on subtask",
-		"goToSubtask": "Go to subtask"
+		"waitingOnSubtask": "Waiting on subtask"
 	},
 	"unpin": "Unpin",
 	"pin": "Pin",
 	"fileChangesInConversation": {
-		"header": "{{count}} file(s) changed in this conversation"
+		"header_one": "{{count}} file changed in this conversation",
+		"header_other": "{{count}} files changed in this conversation",
+		"lineStatsAriaLabel": "Lines added: {{added}}, lines removed: {{removed}}"
 	},
 	"retry": {
 		"title": "Retry",
@@ -112,12 +110,10 @@
 		"tooltip": "Start a new task"
 	},
 	"cancel": {
-		"title": "Cancel",
-		"tooltip": "Cancel the current operation"
+		"title": "Cancel"
 	},
 	"stop": {
-		"title": "Stop",
-		"tooltip": "Stop the current task"
+		"title": "Stop"
 	},
 	"enqueueMessage": "Add message to queue (will be sent after current task completes)",
 	"editMessage": {
@@ -127,7 +123,6 @@
 	"scrollToLatestCheckpoint": "Scroll to previous checkpoint",
 	"about": "Zoo is a whole AI dev team in your editor",
 	"docs": "Check our <DocsLink>docs</DocsLink> to get started",
-	"onboarding": "What would you like to do?",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Customizable modes that don't swerve",
@@ -162,7 +157,6 @@
 	},
 	"enhancePromptDescription": "The 'Enhance Prompt' button helps improve your prompt by providing additional context, clarification, or rephrasing. Try typing a prompt in here and clicking the button again to see how it works.",
 	"addImages": "Add images to message",
-	"sendMessage": "Send message",
 	"pressToSend": "Press {{keyCombination}} to send",
 	"stopTts": "Stop text-to-speech",
 	"typeMessage": "Type a message...",
@@ -172,7 +166,6 @@
 	"dragFilesImages": "hold shift to drag in files/images",
 	"errorReadingFile": "Error reading file",
 	"noValidImages": "No valid images were processed",
-	"separator": "Separator",
 	"edit": "Edit...",
 	"forNextMode": "for next mode",
 	"forPreviousMode": "for previous mode",
@@ -200,7 +193,6 @@
 	},
 	"checkpoint": {
 		"regular": "Checkpoint",
-		"initializingWarning": "Still initializing checkpoint... If this takes too long, you can disable checkpoints in <settingsLink>settings</settingsLink> and restart your task.",
 		"menu": {
 			"viewDiff": "View Diff",
 			"viewDiffFromInit": "View All Changes",
@@ -227,7 +219,7 @@
 		"truncation": {
 			"title": "Context Truncated",
 			"inProgress": "Truncating context...",
-			"messagesRemoved": "{{count}} message removed",
+			"messagesRemoved_one": "{{count}} message removed",
 			"messagesRemoved_other": "{{count}} messages removed",
 			"description": "Older messages were removed from the conversation to stay within the context window limit. This is a fast but less context-preserving approach compared to condensation."
 		}
@@ -250,8 +242,6 @@
 		"wantsToGenerateImageOutsideWorkspace": "Zoo wants to generate an image outside of the workspace",
 		"wantsToGenerateImageProtected": "Zoo wants to generate an image in a protected location",
 		"didGenerateImage": "Zoo generated an image",
-		"wantsToCreate": "Zoo wants to create a new file",
-		"wantsToInsert": "Zoo wants to insert content into this file",
 		"wantsToInsertWithLineNumber": "Zoo wants to insert content into this file at line {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo wants to append content to the end of this file"
 	},
@@ -264,7 +254,6 @@
 		"didViewRecursive": "Zoo recursively viewed all files in this directory",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo wants to recursively view all files in this directory (outside workspace)",
 		"didViewRecursiveOutsideWorkspace": "Zoo recursively viewed all files in this directory (outside workspace)",
-		"wantsToViewMultipleDirectories": "Zoo wants to view multiple directories",
 		"wantsToSearch": "Zoo wants to search this directory for <code>{{regex}}</code>",
 		"didSearch": "Zoo searched this directory for <code>{{regex}}</code>",
 		"wantsToSearchOutsideWorkspace": "Zoo wants to search this directory (outside workspace) for <code>{{regex}}</code>",
@@ -273,15 +262,14 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo wants to search the codebase for <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo wants to search the codebase for <code>{{query}}</code> in <code>{{path}}</code>",
-		"didSearch_one": "Found 1 result",
+		"didSearch_one": "Found {{count}} result",
 		"didSearch_other": "Found {{count}} results",
-		"resultTooltip": "Similarity score: {{score}} (click to open file)"
+		"resultTooltip": "Similarity score: {{score}} (click to open file)",
+		"displayError": "Error displaying search results."
 	},
-	"commandOutput": "Command Output",
 	"commandExecution": {
 		"abort": "Abort",
 		"running": "Running",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "Exited with status {{exitCode}}",
 		"malformedCommand": "Malformed command: shell syntax error",
 		"manageCommands": "Auto-approved commands",
@@ -290,14 +278,9 @@
 		"removeFromAllowed": "Remove from allowed list",
 		"addToDenied": "Add to denied list",
 		"removeFromDenied": "Remove from denied list",
-		"abortCommand": "Abort command execution",
-		"expandOutput": "Expand output",
-		"collapseOutput": "Collapse output",
-		"expandManagement": "Expand command management section",
-		"collapseManagement": "Collapse command management section"
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Click to edit pattern"
 	},
-	"response": "Response",
-	"arguments": "Arguments",
 	"text": {
 		"rooSaid": "Zoo said"
 	},
@@ -317,9 +300,7 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo wants to create a new subtask in {{mode}} mode",
 		"wantsToFinish": "Zoo wants to mark this as completed",
-		"newTaskContent": "Subtask Instructions",
 		"resultContent": "Subtask completed",
-		"defaultResult": "Please continue to the next task.",
 		"completionInstructions": "You can review the results and suggest any corrections or next steps. If everything looks good, confirm to return the result to the parent task.",
 		"goToSubtask": "View task"
 	},
@@ -347,9 +328,6 @@
 		"title": "Edit Unsuccessful"
 	},
 	"troubleMessage": "Zoo is having trouble...",
-	"powershell": {
-		"issues": "It seems like you're having Windows PowerShell issues, please see this"
-	},
 	"autoApprove": {
 		"tooltipManage": "Manage auto-approval settings",
 		"tooltipStatus": "Auto-approval enabled for: {{toggles}}",
@@ -357,30 +335,25 @@
 		"all": "All",
 		"none": "None",
 		"description": "Run these actions without asking for permission. Only enable for actions you fully trust.",
-		"selectOptionsFirst": "Select at least one option below to enable auto-approval",
-		"toggleAriaLabel": "Toggle auto-approval",
-		"disabledAriaLabel": "Auto-approval disabled - select options first",
 		"triggerLabelOff": "Auto-approve off",
 		"triggerLabelOffShort": "Off",
 		"triggerLabel_zero": "0 auto-approve",
-		"triggerLabel_one": "1 auto-approved",
+		"triggerLabel_one": "{{count}} auto-approved",
 		"triggerLabel_other": "{{count}} auto-approved",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Enabled",
+		"toggleAriaLabel": "Toggle auto-approval"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} Released",
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "What is new in Zoo Code v3.90.0",
-			"highlight1": "✨ Providers and models: GitHub Copilot is now a provider: sign in and Zoo Code loads your Copilot models. IO Intelligence is a provider with its own API key. Gemini 4 Argon is on Gemini and Vertex. GPT-6 Luna is on OpenCode Go. Gemini 4 Argon and GPT-6 Luna are on Zoo Gateway as well.",
-			"highlight2": "🧭 Tool execution: Repeating the same tool call gets a warning, then Zoo Code stops that loop. Disabling attempt_completion no longer leaves a task unable to finish. Queued messages run the same command-protection checks as commands you send directly.",
-			"highlight3": "⚡ Reasoning and streaming: Anthropic adaptive thinking shows in chat, and thinking tokens are counted. The R1 toggle keeps reasoning from llama.cpp, Ollama, and LM Studio. Codex keeps encrypted reasoning with the summary you see. VS Code language-model streams use guarded recovery when a stream fails."
-		},
-		"cloudAgents": {
-			"heading": "New in the Cloud:",
-			"specialized": "Introducing <bold>Explainer</bold>, <bold>Planner</bold>, and <bold>Coder</bold> - three specialized cloud agents to enhance your workflows.",
-			"description": "The agents work together in the cloud and can be triggered from the web or through Slack.",
-			"tryButton": "Try Cloud Agents"
+			"heading": "What is new in Zoo Code v3.98.1",
+			"highlight0": "💫Preview the Zoo Pass with unlimited GLM-5.3-Flash free until Dec 1 with any amount of money on your Zoo Gateway account.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Models and reasoning: Use GPT-6.2 Sol, GPT-6.2 Astra, and Claude Sonnet 5.5. Set reasoning effort for each LiteLLM profile.",
+			"highlight2": "🛡️ Security: Improve skill and command metadata parsing, mention handling, provider links, and CLI approval checks.",
+			"highlight3": "🔧 Fixes: Correct OpenAI service-tier costs, recognize workspace symbolic links, and translate more UI labels."
 		}
 	},
 	"reasoning": {
@@ -412,7 +385,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Auto-Approved Request Limit Reached",
-			"description": "Zoo has reached the auto-approved limit of {{count}} API request(s). Would you like to reset the count and proceed with the task?",
+			"description_one": "Zoo has reached the auto-approved limit of {{count}} API request. Would you like to reset the count and proceed with the task?",
+			"description_other": "Zoo has reached the auto-approved limit of {{count}} API requests. Would you like to reset the count and proceed with the task?",
 			"button": "Reset and Continue"
 		},
 		"autoApprovedCostLimitReached": {
@@ -432,28 +406,8 @@
 	"versionIndicator": {
 		"ariaLabel": "Version {{version}} - Click to view release notes"
 	},
-	"command": {
-		"triggerDescription": "Trigger the {{name}} command"
-	},
 	"slashCommands": {
-		"tooltip": "Manage slash commands",
-		"title": "Slash Commands",
-		"description": "Use built-in slash commands or create custom ones for quick access to frequently used prompts and workflows. <DocsLink>Docs</DocsLink>",
-		"manageCommands": "Manage slash commands in settings",
-		"builtInCommands": "Built-in Commands",
-		"globalCommands": "Global Commands",
-		"workspaceCommands": "Workspace Commands",
-		"globalCommand": "Global command",
-		"editCommand": "Edit command",
-		"deleteCommand": "Delete command",
-		"newGlobalCommandPlaceholder": "New global command...",
-		"newWorkspaceCommandPlaceholder": "New workspace command...",
-		"deleteDialog": {
-			"title": "Delete Command",
-			"description": "Are you sure you want to delete the command \"{{name}}\"? This action cannot be undone.",
-			"cancel": "Cancel",
-			"confirm": "Delete"
-		}
+		"manageCommands": "Manage slash commands in settings"
 	},
 	"slashCommand": {
 		"wantsToRun": "Zoo wants to run a slash command",
@@ -467,14 +421,43 @@
 		"noResults": "No results",
 		"problems": "Problems",
 		"terminal": "Terminal",
-		"url": "Paste URL to fetch contents"
+		"url": "Paste URL to fetch contents",
+		"gitCommits": "Git Commits",
+		"gitCommitsDescription": "Search repository history",
+		"workingChanges": "Working changes",
+		"workingChangesDescription": "Current uncommitted changes",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git commit hash",
+		"addFile": "Add File",
+		"addFolder": "Add Folder",
+		"commands": "Commands",
+		"modes": "Modes"
 	},
 	"todo": {
 		"partial": "{{completed}} of {{total}} to-dos done",
 		"complete": "{{total}} to-dos done",
 		"updated": "Updated the to-do list",
-		"completed": "Completed",
-		"started": "Started"
+		"listUpdated": "Todo List Updated",
+		"userEdit": "User Edit",
+		"userEdits": "User Edits",
+		"edit": "Edit",
+		"done": "Done",
+		"itemPlaceholder": "Enter todo item",
+		"newItemPlaceholder": "Enter todo item, press Enter to add",
+		"remove": "Remove",
+		"add": "Add",
+		"cancel": "Cancel",
+		"addTodo": "+ Add Todo",
+		"status": {
+			"notStarted": "Not Started",
+			"inProgress": "In Progress",
+			"completed": "Completed"
+		},
+		"deleteDialog": {
+			"title": "Delete todo item",
+			"description": "Are you sure you want to delete this todo item?",
+			"confirm": "Delete"
+		}
 	},
 	"tooManyTools": {
 		"title": "Too many tools enabled",
@@ -496,5 +479,25 @@
 		"title": "Provider no longer supported",
 		"message": "This provider is no longer available. Select a supported provider to continue.",
 		"openSettings": "Open Settings"
+	},
+	"zooCodeAuth": {
+		"signIn": "Sign in to Zoo Code",
+		"goToDashboard": "Go to Dashboard",
+		"signOut": "Sign out",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Connected"
+	},
+	"arguments": "Arguments:",
+	"copyAsMarkdown": "Copy as markdown",
+	"openInPreview": "Open in preview",
+	"codeAccordion": {
+		"userEdits": "User Edits",
+		"consoleLogs": "Console Logs",
+		"openFileAriaLabel": "Open file: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} hidden line",
+		"hiddenLines_other": "{{count}} hidden lines"
 	}
 }

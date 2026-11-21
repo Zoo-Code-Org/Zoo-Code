@@ -25,7 +25,7 @@ assert.deepEqual(MCP_OAUTH_GRANT_TYPES, ["authorization_code", "refresh_token"])
 for (let mask = 0; mask < 1 << advertisedGrantTypes.length; mask++) {
 	const advertised = advertisedGrantTypes.filter((_, index) => mask & (1 << index))
 	const selected = selectMcpOAuthGrantTypes(advertised)
-	const expected = MCP_OAUTH_GRANT_TYPES.filter((grantType) => advertised.includes(grantType))
+	const expected: string[] = MCP_OAUTH_GRANT_TYPES.filter((grantType) => advertised.includes(grantType))
 
 	// Normative MUST: RFC 7591 section 2 says grant_types describes grants the
 	// client can use, and each token-endpoint grant_type must match its registered

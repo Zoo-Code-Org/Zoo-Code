@@ -1,6 +1,4 @@
 {
-	"title": "Modes",
-	"done": "Terminé",
 	"modes": {
 		"title": "Modes",
 		"createNewMode": "Créer un nouveau mode",
@@ -14,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configuration API",
-		"select": "Sélectionnez la configuration API à utiliser pour ce mode"
+		"select": "Sélectionnez la configuration API à utiliser pour ce mode",
+		"pinnedGroupAriaLabel": "Configurations épinglées",
+		"allGroupAriaLabel": "Toutes les configurations"
 	},
 	"tools": {
 		"title": "Outils disponibles",
@@ -49,13 +49,12 @@
 		"title": "Instructions personnalisées spécifiques au mode (optionnel)",
 		"resetToDefault": "Réinitialiser aux valeurs par défaut",
 		"description": "Ajoutez des directives comportementales spécifiques au mode {{modeName}}.",
-		"loadFromFile": "Les instructions personnalisées spécifiques au mode {{mode}} peuvent également être chargées depuis le dossier <span>.roo/rules-{{slug}}/</span> dans votre espace de travail ou depuis le global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} et .clinerules-{{slug}} sont obsolètes et cesseront de fonctionner bientôt)."
+		"loadFromFile": "Les instructions personnalisées spécifiques au mode {{mode}} peuvent également être chargées depuis le dossier <span>.roo/rules-{{slug}}/</span> dans votre espace de travail ou depuis le global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} et .clinerules-{{slug}} sont obsolètes et cesseront de fonctionner bientôt).",
+		"loadFromFileAriaLabel": "En savoir plus sur les instructions personnalisées globales pour les modes"
 	},
 	"exportMode": {
 		"title": "Exporter le mode",
-		"description": "Exporte ce mode vers un fichier YAML avec toutes les règles incluses pour un partage facile avec d'autres.",
-		"export": "Exporter le mode",
-		"exporting": "Exportation..."
+		"export": "Exporter le mode"
 	},
 	"importMode": {
 		"selectLevel": "Choisissez où importer ce mode :",
@@ -73,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instructions personnalisées pour tous les modes",
 		"description": "Ces instructions s'appliquent à tous les modes. Elles fournissent un ensemble de comportements de base qui peuvent être améliorés par des instructions spécifiques au mode ci-dessous. <0>En savoir plus</0>",
-		"loadFromFile": "Les instructions peuvent également être chargées depuis le dossier <span>.roo/rules/</span> dans votre espace de travail ou depuis le global <0>.roo/rules/</0> (.roorules et .clinerules sont obsolètes et cesseront de fonctionner bientôt)."
+		"loadFromFile": "Les instructions peuvent également être chargées depuis le dossier <span>.roo/rules/</span> dans votre espace de travail ou depuis le global <0>.roo/rules/</0> (.roorules et .clinerules sont obsolètes et cesseront de fonctionner bientôt).",
+		"learnMoreAriaLabel": "En savoir plus sur les instructions personnalisées globales",
+		"loadFromFileAriaLabel": "Découvre comment configurer des instructions personnalisées globales"
 	},
 	"systemPrompt": {
 		"preview": "Aperçu du prompt système",
@@ -81,7 +82,6 @@
 		"title": "Prompt système (mode {{modeName}})"
 	},
 	"supportPrompts": {
-		"title": "Prompts de support",
 		"resetPrompt": "Réinitialiser le prompt {{promptType}} aux valeurs par défaut",
 		"prompt": "Prompt",
 		"enhance": {
@@ -94,10 +94,12 @@
 			"includeTaskHistory": "Inclure l'historique des tâches comme contexte",
 			"includeTaskHistoryDescription": "Lorsque activé, les 10 derniers messages de la conversation actuelle seront inclus comme contexte lors de l'amélioration des prompts, aidant à générer des suggestions plus pertinentes et conscientes du contexte."
 		},
-		"condense": {
-			"apiConfiguration": "Configuration de l'API pour la condensation du contexte",
-			"apiConfigDescription": "Sélectionnez la configuration d'API à utiliser pour les opérations de condensation de contexte. Laissez non sélectionné pour utiliser la configuration active actuelle.",
-			"useCurrentConfig": "Utiliser la configuration d'API actuellement sélectionnée"
+		"taskTitle": {
+			"enabled": "Générer automatiquement les titres de tâche",
+			"enabledDescription": "Résume en arrière-plan le premier prompt de chaque nouvelle tâche en un titre court. Les requêtes de titre ne sont pas incluses dans le coût de la tâche. Les profils GitHub Copilot et VS Code LM consomment votre quota.",
+			"apiConfiguration": "Configuration d'API",
+			"useTaskConfig": "Utiliser la configuration d'API de la tâche",
+			"apiConfigDescription": "Un profil léger sans raisonnement est recommandé. Si vous choisissez un autre profil, le début de votre prompt est envoyé à ce fournisseur."
 		},
 		"types": {
 			"ENHANCE": {
@@ -139,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Démarrer une nouvelle tâche",
 				"description": "Démarre une nouvelle tâche avec ton entrée. Disponible dans la palette de commandes."
+			},
+			"TASK_TITLE": {
+				"label": "Titre de la tâche",
+				"description": "Génère en arrière-plan un titre court pour les nouvelles tâches. Il apparaît dans l'historique et l'en-tête de la tâche. Configurez-le ci-dessous."
 			}
 		}
 	},
@@ -196,8 +202,12 @@
 		"title": "Supprimer le mode",
 		"message": "Êtes-vous sûr de vouloir supprimer le mode \"{{modeName}}\" ?",
 		"rulesFolder": "Ce mode a un dossier de règles à {{folderPath}} qui sera également supprimé.",
-		"descriptionNoRules": "Êtes-vous sûr de vouloir supprimer ce mode personnalisé ?",
 		"confirm": "Supprimer",
 		"cancel": "Annuler"
+	},
+	"mcpServers": {
+		"restrict": "Limiter à certains serveurs MCP",
+		"noneConnected": "Aucun serveur MCP connecté",
+		"notConnected": "{{serverName}} (non connecté)"
 	}
 }

@@ -1,6 +1,6 @@
 // streamUtils/pwshStream.ts
 import { execSync } from "child_process"
-import { CommandStream } from "./index"
+import type { CommandStream, SyncExecError } from "./index"
 
 /**
  * Creates a stream with real command output using PowerShell Core
@@ -35,14 +35,15 @@ export function createPowerShellStream(command: string): CommandStream {
 			stdio: ["pipe", "pipe", "pipe"], // Capture stderr for debugging
 		})
 		exitCode = 0 // Command succeeded
-	} catch (error: any) {
+	} catch (error) {
 		// Command failed - get output and exit code from error
-		realOutput = error.stdout?.toString() || ""
-		console.error(`PowerShell command failed with status ${error.status ?? "unknown"}:`, error.message)
-		if (error.stderr) {
-			console.error(`stderr: ${error.stderr.toString()}`)
+		const execError = error as SyncExecError
+		realOutput = execError.stdout?.toString() || ""
+		console.error(`PowerShell command failed with status ${execError.status ?? "unknown"}:`, execError.message)
+		if (execError.stderr) {
+			console.error(`stderr: ${execError.stderr.toString()}`)
 		}
-		exitCode = error.status ?? 1
+		exitCode = execError.status ?? 1
 	}
 
 	// Create an async iterator for the stream

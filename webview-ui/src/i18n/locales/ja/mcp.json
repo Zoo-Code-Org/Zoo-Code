@@ -1,6 +1,5 @@
 {
 	"title": "MCPサーバー",
-	"done": "完了",
 	"marketplace": "MCPマーケットプレイス",
 	"description": "<0>Model Context Protocol</0>は、ローカルで実行されているMCPサーバーとの通信を可能にし、Rooの機能を拡張するための追加ツールやリソースを提供します。<1>コミュニティによって作成されたサーバー</1>を使用したり、Rooにワークフロー専用の新しいツールを作成するよう依頼したりできます（例：「最新のnpmドキュメントを取得するツールを追加する」）。",
 	"instructions": "手順",
@@ -56,5 +55,10 @@
 		"running": "実行中",
 		"completed": "完了",
 		"error": "エラー"
-	}
+	},
+	"resource": {
+		"returns": "戻り値",
+		"unknownMimeType": "不明"
+	},
+	"toggleServerAriaLabel": "{{serverName}} サーバーのオン/オフを切り替え"
 }

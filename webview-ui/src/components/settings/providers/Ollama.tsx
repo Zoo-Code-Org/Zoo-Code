@@ -83,11 +83,11 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 		vscode.postMessage({
 			type: OllamaModelsMessageType.requestOllamaModels,
 			values: {
-				baseUrl: apiConfiguration?.ollamaBaseUrl,
-				apiKey: apiConfiguration?.ollamaApiKey,
+				baseUrl: apiConfiguration.ollamaBaseUrl,
+				apiKey: apiConfiguration.ollamaApiKey,
 			},
 		})
-	}, [apiConfiguration?.ollamaBaseUrl, apiConfiguration?.ollamaApiKey])
+	}, [apiConfiguration.ollamaBaseUrl, apiConfiguration.ollamaApiKey])
 
 	// Refresh models on mount
 	useEffect(() => {
@@ -97,7 +97,7 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 
 	// Check if the selected model exists in the fetched models
 	const modelNotAvailableError = useMemo(() => {
-		const selectedModel = apiConfiguration?.ollamaModelId
+		const selectedModel = apiConfiguration.ollamaModelId
 		if (!selectedModel) return undefined
 
 		// Check if model exists in local ollama models
@@ -116,21 +116,21 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 
 		// If neither source has loaded yet, don't show warning
 		return undefined
-	}, [apiConfiguration?.ollamaModelId, routerModels.data, ollamaModels, t])
+	}, [apiConfiguration.ollamaModelId, routerModels.data, ollamaModels, t])
 
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.ollamaBaseUrl || ""}
+				value={apiConfiguration.ollamaBaseUrl || ""}
 				type="url"
 				onInput={handleInputChange("ollamaBaseUrl")}
 				placeholder={t("settings:defaults.ollamaUrl")}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.ollama.baseUrl")}</label>
 			</VSCodeTextField>
-			{apiConfiguration?.ollamaBaseUrl && (
+			{apiConfiguration.ollamaBaseUrl && (
 				<VSCodeTextField
-					value={apiConfiguration?.ollamaApiKey || ""}
+					value={apiConfiguration.ollamaApiKey || ""}
 					type="password"
 					onInput={handleInputChange("ollamaApiKey")}
 					placeholder={t("settings:placeholders.apiKey")}
@@ -180,7 +180,7 @@ export const Ollama = ({ apiConfiguration, setApiConfigurationField }: OllamaPro
 				hidePricing
 			/>
 			<VSCodeTextField
-				value={apiConfiguration?.ollamaNumCtx?.toString() || ""}
+				value={apiConfiguration.ollamaNumCtx?.toString() || ""}
 				onInput={(e) => {
 					const value = (e.target as HTMLInputElement)?.value
 					if (value === "") {

@@ -26,8 +26,8 @@ vi.mock("@/utils/clipboard", () => ({
 	useCopyToClipboard: vi.fn(),
 }))
 
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"chat:task.export": "Export task history",
@@ -40,10 +40,6 @@ vi.mock("react-i18next", () => ({
 			return translations[key] || key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: vi.fn(),
-	},
 }))
 
 vi.mock("pretty-bytes", () => ({
@@ -81,6 +77,21 @@ describe("TaskActions", () => {
 		render(<TaskActions item={mockItem} buttonsDisabled={false} />)
 
 		expect(screen.queryByTestId("share-button")).not.toBeInTheDocument()
+	})
+
+	it("calls onRename when the rename button is clicked", () => {
+		const onRename = vi.fn()
+		render(<TaskActions item={mockItem} buttonsDisabled={false} onRename={onRename} />)
+
+		fireEvent.click(screen.getByLabelText("history:renameTask"))
+
+		expect(onRename).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not render the rename button without onRename", () => {
+		render(<TaskActions item={mockItem} buttonsDisabled={false} />)
+
+		expect(screen.queryByTestId("rename-current-task-button")).not.toBeInTheDocument()
 	})
 
 	it("renders export button", () => {

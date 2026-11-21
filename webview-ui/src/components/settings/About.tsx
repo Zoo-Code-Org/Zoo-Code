@@ -100,8 +100,11 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 			<Section>
 				<p>
 					{Package.sha
-						? `Version: ${Package.version} (${Package.sha.slice(0, 8)})`
-						: `Version: ${Package.version}`}
+						? t("settings:about.versionWithCommit", {
+								version: Package.version,
+								commit: Package.sha.slice(0, 8),
+							})
+						: t("settings:about.version", { version: Package.version })}
 				</p>
 				<SearchableSetting
 					settingId="about-telemetry"
@@ -117,6 +120,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 					</VSCodeCheckbox>
 					<p className="text-vscode-descriptionForeground text-sm mt-0">
 						<Trans
+							t={t}
 							i18nKey="settings:footer.telemetry.description"
 							components={{
 								privacyLink: <VSCodeLink href="https://www.zoocode.dev/privacy" />,
@@ -160,6 +164,7 @@ export const About = ({ telemetrySetting, setTelemetrySetting, debug, setDebug, 
 						<MessagesSquare className="size-4 text-vscode-descriptionForeground shrink-0" />
 						<span>
 							<Trans
+								t={t}
 								i18nKey="settings:about.community"
 								components={{
 									redditLink: <VSCodeLink href={EXTERNAL_LINKS.REDDIT} />,

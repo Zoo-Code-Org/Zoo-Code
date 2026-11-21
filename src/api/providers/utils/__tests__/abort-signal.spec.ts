@@ -1,13 +1,22 @@
 import {
+	bridgeExternalAbortSignal,
 	createAbortError,
+	detachOnAbort,
 	isRequestAborted,
 	mergeAbortSignalAndTimeout,
+	hasUsableTimeout,
 	mergeAbortSignals,
 	rejectOnAbort,
 	resolveModelWithAbort,
+	settleOnAbort,
 	throwIfAborted,
+	MAX_TIMEOUT_MS,
+	toSdkTimeoutMs,
+	createTimeoutError,
+	isTimeoutAbort,
 } from "../abort-signal"
 import { withSettleGuard } from "../../../../test-utils/settle-guard"
+import { flushMacrotasks } from "../../../../test-utils/timers"
 
 describe("rejectOnAbort", () => {
 	it("resolves with the pending value when it settles before the signal aborts", async () => {
@@ -64,7 +73,7 @@ describe("rejectOnAbort", () => {
 			})
 
 			// Node reports an unhandled rejection only after the microtask queue drains.
-			await new Promise((resolve) => setTimeout(resolve, 0))
+			await flushMacrotasks()
 			expect(unhandled).toHaveLength(0)
 		} finally {
 			// Remove the process-level listener on every exit path: a failed assertion
@@ -126,6 +135,135 @@ describe("rejectOnAbort", () => {
 	})
 })
 
+describe("detachOnAbort", () => {
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).resolves.toBe("done")
+		expect(controller.signal.aborted).toBe(false)
+	})
+
+	it("rejects with the signal's own reason when the signal aborts first", async () => {
+		const controller = new AbortController()
+		const reason = new Error("caller gave up")
+		// Never settles: the wait must end purely via the abort.
+		const pending = new Promise<never>(() => {})
+		const wait = detachOnAbort(pending, controller.signal)
+		controller.abort(reason)
+
+		// Not createAbortError(): the caller's reason must surface unchanged.
+		await expect(withSettleGuard(wait)).rejects.toBe(reason)
+	})
+
+	it("rejects with the default AbortError reason when abort() carries no reason", async () => {
+		const controller = new AbortController()
+		const wait = detachOnAbort(new Promise<never>(() => {}), controller.signal)
+		controller.abort()
+
+		await expect(withSettleGuard(wait)).rejects.toMatchObject({ name: "AbortError" })
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		const reason = new Error("caller gave up")
+		controller.abort(reason)
+
+		// An already-aborted signal never fires its listener, so waiting would hang.
+		await expect(withSettleGuard(detachOnAbort(new Promise<never>(() => {}), controller.signal))).rejects.toBe(
+			reason,
+		)
+	})
+
+	it("does not attach a listener when the signal is already aborted", async () => {
+		const controller = new AbortController()
+		controller.abort()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).rejects.toBeDefined()
+
+		expect(addSpy).not.toHaveBeenCalled()
+		addSpy.mockRestore()
+	})
+
+	it("does not leave a rejecting pending unhandled when the signal is already aborted", async () => {
+		// The pre-aborted branch never consumes `pending`, so it must still
+		// handle a rejection or it surfaces as unhandled.
+		const controller = new AbortController()
+		controller.abort()
+		const pending = Promise.reject(new Error("shared fetch failed"))
+
+		const unhandled: unknown[] = []
+		const onUnhandledRejection = (reason: unknown) => unhandled.push(reason)
+		process.on("unhandledRejection", onUnhandledRejection)
+		try {
+			await expect(withSettleGuard(detachOnAbort(pending, controller.signal))).rejects.toBeDefined()
+
+			// Node reports an unhandled rejection only after the microtask queue drains.
+			await flushMacrotasks()
+			expect(unhandled).toHaveLength(0)
+		} finally {
+			process.off("unhandledRejection", onUnhandledRejection)
+		}
+	})
+
+	it("propagates the pending rejection when the signal stays active", async () => {
+		const controller = new AbortController()
+		const boom = new Error("shared fetch failed")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.reject(boom), controller.signal))).rejects.toBe(boom)
+	})
+
+	it("detaches the abort listener once the pending settles", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.resolve("done"), controller.signal))).resolves.toBe("done")
+
+		// Must remove the exact registered listener, not just any function.
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("detaches the abort listener when the pending rejects", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const lookupError = new Error("shared fetch failed")
+
+		await expect(withSettleGuard(detachOnAbort(Promise.reject(lookupError), controller.signal))).rejects.toBe(
+			lookupError,
+		)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const registeredListener = addSpy.mock.calls[0]?.[1] as EventListener | undefined
+		expect(typeof registeredListener).toBe("function")
+		expect(removeSpy).toHaveBeenCalledWith("abort", registeredListener)
+		addSpy.mockRestore()
+		removeSpy.mockRestore()
+	})
+
+	it("leaves the shared pending running after this waiter detaches", async () => {
+		// Aborting one caller must not cancel work other callers still await.
+		const controller = new AbortController()
+		let resolveShared: (value: string) => void = () => {}
+		const shared = new Promise<string>((resolve) => {
+			resolveShared = resolve
+		})
+		const wait = detachOnAbort(shared, controller.signal)
+		controller.abort(new Error("caller gave up"))
+
+		await expect(withSettleGuard(wait)).rejects.toThrow("caller gave up")
+
+		resolveShared("late value")
+		await expect(shared).resolves.toBe("late value")
+	})
+})
+
 describe("resolveModelWithAbort", () => {
 	it("fast-fails with the provider abort error when the signal is already aborted", async () => {
 		const controller = new AbortController()
@@ -177,7 +315,7 @@ describe("resolveModelWithAbort", () => {
 		})
 		const race = withSettleGuard(resolveModelWithAbort(async () => pending, controller.signal, "TestProvider"))
 
-		setTimeout(() => controller.abort(), 10)
+		void flushMacrotasks().then(() => controller.abort())
 
 		await expect(race).rejects.toMatchObject({
 			name: "AbortError",
@@ -286,6 +424,20 @@ describe("abort-signal utilities", () => {
 			expect(mergeAbortSignalAndTimeout(controller.signal, Infinity)).toBe(controller.signal)
 		})
 
+		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
+			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
+			// the helper caps the delay so an overflowing timeout does not abort
+			// the request within the first millisecond.
+			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
+
+			expect(result).toBeInstanceOf(AbortSignal)
+			expect(result?.aborted).toBe(false)
+
+			// eslint-disable-next-line no-restricted-globals -- a real native timer is the thing under test; fake timers do not drive AbortSignal.timeout
+			await new Promise((resolve) => setTimeout(resolve, 20))
+			expect(result?.aborted).toBe(false)
+		})
+
 		it("rounds a fractional timeoutMs up before scheduling", async () => {
 			// Node validates AbortSignal.timeout delays as uint32: 1.5 or 0.5
 			// would throw ERR_OUT_OF_RANGE. Pin the rounded delay that actually
@@ -311,19 +463,6 @@ describe("abort-signal utilities", () => {
 			expect(result?.aborted).toBe(false)
 			expect(tiny).toBeInstanceOf(AbortSignal)
 			await vi.waitFor(() => expect(result?.aborted).toBe(true))
-		})
-
-		it("caps an overflowing timeoutMs instead of aborting immediately", async () => {
-			// Node clamps AbortSignal.timeout delays above 2^31-1 ms to 1 ms;
-			// the helper caps the delay so an overflowing timeout does not abort
-			// the request within the first millisecond.
-			const result = mergeAbortSignalAndTimeout(undefined, 2_147_483_648)
-
-			expect(result).toBeInstanceOf(AbortSignal)
-			expect(result?.aborted).toBe(false)
-
-			await new Promise((resolve) => setTimeout(resolve, 20))
-			expect(result?.aborted).toBe(false)
 		})
 	})
 
@@ -464,5 +603,317 @@ describe("abort-signal utilities", () => {
 		it("returns a fresh error on each call", () => {
 			expect(createAbortError("X")).not.toBe(createAbortError("X"))
 		})
+	})
+})
+
+describe("settleOnAbort", () => {
+	it("returns the pending promise unchanged when the signal is undefined", async () => {
+		expect(await settleOnAbort(Promise.resolve(42), undefined, "Test")).toBe(42)
+	})
+
+	it("rejects immediately when the signal is already aborted", async () => {
+		// A listener registered on an already-aborted signal never fires,
+		// so the aborted state must be checked up front; the pending work
+		// keeps running (a helper that skipped the check would resolve
+		// with the sentinel instead of rejecting).
+		const controller = new AbortController()
+		controller.abort()
+		let releaseSentinel!: (value: number) => void
+		const pending = new Promise<number>((resolve) => {
+			releaseSentinel = resolve
+		})
+
+		let caught: unknown
+		try {
+			await settleOnAbort(pending, controller.signal, "Qwen Code")
+		} catch (error) {
+			caught = error
+		}
+		releaseSentinel(1)
+		await flushMacrotasks() // let the sentinel arrive
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).name).toBe("AbortError")
+		expect((caught as Error).message).toBe("The Qwen Code request was aborted")
+	})
+
+	it("resolves with the pending value when it settles before the signal aborts", async () => {
+		const controller = new AbortController()
+		const pending = Promise.resolve(7)
+
+		expect(await settleOnAbort(pending, controller.signal, "Test")).toBe(7)
+	})
+
+	it("does not leak an unhandled rejection when the signal is already aborted and pending rejects", async () => {
+		// The early return hands the caller the abort error and never awaits
+		// pending; without a rejection guard on pending, its rejection would
+		// surface as an unhandled rejection (Vitest fails the file on those).
+		const rejections: unknown[] = []
+		const onUnhandled = (reason: unknown): void => {
+			rejections.push(reason)
+		}
+		process.on("unhandledRejection", onUnhandled)
+		try {
+			const controller = new AbortController()
+			controller.abort()
+			const failure = new Error("load failed")
+
+			let caught: unknown
+			try {
+				await settleOnAbort(Promise.reject(failure), controller.signal, "Test")
+			} catch (error) {
+				caught = error
+			}
+			await flushMacrotasks() // let any unhandledRejection fire
+
+			expect(caught).toBeInstanceOf(Error)
+			expect((caught as Error).name).toBe("AbortError")
+			expect((caught as Error).message).toBe("The Test request was aborted")
+			expect(rejections).toEqual([])
+		} finally {
+			process.off("unhandledRejection", onUnhandled)
+		}
+	})
+
+	it("rejects with the abort contract error when the signal aborts before the pending promise settles", async () => {
+		const controller = new AbortController()
+		let resolvePending!: (value: number) => void
+		const pending = new Promise<number>((resolve) => {
+			resolvePending = resolve
+		})
+		const racing = settleOnAbort(pending, controller.signal, "LM Studio")
+		controller.abort()
+
+		let caught: unknown
+		try {
+			await racing
+		} catch (error) {
+			caught = error
+		}
+		resolvePending(1) // the underlying work still settles; it must not leak a rejection
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).name).toBe("AbortError")
+		expect((caught as Error).message).toBe("The LM Studio request was aborted")
+	})
+
+	it("removes the abort listener once the pending promise settles", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+
+		expect(await settleOnAbort(Promise.resolve("done"), controller.signal, "Test")).toBe("done")
+
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		// The exact registered listener must be removed — removing a
+		// different function would leave the real one attached.
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
+	})
+
+	it("removes the abort listener when the pending promise settles after an abort", async () => {
+		const controller = new AbortController()
+		let resolvePending!: (value: number) => void
+		const pending = new Promise<number>((resolve) => {
+			resolvePending = resolve
+		})
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const racing = settleOnAbort(pending, controller.signal, "Test")
+		controller.abort()
+
+		let caught: unknown
+		try {
+			await racing
+		} catch (error) {
+			caught = error
+		}
+		resolvePending(1) // settles the underlying work, which triggers the cleanup
+		await Promise.resolve()
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).name).toBe("AbortError")
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		// The exact registered listener must be removed — removing a
+		// different function would leave the real one attached.
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
+	})
+
+	it("removes the abort listener from the abort callback when the pending promise never settles", async () => {
+		// A pending promise that never settles must not pin the listener: the
+		// abort callback itself has to detach it, or a long-lived (shared)
+		// signal accumulates one listener per cancelled request.
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const pending = new Promise<number>(() => {})
+		const racing = settleOnAbort(pending, controller.signal, "Test")
+		controller.abort()
+
+		let caught: unknown
+		try {
+			await racing
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBeInstanceOf(Error)
+		expect((caught as Error).name).toBe("AbortError")
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
+	})
+
+	it("propagates a pending promise rejection unchanged and detaches the abort listener", async () => {
+		const controller = new AbortController()
+		const addSpy = vi.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vi.spyOn(controller.signal, "removeEventListener")
+		const failure = new Error("count failed")
+
+		let caught: unknown
+		try {
+			await settleOnAbort(Promise.reject(failure), controller.signal, "Test")
+		} catch (error) {
+			caught = error
+		}
+
+		expect(caught).toBe(failure)
+		// The rejection path must detach the listener too: a leaked listener
+		// would keep this helper's closure alive for the life of the signal.
+		expect(addSpy).toHaveBeenCalledTimes(1) // the wait registered a listener on this signal
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", addSpy.mock.calls[0]?.[1])
+	})
+})
+describe("bridgeExternalAbortSignal", () => {
+	it("returns an undefined signal and a noop dispose without an external signal", () => {
+		const { signal, dispose } = bridgeExternalAbortSignal()
+		expect(signal).toBeUndefined()
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("returns an already-aborted signal when the external signal is aborted", () => {
+		const controller = new AbortController()
+		controller.abort()
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(true)
+		expect(() => dispose()).not.toThrow()
+	})
+
+	it("aborts the per-request signal when the external signal aborts", () => {
+		const controller = new AbortController()
+		const { signal } = bridgeExternalAbortSignal(controller.signal)
+		expect(signal?.aborted).toBe(false)
+		controller.abort()
+		expect(signal?.aborted).toBe(true)
+	})
+
+	it("detaches the retained listener on dispose", () => {
+		const controller = new AbortController()
+		const addSpy = vitest.spyOn(controller.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(controller.signal, "removeEventListener")
+
+		const { signal, dispose } = bridgeExternalAbortSignal(controller.signal)
+
+		expect(addSpy).toHaveBeenCalledTimes(1)
+		const [event, listener, opts] = addSpy.mock.calls[0]
+		expect(event).toBe("abort")
+		expect(opts).toEqual({ once: true })
+
+		dispose()
+		expect(removeSpy).toHaveBeenCalledTimes(1)
+		expect(removeSpy).toHaveBeenCalledWith("abort", listener)
+
+		// After dispose the bridge no longer forwards aborts: the per-request
+		// signal stays live, proving the exact retained callback was detached.
+		controller.abort()
+		expect(signal?.aborted).toBe(false)
+	})
+})
+
+describe("hasUsableTimeout", () => {
+	it("accepts only finite positive values", () => {
+		expect(hasUsableTimeout(1)).toBe(true)
+		expect(hasUsableTimeout(50)).toBe(true)
+		expect(hasUsableTimeout(12.5)).toBe(true)
+	})
+
+	it("rejects values the SDK timeout option cannot take", () => {
+		expect(hasUsableTimeout(undefined)).toBe(false)
+		expect(hasUsableTimeout(0)).toBe(false)
+		expect(hasUsableTimeout(-5)).toBe(false)
+		expect(hasUsableTimeout(Number.NaN)).toBe(false)
+		expect(hasUsableTimeout(Number.POSITIVE_INFINITY)).toBe(false)
+	})
+})
+
+describe("toSdkTimeoutMs", () => {
+	it("rounds fractional delays up", () => {
+		expect(toSdkTimeoutMs(1500.4)).toBe(1501)
+		expect(toSdkTimeoutMs(1)).toBe(1)
+	})
+
+	it("caps delays above the maximum Node timer delay", () => {
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS)).toBe(MAX_TIMEOUT_MS)
+		expect(toSdkTimeoutMs(MAX_TIMEOUT_MS + 1)).toBe(MAX_TIMEOUT_MS)
+	})
+})
+
+describe("createTimeoutError", () => {
+	it("builds a TimeoutError naming the provider", () => {
+		const error = createTimeoutError("LM Studio")
+
+		expect(error).toBeInstanceOf(Error)
+		expect(error.name).toBe("TimeoutError")
+		expect(error.message).toBe("The LM Studio completion request timed out")
+	})
+})
+
+describe("isTimeoutAbort", () => {
+	it("is true when the timeout aborted first and the caller aborted later", () => {
+		// Both orders must classify the same way: the merged signal retains the reason of the
+		// first abort, so a timeout that fired first stays a deadline even after a caller stop.
+		// The signal under test is the real merge, because "the merged signal keeps the first
+		// reason" is the premise of this classification - two unlinked controllers pass even if
+		// the merge stops preserving it.
+		const timeout = new AbortController()
+		const caller = new AbortController()
+		const merged = mergeAbortSignals(timeout.signal, caller.signal)
+		timeout.abort(createTimeoutError("Qwen Code"))
+		caller.abort()
+
+		expect(isTimeoutAbort(merged)).toBe(true)
+	})
+
+	it("is false when the caller aborted first and the merged signal kept the caller reason", () => {
+		const timeout = new AbortController()
+		const caller = new AbortController()
+		const merged = mergeAbortSignals(timeout.signal, caller.signal)
+		caller.abort(new Error("user stop"))
+		timeout.abort(createTimeoutError("Qwen Code"))
+
+		expect(isTimeoutAbort(merged)).toBe(false)
+	})
+
+	it("is false when the request was aborted for a non-timeout reason", () => {
+		const request = new AbortController()
+		request.abort(new Error("shutdown"))
+
+		expect(isTimeoutAbort(request.signal)).toBe(false)
+	})
+
+	it("is false, and does not throw, when the abort reason is null", () => {
+		// controller.abort(null) stores null as the reason: the optional chain on
+		// requestSignal.reason in isTimeoutAbort is load-bearing, and no other case here
+		// reaches it with a reason that has no properties at all.
+		const request = new AbortController()
+		request.abort(null)
+
+		expect(isTimeoutAbort(request.signal)).toBe(false)
+	})
+
+	it("is false without an aborted request signal", () => {
+		expect(isTimeoutAbort(undefined)).toBe(false)
+		expect(isTimeoutAbort(new AbortController().signal)).toBe(false)
 	})
 })

@@ -1,6 +1,5 @@
 {
 	"errors": {
-		"invalid_settings_format": "अमान्य MCP सेटिंग्स JSON फॉर्मेट। कृपया सुनिश्चित करें कि आपकी सेटिंग्स सही JSON फॉर्मेट का पालन करती हैं।",
 		"invalid_settings_syntax": "अमान्य MCP सेटिंग्स JSON फॉर्मेट। कृपया अपनी सेटिंग्स फ़ाइल में सिंटैक्स त्रुटियों की जांच करें।",
 		"invalid_settings_validation": "अमान्य MCP सेटिंग्स फॉर्मेट: {{errorMessages}}",
 		"create_json": ".roo/mcp.json बनाने या खोलने में विफल: {{error}}",
@@ -8,7 +7,8 @@
 		"invalidJsonArgument": "Zoo ने {{toolName}} को अमान्य JSON आर्गुमेंट के साथ उपयोग करने की कोशिश की। फिर से कोशिश कर रहा है...",
 		"refresh_after_disable": "अक्षम करने के बाद MCP कनेक्शन रीफ्रेश करने में विफल",
 		"refresh_after_enable": "सक्षम करने के बाद MCP कनेक्शन रीफ्रेश करने में विफल",
-		"disconnect_servers_partial": "{{count}} MCP सर्वर डिस्कनेक्ट करने में विफल। विवरण के लिए आउटपुट देखें।",
+		"disconnect_servers_partial_one": "{{count}} MCP सर्वर डिस्कनेक्ट करने में विफल। विवरण के लिए आउटपुट देखें।",
+		"disconnect_servers_partial_other": "{{count}} MCP सर्वर डिस्कनेक्ट करने में विफल। विवरण के लिए आउटपुट देखें।",
 		"toolNotFound": "टूल '{{toolName}}' सर्वर '{{serverName}}' पर मौजूद नहीं है। उपलब्ध टूल: {{availableTools}}",
 		"serverNotFound": "MCP सर्वर '{{serverName}}' कॉन्फ़िगर नहीं है। उपलब्ध सर्वर: {{availableServers}}",
 		"toolDisabled": "सर्वर '{{serverName}}' पर टूल '{{toolName}}' अक्षम है। उपलब्ध सक्षम टूल: {{availableTools}}"
@@ -18,11 +18,6 @@
 		"server_connected": "{{serverName}} MCP सर्वर कनेक्टेड",
 		"server_deleted": "MCP सर्वर हटाया गया: {{serverName}}",
 		"server_not_found": "सर्वर \"{{serverName}}\" कॉन्फ़िगरेशन में नहीं मिला",
-		"global_servers_active": "सक्रिय वैश्विक एमसीपी सर्वर: {{mcpServers}}",
-		"project_servers_active": "सक्रिय परियोजना एमसीपी सर्वर: {{mcpServers}}",
-		"already_refreshing": "एमसीपी सर्वर पहले से ही रीफ्रेश हो रहे हैं।",
-		"refreshing_all": "सभी एमसीपी सर्वर रीफ्रेश हो रहे हैं...",
-		"all_refreshed": "सभी एमसीपी सर्वर रीफ्रेश हो गए हैं।",
 		"project_config_deleted": "प्रोजेक्ट एमसीपी कॉन्फ़िगरेशन फ़ाइल हटा दी गई है। सभी प्रोजेक्ट एमसीपी सर्वर डिस्कनेक्ट कर दिए गए हैं।"
 	},
 	"oauth": {
@@ -39,7 +34,6 @@
 		},
 		"flow": {
 			"authenticating": "MCP सर्वर \"{{name}}\" को प्रमाणीकरण की आवश्यकता है",
-			"waitingForBrowser": "अपने ब्राउज़र में साइन-इन पूरा करें...",
 			"clickAuthenticate": "MCP सर्वर \"{{name}}\" प्रमाणीकरण की प्रतीक्षा कर रहा है।",
 			"dismissedHint": "सूचना खारिज की गई — पुनः प्रमाणित करने के लिए सर्वर को रद्द करें और पुनः कनेक्ट करें।",
 			"authenticateButton": "प्रमाणित करें",

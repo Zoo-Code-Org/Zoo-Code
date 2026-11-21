@@ -17,7 +17,7 @@ const MOCK_TIMEOUT_MS = 300_000
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { providerIdentifiers } from "@roo-code/types"
+import { OPENROUTER_DEFAULT_PROVIDER_NAME, openRouterDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types"
 
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
@@ -483,6 +483,115 @@ describe("OpenRouterHandler", () => {
 				}),
 				{ headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } },
 			)
+		})
+
+		describe("prompt cache TTL", () => {
+			const mockStreamWithUsage = () =>
+				asyncStreamFrom([
+					{ id: "test-id", choices: [{ delta: { content: "test response" } }] },
+					{ id: "test-id", choices: [{ delta: {} }], usage: { prompt_tokens: 10, completion_tokens: 20 } },
+				])
+
+			const requestBody = (mockCreate: ReturnType<typeof vitest.fn>) =>
+				mockCreate.mock.calls[mockCreate.mock.calls.length - 1]?.[0]
+
+			// `openai` is mocked for this file, so the prototype is a plain object here.
+			// Reaching it once keeps the casts out of each test body.
+			const stubChatCreate = (mockCreate: ReturnType<typeof vitest.fn>) => {
+				const proto = OpenAI.prototype as unknown as { chat: { completions: { create: unknown } } }
+				proto.chat = { completions: { create: mockCreate } }
+			}
+
+			const cacheControlsIn = (body: unknown) => {
+				const found: Array<Record<string, unknown>> = []
+				const walk = (node: unknown) => {
+					if (Array.isArray(node)) {
+						node.forEach(walk)
+						return
+					}
+					if (node && typeof node === "object") {
+						for (const [key, child] of Object.entries(node as Record<string, unknown>)) {
+							if (key === "cache_control" && child && typeof child === "object") {
+								found.push(child as Record<string, unknown>)
+							}
+							walk(child)
+						}
+					}
+				}
+				walk(JSON.parse(JSON.stringify(body)))
+				return found
+			}
+
+			it("emits no ttl key when the knob is unset", async () => {
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "anthropic/claude-sonnet-4" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+				expect(cacheControlsIn(body).every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("fails closed when the resolved model advertises no TTL capability", async () => {
+				// OpenRouter models come from a dynamic catalog that carries no TTL
+				// capability data, so a 1h knob must not reach the wire (ADR-0006 I2,
+				// and the ADR's stated risk for dynamic catalogs).
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({
+						...mockOptions,
+						openRouterModelId: "anthropic/claude-sonnet-4",
+						promptCacheTtl: "1h",
+					}),
+				)
+
+				expect(handler.getModel().info.promptCacheTtlSupport).toBeUndefined()
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const body = requestBody(mockCreate)
+				expect(JSON.stringify(body)).not.toContain("ttl")
+				expect(cacheControlsIn(body).every((control) => control.ttl === undefined)).toBe(true)
+			})
+
+			it("carries ttl 1h on every marker when the resolved model advertises it", async () => {
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({
+						...mockOptions,
+						openRouterModelId: "anthropic/claude-sonnet-4",
+						promptCacheTtl: "1h",
+					}),
+				)
+
+				// Simulate a catalog that does carry capability data.
+				const model = handler.getModel()
+				vitest.spyOn(handler, "getModel").mockReturnValue({
+					...model,
+					info: { ...model.info, promptCacheTtlSupport: ["5m", "1h"] },
+				})
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				const controls = cacheControlsIn(requestBody(mockCreate))
+				expect(controls).toHaveLength(2)
+				expect(controls.every((control) => control.ttl === "1h")).toBe(true)
+			})
 		})
 
 		it("handles API errors and captures telemetry", async () => {
@@ -1040,6 +1149,109 @@ describe("OpenRouterHandler", () => {
 		it("reports its cache scope", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			expect(handler.getModelCacheScope()).toEqual({ urlScoped: false, keyScoped: false, authScoped: false })
+		})
+
+		it("does not fetch the catalog in the constructor", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+
+			new OpenRouterHandler(mockOptions)
+
+			expect(getModels).not.toHaveBeenCalled()
+			expect(mockGetModelEndpoints).not.toHaveBeenCalled()
+		})
+
+		it("populates models and endpoints when ensureModelFetched resolves", async () => {
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 1000,
+					contextWindow: 2000,
+					supportsPromptCache: false,
+					description: "Moonshot endpoint",
+				},
+			})
+
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			// Before the pre-warm both catalogs are empty, so getModel() falls back
+			// to the hardcoded default info.
+			expect(handler.getModel().info).toBe(openRouterDefaultModelInfo)
+
+			await handler.ensureModelFetched()
+
+			// The endpoint catalog is populated and selected for the specific provider.
+			expect(handler.getModel().info.description).toBe("Moonshot endpoint")
+			expect(handler.getModel().info.contextWindow).toBe(2000)
+
+			// The model catalog is populated too: without a specific provider the
+			// fetched record (not the hardcoded default) is used.
+			const plainHandler = new OpenRouterHandler(mockOptions)
+			await plainHandler.ensureModelFetched()
+			expect(plainHandler.getModel().info.description).toBe("Claude 3.7 Sonnet")
+		})
+
+		it("retries while a selected provider's endpoint catalog is empty", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: "moonshotai",
+				}),
+			)
+
+			// The model-level catalog resolves, but the endpoint request produced
+			// nothing (e.g. it timed out). getModel() would fall back to the
+			// model-level record, so the load must stay retryable.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(2)
+
+			mockGetModelEndpoints.mockResolvedValue({
+				moonshotai: {
+					maxTokens: 1000,
+					contextWindow: 2000,
+					supportsPromptCache: false,
+					description: "Moonshot endpoint",
+				},
+			})
+
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+			expect(handler.getModel().info.description).toBe("Moonshot endpoint")
+
+			// Both catalogs are populated, so the load is now memoized.
+			await handler.ensureModelFetched()
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(3)
+		})
+
+		it("memoizes the default-provider load even when the endpoint catalog is empty", async () => {
+			const handler = new OpenRouterHandler(mockOptions)
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			// Without a selected provider the model-level catalog is what getModel()
+			// uses, so an empty endpoint response must not force a refetch.
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
+		})
+
+		it("treats the [default] provider sentinel as the default provider", async () => {
+			const handler = new OpenRouterHandler(
+				makeApiHandlerOptions({
+					...mockOptions,
+					openRouterSpecificProvider: OPENROUTER_DEFAULT_PROVIDER_NAME,
+				}),
+			)
+
+			await handler.ensureModelFetched()
+			await handler.ensureModelFetched()
+
+			expect(mockGetModelEndpoints).toHaveBeenCalledTimes(1)
 		})
 	})
 })

@@ -47,11 +47,13 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.90.0
+## Nieuw in Zoo Code v3.98.1
 
-- ✨ **Providers en modellen:** GitHub Copilot is nu een provider: meld je aan en Zoo Code laadt je Copilot-modellen. IO Intelligence is een provider met een eigen API-sleutel. Gemini 4 Argon staat op Gemini en Vertex. GPT-6 Luna staat op OpenCode Go. Gemini 4 Argon en GPT-6 Luna staan ook op Zoo Gateway.
-- 🧭 **Tool-uitvoering:** Dezelfde tool-aanroep herhalen geeft een waarschuwing, daarna stopt Zoo Code die lus. `attempt_completion` uitschakelen laat een taak niet langer onafgemaakt. Berichten in de wachtrij doorlopen dezelfde command-protection-controles als opdrachten die je direct verstuurt.
-- ⚡ **Redeneren en streaming:** Adaptief denken van Anthropic verschijnt in de chat en thinking tokens worden geteld. De R1-schakelaar bewaart redenering van llama.cpp, Ollama en LM Studio. Codex bewaart versleutelde redenering bij de samenvatting die je ziet. VS Code language-model-streams gebruiken guarded recovery als een stream mislukt.
+- 💫Probeer Zoo Pass met onbeperkt GLM-5.3-Flash gratis tot 1 december met elk geldbedrag op je Zoo Gateway-account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modellen en redeneren: Gebruik GPT-6.2 Sol, GPT-6.2 Astra en Claude Sonnet 5.5. Stel de redeneerinspanning voor elk LiteLLM-profiel in.
+- 🛡️ Beveiliging: Betere verwerking van metadata van skills en opdrachten, vermeldingen, providerlinks en CLI-goedkeuringen.
+- 🔧 Oplossingen: Correcte OpenAI-serviceniveaukosten, herkenning van symbolische werkruimtekoppelingen en meer vertaalde UI-teksten.
 
 ## Wat kan Zoo Code voor JOU doen?
 

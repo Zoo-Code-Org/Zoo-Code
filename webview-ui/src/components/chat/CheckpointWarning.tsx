@@ -1,5 +1,6 @@
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
 import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 interface CheckpointWarningProps {
 	warning: {
@@ -9,6 +10,7 @@ interface CheckpointWarningProps {
 }
 
 export const CheckpointWarning = ({ warning }: CheckpointWarningProps) => {
+	const { t } = useAppTranslation()
 	const settingsLink = (
 		<VSCodeLink
 			href="#"
@@ -36,6 +38,7 @@ export const CheckpointWarning = ({ warning }: CheckpointWarningProps) => {
 			<span className="codicon codicon-loading codicon-modifier-spin mr-2" />
 			<span className="text-vscode-foreground">
 				<Trans
+					t={t}
 					i18nKey={i18nKey}
 					ns="common"
 					values={{ timeout: warning.timeout }}

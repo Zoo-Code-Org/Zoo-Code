@@ -199,9 +199,7 @@
 	.border-r,
 	.border-l,
 	.border-t,
-	.border-b,
-	.border-x,
-	.border-y {
+	.border-b {
 		border-color: var(--border);
 	}
 
@@ -233,10 +231,6 @@
 		100% {
 			transform: translateY(0);
 		}
-	}
-
-	.animate-smooth-bounce {
-		animation: smooth-bounce 1s ease-in-out infinite;
 	}
 }
 
@@ -274,9 +268,7 @@ body {
 }
 
 body.scrollable,
-.scrollable,
-body.code-block-scrollable,
-.code-block-scrollable {
+.scrollable {
 	border-color: transparent;
 	transition: border-color 0.7s linear;
 }
@@ -284,11 +276,7 @@ body.code-block-scrollable,
 body:hover.scrollable,
 body:hover .scrollable,
 body:focus-within.scrollable,
-body:focus-within .scrollable,
-body:hover.code-block-scrollable,
-body:hover .code-block-scrollable,
-body:focus-within.code-block-scrollable,
-body:focus-within .code-block-scrollable {
+body:focus-within .scrollable {
 	border-color: var(--vscode-scrollbarSlider-background);
 	transition: none;
 }
@@ -321,33 +309,6 @@ body:focus-within .code-block-scrollable {
 	html {
 		scrollbar-color: unset;
 	}
-}
-
-/**
- * The above scrollbar styling uses some transparent background color magic to accomplish its animation. However this doesn't play nicely with SyntaxHighlighter, so we need to set a background color for the code blocks' horizontal scrollbar. This actually has the unintended consequence of always showing the scrollbar which I prefer since it makes it more obvious that there is more content to scroll to.
- */
-
-.code-block-scrollable::-webkit-scrollbar-track {
-	background: transparent;
-}
-
-.code-block-scrollable::-webkit-scrollbar-thumb {
-	background-color: var(--vscode-scrollbarSlider-background);
-	border-radius: 5px;
-	border: 2px solid transparent;
-	background-clip: content-box;
-}
-
-.code-block-scrollable::-webkit-scrollbar-thumb:hover {
-	background-color: var(--vscode-scrollbarSlider-hoverBackground);
-}
-
-.code-block-scrollable::-webkit-scrollbar-thumb:active {
-	background-color: var(--vscode-scrollbarSlider-activeBackground);
-}
-
-.code-block-scrollable::-webkit-scrollbar-corner {
-	background-color: transparent;
 }
 
 /**
@@ -463,14 +424,6 @@ input[cmdk-input]:focus {
 	outline: none;
 }
 
-/**
- * Markdown
- */
-
-.custom-markdown > pre {
-	background-color: transparent !important;
-}
-
 /*
  * Use geometric precision for codicons to avoid blurriness 
  */
@@ -482,19 +435,6 @@ input[cmdk-input]:focus {
 /**
  * Custom animations for UI elements
  */
-
-@keyframes slide-in-right {
-	from {
-		transform: translateX(100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
-
-.animate-slide-in-right {
-	animation: slide-in-right 0.3s ease-out;
-}
 
 @keyframes fade-in {
 	from {

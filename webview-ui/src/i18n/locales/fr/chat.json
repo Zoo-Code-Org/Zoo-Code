@@ -1,30 +1,29 @@
 {
-	"greeting": "Bienvenue sur Zoo Code !",
 	"task": {
 		"title": "Tâche",
 		"expand": "Développer la tâche",
 		"collapse": "Réduire la tâche",
 		"seeMore": "Voir plus",
-		"seeLess": "Voir moins",
 		"tokens": "Tokens",
 		"cache": "Cache",
 		"apiCost": "Coût API",
 		"size": "Taille",
 		"contextWindow": "Durée du contexte",
-		"closeAndStart": "Fermer la tâche et en commencer une nouvelle",
 		"export": "Exporter l'historique des tâches",
 		"delete": "Supprimer la tâche (Shift + Clic pour ignorer la confirmation)",
 		"condenseContext": "Condenser intelligemment le contexte",
 		"openApiHistory": "Ouvrir l'historique de l'API",
 		"openUiHistory": "Ouvrir l'historique de l'UI",
 		"backToParentTask": "Tâche parente",
-		"waitingOnSubtask": "En attente de sous-tâche",
-		"goToSubtask": "Aller à la sous-tâche"
+		"waitingOnSubtask": "En attente de sous-tâche"
 	},
 	"unpin": "Désépingler",
 	"pin": "Épingler",
 	"fileChangesInConversation": {
-		"header": "{{count}} fichier(s) modifié(s) dans cette conversation"
+		"header_one": "{{count}} fichier modifié dans cette conversation",
+		"header_many": "{{count}} fichiers modifiés dans cette conversation",
+		"header_other": "{{count}} fichiers modifiés dans cette conversation",
+		"lineStatsAriaLabel": "Lignes ajoutées : {{added}}, lignes supprimées : {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espace disponible : {{amount}} tokens",
@@ -88,19 +87,16 @@
 		"tooltip": "Terminer la tâche actuelle"
 	},
 	"stop": {
-		"title": "Arrêter",
-		"tooltip": "Arrêter la tâche en cours"
+		"title": "Arrêter"
 	},
 	"cancel": {
-		"title": "Annuler",
-		"tooltip": "Annuler l'opération actuelle"
+		"title": "Annuler"
 	},
 	"enqueueMessage": "Ajouter le message à la file d'attente (sera envoyé après la fin de la tâche en cours)",
 	"scrollToBottom": "Défiler jusqu'au bas du chat",
 	"scrollToLatestCheckpoint": "Défiler jusqu'au checkpoint précédent",
 	"about": "Zoo Code est une équipe complète de développeurs IA dans votre éditeur.",
 	"docs": "Consultez notre <DocsLink>documentation</DocsLink> pour en savoir plus.",
-	"onboarding": "Votre liste de tâches dans cet espace de travail est vide.",
 	"rooTips": {
 		"customizableModes": {
 			"title": "Modes personnalisables",
@@ -126,7 +122,6 @@
 	"unlockApiConfigAcrossModes": "La configuration API est verrouillée pour tous les modes dans cet espace de travail (cliquer pour déverrouiller)",
 	"enhancePrompt": "Améliorer la requête avec un contexte supplémentaire",
 	"addImages": "Ajouter des images au message",
-	"sendMessage": "Envoyer le message",
 	"pressToSend": "Appuie sur {{keyCombination}} pour envoyer",
 	"stopTts": "Arrêter la synthèse vocale",
 	"typeMessage": "Écrivez un message...",
@@ -145,7 +140,6 @@
 	},
 	"errorReadingFile": "Erreur lors de la lecture du fichier",
 	"noValidImages": "Aucune image valide n'a été traitée",
-	"separator": "Séparateur",
 	"edit": "Éditer...",
 	"forNextMode": "pour le prochain mode",
 	"forPreviousMode": "pour le mode précédent",
@@ -178,7 +172,6 @@
 	},
 	"checkpoint": {
 		"regular": "Point de contrôle",
-		"initializingWarning": "Initialisation du point de contrôle en cours... Si cela prend trop de temps, tu peux désactiver les points de contrôle dans les <settingsLink>paramètres</settingsLink> et redémarrer ta tâche.",
 		"menu": {
 			"viewDiff": "Voir les différences",
 			"more": "Plus d'options",
@@ -202,10 +195,8 @@
 		"wantsToEdit": "Zoo veut éditer ce fichier",
 		"wantsToEditOutsideWorkspace": "Zoo veut éditer ce fichier en dehors de l'espace de travail",
 		"wantsToEditProtected": "Zoo veut éditer un fichier de configuration protégé",
-		"wantsToCreate": "Zoo veut créer un nouveau fichier",
 		"wantsToSearchReplace": "Zoo veut effectuer une recherche et remplacement sur ce fichier",
 		"didSearchReplace": "Zoo a effectué une recherche et remplacement sur ce fichier",
-		"wantsToInsert": "Zoo veut insérer du contenu dans ce fichier",
 		"wantsToInsertWithLineNumber": "Zoo veut insérer du contenu dans ce fichier à la ligne {{lineNumber}}",
 		"wantsToInsertAtEnd": "Zoo veut ajouter du contenu à la fin de ce fichier",
 		"wantsToReadAndXMore": "Zoo veut lire ce fichier et {{count}} de plus",
@@ -231,14 +222,11 @@
 		"wantsToViewTopLevelOutsideWorkspace": "Zoo veut voir les fichiers de premier niveau dans ce répertoire (hors espace de travail)",
 		"didViewTopLevelOutsideWorkspace": "Zoo a vu les fichiers de premier niveau dans ce répertoire (hors espace de travail)",
 		"wantsToViewRecursiveOutsideWorkspace": "Zoo veut voir récursivement tous les fichiers dans ce répertoire (hors espace de travail)",
-		"didViewRecursiveOutsideWorkspace": "Zoo a vu récursivement tous les fichiers dans ce répertoire (hors espace de travail)",
-		"wantsToViewMultipleDirectories": "Zoo veut voir plusieurs répertoires"
+		"didViewRecursiveOutsideWorkspace": "Zoo a vu récursivement tous les fichiers dans ce répertoire (hors espace de travail)"
 	},
-	"commandOutput": "Sortie de la Commande",
 	"commandExecution": {
 		"abort": "Abandonner",
 		"running": "En cours d'exécution",
-		"pid": "PID : {{pid}}",
 		"exitStatus": "Terminé avec le statut {{exitCode}}",
 		"malformedCommand": "Commande mal formée : erreur de syntaxe shell",
 		"manageCommands": "Commandes approuvées automatiquement",
@@ -247,14 +235,9 @@
 		"removeFromAllowed": "Retirer de la liste autorisée",
 		"addToDenied": "Ajouter à la liste refusée",
 		"removeFromDenied": "Retirer de la liste refusée",
-		"abortCommand": "Abandonner l'exécution de la commande",
-		"expandOutput": "Développer la sortie",
-		"collapseOutput": "Réduire la sortie",
-		"expandManagement": "Développer la section de gestion des commandes",
-		"collapseManagement": "Réduire la section de gestion des commandes"
+		"pid": "(PID : {{pid}})",
+		"clickToEditPattern": "Clique pour modifier le motif"
 	},
-	"response": "Réponse",
-	"arguments": "Arguments",
 	"text": {
 		"rooSaid": "Zoo a dit"
 	},
@@ -274,10 +257,8 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo veut créer une nouvelle sous-tâche en mode <code>{{mode}}</code>",
 		"wantsToFinish": "Zoo veut terminer cette sous-tâche",
-		"newTaskContent": "Instructions de la sous-tâche",
 		"completionContent": "Sous-tâche terminée",
 		"resultContent": "Résultats de la sous-tâche",
-		"defaultResult": "Veuillez continuer avec la tâche suivante.",
 		"completionInstructions": "Sous-tâche terminée ! Vous pouvez examiner les résultats et suggérer des corrections ou les prochaines étapes. Si tout semble bon, confirmez pour retourner le résultat à la tâche parente.",
 		"goToSubtask": "Afficher la tâche"
 	},
@@ -300,9 +281,6 @@
 		"diagnostics": "Obtenir les détails de l'erreur",
 		"proxyProvider": "Il semble que tu utilises un fournisseur basé sur un proxy. Assure-toi de vérifier ses journaux et de t'assurer qu'il ne réécrit pas les demandes de Zoo."
 	},
-	"powershell": {
-		"issues": "Il semble que vous rencontriez des problèmes avec Windows PowerShell, veuillez consulter ce"
-	},
 	"autoApprove": {
 		"tooltipManage": "Gérer les paramètres d'approbation automatique",
 		"tooltipStatus": "Approbation automatique activée pour : {{toggles}}",
@@ -311,15 +289,15 @@
 		"all": "Tout",
 		"none": "Aucun",
 		"description": "Exécutez ces actions sans demander la permission. N'activez cette option que pour les actions en lesquelles vous avez entièrement confiance.",
-		"selectOptionsFirst": "Sélectionnez au moins une option ci-dessous pour activer l'approbation automatique",
-		"toggleAriaLabel": "Basculer l'approbation automatique",
-		"disabledAriaLabel": "Approbation automatique désactivée - sélectionnez d'abord les options",
 		"triggerLabelOff": "Approbation automatique désactivée",
 		"triggerLabelOffShort": "Désactivé",
 		"triggerLabel_zero": "0 approuvé automatiquement",
-		"triggerLabel_one": "1 approuvé automatiquement",
+		"triggerLabel_one": "{{count}} approuvé automatiquement",
+		"triggerLabel_many": "{{count}} approuvés automatiquement",
 		"triggerLabel_other": "{{count}} approuvés automatiquement",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activé",
+		"toggleAriaLabel": "Activer/désactiver l'approbation automatique"
 	},
 	"reasoning": {
 		"thinking": "Réflexion",
@@ -335,7 +313,8 @@
 		"truncation": {
 			"title": "Contexte tronqué",
 			"inProgress": "Troncature du contexte...",
-			"messagesRemoved": "{{count}} message supprimé",
+			"messagesRemoved_one": "{{count}} message supprimé",
+			"messagesRemoved_many": "{{count}} messages supprimés",
 			"messagesRemoved_other": "{{count}} messages supprimés",
 			"description": "Les messages plus anciens ont été supprimés de la conversation pour rester dans la limite de la fenêtre de contexte. C'est une approche rapide mais moins conservatrice du contexte par rapport à la condensation."
 		}
@@ -352,16 +331,12 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.90.0",
-			"highlight1": "✨ Fournisseurs et modèles : GitHub Copilot est maintenant un fournisseur : connecte-toi et Zoo Code charge tes modèles Copilot. IO Intelligence est un fournisseur avec sa propre clé API. Gemini 4 Argon est sur Gemini et Vertex. GPT-6 Luna est sur OpenCode Go. Gemini 4 Argon et GPT-6 Luna sont aussi sur Zoo Gateway.",
-			"highlight2": "🧭 Exécution des outils : Répéter le même appel d'outil affiche un avertissement, puis Zoo Code arrête cette boucle. Désactiver attempt_completion ne laisse plus une tâche incapable de se terminer. Les messages en file passent les mêmes contrôles de protection des commandes que les commandes que tu envoies directement.",
-			"highlight3": "⚡ Raisonnement et streaming : Le raisonnement adaptatif d'Anthropic s'affiche dans le chat, et les thinking tokens sont comptés. L'option R1 conserve le raisonnement de llama.cpp, Ollama et LM Studio. Codex conserve le raisonnement chiffré avec le résumé que tu vois. Les streams du modèle de langage VS Code utilisent une récupération protégée quand un stream échoue."
-		},
-		"cloudAgents": {
-			"heading": "Nouveautés dans le Cloud :",
-			"specialized": "Présentation d'<bold>Explainer</bold>, <bold>Planner</bold> et <bold>Coder</bold> - trois agents cloud spécialisés pour améliorer tes workflows.",
-			"description": "Les agents travaillent ensemble dans le cloud et peuvent être déclenchés depuis le web ou via Slack.",
-			"tryButton": "Essayer les Agents Cloud"
+			"heading": "Nouveautés de Zoo Code v3.98.1",
+			"highlight0": "💫Découvre Zoo Pass avec GLM-5.3-Flash illimité gratuitement jusqu'au 1er décembre avec n'importe quel solde sur ton compte Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modèles et raisonnement : Utilise GPT-6.2 Sol, GPT-6.2 Astra et Claude Sonnet 5.5. Règle l'effort de raisonnement pour chaque profil LiteLLM.",
+			"highlight2": "🛡️ Sécurité : Amélioration du traitement des métadonnées des compétences et commandes, des mentions, des liens fournisseurs et des approbations CLI.",
+			"highlight3": "🔧 Corrections : Coûts des niveaux de service OpenAI, reconnaissance des liens symboliques de l'espace de travail et davantage de textes traduits."
 		}
 	},
 	"costs": {
@@ -385,7 +360,9 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Limite de requêtes auto-approuvées atteinte",
-			"description": "Zoo a atteint la limite auto-approuvée de {{count}} requête(s) API. Souhaitez-vous réinitialiser le compteur et poursuivre la tâche ?",
+			"description_one": "Zoo a atteint la limite auto-approuvée de {{count}} requête API. Souhaitez-vous réinitialiser le compteur et poursuivre la tâche ?",
+			"description_many": "Zoo a atteint la limite auto-approuvée de {{count}} requêtes API. Souhaitez-vous réinitialiser le compteur et poursuivre la tâche ?",
+			"description_other": "Zoo a atteint la limite auto-approuvée de {{count}} requêtes API. Souhaitez-vous réinitialiser le compteur et poursuivre la tâche ?",
 			"button": "Réinitialiser et continuer"
 		},
 		"autoApprovedCostLimitReached": {
@@ -397,9 +374,11 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo veut rechercher dans la base de code <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo veut rechercher dans la base de code <code>{{query}}</code> dans <code>{{path}}</code>",
-		"didSearch_one": "1 résultat trouvé",
+		"didSearch_one": "{{count}} résultat trouvé",
+		"didSearch_many": "{{count}} résultats trouvés",
 		"didSearch_other": "{{count}} résultats trouvés",
-		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)"
+		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)",
+		"displayError": "Erreur lors de l'affichage des résultats de recherche."
 	},
 	"read-batch": {
 		"approve": {
@@ -444,34 +423,24 @@
 	"editMessage": {
 		"placeholder": "Modifiez votre message..."
 	},
-	"command": {
-		"triggerDescription": "Déclencher la commande {{name}}"
-	},
 	"slashCommands": {
-		"tooltip": "Gérer les commandes slash",
-		"title": "Commandes Slash",
-		"description": "Utilisez les commandes slash intégrées ou créez des personnalisées pour accéder rapidement aux prompts et flux de travail fréquemment utilisés. <DocsLink>Documentation</DocsLink>",
-		"manageCommands": "Gérer les commandes slash dans les paramètres",
-		"builtInCommands": "Commandes Intégrées",
-		"globalCommands": "Commandes Globales",
-		"workspaceCommands": "Commandes de l'Espace de Travail",
-		"globalCommand": "Commande globale",
-		"editCommand": "Modifier la commande",
-		"deleteCommand": "Supprimer la commande",
-		"newGlobalCommandPlaceholder": "Nouvelle commande globale...",
-		"newWorkspaceCommandPlaceholder": "Nouvelle commande de l'espace de travail...",
-		"deleteDialog": {
-			"title": "Supprimer la commande",
-			"description": "Êtes-vous sûr de vouloir supprimer la commande \"{{name}}\" ? Cette action ne peut pas être annulée.",
-			"cancel": "Annuler",
-			"confirm": "Supprimer"
-		}
+		"manageCommands": "Gérer les commandes slash dans les paramètres"
 	},
 	"contextMenu": {
 		"noResults": "Aucun résultat",
 		"problems": "Problèmes",
 		"terminal": "Terminal",
-		"url": "Coller l'URL pour récupérer le contenu"
+		"url": "Coller l'URL pour récupérer le contenu",
+		"gitCommits": "Commits Git",
+		"gitCommitsDescription": "Rechercher dans l'historique du dépôt",
+		"workingChanges": "Modifications en cours",
+		"workingChangesDescription": "Modifications actuelles non commitées",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash du commit Git",
+		"addFile": "Ajouter un fichier",
+		"addFolder": "Ajouter un dossier",
+		"commands": "Commandes",
+		"modes": "Modes"
 	},
 	"queuedMessages": {
 		"title": "Messages en file d'attente",
@@ -485,14 +454,35 @@
 		"partial": "{{completed}} sur {{total}} tâches terminées",
 		"complete": "{{total}} tâches terminées",
 		"updated": "La liste des tâches a été mise à jour",
-		"completed": "Terminé",
-		"started": "Commencé"
+		"listUpdated": "Liste de tâches mise à jour",
+		"userEdit": "Modification de l'utilisateur",
+		"userEdits": "Modifications de l'utilisateur",
+		"edit": "Modifier",
+		"done": "Terminé",
+		"itemPlaceholder": "Saisis une tâche",
+		"newItemPlaceholder": "Saisis une tâche, appuie sur Entrée pour l'ajouter",
+		"remove": "Retirer",
+		"add": "Ajouter",
+		"cancel": "Annuler",
+		"addTodo": "+ Ajouter une tâche",
+		"status": {
+			"notStarted": "Non commencée",
+			"inProgress": "En cours",
+			"completed": "Terminée"
+		},
+		"deleteDialog": {
+			"title": "Supprimer la tâche",
+			"description": "Es-tu sûr de vouloir supprimer cette tâche ?",
+			"confirm": "Supprimer"
+		}
 	},
 	"tooManyTools": {
 		"title": "Trop d'outils activés",
 		"toolsPart_one": "{{count}} outil",
+		"toolsPart_many": "{{count}} outils",
 		"toolsPart_other": "{{count}} outils",
 		"serversPart_one": "{{count}} serveur MCP",
+		"serversPart_many": "{{count}} serveurs MCP",
 		"serversPart_other": "{{count}} serveurs MCP",
 		"messageTemplate": "Tu as {{tools}} activés via {{servers}}. Un nombre aussi élevé peut confondre le modèle et entraîner des erreurs. Essaie de le maintenir en dessous de {{threshold}}.",
 		"openMcpSettings": "Ouvrir les paramètres MCP"
@@ -508,5 +498,26 @@
 		"title": "Fournisseur plus pris en charge",
 		"message": "Ce fournisseur n'est plus disponible. Choisis un fournisseur pris en charge pour continuer.",
 		"openSettings": "Ouvrir les paramètres"
+	},
+	"zooCodeAuth": {
+		"signIn": "Se connecter à Zoo Code",
+		"goToDashboard": "Aller au tableau de bord",
+		"signOut": "Se déconnecter",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code : {{account}}",
+		"connected": "Connecté"
+	},
+	"arguments": "Arguments :",
+	"copyAsMarkdown": "Copier en Markdown",
+	"openInPreview": "Ouvrir dans l'aperçu",
+	"codeAccordion": {
+		"userEdits": "Modifications de l'utilisateur",
+		"consoleLogs": "Journaux de la console",
+		"openFileAriaLabel": "Ouvrir le fichier : {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} ligne masquée",
+		"hiddenLines_many": "{{count}} de lignes masquées",
+		"hiddenLines_other": "{{count}} lignes masquées"
 	}
 }

@@ -54,7 +54,7 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 	it("serializes concurrent operations — second caller reads the state written by the first", async () => {
 		// Seed the cache with an item that has no childIds yet.
 		const item = makeItem("parent-task", { childIds: [] })
-		;(store as any).cache.set(item.id, item)
+		store["cache"].set(item.id, item)
 
 		// Two concurrent delegations each append their child ID.
 		// Because they are serialized by the lock, the second caller must
@@ -72,14 +72,14 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 		await Promise.all([delegation1, delegation2])
 
 		// Both child IDs must be present: delegation2 saw delegation1's write.
-		const final = (store as any).cache.get("parent-task") as HistoryItem
+		const final = store["cache"].get("parent-task")!
 		expect(final.childIds).toContain("child-A")
 		expect(final.childIds).toContain("child-B")
 	})
 
 	it("two concurrent delegations produce consistent HistoryItem state (full field set)", async () => {
 		const item = makeItem("parent-task", { status: "active", childIds: [] })
-		;(store as any).cache.set(item.id, item)
+		store["cache"].set(item.id, item)
 
 		// Each delegation sets awaitingChildId and appends to childIds.
 		const delegation1 = store.atomicReadAndUpdate("parent-task", (historyItem) => {
@@ -106,7 +106,7 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 
 		await Promise.all([delegation1, delegation2])
 
-		const final = (store as any).cache.get("parent-task") as HistoryItem
+		const final = store["cache"].get("parent-task")!
 		// Both child IDs present — neither write clobbered the other's childIds.
 		expect(final.childIds).toContain("child-A")
 		expect(final.childIds).toContain("child-B")
@@ -119,7 +119,7 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 
 	it("completes without deadlock — updater is pure and does not re-acquire the lock", async () => {
 		const item = makeItem("task-1", { childIds: [] })
-		;(store as any).cache.set(item.id, item)
+		store["cache"].set(item.id, item)
 
 		// With the typed (taskId, updater) API, the updater is synchronous and
 		// cannot call upsert/withLock — no re-entrancy, no deadlock.
@@ -135,7 +135,7 @@ describe("TaskHistoryStore.atomicReadAndUpdate", () => {
 
 		expect(result).toBe("completed")
 
-		const final = (store as any).cache.get("task-1") as HistoryItem
+		const final = store["cache"].get("task-1")!
 		expect(final.childIds).toContain("child-1")
 	})
 

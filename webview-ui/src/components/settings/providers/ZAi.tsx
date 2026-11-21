@@ -51,7 +51,7 @@ export const ZAi = ({ apiConfiguration, setApiConfigurationField }: ZAiProps) =>
 			</div>
 			<div>
 				<VSCodeTextField
-					value={apiConfiguration?.zaiApiKey || ""}
+					value={apiConfiguration.zaiApiKey || ""}
 					type="password"
 					onInput={handleInputChange("zaiApiKey")}
 					placeholder={t("settings:placeholders.apiKey")}
@@ -61,7 +61,7 @@ export const ZAi = ({ apiConfiguration, setApiConfigurationField }: ZAiProps) =>
 				<div className="text-sm text-vscode-descriptionForeground">
 					{t("settings:providers.apiKeyStorageNotice")}
 				</div>
-				{!apiConfiguration?.zaiApiKey && (
+				{!apiConfiguration.zaiApiKey && (
 					<VSCodeButtonLink
 						href={
 							zaiApiLineConfigs[apiConfiguration.zaiApiLine ?? "international_coding"].isChina

@@ -44,3 +44,23 @@ describe("pendingTaskActionSchema", () => {
 		expect(parsed.pendingAction?.actionId).toBe("finish-1")
 	})
 })
+
+describe("historyItemSchema", () => {
+	const baseItem = {
+		id: "task-1",
+		number: 1,
+		ts: 1,
+		task: "Original prompt",
+		tokensIn: 0,
+		tokensOut: 0,
+		totalCost: 0,
+	}
+
+	it("keeps a user-assigned title", () => {
+		expect(historyItemSchema.parse({ ...baseItem, title: "Renamed" }).title).toBe("Renamed")
+	})
+
+	it("leaves title unset when absent", () => {
+		expect(historyItemSchema.parse(baseItem)).not.toHaveProperty("title")
+	})
+})

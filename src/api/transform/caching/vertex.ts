@@ -1,6 +1,13 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
-export function addCacheBreakpoints(messages: Anthropic.Messages.MessageParam[]) {
+import type { PromptCacheTtl } from "@roo-code/types"
+
+import { cacheControl } from "./ttl"
+
+export function addCacheBreakpoints(
+	messages: Anthropic.Messages.MessageParam[],
+	ttl?: PromptCacheTtl,
+): Anthropic.Messages.MessageParam[] {
 	// Find indices of user messages that we want to cache.
 	// We only cache the last two user messages to stay within the 4-block limit
 	// (1 block for system + 1 block each for last two user messages = 3 total).
@@ -12,18 +19,23 @@ export function addCacheBreakpoints(messages: Anthropic.Messages.MessageParam[])
 
 	return messages.map((message, index) =>
 		message.role !== "assistant" && (index === lastIndex || index === secondLastIndex)
-			? cachedMessage(message)
+			? cachedMessage(message, ttl)
 			: message,
 	)
 }
 
-function cachedMessage(message: Anthropic.Messages.MessageParam): Anthropic.Messages.MessageParam {
+function cachedMessage(
+	message: Anthropic.Messages.MessageParam,
+	ttl?: PromptCacheTtl,
+): Anthropic.Messages.MessageParam {
+	const control = cacheControl(ttl)
+
 	// For string content, we convert to array format with optional cache control.
 	if (typeof message.content === "string") {
 		return {
 			...message,
 			// For string content, we only have one block so it's always the last block.
-			content: [{ type: "text" as const, text: message.content, cache_control: { type: "ephemeral" } }],
+			content: [{ type: "text" as const, text: message.content, cache_control: control }],
 		}
 	}
 
@@ -41,7 +53,7 @@ function cachedMessage(message: Anthropic.Messages.MessageParam): Anthropic.Mess
 				? {
 						...content,
 						// Check if this is the last text block using our pre-calculated index.
-						...(index === lastTextBlockIndex && { cache_control: { type: "ephemeral" } }),
+						...(index === lastTextBlockIndex && { cache_control: control }),
 					}
 				: content,
 		),

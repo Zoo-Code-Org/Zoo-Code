@@ -77,6 +77,7 @@ describe("MessageEnhancer", () => {
 			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(
 				mockApiConfiguration,
 				expect.stringContaining("Write a function to calculate fibonacci"),
+				undefined,
 			)
 		})
 
@@ -99,7 +100,7 @@ describe("MessageEnhancer", () => {
 				apiKey: "enhancement-key",
 				apiModelId: "claude-3",
 			}
-			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(expectedConfig, expect.any(String))
+			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(expectedConfig, expect.any(String), undefined)
 		})
 
 		it("should include task history when enabled", async () => {
@@ -238,7 +239,40 @@ describe("MessageEnhancer", () => {
 			})
 
 			// Should use the default config
-			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(mockApiConfiguration, expect.any(String))
+			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(
+				mockApiConfiguration,
+				expect.any(String),
+				undefined,
+			)
+		})
+
+		it("passes the task id through to the completion so the cache key stays task-scoped", async () => {
+			await MessageEnhancer.enhanceMessage({
+				text: "Test",
+				apiConfiguration: mockApiConfiguration,
+				listApiConfigMeta: mockListApiConfigMeta,
+				providerSettingsManager: mockProviderSettingsManager,
+				taskId: "task-123",
+			})
+
+			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(mockApiConfiguration, expect.any(String), {
+				taskId: "task-123",
+			})
+		})
+
+		it("omits the completion options when no task is open", async () => {
+			await MessageEnhancer.enhanceMessage({
+				text: "Test",
+				apiConfiguration: mockApiConfiguration,
+				listApiConfigMeta: mockListApiConfigMeta,
+				providerSettingsManager: mockProviderSettingsManager,
+			})
+
+			expect(mockSingleCompletionHandler).toHaveBeenCalledWith(
+				mockApiConfiguration,
+				expect.any(String),
+				undefined,
+			)
 		})
 
 		it("should handle empty task history gracefully", async () => {

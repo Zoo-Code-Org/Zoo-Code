@@ -3,9 +3,9 @@ import { Trans } from "react-i18next"
 import { Checkbox } from "vscrui"
 import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
 
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { type ProviderSettings, VERTEX_REGIONS, VERTEX_1M_CONTEXT_MODEL_IDS, looksLikeFilePath } from "@roo-code/types"
 
-import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@src/components/ui"
 
 import { inputEventTransform } from "../transforms"
@@ -20,7 +20,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 
 	// Check if the selected model supports 1M context (supported Claude 4 models)
 	const supports1MContextBeta =
-		!!apiConfiguration?.apiModelId &&
+		!!apiConfiguration.apiModelId &&
 		VERTEX_1M_CONTEXT_MODEL_IDS.includes(
 			apiConfiguration.apiModelId as (typeof VERTEX_1M_CONTEXT_MODEL_IDS)[number],
 		)
@@ -37,8 +37,8 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 	)
 
 	const credentialsLooksLikePath = useMemo(
-		() => looksLikeFilePath(apiConfiguration?.vertexJsonCredentials),
-		[apiConfiguration?.vertexJsonCredentials],
+		() => looksLikeFilePath(apiConfiguration.vertexJsonCredentials),
+		[apiConfiguration.vertexJsonCredentials],
 	)
 
 	return (
@@ -68,7 +68,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				</div>
 			</div>
 			<VSCodeTextField
-				value={apiConfiguration?.vertexJsonCredentials || ""}
+				value={apiConfiguration.vertexJsonCredentials || ""}
 				onInput={handleInputChange("vertexJsonCredentials")}
 				placeholder={t("settings:placeholders.credentialsJson")}
 				className="w-full">
@@ -80,6 +80,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 					role="status"
 					className="text-sm text-vscode-errorForeground">
 					<Trans
+						t={t}
 						i18nKey="settings:providers.googleCloudCredentialsPathWarning"
 						components={{
 							strong: <strong />,
@@ -89,14 +90,14 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				</div>
 			)}
 			<VSCodeTextField
-				value={apiConfiguration?.vertexKeyFile || ""}
+				value={apiConfiguration.vertexKeyFile || ""}
 				onInput={handleInputChange("vertexKeyFile")}
 				placeholder={t("settings:placeholders.keyFilePath")}
 				className="w-full">
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudKeyFile")}</label>
 			</VSCodeTextField>
 			<VSCodeTextField
-				value={apiConfiguration?.vertexProjectId || ""}
+				value={apiConfiguration.vertexProjectId || ""}
 				onInput={handleInputChange("vertexProjectId")}
 				placeholder={t("settings:placeholders.projectId")}
 				className="w-full">
@@ -105,7 +106,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 			<div>
 				<label className="block font-medium mb-1">{t("settings:providers.googleCloudRegion")}</label>
 				<Select
-					value={apiConfiguration?.vertexRegion || ""}
+					value={apiConfiguration.vertexRegion || ""}
 					onValueChange={(value) => setApiConfigurationField("vertexRegion", value)}>
 					<SelectTrigger className="w-full">
 						<SelectValue placeholder={t("settings:common.select")} />
@@ -124,7 +125,7 @@ export const Vertex = ({ apiConfiguration, setApiConfigurationField }: VertexPro
 				<div>
 					<Checkbox
 						data-testid="checkbox-vertex-1m-context"
-						checked={apiConfiguration?.vertex1MContext ?? false}
+						checked={apiConfiguration.vertex1MContext ?? false}
 						onChange={(checked: boolean) => {
 							setApiConfigurationField("vertex1MContext", checked)
 						}}>

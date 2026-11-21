@@ -155,7 +155,10 @@ async function testCmdCommand(
 		mockTerminalInfo.process = terminalProcess
 
 		// Get the event handlers from the mock
-		const eventHandlers = (vscode as any).__eventHandlers
+		// The vscode mock exposes its registered event handlers for manual firing.
+		const eventHandlers = (
+			vscode as typeof vscode & { __eventHandlers: Record<string, ((event: unknown) => void) | undefined> }
+		).__eventHandlers
 
 		// Execute the command first to set up the process
 		const runPromise = terminalProcess.run(command)
@@ -192,9 +195,10 @@ async function testCmdCommand(
 		// will be consumed before this fires. Firing synchronously would let
 		// DONE_SENTINEL win the Promise.race and skip unconsumed chunks.
 		if (eventHandlers.endTerminalShellExecution) {
+			const endHandler = eventHandlers.endTerminalShellExecution
 			const _exitCode = exitCode
 			setTimeout(() => {
-				eventHandlers.endTerminalShellExecution({
+				endHandler({
 					terminal: mockTerminal,
 					execution: mockExecution,
 					exitCode: _exitCode,

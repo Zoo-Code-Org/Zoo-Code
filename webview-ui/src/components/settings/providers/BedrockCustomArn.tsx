@@ -32,8 +32,10 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 
 	const validation = useMemo(() => {
 		const { awsCustomArn, awsRegion } = apiConfiguration
-		return awsCustomArn ? validateBedrockArn(awsCustomArn, awsRegion) : { isValid: true, errorMessage: undefined }
-	}, [apiConfiguration])
+		return awsCustomArn
+			? validateBedrockArn(awsCustomArn, t, awsRegion)
+			: { isValid: true, errorMessage: undefined }
+	}, [apiConfiguration, t])
 
 	const baseModelId =
 		resolveBedrockCustomArnBaseModelId(apiConfiguration.awsCustomArn, apiConfiguration.awsCustomArnBaseModelId) ??
@@ -67,7 +69,7 @@ export const BedrockCustomArn = ({ apiConfiguration, setApiConfigurationField }:
 	return (
 		<>
 			<VSCodeTextField
-				value={apiConfiguration?.awsCustomArn || ""}
+				value={apiConfiguration.awsCustomArn || ""}
 				onInput={(e) => onArnInput((e.target as HTMLInputElement).value)}
 				placeholder={t("settings:placeholders.customArn")}
 				className="w-full"

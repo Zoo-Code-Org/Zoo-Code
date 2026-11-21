@@ -1,30 +1,27 @@
 {
-	"greeting": "歡迎使用 Zoo Code！",
 	"task": {
 		"title": "工作",
 		"expand": "展開工作",
 		"collapse": "收合工作",
 		"seeMore": "顯示更多",
-		"seeLess": "顯示較少",
 		"tokens": "Token",
 		"cache": "快取",
 		"apiCost": "API 費用",
 		"size": "大小",
 		"condenseContext": "智慧壓縮內容",
 		"contextWindow": "上下文長度",
-		"closeAndStart": "關閉現有工作並開始新工作",
 		"export": "匯出工作記錄",
 		"delete": "刪除工作（按住 Shift 並點選可跳過確認）",
 		"openApiHistory": "開啟 API 歷史紀錄",
 		"openUiHistory": "開啟 UI 歷史紀錄",
 		"backToParentTask": "上層工作",
-		"waitingOnSubtask": "等待子任務",
-		"goToSubtask": "前往子任務"
+		"waitingOnSubtask": "等待子任務"
 	},
 	"unpin": "取消釘選",
 	"pin": "釘選",
 	"fileChangesInConversation": {
-		"header": "此對話中已變更 {{count}} 個檔案"
+		"header_other": "此對話中已變更 {{count}} 個檔案",
+		"lineStatsAriaLabel": "新增行數：{{added}}，刪除行數：{{removed}}"
 	},
 	"retry": {
 		"title": "重試",
@@ -112,12 +109,10 @@
 		"tooltip": "開始新的工作"
 	},
 	"cancel": {
-		"title": "取消",
-		"tooltip": "取消目前操作"
+		"title": "取消"
 	},
 	"stop": {
-		"title": "停止",
-		"tooltip": "停止目前的工作"
+		"title": "停止"
 	},
 	"enqueueMessage": "將訊息加入佇列（會在目前工作完成後傳送）",
 	"editMessage": {
@@ -127,7 +122,6 @@
 	"scrollToLatestCheckpoint": "捲動至上一個檢查點",
 	"about": "Zoo 是編輯器中的完整 AI 開發團隊。",
 	"docs": "請參閱 <DocsLink>說明文件</DocsLink> 開始使用。",
-	"onboarding": "想要做什麼呢？",
 	"rooTips": {
 		"customizableModes": {
 			"title": "可自訂模式，專注任務不偏離",
@@ -162,7 +156,6 @@
 	},
 	"enhancePromptDescription": "「強化提示詞」按鈕可透過提供額外內容、說明或改寫來協助改善提示詞。試著在這裡輸入提示詞，再點選一次按鈕以了解其運作方式。",
 	"addImages": "新增圖片到訊息中",
-	"sendMessage": "傳送訊息",
 	"pressToSend": "按 {{keyCombination}} 傳送",
 	"stopTts": "停止文字轉語音",
 	"typeMessage": "輸入訊息...",
@@ -172,7 +165,6 @@
 	"dragFilesImages": "按住 Shift 鍵拖曳檔案／圖片",
 	"errorReadingFile": "讀取檔案時發生錯誤",
 	"noValidImages": "未處理到任何有效圖片",
-	"separator": "分隔符號",
 	"edit": "編輯...",
 	"forNextMode": "用於下一個模式",
 	"forPreviousMode": "用於上一個模式",
@@ -200,7 +192,6 @@
 	},
 	"checkpoint": {
 		"regular": "檢查點",
-		"initializingWarning": "正在初始化檢查點... 如果耗時過長，您可以在 <settingsLink>設定</settingsLink> 中停用檢查點並重新啟動工作。",
 		"menu": {
 			"viewDiff": "檢視差異",
 			"viewDiffFromInit": "檢視所有變更",
@@ -227,7 +218,6 @@
 		"truncation": {
 			"title": "上下文已截斷",
 			"inProgress": "正在截斷上下文...",
-			"messagesRemoved": "已移除 {{count}} 則訊息",
 			"messagesRemoved_other": "已移除 {{count}} 則訊息",
 			"description": "為保持在上下文視窗限制內，已從對話中移除較舊的訊息。與壓縮相比，這是一種快速但上下文保留較少的方法。"
 		}
@@ -253,8 +243,6 @@
 		"wantsToGenerateImageOutsideWorkspace": "Zoo 想要在工作區外產生圖片",
 		"wantsToGenerateImageProtected": "Zoo 想要在受保護位置產生圖片",
 		"didGenerateImage": "Zoo 已產生圖片",
-		"wantsToCreate": "Zoo 想要建立新檔案",
-		"wantsToInsert": "Zoo 想要在此檔案中插入內容",
 		"wantsToInsertWithLineNumber": "Zoo 想要在此檔案第 {{lineNumber}} 行插入內容",
 		"wantsToInsertAtEnd": "Zoo 想要在此檔案尾端新增內容"
 	},
@@ -270,21 +258,18 @@
 		"wantsToSearch": "Zoo 想要在此目錄中搜尋 <code>{{regex}}</code>",
 		"didSearch": "Zoo 已在此目錄中搜尋 <code>{{regex}}</code>",
 		"wantsToSearchOutsideWorkspace": "Zoo 想要在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
-		"didSearchOutsideWorkspace": "Zoo 已在此目錄（工作區外）中搜尋 <code>{{regex}}</code>",
-		"wantsToViewMultipleDirectories": "Zoo 想要查看多個目錄"
+		"didSearchOutsideWorkspace": "Zoo 已在此目錄（工作區外）中搜尋 <code>{{regex}}</code>"
 	},
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
-		"didSearch_one": "找到 1 個結果",
 		"didSearch_other": "找到 {{count}} 個結果",
-		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
+		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）",
+		"displayError": "顯示搜尋結果時發生錯誤。"
 	},
-	"commandOutput": "命令輸出",
 	"commandExecution": {
 		"abort": "中止",
 		"running": "執行中",
-		"pid": "PID: {{pid}}",
 		"exitStatus": "已結束，狀態碼 {{exitCode}}",
 		"malformedCommand": "命令格式錯誤：shell 語法錯誤",
 		"manageCommands": "自動核准的命令",
@@ -293,14 +278,9 @@
 		"removeFromAllowed": "從允許清單中移除",
 		"addToDenied": "新增至拒絕清單",
 		"removeFromDenied": "從拒絕清單中移除",
-		"abortCommand": "中止命令執行",
-		"expandOutput": "展開輸出",
-		"collapseOutput": "摺疊輸出",
-		"expandManagement": "展開命令管理部分",
-		"collapseManagement": "摺疊命令管理部分"
+		"pid": "（PID：{{pid}}）",
+		"clickToEditPattern": "點擊以編輯模式"
 	},
-	"response": "回應",
-	"arguments": "參數",
 	"text": {
 		"rooSaid": "Zoo 說"
 	},
@@ -320,9 +300,7 @@
 	"subtasks": {
 		"wantsToCreate": "Zoo 想要在 {{mode}} 模式下建立新的子任務",
 		"wantsToFinish": "Zoo 想要完成此子任務",
-		"newTaskContent": "子任務指示",
 		"resultContent": "子任務結果",
-		"defaultResult": "請繼續下一個工作。",
 		"completionInstructions": "子任務已完成！您可以檢閱結果並提出修正或後續步驟。如果一切順利，請確認以將結果回傳給主任務。",
 		"goToSubtask": "查看工作"
 	},
@@ -350,9 +328,6 @@
 		"title": "編輯失敗"
 	},
 	"troubleMessage": "Zoo 遇到問題...",
-	"powershell": {
-		"issues": "似乎遇到 Windows PowerShell 問題，請參閱此說明文件"
-	},
 	"autoApprove": {
 		"tooltipManage": "管理自動核准設定",
 		"tooltipStatus": "自動核准已啟用：{{toggles}}",
@@ -360,30 +335,24 @@
 		"all": "全部",
 		"none": "無",
 		"description": "無需請求權限即可執行這些操作。僅對完全信任的操作啟用此功能。",
-		"selectOptionsFirst": "請至少選擇以下一個選項以啟用自動核准",
-		"toggleAriaLabel": "切換自動核准",
-		"disabledAriaLabel": "自動核准已停用，請先選擇選項",
 		"triggerLabelOff": "自動核准已關閉",
 		"triggerLabelOffShort": "關閉",
 		"triggerLabel_zero": "0 個自動核准",
-		"triggerLabel_one": "1 個自動核准",
 		"triggerLabel_other": "{{count}} 個自動核准",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "已啟用",
+		"toggleAriaLabel": "切換自動核准"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.90.0 新功能",
-			"highlight1": "✨ Provider 與模型：GitHub Copilot 現在是一個 provider：登入後，Zoo Code 會載入您的 Copilot 模型。IO Intelligence 是使用自己 API 金鑰的 provider。Gemini 4 Argon 在 Gemini 和 Vertex 上。GPT-6 Luna 在 OpenCode Go 上。Gemini 4 Argon 和 GPT-6 Luna 也在 Zoo Gateway 上。",
-			"highlight2": "🧭 工具執行：重複同一次工具呼叫會先警告，然後 Zoo Code 停止這個迴圈。關閉 attempt_completion 不再讓工作無法結束。佇列訊息會經過與直接送出的命令相同的命令保護檢查。",
-			"highlight3": "⚡ 推理與串流：Anthropic adaptive thinking 會顯示在聊天中，並統計 thinking tokens。R1 開關會保留 llama.cpp、Ollama 和 LM Studio 的推理。Codex 會把加密推理和您看到的摘要一起保留。VS Code 語言模型串流在串流失敗時使用 guarded recovery。"
-		},
-		"cloudAgents": {
-			"heading": "雲端的新功能：",
-			"specialized": "推出 <bold>Explainer</bold>、<bold>Planner</bold> 和 <bold>Coder</bold>，三個專業雲端代理用來強化工作流程。",
-			"description": "代理在雲端協同工作，可從網頁或透過 Slack 觸發。",
-			"tryButton": "試用雲端代理"
+			"heading": "Zoo Code v3.98.1 新功能",
+			"highlight0": "💫預覽 Zoo Pass：只要你的 Zoo Gateway 帳戶中有任意金額的餘額，即可在 12 月 1 日前免費無限使用 GLM-5.3-Flash。",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 模型與推理：支援 GPT-6.2 Sol、GPT-6.2 Astra 和 Claude Sonnet 5.5。可為每個 LiteLLM 設定檔設定推理強度。",
+			"highlight2": "🛡️ 安全：改善技能和命令中繼資料解析、提及處理、供應商連結及 CLI 核准檢查。",
+			"highlight3": "🔧 修正：修正 OpenAI 服務層級費用，識別工作區符號連結，並補充更多介面翻譯。"
 		}
 	},
 	"reasoning": {
@@ -415,7 +384,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已達自動核准請求上限",
-			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"description_other": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
 			"button": "重設並繼續"
 		},
 		"autoApprovedCostLimitReached": {
@@ -435,28 +404,8 @@
 	"versionIndicator": {
 		"ariaLabel": "版本 {{version}} - 點選查看發布說明"
 	},
-	"command": {
-		"triggerDescription": "觸發 {{name}} 命令"
-	},
 	"slashCommands": {
-		"tooltip": "管理斜線命令",
-		"title": "斜線命令",
-		"description": "使用內建斜線命令或建立自訂命令，以便快速存取常用的提示詞和工作流程。<DocsLink>說明文件</DocsLink>",
-		"manageCommands": "在設定中管理斜線命令",
-		"builtInCommands": "內建命令",
-		"globalCommands": "全域命令",
-		"workspaceCommands": "工作區命令",
-		"globalCommand": "全域命令",
-		"editCommand": "編輯命令",
-		"deleteCommand": "刪除命令",
-		"newGlobalCommandPlaceholder": "新增全域命令...",
-		"newWorkspaceCommandPlaceholder": "新增工作區命令...",
-		"deleteDialog": {
-			"title": "刪除命令",
-			"description": "您確定要刪除「{{name}}」命令嗎？此操作無法復原。",
-			"cancel": "取消",
-			"confirm": "刪除"
-		}
+		"manageCommands": "在設定中管理斜線命令"
 	},
 	"slashCommand": {
 		"wantsToRun": "Zoo 想要執行斜線指令",
@@ -470,20 +419,47 @@
 		"noResults": "找不到結果",
 		"problems": "問題",
 		"terminal": "終端機",
-		"url": "貼上 URL 以擷取內容"
+		"url": "貼上 URL 以擷取內容",
+		"gitCommits": "Git 提交",
+		"gitCommitsDescription": "搜尋儲存庫歷史",
+		"workingChanges": "工作區變更",
+		"workingChangesDescription": "目前尚未提交的變更",
+		"commit": "提交 {{hash}}",
+		"commitHashDescription": "Git 提交雜湊",
+		"addFile": "新增檔案",
+		"addFolder": "新增資料夾",
+		"commands": "命令",
+		"modes": "模式"
 	},
 	"todo": {
 		"partial": "已完成 {{completed}}／{{total}} 個待辦事項",
 		"complete": "已完成 {{total}} 個待辦事項",
 		"updated": "已更新待辦事項清單",
-		"completed": "已完成",
-		"started": "已開始"
+		"listUpdated": "待辦清單已更新",
+		"userEdit": "使用者編輯",
+		"userEdits": "使用者編輯",
+		"edit": "編輯",
+		"done": "完成",
+		"itemPlaceholder": "輸入待辦事項",
+		"newItemPlaceholder": "輸入待辦事項，按 Enter 新增",
+		"remove": "移除",
+		"add": "新增",
+		"cancel": "取消",
+		"addTodo": "+ 新增待辦",
+		"status": {
+			"notStarted": "未開始",
+			"inProgress": "進行中",
+			"completed": "已完成"
+		},
+		"deleteDialog": {
+			"title": "刪除待辦事項",
+			"description": "確定要刪除此待辦事項嗎？",
+			"confirm": "刪除"
+		}
 	},
 	"tooManyTools": {
 		"title": "啟用的工具過多",
-		"toolsPart_one": "{{count}} 個工具",
 		"toolsPart_other": "{{count}} 個工具",
-		"serversPart_one": "{{count}} 個 MCP 伺服器",
 		"serversPart_other": "{{count}} 個 MCP 伺服器",
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"
@@ -499,5 +475,24 @@
 		"title": "供應商不再受支援",
 		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
 		"openSettings": "開啟設定"
+	},
+	"zooCodeAuth": {
+		"signIn": "登入 Zoo Code",
+		"goToDashboard": "前往儀表板",
+		"signOut": "登出",
+		"avatarAlt": "大頭貼",
+		"accountTitle": "Zoo Code：{{account}}",
+		"connected": "已連線"
+	},
+	"arguments": "參數：",
+	"copyAsMarkdown": "複製為 Markdown",
+	"openInPreview": "在預覽中開啟",
+	"codeAccordion": {
+		"userEdits": "使用者編輯",
+		"consoleLogs": "主控台記錄",
+		"openFileAriaLabel": "開啟檔案：{{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "已隱藏 {{count}} 行"
 	}
 }

@@ -3,6 +3,7 @@ import * as os from "os"
 import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
+import type { MockInstance } from "vitest"
 
 import { TaskHistoryStore } from "../TaskHistoryStore"
 
@@ -91,6 +92,24 @@ function createAction(actionId: string, message: string) {
 }
 
 describe("TaskHistoryStore real cross-host locking", () => {
+	it("preserves a recovered record instead of overwriting it during legacy migration", async () => {
+		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-migrate-"))
+		const store = new TaskHistoryStore(storagePath)
+		try {
+			const legacy = item("migrated")
+			const committed = { ...legacy, task: "committed newer task", totalCost: 7 }
+			const taskDir = path.join(storagePath, "tasks", legacy.id)
+			await fs.mkdir(taskDir, { recursive: true })
+			await fs.writeFile(path.join(taskDir, ".history_item.json.bak_1.tmp"), JSON.stringify(committed))
+			await store.migrateFromGlobalState([legacy])
+			expect(store.get(legacy.id)).toEqual(committed)
+			expect(JSON.parse(await fs.readFile(path.join(taskDir, "history_item.json"), "utf8"))).toEqual(committed)
+		} finally {
+			store.dispose()
+			await fs.rm(storagePath, { recursive: true, force: true })
+		}
+	})
+
 	it("preserves independent stale-cache deltas through the real per-file lock", async () => {
 		const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-real-lock-"))
 		const storeA = new TaskHistoryStore(storagePath)
@@ -402,5 +421,194 @@ describe("TaskHistoryStore real cross-host locking", () => {
 			store.dispose()
 			await fs.rm(storagePath, { recursive: true, force: true })
 		}
+	})
+
+	describe("setAutoTitleIfAbsent", () => {
+		let warn: MockInstance<typeof console.warn>
+		beforeEach(() => {
+			warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+		})
+		afterEach(() => {
+			warn.mockRestore()
+		})
+
+		async function withTwoStores(
+			run: (a: TaskHistoryStore, b: TaskHistoryStore, storagePath: string) => Promise<void>,
+		) {
+			const storagePath = await fs.mkdtemp(path.join(os.tmpdir(), "task-history-auto-title-"))
+			const storeA = new TaskHistoryStore(storagePath)
+			const storeB = new TaskHistoryStore(storagePath)
+			try {
+				await storeA.initialize()
+				await storeA.upsert(item("shared-task"))
+				await storeB.initialize()
+				await run(storeA, storeB, storagePath)
+			} finally {
+				storeA.dispose()
+				storeB.dispose()
+				await fs.rm(storagePath, { recursive: true, force: true })
+			}
+		}
+
+		const taskFile = (storagePath: string) => path.join(storagePath, "tasks", "shared-task", "history_item.json")
+
+		it("writes the title and trims it", async () => {
+			await withTwoStores(async (storeA, storeB, storagePath) => {
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "  Fix login bug  ")
+				expect(result.applied).toBe(true)
+				expect(result.item?.autoTitle).toBe("Fix login bug")
+				expect(JSON.parse(await fs.readFile(taskFile(storagePath), "utf8")).autoTitle).toBe("Fix login bug")
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")?.autoTitle).toBe("Fix login bug")
+			})
+		})
+
+		it("keeps a title written by another host and refreshes the stale cache", async () => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeB.setAutoTitleIfAbsent("shared-task", "First title")
+				expect(storeA.get("shared-task")?.autoTitle).toBeUndefined()
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Second title")
+				expect(result.applied).toBe(false)
+				expect(result.item?.autoTitle).toBe("First title")
+				expect(storeA.get("shared-task")?.autoTitle).toBe("First title")
+			})
+		})
+
+		it("does not recreate a task deleted by another host", async () => {
+			await withTwoStores(async (storeA, storeB, storagePath) => {
+				await storeB.delete("shared-task")
+				expect(storeA.get("shared-task")).toBeDefined()
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Late title")
+				expect(result).toEqual({ applied: false })
+				expect(storeA.get("shared-task")).toBeUndefined()
+				await expect(fs.access(taskFile(storagePath))).rejects.toMatchObject({ code: "ENOENT" })
+				// A deleted task is an expected outcome, not a read failure.
+				expect(warn).not.toHaveBeenCalled()
+			})
+		})
+
+		it("does not recreate a task deleted after the early disk read", async () => {
+			await withTwoStores(async (storeA, storeB, storagePath) => {
+				const stale = storeA.get("shared-task")
+				if (!stale) throw new Error("test setup failed")
+				const original = storeA["readTaskFileForAutoTitle"].bind(storeA)
+				let reads = 0
+				// The early read sees the record from before the delete; the merge and the re-read see the real disk.
+				storeA["readTaskFileForAutoTitle"] = async (id) =>
+					reads++ === 0 ? { kind: "found", item: stale } : original(id)
+
+				await storeB.delete("shared-task")
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Late title")
+				expect(reads).toBe(2)
+				expect(result.applied).toBe(false)
+				expect(storeA.get("shared-task")).toBeUndefined()
+				await expect(fs.access(taskFile(storagePath))).rejects.toMatchObject({ code: "ENOENT" })
+			})
+		})
+
+		const ioError = () => Object.assign(new Error("EIO: i/o error, read"), { code: "EIO" })
+		// Each case corrupts the read and returns the file content that must remain on disk.
+		const unreadableCases: Array<{ name: string; corrupt(storagePath: string, before: string): Promise<string> }> =
+			[
+				{
+					name: "a read error",
+					corrupt: async (_storagePath, before) => {
+						vi.mocked(fs.readFile).mockRejectedValueOnce(ioError())
+						return before
+					},
+				},
+				{
+					name: "unparsable JSON",
+					corrupt: async (storagePath) => {
+						await fs.writeFile(taskFile(storagePath), "{ torn")
+						return "{ torn"
+					},
+				},
+				{
+					name: "a record with a different id",
+					corrupt: async (storagePath) => {
+						const other = JSON.stringify(item("other-task"))
+						await fs.writeFile(taskFile(storagePath), other)
+						return other
+					},
+				},
+			]
+
+		it.each(unreadableCases)("keeps the cache, writes nothing and logs on $name", async ({ corrupt }) => {
+			await withTwoStores(async (storeA, _storeB, storagePath) => {
+				const cached = storeA.get("shared-task")
+				const expectedOnDisk = await corrupt(storagePath, await fs.readFile(taskFile(storagePath), "utf8"))
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Title")
+				expect(result.applied).toBe(false)
+				expect(storeA.get("shared-task")).toEqual(cached)
+				expect(await fs.readFile(taskFile(storagePath), "utf8")).toBe(expectedOnDisk)
+				expect(warn).toHaveBeenCalledExactlyOnceWith(
+					"[TaskHistoryStore] Failed to read task shared-task for auto title:",
+					expect.anything(),
+				)
+			})
+		})
+
+		it("does not let a stale save overwrite a peer update after a read error", async () => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeA.upsert({ ...item("shared-task"), mode: "code" })
+				const stale = storeA.get("shared-task")!
+				await storeB.invalidate("shared-task")
+				await storeB.upsert({ ...storeB.get("shared-task")!, mode: "architect" })
+
+				vi.mocked(fs.readFile).mockRejectedValueOnce(ioError())
+				await storeA.setAutoTitleIfAbsent("shared-task", "Title")
+				await storeA.upsert({ ...stale, tokensOut: 5 })
+
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")).toMatchObject({ mode: "architect", tokensOut: 5 })
+			})
+		})
+
+		it.each([
+			{ name: "writes the title", peerTitle: undefined, expectedTitle: "Title" },
+			{ name: "skips a peer's title", peerTitle: "Peer title", expectedTitle: "Peer title" },
+		])("does not let a stale save overwrite a peer update after it $name", async ({ peerTitle, expectedTitle }) => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeA.upsert({ ...item("shared-task"), mode: "code" })
+				const stale = storeA.get("shared-task")!
+				await storeB.invalidate("shared-task")
+				await storeB.upsert({ ...storeB.get("shared-task")!, mode: "architect" })
+				if (peerTitle) await storeB.setAutoTitleIfAbsent("shared-task", peerTitle)
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Title")
+				expect(result.applied).toBe(!peerTitle)
+				expect(storeA.get("shared-task")).toMatchObject({ mode: "code", autoTitle: expectedTitle })
+				await storeA.upsert({ ...stale, tokensOut: 5 })
+
+				await storeB.invalidate("shared-task")
+				expect(storeB.get("shared-task")).toMatchObject({
+					mode: "architect",
+					tokensOut: 5,
+					autoTitle: expectedTitle,
+				})
+			})
+		})
+
+		it.each(["", "   \n\t"])("rejects a blank title %j", async (blank) => {
+			await withTwoStores(async (storeA, _storeB, storagePath) => {
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", blank)
+				expect(result.applied).toBe(false)
+				expect(JSON.parse(await fs.readFile(taskFile(storagePath), "utf8")).autoTitle).toBeUndefined()
+			})
+		})
+
+		it("does not revert a concurrent manual title when writing the auto title", async () => {
+			await withTwoStores(async (storeA, storeB) => {
+				await storeB.atomicReadAndUpdate("shared-task", (current) => ({ ...current, title: "Manual" }))
+
+				const result = await storeA.setAutoTitleIfAbsent("shared-task", "Generated")
+				expect(result.item).toMatchObject({ title: "Manual", autoTitle: "Generated" })
+			})
+		})
 	})
 })

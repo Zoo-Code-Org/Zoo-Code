@@ -4,8 +4,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest"
 import { ChatRowContent } from "../ChatRow"
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string) => {
 			const translations: Record<string, string> = {
 				"chat:slashCommand.wantsToRun": "Roo wants to run slash command:",
@@ -14,12 +14,11 @@ vi.mock("react-i18next", () => ({
 			return translations[key] || key
 		},
 	}),
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => {
 		return <>{children || i18nKey}</>
-	},
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
 	},
 }))
 
@@ -91,7 +90,7 @@ describe("ChatRow - runSlashCommand tool", () => {
 
 		expect(getByText("Roo wants to run slash command:")).toBeInTheDocument()
 		expect(getByText("/test")).toBeInTheDocument()
-		expect(getByText("Arguments:")).toBeInTheDocument()
+		expect(getByText("chat:arguments")).toBeInTheDocument()
 		expect(getByText("focus on unit tests")).toBeInTheDocument()
 		expect(getByText("Run project tests")).toBeInTheDocument()
 		expect(getByText("project")).toBeInTheDocument()

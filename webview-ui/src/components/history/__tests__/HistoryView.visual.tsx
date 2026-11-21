@@ -21,4 +21,27 @@ for (const theme of visualThemes) {
 			focusedControl: selectionButton,
 		})
 	})
+
+	test(`renders task rename states in the VS Code ${theme.name} theme`, async ({ mount, page }) => {
+		// Matches the "history-rename" story's reference time so "time ago" labels stay stable.
+		await page.clock.setFixedTime(new Date("2026-06-01T12:00:00Z"))
+		const component = mountedStory(await mount("history-rename"))
+		await applyVisualTheme(page, theme)
+
+		// A renamed task shows its custom title. Hovering a row reveals the rename action.
+		const renamedTask = component.getByTestId("task-item-task-renamed")
+		await expect(renamedTask.getByText("Auth refactor")).toBeVisible()
+		const originalTask = component.getByTestId("task-item-task-original")
+		await originalTask.getByText("Write unit tests for the billing service").hover()
+		const renameButton = originalTask.getByTestId("rename-task-button")
+		await expect(renameButton).toBeVisible()
+
+		// The rename action swaps the title for an inline editor.
+		await renameButton.click()
+		const input = originalTask.getByTestId("task-title-input")
+		await expect(input).toBeFocused()
+		await expect(input).toHaveValue("Write unit tests for the billing service")
+		await expect(component).toHaveScreenshot(`history-rename-editor-${theme.name}.png`)
+		await expectBoundedLayout(page, component, { focusedControl: input })
+	})
 }

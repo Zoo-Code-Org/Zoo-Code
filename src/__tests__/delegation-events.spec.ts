@@ -4,20 +4,16 @@ import { RooCodeEventName, rooCodeEventsSchema, taskEventSchema } from "@roo-cod
 
 describe("delegation event schemas", () => {
 	test("rooCodeEventsSchema validates tuples", () => {
-		expect(() => (rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegated].parse(["p", "c"])).not.toThrow()
+		expect(() => rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegated].parse(["p", "c"])).not.toThrow()
 		expect(() =>
-			(rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegationCompleted].parse(["p", "c", "s"]),
+			rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegationCompleted].parse(["p", "c", "s"]),
 		).not.toThrow()
-		expect(() =>
-			(rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegationResumed].parse(["p", "c"]),
-		).not.toThrow()
+		expect(() => rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegationResumed].parse(["p", "c"])).not.toThrow()
 
 		// invalid shapes
-		expect(() => (rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegated].parse(["p"])).toThrow()
-		expect(() =>
-			(rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegationCompleted].parse(["p", "c"]),
-		).toThrow()
-		expect(() => (rooCodeEventsSchema.shape as any)[RooCodeEventName.TaskDelegationResumed].parse(["p"])).toThrow()
+		expect(() => rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegated].parse(["p"])).toThrow()
+		expect(() => rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegationCompleted].parse(["p", "c"])).toThrow()
+		expect(() => rooCodeEventsSchema.shape[RooCodeEventName.TaskDelegationResumed].parse(["p"])).toThrow()
 	})
 
 	test("taskEventSchema discriminated union includes delegation events", () => {

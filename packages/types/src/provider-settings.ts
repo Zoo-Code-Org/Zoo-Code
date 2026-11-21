@@ -1,7 +1,7 @@
 import { z } from "zod"
 
-import { providerDefinitionList, type ProviderDefinition } from "./provider-settings/index.js"
-import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./provider-settings/common.js"
+import { providerDefinitionList, type ProviderDefinition } from "./providers/index.js"
+import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./providers/common.js"
 export {
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
@@ -14,7 +14,7 @@ export {
 	type NanoGptRoutingPreference,
 	zaiApiLineSchema,
 	type ZaiApiLine,
-} from "./provider-settings/index.js"
+} from "./providers/index.js"
 
 import { codebaseIndexProviderSchema } from "./codebase-index.js"
 import type { UnionToIntersection } from "./type-fu.js"
@@ -25,6 +25,7 @@ import {
 	type RetiredProviderIdentifier,
 } from "./provider-identifiers.js"
 import {
+	anthropicDefaultModelId,
 	anthropicModels,
 	basetenModels,
 	bedrockModels,
@@ -99,8 +100,8 @@ export const dynamicProviders = [
 	providerIdentifiers.opencodeGo,
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,
-	providerIdentifiers.ioIntelligence,
 	providerIdentifiers.kimiCode,
+	providerIdentifiers.friendli,
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
@@ -314,7 +315,6 @@ export const modelIdKeys = [
 	"opencodeGoModelId",
 	"kenariModelId",
 	"nanoGptModelId",
-	"ioIntelligenceModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
@@ -357,6 +357,14 @@ export function getModelId(settings: ProviderSettings): string | undefined {
 	}
 
 	return undefined
+}
+
+/**
+ * Get the provider's default model ID, ignoring any configured model selection.
+ * Used as a fallback while provider models are still loading.
+ */
+export function getProviderDefaultModelId(provider: ProviderName, settings: ProviderSettings): string {
+	return providerDefinitions[provider]?.getDefaultModelId(settings) ?? anthropicDefaultModelId
 }
 
 /**
@@ -548,11 +556,6 @@ export const MODELS_BY_PROVIDER: Record<
 	},
 	[providerIdentifiers.opencodeGo]: { id: providerIdentifiers.opencodeGo, label: "Opencode Go", models: [] },
 	[providerIdentifiers.kenari]: { id: providerIdentifiers.kenari, label: "Kenari", models: [] },
-	[providerIdentifiers.ioIntelligence]: {
-		id: providerIdentifiers.ioIntelligence,
-		label: "IO Intelligence",
-		models: [],
-	},
 	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },
 	[providerIdentifiers.zooGateway]: { id: providerIdentifiers.zooGateway, label: "Zoo Gateway", models: [] },
 

@@ -2,6 +2,8 @@
 
 import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+
+import { createTestQueryClient } from "@/utils/test-utils"
 import { renderHook, waitFor } from "@testing-library/react"
 import type { Mock } from "vitest"
 
@@ -40,7 +42,7 @@ const renderSyncHook = (queryClient: QueryClient) =>
 			React.createElement(QueryClientProvider, { client: queryClient }, children),
 	})
 
-const makeQueryClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
+const makeQueryClient = () => createTestQueryClient()
 
 beforeEach(() => {
 	vi.clearAllMocks()

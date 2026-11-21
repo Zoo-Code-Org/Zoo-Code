@@ -1,5 +1,6 @@
 // npx vitest run src/integrations/terminal/__tests__/TerminalProcess.spec.ts
 
+import type { Mock } from "vitest"
 import * as vscode from "vscode"
 
 import { mergePromise } from "../mergePromise"
@@ -19,14 +20,17 @@ vi.mock("execa", () => ({
 
 describe("TerminalProcess", () => {
 	let terminalProcess: TestTerminalProcess
-	let mockTerminal: any
-	type TestVscodeTerminal = vscode.Terminal & {
-		shellIntegration: {
-			executeCommand: any
-		}
+	type TestShellIntegration = vscode.TerminalShellIntegration & {
+		executeCommand: Mock<(...args: unknown[]) => vscode.TerminalShellExecution>
 	}
+	type TestVscodeTerminal = Omit<vscode.Terminal, "shellIntegration"> & {
+		shellIntegration: TestShellIntegration | undefined
+	}
+	let mockTerminal: TestVscodeTerminal
 	let mockTerminalInfo: Terminal
-	let mockExecution: any
+	// TerminalShellExecution double provides read() only.
+	type MockShellExecution = vscode.TerminalShellExecution & { read: Mock<() => AsyncIterable<string>> }
+	let mockExecution: MockShellExecution
 	let mockStream: AsyncIterableIterator<string>
 
 	beforeEach(() => {
@@ -110,8 +114,8 @@ describe("TerminalProcess", () => {
 		it("runs command after shell integration activates via onDidChangeTerminalShellIntegration event", async () => {
 			// Cover Terminal.runCommand's waitForShellIntegration resolve path: shell
 			// integration is initially absent but arrives via the VSCode event before timeout.
-			let shellIntegrationHandler: ((e: any) => void) | undefined
-			vi.spyOn(vscode.window, "onDidChangeTerminalShellIntegration" as any).mockImplementation((handler: any) => {
+			let shellIntegrationHandler: ((e: vscode.TerminalShellIntegrationChangeEvent) => void) | undefined
+			vi.spyOn(vscode.window, "onDidChangeTerminalShellIntegration").mockImplementation((handler) => {
 				shellIntegrationHandler = handler
 				return { dispose: vi.fn() }
 			})
@@ -129,8 +133,9 @@ describe("TerminalProcess", () => {
 			expect(shellIntegrationHandler).toBeDefined()
 			mockTerminal.shellIntegration = {
 				executeCommand: vi.fn().mockReturnValue({ read: vi.fn().mockReturnValue((async function* () {})()) }),
-			}
-			shellIntegrationHandler!({ terminal: mockTerminal })
+			} as TestShellIntegration
+			// Event double provides terminal; the source reads shell integration off the terminal.
+			shellIntegrationHandler!({ terminal: mockTerminal } as vscode.TerminalShellIntegrationChangeEvent)
 
 			// Give the .then() callback a chance to run process.run()
 			await Promise.resolve()
@@ -171,9 +176,9 @@ describe("TerminalProcess", () => {
 
 			mockExecution = {
 				read: vi.fn().mockReturnValue(mockStream),
-			}
+			} as unknown as MockShellExecution
 
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue(mockExecution)
 
 			const runPromise = terminalProcess.run("test command")
 			terminalProcess.emit("stream_available", mockStream)
@@ -225,9 +230,9 @@ describe("TerminalProcess", () => {
 
 				mockExecution = {
 					read: vi.fn().mockReturnValue(mockStream),
-				}
+				} as unknown as MockShellExecution
 
-				mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+				mockTerminal.shellIntegration!.executeCommand.mockReturnValue(mockExecution)
 
 				const runPromise = terminalProcess.run("test command")
 				terminalProcess.emit("stream_available", mockStream)
@@ -279,9 +284,9 @@ describe("TerminalProcess", () => {
 
 			mockExecution = {
 				read: vi.fn().mockReturnValue(mockStream),
-			}
+			} as unknown as MockShellExecution
 
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue(mockExecution)
 
 			const runPromise = terminalProcess.run("sleep 60")
 			terminalProcess.emit("stream_available", mockStream)
@@ -341,15 +346,15 @@ describe("TerminalProcess", () => {
 				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue({
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue({
 				read: vi.fn().mockReturnValue(mockStream),
-			})
+			} as unknown as vscode.TerminalShellExecution)
 
 			const runPromise = terminalProcess.run(command)
 			terminalProcess.emit("stream_available", mockStream)
 			await runPromise
 
-			expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(`{\n${command}\n}`)
+			expect(mockTerminal.shellIntegration!.executeCommand).toHaveBeenCalledWith(`{\n${command}\n}`)
 		})
 
 		it.each([
@@ -367,15 +372,15 @@ describe("TerminalProcess", () => {
 					terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 				})()
 
-				mockTerminal.shellIntegration.executeCommand.mockReturnValue({
+				mockTerminal.shellIntegration!.executeCommand.mockReturnValue({
 					read: vi.fn().mockReturnValue(mockStream),
-				})
+				} as unknown as vscode.TerminalShellExecution)
 
 				const runPromise = terminalProcess.run("echo one\necho two")
 				terminalProcess.emit("stream_available", mockStream)
 				await runPromise
 
-				expect(mockTerminal.shellIntegration.executeCommand).toHaveBeenCalledWith(expectedCommand)
+				expect(mockTerminal.shellIntegration!.executeCommand).toHaveBeenCalledWith(expectedCommand)
 			} finally {
 				psSpy.mockRestore()
 				fishSpy.mockRestore()
@@ -492,8 +497,8 @@ describe("TerminalProcess", () => {
 			}
 			mockStream = emptyStream()
 
-			mockExecution = { read: vi.fn().mockReturnValue(mockStream) }
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+			mockExecution = { read: vi.fn().mockReturnValue(mockStream) } as unknown as MockShellExecution
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue(mockExecution)
 
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
@@ -527,8 +532,8 @@ describe("TerminalProcess", () => {
 				terminalProcess.emit("shell_execution_complete", { exitCode: 0 })
 			})()
 
-			mockExecution = { read: vi.fn().mockReturnValue(mockStream) }
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue(mockExecution)
+			mockExecution = { read: vi.fn().mockReturnValue(mockStream) } as unknown as MockShellExecution
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue(mockExecution)
 
 			terminalProcess.once("no_shell_integration", noShellIntegrationSpy)
 
@@ -564,9 +569,9 @@ describe("TerminalProcess", () => {
 				yield "\x1b]633;D\x07" // The last chunk contains the command end sequence with bell character.
 			})()
 
-			mockTerminal.shellIntegration.executeCommand.mockReturnValue({
+			mockTerminal.shellIntegration!.executeCommand.mockReturnValue({
 				read: vi.fn().mockReturnValue(mockStream),
-			})
+			} as unknown as vscode.TerminalShellExecution)
 
 			const runPromise = terminalProcess.run("npm run build")
 			terminalProcess.emit("stream_available", mockStream)
@@ -591,14 +596,14 @@ describe("TerminalProcess", () => {
 		it("resolves waitForShellIntegration immediately when shell integration is already active", async () => {
 			// Cover waitForShellIntegration fast path: shellIntegration already present → resolves synchronously.
 			// Access the private method via bracket notation so we can call it directly.
-			mockTerminal.shellIntegration = { executeCommand: vi.fn() }
-			const result = (mockTerminalInfo as any).waitForShellIntegration(5000)
+			mockTerminal.shellIntegration = { executeCommand: vi.fn() } as TestShellIntegration
+			const result = mockTerminalInfo["waitForShellIntegration"](5000)
 			// Should resolve immediately (synchronously resolved Promise) without touching timers.
 			await expect(result).resolves.toBeUndefined()
 		})
 
 		it("handles executeCommand throwing by propagating the error", async () => {
-			mockTerminal.shellIntegration.executeCommand.mockImplementation(() => {
+			mockTerminal.shellIntegration!.executeCommand.mockImplementation(() => {
 				throw new Error("execution failed")
 			})
 
@@ -680,7 +685,7 @@ describe("TerminalProcess", () => {
 
 			// executeCommand should be called with a shell + temp-script invocation, not the
 			// raw multiline command string.
-			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			const calledWith = mockTerminal.shellIntegration!.executeCommand.mock.calls[0][0] as string
 			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
 		})
 
@@ -709,7 +714,7 @@ describe("TerminalProcess", () => {
 
 			await runPromise
 
-			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			const calledWith = mockTerminal.shellIntegration!.executeCommand.mock.calls[0][0] as string
 			expect(calledWith).toMatch(/^"\/bin\/bash" ".*roo-cmd-.*\.sh"$/)
 		})
 
@@ -740,7 +745,7 @@ describe("TerminalProcess", () => {
 
 			await runPromise
 
-			const calledWith = mockTerminal.shellIntegration.executeCommand.mock.calls[0][0] as string
+			const calledWith = mockTerminal.shellIntegration!.executeCommand.mock.calls[0][0] as string
 			expect(calledWith).toBe(`. {\necho a\necho b\n}`)
 		})
 

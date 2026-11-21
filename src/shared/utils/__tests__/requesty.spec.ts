@@ -83,13 +83,26 @@ describe("toRequestyServiceUrl", () => {
 		it("should fall back to default URL for invalid baseUrl", () => {
 			const result = toRequestyServiceUrl("not-a-valid-url")
 			expect(result).toBe("https://router.requesty.ai/v1")
-			expect(console.warn).toHaveBeenCalledWith('Invalid base URL "not-a-valid-url", falling back to default')
+			expect(console.warn).toHaveBeenCalledWith("Invalid base URL provided, falling back to default")
 		})
 
 		it("should fall back to default URL for malformed URL", () => {
 			const result = toRequestyServiceUrl("ht!tp://[invalid")
 			expect(result).toBe("https://router.requesty.ai/v1")
 			expect(console.warn).toHaveBeenCalled()
+		})
+
+		// Regression: the warning logged the raw URL or a regex-redacted copy. A malformed
+		// deep-link baseUrl leaked its credential text to the log before the consent dialog.
+		it.each([
+			"https://user:secret@host:invalid/v1",
+			"https://user:sec/ret@host:invalid/v1",
+			"https:/user:secret@host:invalid/v1",
+			"https:secret@h:bad",
+		])("should not log credential text from the invalid URL %s", (baseUrl) => {
+			expect(toRequestyServiceUrl(baseUrl)).toBe("https://router.requesty.ai/v1")
+			expect(console.warn).toHaveBeenCalledTimes(1)
+			expect(String(vi.mocked(console.warn).mock.calls[0])).not.toMatch(/user|secret|sec\/ret/)
 		})
 
 		it("should fall back to default app URL for invalid baseUrl with app service", () => {
@@ -99,12 +112,14 @@ describe("toRequestyServiceUrl", () => {
 		})
 
 		it("should handle null baseUrl gracefully", () => {
-			const result = toRequestyServiceUrl(null as any)
+			const result = toRequestyServiceUrl(null)
 			expect(result).toBe("https://router.requesty.ai/v1")
 		})
 
 		it("should handle non-string baseUrl gracefully", () => {
-			const result = toRequestyServiceUrl(123 as any)
+			// Exercise the runtime fallback for a persisted value with an invalid type.
+			const invalidBaseUrl = 123 as unknown as string
+			const result = toRequestyServiceUrl(invalidBaseUrl)
 			expect(result).toBe("https://router.requesty.ai/v1")
 		})
 	})

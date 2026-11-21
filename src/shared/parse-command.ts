@@ -653,9 +653,9 @@ function parseCommandLine(command: string): string[] {
 	let tokens: ShellToken[]
 	try {
 		tokens = parse(processedCommand) as ShellToken[]
-	} catch (error: any) {
+	} catch (error) {
 		// If shell-quote fails to parse, fall back to simple splitting
-		console.warn("shell-quote parse error:", error.message, "for command:", processedCommand)
+		console.warn("shell-quote parse error:", (error as Error).message, "for command:", processedCommand)
 
 		// Simple fallback: split by common operators
 		const fallbackCommands = processedCommand

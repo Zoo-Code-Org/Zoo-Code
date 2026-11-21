@@ -2,6 +2,128 @@ import { openAiCodexDefaultModelId, openAiCodexModels } from "../providers/opena
 import { openAiNativeDefaultModelId, openAiNativeModels } from "../providers/openai.js"
 
 describe("OpenAI native models", () => {
+	it.each([
+		{ modelId: "gpt-6.2-sol", inputPrice: 2, outputPrice: 10, cacheReadsPrice: 0.1, cacheWritesPrice: 2.5 },
+		{ modelId: "gpt-6.2-astra", inputPrice: 8, outputPrice: 40, cacheReadsPrice: 0.4, cacheWritesPrice: 10 },
+	] as const)(
+		"publishes provider-specific windows, reasoning, and prices for $modelId",
+		({ modelId, inputPrice, outputPrice, cacheReadsPrice, cacheWritesPrice }) => {
+			const capabilities = {
+				maxTokens: 128_000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				includedTools: ["apply_patch"],
+				excludedTools: ["apply_diff", "write_to_file"],
+				supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+				requiredReasoningEffort: true,
+				supportsVerbosity: true,
+				supportsTemperature: false,
+			}
+			const nativeModel = openAiNativeModels[modelId]
+			expect(nativeModel).toMatchObject({
+				...capabilities,
+				contextWindow: 1_050_000,
+				reasoningEffort: "medium",
+				inputPrice,
+				outputPrice,
+				cacheReadsPrice,
+				cacheWritesPrice,
+				cacheWritesPrice12h: cacheWritesPrice * 2,
+				longContextPricing: {
+					thresholdTokens: 272_000,
+					inputPriceMultiplier: 2,
+					outputPriceMultiplier: 1.5,
+					cacheReadsPriceMultiplier: 2,
+					cacheWritesPriceMultiplier: 2,
+					appliesToServiceTiers: ["default", "priority"],
+				},
+			})
+			expect(nativeModel.tiers).toEqual([
+				{
+					name: "priority",
+					contextWindow: 1_050_000,
+					inputPrice: inputPrice * 2,
+					outputPrice: outputPrice * 2,
+					cacheReadsPrice: cacheReadsPrice * 2,
+					cacheWritesPrice: cacheWritesPrice * 2,
+					cacheWritesPrice12h: cacheWritesPrice * 4,
+				},
+			])
+			expect(openAiCodexModels[modelId]).toMatchObject({
+				...capabilities,
+				contextWindow: 872_000,
+				reasoningEffort: "low",
+				inputPrice: 0,
+				outputPrice: 0,
+			})
+		},
+	)
+
+	it("describes GPT-6.1 Terra pricing and optional native reasoning without changing defaults", () => {
+		expect(openAiNativeDefaultModelId).toBe("gpt-5.6-sol")
+		expect(openAiCodexDefaultModelId).toBe("gpt-5.6-sol")
+		const model = openAiNativeModels["gpt-6.1-terra"]
+		expect(model).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 1_050_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+			reasoningEffort: "medium",
+			supportsTemperature: false,
+			supportsVerbosity: true,
+			inputPrice: 1,
+			outputPrice: 5,
+			cacheWritesPrice: 1.25,
+			cacheWritesPrice12h: 2.5,
+			cacheReadsPrice: 0.05,
+			longContextPricing: {
+				thresholdTokens: 272_000,
+				inputPriceMultiplier: 2,
+				outputPriceMultiplier: 1.5,
+				cacheWritesPriceMultiplier: 2,
+				cacheReadsPriceMultiplier: 2,
+				appliesToServiceTiers: ["default", "flex", "priority"],
+			},
+		})
+		expect(model).not.toHaveProperty("requiredReasoningEffort", true)
+		expect(model.tiers).toEqual([
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 0.5,
+				outputPrice: 2.5,
+				cacheWritesPrice: 0.625,
+				cacheReadsPrice: 0.025,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 2,
+				outputPrice: 10,
+				cacheWritesPrice: 2.5,
+				cacheReadsPrice: 0.1,
+			},
+		])
+		expect(openAiCodexModels["gpt-6.1-terra"]).toMatchObject({
+			maxTokens: 128_000,
+			contextWindow: 872_000,
+			includedTools: ["apply_patch"],
+			excludedTools: ["apply_diff", "write_to_file"],
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+			requiredReasoningEffort: true,
+			reasoningEffort: "low",
+			supportsTemperature: false,
+			supportsVerbosity: true,
+			inputPrice: 0,
+			outputPrice: 0,
+		})
+	})
+
 	it("describes GPT-6.1 Sol pricing and required reasoning without changing defaults", () => {
 		expect(openAiNativeDefaultModelId).toBe("gpt-5.6-sol")
 		expect(openAiCodexDefaultModelId).toBe("gpt-5.6-sol")
@@ -122,6 +244,7 @@ describe("OpenAI native models", () => {
 			inputPrice: 2,
 			outputPrice: 10,
 			cacheWritesPrice: 2.5,
+			cacheWritesPrice12h: 5,
 			cacheReadsPrice: 0.2,
 			longContextPricing: {
 				thresholdTokens: 272_000,
@@ -166,6 +289,7 @@ describe("OpenAI native models", () => {
 			inputPrice: 0.1,
 			outputPrice: 0.5,
 			cacheWritesPrice: 0.125,
+			cacheWritesPrice12h: 0.25,
 			cacheReadsPrice: 0.01,
 			longContextPricing: {
 				thresholdTokens: 272_000,

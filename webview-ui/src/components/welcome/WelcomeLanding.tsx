@@ -1,5 +1,4 @@
 import { Trans } from "react-i18next"
-
 import { Button } from "@src/components/ui"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 
@@ -22,7 +21,7 @@ export function WelcomeLanding({ onGetStarted, onImportSettings }: WelcomeLandin
 
 				<div className="space-y-4 leading-normal">
 					<p className="text-base text-vscode-foreground">
-						<Trans i18nKey="welcome:landing.introduction" />
+						<Trans t={t} i18nKey="welcome:landing.introduction" />
 					</p>
 				</div>
 

@@ -1,5 +1,4 @@
 {
-	"unknownError": "未知錯誤",
 	"authenticationFailed": "建立內嵌失敗：驗證失敗。請檢查您的 API 金鑰。",
 	"failedWithStatus": "嘗試 {{attempts}} 次後建立內嵌失敗：HTTP {{statusCode}} - {{errorMessage}}",
 	"failedWithError": "嘗試 {{attempts}} 次後建立內嵌失敗：{{errorMessage}}",
@@ -39,10 +38,6 @@
 		"configurationError": "無效的內嵌程式組態。請檢閱您的設定。",
 		"serviceUnavailable": "內嵌服務不可用。請確保它正在執行且可存取。",
 		"invalidEndpoint": "無效的 API 端點。請檢查您的 URL 組態。",
-		"invalidEmbedderConfig": "無效的內嵌程式組態。請檢查您的設定。",
-		"invalidApiKey": "無效的 API 金鑰。請檢查您的 API 金鑰組態。",
-		"invalidBaseUrl": "無效的基礎 URL。請檢查您的 URL 組態。",
-		"invalidModel": "無效的模型。請檢查您的模型組態。",
 		"invalidResponse": "內嵌服務回應無效。請檢查您的組態。",
 		"apiKeyRequired": "此嵌入器需要 API 金鑰",
 		"baseUrlRequired": "此嵌入器需要基礎 URL"
@@ -50,7 +45,6 @@
 	"serviceFactory": {
 		"openAiConfigMissing": "建立嵌入器缺少 OpenAI 設定",
 		"ollamaConfigMissing": "建立嵌入器缺少 Ollama 設定",
-		"openAiCompatibleConfigMissing": "建立嵌入器缺少 OpenAI 相容設定",
 		"geminiConfigMissing": "建立嵌入器缺少 Gemini 設定",
 		"mistralConfigMissing": "建立嵌入器時缺少 Mistral 設定",
 		"openRouterConfigMissing": "建立嵌入器時缺少 OpenRouter 設定",
@@ -64,7 +58,6 @@
 	},
 	"orchestrator": {
 		"indexingFailedNoBlocks": "索引失敗：沒有程式碼區塊被成功索引。這通常表示 Embedder 設定問題。",
-		"indexingFailedCritical": "索引失敗：儘管找到了要處理的檔案，但沒有程式碼區塊被成功索引。這表示 Embedder 出現嚴重故障。",
 		"fileWatcherStarted": "檔案監控已啟動。",
 		"fileWatcherStopped": "檔案監控已停止。",
 		"failedDuringInitialScan": "初始掃描失敗：{{errorMessage}}",

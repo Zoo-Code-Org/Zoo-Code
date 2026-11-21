@@ -21,7 +21,6 @@ import {
 	openAiCodexModels,
 	sambaNovaModels,
 	getZAiModels,
-	zaiApiLineConfigs,
 	fireworksModels,
 	friendliModels,
 	basetenModels,
@@ -31,7 +30,6 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
-	ioIntelligenceDefaultModelInfo,
 	nanoGptDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_DEFAULT_CONTEXT,
@@ -51,6 +49,7 @@ import { useOpenRouterModelProviders } from "./useOpenRouterModelProviders"
 import { useLmStudioModels } from "./useLmStudioModels"
 import { useOllamaModels } from "./useOllamaModels"
 import { useGitHubCopilotModels, type GitHubCopilotModels } from "./useGitHubCopilotModels"
+import { useVsCodeLmModels, type VsCodeLmModels } from "./useVsCodeLmModels"
 
 /**
  * Helper to get a validated model ID for dynamic providers.
@@ -96,15 +95,15 @@ function getStaticCatalogModel(
  * router payload has no LiteLLM entry (partial listing, failed fetch, or
  * renamed deployment).
  */
-export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
-	const provider = apiConfiguration?.apiProvider || providerIdentifiers.openrouter
+export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
+	const provider = apiConfiguration.apiProvider || providerIdentifiers.openrouter
 	const activeProvider: ProviderName | undefined = isRetiredProvider(provider) ? undefined : provider
 	const dynamicProvider = activeProvider && isDynamicProvider(activeProvider) ? activeProvider : undefined
 	const openRouterModelId =
-		activeProvider === providerIdentifiers.openrouter ? apiConfiguration?.openRouterModelId : undefined
+		activeProvider === providerIdentifiers.openrouter ? apiConfiguration.openRouterModelId : undefined
 	const lmStudioModelId =
-		activeProvider === providerIdentifiers.lmstudio ? apiConfiguration?.lmStudioModelId : undefined
-	const ollamaModelId = activeProvider === providerIdentifiers.ollama ? apiConfiguration?.ollamaModelId : undefined
+		activeProvider === providerIdentifiers.lmstudio ? apiConfiguration.lmStudioModelId : undefined
+	const ollamaModelId = activeProvider === providerIdentifiers.ollama ? apiConfiguration.ollamaModelId : undefined
 
 	// Only fetch router models for dynamic providers
 	const shouldFetchRouterModels = !!dynamicProvider
@@ -118,6 +117,7 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const ollamaModels = useOllamaModels(ollamaModelId)
 	// Not part of readiness: until the host reports, the curated catalog describes the model.
 	const copilotModels = useGitHubCopilotModels(activeProvider === providerIdentifiers.githubCopilot)
+	const vsCodeLmModels = useVsCodeLmModels(activeProvider === providerIdentifiers.vscodeLm)
 
 	// Compute readiness only for the data actually needed for the selected provider
 	const needRouterModels = shouldFetchRouterModels
@@ -125,19 +125,21 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM and IO Intelligence may legitimately have no entry in the router
-	// payload (partial listing, failed fetch, renamed deployment) even though
-	// the configured ID is a valid selection, so they only need the fetch to
-	// settle. Other dynamic providers require a populated provider entry
-	// before the selection is resolved.
+	// LiteLLM may legitimately have no entry in the router payload (partial
+	// listing, failed fetch, renamed deployment) even though the configured ID
+	// is a valid selection, so it only needs the fetch to settle. Other
+	// dynamic providers require a populated provider entry before the
+	// selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
-				? !routerModels.isLoading
-				: routerModels.data &&
-					routerModels.data[dynamicProvider] !== undefined &&
-					typeof routerModels.data[dynamicProvider] === "object" &&
-					!routerModels.isLoading
+			? dynamicProvider === providerIdentifiers.friendli
+				? true // static friendliModels cover the window before /v1/models data arrives
+				: dynamicProvider === providerIdentifiers.litellm
+					? !routerModels.isLoading
+					: routerModels.data &&
+						routerModels.data[dynamicProvider] !== undefined &&
+						typeof routerModels.data[dynamicProvider] === "object" &&
+						!routerModels.isLoading
 			: true
 
 	const isReady =
@@ -156,13 +158,22 @@ export const useSelectedModel = (apiConfiguration?: ProviderSettings) => {
 					lmStudioModels: (lmStudioModels.data || undefined) as ModelRecord | undefined,
 					ollamaModels: (ollamaModels.data || undefined) as ModelRecord | undefined,
 					copilotModels: copilotModels.data,
+					vsCodeLmModels: vsCodeLmModels.data,
 				})
 			: activeProvider === providerIdentifiers.kimiCode && apiConfiguration
 				? {
-						id: apiConfiguration.apiModelId || getProviderDefaultModelId(providerIdentifiers.kimiCode),
+						id:
+							apiConfiguration.apiModelId ||
+							getProviderDefaultModelId(providerIdentifiers.kimiCode, apiConfiguration),
 						info: kimiCodeDefaultModelInfo,
 					}
-				: { id: getProviderDefaultModelId(activeProvider ?? providerIdentifiers.openrouter), info: undefined }
+				: {
+						id: getProviderDefaultModelId(
+							activeProvider ?? providerIdentifiers.openrouter,
+							apiConfiguration ?? {},
+						),
+						info: undefined,
+					}
 
 	return {
 		provider,
@@ -189,6 +200,7 @@ function getSelectedModel({
 	lmStudioModels,
 	ollamaModels,
 	copilotModels,
+	vsCodeLmModels,
 }: {
 	provider: ProviderName
 	apiConfiguration: ProviderSettings
@@ -197,11 +209,12 @@ function getSelectedModel({
 	lmStudioModels: ModelRecord | undefined
 	ollamaModels: ModelRecord | undefined
 	copilotModels?: GitHubCopilotModels
+	vsCodeLmModels?: VsCodeLmModels
 }): { id: string; info: ModelInfo | undefined } {
 	// the `undefined` case are used to show the invalid selection to prevent
 	// users from seeing the default model if their selection is invalid
 	// this gives a better UX than showing the default model
-	const defaultModelId = getProviderDefaultModelId(provider)
+	const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 	switch (provider) {
 		case providerIdentifiers.openrouter: {
 			const id = getValidatedModelId(
@@ -388,9 +401,8 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.zai: {
 			const apiLine = apiConfiguration.zaiApiLine ?? "international_coding"
-			const isChina = zaiApiLineConfigs[apiLine].isChina
 			const models = getZAiModels(apiLine)
-			const defaultModelId = getProviderDefaultModelId(provider, { isChina })
+			const defaultModelId = getProviderDefaultModelId(provider, apiConfiguration)
 			const configuredId = apiConfiguration.apiModelId
 			if (configuredId) {
 				return { id: configuredId, info: models[configuredId] ?? openAiModelInfoSaneDefaults }
@@ -409,7 +421,7 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.openai: {
 			const id = apiConfiguration.openAiModelId ?? ""
-			const customInfo = apiConfiguration?.openAiCustomModelInfo
+			const customInfo = apiConfiguration.openAiCustomModelInfo
 			const info = customInfo ?? openAiModelInfoSaneDefaults
 			return { id, info }
 		}
@@ -419,7 +431,7 @@ function getSelectedModel({
 
 			const adjustedInfo =
 				info?.contextWindow &&
-				apiConfiguration?.ollamaNumCtx &&
+				apiConfiguration.ollamaNumCtx &&
 				apiConfiguration.ollamaNumCtx < info.contextWindow
 					? { ...info, contextWindow: apiConfiguration.ollamaNumCtx }
 					: info
@@ -469,10 +481,18 @@ function getSelectedModel({
 			}
 		}
 		case providerIdentifiers.vscodeLm: {
-			const id = apiConfiguration?.vsCodeLmModelSelector
+			const selector = apiConfiguration.vsCodeLmModelSelector
+			const matches = vsCodeLmModels?.filter((model) =>
+				(["id", "vendor", "family", "version"] as const).every(
+					(key) => selector?.[key] === undefined || model[key] === selector[key],
+				),
+			)
+			// The host selects its first match; a separate listing cannot establish that order.
+			const reported = matches?.length === 1 ? matches[0] : undefined
+			const id = apiConfiguration.vsCodeLmModelSelector
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
 				: vscodeLlmDefaultModelId
-			const modelFamily = apiConfiguration?.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
+			const modelFamily = apiConfiguration.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
 			// On a family miss, fall back to the default model entry, not openAiModelInfoSaneDefaults
 			// (whose 128K contextWindow would diverge from the gate and skew the bar).
 			const listedModel =
@@ -484,7 +504,7 @@ function getSelectedModel({
 				...openAiModelInfoSaneDefaults,
 				...listedModel,
 				contextWindow: listedModel.maxInputTokens,
-				supportsImages: false, // VSCode LM API currently doesn't support images.
+				supportsImages: reported?.modelInfo?.supportsImages,
 			}
 			return { id, info }
 		}
@@ -493,8 +513,14 @@ function getSelectedModel({
 		case providerIdentifiers.fireworks:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
+			const id = apiConfiguration.apiModelId || defaultModelId
+			// Mirror the backend getModel(): own-property reads only (an ID such as "toString" must
+			// not resolve to an inherited member), and sane defaults when neither catalog has the ID.
+			const fetched = routerModels.friendli
+			const info =
+				(fetched && Object.hasOwn(fetched, id) ? fetched[id] : undefined) ??
+				(Object.hasOwn(friendliModels, id) ? friendliModels[id as keyof typeof friendliModels] : undefined) ??
+				openAiModelInfoSaneDefaults
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
@@ -541,15 +567,6 @@ function getSelectedModel({
 			// Fall back to the provider's default ModelInfo so capability-driven UI
 			// keeps working when the /models list is empty or unavailable.
 			const info = routerModels[providerIdentifiers.kenari]?.[id] ?? kenariDefaultModelInfo
-			return { id, info }
-		}
-		case providerIdentifiers.ioIntelligence: {
-			// A configured id is the user's explicit selection (ModelPicker's
-			// "Use custom model" path stores ids absent from the fetched catalog)
-			// and the handler sends requests with it, so keep it instead of
-			// displaying a default model that requests do not use.
-			const id = apiConfiguration.ioIntelligenceModelId || defaultModelId
-			const info = routerModels[providerIdentifiers.ioIntelligence]?.[id] ?? ioIntelligenceDefaultModelInfo
 			return { id, info }
 		}
 		case providerIdentifiers.nanogpt: {

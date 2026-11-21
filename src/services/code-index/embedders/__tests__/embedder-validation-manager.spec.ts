@@ -1,6 +1,7 @@
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
 import { t } from "../../../../i18n"
+import { clearAllMocks } from "../../../../test-utils/reset"
 import embeddings from "../../../../i18n/locales/en/embeddings.json"
 import { OpenAiEmbedder } from "../openai"
 import { EmbedderValidationManager } from "../embedder-validation-manager"
@@ -14,7 +15,7 @@ vi.mock("@roo-code/telemetry", () => ({
 describe("EmbedderValidationManager", () => {
 	const manager = new EmbedderValidationManager()
 
-	beforeEach(() => vi.clearAllMocks())
+	beforeEach(() => clearAllMocks())
 
 	it.each([{ valid: true }, { valid: false, error: "Invalid credentials" }])(
 		"preserves the validation result %j without reporting an exception",

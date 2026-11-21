@@ -3,9 +3,11 @@
 import { describe, it, expect, vi } from "vitest"
 import { RooCodeEventName } from "@roo-code/types"
 import { Task } from "../core/task/Task"
+import type { ClineProvider } from "../core/webview/ClineProvider"
 
 describe("Task.startSubtask() metadata-driven delegation", () => {
 	it("Routes to provider.delegateParentAndOpenChild without pausing parent", async () => {
+		// This double provides the state, delegation, task creation, and mode-switch members used here.
 		const provider = {
 			getState: vi.fn().mockResolvedValue({
 				experiments: {},
@@ -13,15 +15,18 @@ describe("Task.startSubtask() metadata-driven delegation", () => {
 			delegateParentAndOpenChild: vi.fn().mockResolvedValue({ taskId: "child-1" }),
 			createTask: vi.fn(),
 			handleModeSwitch: vi.fn(),
-		} as any
+		} as unknown as ClineProvider
 
 		// Create a minimal Task-like instance with only fields used by startSubtask
+		const emitMock = vi.fn<Task["emit"]>()
 		const parent = Object.create(Task.prototype) as Task
-		;(parent as any).taskId = "parent-1"
-		;(parent as any).providerRef = { deref: () => provider }
-		;(parent as any).emit = vi.fn()
+		Object.assign(parent, {
+			taskId: "parent-1",
+			providerRef: { deref: () => provider },
+			emit: emitMock,
+		})
 
-		const child = await (Task.prototype as any).startSubtask.call(parent, "Do something", [], "code")
+		const child = await Task.prototype.startSubtask.call(parent, "Do something", [], "code")
 
 		expect(provider.delegateParentAndOpenChild).toHaveBeenCalledWith({
 			parentTaskId: "parent-1",
@@ -32,8 +37,8 @@ describe("Task.startSubtask() metadata-driven delegation", () => {
 		expect(child.taskId).toBe("child-1")
 
 		// No paused/unpaused events should be emitted
-		expect((parent as any).childTaskId).toBeUndefined()
-		const emittedEvents = (parent.emit as any).mock.calls.map((c: any[]) => c[0])
+		expect(parent.childTaskId).toBeUndefined()
+		const emittedEvents = emitMock.mock.calls.map((c) => c[0])
 		expect(emittedEvents).not.toContain(RooCodeEventName.TaskPaused)
 		expect(emittedEvents).not.toContain(RooCodeEventName.TaskUnpaused)
 

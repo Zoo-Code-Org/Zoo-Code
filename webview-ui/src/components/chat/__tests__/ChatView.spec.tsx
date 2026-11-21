@@ -6,6 +6,7 @@ import {
 	mockVscodePostMessage,
 	renderWithExtensionState,
 	waitFor,
+	screen,
 	act,
 	fireEvent,
 } from "@/utils/test-utils"
@@ -49,6 +50,8 @@ vi.mock("use-sound", () => ({
 	}),
 }))
 
+let nextRowInstance = 0
+
 // Mock components that use ESM dependencies
 vi.mock("../ChatRow", () => ({
 	default: function MockChatRow({
@@ -60,6 +63,7 @@ vi.mock("../ChatRow", () => ({
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
 		isFollowUpAnswered?: boolean
 	}) {
+		const [instance] = React.useState(() => ++nextRowInstance)
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
 				const followUp = JSON.parse(message.text) as { suggest?: SuggestionItem[] }
@@ -81,7 +85,11 @@ vi.mock("../ChatRow", () => ({
 			}
 		}
 
-		return <div data-testid="chat-row">{JSON.stringify(message)}</div>
+		return (
+			<div data-testid="chat-row" data-instance={instance}>
+				{JSON.stringify(message)}
+			</div>
+		)
 	},
 }))
 
@@ -214,8 +222,8 @@ vi.mock("../common/TelemetryBanner", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string, options?: any) => {
 			if (key === "chat:versionIndicator.ariaLabel" && options?.version) {
 				return `Version ${options.version}`
@@ -223,10 +231,9 @@ vi.mock("react-i18next", () => ({
 			return key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => {
 		return <>{children || i18nKey}</>
 	},
@@ -721,6 +728,22 @@ describe("ChatView - Virtualization Configuration", () => {
 		mockVirtuosoState.lastConfig = null
 	})
 
+	it("preserves the row instance when a partial message completes", async () => {
+		renderChatView()
+		const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Task" }
+		const partial: ClineMessage = { type: "say", say: "text", ts: 2, text: "Streaming", partial: true }
+		mockPostMessage({ clineMessages: [task, partial] })
+		const row = await screen.findByTestId("chat-row")
+		const instance = row.getAttribute("data-instance")
+		expect(instance).not.toBeNull()
+		await dispatchExtensionMessage({
+			type: "messageUpdated",
+			clineMessage: { ...partial, text: "Completed", partial: false },
+		})
+		await waitFor(() => expect(screen.getByTestId("chat-row")).toHaveTextContent("Completed"))
+		expect(screen.getByTestId("chat-row").getAttribute("data-instance")).toBe(instance)
+	})
+
 	it("keeps the off-screen render buffer tight for chat rows", async () => {
 		renderChatView()
 
@@ -751,6 +774,9 @@ describe("ChatView - Virtualization Configuration", () => {
 		expect(mockVirtuosoState.lastConfig?.defaultItemHeight).toBe(180)
 		expect(mockVirtuosoState.lastConfig?.increaseViewportBy).toEqual({ top: 600, bottom: 800 })
 		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs })).toBe(`${rowTs}-1`)
+		expect(mockVirtuosoState.lastConfig?.computeItemKey?.(1, { type: "say", ts: rowTs, partial: true })).toBe(
+			`${rowTs}-1`,
+		)
 	})
 })
 
@@ -1216,6 +1242,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "follow-up question during spinner",
 				images: [],
+				segments: [{ text: "follow-up question during spinner", source: "user" }],
 			})
 		})
 
@@ -1287,6 +1314,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				askResponse: "messageResponse",
 				text: "follow-up after completion",
 				images: [],
+				segments: [{ text: "follow-up after completion", source: "user" }],
 			})
 		})
 
@@ -1346,6 +1374,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during queue drain",
 				images: [],
+				segments: [{ text: "message during queue drain", source: "user" }],
 			})
 		})
 
@@ -1409,6 +1438,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during command execution",
 				images: [],
+				segments: [{ text: "message during command execution", source: "user" }],
 			})
 		})
 
@@ -1529,6 +1559,52 @@ describe("ChatView - Follow-up Suggestions", () => {
 			askResponse: "messageResponse",
 			text: "Use code mode",
 			images: [],
+			segments: [{ text: "Use code mode", source: "generated" }],
+		})
+	})
+
+	it("keeps a shift-clicked suggestion generated and the typed draft user text", async () => {
+		const { getByRole, getByTestId } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{ type: "say", say: "task", ts: Date.now() - 1000, text: "Initial task" },
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({ question: "Next?", suggest: [{ answer: "Use @/secret" }] }),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Use @/secret" }))
+		const input = getByTestId("chat-textarea").querySelector("input")! as HTMLInputElement
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "mine" } })
+		})
+		vscodePostMessageMock.cleanup()
+
+		await act(async () => {
+			fireEvent.click(suggestion, { shiftKey: true })
+		})
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					segments: [
+						{ text: "mine", source: "user" },
+						{ text: " \nUse @/secret", source: "generated" },
+					],
+				}),
+			)
 		})
 	})
 
@@ -1569,6 +1645,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Use invalid mode",
 				images: [],
+				segments: [{ text: "Use invalid mode", source: "generated" }],
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
@@ -1629,6 +1706,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Valid answer",
 				images: [],
+				segments: [{ text: "Valid answer", source: "generated" }],
 			})
 		})
 	})

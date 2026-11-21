@@ -45,9 +45,11 @@ export const commandIds = [
 	"focusInput",
 	"acceptInput",
 	"focusPanel",
+	"retryWebviewRecovery",
 	"toggleAutoApprove",
 
 	"showRipgrepDiagnostic",
+	"createDiagnosticsReport",
 ] as const
 
 export type CommandId = (typeof commandIds)[number]

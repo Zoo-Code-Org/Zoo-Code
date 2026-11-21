@@ -25,6 +25,31 @@ function makeRawModel(overrides: Record<string, unknown>) {
 }
 
 describe("getRequestyModels", () => {
+	// Property: exact members receive all overrides. Other models keep catalog capabilities.
+	it.each(
+		[
+			{ id: "anthropic/claude-fable-5.1", overridden: true },
+			{ id: "anthropic/claude-fable-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5-5", overridden: true },
+			{ id: "anthropic/claude-opus-5", overridden: true },
+			{ id: "anthropic/claude-opus-5-5", overridden: true },
+			{ id: "anthropic/claude-haiku-5-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-4", overridden: false },
+			{ id: "anthropic/claude-sonnet-5-50", overridden: false },
+			{ id: "anthropic/claude-sonnet-5.5", overridden: false },
+		].flatMap((model) => [true, false, undefined].map((supports_reasoning) => ({ ...model, supports_reasoning }))),
+	)(
+		"preserves overrides for $id with catalog reasoning $supports_reasoning",
+		async ({ id, overridden, supports_reasoning }) => {
+			mockAxiosGet.mockResolvedValueOnce({ data: { data: [makeRawModel({ id, supports_reasoning })] } })
+			const model = (await getRequestyModels())[id]
+			expect(model.supportsReasoningBudget).toBe(overridden ? true : supports_reasoning)
+			expect(model.supportsReasoningBinary).toBe(overridden ? true : undefined)
+			expect(model.supportsTemperature).toBe(overridden ? false : undefined)
+		},
+	)
+
 	it("applies Fable 5.1 overrides when parsing anthropic/claude-fable-5.1", async () => {
 		const rawFable51 = makeRawModel({
 			id: "anthropic/claude-fable-5.1",
@@ -101,6 +126,29 @@ describe("getRequestyModels", () => {
 		expect(sonnet5.supportsTemperature).toBe(false)
 	})
 
+	it.each([true, false])("applies Sonnet 5.5 overrides with supports_reasoning %s", async (supports_reasoning) => {
+		const rawSonnet55 = makeRawModel({
+			id: "anthropic/claude-sonnet-5-5",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning,
+			input_price: "0.000002",
+			output_price: "0.00001",
+			caching_price: "0.0000025",
+			cached_price: "0.0000001",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawSonnet55] } })
+
+		const sonnet55 = (await getRequestyModels())["anthropic/claude-sonnet-5-5"]
+		expect(sonnet55).toBeDefined()
+		expect(sonnet55.supportsReasoningBudget).toBe(true)
+		expect(sonnet55.supportsReasoningBinary).toBe(true)
+		expect(sonnet55.supportsTemperature).toBe(false)
+	})
+
 	it("applies Opus 5 overrides when parsing anthropic/claude-opus-5", async () => {
 		const rawOpus5 = makeRawModel({
 			id: "anthropic/claude-opus-5",
@@ -149,6 +197,31 @@ describe("getRequestyModels", () => {
 		expect(opus55.supportsReasoningBudget).toBe(true)
 		expect(opus55.supportsReasoningBinary).toBe(true)
 		expect(opus55.supportsTemperature).toBe(false)
+	})
+
+	it("applies Haiku 5.5 overrides when parsing anthropic/claude-haiku-5-5", async () => {
+		const rawHaiku55 = makeRawModel({
+			id: "anthropic/claude-haiku-5-5",
+			max_output_tokens: 128000,
+			context_window: 1000000,
+			supports_caching: true,
+			supports_vision: true,
+			supports_reasoning: true,
+			input_price: "0.0000001",
+			output_price: "0.0000005",
+			caching_price: "0.000000125",
+			cached_price: "0.00000001",
+		})
+
+		mockAxiosGet.mockResolvedValueOnce({ data: { data: [rawHaiku55] } })
+
+		const models = await getRequestyModels()
+		const haiku55 = models["anthropic/claude-haiku-5-5"]
+
+		expect(haiku55).toBeDefined()
+		expect(haiku55.supportsReasoningBudget).toBe(true)
+		expect(haiku55.supportsReasoningBinary).toBe(true)
+		expect(haiku55.supportsTemperature).toBe(false)
 	})
 
 	it("does not apply Fable 5 overrides to other models", async () => {

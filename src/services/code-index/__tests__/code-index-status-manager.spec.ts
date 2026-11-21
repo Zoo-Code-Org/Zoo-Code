@@ -6,6 +6,7 @@ import {
 	makeExtensionContext,
 	makeWorkspaceConfiguration,
 } from "../../../test-utils/vscode"
+import { clearAllMocks } from "../../../test-utils/reset"
 import { CodeIndexManager } from "../manager"
 import { CodeIndexStateManager } from "../state-manager"
 import { CodeIndexStatusManager, type CodeIndexStatus } from "../code-index-status-manager"
@@ -68,7 +69,7 @@ describe("CodeIndexStatusManager", () => {
 	let disposeWorkspaceFolders: ReturnType<typeof vi.fn<() => void>>
 
 	beforeEach(() => {
-		vi.clearAllMocks()
+		clearAllMocks()
 		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(makeWorkspaceConfiguration())
 		Object.defineProperty(vscode.window, "activeTextEditor", { configurable: true, value: undefined })
 		Object.defineProperty(vscode.workspace, "workspaceFolders", {

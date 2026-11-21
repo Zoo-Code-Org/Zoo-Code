@@ -40,16 +40,15 @@ function makeStoreStub(
  * `parent`. Without flushPendingToolResultsToHistory the method hits its
  * non-fatal flush-error branch and never reaches the happy delegation path.
  */
-const makeParentTask = () =>
-	({
-		taskId: "parent-1",
-		apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
-		getTaskMode: vi.fn().mockResolvedValue("code"),
-		getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
-		emit: vi.fn(),
-		flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
-		retrySaveApiConversationHistory: vi.fn(),
-	}) as any
+const makeParentTask = () => ({
+	taskId: "parent-1",
+	apiConfiguration: { apiProvider: providerIdentifiers.anthropic, anthropicApiKey: "task-local-key" },
+	getTaskMode: vi.fn().mockResolvedValue("code"),
+	getTaskApiConfigName: vi.fn().mockResolvedValue("task-local-profile"),
+	emit: vi.fn(),
+	flushPendingToolResultsToHistory: vi.fn().mockResolvedValue(true),
+	retrySaveApiConversationHistory: vi.fn(),
+})
 
 describe("ClineProvider.delegateParentAndOpenChild()", () => {
 	it("rejects a stale restored action before delegation side effects", async () => {
@@ -150,7 +149,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		}
 		const parentTask = makeParentTask()
 		const child = { taskId: "child-1", run: vi.fn().mockResolvedValue(undefined) }
-		const getCurrentTask = vi.fn(() => parentTask)
+		const getCurrentTask = vi.fn((): { taskId: string } => parentTask)
 		const createTask = vi.fn(async () => {
 			getCurrentTask.mockReturnValue(child)
 			return child
@@ -218,7 +217,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		const child = await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		const child = await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -295,6 +294,8 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
 			providerSettingsManager,
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId: (mode: string) => providerSettingsManager.getModeConfigId(mode),
 			context: { workspaceState: { get: workspaceGet } },
 		} as unknown as ClineProvider
 
@@ -326,6 +327,53 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		)
 	})
 
+	it("uses this window's mode profile instead of one another window saved in shared storage", async () => {
+		const parentTask = makeParentTask()
+		const createTask = vi
+			.fn()
+			.mockResolvedValue({ taskId: "child-local", run: vi.fn().mockResolvedValue(undefined) })
+		const getProfile = vi.fn().mockResolvedValue({
+			name: "local-profile",
+			id: "local-profile-id",
+			apiProvider: providerIdentifiers.openrouter,
+			openRouterModelId: "openai/gpt-4.1-mini",
+		})
+		const sharedGetModeConfigId = vi.fn().mockResolvedValue("other-window-profile-id")
+		const provider = {
+			taskScheduler: new TaskScheduler(),
+			emit: vi.fn(),
+			getCurrentTask: vi.fn(() => parentTask),
+			removeClineFromStack: vi.fn().mockResolvedValue(undefined),
+			createTask,
+			log: vi.fn(),
+			isViewLaunched: false,
+			taskHistoryStore: makeStoreStub(),
+			providerSettingsManager: { getModeConfigId: sharedGetModeConfigId, getProfile },
+			// This window's own choice differs from the shared value another window wrote.
+			getModeConfigId: vi.fn().mockResolvedValue("local-profile-id"),
+			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
+		} as unknown as ClineProvider
+
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
+			parentTaskId: "parent-1",
+			message: "Local child",
+			initialTodos: [],
+			mode: "ask",
+		})
+
+		expect(getProfile).toHaveBeenCalledOnce()
+		expect(getProfile).toHaveBeenCalledWith({ id: "local-profile-id" })
+		expect(sharedGetModeConfigId).not.toHaveBeenCalled()
+		expect(createTask).toHaveBeenCalledWith(
+			"Local child",
+			undefined,
+			parentTask,
+			expect.objectContaining({
+				handoffExecutionContext: expect.objectContaining({ mode: "ask", apiConfigName: "local-profile" }),
+			}),
+		)
+	})
+
 	it.each([
 		{ name: "has no saved mode profile", savedConfigId: undefined, savedProfile: undefined },
 		{
@@ -347,6 +395,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 				? vi.fn().mockRejectedValue(savedProfile)
 				: vi.fn().mockResolvedValue(savedProfile)
 		const log = vi.fn()
+		const getModeConfigId = vi.fn().mockResolvedValue(savedConfigId)
 		const provider = {
 			taskScheduler: new TaskScheduler(),
 			emit: vi.fn(),
@@ -356,10 +405,9 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			log,
 			isViewLaunched: false,
 			taskHistoryStore: makeStoreStub(),
-			providerSettingsManager: {
-				getModeConfigId: vi.fn().mockResolvedValue(savedConfigId),
-				getProfile,
-			},
+			providerSettingsManager: { getModeConfigId, getProfile },
+			// No window-local choice is recorded, so the lookup reaches the shared manager.
+			getModeConfigId,
 			context: { workspaceState: { get: vi.fn().mockReturnValue(false) } },
 		} as unknown as ClineProvider
 
@@ -416,7 +464,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -450,7 +498,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -491,7 +539,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Do something",
 			initialTodos: [],
@@ -538,7 +586,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			taskHistoryStore,
 		} as unknown as ClineProvider
 
-		await (ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+		await ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 			parentTaskId: "parent-1",
 			message: "Continue",
 			initialTodos: [],
@@ -603,7 +651,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Continue",
 				initialTodos: [],
@@ -614,7 +662,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		// The authoritative preflight rejects before either provider mutates its stack.
 		expect(child.run).not.toHaveBeenCalled()
 		expect(createTask).not.toHaveBeenCalled()
-		expect((provider as any).deleteTaskWithId).not.toHaveBeenCalled()
+		expect(provider.deleteTaskWithId).not.toHaveBeenCalled()
 	})
 
 	it("rejects a delegated parent whose awaited-child identity is missing", async () => {
@@ -744,7 +792,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 		} as unknown as ClineProvider
 
 		await expect(
-			(ClineProvider.prototype as any).delegateParentAndOpenChild.call(provider, {
+			ClineProvider.prototype.delegateParentAndOpenChild.call(provider, {
 				parentTaskId: "parent-1",
 				message: "Do something",
 				initialTodos: [],
@@ -1206,6 +1254,7 @@ describe("ClineProvider.delegateParentAndOpenChild()", () => {
 			// The real deletion path: the store swallows a per-file history
 			// lock failure, so deleteMany resolves and cleanup continues.
 			deleteTaskWithId: ClineProvider.prototype.deleteTaskWithId,
+			taskTitleService: { cancel: vi.fn() },
 			createTaskWithHistoryItem,
 			log: vi.fn(),
 			postStateToWebview: vi.fn().mockResolvedValue(undefined),

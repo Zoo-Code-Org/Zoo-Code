@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude
 export type VertexModelId = keyof typeof vertexModels
@@ -418,6 +427,20 @@ export const vertexModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"claude-sonnet-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheReadsPrice: 0.1,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description: "Claude Sonnet 5.5 is the best combination of speed and intelligence for everyday tasks.",
+	},
 	"claude-haiku-4-5@20251001": {
 		maxTokens: 8192,
 		contextWindow: 200_000,
@@ -525,6 +548,23 @@ export const vertexModels = {
 		supportsTemperature: false,
 		description:
 			"Claude Opus 5.5 is Anthropic's most capable model for complex agentic coding and enterprise work.",
+	},
+	"claude-haiku-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000, // 1M context window native (no beta header required)
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Standard pricing (prompts of 100,000 tokens or fewer). Prompts over
+		// 100,000 tokens bill at higher tiered rates per Anthropic's pricing page.
+		inputPrice: 0.1, // $0.10 per million input tokens
+		outputPrice: 0.5, // $0.50 per million output tokens
+		cacheWritesPrice: 0.125, // $0.125 per million tokens (5m cache writes)
+		cacheReadsPrice: 0.01, // $0.01 per million tokens (cache hits / refreshes)
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description:
+			"Claude Haiku 5.5 is the fastest, most efficient Claude 5.5 model, built for high-volume, latency-sensitive coding and agent work.",
 	},
 	"claude-fable-5-1": {
 		maxTokens: 128_000,
@@ -795,3 +835,18 @@ export const VERTEX_REGIONS = [
 	{ value: "me-central1", label: "me-central1" },
 	{ value: "africa-south1", label: "africa-south1" },
 ]
+
+export const vertexProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.vertex,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => vertexDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		vertexKeyFile: z.string().optional(),
+		vertexJsonCredentials: z.string().optional(),
+		vertexProjectId: z.string().optional(),
+		vertexRegion: z.string().optional(),
+		vertex1MContext: z.boolean().optional(), // Enable 'context-1m-2025-08-07' beta for 1M context window.
+	},
+})

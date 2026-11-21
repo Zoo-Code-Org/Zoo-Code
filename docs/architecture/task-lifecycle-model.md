@@ -102,7 +102,7 @@ The model maps its state to production fields as follows:
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `phase`, `index`           | `Task.assistantMessageContent` partial flags, matching `tool_result` blocks in `userMessageContent`, and `currentStreamingContentIndex` |
 | `stream`                   | `didCompleteReadingStream`                                                                                                              |
-| `lock`, `owner`, `pending` | `presentAssistantMessageLocked` and `presentAssistantMessageHasPendingUpdates`, owned by the `presentAssistantMessage` wrapper          |
+| `lock`, `owner`, `pending` | `dispatchState` (not `IDLE`) and `pendingWork` (not `null`), owned by the `presentAssistantMessage` wrapper                             |
 | `latch`                    | `userMessageContentReady`                                                                                                               |
 | `epoch`                    | the per-request reset in the request loop (`Task.ts`)                                                                                   |
 | `poll` and `post-wait`     | the `pWaitFor` condition and the abort check that follows it                                                                            |
@@ -139,6 +139,12 @@ For #921, the execution-context matrix checks saved, unsaved, and locked profile
 Merged PR #1625 changed the confirmed downstream readers: `getEnvironmentDetails` obtains `cline.getTaskMode()`, `presentAssistantMessage` passes that task-local mode to `validateToolUse`, and custom tool execution receives the same task-local mode. Focused production tests cover those three paths.
 
 `scripts/check-delegated-mode-readers.ts` does not execute `getEnvironmentDetails`, `presentAssistantMessage`, or `validateToolUse`. It checks the production handoff selector and a pure built-in-mode permission divergence, establishing that the wrong source is observable. It is refinement support, not exhaustive reader coverage. Other mode-sensitive consumers remain an explicit inventory gap, and this suite does not claim universal task-local reader isolation.
+
+## Queue ask landing model
+
+`scripts/check-queue-ask-landing.ts` is a bounded model of where a queued message lands after `MessageQueueService` drains it. It imports the real `MessageQueueService` and the `nextRunState` kernel. The `askResponse` slot and the `setTimeout(0)` hop in `Task.ts` are model abstractions, because `Task.ts` needs VS Code.
+
+The invariant is that every added message is queued, in flight, in the slot, or consumed. Nothing is dropped. The production policy sets the slot with no ask pending, and the next `ask()` resets it. The model keeps this gap as a known witness (#2421). The requeue policy is the proposed fix and must stay clean. Remove the witness when production changes.
 
 ## Task fan-out protocol model
 
@@ -205,6 +211,14 @@ The production mapping above names primary lifecycle transitions, not every muta
 CI runs `pnpm lifecycle:model-check` in `.github/workflows/code-qa.yml` after lint and type checking. Extension-host subtask and restart-persistence E2E run separately; a green umbrella command therefore says nothing about an omitted E2E boundary or an unmodeled downstream consumer.
 
 ## Gap audit
+
+The independent [file replacement/restart model](./file-replacement-restart-model.md)
+checks the process-crash replacement protocol separately from completion readiness.
+It models three task files, initial publication, one replacement, one crash,
+locked recovery on fresh reads/startup, and successful explicit deletion. Its
+contract, production mapping, old-protocol counterexample, refinement tests, and
+filesystem/lock assumptions are documented there. A passing completion-readiness
+model alone does not establish this file-level contract.
 
 This section is a summary tracker. Issue links are historical provenance rather than specifications. Coverage status uses these evidence classes:
 

@@ -57,6 +57,7 @@ import {
 	MAX_MCP_TOOLS_THRESHOLD,
 	countEnabledMcpTools,
 	providerIdentifiers,
+	type MentionSegment,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -106,12 +107,14 @@ import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
 import { restoreTodoListForTask } from "../tools/UpdateTodoListTool"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
+import { ObservationRegistry } from "./observationRegistry"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
+import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { manageContext, willManageContext } from "../context-management"
+import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -133,7 +136,8 @@ import {
 	checkpointRestore,
 	checkpointDiff,
 } from "../checkpoints"
-import { processUserContentMentions } from "../mentions/processUserContentMentions"
+import { joinSegments, normalizeSegments, trimSegments } from "../../shared/mentionSegments"
+import { expandUserMentions, wrapUserMessage } from "../mentions/processUserContentMentions"
 import { getMessagesSinceLastSummary, summarizeConversation, getEffectiveApiHistory } from "../condense"
 import { MessageQueueService } from "../message-queue/MessageQueueService"
 import { type AutoDenyDetail, AutoApprovalHandler, checkAutoApproval } from "../auto-approval"
@@ -143,7 +147,7 @@ import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
-import { initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
+import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
 import { applyRunEvent, type RunRejection } from "./run-state/runStateShadow"
 import {
 	divergenceKey,
@@ -154,6 +158,9 @@ import {
 
 const MAX_EXPONENTIAL_BACKOFF_SECONDS = 600 // 10 minutes
 const DEFAULT_USAGE_COLLECTION_TIMEOUT_MS = 5000 // 5 seconds
+// Streamed deltas arrive far faster than the webview can usefully re-render a growing message
+// (tables and code fences reflow on nearly every update), so partial updates post at most this often.
+const PARTIAL_MESSAGE_UPDATE_INTERVAL_MS = 120
 // Upper bound on awaiting lazily loaded model metadata. Some model-catalog
 // fetchers (e.g. OpenRouter's bare axios GET) have no request timeout, so a
 // hung endpoint must not stall streaming, condense, or context-window
@@ -250,6 +257,8 @@ export interface TaskOptions extends CreateTaskOptions {
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
 	task?: string
+	/** Origin of each part of `task`. Absent means all generated, so no mention expands. */
+	segments?: MentionSegment[]
 	images?: string[]
 	historyItem?: HistoryItem
 	experiments?: Record<string, boolean>
@@ -291,6 +300,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
+
+	// The observed on-disk version of each file this task has read. Declared here so the
+	// read tools can record it; a write guard later compares a token against this registry.
+	readonly observationRegistry = new ObservationRegistry()
 
 	todoList?: TodoItem[]
 
@@ -388,7 +401,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	providerRef: WeakRef<ClineProvider>
 	private readonly globalStoragePath: string
-	abort: boolean = false
+	// Monotonic cancellation counter. `requestAbort()` and `requestDispose()` advance
+	// this fence, and the guarded-write path compares the value it captured when the
+	// write was queued with the value at publish time, so a queued write cannot publish
+	// after the task was cancelled or disposed.
+	cancellationGeneration: number = 0
 	currentRequestAbortController?: AbortController
 	/**
 	 * Controller for the waiter on an in-flight `ensureModelFetched()` call (see
@@ -406,7 +423,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	didFinishAbortingStream = false
 	abandoned = false
-	abortReason?: ClineApiReqCancelReason
 	isInitialized = false
 
 	runState: RunState = initialRunState
@@ -448,6 +464,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponse?: ClineAskResponse
 	private askResponseText?: string
 	private askResponseImages?: string[]
+	private askResponseSegments?: MentionSegment[]
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -516,8 +533,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	currentStreamingContentIndex = 0
 	currentStreamingDidCheckpoint = false
 	assistantMessageContent: AssistantMessageContent[] = []
-	presentAssistantMessageLocked = false
-	presentAssistantMessageHasPendingUpdates = false
+	dispatchState: DispatchState = DispatchState.IDLE
+	pendingWork: PendingWork | null = null
 	userMessageContent: (Anthropic.TextBlockParam | Anthropic.ImageBlockParam | Anthropic.ToolResultBlockParam)[] = []
 	userMessageContentReady = false
 
@@ -577,6 +594,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Push a tool_result block to userMessageContent, preventing duplicates.
 	 * Duplicate tool_use_ids cause API errors.
 	 *
+	 * Keeps all tool_result blocks first and contiguous, as the Anthropic API
+	 * requires: a user message responding to tool_use blocks must begin with
+	 * the tool_result blocks, and any other content (images, text) between or
+	 * ahead of them is rejected ("tool_use ids were found without tool_result
+	 * blocks immediately after"). All tool_result blocks are therefore kept
+	 * ahead of other content in this array.
+	 *
 	 * @param toolResult - The tool_result block to add
 	 * @returns true if added, false if duplicate was skipped
 	 */
@@ -592,6 +616,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return false
 		}
 		this.userMessageContent.push(toolResult)
+
+		// Partition into [tool_results, other blocks], preserving order within
+		// each group, so results stay first and contiguous regardless of what
+		// other content (images, text) arrived between pushes.
+		const results = this.userMessageContent.filter(
+			(block): block is Anthropic.ToolResultBlockParam => block.type === "tool_result",
+		)
+		const others = this.userMessageContent.filter((block) => block.type !== "tool_result")
+		this.userMessageContent.splice(0, this.userMessageContent.length, ...results, ...others)
+
 		return true
 	}
 
@@ -609,7 +643,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A non-abort presenter rejection releases the lock and is logged, but
 		// nothing schedules another presentation pass. Gating on the index would
 		// strand this wait after exactly that failure.
-		if (!this.didCompleteReadingStream || this.presentAssistantMessageLocked) {
+		if (!this.didCompleteReadingStream || this.dispatchState !== DispatchState.IDLE) {
 			return false
 		}
 
@@ -674,7 +708,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// MessageManager for high-level message operations (lazy initialized)
 	private _messageManager?: MessageManager
 
+	private readonly segments?: MentionSegment[]
+
 	constructor({
+		segments,
 		provider,
 		apiConfiguration,
 		enableCheckpoints = true,
@@ -699,6 +736,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		handoffExecutionContext,
 	}: TaskOptions) {
 		super()
+		this.segments = segments
+
 		this.resetAssistantMessagePersistence()
 
 		if (startTask && !task && !images && !historyItem) {
@@ -808,6 +847,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		this.messageQueueService.on("stateChanged", this.messageQueueStateChangedHandler)
+		this.messageQueueService.on("drained", (queued) => this.submitQueuedMessage(queued))
 
 		// Set up diff strategy
 		this.diffStrategy = new MultiSearchReplaceDiffStrategy(diffFuzzyThreshold)
@@ -1232,7 +1272,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	private handleQueuedAskResponse(message: QueuedMessage, resolution: QueuedAskResolution): string | undefined {
-		this.handleWebviewAskResponse(resolution.response, message.text, message.images)
+		this.handleWebviewAskResponse(resolution.response, message.text, message.images, message.segments)
 		if (resolution.requiresDurableAck) {
 			return message.id
 		}
@@ -1380,22 +1420,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.blanketDeniedCommandThisTurn = true
 	}
 
+	/** When provided, historyItem overrides task and images in the startup metadata. */
 	static create(options: TaskOptions): [Task, Promise<void>] {
-		const instance = new Task({ ...options, startTask: false })
-		const { images, task, historyItem } = options
-		let promise
-
-		instance.startIdleTelemetryCheck()
-
-		if (images || task) {
-			promise = instance.startTask(task, images)
-		} else if (historyItem) {
-			promise = instance.resumeTaskFromHistory()
-		} else {
+		if (!options.task && !options.images && !options.historyItem) {
 			throw new Error("Either historyItem or task/images must be provided")
 		}
 
-		return [instance, promise]
+		const instance = new Task({ ...options, startTask: false })
+
+		return [instance, instance.run()]
 	}
 
 	// API Messages
@@ -1741,6 +1774,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Updates a Cline message in the webview and emits an event.
 	 * Non-partial messages are synced to cloud telemetry if not already synced.
 	 */
+	private lastPartialMessagePostTs = 0
+	private pendingPartialMessageTimer: ReturnType<typeof setTimeout> | undefined
+	private pendingPartialMessage: ClineMessage | undefined
+
+	/**
+	 * Posts a streaming (partial) message update, at most once per
+	 * `PARTIAL_MESSAGE_UPDATE_INTERVAL_MS`. The message object is always kept current by the
+	 * caller; a trailing post makes sure the latest text is delivered once the burst ends.
+	 */
+	private postPartialMessageUpdate(message: ClineMessage, source: "ask" | "say"): void {
+		const post = (target: ClineMessage) => {
+			this.lastPartialMessagePostTs = Date.now()
+			// Fire-and-forget: the `RooCodeEventName.Message` emit can synchronously throw via a
+			// consumer-attached listener. Surface that as a log, not an unhandled rejection.
+			this.updateClineMessage(target).catch((error) => {
+				console.error(`[Task#${source}] updateClineMessage failed:`, error)
+			})
+		}
+
+		// A queued update for a different message (e.g. reasoning followed by text) must not be
+		// overwritten by this one, so deliver it now.
+		const queued = this.pendingPartialMessage
+		if (queued && queued.ts !== message.ts) {
+			this.cancelPendingPartialMessageUpdate()
+			post(queued)
+		}
+
+		// Clamp: a backward wall-clock step makes the difference negative, which would schedule
+		// the trailing post later than the interval.
+		const elapsed = Math.max(0, Date.now() - this.lastPartialMessagePostTs)
+		if (elapsed >= PARTIAL_MESSAGE_UPDATE_INTERVAL_MS) {
+			this.cancelPendingPartialMessageUpdate()
+			post(message)
+			return
+		}
+
+		this.pendingPartialMessage = message
+		if (this.pendingPartialMessageTimer) {
+			return
+		}
+
+		this.pendingPartialMessageTimer = setTimeout(() => {
+			const pending = this.pendingPartialMessage
+			this.pendingPartialMessageTimer = undefined
+			this.pendingPartialMessage = undefined
+
+			if (pending?.partial && !this.abort && !this.abandoned) {
+				post(pending)
+			}
+		}, PARTIAL_MESSAGE_UPDATE_INTERVAL_MS - elapsed)
+	}
+
+	/** Drops a queued trailing partial post, e.g. because the message was finalized or the task is ending. */
+	private cancelPendingPartialMessageUpdate(): void {
+		if (this.pendingPartialMessageTimer) {
+			clearTimeout(this.pendingPartialMessageTimer)
+		}
+		this.pendingPartialMessageTimer = undefined
+		this.pendingPartialMessage = undefined
+	}
+
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
@@ -1848,6 +1942,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		response: ClineAskResponse
 		text?: string
 		images?: string[]
+		/** Origin of each part of `text`. */
+		segments?: MentionSegment[]
 		queuedMessageId?: string
 		/**
 		 * Present when the ask was resolved by an automatic (policy) denial
@@ -1948,13 +2044,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// data or one whole message at a time so ignore partial for
 					// saves, and only post parts of partial message instead of
 					// whole array in new listener.
-					// Fire-and-forget: the webview post is internally guarded, but
-					// the `RooCodeEventName.Message` emit can synchronously throw
-					// if any consumer-attached listener does, which would surface
-					// here as an unhandled rejection. Log it instead.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#ask] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "ask")
 					// console.log("Task#ask: current ask promise was ignored (#1)")
 					throw new AskIgnoredError("updating existing partial")
 				} else {
@@ -1995,9 +2085,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						lastMessage.isAnswered = true
 						lastMessage.autoApprovalDecision = autoApprovalDecision
 					}
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
-					// Fire-and-forget: see updateClineMessage call above for the
-					// rationale on the .catch arm.
+					// Fire-and-forget: see postPartialMessageUpdate for the rationale on the .catch arm.
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#ask] updateClineMessage failed:", error)
 					})
@@ -2372,12 +2462,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				response: this.askResponse!,
 				text: this.askResponseText,
 				images: this.askResponseImages,
+				segments: this.askResponseSegments,
 				queuedMessageId,
 				autoDenyDetail: this.pendingAutoDenyDetail,
 			}
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseSegments = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2400,13 +2492,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 	}
 
-	handleWebviewAskResponse(askResponse: ClineAskResponse, text?: string, images?: string[]) {
+	handleWebviewAskResponse(
+		askResponse: ClineAskResponse,
+		text?: string,
+		images?: string[],
+		segments?: MentionSegment[],
+	) {
 		// Clear any pending auto-approval timeout when user responds
 		this.cancelAutoApprovalTimeout()
 
 		this.askResponse = askResponse
 		this.askResponseText = text
 		this.askResponseImages = images
+		this.askResponseSegments = segments
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2547,9 +2645,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		images?: string[],
 		mode?: string,
 		providerProfile?: string,
+		segments?: MentionSegment[],
 	): Promise<void> {
 		try {
-			text = (text ?? "").trim()
+			// Trim the text and its segments together so they stay equal.
+			const trimmed = trimSegments(normalizeSegments(text ?? "", segments))
+			text = joinSegments(trimmed)
 			images = images ?? []
 
 			if (text.length === 0 && images.length === 0) {
@@ -2581,7 +2682,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Handle the message directly instead of routing through the webview.
 				// This avoids a race condition where the webview's message state hasn't
 				// hydrated yet, causing it to interpret the message as a new task request.
-				this.handleWebviewAskResponse("messageResponse", text, images)
+				this.handleWebviewAskResponse("messageResponse", text, images, trimmed)
 			} else {
 				console.error("[Task#submitUserMessage] Provider reference lost")
 			}
@@ -2786,13 +2887,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					lastMessage.images = images
 					lastMessage.partial = partial
 					lastMessage.progressStatus = progressStatus
-					// Fire-and-forget: webview post is internally guarded, but the
-					// `RooCodeEventName.Message` emit can synchronously throw via a
-					// consumer-attached listener. Surface that as a log, not an
-					// unhandled rejection.
-					this.updateClineMessage(lastMessage).catch((error) => {
-						console.error("[Task#say] updateClineMessage failed:", error)
-					})
+					this.postPartialMessageUpdate(lastMessage, "say")
 				} else {
 					// This is a new partial message, so add it with partial state.
 					const sayTs = Date.now()
@@ -2828,6 +2923,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Instead of streaming partialMessage events, we do a save
 					// and post like normal to persist to disk.
+					this.cancelPendingPartialMessageUpdate()
 					await this.saveClineMessages()
 
 					// More performant than an entire `postStateToWebview`.
@@ -3095,13 +3191,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			const imageBlocks: Anthropic.ImageBlockParam[] = formatResponse.imageBlocks(images)
 
 			// Task starting
-			await this.initiateTaskLoop([
-				{
-					type: "text",
-					text: `<user_message>\n${task}\n</user_message>`,
-				},
-				...imageBlocks,
-			]).catch((error) => {
+			// Task text can carry generated context. Without segments
+			// nothing expands. The loop waits for the content after it shows the request row.
+			await this.initiateTaskLoop(
+				this.userInputContent(task ?? "", this.segments).then((content) => [...content, ...imageBlocks]),
+			).catch((error) => {
 				// Swallow loop rejection when the task was intentionally abandoned/aborted
 				// during delegation or user cancellation to prevent unhandled rejections.
 				if (this.abandoned === true || this.abortReason === "user_cancelled") {
@@ -3239,7 +3333,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			this.markInitialized()
 
-			const { response, text, images } = await this.ask(askType) // Calls `postStateToWebview`.
+			const { response, text, images, segments } = await this.ask(askType) // Calls `postStateToWebview`.
 
 			let responseText: string | undefined
 			let responseImages: string[] | undefined
@@ -3358,29 +3452,33 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				throw new Error("Unexpected: No existing API conversation history")
 			}
 
-			const newUserContent: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent]
+			// Only user segments expand.
+			const preparationGeneration = this.cancellationGeneration
+			const expanded = responseText ? this.userInputContent(responseText, segments) : Promise.resolve([])
+			const newUserContent = expanded.then(async (content) => {
+				// A cancelled preparation must not replace history from a newer run.
+				if (this.abort || this.abandoned || this.cancellationGeneration !== preparationGeneration) {
+					throw new Error(`[Task#resumeTaskFromHistory] task ${this.taskId}.${this.instanceId} aborted`)
+				}
+				// Replace history before the loop appends the combined user content.
+				await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+				const blocks: Anthropic.Messages.ContentBlockParam[] = [...modifiedOldUserContent, ...content]
 
-			if (responseText) {
-				newUserContent.push({
-					type: "text",
-					text: `<user_message>\n${responseText}\n</user_message>`,
-				})
-			}
+				if (responseImages && responseImages.length > 0) {
+					blocks.push(...formatResponse.imageBlocks(responseImages))
+				}
 
-			if (responseImages && responseImages.length > 0) {
-				newUserContent.push(...formatResponse.imageBlocks(responseImages))
-			}
+				// Ensure we have at least some content to send to the API.
+				// If blocks is empty, add a minimal resumption message.
+				if (blocks.length === 0) {
+					blocks.push({
+						type: "text",
+						text: "[TASK RESUMPTION] Resuming task...",
+					})
+				}
 
-			// Ensure we have at least some content to send to the API.
-			// If newUserContent is empty, add a minimal resumption message.
-			if (newUserContent.length === 0) {
-				newUserContent.push({
-					type: "text",
-					text: "[TASK RESUMPTION] Resuming task...",
-				})
-			}
-
-			await this.overwriteApiConversationHistory(modifiedApiConversationHistory)
+				return blocks
+			})
 
 			// Task resuming from history item.
 			await this.initiateTaskLoop(newUserContent)
@@ -3517,8 +3615,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.driveRunEvent({ tag: "completionAccepted", askTs })
 	}
 
+	get abort(): boolean {
+		return abort(this.runState)
+	}
+
+	get abortReason(): ClineApiReqCancelReason | undefined {
+		return abortReason(this.runState)
+	}
+
 	setAbortReason(reason: ClineApiReqCancelReason): void {
-		this.abortReason ??= reason
 		this.driveRunEvent({ tag: "reasonSet", reason })
 	}
 
@@ -3526,7 +3631,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		if (isAbandoned) {
 			this.abandoned = true
 		}
-		this.abort = true
+		// The S4a write guard compares this counter with the value a queued write
+		// captured when it started, so every cancellation must advance it and it
+		// must never go backwards. Main moved the abort flag into the run-state
+		// reducer (see the abort(this.runState) getter above), so this counter is
+		// the only thing left that separates a cancelled run's queued writes from
+		// the resumed run's, and only if it advances monotonically.
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "abortRequested", abandoned: isAbandoned })
 	}
 
@@ -3536,7 +3647,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	requestDispose(): void {
-		this.abort = true
+		// A host teardown never calls abortTask(): disposal has to raise the same
+		// counter, or a write still parked on its path chain publishes after the
+		// task is gone.
+		this.cancellationGeneration++
 		this.driveRunEvent({ tag: "disposeRequested" })
 	}
 
@@ -3565,6 +3679,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public abortTask(isAbandoned = false): Promise<void> {
 		this.requestAbort(isAbandoned)
+
 		this.cancelAssistantMessagePersistence()
 		this.abortPromise ??= this.abortTaskOnce()
 		return this.abortPromise
@@ -3630,6 +3745,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async disposeOnce(): Promise<void> {
 		console.log(`[Task#dispose] disposing task ${this.taskId}.${this.instanceId}`)
 		this.cancelAssistantMessagePersistence()
+		this.cancelPendingPartialMessageUpdate()
 
 		// Release handler-owned host resources (e.g. VS Code configuration listeners).
 		// This is the fallback for leases that never settle; later lease releases
@@ -3685,6 +3801,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		} catch (error) {
 			console.error("Error removing event listeners:", error)
 		}
+
+		// A disposed task is no longer authoritative for what it read. The registry holds
+		// version tokens captured while the task was alive, and a disposed task can still be
+		// reachable through a parent/subtask reference; a guarded write must not accept one of
+		// those tokens for a file this task has not re-read since. Clearing also stops a long
+		// task from pinning every file it ever read.
+		this.observationRegistry.close()
 
 		// Release any terminals associated with this task.
 		try {
@@ -3825,13 +3948,50 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	// Task Loop
 
-	private async initiateTaskLoop(userContent: Anthropic.Messages.ContentBlockParam[]): Promise<void> {
+	/**
+	 * Builds the content blocks for user input. Only user segments expand mentions.
+	 * A slash command in the input can switch the mode.
+	 */
+	public async userInputContent(text: string, segments?: MentionSegment[]): Promise<Anthropic.TextBlockParam[]> {
+		const provider = this.providerRef.deref()
+		const state = provider ? await provider.getState() : undefined
+
+		const { content, mode } = await expandUserMentions({
+			segments: wrapUserMessage(normalizeSegments(text, segments)),
+			cwd: this.cwd,
+			fileContextTracker: this.fileContextTracker,
+			rooIgnoreController: this.rooIgnoreController,
+			showRooIgnoredFiles: state?.showRooIgnoredFiles ?? false,
+			includeDiagnosticMessages: state?.includeDiagnosticMessages ?? true,
+			maxDiagnosticMessages: state?.maxDiagnosticMessages ?? 50,
+			skillsManager: provider?.getSkillsManager(),
+			currentMode: await this.getTaskMode(),
+		})
+
+		// A cancelled task must not switch the mode. A listener can cancel while the content loads.
+		if (this.abort || this.abandoned) return content
+
+		// Switch mode if specified in a slash command's frontmatter
+		if (mode && provider && getModeBySlug(mode, state?.customModes)) {
+			await provider.handleModeSwitch(mode, null)
+		}
+
+		return content
+	}
+
+	private async initiateTaskLoop(
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	): Promise<void> {
 		// Kicks off the checkpoints initialization process in the background.
 		// `getCheckpointService` wraps its full body in a try/catch and returns
 		// `undefined` on failure (see src/core/checkpoints/index.ts), so the
 		// returned promise cannot reject. `void` is sufficient — no `.catch`
 		// arm needed.
 		void getCheckpointService(this)
+
+		// The loop awaits a pending value later. Mark it handled so an early rejection
+		// does not reach the process as unhandled.
+		if (!Array.isArray(userContent)) userContent.catch(() => {})
 
 		let nextUserContent = userContent
 		let includeFileDetails = true
@@ -3864,17 +4024,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	}
 
 	public async recursivelyMakeClineRequests(
-		userContent: Anthropic.Messages.ContentBlockParam[],
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
 		includeFileDetails: boolean = false,
 	): Promise<boolean> {
 		interface StackItem {
 			userContent: Anthropic.Messages.ContentBlockParam[]
+			pendingContent?: Promise<Anthropic.Messages.ContentBlockParam[]> // Resolved after the request row shows
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
 		}
 
-		const stack: StackItem[] = [{ userContent, includeFileDetails, retryAttempt: 0 }]
+		const stack: StackItem[] = [
+			Array.isArray(userContent)
+				? { userContent, includeFileDetails, retryAttempt: 0 }
+				: { userContent: [], pendingContent: userContent, includeFileDetails, retryAttempt: 0 },
+		]
 
 		while (stack.length > 0) {
 			const currentItem = stack.pop()!
@@ -3946,36 +4111,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				}),
 			)
 
-			const provider = this.providerRef.deref()
-			const state = provider ? await provider.getState() : undefined
-
-			const showRooIgnoredFiles = state?.showRooIgnoredFiles ?? false
-			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
-			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
-			const currentMode = await this.getTaskMode()
-
-			const { content: parsedUserContent, mode: slashCommandMode } = await processUserContentMentions({
-				userContent: currentUserContent,
-				cwd: this.cwd,
-				fileContextTracker: this.fileContextTracker,
-				rooIgnoreController: this.rooIgnoreController,
-				showRooIgnoredFiles,
-				includeDiagnosticMessages,
-				maxDiagnosticMessages,
-				skillsManager: provider?.getSkillsManager(),
-				currentMode,
-			})
-
-			// Switch mode if specified in a slash command's frontmatter
-			if (slashCommandMode) {
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const state = await provider.getState()
-					const targetMode = getModeBySlug(slashCommandMode, state?.customModes)
-					if (targetMode) {
-						await provider.handleModeSwitch(slashCommandMode, null)
-					}
-				}
+			// Mention expansion can take time. The request row already shows.
+			if (currentItem.pendingContent) {
+				currentUserContent.push(...(await currentItem.pendingContent))
 			}
 
 			const environmentDetails = await getEnvironmentDetails(this, currentIncludeFileDetails)
@@ -3985,7 +4123,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// where the old user message content may already contain environment details from the previous session.
 			// We check for both opening and closing tags to ensure we're matching complete environment detail blocks,
 			// not just mentions of the tag in regular content.
-			const contentWithoutEnvDetails = parsedUserContent.filter((block) => {
+			const contentWithoutEnvDetails = currentUserContent.filter((block) => {
 				if (block.type === "text" && typeof block.text === "string") {
 					// Check if this text block is a complete environment_details block
 					// by verifying it starts with the opening tag and ends with the closing tag
@@ -4027,6 +4165,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			try {
 				let cacheWriteTokens = 0
+				let cacheWrite1hTokens = 0
+				let cacheWrite12hTokens = 0
 				let cacheReadTokens = 0
 				let inputTokens = 0
 				let outputTokens = 0
@@ -4062,6 +4202,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 							: calculateApiCostOpenAI(
 									streamModelInfo,
@@ -4069,6 +4211,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									outputTokens,
 									cacheWriteTokens,
 									cacheReadTokens,
+									undefined,
+									cacheWrite1hTokens,
+									cacheWrite12hTokens,
 								)
 
 					this.clineMessages[lastApiReqIndex].text = JSON.stringify({
@@ -4128,8 +4273,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// for the turn that earned it: a message the user queues afterward
 				// (a new turn) is fair game for the next ask to answer.
 				this.blanketDeniedCommandThisTurn = false
-				this.presentAssistantMessageLocked = false
-				this.presentAssistantMessageHasPendingUpdates = false
+				this.dispatchState = DispatchState.IDLE
+				this.pendingWork = null
 				// No legacy text-stream tool parser.
 				this.streamingToolCallIndices.clear()
 				const nativeToolCallParserScope = NativeToolCallParser.createScope()
@@ -4216,6 +4361,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens += chunk.inputTokens
 								outputTokens += chunk.outputTokens
 								cacheWriteTokens += chunk.cacheWriteTokens ?? 0
+								cacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+								cacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 								cacheReadTokens += chunk.cacheReadTokens ?? 0
 								totalCost = chunk.totalCost
 								break
@@ -4345,7 +4492,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 														nativeToolCallParserScope,
 													)
 
-										// Stryker disable next-line ConditionalExpression, EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
+										// Stryker disable next-line ConditionalExpression,EqualityOperator: equivalent mutants, streamingKey is always defined here, so both conditions reduce to the partialToolUse check
 										if (partialToolUse && streamingKey !== undefined) {
 											// Reuse the compound key built above: it is exactly the key the start event
 											// registered under, so the delta lookup needs no second encoding.
@@ -4456,6 +4603,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						input: inputTokens,
 						output: outputTokens,
 						cacheWrite: cacheWriteTokens,
+						cacheWrite1h: cacheWrite1hTokens,
+						cacheWrite12h: cacheWrite12hTokens,
 						cacheRead: cacheReadTokens,
 						total: totalCost,
 					}
@@ -4472,6 +4621,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						let bgInputTokens = currentTokens.input
 						let bgOutputTokens = currentTokens.output
 						let bgCacheWriteTokens = currentTokens.cacheWrite
+						let bgCacheWrite1hTokens = currentTokens.cacheWrite1h
+						let bgCacheWrite12hTokens = currentTokens.cacheWrite12h
 						let bgCacheReadTokens = currentTokens.cacheRead
 						let bgTotalCost = currentTokens.total
 
@@ -4481,6 +4632,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								input: number
 								output: number
 								cacheWrite: number
+								cacheWrite1h: number
+								cacheWrite12h: number
 								cacheRead: number
 								total?: number
 							},
@@ -4497,6 +4650,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								inputTokens = tokens.input
 								outputTokens = tokens.output
 								cacheWriteTokens = tokens.cacheWrite
+								cacheWrite1hTokens = tokens.cacheWrite1h
+								cacheWrite12hTokens = tokens.cacheWrite12h
 								cacheReadTokens = tokens.cacheRead
 								totalCost = tokens.total
 
@@ -4518,7 +4673,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									modelId,
 								)
 
-								// Use the appropriate cost function based on the API protocol
+								// Use the appropriate cost function based on the API protocol.
+								// The per-TTL split must be passed here too: without it this
+								// telemetry recompute bills every write at the short-TTL rate,
+								// which is exactly the under-report this PR exists to fix.
 								const costResult =
 									apiProtocol === "anthropic"
 										? calculateApiCostAnthropic(
@@ -4527,6 +4685,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 										: calculateApiCostOpenAI(
 												streamModelInfo,
@@ -4534,6 +4694,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 												tokens.output,
 												tokens.cacheWrite,
 												tokens.cacheRead,
+												undefined,
+												tokens.cacheWrite1h,
+												tokens.cacheWrite12h,
 											)
 
 								TelemetryService.instance.captureLlmCompletion(this.taskId, {
@@ -4574,6 +4737,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgInputTokens += chunk.inputTokens
 									bgOutputTokens += chunk.outputTokens
 									bgCacheWriteTokens += chunk.cacheWriteTokens ?? 0
+									bgCacheWrite1hTokens += chunk.cacheWrite1hTokens ?? 0
+									bgCacheWrite12hTokens += chunk.cacheWrite12hTokens ?? 0
 									bgCacheReadTokens += chunk.cacheReadTokens ?? 0
 									bgTotalCost = chunk.totalCost
 								}
@@ -4592,6 +4757,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -4617,6 +4784,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 										input: bgInputTokens,
 										output: bgOutputTokens,
 										cacheWrite: bgCacheWriteTokens,
+										cacheWrite1h: bgCacheWrite1hTokens,
+										cacheWrite12h: bgCacheWrite12hTokens,
 										cacheRead: bgCacheReadTokens,
 										total: bgTotalCost,
 									},
@@ -4759,7 +4928,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						// name (provider quirk), the compound-key lookup above misses and both the
 						// parser entry and the dedup tracking would stay stale. Resolve the tracked
 						// entry by id and target the real compound key for finalization and cleanup.
-						// Stryker disable next-line ConditionalExpression, LogicalOperator, EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
+						// Stryker disable next-line ConditionalExpression,LogicalOperator,EqualityOperator: equivalent mutants, the both-miss case is unreachable via the raw-chunk pipeline
 						if (finalToolUse === null && toolUseIndex === undefined) {
 							const resolved = NativeToolCallParser.getStreamingToolCallById(
 								event.id,
@@ -5388,6 +5557,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this.api.getModel().info
 	}
 
+	/**
+	 * Report a manageContext result to the webview. Shared by the automatic and emergency
+	 * condense paths so both emit the same events: a surfaced error, and a condense event
+	 * carrying the condenseId that rewind cleanup uses to remove the matching summary.
+	 */
+	private async reportContextManagementResult(result: ContextManagementResult): Promise<void> {
+		if (result.error) {
+			await this.say("condense_context_error", result.error)
+		}
+		if (result.summary) {
+			const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = result
+			const contextCondense: ContextCondense = {
+				summary,
+				cost,
+				newContextTokens,
+				prevContextTokens,
+				condenseId,
+			}
+			await this.say(
+				"condense_context",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				contextCondense,
+			)
+		} else if (result.truncationId) {
+			// Sliding window truncation occurred (fallback when condensing fails or is disabled)
+			const contextTruncation: ContextTruncation = {
+				truncationId: result.truncationId,
+				messagesRemoved: result.messagesRemoved ?? 0,
+				prevContextTokens: result.prevContextTokens,
+				newContextTokens: result.newContextTokensAfterTruncation ?? 0,
+			}
+			await this.say(
+				"sliding_window_truncation",
+				undefined /* text */,
+				undefined /* images */,
+				false /* partial */,
+				undefined /* checkpoint */,
+				undefined /* progressStatus */,
+				{ isNonInteractive: true } /* options */,
+				undefined /* contextCondense */,
+				contextTruncation,
+			)
+		}
+	}
+
 	private async handleContextWindowExceededError(requestModelInfo: ModelInfo): Promise<void> {
 		const state = await this.providerRef.deref()?.getState()
 		const { profileThresholds = {} } = state ?? {}
@@ -5464,6 +5683,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			// Generate environment details to include in the condensed summary
 			const environmentDetails = await getEnvironmentDetails(this, true)
+			const filesReadByRoo = await this.getFilesReadByRooSafely("handleContextWindowExceededError")
 
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
@@ -5476,50 +5696,22 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
 				systemPrompt: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
+				// Recovery must summarize like the automatic path: same prompt and folded file context.
+				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
 				profileThresholds,
 				currentProfileId,
 				metadata,
 				environmentDetails,
+				filesReadByRoo,
+				cwd: this.cwd,
+				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
 			})
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
-
-			if (truncateResult.summary) {
-				const { summary, cost, prevContextTokens, newContextTokens = 0 } = truncateResult
-				const contextCondense: ContextCondense = { summary, cost, newContextTokens, prevContextTokens }
-				await this.say(
-					"condense_context",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					contextCondense,
-				)
-			} else if (truncateResult.truncationId) {
-				// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-				const contextTruncation: ContextTruncation = {
-					truncationId: truncateResult.truncationId,
-					messagesRemoved: truncateResult.messagesRemoved ?? 0,
-					prevContextTokens: truncateResult.prevContextTokens,
-					newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-				}
-				await this.say(
-					"sliding_window_truncation",
-					undefined /* text */,
-					undefined /* images */,
-					false /* partial */,
-					undefined /* checkpoint */,
-					undefined /* progressStatus */,
-					{ isNonInteractive: true } /* options */,
-					undefined /* contextCondense */,
-					contextTruncation,
-				)
-			}
+			await this.reportContextManagementResult(truncateResult)
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
@@ -5776,48 +5968,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
-				if (truncateResult.error) {
-					await this.say("condense_context_error", truncateResult.error)
-				}
-				if (truncateResult.summary) {
-					const { summary, cost, prevContextTokens, newContextTokens = 0, condenseId } = truncateResult
-					const contextCondense: ContextCondense = {
-						summary,
-						cost,
-						newContextTokens,
-						prevContextTokens,
-						condenseId,
-					}
-					await this.say(
-						"condense_context",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						contextCondense,
-					)
-				} else if (truncateResult.truncationId) {
-					// Sliding window truncation occurred (fallback when condensing fails or is disabled)
-					const contextTruncation: ContextTruncation = {
-						truncationId: truncateResult.truncationId,
-						messagesRemoved: truncateResult.messagesRemoved ?? 0,
-						prevContextTokens: truncateResult.prevContextTokens,
-						newContextTokens: truncateResult.newContextTokensAfterTruncation ?? 0,
-					}
-					await this.say(
-						"sliding_window_truncation",
-						undefined /* text */,
-						undefined /* images */,
-						false /* partial */,
-						undefined /* checkpoint */,
-						undefined /* progressStatus */,
-						{ isNonInteractive: true } /* options */,
-						undefined /* contextCondense */,
-						contextTruncation,
-					)
-				}
+				await this.reportContextManagementResult(truncateResult)
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show
@@ -6437,6 +6588,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._messageManager
 	}
 
+	private submitQueuedMessage(queued: QueuedMessage): void {
+		setTimeout(() => {
+			this.submitUserMessage(queued.text, queued.images, undefined, undefined, queued.segments).catch((err) =>
+				console.error(`[Task] Failed to submit queued message:`, err),
+			)
+		}, 0)
+	}
+
 	/**
 	 * Process any queued messages by dequeuing and submitting them.
 	 * This ensures that queued user messages are sent when appropriate,
@@ -6447,13 +6606,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	public processQueuedMessages(): void {
 		try {
 			if (!this.messageQueueService.isEmpty()) {
-				const queued = this.messageQueueService.dequeueMessage()
+				const queued = this.messageQueueService.drain()
 				if (queued) {
-					setTimeout(() => {
-						this.submitUserMessage(queued.text, queued.images).catch((err) =>
-							console.error(`[Task] Failed to submit queued message:`, err),
-						)
-					}, 0)
+					this.submitQueuedMessage(queued)
 				}
 			}
 		} catch (e) {

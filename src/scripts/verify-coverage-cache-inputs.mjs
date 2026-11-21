@@ -1,16 +1,11 @@
+import { createProbe, turboGraph, stashCommit } from "./cache-probe.mjs"
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
-import { tmpdir } from "node:os"
+import { readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs"
 import { resolve } from "node:path"
 import process from "node:process"
 import { test } from "node:test"
 
-const root = resolve(import.meta.dirname, "../..")
-const pnpm = process.platform === "win32" ? process.env.npm_execpath : "pnpm"
-if (!pnpm) throw new Error("pnpm executable path is unavailable")
-const command = process.platform === "win32" ? process.execPath : pnpm
-const args = process.platform === "win32" ? [pnpm] : []
 const lanes = ["api", "core", "services", "misc", "tree-sitter"]
 const taskNames = lanes.flatMap((lane) => [`test:${lane}`, `test:coverage:${lane}`])
 // Data files owned by one lane's test area. A change here must invalidate only
@@ -44,61 +39,8 @@ const laneOwnedTopLevelSpecFiles = {
 }
 let probeRoot
 
-const gitError = (result) => {
-	const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
-	return new Error(details || `git exited with status ${result.status ?? "unknown"}`)
-}
-
-const git = (gitArgs) => {
-	const result = spawnSync("git", gitArgs, { cwd: root, encoding: "utf8" })
-	if (result.status !== 0) throw gitError(result)
-}
-
-const trackedTreeStatus = () =>
-	spawnSync("git", ["status", "--porcelain=v1", "--untracked-files=no"], { cwd: root, encoding: "utf8" })
-
-// Probe the working tree so local runs validate uncommitted task edits. CI
-// runs on a clean tree, where stash create exits without a SHA and this
-// falls back to HEAD. git stash create can exit 1 with empty output when
-// stale index metadata refreshes to a clean tracked tree. Confirm a clean
-// tracked tree before trusting that exit.
-const stashCommit = (result, trackedTree = trackedTreeStatus) => {
-	if (result.status === 0) return result.stdout.trim() || "HEAD"
-	const quietExit = result.status === 1 && !result.error && !result.signal && !result.stdout && !result.stderr
-	if (!quietExit) throw gitError(result)
-	const status = trackedTree()
-	if (status.status !== 0) throw gitError(status)
-	if (status.stdout.trim() !== "") {
-		const changes = status.stdout.trim()
-		throw new Error(`git stash create found no changes, but git status reports tracked changes:\n${changes}`)
-	}
-	return "HEAD"
-}
-
-const worktreeCommit = () => stashCommit(spawnSync("git", ["stash", "create"], { cwd: root, encoding: "utf8" }))
-
 const turboTasks = () => {
-	const result = spawnSync(
-		command,
-		[...args, "turbo", "--cwd", probeRoot, "run", ...taskNames, "--filter=zoo-code", "--dry=json", "--no-daemon"],
-		{ cwd: root, encoding: "utf8" },
-	)
-	if (result.status !== 0) {
-		const details = [result.error?.message, result.signal, result.stderr, result.stdout].filter(Boolean).join("\n")
-		throw new Error(details || `pnpm exited with status ${result.status ?? "unknown"}`)
-	}
-	// pnpm may print warnings before the Turbo graph. The graph is the last
-	// top-level JSON object in the output.
-	const lines = result.stdout.split("\n")
-	let jsonStart = -1
-	for (let i = 0; i < lines.length; i++) {
-		if (lines[i].startsWith("{")) jsonStart = i
-	}
-	if (jsonStart < 0) {
-		const details = [result.error?.message, result.stderr, result.stdout].filter(Boolean).join("\n")
-		throw new Error(details || "turbo dry run produced no JSON graph")
-	}
-	const graph = JSON.parse(lines.slice(jsonStart).join("\n"))
+	const graph = turboGraph(probeRoot, [...taskNames, "--filter=zoo-code"], process.env)
 	return taskNames.map((taskName) => {
 		const task = graph.tasks.find(({ taskId }) => taskId === `zoo-code#${taskName}`)
 		if (!task) throw new Error(`Extension lane missing from Turbo graph: ${taskName}`)
@@ -140,62 +82,10 @@ const expectInvalidatesExactly = (task, changed) => {
 		)
 }
 
-test("stash commit probe rejects git failures and keeps the clean-tree fallback", () => {
-	const cleanTree = () => ({ status: 0, stdout: "" })
-	const dirtyTree = () => ({ status: 0, stdout: " M src/utils/path.ts\n" })
-	const brokenTree = () => ({ status: 128, stdout: "", stderr: "fatal: unable to read the index" })
-	const failures = [
-		{ status: 128, stdout: "", stderr: "fatal: not a git repository" },
-		{ status: null, error: new Error("spawn git ENOENT") },
-		{ status: 1, signal: "SIGTERM", stdout: "", stderr: "" },
-		{ status: 1, stdout: "unexpected output", stderr: "" },
-	]
-
-	assert.equal(stashCommit({ status: 0, stdout: "0f53a1c\n" }, cleanTree), "0f53a1c")
-	assert.equal(stashCommit({ status: 0, stdout: "\n" }, cleanTree), "HEAD")
-	assert.equal(stashCommit({ status: 1, stdout: "", stderr: "" }, cleanTree), "HEAD")
-	for (const result of failures) {
-		assert.throws(
-			() => stashCommit(result, cleanTree),
-			(error) => error.message.length > 0,
-		)
-	}
-	assert.throws(
-		() => stashCommit({ status: 1, stdout: "", stderr: "" }, dirtyTree),
-		/git status reports tracked changes/,
-	)
-	assert.throws(
-		() => stashCommit({ status: 1, stdout: "", stderr: "" }, brokenTree),
-		/fatal: unable to read the index/,
-	)
-})
-
 test("coverage cache input contract", async (context) => {
-	probeRoot = mkdtempSync(resolve(tmpdir(), "zoo-code-coverage-cache-inputs-"))
-	let worktreeAdded = false
-	let cleaned = false
-	const cleanup = () => {
-		if (cleaned) return
-		cleaned = true
-		try {
-			if (worktreeAdded) git(["worktree", "remove", "--force", probeRoot])
-		} finally {
-			rmSync(probeRoot, { recursive: true, force: true })
-		}
-	}
-	const terminate = (signal) => {
-		cleanup()
-		process.kill(process.pid, signal)
-	}
-	const onSigint = () => terminate("SIGINT")
-	const onSigterm = () => terminate("SIGTERM")
-	process.once("SIGINT", onSigint)
-	process.once("SIGTERM", onSigterm)
-
+	const probe = createProbe()
+	probeRoot = probe.probeRoot
 	try {
-		git(["worktree", "add", "--detach", probeRoot, worktreeCommit()])
-		worktreeAdded = true
-
 		await context.test("plain and coverage lanes share identical input sets", () => {
 			const tasks = turboTasks()
 			const inputsByTask = Object.fromEntries(tasks.map((task) => [task.task, task.inputs]))
@@ -314,8 +204,6 @@ test("coverage cache input contract", async (context) => {
 			assert.match(sha, /^[0-9a-f]+$/)
 		})
 	} finally {
-		process.off("SIGINT", onSigint)
-		process.off("SIGTERM", onSigterm)
-		cleanup()
+		probe.cleanup()
 	}
 })

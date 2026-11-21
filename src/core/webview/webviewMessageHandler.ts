@@ -15,11 +15,11 @@ import {
 	type ProviderSettings,
 	type Command as SlashCommand,
 	type WebviewMessage,
-	type EditQueuedMessagePayload,
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
 	checkoutDiffPayloadSchema,
+	editQueuedMessagePayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
@@ -30,18 +30,22 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
+	type MentionSegment,
 } from "@roo-code/types"
+import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
 import { CloudService } from "@roo-code/cloud"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
+import { isInvalidDisplayValue } from "../config/displaySettings"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
 import { findOriginalContent } from "./stripOriginalContent"
 import { handleCheckpointRestoreOperation } from "./checkpointRestoreHandler"
+import { assertRecordedCheckpoint } from "../checkpoints/recordedCheckpoint"
 import { generateErrorDiagnostics } from "./diagnosticsHandler"
 import {
 	handleRequestSkills,
@@ -88,6 +92,7 @@ import {
 	openGitHubAccountManagement,
 } from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
+import { generatedSegments, normalizeSegments, userText } from "../../shared/mentionSegments"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
@@ -224,21 +229,25 @@ export const webviewMessageHandler = async (
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
 	 */
-	const resolveIncomingImages = async (payload: { text?: string; images?: string[] }) => {
+	const resolveIncomingImages = async (payload: { text?: string; images?: string[]; segments: MentionSegment[] }) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
 		const state = await provider.getState()
+		// Scan only user segments, so generated mentions attach no images.
 		const resolved = await resolveImageMentions({
-			text,
+			text: userText(payload.segments),
 			images,
 			cwd: getCurrentCwd(),
 			rooIgnoreController: currentTask?.rooIgnoreController,
 			maxImageFileSize: state.maxImageFileSize,
 			maxTotalImageSize: state.maxTotalImageSize,
 		})
-		return resolved
+		return { text, images: resolved.images }
 	}
+	// Fails closed: segments that are missing or do not match the text are all generated.
+	const segmentsOf = (message: { text?: string; segments?: unknown }) =>
+		normalizeSegments(message.text ?? "", message.segments)
 	/**
 	 * Shared utility to find message indices based on timestamp.
 	 * When multiple messages share the same timestamp (e.g., after condense),
@@ -435,6 +444,7 @@ export const webviewMessageHandler = async (
 		editedContent: string,
 		restoreCheckpoint?: boolean,
 		images?: string[],
+		segments?: MentionSegment[],
 	): Promise<void> => {
 		const currentCline = provider.getCurrentTask()
 		if (!currentCline) {
@@ -554,7 +564,7 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images)
+			await currentCline.submitUserMessage(editedContent, images, undefined, undefined, segments)
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -700,17 +710,28 @@ export const webviewMessageHandler = async (
 
 			provider.isViewLaunched = true
 			break
+		case "webviewHeartbeat":
+			// Confirm renderer liveness and advance the watchdog recovery health window.
+			provider.updateWebviewHeartbeat()
+			break
 		case "newTask":
 			// Initializing new instance of Cline will make sure that any
 			// agentically running promises in old instance don't affect our new
 			// task. This essentially creates a fresh slate for the new task.
 			try {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments: segmentsOf(message),
+				})
 				await provider.createTask(
 					resolved.text,
 					resolved.images,
 					undefined,
-					{ taskId: message.taskId },
+					{
+						taskId: message.taskId,
+						segments: segmentsOf(message),
+					},
 					message.taskConfiguration,
 				)
 				// Task created successfully - notify the UI to reset
@@ -730,15 +751,30 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const segments = segmentsOf(message)
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments,
+				})
 				provider
 					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images, segments)
 			}
 			break
 
-		case "updateSettings":
-			if (message.updatedSettings) {
+		case "updateSettings": {
+			// The settings are written one at a time, in the order sent, and not as a transaction. If a write fails, the
+			// ones before it stay stored and the ones after it are not written. The display settings only change how
+			// times are shown, so a partial save is harmless, and saving again completes it. Either way the webview is
+			// refreshed and, if the request has an id, told whether the save was stored (`settingsSaveResult`): the
+			// settings page keeps the user's edits as unsaved after a failure. The error is then thrown, as it always was.
+			let failed = false
+			let failure: unknown
+
+			try {
+				if (!message.updatedSettings) break
+
 				if (message.updatedSettings.destructiveCommandGuardEnabled === true) {
 					try {
 						const { ensureDcgInstalled } = await import("../../services/destructive-command-guard")
@@ -758,6 +794,12 @@ export const webviewMessageHandler = async (
 				}
 
 				for (const [key, value] of Object.entries(message.updatedSettings)) {
+					// An invalid display value is ignored, before anything is done for it.
+					if (isInvalidDisplayValue(key, value)) {
+						provider.log(`[updateSettings] Ignored an invalid value for ${key}`)
+						continue
+					}
+
 					let newValue = value
 
 					if (key === "language") {
@@ -869,11 +911,33 @@ export const webviewMessageHandler = async (
 
 					await provider.contextProxy.setValue(key as keyof RooCodeSettings, newValue)
 				}
-
-				await provider.postStateToWebview()
+			} catch (error) {
+				failed = true
+				failure = error
 			}
 
+			// A failed refresh must neither undo a stored save nor keep the webview from getting the result.
+			try {
+				await provider.postStateToWebview()
+			} catch (error) {
+				provider.log(
+					`[updateSettings] Could not refresh the webview state: ${error instanceof Error ? error.message : String(error)}`,
+				)
+			}
+
+			if (message.requestId) {
+				await provider.postMessageToWebview({
+					type: "settingsSaveResult",
+					requestId: message.requestId,
+					success: !failed,
+					...(failed ? { error: failure instanceof Error ? failure.message : String(failure) } : {}),
+				})
+			}
+
+			if (failed) throw failure
+
 			break
+		}
 
 		case "terminalOperation":
 			if (message.terminalOperation) {
@@ -980,6 +1044,11 @@ export const webviewMessageHandler = async (
 		}
 		case "exportTaskWithId":
 			await provider.exportTaskWithId(message.text!)
+			break
+		case "renameTaskWithId":
+			if (message.taskId) {
+				await provider.renameTaskWithId(message.taskId, message.text)
+			}
 			break
 		case "getTaskWithAggregatedCosts": {
 			try {
@@ -1112,6 +1181,9 @@ export const webviewMessageHandler = async (
 		case "resetState":
 			await provider.resetState()
 			break
+		case "requestProviderInfo":
+			await handleRequestProviderInfo(provider, message)
+			break
 		case RouterModelsMessageType.flushRouterModels: {
 			const { apiConfiguration } = await provider.getState()
 			const routerNameFlush: RouterName = toRouterName(message.text)
@@ -1150,9 +1222,9 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
-						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
+						[providerIdentifiers.friendli]: {},
 					}
 
 			const safeGetModels = async (options: GetModelsOptions, handler: ApiHandler): Promise<ModelRecord> => {
@@ -1333,22 +1405,6 @@ export const webviewMessageHandler = async (
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
 			})
 
-			// IO Intelligence's /models catalog is public; an optional key can scope
-			// the visible model set. Prefer an explicitly supplied unsaved key.
-			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
-			if (message?.values?.ioIntelligenceApiKey !== undefined) {
-				await flushModels(
-					{ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
-					handlerFor(apiConfiguration, providerIdentifiers.ioIntelligence),
-					true,
-				)
-			}
-
-			candidates.push({
-				key: providerIdentifiers.ioIntelligence,
-				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
-			})
-
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
 			// different allowlist. Prefer an explicitly supplied unsaved key and use the
 			// same key-scoped options for refresh and retrieval.
@@ -1365,6 +1421,9 @@ export const webviewMessageHandler = async (
 				key: providerIdentifiers.nanogpt,
 				options: { provider: providerIdentifiers.nanogpt, apiKey: nanoGptApiKey },
 			})
+
+			// Friendli's /models catalog is public.
+			candidates.push({ key: providerIdentifiers.friendli, options: { provider: providerIdentifiers.friendli } })
 
 			if (!providerFilter || providerFilter === providerIdentifiers.kimiCode) {
 				const { kimiCodeOAuthManager } = await import("../../integrations/kimi-code/oauth")
@@ -1779,19 +1838,30 @@ export const webviewMessageHandler = async (
 			const result = checkoutRestorePayloadSchema.safeParse(message.payload)
 
 			if (result.success) {
-				await provider.cancelTask()
-
 				try {
-					await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
-					return
-				}
+					const taskBeforeCancel = provider.getCurrentTask()
+					// Reject a bad hash before cancelling, so the running task survives.
+					if (taskBeforeCancel) {
+						assertRecordedCheckpoint(taskBeforeCancel, result.data.commitHash)
+					}
 
-				try {
+					await provider.cancelTask()
+
+					try {
+						await pWaitFor(() => provider.getCurrentTask()?.isInitialized === true, { timeout: 3_000 })
+					} catch {
+						vscode.window.showErrorMessage(t("common:errors.checkpoint_timeout"))
+						return
+					}
+
 					await provider.getCurrentTask()?.checkpointRestore(result.data)
-				} catch {
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+				} catch (error) {
+					console.error("[checkpointRestore] checkpointRestore failed:", error)
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -1841,7 +1911,11 @@ export const webviewMessageHandler = async (
 					})
 				} catch (error) {
 					console.error("[completionCheckpointRestore] checkpointRestore failed:", error)
-					vscode.window.showErrorMessage(t("common:errors.checkpoint_failed"))
+					void vscode.window.showErrorMessage(
+						t("common:errors.checkpoint_restore_failed", {
+							error: error instanceof Error ? error.message : String(error),
+						}),
+					)
 				}
 			}
 
@@ -2247,6 +2321,7 @@ export const webviewMessageHandler = async (
 						includeTaskHistoryInEnhance,
 						currentClineMessages: currentCline?.clineMessages,
 						providerSettingsManager: provider.providerSettingsManager,
+						taskId: currentCline?.taskId,
 					})
 
 					if (result.success && result.enhancedText) {
@@ -2543,12 +2618,19 @@ export const webviewMessageHandler = async (
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				// Stored messages carry no segments, so fail closed: nothing is expanded.
+				const editSegments = generatedSegments(message.text)
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments: editSegments,
+				})
 				await handleEditMessageConfirm(
 					message.messageTs,
 					resolved.text,
 					message.restoreCheckpoint,
 					resolved.images,
+					editSegments,
 				)
 			}
 			break
@@ -3957,8 +4039,9 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
-			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			const segments = segmentsOf(message)
+			const resolved = await resolveIncomingImages({ text: message.text, images: message.images, segments })
+			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images, segments)
 			break
 		}
 		case "removeQueuedMessage": {
@@ -3966,9 +4049,23 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "editQueuedMessage": {
-			if (message.payload) {
-				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+			const edit = editQueuedMessagePayloadSchema.safeParse(message.payload)
+			if (edit.success) {
+				const { id, text, segments: given } = edit.data
+				const queue = provider.getCurrentTask()?.messageQueueService
+				// The edit holds the message during the image scan, so a drain cannot send the old text.
+				const token = queue?.beginEdit(id)
+				if (queue && token !== undefined) {
+					let images = edit.data.images
+					try {
+						images = (await resolveIncomingImages({ text, images, segments: segmentsOf(edit.data) })).images
+					} catch (error) {
+						provider.log(`[editQueuedMessage] Image scan failed: ${error}`)
+					}
+					queue.commitEdit(id, token, text, images, given)
+				} else {
+					provider.log("[editQueuedMessage] Edit dropped: the message already left the queue.")
+				}
 			}
 
 			break

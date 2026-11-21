@@ -1,6 +1,5 @@
 {
 	"title": "Worktrees",
-	"done": "Concluído",
 	"description": "Os worktrees do Git permitem que você trabalhe em vários branches ao mesmo tempo em diretórios separados. Cada worktree tem sua própria janela do VS Code com o Zoo Code.",
 	"notGitRepo": "Este workspace não é um repositório Git. Worktrees exigem um repositório Git para funcionar.",
 	"multiRootNotSupported": "Worktrees não são compatíveis com workspaces multi-root. Abra uma única pasta para usar worktrees.",
@@ -10,25 +9,19 @@
 	"noIncludeFile": "Nenhum arquivo .worktreeinclude encontrado",
 	"createFromGitignore": "Criar a partir do .gitignore",
 	"primary": "Principal",
-	"current": "Atual",
 	"locked": "Bloqueado",
 	"detachedHead": "Detached HEAD",
 	"noBranch": "Sem branch",
-	"switchInThisWindow": "Mudar para worktree",
 	"openInNewWindow": "Abrir em uma nova janela",
 	"delete": "Excluir",
 	"newWorktree": "Novo Worktree",
 	"createWorktree": "Criar Worktree",
 	"branchName": "Nome do branch",
-	"createNewBranch": "Criar novo branch",
-	"checkoutExisting": "Fazer checkout de um branch existente",
 	"baseBranch": "Branch base",
 	"loadingBranches": "Carregando branches...",
 	"selectBranch": "Selecionar branch",
 	"searchBranch": "Pesquisar branches...",
 	"noBranchFound": "Nenhum branch encontrado",
-	"localBranches": "Branches locais",
-	"remoteBranches": "Branches remotos",
 	"worktreePath": "Em",
 	"selectWorktreeLocation": "Selecionar local do Worktree",
 	"selectFolderForWorktree": "Selecionar pasta para o novo worktree",
@@ -47,14 +40,12 @@
 	"forceDelete": "Forçar exclusão",
 	"worktreeIsLocked": "worktree está bloqueado",
 	"deleting": "Excluindo...",
-	"close": "Fechar",
 	"showInHomeScreen": "Mostrar worktrees na tela inicial",
 	"selector": {
 		"worktree": "Worktree",
 		"title": "Worktrees",
 		"tooltip": "Alterne entre worktrees",
 		"description": "Os worktrees do Git permitem trabalhar em vários branches simultaneamente. Clique para alternar o workspace.",
-		"settings": "Gerenciar Worktrees",
-		"info": "Os worktrees do Git permitem ter vários diretórios de trabalho conectados ao mesmo repositório."
+		"settings": "Gerenciar Worktrees"
 	}
 }

@@ -145,6 +145,7 @@ export const AutoApproveSettings = ({
 							<p>{t("settings:autoApprove.description")}</p>
 							<p>
 								<Trans
+									t={t}
 									i18nKey="settings:autoApprove.toggleShortcut"
 									components={{
 										SettingsLink: (

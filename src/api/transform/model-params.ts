@@ -137,7 +137,7 @@ export function getModelParams({
 		// Here we simply propagate the resolved effort into the params, while
 		// still treating "disable" as an omission.
 		if (effort && effort !== "disable") {
-			reasoningEffort = effort as ReasoningEffortExtended
+			reasoningEffort = effort
 		}
 	}
 

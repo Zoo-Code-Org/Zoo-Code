@@ -1,4 +1,13 @@
-import type { ModelInfo } from "../model.js"
+import { z } from "zod"
+
+import { type ModelInfo } from "../model.js"
+import { providerIdentifiers } from "../provider-identifiers.js"
+import {
+	API_MODEL_ID_FIELD,
+	apiModelIdProviderModelShape,
+	createModelIdAccessor,
+	createProviderDefinition,
+} from "./common.js"
 
 // https://ai.google.dev/gemini-api/docs/models/gemini
 export type GeminiModelId = keyof typeof geminiModels
@@ -374,3 +383,15 @@ export const geminiModels = {
 		maxThinkingTokens: 24_576,
 	},
 } as const satisfies Record<string, ModelInfo>
+
+export const geminiProviderDefinition = createProviderDefinition({
+	apiProvider: providerIdentifiers.gemini,
+	modelIdKey: API_MODEL_ID_FIELD,
+	getModelId: createModelIdAccessor(API_MODEL_ID_FIELD),
+	getDefaultModelId: () => geminiDefaultModelId,
+	schema: {
+		...apiModelIdProviderModelShape,
+		geminiApiKey: z.string().optional(),
+		googleGeminiBaseUrl: z.string().optional(),
+	},
+})

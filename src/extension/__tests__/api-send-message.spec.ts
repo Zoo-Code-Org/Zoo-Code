@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import * as vscode from "vscode"
 
 import { API } from "../api"
+import { userSegments } from "../../shared/mentionSegments"
 import { ClineProvider } from "../../core/webview/ClineProvider"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
@@ -12,8 +13,8 @@ describe("API - SendMessage Command", () => {
 	let api: API
 	let mockOutputChannel: vscode.OutputChannel
 	let mockProvider: ClineProvider
-	let mockPostMessageToWebview: ReturnType<typeof vi.fn<(...args: any[]) => any>>
-	let mockLog: ReturnType<typeof vi.fn<(...args: any[]) => void>>
+	let mockPostMessageToWebview: ReturnType<typeof vi.fn<(message: unknown) => Promise<void>>>
+	let mockLog: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>
 
 	beforeEach(() => {
 		// Setup mocks
@@ -21,7 +22,7 @@ describe("API - SendMessage Command", () => {
 			appendLine: vi.fn(),
 		} as unknown as vscode.OutputChannel
 
-		mockPostMessageToWebview = vi.fn<(...args: any[]) => any>().mockResolvedValue(undefined)
+		mockPostMessageToWebview = vi.fn<(message: unknown) => Promise<void>>().mockResolvedValue(undefined)
 
 		mockProvider = {
 			context: {} as vscode.ExtensionContext,
@@ -32,12 +33,12 @@ describe("API - SendMessage Command", () => {
 			viewLaunched: true,
 		} as unknown as ClineProvider
 
-		mockLog = vi.fn<(...args: any[]) => void>()
+		mockLog = vi.fn<(...args: unknown[]) => void>()
 
 		// Create API instance with logging enabled for testing
 		api = new API(mockOutputChannel, mockProvider, makeClineProviderFactory(), undefined, true)
 		// Override the log method to use our mock
-		;(api as any).log = mockLog
+		Object.assign(api, { log: mockLog })
 	})
 
 	it("should handle SendMessage command with text only", async () => {
@@ -53,6 +54,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images: undefined,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -72,6 +74,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -90,6 +93,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: undefined,
 			images,
+			segments: userSegments(""),
 		})
 	})
 
@@ -103,6 +107,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: undefined,
 			images: undefined,
+			segments: userSegments(""),
 		})
 	})
 
@@ -129,6 +134,7 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images: undefined,
+			segments: userSegments(messageText ?? ""),
 		})
 	})
 
@@ -150,7 +156,38 @@ describe("API - SendMessage Command", () => {
 			invoke: "sendMessage",
 			text: messageText,
 			images,
+			segments: userSegments(messageText ?? ""),
 		})
 		expect(mockPostMessageToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	describe("when the webview is not launched", () => {
+		const user = (text: string) => ({ text, source: "user" as const })
+
+		it.each([
+			{ label: "text and images", text: "see @/file.ts", images: ["img"], expected: [user("see @/file.ts")] },
+			{ label: "empty text", text: "", images: undefined, expected: [] },
+			{ label: "missing text", text: undefined, images: undefined, expected: [] },
+		])("submits the user text directly with $label", async ({ text, images, expected }) => {
+			const submitUserMessage = vi.fn().mockResolvedValue(undefined)
+			Object.assign(mockProvider, {
+				viewLaunched: false,
+				getCurrentTask: vi.fn().mockReturnValue({ submitUserMessage }),
+			})
+
+			await api.sendMessage(text, images)
+
+			expect(submitUserMessage).toHaveBeenCalledWith(text ?? "", images, undefined, undefined, expected)
+			expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+		})
+
+		it("logs and drops the message when there is no current task", async () => {
+			Object.assign(mockProvider, { viewLaunched: false })
+
+			await api.sendMessage("see @/file.ts")
+
+			expect(mockLog).toHaveBeenCalledWith(expect.stringContaining("no current task"))
+			expect(mockPostMessageToWebview).not.toHaveBeenCalled()
+		})
 	})
 })

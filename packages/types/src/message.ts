@@ -272,6 +272,8 @@ export const clineMessageSchema = z.object({
 	 * Present when `say: "sliding_window_truncation"`.
 	 */
 	contextTruncation: contextTruncationSchema.optional(),
+	// Older delegation messages lack this stamp and require positional link resolution.
+	childTaskId: z.string().optional(),
 	isProtected: z.boolean().optional(),
 	apiProtocol: z.union([z.literal("openai"), z.literal("anthropic")]).optional(),
 	isAnswered: z.boolean().optional(),
@@ -366,6 +368,18 @@ export const tokenUsageSchema = z.object({
 export type TokenUsage = z.infer<typeof tokenUsageSchema>
 
 /**
+ * MentionSegment
+ */
+
+/** A part of a message with a known origin. Only `user` parts may have mentions expanded. */
+export const mentionSegmentSchema = z.object({
+	text: z.string(),
+	source: z.enum(["user", "generated"]),
+})
+
+export type MentionSegment = z.infer<typeof mentionSegmentSchema>
+
+/**
  * QueuedMessage
  */
 
@@ -374,6 +388,8 @@ export const queuedMessageSchema = z.object({
 	id: z.string(),
 	text: z.string(),
 	images: z.array(z.string()).optional(),
+	/** Origin of each part of `text`. Absent means all generated. */
+	segments: z.array(mentionSegmentSchema).optional(),
 })
 
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>

@@ -1,6 +1,5 @@
 {
 	"title": "MCP-Server",
-	"done": "Fertig",
 	"marketplace": "MCP-Marktplatz",
 	"description": "Das <0>Model Context Protocol</0> ermöglicht die Kommunikation mit lokal laufenden MCP-Servern, die zusätzliche Tools und Ressourcen zur Erweiterung der Fähigkeiten von Zoo bereitstellen. Du kannst <1>von der Community erstellte Server</1> verwenden oder Zoo bitten, neue Tools speziell für deinen Workflow zu erstellen (z.B. \"ein Tool hinzufügen, das die neueste npm-Dokumentation abruft\").",
 	"instructions": "Anweisungen",
@@ -56,5 +55,10 @@
 		"running": "Wird ausgeführt",
 		"completed": "Abgeschlossen",
 		"error": "Fehler"
-	}
+	},
+	"resource": {
+		"returns": "Gibt zurück",
+		"unknownMimeType": "Unbekannt"
+	},
+	"toggleServerAriaLabel": "Server {{serverName}} ein-/ausschalten"
 }
