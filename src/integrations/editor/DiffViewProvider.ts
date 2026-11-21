@@ -24,6 +24,23 @@ import { DecorationController } from "./DecorationController"
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
 
+/**
+ * Resolves with undefined once the signal aborts, and never rejects. Some awaits on
+ * the post-save diagnostics path - the provider settings read above all - cannot be
+ * interrupted by an AbortSignal, so a cancelled tail would stay parked on them until
+ * they settle, holding the task and the pre-save diagnostics snapshot the tail
+ * captured. Racing such an await against this settles the tail as soon as the task is
+ * gone; the caller's own abort guard still decides what happens next.
+ */
+function settlesOnAbort(signal: AbortSignal): Promise<undefined> {
+	if (signal.aborted) {
+		return Promise.resolve(undefined)
+	}
+	return new Promise((resolve) => {
+		signal.addEventListener("abort", () => resolve(undefined), { once: true })
+	})
+}
+
 // TODO: https://github.com/cline/cline/pull/3354
 export class DiffViewProvider {
 	// Properties to store the results of saveChanges
@@ -46,6 +63,23 @@ export class DiffViewProvider {
 	private streamedLines: string[] = []
 	private preDiagnostics: [vscode.Uri, vscode.Diagnostic[]][] = []
 	private preEditScrollLine: number | undefined
+	// One controller per post-save diagnostics tail that is still waiting, so task
+	// disposal can cancel the wait instead of leaving a timer (and this provider and
+	// the pre-save diagnostics snapshot it closes over) running past the teardown.
+	private readonly postSaveTails = new Set<AbortController>()
+	// Latched once Task disposal has cancelled the tails. A save that was already awaiting
+	// its file operations can still reach the tail start after that point, and a tail that
+	// begins after disposal would emit into a dead task and keep its providers alive.
+	private tailsDisposed = false
+	// Report ownership across overlapping saves of one path. saveDirectly registers the
+	// newest save together with the earliest baseline of the saves it supersedes, and only
+	// the tail whose generation is still current may report. Without it, two saves that
+	// both finish before the LSP answers each diff the same later problem and the user
+	// gets one error row per save - the older one blaming a write that was clean.
+	private readonly pendingSaveReports = new Map<
+		string,
+		{ baseline: [vscode.Uri, vscode.Diagnostic[]][]; generation: number }
+	>()
 	// Tracks whether the user activated the target file's editor tab during the
 	// diff session. When the file was not already open before the edit, we only
 	// keep it open afterward if the user explicitly interacted with it.
@@ -1121,6 +1155,10 @@ export class DiffViewProvider {
 		this.activeLineController = undefined
 		this.streamedLines = []
 		this.preDiagnostics = []
+		// A reset ends any run of overlapping saves whose report was still pending: the
+		// tail that owned it will never run again, and a stale entry would suppress the
+		// next save's report.
+		this.pendingSaveReports.clear()
 		this.preEditScrollLine = undefined
 		this.diffScrollLine = undefined
 		this.targetFileScrollLine = undefined
@@ -1152,8 +1190,11 @@ export class DiffViewProvider {
 	}> {
 		const absolutePath = path.resolve(this.cwd, relPath)
 
-		// Get diagnostics before editing the file
-		this.preDiagnostics = vscode.languages.getDiagnostics()
+		// Get diagnostics before editing the file. Capture the snapshot locally:
+		// overlapping saveDirectly calls (multi-file edits) must not let a later
+		// call overwrite this one's baseline before its diagnostics tail runs.
+		const preDiagnostics = vscode.languages.getDiagnostics()
+		this.preDiagnostics = preDiagnostics
 
 		// Write the content directly to the file
 		await createDirectoriesForFile(absolutePath)
@@ -1176,52 +1217,181 @@ export class DiffViewProvider {
 				await doc.save()
 			}
 
-			// Force a small delay to ensure diagnostics are triggered
-			await new Promise((resolve) => setTimeout(resolve, 100))
+			// The 100 ms diagnostics-settle wait is carried by the
+			// emitPostSaveDiagnostics tail (inMemoryDocument) instead of here:
+			// blocking the save path delayed every openFile=false save even when
+			// diagnostics were disabled or the write delay was 0.
 		}
 
-		let newProblemsMessage = ""
-
+		// L1 (A2): resolve without awaiting the LSP diagnostics settle. The
+		// diagnostics check becomes a fire-and-forget tail that emits any new
+		// problems via the existing "error" ClineSay type; the returned
+		// newProblemsMessage is therefore always undefined.
 		if (diagnosticsEnabled) {
-			// Add configurable delay to allow linters time to process
-			const safeDelayMs = Math.max(0, writeDelayMs)
+			// The newest save of this path takes over the report, and it inherits the
+			// earliest baseline of the saves it supersedes: the problem an earlier save
+			// exposed is still reported, but by the tail that describes the newest revision
+			// and exactly once instead of once per save.
+			const pendingReport = this.pendingSaveReports.get(absolutePath)
+			const reportBaseline = pendingReport?.baseline ?? preDiagnostics
+			const reportGeneration = (pendingReport?.generation ?? 0) + 1
+			this.pendingSaveReports.set(absolutePath, {
+				baseline: reportBaseline,
+				generation: reportGeneration,
+			})
+			// The method's outer try/catch guarantees it never rejects, so the
+			// fire-and-forget call needs no .catch wrapper.
+			void this.emitPostSaveDiagnostics(relPath, writeDelayMs, reportBaseline, !openFile, reportGeneration)
+		}
 
+		// Store the results for formatFileWriteResponse
+		this.newProblemsMessage = undefined
+		this.userEdits = undefined
+		this.relPath = relPath
+		this.newContent = content
+
+		return {
+			newProblemsMessage: undefined,
+			userEdits: undefined,
+			finalContent: content,
+		}
+	}
+
+	// L1 (A2): fire-and-forget post-save diagnostics. After the write delay,
+	// collects new Error-severity problems and emits them via the existing
+	// "error" ClineSay type (only Error-severity diagnostics reach this branch;
+	// "error" carries no task-failure semantics in core). Abort-safe: say()
+	// rejects when the task is aborted, so the whole body sits inside a
+	// try/catch that degrades to a console.warn — the tail can never reject.
+	// The wait itself is registered in postSaveTails so Task disposal can cancel
+	// it: an unregistered delay keeps the timer, this provider and the pre-save
+	// diagnostics snapshot alive past disposal, and the tail then does stale
+	// diagnostics work against a task that is already gone.
+	private async emitPostSaveDiagnostics(
+		relPath: string,
+		writeDelayMs: number,
+		preDiagnostics: [vscode.Uri, vscode.Diagnostic[]][],
+		inMemoryDocument = false,
+		saveGeneration: number,
+	): Promise<void> {
+		if (this.tailsDisposed) {
+			// Disposal already ran: emitting now would call say() on a disposed task.
+			return
+		}
+
+		const controller = new AbortController()
+		this.postSaveTails.add(controller)
+		try {
+			// Add configurable delay to allow linters time to process. When the
+			// document was opened in memory (openFile=false), the tail also
+			// carries the 100 ms diagnostics-settle wait that used to block
+			// saveDirectly. The signal is the disposal hook: delay() rejects with
+			// AbortError once the task is gone, which is the tail's expected end.
+			const safeDelayMs = Math.max(0, writeDelayMs) + (inMemoryDocument ? 100 : 0)
 			try {
-				await delay(safeDelayMs)
+				await delay(safeDelayMs, { signal: controller.signal })
 			} catch (error) {
-				console.warn(`Failed to apply write delay: ${error}`)
+				if (controller.signal.aborted) {
+					return
+				}
+				throw error
+			}
+			// A cancellation can also land between the wait resolving and the work
+			// starting; either way nothing is queried or emitted after it.
+			if (controller.signal.aborted) {
+				return
 			}
 
-			const postDiagnostics = vscode.languages.getDiagnostics()
+			// Filter to the saved file: saveDirectly resolves before this tail
+			// completes, so in a multi-file write sequence (e.g. apply_patch)
+			// a later file's problems must not be attributed to this relPath.
+			const savedFilePath = path.resolve(this.cwd, relPath)
+			// A newer save of this path owns the report. Reading the workspace snapshot here
+			// would read it after that newer write and re-report its problems against the
+			// save this tail describes, so the superseded tail stops before any diagnostics
+			// work; the survivor holds this run's earliest baseline.
+			if (this.pendingSaveReports.get(savedFilePath)?.generation !== saveGeneration) {
+				return
+			}
+			this.pendingSaveReports.delete(savedFilePath)
+			// arePathsEqual: case-insensitive on Windows, where a relPath whose
+			// casing differs from the diagnostic URI is still the same file.
+			const postDiagnostics = vscode.languages
+				.getDiagnostics()
+				.filter(([uri]) => arePathsEqual(uri.fsPath, savedFilePath))
 
-			// Get diagnostic settings from state
+			// Get diagnostic settings from state. The read is an await the signal cannot
+			// interrupt, so it is raced against the tail's own abort: a slow settings read
+			// used to keep this tail - the task and the pre-save snapshot it captured with
+			// it - alive until it settled, even after the task was disposed.
 			const task = this.taskRef.deref()
-			const state = await task?.providerRef.deref()?.getState()
+			const provider = task?.providerRef.deref()
+			const state = provider
+				? await Promise.race([provider.getState(), settlesOnAbort(controller.signal)])
+				: undefined
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
+			// The settings read is an await too, so disposal can land inside it and the
+			// await still returns normally. Stopping here keeps a gone task from paying for
+			// the formatting pass before the emit guard below.
+			if (controller.signal.aborted) {
+				return
+			}
+
 			const newProblems = await diagnosticsToProblemsString(
-				getNewDiagnostics(this.preDiagnostics, postDiagnostics),
+				getNewDiagnostics(preDiagnostics, postDiagnostics),
 				[vscode.DiagnosticSeverity.Error],
 				this.cwd,
 				includeDiagnosticMessages,
 				maxDiagnosticMessages,
 			)
 
-			newProblemsMessage =
-				newProblems.length > 0 ? `\n\nNew problems detected after saving the file:\n${newProblems}` : ""
-		}
+			// Formatting is awaited too, so a cancellation can land inside it. The emit below
+			// persists an error row into the task, so it must not start once the caller is gone:
+			// say() would otherwise be dropped or land in a task the user already left.
+			if (controller.signal.aborted) {
+				return
+			}
 
-		// Store the results for formatFileWriteResponse
-		this.newProblemsMessage = newProblemsMessage
-		this.userEdits = undefined
-		this.relPath = relPath
-		this.newContent = content
-
-		return {
-			newProblemsMessage,
-			userEdits: undefined,
-			finalContent: content,
+			if (newProblems.length > 0) {
+				// This tail runs writeDelayMs after saveDirectly resolved, so the task has usually
+				// moved on and may be sitting in ask() waiting for the user - the next tool's
+				// approval, completion_result. say() bumps lastMessageTs unless the message is
+				// non-interactive, and ask()'s pWaitFor reads a moved lastMessageTs as
+				// "superseded": the pending ask would throw AskIgnoredError even though the user
+				// never answered. These diagnostics are informational, so they must not be able to
+				// cancel an ask; the "error" channel and the text stay exactly as they were.
+				await task?.say(
+					"error",
+					`New problems detected after saving file: ${relPath}\n\n${newProblems}`,
+					undefined /* images */,
+					undefined /* partial */,
+					undefined /* checkpoint */,
+					undefined /* progressStatus */,
+					{ isNonInteractive: true } /* options */,
+				)
+			}
+		} catch (error) {
+			// Abort-safe: never let a post-save diagnostic emit become an
+			// unhandled rejection (say() rejects when the task is aborted).
+			console.warn(`Post-save diagnostics emit failed: ${error}`)
+		} finally {
+			this.postSaveTails.delete(controller)
 		}
+	}
+
+	/**
+	 * Cancel post-save diagnostics tails that are still waiting. Called when the
+	 * owning task is disposed. Deliberately NOT called from reset(): reset follows a
+	 * successful write, and the tail that write started still has to report the
+	 * problems it is waiting for.
+	 */
+	public cancelPostSaveDiagnosticsTails(): void {
+		this.tailsDisposed = true
+		for (const controller of this.postSaveTails) {
+			controller.abort()
+		}
+		this.postSaveTails.clear()
 	}
 }
