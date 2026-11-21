@@ -37,12 +37,14 @@ export class CustomToolRegistry {
 	private lastLoaded: Map<string, number> = new Map()
 
 	constructor(options?: RegistryOptions) {
-		this.cacheDir =
+		// Resolve once so every reader and the cleanup use the same root.
+		this.cacheDir = path.resolve(
 			options?.cacheDir ??
-			path.join(
-				process.platform === "win32" ? os.homedir() : os.tmpdir(),
-				`dynamic-tools-cache-${process.getuid?.() ?? "user"}`,
-			)
+				path.join(
+					process.platform === "win32" ? os.homedir() : os.tmpdir(),
+					`dynamic-tools-cache-${process.getuid?.() ?? "user"}`,
+				),
+		)
 		// Default to current working directory's node_modules.
 		this.nodePaths = options?.nodePaths ?? [path.join(process.cwd(), "node_modules")]
 		this.extensionPath = options?.extensionPath
@@ -254,8 +256,7 @@ export class CustomToolRegistry {
 
 	private prepareCacheDirectory(): void {
 		// Resolve platform aliases (e.g. /var on macOS), then check ancestors before writing.
-		const normalizedCacheDir = path.resolve(this.cacheDir)
-		let ancestor = path.dirname(normalizedCacheDir)
+		let ancestor = path.dirname(this.cacheDir)
 		const missing: string[] = []
 		while (!fs.lstatSync(ancestor, { throwIfNoEntry: false })) {
 			missing.unshift(path.basename(ancestor))
@@ -278,7 +279,7 @@ export class CustomToolRegistry {
 			fs.mkdirSync(parent, { recursive: true, mode: 0o700 })
 			this.validateCachePath(parent, true)
 		}
-		this.cacheDir = path.join(parent, path.basename(normalizedCacheDir))
+		this.cacheDir = path.join(parent, path.basename(this.cacheDir))
 		fs.mkdirSync(this.cacheDir, { recursive: true, mode: 0o700 })
 		this.validateCachePath(this.cacheDir, true)
 	}

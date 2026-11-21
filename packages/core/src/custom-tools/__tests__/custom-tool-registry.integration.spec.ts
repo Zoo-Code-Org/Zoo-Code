@@ -63,17 +63,20 @@ describe.sequential("CustomToolRegistry integration", () => {
 			expect(fs.readdirSync(cacheDir)).toEqual([])
 		})
 
-		it.each(["", "/.", "/./.", "/nested/.."])("clears only the configured cache with suffix %s", (suffix) => {
-			fs.mkdirSync(cacheDir, { mode: 0o700 })
-			fs.mkdirSync(path.join(cacheDir, "nested"))
-			const cachedBundle = path.join(cacheDir, "bundle.mjs")
-			const sibling = path.join(toolDir, "sentinel")
-			fs.writeFileSync(cachedBundle, "cached")
-			fs.writeFileSync(sibling, "keep")
-			new CustomToolRegistry({ cacheDir: `${cacheDir}${suffix}` }).clearCache()
-			expect(fs.existsSync(cachedBundle)).toBe(false)
-			expect(fs.readFileSync(sibling, "utf8")).toBe("keep")
-		})
+		it.each(["", "/.", "/./.", "/nested/..", "/missing/.."])(
+			"clears only the configured cache with suffix %s",
+			(suffix) => {
+				fs.mkdirSync(cacheDir, { mode: 0o700 })
+				fs.mkdirSync(path.join(cacheDir, "nested"))
+				const cachedBundle = path.join(cacheDir, "bundle.mjs")
+				const sibling = path.join(toolDir, "sentinel")
+				fs.writeFileSync(cachedBundle, "cached")
+				fs.writeFileSync(sibling, "keep")
+				new CustomToolRegistry({ cacheDir: `${cacheDir}${suffix}` }).clearCache()
+				expect(fs.existsSync(cachedBundle)).toBe(false)
+				expect(fs.readFileSync(sibling, "utf8")).toBe("keep")
+			},
+		)
 
 		it.each(["permissions", "symlink", "symlink-dot"])("does not clear an unsafe cache root: %s", (kind) => {
 			fs.mkdirSync(cacheDir, { mode: 0o700 })
