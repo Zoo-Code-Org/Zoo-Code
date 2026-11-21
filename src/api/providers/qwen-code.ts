@@ -21,9 +21,9 @@ import {
 	isRequestAborted,
 	settleOnAbort,
 	type OpenAiRequestOptions,
-	createTimeoutError,
 	isTimeoutAbort,
 } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 const QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
@@ -492,7 +492,9 @@ export class QwenCodeHandler extends BaseProvider implements SingleCompletionHan
 			// TimeoutError when the merged signal ended because its own timer
 			// elapsed. The auth wait and the request both settle through here.
 			if (isRequestAborted(error, requestSignal) && isTimeoutAbort(requestSignal)) {
-				throw createTimeoutError("Qwen Code")
+				// The deadline was classified from an abort-shaped failure already in hand;
+				// keep it as cause so the report holds both the deadline and what it was seen through.
+				throw createTimeoutError("Qwen Code", "completion request", error)
 			}
 			throw error
 		}

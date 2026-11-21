@@ -44,4 +44,28 @@ describe("createTimeoutError", () => {
 		expect(error.name).toBe("TimeoutError")
 		expect(error.message).toBe("The Gemini completion request timed out")
 	})
+
+	it("names the phase that the phase-less build dropped", () => {
+		// A catalog wait is model discovery. Collapsing the duplicate definition into
+		// this one is what lets a caller report the phase that actually stalled.
+		const error = createTimeoutError("Friendli", "model discovery")
+		expect(error.name).toBe("TimeoutError")
+		expect(error.message).toBe("The Friendli model discovery timed out")
+	})
+
+	it("carries the failure the deadline was detected through", () => {
+		// A stalled response body or a late SDK rejection is not the deadline itself;
+		// cause keeps both facts in one report.
+		const cause = new Error("Response body stalled")
+		const error = createTimeoutError("Unbound", "completion request", cause)
+		expect(error.message).toBe("The Unbound completion request timed out")
+		expect(error.cause).toBe(cause)
+	})
+
+	it("leaves cause unset when the caller has no underlying failure", () => {
+		// A timer that elapsed on its own has nothing to attribute. Passing an
+		// undefined cause would make the error look attributed when it is not.
+		const error = createTimeoutError("Vercel AI Gateway", "model discovery")
+		expect("cause" in error).toBe(false)
+	})
 })
