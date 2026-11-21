@@ -137,7 +137,7 @@ export const getAnthropicProviderReasoning = ({
 	}
 
 	// Sonnet 5.5 enables adaptive thinking when this field is absent.
-	if (modelId === "claude-sonnet-5-5") {
+	if (modelId === "claude-sonnet-5-5" || modelId === "anthropic/claude-sonnet-5-5") {
 		return { type: "between_tools" }
 	}
 

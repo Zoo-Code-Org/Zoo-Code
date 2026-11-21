@@ -605,7 +605,7 @@ describe("OpenRouter API", () => {
 				},
 				inputModality: ["text", "image"],
 				outputModality: ["text"],
-				maxTokens: 128000,
+				maxTokens: 8192,
 				supportedParameters: ["reasoning", "include_reasoning"],
 			})
 
