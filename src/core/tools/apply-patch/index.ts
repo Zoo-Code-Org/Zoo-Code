@@ -11,4 +11,4 @@ export type { Hunk, UpdateFileChunk, ApplyPatchArgs } from "./parser"
 export { seekSequence } from "./seek-sequence"
 
 export { applyChunksToContent, processHunk, processAllHunks, ApplyPatchError } from "./apply"
-export type { ApplyPatchFileChange } from "./apply"
+export type { ApplyPatchFileChange, PatchReadIntent } from "./apply"
