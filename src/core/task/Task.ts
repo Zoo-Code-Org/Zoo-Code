@@ -1770,10 +1770,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.apiConversationHistory = ensureMessageIdentifiers(messages)
 	}
 
-	/**
-	 * Updates a Cline message in the webview and emits an event.
-	 * Non-partial messages are synced to cloud telemetry if not already synced.
-	 */
 	private lastPartialMessagePostTs = 0
 	private pendingPartialMessageTimer: ReturnType<typeof setTimeout> | undefined
 	private pendingPartialMessage: ClineMessage | undefined
@@ -1835,9 +1831,30 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.pendingPartialMessage = undefined
 	}
 
-	private async updateClineMessage(message: ClineMessage) {
+	/**
+	 * Posts a message update to the webview only.
+	 *
+	 * The webview renders the durable on-disk state, so callers must gate
+	 * this post on a successful `saveClineMessages()`: posting an update the
+	 * disk does not back would let a reload restore stale content over it.
+	 */
+	private async postMessageUpdated(message: ClineMessage) {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+	}
+
+	/**
+	 * Emits the Message "updated" event to IPC/CLI consumers and syncs the
+	 * message to cloud telemetry when it is complete and not already synced.
+	 *
+	 * Unlike `postMessageUpdated` this is intentionally NOT gated on
+	 * persistence: IPC/CLI consumers read the in-memory task state directly
+	 * and never reload from disk, so suppressing the emit on a failed save
+	 * would leave their view of the in-memory truth stale. Cloud capture is
+	 * ts-keyed (`cloudSyncedMessageTimestamps`), so a later successful save
+	 * re-running this path cannot double-report the same message.
+	 */
+	private async emitMessageUpdated(message: ClineMessage) {
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 
 		// Check if we should sync to cloud and haven't already synced this message
@@ -1852,6 +1869,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Track that this message has been synced to cloud
 			this.cloudSyncedMessageTimestamps.add(message.ts)
 		}
+	}
+
+	/**
+	 * Updates a Cline message in the webview and emits an event.
+	 * Non-partial messages are synced to cloud telemetry if not already synced.
+	 */
+	private async updateClineMessage(message: ClineMessage) {
+		await this.postMessageUpdated(message)
+		await this.emitMessageUpdated(message)
 	}
 
 	/**
@@ -2857,6 +2883,40 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.processQueuedMessages()
 	}
 
+	/**
+	 * Returns the index of a stranded in-flight partial "say" snapshot of the
+	 * same type whose text is a prefix (or extension) of `text`, or -1 if none
+	 * exists.
+	 *
+	 * A partial stream can be interrupted by other messages (tool use, api_req,
+	 * ...) being appended while it is in flight, which strands its partial
+	 * snapshot before the stream resumes or completes. Appending a fresh message
+	 * in that case would persist — and the webview would render — the same
+	 * content twice, so callers merge into the stranded snapshot instead.
+	 *
+	 * Empty text never matches, on either side. `m.text.startsWith("")` is true
+	 * for every stored text, so an empty write (`AttemptCompletionTool` passes
+	 * `result ?? ""`) would otherwise adopt an abandoned snapshot from an
+	 * earlier turn: the streaming write would overwrite its text and the
+	 * completing write would finalize it as this turn's message, re-stamping
+	 * `lastMessageTs` with the dead row's ts.
+	 */
+	private findStalePartialSaySnapshotIndex(type: ClineSay, text: string | undefined): number {
+		if (typeof text !== "string" || text === "") {
+			return -1
+		}
+		return findLastIndex(
+			this.clineMessages,
+			(m) =>
+				m.partial === true &&
+				m.type === "say" &&
+				m.say === type &&
+				typeof m.text === "string" &&
+				m.text !== "" &&
+				(text.startsWith(m.text) || m.text.startsWith(text)),
+		)
+	}
+
 	async say(
 		type: ClineSay,
 		text?: string,
@@ -2890,22 +2950,65 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.postPartialMessageUpdate(lastMessage, "say")
 				} else {
 					// This is a new partial message, so add it with partial state.
-					const sayTs = Date.now()
+					const staleSnapshotIndex = this.findStalePartialSaySnapshotIndex(type, text)
 
-					if (!options.isNonInteractive) {
-						this.lastMessageTs = sayTs
+					if (staleSnapshotIndex !== -1) {
+						// The in-flight partial snapshot of this stream was stranded
+						// by an intervening message; keep streaming into it instead of
+						// starting a duplicate entry that would render twice.
+						const staleSnapshot = this.clineMessages[staleSnapshotIndex]
+						staleSnapshot.text = text
+						staleSnapshot.images = images
+						staleSnapshot.partial = partial
+						staleSnapshot.progressStatus = progressStatus
+						// Move the merged row to the tail so the next delta takes the
+						// in-place fast path above instead of re-entering this branch
+						// and awaiting another full save. `ts` is untouched: it is the
+						// webview's virtuoso key, so re-stamping it would remount the row.
+						this.clineMessages.splice(staleSnapshotIndex, 1)
+						this.clineMessages.push(staleSnapshot)
+						// A stranded snapshot merge has no guaranteed later save, so
+						// persist the merged delta before the webview update — the
+						// same save-then-post pattern as the complete-merge branch.
+						const saved = await this.saveClineMessages()
+						if (saved) {
+							// Fire-and-forget: see updateClineMessage call above for the
+							// rationale on the .catch arm.
+							this.updateClineMessage(staleSnapshot).catch((error) => {
+								console.error("[Task#say] updateClineMessage failed:", error)
+							})
+						} else {
+							// The persistence write failed: the on-disk record still carries
+							// the pre-merge snapshot while the in-memory message is updated,
+							// so the webview-only post is skipped (a reload would restore
+							// the stale text; the next saveClineMessages() call re-persists
+							// the full message array and repairs the disk record). IPC/CLI
+							// consumers never reload from disk, so the Message "updated"
+							// emit and the cloud capture stay ungated: suppressing them
+							// would leave their view of the in-memory truth stale.
+							this.emitMessageUpdated(staleSnapshot).catch((error) => {
+								console.error("[Task#say] emitMessageUpdated failed:", error)
+							})
+							console.error("[Task#say] saveClineMessages failed; skipping webview update")
+						}
+					} else {
+						const sayTs = Date.now()
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = sayTs
+						}
+
+						await this.addToClineMessages({
+							ts: sayTs,
+							type: "say",
+							say: type,
+							text,
+							images,
+							partial,
+							contextCondense,
+							contextTruncation,
+						})
 					}
-
-					await this.addToClineMessages({
-						ts: sayTs,
-						type: "say",
-						say: type,
-						text,
-						images,
-						partial,
-						contextCondense,
-						contextTruncation,
-					})
 				}
 			} else {
 				// New now have a complete version of a previously partial message.
@@ -2934,21 +3037,62 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					})
 				} else {
 					// This is a new and complete message, so add it like normal.
-					const sayTs = Date.now()
+					const staleSnapshotIndex = this.findStalePartialSaySnapshotIndex(type, text)
 
-					if (!options.isNonInteractive) {
-						this.lastMessageTs = sayTs
+					if (staleSnapshotIndex !== -1) {
+						// The complete version of a stranded partial snapshot: replace
+						// it in place so the frozen snapshot is not persisted (and
+						// rendered) as a duplicate.
+						const staleSnapshot = this.clineMessages[staleSnapshotIndex]
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = staleSnapshot.ts
+						}
+
+						staleSnapshot.text = text
+						staleSnapshot.images = images
+						staleSnapshot.partial = false
+						staleSnapshot.progressStatus = progressStatus
+
+						// Instead of streaming partialMessage events, we do a save
+						// and post like normal to persist to disk.
+						const saved = await this.saveClineMessages()
+
+						if (saved) {
+							// Fire-and-forget: see updateClineMessage call above for the
+							// rationale on the .catch arm.
+							this.updateClineMessage(staleSnapshot).catch((error) => {
+								console.error("[Task#say] updateClineMessage failed:", error)
+							})
+						} else {
+							// Same durable-state gate as the partial-merge branch above: the
+							// on-disk record still carries the partial snapshot, so the
+							// webview-only post is skipped (a reload would restore a spinner
+							// over a finished message; the next saveClineMessages() repairs
+							// the disk). IPC/CLI consumers never reload from disk, so the
+							// Message "updated" emit and the cloud capture stay ungated.
+							this.emitMessageUpdated(staleSnapshot).catch((error) => {
+								console.error("[Task#say] emitMessageUpdated failed:", error)
+							})
+							console.error("[Task#say] saveClineMessages failed; skipping webview update")
+						}
+					} else {
+						const sayTs = Date.now()
+
+						if (!options.isNonInteractive) {
+							this.lastMessageTs = sayTs
+						}
+
+						await this.addToClineMessages({
+							ts: sayTs,
+							type: "say",
+							say: type,
+							text,
+							images,
+							contextCondense,
+							contextTruncation,
+						})
 					}
-
-					await this.addToClineMessages({
-						ts: sayTs,
-						type: "say",
-						say: type,
-						text,
-						images,
-						contextCondense,
-						contextTruncation,
-					})
 				}
 			}
 		} else {
