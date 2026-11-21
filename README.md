@@ -46,13 +46,13 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.98.0
+## What is new in Zoo Code v3.98.1
 
-- 🎟️ Preview the upcoming Zoo Pass subscription. 2 week free access; limited spots
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
-- 🔌 **Expanded model and provider support:** Use GPT-6.1 Terra and fetch the latest Friendli model list.
-- 🛡️ **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
+- 💫Preview the Zoo Pass with unlimited GLM-5.3-Flash free until Dec 1 with any amount of money on your Zoo Gateway account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Models and reasoning: Use GPT-6.2 Sol, GPT-6.2 Astra, and Claude Sonnet 5.5. Set reasoning effort for each LiteLLM profile.
+- 🛡️ Security: Improve skill and command metadata parsing, mention handling, provider links, and CLI approval checks.
+- 🔧 Fixes: Correct OpenAI service-tier costs, recognize workspace symbolic links, and translate more UI labels.
 
 <details>
   <summary>🌐 Available languages</summary>

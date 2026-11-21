@@ -421,7 +421,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.98.0-titles-models-reliability" // v3.98.0 task titles, model support, and reliability
+	public readonly latestAnnouncementId = "nov-2026-v3.98.1-pass-models-security" // v3.98.1 Zoo Pass, model support, and security
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
