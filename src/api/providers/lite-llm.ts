@@ -400,7 +400,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	getThoughtSignatureOrigin(): string | undefined {
-		return this.lastThoughtSignature ? this.thoughtSignatureOrigin : undefined
+		return this.thoughtSignatureOrigin
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {

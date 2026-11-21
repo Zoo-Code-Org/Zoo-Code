@@ -988,8 +988,11 @@ describe("LiteLLMHandler", () => {
 									? decodesCorruptId(call) || (listed && invalidOrMissing(call))
 									: listed && call.sig !== undefined,
 							)
+							// SignatureDelivered: a LiteLLM backend gets back the signature it minted.
+							const delivered = !(minted && source === target) || sent[0]?.sig === signature
 							expect(sent).toHaveLength(n)
 							expect(rejected).toEqual([])
+							expect(delivered).toBe(true)
 						},
 					)
 				})
