@@ -1,11 +1,11 @@
 import { memo, type MouseEvent, type ReactNode, useState } from "react"
 import { Trans } from "react-i18next"
-import { SiDiscord, SiReddit, SiX } from "react-icons/si"
 
 import { Package } from "@roo/package"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { vscode } from "@src/utils/vscode"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@src/components/ui"
+import { SiDiscord, SiReddit, SiX } from "react-icons/si"
 import { EXTERNAL_LINKS } from "@src/constants/externalLinks"
 
 interface AnnouncementProps {
