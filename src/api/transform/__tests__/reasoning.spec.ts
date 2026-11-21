@@ -1,6 +1,12 @@
 // npx vitest run src/api/transform/__tests__/reasoning.spec.ts
 
-import type { ModelInfo, ProviderSettings, ReasoningEffortWithMinimal } from "@roo-code/types"
+import {
+	geminiModels,
+	vertexModels,
+	type ModelInfo,
+	type ProviderSettings,
+	type ReasoningEffortWithMinimal,
+} from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 import {
@@ -10,6 +16,7 @@ import {
 	getOpenAiReasoning,
 	getRooReasoning,
 	getGeminiReasoning,
+	isGeminiThinkingLevel,
 	GetModelReasoningOptions,
 	OpenRouterReasoningParams,
 	AnthropicReasoningParams,
@@ -732,6 +739,71 @@ describe("reasoning.ts", () => {
 	})
 
 	describe("Gemini reasoning (effort models)", () => {
+		describe.each([
+			["Gemini", geminiModels],
+			["Vertex", vertexModels],
+		])("new model thinking levels on %s", (_provider, catalog: Record<string, ModelInfo>) => {
+			it.each(["gemini-3.8-flash", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"])(
+				"preserves each supported choice for %s",
+				(id) => {
+					const model = catalog[id]
+					if (!model) {
+						expect(id).toBe("gemini-4-neon")
+						return
+					}
+					for (const level of ["minimal", "low", "medium", "high", "xhigh", "disable", undefined] as const) {
+						const supported =
+							Array.isArray(model.supportsReasoningEffort) &&
+							level !== undefined &&
+							level !== "disable" &&
+							model.supportsReasoningEffort.includes(level)
+						expect(
+							getGeminiReasoning({
+								model,
+								reasoningBudget: undefined,
+								settings: { reasoningEffort: level },
+							}),
+						).toEqual(supported ? { thinkingLevel: level, includeThoughts: true } : undefined)
+					}
+				},
+			)
+		})
+
+		it.each(["minimal", "low", "medium", "high", "xhigh"] as const)(
+			"preserves the supported %s thinking level",
+			(level) => {
+				expect(isGeminiThinkingLevel(level)).toBe(true)
+				expect(
+					getGeminiReasoning({
+						model: { ...baseModel, supportsReasoningEffort: [level] },
+						reasoningBudget: undefined,
+						settings: { reasoningEffort: level },
+					}),
+				).toEqual({ thinkingLevel: level, includeThoughts: true })
+			},
+		)
+
+		it.each([undefined, null, "invalid", "disable", "XHIGH", 1])(
+			"rejects the invalid thinking level %s",
+			(level) => {
+				expect(isGeminiThinkingLevel(level)).toBe(false)
+			},
+		)
+
+		it.each(["minimal", "xhigh"] as const)("uses the model default for unsupported %s", (level) => {
+			expect(
+				getGeminiReasoning({
+					model: {
+						...baseModel,
+						supportsReasoningEffort: ["low", "medium", "high"],
+						reasoningEffort: "medium",
+					},
+					reasoningBudget: undefined,
+					settings: { reasoningEffort: level },
+				}),
+			).toEqual({ thinkingLevel: "medium", includeThoughts: true })
+		})
+
 		it("should return thinkingLevel when effort is set to low or high and budget is not used", () => {
 			const geminiModel: ModelInfo = {
 				...baseModel,

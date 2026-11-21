@@ -34,7 +34,7 @@ export type AnthropicProviderReasoningParams =
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
 // Valid Gemini thinking levels for effort-based reasoning
-const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
+const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const
 
 export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number]
 
@@ -208,7 +208,7 @@ export const getGeminiReasoning = ({
 			? model.reasoningEffort
 			: selectedEffort
 
-	// Effort-based models on Google GenAI support minimal/low/medium/high levels.
+	// Accept only known Google GenAI thinking levels.
 	if (!effortToUse || !isGeminiThinkingLevel(effortToUse)) {
 		return undefined
 	}

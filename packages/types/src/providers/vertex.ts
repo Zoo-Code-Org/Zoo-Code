@@ -15,6 +15,45 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
+	// New models: leave unverified defaults and capability fields unset.
+	// Live requests accept budget and temperature but do not report whether they apply.
+	// https://aistudio.google.com/docs/models/gemini-3.8-flash
+	"gemini-3.8-flash": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		// Promo prices end Dec 31, 2026. From Jan 1, 2027: input $1.50, output $7.50, cache read $0.15.
+		inputPrice: 0.75,
+		outputPrice: 3.75,
+		cacheReadsPrice: 0.075,
+	},
+	// https://aistudio.google.com/docs/models/gemini-4-carbon
+	"gemini-4-carbon": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high"],
+		// Promo prices end Nov 30, 2026. From Dec 1, 2026: input $4, output $20, cache read $0.20.
+		inputPrice: 2,
+		outputPrice: 10,
+		cacheReadsPrice: 0.1,
+	},
+	// https://aistudio.google.com/docs/models/gemini-4-hydrogen
+	"gemini-4-hydrogen": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		inputPrice: 1.5,
+		outputPrice: 7.5,
+		cacheReadsPrice: 0.075,
+	},
 	// https://cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
 	// Available in the global, us, and eu locations.
 	"gemini-4-argon": {
