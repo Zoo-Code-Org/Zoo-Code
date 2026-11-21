@@ -1,10 +1,10 @@
 ---- MODULE OpenAiServiceTier ----
 \* Source: response service_tier in handleStreamResponse and processEvent.
+\* Normalize: normalizeResponseServiceTier. Capture: captureResponseMetadata (openai-native.ts).
 \* Sink: normalizeUsage sends one tier to applyServiceTierPricing and calculateApiCostOpenAI.
 \* Failure: Fast uses base rates or skips the long-context rate.
 \* Invariant: Fast uses priority at both cost readers. Other tiers keep their meaning.
-\* Before review: expect catalog or routing mismatches. Each provider must use its own catalog.
-\* Review: 0 covered, 1 added, 0 gap. PR 2484, thread PRRT_kwDOSK-bwM66Hdu8.
+\* Review: 0 covered, 1 added, 4 gap. PR 2484, thread PRRT_kwDOSK-bwM66Hdu8 and supplied review summary.
 \* Added: FastUsesPriority and OtherTiersKeepMeaning narrow the catalog invariant.
 \* Expect: Raw fails on fast. Fixed holds. Prices and token counts are oracles.
 \* Result: Raw fails FastUsesPriority on fast. Fixed holds in all 20 states. No new failure was found.
@@ -13,6 +13,12 @@
 \* Scope: price math and response transport are outside this model. The property test checks both.
 \* Gate: run all configs and the property test. Raw and DroppedStatus must fail. Fixed and the test must pass.
 \* Property test: src/api/providers/__tests__/openai-service-tier.spec.ts.
+\* Not modeled: unknown response tiers and the SDK-to-fetch fallback reset. The property test covers both.
+\* Review gaps: #1 is PR scope and description. #2, #3 and #4 are spec documentation. State invariants cannot check them.
+\* Review fixes: document the tier work in the PR; remove stale text, name the functions and state the model limits.
+\* Review expect: header changes leave the model results unchanged. No new runtime failure is expected.
+\* Review result: Fixed passes in 180 states. Raw and DroppedStatus fail FastUsesPriority. All 448 provider tests pass.
+\* Review cost: three TLC runs take less than 1 second each. Agent work takes about 5 minutes. No new failure was found.
 
 \* Simplification expect: one capture rule keeps status, core and legacy tiers before usage.
 \* Failure: removal of fallback capture loses a status tier before a later usage event.
