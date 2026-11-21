@@ -276,6 +276,8 @@ export class CodeIndexManager {
 
 		this._isRecoveringFromError = true
 		try {
+			// Dispose the watcher before recovery clears its owner.
+			this._orchestrator?.stopWatcher()
 			// Clear error state
 			this._stateManager.setSystemState("Standby", "")
 		} catch (error) {

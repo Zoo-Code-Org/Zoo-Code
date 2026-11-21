@@ -552,6 +552,25 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			;(manager as any)._serviceFactory = {}
 		})
 
+		it.each([1, 2, 4])(
+			"disposes each tripped watcher before clearing it across %i recoveries",
+			async (restarts) => {
+				const orchestrator = manager["_orchestrator"]!
+				for (let restart = 0; restart < restarts; restart++) {
+					const stop = vi.spyOn(orchestrator, "stopWatcher").mockImplementation(() => {
+						expect(manager["_orchestrator"]).toBe(orchestrator)
+					})
+					manager["_orchestrator"] = orchestrator
+					await manager.recoverFromError()
+					expect(stop).toHaveBeenCalledTimes(1)
+					expect(manager["_orchestrator"]).toBeUndefined()
+					await manager.recoverFromError()
+					expect(stop).toHaveBeenCalledTimes(1)
+					stop.mockRestore()
+				}
+			},
+		)
+
 		it("should clear error state when recoverFromError is called", async () => {
 			// Act
 			await manager.recoverFromError()
