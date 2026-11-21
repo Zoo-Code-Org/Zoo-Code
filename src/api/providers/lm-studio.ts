@@ -30,12 +30,12 @@ import {
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
 	createAbortError,
-	createTimeoutError,
 	isRequestAborted,
 	isTimeoutAbort,
 	settleOnAbort,
 	type OpenAiRequestOptions,
 } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -330,7 +330,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	 * and the outer completion catch, so it lives in one helper.
 	 */
 	private toCompletionAbortError(requestSignal: AbortSignal | undefined): Error {
-		return isTimeoutAbort(requestSignal) ? createTimeoutError("LM Studio") : createAbortError("LM Studio")
+		return isTimeoutAbort(requestSignal)
+			? createTimeoutError("LM Studio", "completion request")
+			: createAbortError("LM Studio")
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
