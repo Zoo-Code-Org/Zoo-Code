@@ -577,12 +577,58 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						// Best-effort only
 					}
 
+					// This guard returns before tool.handle(), so handle()'s parse-failure teardown
+					// never runs on the malformed-completion path: the per-task stream entry and its
+					// TaskAborted listener would outlive the call, a retained streamFailed mark would
+					// suppress this task's later diff previews, and a diff document the stream opened
+					// would keep content the user never approved. Release this task's state before
+					// emitting the result. The guard owns the single tool_result a native tool call
+					// must produce, so the tool's handleError folds the failure it reports into that
+					// one result instead of pushing a second one.
+					const abandonedStreamFailure: { report?: string } = {}
+					let reportedStreamFailure = false
+					if (block.name === "write_to_file") {
+						try {
+							reportedStreamFailure = await writeToFileTool.releaseStreamStateOnParseFailure(cline, {
+								handleError: async (action, error) => {
+									// Store the report before touching the UI: the failure text is the only
+									// copy of it, and a chat row that cannot be saved must not cost the model
+									// the tool_result this guard owes the provider.
+									abandonedStreamFailure.report = `Error ${action}: ${JSON.stringify(serializeError(error))}`
+									try {
+										await cline.say("error", `Error ${action}:\n${error.message}`)
+									} catch (reportError) {
+										// A chat row that cannot be saved must not cost the model the tool_result
+										// this guard owes the provider, and it must not change which failure that
+										// result reports: letting it escape here would also lose the hook's answer
+										// on whether the parse error is still worth mentioning.
+										console.error("Error saving abandoned write_to_file error row:", reportError)
+									}
+								},
+							})
+						} catch (teardownError) {
+							// The teardown protects this call from a leak; it must never be the reason the
+							// mandatory tool_result and the block-completion bookkeeping below are skipped.
+							console.error("Error releasing abandoned write_to_file stream state:", teardownError)
+						}
+					}
+					// The hook returns true when the failure it reported replaces the parse error. When it
+					// reports anyway and still returns false - a refused rollback with no captured streaming
+					// error is a second, distinct failure - the model must also learn the call could not be
+					// finalized, so both facts go into the one tool_result.
+					let resultContent = errorMessage
+					if (abandonedStreamFailure.report) {
+						resultContent = reportedStreamFailure
+							? abandonedStreamFailure.report
+							: `${abandonedStreamFailure.report}\n${errorMessage}`
+					}
+
 					// Push tool_result directly without setting didAlreadyUseTool so streaming can
 					// continue gracefully.
 					cline.pushToolResultToUserContent({
 						type: "tool_result",
 						tool_use_id: sanitizeToolUseId(toolCallId),
-						content: formatResponse.toolError(errorMessage),
+						content: formatResponse.toolError(resultContent),
 						is_error: true,
 					})
 
