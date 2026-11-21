@@ -34,9 +34,17 @@ export function useZooGatewayRouterModelsSync() {
 				return
 			}
 
+			const merge = (current: RouterModels | undefined) =>
+				current ? { ...current, [providerIdentifiers.zooGateway]: zooModels } : current
+
+			// Settings and the chat model selector read the provider-scoped key.
+			queryClient.setQueryData<RouterModels>(
+				[RouterModelsMessageType.routerModels, providerIdentifiers.zooGateway],
+				(current) => merge(current) ?? partial,
+			)
 			queryClient.setQueryData<RouterModels>(
 				[RouterModelsMessageType.routerModels, allRouterModelsProvider],
-				(current) => (current ? { ...current, [providerIdentifiers.zooGateway]: zooModels } : partial),
+				merge,
 			)
 		} catch {
 			// Ignore: bulk router fetch may still be in flight.

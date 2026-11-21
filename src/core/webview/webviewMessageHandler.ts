@@ -1487,6 +1487,13 @@ export const webviewMessageHandler = async (
 				routerModels,
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
+
+			// A rejected session clears the Zoo token during discovery; refresh state so the
+			// settings panel shows the sign-in prompt instead of an empty model list.
+			const zooGatewayIndex = modelFetchPromises.findIndex(({ key }) => key === providerIdentifiers.zooGateway)
+			if (zooGatewayIndex !== -1 && results[zooGatewayIndex].status === "rejected") {
+				await provider.postStateToWebview()
+			}
 			break
 		}
 		case OllamaModelsMessageType.requestOllamaModels: {

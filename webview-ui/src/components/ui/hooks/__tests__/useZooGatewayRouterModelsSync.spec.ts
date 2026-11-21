@@ -100,6 +100,34 @@ describe("useZooGatewayRouterModelsSync", () => {
 		})
 	})
 
+	it("replaces an empty provider-scoped catalog that settings read before sign-in", async () => {
+		setAuthenticated(true)
+		const queryClient = makeQueryClient()
+		queryClient.setQueryData(["routerModels", "zoo-gateway"], asRouterModels({ "zoo-gateway": {} }))
+
+		renderSyncHook(queryClient)
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "zooGatewayCredentialsReady" } }))
+
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<RouterModels>(["routerModels", "zoo-gateway"])
+			expect(cached?.["zoo-gateway"]).toEqual(zooModels)
+		})
+	})
+
+	it("seeds the provider-scoped key but does not create a partial all-providers entry", async () => {
+		setAuthenticated(true)
+		const queryClient = makeQueryClient()
+
+		renderSyncHook(queryClient)
+		window.dispatchEvent(new MessageEvent("message", { data: { type: "zooGatewayCredentialsReady" } }))
+
+		await waitFor(() => {
+			const cached = queryClient.getQueryData<RouterModels>(["routerModels", "zoo-gateway"])
+			expect(cached?.["zoo-gateway"]).toEqual(zooModels)
+		})
+		expect(queryClient.getQueryData(["routerModels", "all"])).toBeUndefined()
+	})
+
 	it("does not overwrite the cache when the fetch returns no zoo-gateway models", async () => {
 		setAuthenticated(true)
 		mockFetchRouterModels.mockResolvedValue(asRouterModels({ "zoo-gateway": {} }))

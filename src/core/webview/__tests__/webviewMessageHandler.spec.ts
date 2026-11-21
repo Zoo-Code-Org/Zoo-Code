@@ -1133,6 +1133,35 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
+	it("refreshes webview state when Zoo Gateway discovery fails so a cleared session shows sign-in", async () => {
+		mockGetModels.mockRejectedValueOnce(new Error("Zoo Gateway session is no longer valid"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: { [providerIdentifiers.zooGateway]: {} },
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not refresh webview state when Zoo Gateway discovery succeeds", async () => {
+		mockGetModels.mockResolvedValueOnce({
+			"zai/glm-5": { maxTokens: 4096, contextWindow: 8192, supportsPromptCache: false },
+		})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
 	it("successfully fetches models from all providers", async () => {
 		const mockModels: ModelRecord = {
 			"model-1": {

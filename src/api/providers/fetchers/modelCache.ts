@@ -21,7 +21,7 @@ import { GetModelsOptions } from "../../../shared/api"
 
 import type { ApiHandler } from "../../index"
 import { getKimiCodeModels } from "./kimi-code"
-import { getZooGatewayModels } from "./zoo-gateway"
+import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "./zoo-gateway"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -323,7 +323,13 @@ async function resolveAuthScopedModels(
 
 			return fetched.models
 		} catch (error) {
-			if (existing && authSessionHasModels(existing.models)) {
+			// A rejected session must reach the UI as a sign-in prompt, not be masked by the
+			// previous catalog.
+			if (
+				existing &&
+				authSessionHasModels(existing.models) &&
+				!(error instanceof ZooGatewayModelsUnauthorizedError)
+			) {
 				return existing.models
 			}
 			throw error

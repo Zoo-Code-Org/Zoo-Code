@@ -79,7 +79,7 @@ import {
 	resetModelCacheTransientStateForTests,
 } from "../modelCache"
 import { getKimiCodeModels } from "../kimi-code"
-import { getZooGatewayModels } from "../zoo-gateway"
+import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "../zoo-gateway"
 
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 const mockGetKimiCodeModels = getKimiCodeModels as Mock<typeof getKimiCodeModels>
@@ -1429,6 +1429,43 @@ describe("auth session cache", () => {
 
 		expect(refreshed).toEqual(zooModels)
 		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+	})
+
+	it("keeps prior catalog when a revalidation after TTL fails", async () => {
+		vi.useFakeTimers()
+		try {
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				.mockRejectedValueOnce(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60_000 + 1)
+
+			await expect(getModels(options, zooGatewayHandler)).resolves.toEqual(zooModels)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("surfaces an unauthorized revalidation instead of masking it with the prior catalog", async () => {
+		vi.useFakeTimers()
+		try {
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				.mockRejectedValueOnce(new ZooGatewayModelsUnauthorizedError())
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60_000 + 1)
+
+			await expect(getModels(options, zooGatewayHandler)).rejects.toBeInstanceOf(
+				ZooGatewayModelsUnauthorizedError,
+			)
+		} finally {
+			vi.useRealTimers()
+		}
 	})
 
 	it("clears session cache on sign-out helper so the same identity refetches", async () => {

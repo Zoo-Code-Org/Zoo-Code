@@ -3,7 +3,7 @@ import axios from "axios"
 import type { ModelInfo } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
-import { getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
+import { clearZooCodeToken, getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
 
 import {
 	type VercelAiGatewayModel,
@@ -13,6 +13,17 @@ import {
 
 // Bound model discovery so a network stall can't hang provider initialization paths.
 const MODEL_DISCOVERY_TIMEOUT_MS = 15_000
+
+/**
+ * Thrown when the gateway rejects the session token. The session is cleared before
+ * this is thrown so the UI can prompt for sign-in instead of showing an empty catalog.
+ */
+export class ZooGatewayModelsUnauthorizedError extends Error {
+	constructor() {
+		super("Zoo Gateway session is no longer valid")
+		this.name = "ZooGatewayModelsUnauthorizedError"
+	}
+}
 
 /**
  * getZooGatewayModels
@@ -60,7 +71,7 @@ export async function getZooGatewayModels(
 
 		if (!result.success) {
 			console.error(`Zoo Gateway models response is invalid ${JSON.stringify(result.error.format())}`)
-			return { kind: "ok", models }
+			throw new Error("Zoo Gateway models response is invalid")
 		}
 
 		for (const model of result.data.data) {
@@ -77,20 +88,26 @@ export async function getZooGatewayModels(
 
 		return { kind: "ok", models, etag }
 	} catch (error) {
-		// Log only safe fields; never serialize the full error object because it
-		// includes request config/headers which carry the bearer session token.
+		// Log and rethrow only safe fields; never serialize or rethrow the original error
+		// because its request config/headers carry the bearer session token.
 		const err = error as {
 			message?: string
 			name?: string
 			code?: string
 			response?: { status?: number; statusText?: string }
 		}
+		const status = err.response?.status
 		console.error(
-			`Error fetching Zoo Gateway models: name=${err.name ?? "Error"} code=${err.code ?? "unknown"} status=${err.response?.status ?? "unknown"} ${err.response?.statusText ?? ""} message=${err.message ?? "unknown error"}`,
+			`Error fetching Zoo Gateway models: name=${err.name ?? "Error"} code=${err.code ?? "unknown"} status=${status ?? "unknown"} ${err.response?.statusText ?? ""} message=${err.message ?? "unknown error"}`,
 		)
-	}
 
-	return { kind: "ok", models }
+		if (status === 401) {
+			await clearZooCodeToken()
+			throw new ZooGatewayModelsUnauthorizedError()
+		}
+
+		throw new Error(`Zoo Gateway models request failed (status=${status ?? "none"} code=${err.code ?? "unknown"})`)
+	}
 }
 
 /**

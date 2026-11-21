@@ -4,10 +4,12 @@ import axios from "axios"
 
 import type { ApiHandlerOptions } from "../../../../shared/api"
 import type { VercelAiGatewayModel } from "../vercel-ai-gateway"
-import { getZooGatewayModels, parseZooGatewayModel } from "../zoo-gateway"
+import { clearZooCodeToken } from "../../../../services/zoo-code-auth"
+import { getZooGatewayModels, parseZooGatewayModel, ZooGatewayModelsUnauthorizedError } from "../zoo-gateway"
 
 vitest.mock("axios")
 vitest.mock("../../../../services/zoo-code-auth", () => ({
+	clearZooCodeToken: vitest.fn(async function () {}),
 	getCachedZooCodeToken: vitest.fn(function () {
 		return ""
 	}),
@@ -182,7 +184,7 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(result).toEqual({ kind: "ok", models: {} })
 		})
 
-		it("returns {} and never leaks the error object when the request fails", async () => {
+		it("throws a sanitized error and never leaks the original when the request fails", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			const failure = Object.assign(new Error("Network error"), {
 				config: { headers: { Authorization: "Bearer should-never-be-logged" } },
@@ -191,14 +193,34 @@ describe("Zoo Gateway Fetchers", () => {
 			})
 			mockAxiosGet.mockRejectedValueOnce(failure)
 
-			const result = await getZooGatewayModels(gatewayOptions())
+			const thrown = await getZooGatewayModels(gatewayOptions()).catch((error: unknown) => error)
 
-			expect(result).toEqual({ kind: "ok", models: {} })
+			expect(thrown).toBeInstanceOf(Error)
+			expect(thrown).not.toBe(failure)
+			expect(thrown).not.toHaveProperty("config")
+			expect((thrown as Error).message).toContain("status=502")
+			expect((thrown as Error).message).not.toContain("should-never-be-logged")
+			expect(clearZooCodeToken).not.toHaveBeenCalled()
 			const logged = consoleErrorSpy.mock.calls.map((args) => String(args[0])).join("\n")
 			expect(logged).toContain("status=502")
 			expect(logged).toContain("code=ECONNRESET")
 			expect(logged).not.toContain("should-never-be-logged")
 			expect(logged).not.toContain("Authorization")
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("clears the session and throws an unauthorized error on 401", async () => {
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
+			mockAxiosGet.mockRejectedValueOnce(
+				Object.assign(new Error("Request failed with status code 401"), {
+					response: { status: 401, statusText: "Unauthorized" },
+				}),
+			)
+
+			await expect(getZooGatewayModels(gatewayOptions())).rejects.toBeInstanceOf(
+				ZooGatewayModelsUnauthorizedError,
+			)
+			expect(clearZooCodeToken).toHaveBeenCalledTimes(1)
 			consoleErrorSpy.mockRestore()
 		})
 
@@ -232,13 +254,11 @@ describe("Zoo Gateway Fetchers", () => {
 			if (result.kind !== "ok") return
 			expect(result.models["anthropic/claude-sonnet-4"].description).toBe("Claude Sonnet 4")
 		})
-		it("returns {} on a structurally broken response instead of throwing", async () => {
+		it("throws on a structurally broken response instead of reporting an empty catalog", async () => {
 			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
 			mockAxiosGet.mockResolvedValueOnce({ status: 200, headers: {}, data: { unexpected: true } })
 
-			const result = await getZooGatewayModels(gatewayOptions())
-
-			expect(result).toEqual({ kind: "ok", models: {} })
+			await expect(getZooGatewayModels(gatewayOptions())).rejects.toThrow()
 			expect(consoleErrorSpy).toHaveBeenCalled()
 			consoleErrorSpy.mockRestore()
 		})
