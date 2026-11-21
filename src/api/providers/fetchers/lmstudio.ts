@@ -43,6 +43,9 @@ type Instance = z.infer<typeof instanceSchema>
 // Loading large model files can take minutes; discovery keeps its shorter deadline.
 export const LM_STUDIO_MODEL_LOAD_TIMEOUT_MS = 10 * 60_000
 const modelsWithLoadedDetails = new Map<string, Set<string>>()
+const warnedFallbacks = new Set<string>()
+const preparationAttempts = new Map<string, number>()
+const PREPARATION_RETRY_MS = 30_000
 const serverVersions = new Map<string, "v1" | "v0" | "openai">()
 type PendingLoad = { promise: Promise<void>; controller: AbortController; waiters: number }
 const pendingLoads = new Map<string, PendingLoad>()
@@ -115,9 +118,13 @@ const discoveryEndpoints = [
 async function discoverModels(baseUrl: string, externalSignal?: AbortSignal): Promise<Discovery> {
 	const signal = mergeAbortSignalAndTimeout(externalSignal, MODEL_CATALOG_FETCH_TIMEOUT_MS)
 	let firstServerError: Error | undefined
+	let fallbackReason = "unsupported route"
 	for (const [index, { path, fallbackNote, parse }] of discoveryEndpoints.entries()) {
 		const last = index === discoveryEndpoints.length - 1
-		if (fallbackNote) console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} ${fallbackNote}`)
+		if (fallbackNote && !warnedFallbacks.has(baseUrl)) {
+			warnedFallbacks.add(baseUrl)
+			console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} ${fallbackNote}: ${fallbackReason}`)
+		}
 		try {
 			const { data } = await axios.get<unknown>(`${baseUrl}${path}`, { signal })
 			const parsed = parse(data, baseUrl)
@@ -125,12 +132,14 @@ async function discoverModels(baseUrl: string, externalSignal?: AbortSignal): Pr
 			// Older APIs may return HTTP 200 with an error string for an unsupported route.
 			const serverError = errorBodySchema.safeParse(data)
 			if (!serverError.success) throw last ? (firstServerError ?? parsed.error) : parsed.error
+			fallbackReason = "HTTP 200 with an unsupported-route error body"
 			firstServerError ??= new Error(serverError.data.error)
 			if (last) throw firstServerError
 		} catch (error) {
 			if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
 			throwIfAborted(signal)
 			if (!isUnsupportedEndpoint(error)) throw error
+			fallbackReason = `HTTP ${axios.isAxiosError(error) ? error.response?.status : "unsupported"}`
 			// Keep the earlier server message only when the last endpoint is also unsupported.
 			if (last) throw firstServerError ?? error
 		}
@@ -184,6 +193,7 @@ export const forceFullModelDetailsLoad = async (
 		// only resolve by its catalog key; instance aliases already imply a load.
 		const loadKey = JSON.stringify([baseUrl, modelId])
 		let pending = pendingLoads.get(loadKey)
+		if (!pending && Date.now() - (preparationAttempts.get(loadKey) ?? -Infinity) < PREPARATION_RETRY_MS) return
 		if (!pending) {
 			const controller = new AbortController()
 			const loadSignal = controller.signal
@@ -198,16 +208,25 @@ export const forceFullModelDetailsLoad = async (
 					llms.find(({ key }) => key === modelId) ??
 					llms.find(({ loaded_instances }) => loaded_instances.some(({ id }) => id === modelId))
 				// Preserve unmatched SDK paths for chat rather than guessing a key.
-				if (!model) return
+				if (!model) {
+					preparationAttempts.set(loadKey, Date.now())
+					return
+				}
 				if (!selectInstance(model, modelId)) {
 					console.info(`LM Studio model load started at ${getLoggableOrigin(baseUrl)}`)
-					await axios.post(
-						`${baseUrl}/api/v1/models/load`,
-						{ model: model.key },
-						{
-							signal: mergeAbortSignalAndTimeout(loadSignal, LM_STUDIO_MODEL_LOAD_TIMEOUT_MS),
-						},
-					)
+					const requestSignal = mergeAbortSignalAndTimeout(loadSignal, LM_STUDIO_MODEL_LOAD_TIMEOUT_MS)
+					try {
+						await axios.post(
+							`${baseUrl}/api/v1/models/load`,
+							{ model: model.key },
+							{
+								signal: requestSignal,
+							},
+						)
+					} catch (error) {
+						if (isTimeoutAbort(requestSignal)) throw new Error("LM Studio model load timed out")
+						throw error
+					}
 					console.info(`LM Studio model load completed at ${getLoggableOrigin(baseUrl)}`)
 				}
 				throwIfAborted(loadSignal)
@@ -215,7 +234,10 @@ export const forceFullModelDetailsLoad = async (
 					{ provider: providerIdentifiers.lmstudio, baseUrl, signal: loadSignal },
 					handler,
 					true,
+					true,
 				)
+				throwIfAborted(loadSignal)
+				preparationAttempts.set(loadKey, Date.now())
 			})().finally(() => {
 				if (pendingLoads.get(loadKey)?.promise === promise) pendingLoads.delete(loadKey)
 			})
@@ -233,7 +255,8 @@ export const forceFullModelDetailsLoad = async (
 			}
 		}
 	} catch (error) {
-		logModelError("refreshing", error, baseUrl)
+		if (signal?.aborted && !isTimeoutAbort(signal)) return
+		logModelError("loading or refreshing", error, baseUrl)
 	}
 }
 
@@ -281,6 +304,9 @@ export async function getLMStudioModels(
 				models[model.id] = { ...lMStudioDefaultModelInfo, description: model.id, supportsImages: false }
 		}
 		if (opts?.commit !== false && settleRefresh(baseUrl, ticket)) {
+			for (const key of preparationAttempts.keys()) {
+				if (JSON.parse(key)[0] === baseUrl) preparationAttempts.delete(key)
+			}
 			serverVersions.set(baseUrl, catalog.version)
 			modelsWithLoadedDetails.set(baseUrl, loadedDetails)
 			instanceAliases.set(baseUrl, aliases)

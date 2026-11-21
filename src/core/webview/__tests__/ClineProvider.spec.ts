@@ -1147,19 +1147,24 @@ describe("ClineProvider", () => {
 		},
 	)
 
-	test("cancels LM Studio preparation through the task metadata controller and releases it", async () => {
-		// Preparation reads configuration and owns only this task's metadata controller.
+	test.each([false, true])("releases only its own preparation controller (replaced=%s)", async (replaced) => {
+		// Preparation uses only the configuration and metadata controller of this task double.
 		const task = {
 			apiConfiguration: { apiProvider: providerIdentifiers.lmstudio, lmStudioModelId: "test-model" },
 			metadataFetchAbortController: undefined,
 		} as unknown as Task
+		let ownedSignal: AbortSignal | undefined
+		const replacement = new AbortController()
 		vi.mocked(forceFullModelDetailsLoad).mockImplementationOnce(async (_url, _model, _handler, signal) => {
+			ownedSignal = signal
 			expect(signal).toBe(task.metadataFetchAbortController?.signal)
-			task.metadataFetchAbortController?.abort()
-			expect(signal?.aborted).toBe(true)
+			expect(signal?.aborted).toBe(false)
+			if (replaced) task.metadataFetchAbortController = replacement
 		})
 		await provider.performPreparationTasks(task)
-		expect(task.metadataFetchAbortController).toBeUndefined()
+		expect(ownedSignal?.aborted).toBe(true)
+		expect(task.metadataFetchAbortController).toBe(replaced ? replacement : undefined)
+		expect(replacement.signal.aborted).toBe(false)
 	})
 
 	test.each([undefined, "http://localhost:1234"])(

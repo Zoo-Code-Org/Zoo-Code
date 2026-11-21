@@ -19,6 +19,7 @@
 \* Found: Current fails FreshWins (a stale refresh overwrites a newer one). GenOrphan fails NoOrphanCommit (the flush ignores the abort).
 \* Both are real. The replay is in lmstudio.interleavings.spec.ts. The fix is a refresh ticket and the signal on flushModels.
 \* Code check (step 10): lmstudio.interleavings.spec.ts runs the invariants on the real code in every settle order.
+\* The flush action assumes a new request. LmStudioPreparation models the pre-load flight boundary from PR 2170.
 \* Not modeled: serverVersions, the HTTP calls, the server side of a load, and the gap between a settle and finally.
 \* Cost: each run takes under 20 seconds. Agent time is not measured.
 

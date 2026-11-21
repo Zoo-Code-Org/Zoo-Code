@@ -37,7 +37,9 @@ const deferred = (): Deferred => {
 	return d
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+	get.mockResolvedValue({ data: { models: [] } })
+	await getLMStudioModels(baseUrl)
 	get.mockReset()
 	post.mockReset()
 	mockFlushModels.mockReset()

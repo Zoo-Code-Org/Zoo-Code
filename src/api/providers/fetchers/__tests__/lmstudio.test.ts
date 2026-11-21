@@ -403,9 +403,13 @@ describe("LM Studio explicit loading", () => {
 				expect(timeout).toHaveBeenLastCalledWith(
 					phase === "discovery" ? MODEL_CATALOG_FETCH_TIMEOUT_MS : LM_STUDIO_MODEL_LOAD_TIMEOUT_MS,
 				)
-				deadline.abort()
+				deadline.abort(new DOMException("deadline", "TimeoutError"))
 				expect(requestSignal?.aborted).toBe(true)
 				await pending
+				expect(console.error).toHaveBeenCalledWith(
+					expect.any(String),
+					`LM Studio model ${phase === "load" ? "load" : "discovery"} timed out`,
+				)
 				expect(mockFlushModels).not.toHaveBeenCalled()
 				timeout.mockRestore()
 				await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
@@ -423,6 +427,7 @@ describe("LM Studio explicit loading", () => {
 		expect(mockFlushModels).toHaveBeenCalledExactlyOnceWith(
 			{ provider: providerIdentifiers.lmstudio, baseUrl, signal: expect.any(AbortSignal) },
 			handler,
+			true,
 			true,
 		)
 	})
@@ -570,6 +575,17 @@ describe("LM Studio explicit loading", () => {
 })
 
 describe("LM Studio review regressions", () => {
+	it("warns once per URL when discovery falls back and includes the reason", async () => {
+		vi.mocked(console.warn).mockClear()
+		const url = "http://fallback-warning:1234"
+		for (let attempt = 0; attempt < 2; attempt++) {
+			get.mockRejectedValueOnce(httpError(404)).mockResolvedValueOnce({ data: { data: [] } })
+			await getLMStudioModels(url)
+		}
+		expect(console.warn).toHaveBeenCalledTimes(1)
+		expect(console.warn).toHaveBeenCalledWith(expect.stringContaining("HTTP 404"))
+	})
+
 	it("keeps preview metadata out of runtime state", async () => {
 		get.mockResolvedValueOnce(nativeResponse()).mockResolvedValueOnce(nativeResponse([]))
 		await getLMStudioModels(baseUrl)
@@ -577,6 +593,34 @@ describe("LM Studio review regressions", () => {
 		await getLMStudioModels(baseUrl, { commit: false })
 		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(true)
 		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toEqual(alias)
+	})
+
+	it("preserves committed metadata after a failed preview", async () => {
+		get.mockResolvedValueOnce(nativeResponse())
+		await getLMStudioModels(baseUrl)
+		const alias = getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)
+		get.mockRejectedValueOnce(new Error("preview failed"))
+		expect(await getLMStudioModels(baseUrl, { commit: false })).toEqual({})
+		expect(hasLoadedFullDetails(modelKey, baseUrl)).toBe(true)
+		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toEqual(alias)
+	})
+
+	it("limits repeated preparation for a missing model until retry or catalog refresh", async () => {
+		const now = vi.spyOn(Date, "now").mockReturnValue(100_000)
+		try {
+			get.mockResolvedValue({ data: { models: [] } })
+			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
+			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
+			expect(get).toHaveBeenCalledTimes(1)
+			now.mockReturnValue(130_001)
+			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
+			expect(get).toHaveBeenCalledTimes(2)
+			await getLMStudioModels(baseUrl)
+			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
+			expect(get).toHaveBeenCalledTimes(4)
+		} finally {
+			now.mockRestore()
+		}
 	})
 
 	it("does not commit a successful response that arrives after cancellation", async () => {
