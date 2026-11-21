@@ -520,7 +520,7 @@ describe("PostHogTelemetryClient", () => {
 			expect(mockPostHogClient.captureException).not.toHaveBeenCalled()
 		})
 
-		it("should capture errors with nested metadata and override error.message with extracted message", () => {
+		it("should normalize nested metadata without changing the source message", () => {
 			const client = new PostHogTelemetryClient()
 			client.updateTelemetryState(true)
 
@@ -535,14 +535,15 @@ describe("PostHogTelemetryClient", () => {
 
 			client.captureException(error)
 
-			// The implementation overrides error.message with the extracted message from getErrorMessage
-			expect(error.message).toBe("Upstream provider error: model overloaded")
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
-				$app_version: undefined,
-			})
+			expect(error.message).toBe("Generic request failed")
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(
+				expect.objectContaining({ message: "Upstream provider error: model overloaded", stack: error.stack }),
+				"test-machine-id",
+				{ $app_version: undefined },
+			)
 		})
 
-		it("should capture errors with nested error.message and override error.message with extracted message", () => {
+		it("should normalize nested error.message without changing the source message", () => {
 			const client = new PostHogTelemetryClient()
 			client.updateTelemetryState(true)
 
@@ -556,11 +557,12 @@ describe("PostHogTelemetryClient", () => {
 
 			client.captureException(error)
 
-			// The implementation overrides error.message with the extracted message from getErrorMessage
-			expect(error.message).toBe("Upstream provider: connection timeout")
-			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(error, "test-machine-id", {
-				$app_version: undefined,
-			})
+			expect(error.message).toBe("Generic request failed")
+			expect(mockPostHogClient.captureException).toHaveBeenCalledWith(
+				expect.objectContaining({ message: "Upstream provider: connection timeout", stack: error.stack }),
+				"test-machine-id",
+				{ $app_version: undefined },
+			)
 		})
 
 		it("should use primary message when no nested error structure exists", () => {
