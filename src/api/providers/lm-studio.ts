@@ -27,15 +27,16 @@ import type {
 import { getModels, getModelsFromCache } from "./fetchers/modelCache"
 import { getLMStudioModels } from "./fetchers/lmstudio"
 import {
+	bridgeExternalAbortSignal,
 	mergeAbortSignalAndTimeout,
 	throwIfAborted,
 	createAbortError,
-	createTimeoutError,
 	isRequestAborted,
 	isTimeoutAbort,
 	settleOnAbort,
 	type OpenAiRequestOptions,
 } from "./utils/abort-signal"
+import { createTimeoutError } from "./utils/request-timeout"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 
@@ -120,22 +121,17 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 			return result
 		}
 
-		// Request-local abort controller — a class field would outlive this
-		// request and let concurrent requests abort each other. It is created
-		// before the token counts so an abort landing while either count is
-		// pending settles this generator promptly instead of waiting for the
-		// count to finish.
-		const requestController = new AbortController()
-		const onExternalAbort = () => {
-			requestController.abort()
-		}
+		// Request-local cancellation scope — a class field would outlive this request and let
+		// concurrent requests abort each other. It is established before the token counts so an
+		// abort landing while either count is pending settles this generator promptly instead
+		// of waiting for the count to finish. The bridge relays the caller's signal into the
+		// controller (a caller that already aborted reaches it the same way) and still hands
+		// back a request-local signal when the caller passed none, which the counts, the SDK
+		// request options and the pre-issue guard below all need.
+		const { controller: requestController, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
 		const externalSignal = metadata?.abortSignal
-		if (externalSignal) {
-			// Nothing is awaited between throwIfAborted above and this registration,
-			// so the signal cannot have aborted in between; the listener alone covers
-			// an abort landing while either token count is pending.
-			externalSignal.addEventListener("abort", onExternalAbort)
-		}
 
 		try {
 			let inputTokens = 0
@@ -295,11 +291,12 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 		} finally {
 			// Cancel the in-flight SDK request if the consumer stopped iterating
 			// early (break or return): the external signal may never fire in that
-			// case, and only the request-local signal reaches the SDK.
+			// case, and only the request-local signal reaches the SDK. Detaching the
+			// bridge's listener runs on the same three paths — completion, failure
+			// and early exit — so no completed request leaves one attached to the
+			// caller's long-lived signal.
 			requestController.abort()
-			if (externalSignal) {
-				externalSignal.removeEventListener("abort", onExternalAbort)
-			}
+			removeExternalAbortListener()
 		}
 	}
 
@@ -330,7 +327,9 @@ export class LmStudioHandler extends BaseProvider implements SingleCompletionHan
 	 * and the outer completion catch, so it lives in one helper.
 	 */
 	private toCompletionAbortError(requestSignal: AbortSignal | undefined): Error {
-		return isTimeoutAbort(requestSignal) ? createTimeoutError("LM Studio") : createAbortError("LM Studio")
+		return isTimeoutAbort(requestSignal)
+			? createTimeoutError("LM Studio", "completion request")
+			: createAbortError("LM Studio")
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
