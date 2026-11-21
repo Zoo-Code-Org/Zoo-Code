@@ -8,6 +8,26 @@ vi.mock("node:fs", () => ({
 	},
 }))
 
+// callApiWithRetry normalizes any abort failure into a fresh contract AbortError before the
+// provider's catch wraps it, so asserting that the TimeoutError carries *this request's*
+// abort failure (not a newly invented one) requires recording the instances the contract
+// helper creates. Every other export delegates to the real implementation.
+const abortFailures = vi.hoisted(function (): Error[] {
+	return []
+})
+vi.mock("../utils/abort-signal", async (importOriginal) => {
+	// The factory's importOriginal is typed as unknown; recover the module's real type so
+	// the rest of the contract can be spread without `any`.
+	const actual = (await importOriginal()) as typeof import("../utils/abort-signal")
+	return {
+		...actual,
+		createAbortError: function (providerName: string): Error {
+			const abortError = actual.createAbortError(providerName)
+			abortFailures.push(abortError)
+			return abortError
+		},
+	}
+})
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -764,6 +784,8 @@ describe("QwenCodeHandler abort wiring", () => {
 
 	describe("completePrompt", () => {
 		it("reports an elapsed timeout as TimeoutError while the caller signal stays live", async () => {
+			// The record is module-wide, so scope it to this request before asserting on it.
+			abortFailures.length = 0
 			mockCreate.mockImplementationOnce((_params?: unknown, opts?: { signal?: AbortSignal }) => {
 				return new Promise((_resolve, reject) => {
 					const signal = opts?.signal
@@ -793,6 +815,16 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("TimeoutError")
 			expect((caught as Error).message).toBe("The Qwen Code completion request timed out")
+			// callApiWithRetry normalizes the SDK rejection into a contract AbortError before the
+			// provider wraps it, so pinning "the cause is the failure this request had in hand"
+			// means requiring that exactly one abort error was created for this request and that
+			// it is the cause: a provider that discarded the caught error and invented a second,
+			// indistinguishable one would create two instances and fail here.
+			const cause = (caught as { cause?: unknown }).cause
+			expect(abortFailures).toHaveLength(1)
+			expect(cause).toBe(abortFailures[0])
+			expect((cause as Error).name).toBe("AbortError")
+			expect((cause as Error).message).toBe("The Qwen Code request was aborted")
 		})
 
 		it("passes the merged signal through and nothing without options", async () => {
