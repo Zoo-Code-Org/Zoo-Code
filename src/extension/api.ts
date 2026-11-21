@@ -3,6 +3,7 @@ import fs from "fs/promises"
 import * as path from "path"
 import * as os from "os"
 
+import deepEqual from "fast-deep-equal"
 import * as vscode from "vscode"
 import pWaitFor from "p-wait-for"
 
@@ -34,6 +35,7 @@ import { Package } from "../shared/package"
 import type { Mode } from "../shared/modes"
 import type { ClineProvider } from "../core/webview/ClineProvider"
 import type { ClineProviderFactory } from "../core/webview/ClineProviderFactory"
+import { isNonPortableSettingsKey } from "../core/config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../core/config/displaySettings"
 import { readTaskMessages, TaskMessagesReadError } from "../core/task-persistence/taskMessages"
 import { getErrorCode } from "../core/task-persistence/readFileWithMissingRetry"
@@ -657,23 +659,279 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 	 * with a `SettingsWriteError` that lists the keys that were stored and the keys that were not (the cache of the
 	 * failed keys has been read back from storage), the stored settings stay, and nothing after the settings is
 	 * written. Invalid values of the display settings are dropped and logged first.
+	 *
+	 * The profile writes that follow the settings are wrapped by this unit: the prior record, the prior shared
+	 * settings, the prior shared mode and profile pin, and the prior mapping of every mode the payload touches are
+	 * snapshotted before the first write, and a failure after any of them restores all of them and rethrows the
+	 * original error. Invalid values of the display settings are dropped and logged first, before anything is stored.
 	 */
 	public async setConfiguration(allValues: RooCodeSettings) {
 		const values = withoutInvalidDisplaySettings(allValues, (key) =>
 			this.sidebarProvider.log(`[setConfiguration] Ignored an invalid value for ${key}`),
 		)
-		await this.sidebarProvider.contextProxy.setValues(values)
-		await this.sidebarProvider.providerSettingsManager.saveConfig(values.currentApiConfigName || "default", values)
+		// Derive the saved profile name once so the sibling refresh and the save
+		// agree on the empty-string fallback.
+		const savedProfileName = values.currentApiConfigName || "default"
+		const manager = this.sidebarProvider.providerSettingsManager
+		// Read existence from the store rather than the cached profile list: a stale
+		// list could hide an existing record and let rollback delete it. A failed
+		// existence read is treated as "may exist" so rollback never deletes blindly.
+		let recordExisted: boolean
+		try {
+			recordExisted = await manager.hasConfig(savedProfileName)
+		} catch {
+			recordExisted = true
+		}
+		// The getter's map carries viewStates: a snapshot of every view's selection as of now. The
+		// rollback below replays this map through setValues, which would pin every other view back
+		// to where this call found them, so the host-owned key is dropped from the snapshot. Same
+		// list the export schema and the import path use (NON_PORTABLE_SETTINGS_KEYS).
+		const previousValues: RooCodeSettings = Object.fromEntries(
+			Object.entries(this.getConfiguration()).filter(([key]) => !isNonPortableSettingsKey(key)),
+		)
+		const previousSharedSettings = this.sidebarProvider.contextProxy.getProviderSettings()
+		// getConfiguration() folds this view's overlay into the merged copy, so its mode and profile
+		// pin are this view's values rather than the shared ones. Snapshot the shared pair here:
+		// the rollback below replays the merged copy through setValues, which writes both keys to
+		// shared global state, and without this snapshot a failed call would leave every other
+		// unpinned view on this view's mode and profile.
+		const previousSharedMode = this.sidebarProvider.contextProxy.getValue("mode")
+		const previousSharedProfileName = this.sidebarProvider.contextProxy.getValue("currentApiConfigName")
+		// Fail closed BEFORE any write: an existing record that cannot be read
+		// aborts the call while nothing has been mutated.
+		let previousRecord: Awaited<ReturnType<typeof manager.getProfile>> | undefined
+		if (recordExisted) {
+			previousRecord = await manager.getProfile({ name: savedProfileName })
+		}
+		// Capture the prior mapping of every mode this payload touches, so a
+		// partial mode fan-out rolls back completely - including mappings this
+		// call creates for the first time (an undefined prior id restores the
+		// no-mapping semantics getModeConfigId reports).
+		const previousModeConfigs: Array<[Mode, string | undefined]> = []
+		// The fan-out below goes through the provider, so it moves this window's cached mode choice
+		// along with the shared map; the compensation has to move both back. Snapshot the window's own
+		// choices while they are still the pre-call values - a choice this window made locally (an
+		// unmapped mode's default) never reaches the shared map, and the restore must not lose it.
+		let previousLocalModeConfigs = new Map<string, string>()
 		if (values.modeApiConfigs) {
-			await Promise.all(
-				Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
-					this.sidebarProvider.setModeConfig(mode as Mode, configId),
-				),
+			previousLocalModeConfigs = this.sidebarProvider.getLocalModeConfigIds()
+			for (const mode of Object.keys(values.modeApiConfigs)) {
+				previousModeConfigs.push([mode as Mode, await manager.getModeConfigId(mode as Mode)])
+			}
+		}
+		// Persist the profile record before the shared/sibling refresh: saveConfig
+		// validates before storing, so a rejected save leaves every domain
+		// untouched and no rollback is needed.
+		await manager.saveConfig(savedProfileName, values)
+		// R2 (issue 2488, step 1): the record restore below may only undo what this call wrote, so record
+		// from the same layer the value this save left in the store. Neither the pre-save copy nor the
+		// caller's payload is that value - the store validates and merges what it is handed - so the only
+		// faithful record of our own write is the one the store reports back immediately after it.
+		let writtenRecordSettings: ProviderSettings | undefined
+		let writtenRecordAbsent = false
+		let writtenRecordUnconfirmed = false
+		try {
+			if (await manager.hasConfig(savedProfileName)) {
+				const {
+					name: _writtenName,
+					id: _writtenId,
+					...writtenSettings
+				} = await manager.getProfile({
+					name: savedProfileName,
+				})
+				writtenRecordSettings = writtenSettings as ProviderSettings
+			} else {
+				writtenRecordAbsent = true
+			}
+		} catch {
+			writtenRecordUnconfirmed = true
+		}
+		// Whether the mode fan-out below started: the compensation may only undo mode writes this
+		// call performed, or it would roll back a mapping another window accepted meanwhile.
+		let modeWritesStarted = false
+		try {
+			await this.sidebarProvider.setValues(
+				// The caller's payload is another snapshot of machine-local state: writing it forward
+				// would pin views this call does not own. See the snapshot comment above.
+				Object.fromEntries(Object.entries(values).filter(([key]) => !isNonPortableSettingsKey(key))),
+				{ savedProfileName },
 			)
+			if (values.modeApiConfigs) {
+				// From here on this call has mode writes of its own to undo, even if a later leg
+				// of the fan-out rejects.
+				modeWritesStarted = true
+				await Promise.all(
+					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
+						// Route through the provider (#2110) so this window's local mode choice moves
+						// with the shared map.
+						this.sidebarProvider.setModeConfig(mode as Mode, configId),
+					),
+				)
+			}
+		} catch (error) {
+			// The save landed: roll back every domain this mutation touched - the
+			// profile record, the sibling overlays pinned to it, the complete
+			// settings round trip (global values, view-local state, and sibling
+			// overlays), the shared provider settings, and the mode mappings.
+			// Each restore is independent and logged; the original failure is
+			// what the caller sees.
+			let previousSettings: ProviderSettings | undefined
+			if (previousRecord) {
+				const { name: _previousName, id: _previousId, ...rest } = previousRecord
+				previousSettings = rest
+			}
+			// R3 (issue 2488, step 1): re-read the record from the same layer and compare it with what this
+			// call's own save left there. A sibling save that landed while this call was refreshing siblings
+			// owns the record now: replaying our snapshot over it would drop their accepted profile, and on
+			// the branch below it would delete a record they updated. A record that cannot be re-read is
+			// unconfirmed, so it is left alone rather than written blind.
+			let currentRecordSettings: ProviderSettings | undefined
+			let currentRecordAbsent = false
+			let currentRecordUnconfirmed = false
+			try {
+				if (await manager.hasConfig(savedProfileName)) {
+					const {
+						name: _currentName,
+						id: _currentId,
+						...currentSettings
+					} = await manager.getProfile({
+						name: savedProfileName,
+					})
+					currentRecordSettings = currentSettings as ProviderSettings
+				} else {
+					currentRecordAbsent = true
+				}
+			} catch {
+				currentRecordUnconfirmed = true
+			}
+			const recordStillOurs =
+				!writtenRecordUnconfirmed &&
+				!currentRecordUnconfirmed &&
+				(currentRecordAbsent
+					? writtenRecordAbsent
+					: writtenRecordSettings !== undefined && deepEqual(currentRecordSettings, writtenRecordSettings))
+			if (recordStillOurs) {
+				try {
+					if (recordExisted && previousSettings) {
+						await manager.saveConfig(savedProfileName, previousSettings)
+					} else {
+						await manager.deleteConfig(savedProfileName)
+					}
+				} catch (restoreError) {
+					this.log(
+						`[setConfiguration] failed to restore the profile record '${savedProfileName}': ` +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			} else if (writtenRecordUnconfirmed || currentRecordUnconfirmed) {
+				this.log(
+					`[setConfiguration] left the profile record '${savedProfileName}' alone: the store could not be re-read, so its current owner is unconfirmed`,
+				)
+			} else {
+				this.log(
+					`[setConfiguration] skipped restoring the profile record '${savedProfileName}': the store no longer holds what this call saved, so a later write owns that record`,
+				)
+			}
+			const previousProfileName = previousValues.currentApiConfigName || "default"
+			try {
+				await this.sidebarProvider.setValues(previousValues, { savedProfileName: previousProfileName })
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the previous configuration values: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// The merged replay above wrote this view's mode and pin into shared state, which
+			// belongs to every unpinned view: put the shared pair back from the pre-write snapshot.
+			// This touches the shared store only - this view's own overlay keeps the same pair the
+			// replay just wrote there, so nothing about this view changes.
+			try {
+				await this.sidebarProvider.contextProxy.setValues({
+					mode: previousSharedMode,
+					currentApiConfigName: previousSharedProfileName,
+				})
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the shared mode and profile pin: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// Replay the restored record to the sibling overlays pinned to the
+			// saved profile AFTER the configuration restore: when the saved profile
+			// is also the active profile, the restore above refreshes the same
+			// siblings with non-secret values, and this replay must be the last
+			// refresh so the overlays end on the restored record's settings. An
+			// absent prior profile restores an empty overlay.
+			try {
+				await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+					savedProfileName,
+					previousSettings ?? {},
+				)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to refresh the overlays pinned to '" +
+						savedProfileName +
+						"': " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// When the mutation switched profiles, the configuration restore above
+			// refreshed siblings pinned to the previous profile from non-secret
+			// values; replay that profile's complete stored record so those
+			// overlays keep their credentials. A previous profile that cannot be
+			// read keeps the restore's non-secret refresh.
+			if (previousProfileName !== savedProfileName) {
+				try {
+					const previousProfileRecord = await manager.getProfile({ name: previousProfileName })
+					const { name: _ppName, id: _ppId, ...previousProfileSettings } = previousProfileRecord
+					await this.sidebarProvider.refreshViewLocalStateForUpdatedProfile(
+						previousProfileName,
+						previousProfileSettings,
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to refresh the overlays pinned to '" +
+							previousProfileName +
+							"': " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			}
+			try {
+				await this.sidebarProvider.contextProxy.setProviderSettings(previousSharedSettings)
+			} catch (restoreError) {
+				this.log(
+					"[setConfiguration] failed to restore the shared provider settings: " +
+						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+				)
+			}
+			// The mode fan-out is conditional: when the settings write rejected before it ran, this call
+			// never touched the mode maps, so restoring them here would roll another window's accepted
+			// mapping back to the value this call read.
+			if (modeWritesStarted) {
+				try {
+					// Both maps move back together, the way the forward fan-out wrote them: the shared mapping
+					// through the manager, and this window's cached choice from the snapshot above. A mode that
+					// was unmapped everywhere reverts to "no mapping" - the accessor clears the cache instead
+					// of leaving it at the id the rejected call stored.
+					await Promise.all(
+						previousModeConfigs.map(([mode, configId]) =>
+							this.sidebarProvider.restoreModeConfig(mode, configId, previousLocalModeConfigs.get(mode)),
+						),
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to restore the mode API config mappings: " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			} else {
+				this.log("[setConfiguration] no mode API config write ran; leaving the mode mappings as they are")
+			}
+			throw error
 		}
 		await this.sidebarProvider.postStateToWebview()
 	}
-
 	public setTerminalProfile(name: string | undefined): void {
 		const previousProfile = Terminal.getTerminalProfile()
 		Terminal.setTerminalProfile(name)
