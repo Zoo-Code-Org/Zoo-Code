@@ -54,6 +54,58 @@ function historyFilePath(storagePath: string, taskId: string): string {
 	return path.join(storagePath, "tasks", taskId, GlobalFileNames.historyItem)
 }
 
+// The delete locks the file it unlinks, and the spelling of that path is whatever the
+// store was given: `delete` hands `deleteJsonFile` a joined path, `deleteJsonFile` hands it
+// to `withFileLock`, and `withFileLock` only `path.resolve`s it -- the canonicalisation
+// through fs/promises realpath happens deeper, when the lock file itself is placed, so it
+// never reaches this spy. On the Windows runner the two spellings of one temp file differ
+// (C:/Users/runneradmin/... and its NTFS 8.3 alias C:/Users/RUNNER~1/...), so comparing the
+// key by text holds on a developer box and misses there. File identity is the comparison
+// that holds on both spellings, which is how the landed
+// src/utils/__tests__/safeWriteJson.interruption.test.ts handles the same hazard.
+async function fileIdentity(candidate: string): Promise<string | null> {
+	try {
+		const stats = await actualFs.stat(candidate)
+		return `${stats.dev}:${stats.ino}`
+	} catch {
+		return null
+	}
+}
+
+async function lockKeyNamesTheSameFile(lockKey: unknown, expectedPath: string): Promise<boolean> {
+	if (typeof lockKey !== "string") {
+		return false
+	}
+	// The unlink removes the file and leaves the per-task directory in place, so both sides
+	// still carry an identity here. Basenames are compared exactly when they agree, and where
+	// they differ the answer comes from the filesystem and not from the platform name: the
+	// measurement that decides is the dev+ino pair below, which is the same measurement the
+	// calibration row further down computes and requires this helper to agree with. Apple
+	// supports case-sensitive APFS on macOS and a Linux box can be mounted over a
+	// case-insensitive filesystem, so no platform string can say whether two spellings are
+	// one file on the box that is running it.
+	const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
+	const keyDirectory = await fileIdentity(path.dirname(lockKey))
+	if (expectedDirectory === null || keyDirectory !== expectedDirectory) {
+		return false
+	}
+	const keyBasename = path.basename(lockKey)
+	const expectedBasename = path.basename(expectedPath)
+	if (keyBasename === expectedBasename) {
+		return true
+	}
+	// Different spellings: the directory itself is asked whether it keeps them apart.
+	const keyIdentity = await fileIdentity(lockKey)
+	const expectedIdentity = await fileIdentity(expectedPath)
+	if (keyIdentity === null || expectedIdentity === null) {
+		// One side or both have no identity to compare, which is the shape the delete rows are
+		// in after the unlink. With nothing measured the exact comparison above stays the
+		// only acceptance this helper offers.
+		return false
+	}
+	return keyIdentity === expectedIdentity
+}
+
 function storeInternals(store: TaskHistoryStore): {
 	cache: Map<string, HistoryItem>
 	taskFileMtimes: Map<string, number>
@@ -152,14 +204,23 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const store = createStore()
 			await store.initialize()
 			await store.upsert(makeHistoryItem({ id: "locked-delete" }))
+			// The lock spy is created once for the whole file, so clear it to make the
+			// assertion below about this delete and not about every case before it.
+			vi.mocked(withFileLock).mockClear()
 			onWrite.mockClear()
 
 			await expect(store.delete("locked-delete")).resolves.toBeUndefined()
 
-			expect(vi.mocked(withFileLock)).toHaveBeenCalledWith(
-				historyFilePath(storagePath, "locked-delete"),
-				expect.any(Function),
+			const lockCalls = vi.mocked(withFileLock).mock.calls
+			expect(lockCalls).toHaveLength(1)
+			// The lock is taken for the file the delete unlinked, under a function body: the key
+			// is pinned by identity rather than by text, and the arity and the body are pinned
+			// alongside it so an argument dropped or swapped cannot slip through.
+			expect(lockCalls[0]).toHaveLength(2)
+			expect(await lockKeyNamesTheSameFile(lockCalls[0][0], historyFilePath(storagePath, "locked-delete"))).toBe(
+				true,
 			)
+			expect(lockCalls[0][1]).toBeTypeOf("function")
 			await expect(fs.access(historyFilePath(storagePath, "locked-delete"))).rejects.toMatchObject({
 				code: "ENOENT",
 			})
@@ -296,5 +357,42 @@ describe("TaskHistoryStore best-effort deletion semantics", () => {
 			const writtenIds = (onWrite.mock.calls[0][0] as HistoryItem[]).map((item) => item.id)
 			expect(writtenIds).toEqual([])
 		})
+	})
+})
+
+describe("the lock-key helper's case rule", () => {
+	let probeDir: string
+
+	beforeEach(async () => {
+		probeDir = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "TaskHistoryStore-case-rule-")))
+	})
+
+	afterEach(async () => {
+		await fs.rm(probeDir, { recursive: true, force: true })
+	})
+
+	it("accepts a case-distinct basename only where the filesystem folds the two names into one file", async () => {
+		// The row does not rule on what a platform does with case. It makes both spellings, asks
+		// the filesystem whether they are one file or two, and requires the helper to agree with
+		// that answer. Where the directory keeps the spellings apart, a lock key naming one
+		// must not be accepted as naming the other; before this row the folded basename
+		// comparison was the only thing behind that acceptance, with nothing but the two
+		// directory pins to stop a key naming a different file. If a box's filesystem ever
+		// contradicts its platform name, this row fails loudly instead of passing quietly.
+		const expectedPath = path.join(probeDir, "history.json")
+		const caseDistinctKey = path.join(probeDir, "HISTORY.json")
+		await fs.writeFile(expectedPath, "{}", "utf8")
+		await fs.writeFile(caseDistinctKey, "[]", "utf8")
+
+		const expectedDirectory = await fileIdentity(path.dirname(expectedPath))
+		const keyDirectory = await fileIdentity(path.dirname(caseDistinctKey))
+		expect(expectedDirectory).not.toBeNull()
+		// The two spellings sit in one directory, so the basename is the only thing that can differ.
+		expect(keyDirectory).toBe(expectedDirectory)
+		const oneFile = (await fileIdentity(expectedPath)) === (await fileIdentity(caseDistinctKey))
+		expect(await lockKeyNamesTheSameFile(caseDistinctKey, expectedPath)).toBe(oneFile)
+		// The same spelling is the same file on every platform, which is the direction the delete
+		// rows above depend on.
+		expect(await lockKeyNamesTheSameFile(expectedPath, expectedPath)).toBe(true)
 	})
 })
