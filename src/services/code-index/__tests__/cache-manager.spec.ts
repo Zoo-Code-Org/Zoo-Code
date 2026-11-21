@@ -7,9 +7,10 @@ import { CacheManager } from "../cache-manager"
 import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock safeWriteJson utility
-vitest.mock("../../../utils/safeWriteJson", () => ({
-	safeWriteJson: vitest.fn().mockResolvedValue(undefined),
-}))
+vitest.mock("../../../utils/safeWriteJson", async () => {
+	const actual = await vi.importActual<typeof import("../../../utils/safeWriteJson")>("../../../utils/safeWriteJson")
+	return { ...actual, safeWriteJson: vi.fn().mockResolvedValue(undefined) }
+})
 
 // Import the mocked version
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -182,6 +183,25 @@ describe("CacheManager", () => {
 
 			expect(safeWriteJson).toHaveBeenCalledWith(mockCachePath.fsPath, {})
 			expect(cacheManager.getAllHashes()).toEqual({})
+		})
+
+		it("clears in-memory hashes when the empty cache committed but its durability was unconfirmed", async () => {
+			cacheManager.updateHash("test.ts", "hash")
+			const { PublishNotDurableError } = await import("../../file-safety/safeWriteText")
+			const consoleWarnSpy = vitest.spyOn(console, "warn").mockImplementation(function () {})
+			const committedError = new PublishNotDurableError(mockCachePath.fsPath, "EIO")
+			;(safeWriteJson as Mock).mockRejectedValue(committedError)
+
+			await cacheManager.clearCacheFile()
+
+			// The empty object is already on disk, so the old hashes must not survive in memory,
+			// and the warning names the exact post-commit error the consumer had to tolerate.
+			expect(cacheManager.getAllHashes()).toEqual({})
+			expect(consoleWarnSpy).toHaveBeenCalledWith(
+				"Cache file content committed but not fully verified:",
+				committedError,
+			)
+			consoleWarnSpy.mockRestore()
 		})
 
 		it("should handle clear errors gracefully", async () => {
