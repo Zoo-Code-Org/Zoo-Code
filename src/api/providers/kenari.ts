@@ -23,7 +23,19 @@ import type {
 } from "../index"
 import { RouterProvider } from "./router-provider"
 import { getKenariModels } from "./fetchers/kenari"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	hasUsableTimeout,
+	isRequestAborted,
+	mergeAbortSignalAndTimeout,
+	rejectOnAbort,
+	resolveModelWithAbort,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+
+const KENARI_PROVIDER_NAME = "Kenari"
 
 /**
  * API handler for Kenari, an Indonesian OpenAI-compatible AI gateway billed
@@ -72,7 +84,19 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		const callerSignal = metadata?.abortSignal
+		// The SDK adds an abort listener to whatever signal it is handed and never removes it, so this
+		// generator bridges the caller signal and detaches the bridge in its finally, as completePrompt does.
+		const { signal: bridgedCallerSignal, dispose: removeCallerAbortListener } =
+			bridgeExternalAbortSignal(callerSignal)
+		const { id: modelId, info } = await resolveModelWithAbort(
+			() => this.fetchModel(),
+			bridgedCallerSignal,
+			KENARI_PROVIDER_NAME,
+		).catch((error: unknown) => {
+			removeCallerAbortListener()
+			throw error
+		})
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -93,57 +117,89 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 		}
 
-		const completion = await this.client.chat.completions.create(body)
+		const streamRequestOptions: [] | [OpenAI.RequestOptions] = bridgedCallerSignal
+			? [{ signal: bridgedCallerSignal }]
+			: []
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+		try {
+			const pendingCompletion = this.client.chat.completions.create(body, ...streamRequestOptions)
+			const completion = bridgedCallerSignal
+				? await rejectOnAbort(pendingCompletion, bridgedCallerSignal, KENARI_PROVIDER_NAME)
+				: await pendingCompletion
 
-			// Several Kenari models (GLM, DeepSeek) stream reasoning via reasoning_content,
-			// with an OpenRouter-style `reasoning` fallback; the shared helper handles both.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+			for await (const chunk of completion) {
+				if (callerSignal?.aborted) break // the tail check turns this into the contract AbortError
+				const delta = chunk.choices[0]?.delta
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+				// Several Kenari models (GLM, DeepSeek) stream reasoning via reasoning_content,
+				// with an OpenRouter-style `reasoning` fallback; the shared helper handles both.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						if (callerSignal?.aborted) throw createAbortError(KENARI_PROVIDER_NAME) // a cancel must not emit the rest of this chunk
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
+					}
+				}
+
+				if (chunk.usage) {
 					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+						type: "usage",
+						inputTokens: chunk.usage.prompt_tokens || 0,
+						outputTokens: chunk.usage.completion_tokens || 0,
+						cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
 					}
 				}
 			}
-
-			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
+		} catch (error) {
+			if (isRequestAborted(error, callerSignal)) {
+				throw createAbortError(KENARI_PROVIDER_NAME)
 			}
+			throw error
+		} finally {
+			removeCallerAbortListener()
 		}
+		if (callerSignal?.aborted) throw createAbortError(KENARI_PROVIDER_NAME) // a stream that ended because the caller cancelled
 	}
 
 	/**
 	 * Performs a non-streaming chat completion and returns the full response text.
 	 *
+	 * Cancellation follows the shared abort-signal contract (see zoo-gateway.ts and
+	 * requesty.ts): the caller signal is bridged to a per-request signal, the timeout joins
+	 * that same signal, and `finally` detaches the bridge on every exit path.
 	 * @param prompt - The user prompt to send as a single user message.
+	 * @param options - Caller cancellation and request timeout, per `CompletePromptOptions`.
 	 * @returns The model's reply text, or an empty string if no content is returned.
 	 * @throws Error with a Kenari-specific prefix if the request fails.
 	 */
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		const { signal: bridgedCallerSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			options?.abortSignal,
+		)
+		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
 
 		try {
+			const { id: modelId, info } = await resolveModelWithAbort(
+				() => this.fetchModel(),
+				requestAbortSignal,
+				KENARI_PROVIDER_NAME,
+			)
+
 			const requestOptions: OpenAI.Chat.ChatCompletionCreateParams = {
 				model: modelId,
 				messages: [{ role: "user", content: prompt }],
@@ -156,13 +212,29 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 
 			requestOptions.max_completion_tokens = info.maxTokens
 
-			const response = await this.client.chat.completions.create(requestOptions)
-			return response.choices[0]?.message.content || ""
-		} catch (error) {
-			if (error instanceof Error) {
-				throw new Error(`Kenari completion error: ${error.message}`)
+			const createOptions: OpenAI.RequestOptions = {
+				...(requestAbortSignal && { signal: requestAbortSignal }),
+				...(hasUsableTimeout(options?.timeoutMs) && { timeout: toSdkTimeoutMs(options.timeoutMs) }),
 			}
-			throw error
+			const requestOptionsTail: [] | [OpenAI.RequestOptions] = requestAbortSignal ? [createOptions] : []
+
+			try {
+				const pendingCompletion = this.client.chat.completions.create(requestOptions, ...requestOptionsTail)
+				// Race the completion too: the SDK ignores the signal while it retries.
+				const response = requestAbortSignal
+					? await rejectOnAbort(pendingCompletion, requestAbortSignal, KENARI_PROVIDER_NAME)
+					: await pendingCompletion
+				if (requestAbortSignal?.aborted) throw createAbortError(KENARI_PROVIDER_NAME) // a completion that lands after the cancel is dropped
+				return response.choices[0]?.message.content || ""
+			} catch (error) {
+				if (isRequestAborted(error, requestAbortSignal)) throw createAbortError(KENARI_PROVIDER_NAME)
+				if (error instanceof Error) {
+					throw new Error(`Kenari completion error: ${error.message}`)
+				}
+				throw error
+			}
+		} finally {
+			removeExternalAbortListener()
 		}
 	}
 }
