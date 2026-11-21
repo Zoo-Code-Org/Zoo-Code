@@ -15,8 +15,12 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
-	// New models: leave unverified defaults and capability fields unset.
-	// Live requests accept budget and temperature but do not report whether they apply.
+	// Leave defaults and capabilities unset when evidence is missing.
+	// Prices and untested capabilities come from the Gemini API. Vertex prices are not verified.
+	// Flash works in Express mode and rejects xhigh.
+	// Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
+	// Carbon rejects xhigh. Hydrogen accepts xhigh.
+	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start/get-started-with-gemini-4
 	// https://aistudio.google.com/docs/models/gemini-3.8-flash
 	"gemini-3.8-flash": {
 		maxTokens: 65_536,
@@ -24,7 +28,8 @@ export const vertexModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["low", "medium", "high"],
-		// Promo prices end Dec 31, 2026. From Jan 1, 2027: input $1.50, output $7.50, cache read $0.15.
+		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
+		// TODO (2027-01-01): Set input to $1.50, output to $7.50, and cache reads to $0.15 per million tokens.
 		inputPrice: 0.75,
 		outputPrice: 3.75,
 		cacheReadsPrice: 0.075,
@@ -37,7 +42,8 @@ export const vertexModels = {
 		supportsPromptCache: true,
 		// Only implicit caching is supported.
 		supportsReasoningEffort: ["low", "medium", "high"],
-		// Promo prices end Nov 30, 2026. From Dec 1, 2026: input $4, output $20, cache read $0.20.
+		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
+		// TODO (2026-12-01): Set input to $4, output to $20, and cache reads to $0.20 per million tokens.
 		inputPrice: 2,
 		outputPrice: 10,
 		cacheReadsPrice: 0.1,

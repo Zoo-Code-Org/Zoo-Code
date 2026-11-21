@@ -1,48 +1,25 @@
 ---- MODULE GeminiCapabilities ----
 \* Sources: geminiModels, vertexModels, and the user's thinking level.
 \* Sink: getGeminiReasoning and its thinkingConfig. Transport is an oracle.
-\* Expect: missing registrations and a dropped xhigh selection fail the model.
-\* Failure: a listed model is absent, or an unlisted Vertex model is present.
-\* Failure: a supported thinking level is dropped or an unsupported level is sent.
-\* Invariants: RegistrationMatchesAvailability and SupportedLevelsReachRequest.
-\* First invariants precede issue comments and implementation. Vendor facts are inputs.
-\* Results: the fixed model holds in 64 states. All three defect configs fail.
-\* Replay: seven missing entries and two xhigh paths fail tests before the fix.
-\* Sabotage: adding Neon to vertexModels fails the real absence test. The edit was removed.
-\* Property tests: google-models.test.ts checks availability. reasoning.spec.ts checks each known level.
-\* Input rules include stale minimal and xhigh choices, invalid input, off, and an unset choice.
-\* The fallback rule uses the model default for a known level that the model does not support.
-\* Null result: the model found no defect beyond the issue and the xhigh fallback path.
-\* No false alarms were retained. The model checks contracts, not code or vendor facts.
-\* Router check: both public catalogs list all four IDs. Gateway image fallback entries were added.
-\* OpenRouter uses live model data. No static override is needed. VS Code IDs lack live evidence.
-\* Approved live check: all 16 GenerateContent calls returned HTTP 403 PERMISSION_DENIED, reason ACCESS_DENIED.
-\* The first attempt denied service access. The approved retry returned HTTP 402 RESOURCE_EXHAUSTED for all 16 calls.
-\* The retry reports depleted prepayment credits. No capability result was obtained.
-\* After prepayment, 14 calls passed. Flash and Carbon rejected xhigh with HTTP 400 as expected.
-\* Hydrogen and Neon accepted xhigh. All four accepted budget and temperature parameters.
-\* Acceptance does not show whether those parameters apply. Responses do not state a default thinking level.
-\* Default, budget, temperature, and Flash cache write fields remain unset. An hourly fee is not a write price.
-\* Default is none in this model. An unset or unsupported choice leaves the API to use its own default.
-\* The original model assumed catalog defaults. Source review removed that assumption before the final gate.
-\* Cost: about 12 minutes of agent work. The four-config TLC gate takes about 3 seconds.
-\* Checks: 168 focused tests, both type checks, and lint pass. Suppression counts did not change.
-\* Gate: TLA_JAR=/tmp/tla-tools/tla2tools.jar ./check.sh GeminiCapabilities.
-\* Review: 0 covered, 1 added, 1 gap. PR 2640 adds NoUnsupportedEffort and models without effort support.
-\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4655065689.
-\* Failure: a stored level reaches a model without effort support when the budget branch is inactive.
-\* Expect: NoEffortGuard fails. The fixed model holds. Budget requests and boolean effort support remain valid.
-\* Gap: the review asks to remove spec files. Scope is not a source-to-sink behavior in this model.
-\* The user requested SDD. The spec policy requires a spec for each change. The files remain in this PR.
-\* Result: the fixed model holds in 224 states. All four defect configs fail as expected.
-\* Replay: nine assertions fail before the guard. They cover five levels, inactive budgets, and absent or false support.
-\* The guard keeps enabled and required budget paths ahead of the effort check. Boolean true remains supported.
-\* Review checks: 126 reasoning tests, src type checking, and lint pass. Suppression counts did not change.
-\* No further runtime defect was found. Review cost: about 4 minutes of agent work and five TLC runs.
-\* Simplify expectation: reject unknown selections before fallback. All current verdicts must stay the same.
-\* KnownLevels supplies both the input domain and the recognition rule. No state variable is added.
-\* Simplify result: 224 states and all five config verdicts are unchanged. No new defect was found.
-\* All 126 reasoning tests, type checking, and lint pass. Cost: about one minute and five TLC runs.
+\* Failures: missing registrations, unlisted Vertex models, dropped levels, and unsupported effort requests.
+\* Invariants: RegistrationMatchesAvailability, SupportedLevelsReachRequest, and NoUnsupportedEffort.
+\* Expected result: each defect config fails when an entry, xhigh support, or the effort guard is missing.
+\* Vendor facts are inputs. This model does not verify prices or provider capabilities.
+\* KnownLevels defines valid levels. The budget check runs before the effort guard.
+\* Replay: seven missing entries and two xhigh paths failed before registration and level fixes.
+\* Replay: nine assertions failed before the effort guard. The Vertex Neon absence test detects sabotage.
+\* Result: all 224 states pass with the fixes. All four defect configs fail. No new code defect was found.
+\* Tests: google-models.test.ts checks availability. reasoning.spec.ts checks each known level.
+\* Cost: about 17 minutes of agent work. The five-config gate takes about three seconds.
+\* Review: 1 covered, 1 added, 5 gaps. The effort guard required NoUnsupportedEffort.
+\* Guard finding: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4655065689.
+\* Covered: the later review reports the same effort guard issue.
+\* Gaps: scope, price expiry, vendor evidence, test independence, and header maintenance are outside this model.
+\* Review changes: add dates for price updates, state Vertex assumptions, and use fixed test expectations.
+\* Vertex replay: Flash responds through Express mode and rejects xhigh.
+\* Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
+\* Carbon rejects xhigh. Hydrogen accepts xhigh. Prices and other capabilities are not verified.
+\* AGENTS.md requires the cost and findings in this header.
 EXTENDS TLC
 CONSTANT CatalogFixed, LevelsFixed, VertexListedOnly, EffortGuard
 VARIABLE input

@@ -740,33 +740,29 @@ describe("reasoning.ts", () => {
 
 	describe("Gemini reasoning (effort models)", () => {
 		describe.each([
-			["Gemini", geminiModels],
-			["Vertex", vertexModels],
-		])("new model thinking levels on %s", (_provider, catalog: Record<string, ModelInfo>) => {
-			it.each(["gemini-3.8-flash", "gemini-4-carbon", "gemini-4-hydrogen", "gemini-4-neon"])(
-				"preserves each supported choice for %s",
-				(id) => {
-					const model = catalog[id]
-					if (!model) {
-						expect(id).toBe("gemini-4-neon")
-						return
-					}
-					for (const level of ["minimal", "low", "medium", "high", "xhigh", "disable", undefined] as const) {
-						const supported =
-							Array.isArray(model.supportsReasoningEffort) &&
-							level !== undefined &&
-							level !== "disable" &&
-							model.supportsReasoningEffort.includes(level)
-						expect(
-							getGeminiReasoning({
-								model,
-								reasoningBudget: undefined,
-								settings: { reasoningEffort: level },
-							}),
-						).toEqual(supported ? { thinkingLevel: level, includeThoughts: true } : undefined)
-					}
-				},
-			)
+			["Gemini", geminiModels, true],
+			["Vertex", vertexModels, false],
+		])("new model thinking levels on %s", (_provider, catalog: Record<string, ModelInfo>, includesNeon) => {
+			const cases = [
+				{ id: "gemini-3.8-flash", levels: ["low", "medium", "high"] },
+				{ id: "gemini-4-carbon", levels: ["low", "medium", "high"] },
+				{ id: "gemini-4-hydrogen", levels: ["low", "medium", "high", "xhigh"] },
+				...(includesNeon ? [{ id: "gemini-4-neon", levels: ["low", "medium", "high", "xhigh"] }] : []),
+			]
+			it.each(cases)("preserves each supported choice for $id", ({ id, levels }) => {
+				const model = catalog[id]
+				expect(model).toBeDefined()
+				for (const level of ["minimal", "low", "medium", "high", "xhigh", "disable", undefined] as const) {
+					const supported = level !== undefined && levels.includes(level)
+					expect(
+						getGeminiReasoning({
+							model,
+							reasoningBudget: undefined,
+							settings: { reasoningEffort: level },
+						}),
+					).toEqual(supported ? { thinkingLevel: level, includeThoughts: true } : undefined)
+				}
+			})
 		})
 
 		it.each(["minimal", "low", "medium", "high", "xhigh"] as const)(
