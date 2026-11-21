@@ -42,6 +42,7 @@ import { type ApiMessage } from "../task-persistence/apiMessages"
 import { saveTaskMessages } from "../task-persistence"
 import { isInvalidDisplayValue } from "../config/displaySettings"
 import { isNonPortableSettingsKey } from "../config/ContextProxy"
+import { ProviderSettingsNotFoundError } from "../config/ProviderSettingsManager"
 import { importRooTaskHistory } from "../task-persistence/importRooTaskHistory"
 
 import { ClineProvider } from "./ClineProvider"
@@ -665,14 +666,15 @@ export const webviewMessageHandler = async (
 						}
 					}
 
-					const currentState = await provider.getState()
-					const currentConfigName = currentState.currentApiConfigName
-
 					// R2 (issue 2488, step 1): the repair below writes this view's own selection layer, so capture
-					// that layer before the existence lookups below await. Comparing against the manager or the
-					// global selection would be comparing a different layer.
+					// that layer before getState() and the existence lookups below can yield - a switch that lands
+					// during those awaits must count as a change this repair does not own. Comparing against the
+					// manager or the global selection would be comparing a different layer.
 					const pinnedProfileNameBeforeRepair = provider.pinnedProfileName
 					const bufferedApiConfigurationBeforeRepair = provider["viewLocalState"]?.apiConfiguration
+
+					const currentState = await provider.getState()
+					const currentConfigName = currentState.currentApiConfigName
 
 					if (currentConfigName) {
 						if (!(await provider.providerSettingsManager.hasConfig(currentConfigName))) {
@@ -2692,6 +2694,16 @@ export const webviewMessageHandler = async (
 					try {
 						await provider.providerSettingsManager.deleteConfig(oldName)
 					} catch (error) {
+						// A rejection that reports the source profile as absent means a concurrent operation already
+						// removed it. Reversing the rename onto that name would re-pin every view to a profile that
+						// no longer exists and drop the record this call just wrote, so leave the views on the new
+						// name: the rename is already the end state the caller asked for.
+						if (error instanceof ProviderSettingsNotFoundError) {
+							provider.log(
+								`Rename compensation skipped: ${oldName} was already deleted by a concurrent operation.`,
+							)
+							throw error
+						}
 						try {
 							await provider.repointViewLocalStateAfterProfileRename(newName, oldName, previousRecord)
 							await provider.providerSettingsManager.deleteConfig(newName)

@@ -787,17 +787,19 @@ export class ClineProvider
 				wroteEntry = true
 			}
 
+			// Snapshot the durable value before the attempt: the Memento applies the new map to its
+			// in-memory value before the durable write, so reading it after a rejection can return
+			// the map that just failed to persist.
+			const persistedBeforeWrite = this.context.globalState.get<Record<string, PersistedViewState>>("viewStates")
 			try {
 				await this.contextProxy.setValue("viewStates", this.prunePersistedViewStates(states))
 			} catch (error) {
-				// updateGlobalState applies the new map to the in-memory cache before
-				// the durable write, so a rejected write leaves the cache claiming an
-				// entry that never reached disk. Restore the cache to the value durable
-				// storage actually holds (undefined when the key was never written); the
-				// cache update lands even if this compensating write also fails, so
-				// readers cannot observe the lost entry either way.
+				// A rejected write leaves the cache claiming an entry that never reached disk. Put the
+				// cache back to the value durable storage actually held before this attempt (undefined
+				// when the key was never written); the cache update lands even if this compensating write
+				// also fails, so readers cannot observe the lost entry either way.
 				try {
-					await this.contextProxy.setValue("viewStates", this.context.globalState.get("viewStates"))
+					await this.contextProxy.setValue("viewStates", persistedBeforeWrite)
 				} catch {
 					// The cache is updated before the durable attempt: it matches the
 					// durable value regardless of whether this restore write landed.
@@ -2928,17 +2930,26 @@ export class ClineProvider
 		// Each restore is awaited on its own and logged on failure, never swallowed.
 		const reconcileSwitchWrites = async () => {
 			if (sharedAttempted) {
-				// The shared write may have landed before its promise rejected: restore
-				// it unconditionally so getValues() cannot mix a fresh shared mode with
-				// the rolled-back view state.
-				try {
-					await this.contextProxy.setValue("mode", previousMode)
-				} catch (rollbackError) {
+				// The shared write landed before a later failure, but another view can have committed a
+				// newer shared mode after this switch captured the old one. Restoring on top of that value
+				// would put this switch's pre-switch mode back over an accepted write, so restore only
+				// while the shared mode is still the one this switch wrote (issue 2488: compare-and-set is
+				// the rule until write revisions exist).
+				const sharedModeNow = this.getValue("mode")
+				if (sharedModeNow !== newMode) {
 					this.log(
-						`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
-							rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-						}`,
+						`[handleModeSwitch] Leaving the newer shared mode ${String(sharedModeNow)} in place rather than restoring ${String(previousMode)} after a failed switch.`,
 					)
+				} else {
+					try {
+						await this.contextProxy.setValue("mode", previousMode)
+					} catch (rollbackError) {
+						this.log(
+							`[handleModeSwitch] Failed to roll back shared mode after persistence failure: ${
+								rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+							}`,
+						)
+					}
 				}
 			}
 			if (pinLanded) {
@@ -5258,7 +5269,11 @@ export class ClineProvider
 
 		// Merge viewLocalState on top of global state so a provider can serve
 		// state values scoped to its own view while preserving ContextProxy defaults.
-		const mergedStateValues = { ...stateValues, ...this.viewLocalState }
+		// The view-local settings are copied in the same instant as the merged values: the profile
+		// name this state reports and the settings that accompany it must come from one read, because
+		// the awaits below can move this view to another profile in between.
+		const viewLocalStateSnapshot = { ...this.viewLocalState }
+		const mergedStateValues = { ...stateValues, ...viewLocalStateSnapshot }
 
 		const customModes = await this.customModesManager.getCustomModes()
 
@@ -5332,9 +5347,10 @@ export class ClineProvider
 		// leak in from another profile, which ContextProxy.setProviderSettings deliberately
 		// prevents by clearing omitted keys. Use the view's own settings in place and take
 		// only apiProvider from the shared state when the profile does not carry one.
-		// The overlay is read from the buffer itself: the raw apiConfiguration state key
-		// is a partial patch from shared-store paths, not a view snapshot.
-		const viewApiConfiguration = this.viewLocalState.apiConfiguration
+		// The overlay comes from the snapshot taken with the merged values above, not from the live
+		// buffer: an await between the two reads can move this view to another profile, and pairing a
+		// name from one instant with settings from a later one would describe two profiles at once.
+		const viewApiConfiguration = viewLocalStateSnapshot.apiConfiguration
 		const resolvedApiConfiguration = viewApiConfiguration
 			? {
 					...viewApiConfiguration,

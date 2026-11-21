@@ -83,6 +83,7 @@ import type { ModelRecord, RooCodeSettings } from "@roo-code/types"
 import * as vsCodeLmProvider from "../../../api/providers/vscode-lm"
 import * as copilotProvider from "../../../api/providers/github-copilot"
 
+import { ProviderSettingsNotFoundError } from "../../config/ProviderSettingsManager"
 import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
@@ -1037,6 +1038,55 @@ describe("webviewMessageHandler - webviewDidLaunch", () => {
 		})
 		await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
 		await new Promise((resolve) => setImmediate(resolve))
+		consoleSpy.mockRestore()
+		viewStateHost.pinnedProfileName = undefined
+		viewStateHost.viewLocalState = undefined
+
+		expect(printed.join(" ||| ")).toContain("Skipping the launch repair for profile 'view-local-profile'")
+		// The repair would have re-pinned the view onto the shared global selection: it did not write.
+		expect(mockClineProvider.saveViewState).not.toHaveBeenCalledWith("currentApiConfigName", "shared-profile")
+		expect(mockClineProvider.activateProviderProfile).not.toHaveBeenCalled()
+	})
+	// getState() is awaited itself, so a switch that lands while it is in flight is newer than
+	// anything this handler could snapshot after it returned. The repair is skipped then too.
+	it("skips the launch repair when the view selection changes while getState is in flight", async () => {
+		const printed: string[] = []
+		const consoleSpy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+			printed.push(args.map(String).join(" "))
+		})
+		// The repair decides from the provider's own view state, which the fixture otherwise
+		// leaves unset; seeding it is what gives the competing write something to move.
+		const viewStateHost = double as unknown as {
+			pinnedProfileName?: string
+			viewLocalState?: { apiConfiguration?: { apiProvider: string } }
+		}
+		viewStateHost.pinnedProfileName = "view-local-profile"
+		viewStateHost.viewLocalState = { apiConfiguration: { apiProvider: providerIdentifiers.anthropic } }
+		const originalGetState = mockClineProvider.getState
+		let getStateCalls = 0
+		mockClineProvider.getState = vi.fn(async () => {
+			getStateCalls++
+			// Launch handling reads getState once before the repair block; the repair's own read
+			// is the second one, and the competing switch lands while that read is awaited.
+			if (getStateCalls === 2) {
+				viewStateHost.viewLocalState = { apiConfiguration: { apiProvider: providerIdentifiers.openrouter } }
+			}
+			return Object.assign({} as Awaited<ReturnType<typeof mockClineProvider.getState>>, {
+				currentApiConfigName: "view-local-profile",
+				apiConfiguration: {},
+			})
+		})
+		vi.mocked(mockClineProvider.providerSettingsManager.hasConfig).mockImplementation(
+			async (name: string) => name === "shared-profile",
+		)
+		try {
+			await webviewMessageHandler(mockClineProvider, { type: "webviewDidLaunch", viewStateId: "view-1" })
+			await new Promise((resolve) => setImmediate(resolve))
+		} finally {
+			mockClineProvider.getState = originalGetState
+		}
+		// The competing write landed on the repair's own read, not before it.
+		expect(getStateCalls).toBeGreaterThanOrEqual(2)
 		consoleSpy.mockRestore()
 		viewStateHost.pinnedProfileName = undefined
 		viewStateHost.viewLocalState = undefined
@@ -3350,6 +3400,48 @@ describe("webviewMessageHandler - renameApiConfiguration", () => {
 		// would then delete a profile the rename never owned.
 		expect(provider.providerSettingsManager.saveConfig).not.toHaveBeenCalled()
 		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalled()
+		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
+	})
+	// A concurrent operation can delete the source profile before this rename's own delete runs.
+	// Reversing the rename onto that name would re-pin every view to a profile that no longer
+	// exists and drop the record this rename just wrote, so the compensation is skipped.
+	it("leaves views on the new name when a concurrent delete already removed the source", async () => {
+		provider.providerSettingsManager = {
+			hasConfig: vi.fn().mockResolvedValue(false),
+			getProfile: vi.fn().mockResolvedValue({
+				id: "profile-id",
+				apiProvider: providerIdentifiers.anthropic,
+				apiModelId: "stored-model",
+			}),
+			saveConfig: vi.fn().mockResolvedValue(undefined),
+			deleteConfig: vi
+				.fn()
+				.mockRejectedValueOnce(new ProviderSettingsNotFoundError("Config 'old-profile' not found")),
+		}
+		const repoint = vi.fn().mockResolvedValue(undefined)
+		provider.repointViewLocalStateAfterProfileRename = repoint
+		provider.activateProviderProfile = vi.fn().mockResolvedValue(undefined)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "renameApiConfiguration",
+			values: { oldName: "old-profile", newName: "new-profile" },
+			apiConfiguration: { apiProvider: providerIdentifiers.anthropic },
+		})
+
+		// The forward re-point ran; the reverse one (new name back onto the missing old name) did
+		// not, and the record this rename wrote stays stored.
+		expect(repoint).toHaveBeenCalledWith(
+			"old-profile",
+			"new-profile",
+			expect.objectContaining({ id: "profile-id" }),
+		)
+		expect(repoint).not.toHaveBeenCalledWith("new-profile", "old-profile", expect.anything())
+		expect(provider.providerSettingsManager.deleteConfig).toHaveBeenCalledWith("old-profile")
+		expect(provider.providerSettingsManager.deleteConfig).not.toHaveBeenCalledWith("new-profile")
+		expect(mockClineProvider.log).toHaveBeenCalledWith(
+			expect.stringContaining("Rename compensation skipped: old-profile was already deleted"),
+		)
+		// The caller still learns the delete failed.
 		expect(mockClineProvider.log).toHaveBeenCalledWith(expect.stringContaining("Error rename api configuration"))
 	})
 

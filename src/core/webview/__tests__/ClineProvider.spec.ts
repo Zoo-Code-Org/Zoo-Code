@@ -6624,6 +6624,46 @@ describe("ClineProvider", () => {
 
 			await provider.dispose()
 		})
+		// A profile switch can land during the awaits inside getState. The profile name this state
+		// reports and the settings that go with it must come from one read, or the state describes
+		// two profiles at once.
+		it("reports the profile name and its settings from the same instant", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.saveViewState("currentApiConfigName", "profile-a")
+			await provider.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "key-of-a",
+			})
+			const getCustomModesSpy = vi
+				.spyOn(provider["customModesManager"], "getCustomModes")
+				.mockImplementationOnce(async () => {
+					// A switch to another profile lands while getState awaits this lookup.
+					provider["viewLocalState"] = {
+						...provider["viewLocalState"],
+						currentApiConfigName: "profile-b",
+						apiConfiguration: {
+							apiProvider: providerIdentifiers.openrouter,
+							openRouterApiKey: "key-of-b",
+						},
+					}
+					return []
+				})
+
+			const state = await provider.getState({ includeTaskHistory: false })
+
+			// The state names the profile this read started with and carries that profile's own
+			// buffered settings, never the profile that activated meanwhile.
+			expect(state.currentApiConfigName).toBe("profile-a")
+			expect(state.apiConfiguration.openRouterApiKey).toBe("key-of-a")
+			getCustomModesSpy.mockRestore()
+			await provider.dispose()
+		})
 
 		it("reports the fresh global apiConfiguration after a profile activation followed by a global settings write", async () => {
 			const provider = new ClineProvider(
@@ -6751,6 +6791,48 @@ describe("ClineProvider", () => {
 			expect(provider.contextProxy.getValue("viewStates")).toEqual({
 				"other-view": { mode: "code", updatedAt: 1 },
 			})
+			updateSpy.mockRestore()
+			await provider.dispose()
+		})
+		// A Memento applies an update to its in-memory value before the durable write lands, so a
+		// rejected write leaves the rejected map readable through get(). The restore must put back
+		// the value durable storage held before the attempt, not what the failed attempt left in memory.
+		it("restores the pre-write map when the memento already shows the rejected value", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider["setViewStateId"]("stable-sidebar-view")
+			const preWrite = { "other-view": { mode: "code", updatedAt: 1 } }
+			await provider.contextProxy.setValue("viewStates", preWrite)
+			// The durable attempt applies its value to the Memento and only then fails, the way the
+			// real API does: the rejected map is what a later get() would return.
+			const baseUpdate = vi.mocked(mockContext.globalState.update).getMockImplementation()
+			if (!baseUpdate) {
+				throw new Error("the fixture's globalState.update mock has no implementation")
+			}
+			const updateSpy = vi.spyOn(mockContext.globalState, "update").mockImplementation(async (key, value) => {
+				// Apply first, then fail: that is the order the real Memento uses.
+				await baseUpdate(key, value)
+				if (key === "viewStates") {
+					throw new Error("durable write failed")
+				}
+			})
+
+			await expect(provider["savePersistedViewState"]({ mode: "architect", updatedAt: 2 })).rejects.toThrow(
+				"durable write failed",
+			)
+
+			const viewStatesWrites = updateSpy.mock.calls
+				.filter((call) => call[0] === "viewStates")
+				.map((call) => call[1])
+			// The compensating write carried the map durable storage held before the attempt, and the
+			// cache matches durable storage again.
+			expect(viewStatesWrites.at(-1)).toEqual(preWrite)
+			expect(provider.contextProxy.getValue("viewStates")).toEqual(preWrite)
 			updateSpy.mockRestore()
 			await provider.dispose()
 		})
@@ -10340,6 +10422,41 @@ describe("ClineProvider", () => {
 
 			// Verify state was posted to webview
 			expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+		})
+		// The shared mode write lands before a later failure, so the rollback may only put the old
+		// mode back while nothing else has moved the shared slot: a mode another window accepted in
+		// the meantime is newer than this view's failed switch and must survive it.
+		it("leaves a newer shared mode in place when a later switch write fails", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({})
+			vi.spyOn(provider.providerSettingsManager, "getModeConfigId").mockResolvedValue(undefined)
+			const listConfigSpy = vi
+				.spyOn(provider.providerSettingsManager, "listConfig")
+				.mockImplementation(async () => {
+					// Another window commits its own mode switch between this switch's shared mode write
+					// and the write that fails below.
+					await provider.contextProxy.setValue("mode", "quality")
+					throw new Error("profile list failed")
+				})
+			// Seed the shared slot so the rollback has a previous mode it could restore.
+			await provider.contextProxy.setValue("mode", "code")
+			await provider["setViewStateId"]("stable-test-view")
+			const updateSpy = vi.mocked(mockContext.globalState.update)
+			const modeWritesBefore = updateSpy.mock.calls.filter((call) => call[0] === "mode").length
+
+			await provider.handleModeSwitch("architect").catch(() => undefined)
+
+			const modeWrites = updateSpy.mock.calls
+				.slice(modeWritesBefore)
+				.filter((call) => call[0] === "mode")
+				.map((call) => call[1])
+			// This view wrote the mode it switched to, the other window wrote the newer mode, and the
+			// rollback added nothing on top of it.
+			expect(modeWrites).toEqual(["code", "architect", "quality"])
+			expect(provider.contextProxy.getValue("mode")).toBe("quality")
+			expect(mockOutputChannel.appendLine).toHaveBeenCalledWith(
+				expect.stringContaining("Leaving the newer shared mode quality in place"),
+			)
+			listConfigSpy.mockRestore()
 		})
 
 		test("keeps the current config locally when switching to a mode without a config", async () => {

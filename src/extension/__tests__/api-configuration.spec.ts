@@ -557,6 +557,52 @@ describe("API - configuration", () => {
 		expect(provider["restoreModeConfig"]).toHaveBeenCalledWith("code", undefined, undefined)
 		expect(postStateToWebview).not.toHaveBeenCalled()
 	})
+	it("leaves the mode mappings alone when the settings write failed before any mode write", async () => {
+		const setValues = vi.fn().mockRejectedValue(new Error("settings write failed"))
+		const saveConfig = vi.fn().mockResolvedValue("pinned-id")
+		const deleteConfig = vi.fn().mockResolvedValue(undefined)
+		const setModeConfig = vi.fn().mockResolvedValue(undefined)
+		const restoreModeConfig = vi.fn().mockResolvedValue(undefined)
+		const provider = {
+			context: {},
+			on: vi.fn(),
+			getProviderProfileEntries: vi.fn().mockReturnValue([]),
+			getValues: vi.fn().mockReturnValue({ currentApiConfigName: "old-profile" }),
+			setValues,
+			contextProxy: {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValues: vi.fn().mockResolvedValue(undefined),
+				getProviderSettings: vi.fn().mockReturnValue(undefined),
+				setProviderSettings: vi.fn().mockResolvedValue(undefined),
+			},
+			refreshViewLocalStateForUpdatedProfile: vi.fn().mockResolvedValue(undefined),
+			providerSettingsManager: {
+				saveConfig,
+				deleteConfig,
+				setModeConfig,
+				// The profile did not exist before the call.
+				hasConfig: vi.fn().mockResolvedValue(false),
+				getModeConfigId: vi.fn().mockResolvedValue(undefined),
+			},
+			setModeConfig,
+			getLocalModeConfigIds: vi.fn().mockReturnValue(new Map<string, string>()),
+			restoreModeConfig,
+			postStateToWebview: vi.fn().mockResolvedValue(undefined),
+		} as unknown as ClineProvider
+		const outputChannel = { appendLine: vi.fn() } as unknown as vscode.OutputChannel
+		const api = new API(outputChannel, provider, makeClineProviderFactory())
+
+		await expect(
+			api.setConfiguration({ currentApiConfigName: "pinned", modeApiConfigs: { code: "new-code-config" } }),
+		).rejects.toThrow("settings write failed")
+
+		// The mode fan-out never ran, so this call has no mode write to undo: restoring the
+		// mappings would roll back a mapping another window accepted while the settings write
+		// was in flight.
+		expect(setModeConfig).not.toHaveBeenCalled()
+		expect(restoreModeConfig).not.toHaveBeenCalled()
+		expect(deleteConfig).toHaveBeenCalledWith("pinned")
+	})
 
 	it("replays this window's local mode choice when the mode mapping rolls back", async () => {
 		// The fan-out moves the window's cached choice with the shared map, so the rollback has to

@@ -746,6 +746,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 		} catch {
 			writtenRecordUnconfirmed = true
 		}
+		// Whether the mode fan-out below started: the compensation may only undo mode writes this
+		// call performed, or it would roll back a mapping another window accepted meanwhile.
+		let modeWritesStarted = false
 		try {
 			await this.sidebarProvider.setValues(
 				// The caller's payload is another snapshot of machine-local state: writing it forward
@@ -754,6 +757,9 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 				{ savedProfileName },
 			)
 			if (values.modeApiConfigs) {
+				// From here on this call has mode writes of its own to undo, even if a later leg
+				// of the fan-out rejects.
+				modeWritesStarted = true
 				await Promise.all(
 					Object.entries(values.modeApiConfigs).map(([mode, configId]) =>
 						// Route through the provider (#2110) so this window's local mode choice moves
@@ -899,21 +905,28 @@ export class API extends EventEmitter<RooCodeEvents> implements RooCodeAPI {
 						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
 				)
 			}
-			try {
-				// Both maps move back together, the way the forward fan-out wrote them: the shared mapping
-				// through the manager, and this window's cached choice from the snapshot above. A mode that
-				// was unmapped everywhere reverts to "no mapping" - the accessor clears the cache instead
-				// of leaving it at the id the rejected call stored.
-				await Promise.all(
-					previousModeConfigs.map(([mode, configId]) =>
-						this.sidebarProvider.restoreModeConfig(mode, configId, previousLocalModeConfigs.get(mode)),
-					),
-				)
-			} catch (restoreError) {
-				this.log(
-					"[setConfiguration] failed to restore the mode API config mappings: " +
-						(restoreError instanceof Error ? restoreError.message : String(restoreError)),
-				)
+			// The mode fan-out is conditional: when the settings write rejected before it ran, this call
+			// never touched the mode maps, so restoring them here would roll another window's accepted
+			// mapping back to the value this call read.
+			if (modeWritesStarted) {
+				try {
+					// Both maps move back together, the way the forward fan-out wrote them: the shared mapping
+					// through the manager, and this window's cached choice from the snapshot above. A mode that
+					// was unmapped everywhere reverts to "no mapping" - the accessor clears the cache instead
+					// of leaving it at the id the rejected call stored.
+					await Promise.all(
+						previousModeConfigs.map(([mode, configId]) =>
+							this.sidebarProvider.restoreModeConfig(mode, configId, previousLocalModeConfigs.get(mode)),
+						),
+					)
+				} catch (restoreError) {
+					this.log(
+						"[setConfiguration] failed to restore the mode API config mappings: " +
+							(restoreError instanceof Error ? restoreError.message : String(restoreError)),
+					)
+				}
+			} else {
+				this.log("[setConfiguration] no mode API config write ran; leaving the mode mappings as they are")
 			}
 			throw error
 		}
