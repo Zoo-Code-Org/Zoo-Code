@@ -773,6 +773,81 @@ describe("webviewMessageHandler - theme fixture probes", () => {
 	})
 })
 
+describe("CI-WV-01: code index start and status forwarding", () => {
+	const status = {
+		systemStatus: "Standby",
+		message: "partial",
+		processedItems: 1,
+		totalItems: 2,
+		currentItemUnit: "blocks",
+		failedFiles: [{ path: "a.ts", activity: "embed", reason: "down", state: "exhausted" }],
+		providerWaits: [{ service: "openai", resumeAt: 1, waitingFiles: ["b.ts"] }],
+	}
+
+	function withManager(state: string) {
+		const manager = {
+			setWorkspaceEnabled: vi.fn().mockResolvedValue(undefined),
+			initialize: vi.fn().mockResolvedValue(undefined),
+			startIndexing: vi.fn().mockResolvedValue(undefined),
+			stopIndexing: vi.fn().mockResolvedValue(undefined),
+			getCurrentStatus: vi.fn().mockReturnValue(status),
+			isFeatureEnabled: true,
+			isFeatureConfigured: true,
+			isInitialized: true,
+			state,
+		}
+		// The double provides only the scope lookup and webview members these handlers call.
+		const provider = {
+			...mockClineProvider,
+			postMessageToWebview: vi.fn(),
+			getCurrentWorkspaceCodeIndexScope: () => ({ codeIndexManager: manager }),
+		} as unknown as ClineProvider
+		return { manager, provider }
+	}
+
+	beforeEach(() => vi.clearAllMocks())
+
+	it.each(["Standby", "Error"])("starts indexing once from %s without awaiting the start", async (state) => {
+		const { manager, provider } = withManager(state)
+		manager.startIndexing.mockReturnValue(new Promise<void>(() => {}))
+		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		expect(manager.startIndexing).toHaveBeenCalledTimes(1)
+	})
+
+	it("logs a start failure instead of rejecting", async () => {
+		const { manager, provider } = withManager("Standby")
+		manager.startIndexing.mockRejectedValue(new Error("boom"))
+		await expect(webviewMessageHandler(provider, { type: "startIndexing" })).resolves.toBeUndefined()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(provider.log).toHaveBeenCalledWith("Indexing error: Error: boom")
+	})
+
+	it("does not start again while indexing is active", async () => {
+		const { manager, provider } = withManager("Indexing")
+		await webviewMessageHandler(provider, { type: "startIndexing" })
+		expect(manager.startIndexing).not.toHaveBeenCalled()
+	})
+
+	it("forwards failed files and provider waits only after the stop finishes", async () => {
+		const { manager, provider } = withManager("Indexing")
+		let finishStop!: () => void
+		manager.stopIndexing.mockReturnValue(new Promise<void>((resolve) => (finishStop = resolve)))
+		manager.getCurrentStatus.mockReturnValue({ ...status, systemStatus: "Stopping" })
+		const handling = webviewMessageHandler(provider, { type: "stopIndexing" })
+		await new Promise((resolve) => setTimeout(resolve, 0))
+		expect(provider.postMessageToWebview).not.toHaveBeenCalled()
+
+		manager.getCurrentStatus.mockReturnValue(status)
+		finishStop()
+		await handling
+		expect(manager.stopIndexing).toHaveBeenCalledTimes(1)
+		expect(provider.postMessageToWebview).toHaveBeenCalledExactlyOnceWith({
+			type: "indexingStatusUpdate",
+			values: status,
+		})
+	})
+})
+
 import { changeLanguage, t } from "../../../i18n"
 
 vi.mock("vscode", () => {

@@ -1,0 +1,56 @@
+diff --git a/dist/browser/index.cjs b/dist/browser/index.cjs
+--- a/dist/browser/index.cjs
++++ b/dist/browser/index.cjs
+@@ -991,8 +991,8 @@
+         }
+         catch (error) {
+             if (error instanceof ApiError && error.status === 429) {
+-                const retryAfterHeader = error.headers.get('retry-after')?.[0];
+-                if (retryAfterHeader) {
++                const retryAfterHeader = error.headers.get('retry-after');
++                if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+                     throw new QdrantClientResourceExhaustedError(error.message, retryAfterHeader);
+                 }
+             }
+diff --git a/dist/browser/index.js b/dist/browser/index.js
+--- a/dist/browser/index.js
++++ b/dist/browser/index.js
+@@ -989,8 +989,8 @@
+         }
+         catch (error) {
+             if (error instanceof ApiError && error.status === 429) {
+-                const retryAfterHeader = error.headers.get('retry-after')?.[0];
+-                if (retryAfterHeader) {
++                const retryAfterHeader = error.headers.get('retry-after');
++                if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+                     throw new QdrantClientResourceExhaustedError(error.message, retryAfterHeader);
+                 }
+             }
+diff --git a/dist/cjs/api-client.js b/dist/cjs/api-client.js
+--- a/dist/cjs/api-client.js
++++ b/dist/cjs/api-client.js
+@@ -51,8 +51,8 @@
+         }
+         catch (error) {
+             if (error instanceof openapi_typescript_fetch_1.ApiError && error.status === 429) {
+-                const retryAfterHeader = error.headers.get('retry-after')?.[0];
+-                if (retryAfterHeader) {
++                const retryAfterHeader = error.headers.get('retry-after');
++                if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+                     throw new errors_js_1.QdrantClientResourceExhaustedError(error.message, retryAfterHeader);
+                 }
+             }
+diff --git a/dist/esm/api-client.js b/dist/esm/api-client.js
+--- a/dist/esm/api-client.js
++++ b/dist/esm/api-client.js
+@@ -47,8 +47,8 @@
+         }
+         catch (error) {
+             if (error instanceof ApiError && error.status === 429) {
+-                const retryAfterHeader = error.headers.get('retry-after')?.[0];
+-                if (retryAfterHeader) {
++                const retryAfterHeader = error.headers.get('retry-after');
++                if (retryAfterHeader && !isNaN(Number(retryAfterHeader))) {
+                     throw new QdrantClientResourceExhaustedError(error.message, retryAfterHeader);
+                 }
+             }

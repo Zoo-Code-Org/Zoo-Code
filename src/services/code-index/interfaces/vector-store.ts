@@ -10,9 +10,13 @@ export type PointStruct = {
 export interface IVectorStore {
 	/**
 	 * Initializes the vector store
+	 * @param signal Ends retry and rate-limit waits during collection and index creation
 	 * @returns Promise resolving to boolean indicating if a new collection was created
 	 */
-	initialize(): Promise<boolean>
+	initialize(signal?: AbortSignal): Promise<boolean>
+
+	/** Requests with the same scope share one service allowance and its rate-limit wait. */
+	readonly rateLimitScope: string
 
 	/**
 	 * Upserts points into the vector store

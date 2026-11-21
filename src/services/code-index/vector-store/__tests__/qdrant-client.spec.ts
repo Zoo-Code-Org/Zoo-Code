@@ -1,7 +1,8 @@
-import { QdrantClient } from "@qdrant/js-client-rest"
+import { QdrantClient, QdrantClientResourceExhaustedError } from "@qdrant/js-client-rest"
 import { createHash } from "crypto"
 
 import { QdrantVectorStore } from "../qdrant-client"
+import { ProviderPacerRegistry } from "../../provider-pacer"
 import { getWorkspacePath } from "../../../../utils/path"
 import { DEFAULT_MAX_SEARCH_RESULTS, DEFAULT_SEARCH_MIN_SCORE } from "../../constants"
 
@@ -42,6 +43,9 @@ const mockQdrantClientInstance = {
 	delete: vitest.fn(),
 }
 
+// Recreated per test: a 429 pause left in a shared registry would delay every later request.
+let pacers: ProviderPacerRegistry
+
 const mockCreateHashInstance = {
 	update: vitest.fn().mockReturnThis(),
 	digest: vitest.fn(),
@@ -58,6 +62,7 @@ describe("QdrantVectorStore", () => {
 
 	beforeEach(() => {
 		clearAllMocks()
+		pacers = new ProviderPacerRegistry()
 
 		// Mock QdrantClient constructor
 		;(QdrantClient as any).mockImplementation(function () {
@@ -72,7 +77,7 @@ describe("QdrantVectorStore", () => {
 		// Mock getWorkspacePath
 		;(getWorkspacePath as any).mockReturnValue(mockWorkspacePath)
 
-		vectorStore = new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize, mockApiKey)
+		vectorStore = new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize, mockApiKey, pacers)
 	})
 
 	it("should correctly initialize QdrantClient and collectionName in constructor", () => {
@@ -94,7 +99,7 @@ describe("QdrantVectorStore", () => {
 		expect((vectorStore as any).vectorSize).toBe(mockVectorSize)
 	})
 	it("should handle constructor with default URL when none provided", () => {
-		new QdrantVectorStore(mockWorkspacePath, undefined as any, mockVectorSize)
+		new QdrantVectorStore(mockWorkspacePath, undefined as any, mockVectorSize, undefined, pacers)
 
 		expect(QdrantClient).toHaveBeenLastCalledWith({
 			host: "localhost",
@@ -108,7 +113,7 @@ describe("QdrantVectorStore", () => {
 	})
 
 	it("should handle constructor without API key", () => {
-		new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize)
+		new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, mockVectorSize, undefined, pacers)
 
 		expect(QdrantClient).toHaveBeenLastCalledWith({
 			host: "mock-qdrant",
@@ -128,6 +133,8 @@ describe("QdrantVectorStore", () => {
 					mockWorkspacePath,
 					"https://qdrant.ashbyfam.com",
 					mockVectorSize,
+					undefined,
+					pacers,
 				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "qdrant.ashbyfam.com",
@@ -143,7 +150,13 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should use explicit port for HTTPS URLs with explicit port", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "https://example.com:9000", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"https://example.com:9000",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "example.com",
 					https: true,
@@ -162,6 +175,8 @@ describe("QdrantVectorStore", () => {
 					mockWorkspacePath,
 					"https://example.com/api/v1?key=value",
 					mockVectorSize,
+					undefined,
+					pacers,
 				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "example.com",
@@ -179,7 +194,13 @@ describe("QdrantVectorStore", () => {
 
 		describe("HTTP URL handling", () => {
 			it("should use explicit port 80 for HTTP URLs without port", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "http://example.com", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"http://example.com",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "example.com",
 					https: false,
@@ -194,7 +215,13 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should use explicit port for HTTP URLs with explicit port", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "http://localhost:8080", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"http://localhost:8080",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -213,6 +240,8 @@ describe("QdrantVectorStore", () => {
 					mockWorkspacePath,
 					"http://example.com/api/v1?key=value",
 					mockVectorSize,
+					undefined,
+					pacers,
 				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "example.com",
@@ -230,7 +259,13 @@ describe("QdrantVectorStore", () => {
 
 		describe("Hostname handling", () => {
 			it("should convert hostname to http with port 80", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "qdrant.example.com", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"qdrant.example.com",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "qdrant.example.com",
 					https: false,
@@ -244,7 +279,13 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should handle hostname:port format with explicit port", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "localhost:6333", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"localhost:6333",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -258,7 +299,13 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should handle explicit HTTP URLs correctly", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "http://localhost:9000", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"http://localhost:9000",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -274,7 +321,13 @@ describe("QdrantVectorStore", () => {
 
 		describe("IP address handling", () => {
 			it("should convert IP address to http with port 80", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "192.168.1.100", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"192.168.1.100",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "192.168.1.100",
 					https: false,
@@ -288,7 +341,13 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should handle IP:port format with explicit port", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "192.168.1.100:6333", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"192.168.1.100:6333",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "192.168.1.100",
 					https: false,
@@ -304,7 +363,13 @@ describe("QdrantVectorStore", () => {
 
 		describe("Edge cases", () => {
 			it("should handle undefined URL with host-based config", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, undefined as any, mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					undefined as any,
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -318,7 +383,7 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should handle empty string URL with host-based config", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "", mockVectorSize, undefined, pacers)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -332,7 +397,7 @@ describe("QdrantVectorStore", () => {
 			})
 
 			it("should handle whitespace-only URL with host-based config", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "   ", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "   ", mockVectorSize, undefined, pacers)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "localhost",
 					https: false,
@@ -348,7 +413,13 @@ describe("QdrantVectorStore", () => {
 
 		describe("Invalid URL fallback", () => {
 			it("should treat invalid URLs as hostnames with port 80", () => {
-				const vectorStore = new QdrantVectorStore(mockWorkspacePath, "invalid-url-format", mockVectorSize)
+				const vectorStore = new QdrantVectorStore(
+					mockWorkspacePath,
+					"invalid-url-format",
+					mockVectorSize,
+					undefined,
+					pacers,
+				)
 				expect(QdrantClient).toHaveBeenLastCalledWith({
 					host: "invalid-url-format",
 					https: false,
@@ -369,6 +440,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/some/path",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -388,6 +461,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -407,6 +482,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"https://qdrant.ashbyfam.com/api",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "qdrant.ashbyfam.com",
@@ -426,6 +503,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/api/",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -445,6 +524,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/api///",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -464,6 +545,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/api/v1/qdrant",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -480,7 +563,13 @@ describe("QdrantVectorStore", () => {
 
 		it("should handle complex URL with multiple segments, multiple trailing slashes, query params, and fragment", () => {
 			const complexUrl = "https://example.com/ollama/api/v1///?key=value#pos"
-			const vectorStoreComplex = new QdrantVectorStore(mockWorkspacePath, complexUrl, mockVectorSize)
+			const vectorStoreComplex = new QdrantVectorStore(
+				mockWorkspacePath,
+				complexUrl,
+				mockVectorSize,
+				undefined,
+				pacers,
+			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "example.com",
 				https: true,
@@ -499,6 +588,8 @@ describe("QdrantVectorStore", () => {
 				mockWorkspacePath,
 				"http://localhost:6333/api/path?key=value#fragment",
 				mockVectorSize,
+				undefined,
+				pacers,
 			)
 			expect(QdrantClient).toHaveBeenLastCalledWith({
 				host: "localhost",
@@ -690,43 +781,89 @@ describe("QdrantVectorStore", () => {
 			expect(console.error).toHaveBeenCalledTimes(1) // Only the outer try/catch
 			;(console.error as any).mockRestore()
 		})
-		it("should log but not fail if payload index creation errors occur", async () => {
-			// Mock successful collection creation
-			mockQdrantClientInstance.getCollection.mockRejectedValue({
-				response: { status: 404 },
-				message: "Not found",
+		describe("CI-QD-01: collection and payload index creation", () => {
+			const serverError = () => Object.assign(new Error("unavailable"), { status: 503 })
+
+			beforeEach(() => {
+				vitest.useFakeTimers()
+				mockQdrantClientInstance.createPayloadIndex.mockResolvedValue(undefined)
+				mockQdrantClientInstance.getCollection.mockRejectedValue({
+					response: { status: 404 },
+					message: "Not found",
+				})
+				mockQdrantClientInstance.createCollection.mockResolvedValue(true)
+				vitest.spyOn(console, "error").mockImplementation(function () {})
 			})
-			mockQdrantClientInstance.createCollection.mockResolvedValue(true as any)
+			afterEach(() => {
+				vitest.useRealTimers()
+				// clearAllMocks keeps implementations; a persistent rejection here would leak into later tests.
+				mockQdrantClientInstance.createPayloadIndex.mockReset()
+			})
 
-			// Mock payload index creation to fail
-			const indexError = new Error("Index creation failed")
-			mockQdrantClientInstance.createPayloadIndex.mockRejectedValue(indexError)
-			vitest.spyOn(console, "warn").mockImplementation(function () {}) // Suppress console.warn
-
-			const result = await vectorStore.initialize()
-
-			// Should still return true since main collection setup succeeded
-			expect(result).toBe(true)
-			expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
-
-			// Verify all payload index creations were attempted (6: type + 5 pathSegments)
-			expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
-
-			// Verify warnings were logged for each failed index (now 6)
-			expect(console.warn).toHaveBeenCalledTimes(6)
-			// Verify warning for 'type' index
-			expect(console.warn).toHaveBeenCalledWith(
-				expect.stringContaining(`Could not create payload index for type`),
-				indexError.message,
+			it.each(["createCollection", "createPayloadIndex"] as const)(
+				"recovers when %s fails twice with a server error",
+				async (method) => {
+					mockQdrantClientInstance[method]
+						.mockRejectedValueOnce(serverError())
+						.mockRejectedValueOnce(serverError())
+					const pending = vectorStore.initialize()
+					await vitest.advanceTimersByTimeAsync(1500)
+					await expect(pending).resolves.toBe(true)
+				},
 			)
-			for (let i = 0; i <= 4; i++) {
-				expect(console.warn).toHaveBeenCalledWith(
-					expect.stringContaining(`Could not create payload index for pathSegments.${i}`),
-					indexError.message,
-				)
-			}
 
-			;(console.warn as any).mockRestore()
+			it("rejects when payload index creation exhausts its retries", async () => {
+				mockQdrantClientInstance.createPayloadIndex.mockRejectedValue(serverError())
+				const pending = vectorStore.initialize().catch((error: unknown) => error)
+				await vitest.advanceTimersByTimeAsync(1500)
+				expect(await pending).toBeInstanceOf(Error)
+				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(3)
+			})
+
+			it("does not retry a permanent creation failure", async () => {
+				mockQdrantClientInstance.createCollection.mockRejectedValue(
+					Object.assign(new Error("bad request"), { status: 400 }),
+				)
+				await expect(vectorStore.initialize()).rejects.toThrow()
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
+			})
+
+			it("retries the collection recreate after a dimension mismatch", async () => {
+				mockQdrantClientInstance.getCollection
+					.mockResolvedValueOnce({ config: { params: { vectors: { size: mockVectorSize + 1 } } } })
+					.mockRejectedValueOnce(new Error("Not found"))
+				mockQdrantClientInstance.deleteCollection.mockResolvedValue(true)
+				mockQdrantClientInstance.createCollection.mockRejectedValueOnce(serverError())
+				vitest.spyOn(console, "warn").mockImplementation(function () {})
+				const pending = vectorStore.initialize()
+				await vitest.advanceTimersByTimeAsync(1000)
+				await expect(pending).resolves.toBe(true)
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(2)
+			})
+
+			it.each([
+				["with Retry-After: 2", 2, 2000],
+				["without Retry-After", undefined, 1000],
+			])("waits and recovers when collection creation gets a 429 %s", async (_label, retryAfter, waitMs) => {
+				// The module is automocked, so set the fields the patched client would assign.
+				const limited = Object.assign(new QdrantClientResourceExhaustedError("Too many requests", "0"), {
+					message: "Too many requests",
+					retry_after: retryAfter,
+				})
+				mockQdrantClientInstance.createCollection.mockRejectedValueOnce(limited)
+				const pending = vectorStore.initialize()
+				await vitest.advanceTimersByTimeAsync(waitMs - 1)
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(1)
+				await vitest.advanceTimersByTimeAsync(1)
+				await expect(pending).resolves.toBe(true)
+				expect(mockQdrantClientInstance.createCollection).toHaveBeenCalledTimes(2)
+			})
+
+			it("treats an existing payload index as success", async () => {
+				mockQdrantClientInstance.createPayloadIndex.mockRejectedValue(new Error("index already exists"))
+				await expect(vectorStore.initialize()).resolves.toBe(true)
+				expect(mockQdrantClientInstance.createPayloadIndex).toHaveBeenCalledTimes(6)
+			})
 		})
 
 		it("should throw vectorDimensionMismatch error when deleteCollection fails during recreation", async () => {
@@ -904,7 +1041,13 @@ describe("QdrantVectorStore", () => {
 			const newVectorSize = 768
 
 			// Create a new vector store with the new dimension
-			const newVectorStore = new QdrantVectorStore(mockWorkspacePath, mockQdrantUrl, newVectorSize, mockApiKey)
+			const newVectorStore = new QdrantVectorStore(
+				mockWorkspacePath,
+				mockQdrantUrl,
+				newVectorSize,
+				mockApiKey,
+				pacers,
+			)
 
 			mockQdrantClientInstance.getCollection
 				.mockResolvedValueOnce({
@@ -1236,7 +1379,11 @@ describe("QdrantVectorStore", () => {
 			mockQdrantClientInstance.upsert.mockRejectedValue(upsertError)
 			vitest.spyOn(console, "error").mockImplementation(function () {})
 
-			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toThrow(upsertError)
+			// The wrapper adds the classification the writer's retry policy reads; message and cause are unchanged.
+			await expect(vectorStore.upsertPoints(mockPoints)).rejects.toMatchObject({
+				message: "Upsert failed",
+				cause: upsertError,
+			})
 
 			expect(mockQdrantClientInstance.upsert).toHaveBeenCalledTimes(1)
 			expect(console.error).toHaveBeenCalledWith("Failed to upsert points:", upsertError)

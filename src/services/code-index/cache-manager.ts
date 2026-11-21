@@ -5,6 +5,25 @@ import debounce from "lodash.debounce"
 import { safeWriteJson } from "../../utils/safeWriteJson"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
+import { t } from "../../i18n"
+import { isSourceMissing } from "./shared/indexing-errors"
+
+/** The cache exists but could not be read; treating it as empty would erase the index on the next scan. */
+export class CacheReadError extends Error {
+	constructor(cause: unknown) {
+		super(t("embeddings:orchestrator.cacheReadFailed"), { cause })
+		this.name = "CacheReadError"
+	}
+}
+
+function isHashMap(value: unknown): value is Record<string, string> {
+	return (
+		typeof value === "object" &&
+		value !== null &&
+		!Array.isArray(value) &&
+		Object.values(value).every((hash) => typeof hash === "string")
+	)
+}
 
 /**
  * Manages the cache for code indexing
@@ -33,17 +52,32 @@ export class CacheManager implements ICacheManager {
 	 * Initializes the cache manager by loading the cache file
 	 */
 	async initialize(): Promise<void> {
+		let cacheData: Uint8Array
 		try {
-			const cacheData = await vscode.workspace.fs.readFile(this.cachePath)
-			this.fileHashes = JSON.parse(cacheData.toString())
+			cacheData = await vscode.workspace.fs.readFile(this.cachePath)
+		} catch (error) {
+			if (isSourceMissing(error)) {
+				this.fileHashes = {}
+				return
+			}
+			this.captureError(error, "initialize")
+			throw new CacheReadError(error)
+		}
+		try {
+			const parsed: unknown = JSON.parse(Buffer.from(cacheData).toString())
+			this.fileHashes = isHashMap(parsed) ? parsed : {}
 		} catch (error) {
 			this.fileHashes = {}
-			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
-				error: error instanceof Error ? error.message : String(error),
-				stack: error instanceof Error ? error.stack : undefined,
-				location: "initialize",
-			})
+			this.captureError(error, "initialize")
 		}
+	}
+
+	private captureError(error: unknown, location: string): void {
+		TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+			error: error instanceof Error ? error.message : String(error),
+			stack: error instanceof Error ? error.stack : undefined,
+			location,
+		})
 	}
 
 	/**

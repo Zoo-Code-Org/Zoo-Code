@@ -6,27 +6,43 @@ import { CodeIndexConfigManager } from "./config-manager"
 import { CodeIndexStateManager } from "./state-manager"
 import { TelemetryService } from "@roo-code/telemetry"
 import { TelemetryEventName } from "@roo-code/types"
+import type { FileFailureRegistry } from "./file-failure-registry"
+import type { ProviderPacerRegistry } from "./provider-pacer"
+import { retryWithPolicy } from "./shared/retry-policy"
+import { classifyIndexingError, SearchProviderRateLimitError } from "./shared/indexing-errors"
+import { t } from "../../i18n"
+
+export interface CodeIndexSearchResponse {
+	results: VectorStoreSearchResult[]
+	incomplete: boolean
+	failedPaths: string[]
+	waitingPaths: string[]
+}
 
 /**
  * Service responsible for searching the code index.
  */
 export class CodeIndexSearchService {
 	constructor(
-		private readonly configManager: CodeIndexConfigManager,
-		private readonly stateManager: CodeIndexStateManager,
-		private readonly embedder: IEmbedder,
-		private readonly vectorStore: IVectorStore,
+		private readonly configManager: Pick<
+			CodeIndexConfigManager,
+			"isFeatureEnabled" | "isFeatureConfigured" | "currentSearchMinScore" | "currentSearchMaxResults"
+		>,
+		private readonly stateManager: Pick<CodeIndexStateManager, "getCurrentStatus">,
+		private readonly embedder: Pick<IEmbedder, "createEmbeddings">,
+		private readonly vectorStore: Pick<IVectorStore, "search" | "collectionExists">,
+		private readonly failures: Pick<FileFailureRegistry, "list">,
+		private readonly providerPacers: Pick<ProviderPacerRegistry, "waitingPaths">,
 	) {}
 
 	/**
 	 * Searches the code index for relevant content.
 	 * @param query The search query
-	 * @param limit Maximum number of results to return
 	 * @param directoryPrefix Optional directory path to filter results by
-	 * @returns Array of search results
+	 * @returns Search results with incomplete-index details
 	 * @throws Error if the service is not properly configured or ready
 	 */
-	public async searchIndex(query: string, directoryPrefix?: string): Promise<VectorStoreSearchResult[]> {
+	public async searchIndex(query: string, directoryPrefix?: string): Promise<CodeIndexSearchResponse> {
 		if (!this.configManager.isFeatureEnabled || !this.configManager.isFeatureConfigured) {
 			throw new Error("Code index feature is disabled or not configured.")
 		}
@@ -34,15 +50,29 @@ export class CodeIndexSearchService {
 		const minScore = this.configManager.currentSearchMinScore
 		const maxResults = this.configManager.currentSearchMaxResults
 
+		const initialState = this.stateManager.getCurrentStatus().systemStatus
+		const partialStandby =
+			initialState === "Standby" && this.hasOutstandingWork() && (await this.vectorStore.collectionExists())
+		// The collection lookup is awaited, so a stop or error may have started meanwhile.
 		const currentState = this.stateManager.getCurrentStatus().systemStatus
-		if (currentState !== "Indexed" && currentState !== "Indexing") {
-			// Allow search during Indexing too
+		const ready =
+			currentState === "Indexed" || currentState === "Indexing" || (partialStandby && currentState === "Standby")
+		if (!ready) {
 			throw new Error(`Code index is not ready for search. Current state: ${currentState}`)
 		}
 
 		try {
-			// Generate embedding for query
-			const embeddingResponse = await this.embedder.createEmbeddings([query])
+			const embeddingResponse = await retryWithPolicy(
+				async () => {
+					try {
+						return await this.embedder.createEmbeddings([query])
+					} catch (error) {
+						if (classifyIndexingError(error) !== "rate-limit") throw error
+						throw new SearchProviderRateLimitError(t("embeddings:searchProviderRateLimited"), error)
+					}
+				},
+				{ budget: { retriesUsed: 0 } },
+			)
 			const vector = embeddingResponse?.embeddings[0]
 			if (!vector) {
 				throw new Error("Failed to generate embedding for query.")
@@ -56,10 +86,18 @@ export class CodeIndexSearchService {
 
 			// Perform search
 			const results = await this.vectorStore.search(vector, normalizedPrefix, minScore, maxResults)
-			return results
+			const failedPaths = [...new Set(this.failures.list().map((failure) => failure.path))]
+			const waitingPaths = this.providerPacers.waitingPaths()
+			// Only Indexed proves the scan finished; a stop during the query leaves Standby without that proof.
+			const complete = this.stateManager.getCurrentStatus().systemStatus === "Indexed"
+			return {
+				results,
+				incomplete: !complete || failedPaths.length > 0 || waitingPaths.length > 0,
+				failedPaths,
+				waitingPaths,
+			}
 		} catch (error) {
 			console.error("[CodeIndexSearchService] Error during search:", error)
-			this.stateManager.setSystemState("Error", `Search failed: ${(error as Error).message}`)
 
 			// Capture telemetry for the error
 			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
@@ -67,8 +105,11 @@ export class CodeIndexSearchService {
 				stack: (error as Error).stack,
 				location: "searchIndex",
 			})
-
-			throw error // Re-throw the error after setting state
+			throw error
 		}
+	}
+
+	private hasOutstandingWork(): boolean {
+		return this.failures.list().length > 0 || this.providerPacers.waitingPaths().length > 0
 	}
 }

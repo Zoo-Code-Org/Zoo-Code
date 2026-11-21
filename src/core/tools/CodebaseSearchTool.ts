@@ -4,7 +4,6 @@ import { Task } from "../task/Task"
 import { CodeIndexManagerRegistry } from "../../services/code-index/code-index-manager-registry"
 import { getWorkspacePath } from "../../utils/path"
 import { formatResponse } from "../prompts/responses"
-import { VectorStoreSearchResult } from "../../services/code-index/interfaces"
 import type { ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -78,18 +77,36 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 				throw new Error("Code Indexing is not initialized for this workspace.")
 			}
 
-			const searchResults: VectorStoreSearchResult[] = await manager.searchIndex(query, directoryPrefix)
-
-			if (!searchResults || searchResults.length === 0) {
-				pushToolResult(`No relevant code snippets found for the query: "${query}"`)
-				return
-			}
+			const {
+				results: searchResults,
+				incomplete,
+				failedPaths,
+				waitingPaths,
+			} = await manager.searchIndex(query, directoryPrefix)
+			const incompleteNotice = incomplete
+				? [
+						"Partial index: results may be incomplete.",
+						...(failedPaths.length ? ["Failed files:", ...failedPaths.map((file) => `- ${file}`)] : []),
+						...(waitingPaths.length
+							? [
+									"Waiting files (indexing resumes automatically):",
+									...waitingPaths.map((file) => `- ${file}`),
+								]
+							: []),
+					].join("\n") + "\n\n"
+				: ""
 
 			const jsonResult = {
 				query,
 				results: [],
+				incomplete,
+				failedPaths,
+				waitingPaths,
 			} as {
 				query: string
+				incomplete: boolean
+				failedPaths: string[]
+				waitingPaths: string[]
 				results: Array<{
 					filePath: string
 					score: number
@@ -117,7 +134,12 @@ export class CodebaseSearchTool extends BaseTool<"codebase_search"> {
 			const payload = { tool: "codebaseSearch", content: jsonResult }
 			await task.say("codebase_search_result", JSON.stringify(payload))
 
-			const output = `Query: ${query}
+			if (jsonResult.results.length === 0) {
+				pushToolResult(`${incompleteNotice}No relevant code snippets found for the query: "${query}"`)
+				return
+			}
+
+			const output = `${incompleteNotice}Query: ${query}
 Results:
 
 ${jsonResult.results
@@ -131,7 +153,7 @@ Code Chunk: ${result.codeChunk}
 	.join("\n")}`
 
 			pushToolResult(output)
-		} catch (error: any) {
+		} catch (error) {
 			await handleError("codebase_search", error)
 		}
 	}
