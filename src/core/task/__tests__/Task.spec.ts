@@ -7395,21 +7395,9 @@ describe("Cline", () => {
 				totalTokensOut: 0,
 				contextTokens: 50_000,
 			})
-			vi.spyOn(task.api, "createMessage").mockReturnValue({
-				async *[Symbol.asyncIterator]() {
-					yield { type: "text", text: "ok" }
-				},
-				async next() {
-					return { done: true, value: undefined }
-				},
-				async return() {
-					return { done: true, value: undefined }
-				},
-				async throw(error: unknown) {
-					throw error
-				},
-				async [Symbol.asyncDispose]() {},
-			} as AsyncGenerator<ApiStreamChunk>)
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
 			task.apiConversationHistory = [
 				{
 					role: "user" as const,

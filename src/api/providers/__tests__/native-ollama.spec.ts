@@ -1099,11 +1099,9 @@ describe("NativeOllamaHandler", () => {
 			expect(removeEventListenerSpy).toHaveBeenCalledWith("abort", registeredHandler)
 		})
 
-		it("should forward the abort signal to model discovery so discovery is cancellable", async () => {
+		it("keeps shared discovery active when a prompt waiter aborts", async () => {
 			const controller = new AbortController()
-			// Keep discovery pending so the linkage between the forwarded
-			// signal and the caller's signal is observable while discovery is
-			// still in flight (a settled call detaches the linkage).
+			// Keep discovery pending while this caller detaches.
 			mockGetOllamaModels.mockImplementation(
 				() => new Promise<Awaited<ReturnType<typeof getOllamaModels>>>(() => {}),
 			)
@@ -1114,16 +1112,14 @@ describe("NativeOllamaHandler", () => {
 				await Promise.resolve()
 			}
 
-			// Discovery must be cancellable: the per-request signal is forwarded
-			// to the fetcher (not just raced against). Aborting the caller's
-			// signal must abort the forwarded signal while discovery is pending.
+			// The shared fetch owns its timeout signal.
 			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
 			const forwarded = mockGetOllamaModels.mock.calls[0]?.[2]?.signal
 			expect(forwarded).toBeInstanceOf(AbortSignal)
 			expect(forwarded?.aborted).toBe(false)
 
 			controller.abort()
-			expect(forwarded?.aborted).toBe(true)
+			expect(forwarded?.aborted).toBe(false)
 
 			await expect(promise).rejects.toMatchObject({ name: "AbortError" })
 		})
@@ -1450,6 +1446,126 @@ describe("NativeOllamaHandler", () => {
 
 			expect(mockGetOllamaModels).toHaveBeenCalledTimes(2)
 		})
+	})
+
+	describe("catalog cancellation property", () => {
+		const entries = ["fetch", "ensure", "stream", "prompt"] as const
+		const cases = entries.flatMap((first) =>
+			entries.flatMap((second) =>
+				[0, 1].flatMap((cancelled) =>
+					[false, true].map((settleFirst) => ({ first, second, cancelled, settleFirst })),
+				),
+			),
+		)
+
+		it("keeps a streaming caller alive when a concurrent prompt times out", async () => {
+			vi.useFakeTimers()
+			try {
+				let finish = () => {}
+				mockGetOllamaModels.mockImplementationOnce(
+					(_url, _key, options) =>
+						new Promise((resolve, reject) => {
+							finish = () => resolve({ llama2: { contextWindow: 1_000_000, supportsPromptCache: false } })
+							options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+								once: true,
+							})
+						}),
+				)
+				mockChat.mockResolvedValue({
+					async *[Symbol.asyncIterator]() {
+						yield { message: { content: "ok" } }
+					},
+				})
+				const prompt = handler.completePrompt("Prompt", { timeoutMs: 10 })
+				const rejected = expect(prompt).rejects.toMatchObject({ name: "AbortError" })
+				const stream = collectStream(handler.createMessage("System", []))
+				await vi.advanceTimersByTimeAsync(10)
+				await rejected
+				expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal?.aborted).toBe(false)
+				finish()
+				await expect(stream).resolves.toContainEqual({ type: "text", text: "ok" })
+				expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it.each(["empty", "error"] as const)("retries a shared %s result", async (result) => {
+			if (result === "empty") mockGetOllamaModels.mockResolvedValueOnce({})
+			else mockGetOllamaModels.mockRejectedValueOnce(new Error("network down"))
+			const first = await Promise.allSettled([handler.fetchModel(), handler.ensureModelFetched()])
+			expect(first.map(({ status }) => status)).toEqual(
+				result === "empty" ? ["fulfilled", "fulfilled"] : ["rejected", "rejected"],
+			)
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			await Promise.all([handler.ensureModelFetched(), handler.fetchModel()])
+			expect(mockGetOllamaModels).toHaveBeenCalledTimes(2)
+		})
+
+		it.each(cases)(
+			"isolates cancellation: $first/$second, caller $cancelled, settled $settleFirst",
+			async ({ first, second, cancelled, settleFirst }) => {
+				// Property: cancelling one waiter must not reject a live waiter.
+				// Enumerate both caller orders, all entry points, and both settle orders.
+				const models = { llama2: { contextWindow: 1_000_000, maxTokens: 4096, supportsPromptCache: false } }
+				let finish = () => {}
+				mockGetOllamaModels.mockImplementationOnce(
+					(_url, _key, options) =>
+						new Promise((resolve, reject) => {
+							finish = () => resolve(models)
+							options?.signal?.addEventListener("abort", () => reject(options.signal?.reason), {
+								once: true,
+							})
+						}),
+				)
+				mockChat.mockImplementation(async (request: { stream: boolean }) =>
+					request.stream
+						? {
+								async *[Symbol.asyncIterator]() {
+									yield { message: { content: "ok" } }
+								},
+							}
+						: { message: { content: "ok" } },
+				)
+				const controllers = [new AbortController(), new AbortController()]
+				const start = (entry: (typeof entries)[number], signal: AbortSignal): Promise<unknown> => {
+					switch (entry) {
+						case "fetch":
+							return handler.fetchModel(signal)
+						case "ensure":
+							return handler.ensureModelFetched(signal)
+						case "stream":
+							return collectStream(
+								handler.createMessage("System", [], makeCreateMessageMetadata({ abortSignal: signal })),
+							)
+						case "prompt":
+							return handler.completePrompt("Prompt", { abortSignal: signal })
+					}
+				}
+				const outcomes = [start(first, controllers[0].signal), start(second, controllers[1].signal)].map(
+					(promise) =>
+						promise.then(
+							() => "done",
+							() => "cancelled",
+						),
+				)
+				if (settleFirst) {
+					finish()
+					await Promise.all(outcomes)
+				}
+				controllers[cancelled].abort()
+				if (!settleFirst) {
+					expect(await outcomes[cancelled]).toBe("cancelled")
+					expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal?.aborted).toBe(false)
+					finish()
+				}
+				expect(await outcomes[1 - cancelled]).toBe("done")
+				expect(handler.getModel().info.contextWindow).toBe(1_000_000)
+				expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+				await handler.fetchModel()
+				expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
+			},
+		)
 	})
 
 	describe("tool calling", () => {
@@ -2981,9 +3097,9 @@ describe("NativeOllamaHandler", () => {
 			await withDeadline(settledDiscovery, 500)
 			expect(mockChat).not.toHaveBeenCalled()
 			expect(mockGetOllamaModels).toHaveBeenCalledTimes(1)
-			// The external signal must reach the discovery fetch itself, so an
-			// aborted request is cancelled at the network level, not just raced.
-			expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal).toBe(controller.signal)
+			// Cancelling this stream must not cancel the shared discovery.
+			expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal).not.toBe(controller.signal)
+			expect(mockGetOllamaModels.mock.calls[0]?.[2]?.signal?.aborted).toBe(false)
 			expect(clientAborted).toBe(true)
 
 			// Settle the held discovery fetch so no promise is left dangling.
