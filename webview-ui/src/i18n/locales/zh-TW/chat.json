@@ -347,12 +347,12 @@
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.98.0 新功能",
-			"highlight0": "🎟️ 預覽即將推出的 Zoo Pass 訂閱。2 週免費使用；名額有限",
-			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "🏷️ 自動任務標題與更精細的模型控制: 自動為新的根任務產生標題，並嘗試實驗性的動態思考力度設定。",
-			"highlight2": "🔌 擴充的模型與供應商支援: 使用 GPT-6.1 Terra 並取得最新的 Friendli 模型清單。",
-			"highlight3": "🛡️ 更安全、回應更迅速的對話與編輯: 正常取消 OpenAI Native 和 Requesty 請求，防止工作區外的 diff 遭到意外自動核准，一致地切換介面語言，並避免有歧義的 JSON 備份復原。"
+			"heading": "Zoo Code v3.98.1 新功能",
+			"highlight0": "💫預覽 Zoo Pass：只要你的 Zoo Gateway 帳戶中有任意金額的餘額，即可在 12 月 1 日前免費無限使用 GLM-5.3-Flash。",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 模型與推理：支援 GPT-6.2 Sol、GPT-6.2 Astra 和 Claude Sonnet 5.5。可為每個 LiteLLM 設定檔設定推理強度。",
+			"highlight2": "🛡️ 安全：改善技能和命令中繼資料解析、提及處理、供應商連結及 CLI 核准檢查。",
+			"highlight3": "🔧 修正：修正 OpenAI 服務層級費用，識別工作區符號連結，並補充更多介面翻譯。"
 		}
 	},
 	"reasoning": {

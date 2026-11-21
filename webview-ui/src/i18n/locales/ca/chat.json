@@ -331,12 +331,12 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Què hi ha de nou al Zoo Code v3.98.0",
-			"highlight0": "🎟️ Prova la propera subscripció Zoo Pass. 2 setmanes d'accés gratuït; places limitades",
-			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "🏷️ Títols de tasques automàtics i més control dels models: Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.",
-			"highlight2": "🔌 Més compatibilitat amb models i proveïdors: Utilitza GPT-6.1 Terra i obtén la llista més recent de models de Friendli.",
-			"highlight3": "🛡️ Xats i edicions més segurs i responsius: Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON."
+			"heading": "Novetats de Zoo Code v3.98.1",
+			"highlight0": "💫Prova Zoo Pass amb GLM-5.3-Flash il·limitat de franc fins a l'1 de desembre amb qualsevol saldo al teu compte de Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Models i raonament: Utilitza GPT-6.2 Sol, GPT-6.2 Astra i Claude Sonnet 5.5. Configura l'esforç de raonament per a cada perfil de LiteLLM.",
+			"highlight2": "🛡️ Seguretat: Millores en el processament de metadades d'habilitats i ordres, mencions, enllaços de proveïdors i aprovacions de la CLI.",
+			"highlight3": "🔧 Correccions: Costos dels nivells de servei d'OpenAI, reconeixement d'enllaços simbòlics de l'espai de treball i més textos traduïts."
 		}
 	},
 	"costs": {

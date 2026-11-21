@@ -46,13 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.98.0
+## Yang baru di Zoo Code v3.98.1
 
-- 🎟️ Pratinjau langganan Zoo Pass yang akan datang. Akses gratis 2 minggu; tempat terbatas
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Judul tugas otomatis dan kontrol model yang lebih detail:** Buat judul untuk tugas root baru secara otomatis dan coba setelan eksperimental dynamic thinking-effort.
-- 🔌 **Dukungan model dan penyedia yang diperluas:** Gunakan GPT-6.1 Terra dan ambil daftar model Friendli terbaru.
-- 🛡️ **Obrolan dan edit yang lebih aman serta responsif:** Batalkan permintaan OpenAI Native dan Requesty dengan bersih, lindungi diff di luar workspace dari persetujuan otomatis yang tidak disengaja, ganti bahasa UI secara konsisten, dan hindari pemulihan backup JSON yang ambigu.
+- 💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Model dan penalaran: Gunakan GPT-6.2 Sol, GPT-6.2 Astra, dan Claude Sonnet 5.5. Atur upaya penalaran untuk setiap profil LiteLLM.
+- 🛡️ Keamanan: Perbaikan penguraian metadata skill dan perintah, penanganan penyebutan, tautan penyedia, dan pemeriksaan persetujuan CLI.
+- 🔧 Perbaikan: Biaya tingkat layanan OpenAI, pengenalan tautan simbolis ruang kerja, dan lebih banyak teks UI yang diterjemahkan.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 
