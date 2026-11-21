@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFileSync, spawnSync } from "node:child_process"
 import fs from "node:fs"
 import os from "node:os"
 import path from "node:path"
@@ -9,11 +9,22 @@ import { runInNewContext } from "node:vm"
 import { parse as parseYaml } from "yaml"
 
 import {
+	DRY_RUN_TIMEOUT_MINUTES,
+	ENGINE_DEFAULT_DRY_RUN_MINUTES,
 	MAX_CHANGED_LINES,
 	MAX_MUTANTS,
 	PACKAGE_CONFIGS,
 	PR_COMMENT_FILENAME,
 	PR_COMMENT_MARKER,
+	REJECTION_FILENAME,
+	JOB_TIMEOUT_MINUTES,
+	MANIFEST_BUDGET_MINUTES,
+	SPAWN_GRACE_MINUTES,
+	TERMINUS_RESERVE_MINUTES,
+	manifestBudgetError,
+	manifestBudgetMs,
+	manifestRunBudgetMinutes,
+	spawnTimeoutMs,
 	appendSummary,
 	buildManifest,
 	discoverRelatedTestFiles,
@@ -30,6 +41,9 @@ import {
 	parseNameStatus,
 	parseVitestTestFiles,
 	preferDirectTestFiles,
+	recordRejection,
+	resolveDeclaredBinEntry,
+	resolveStrykerBinary,
 	resolveStrykerTempDir,
 	resolveVitestBinary,
 	shouldUseVitestRelated,
@@ -42,6 +56,18 @@ import {
 
 const repositoryRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
 
+// The gate publishes whatever it appends to GITHUB_STEP_SUMMARY, and this suite runs the gate against
+// synthetic deltas from inside the very job that publishes a summary: the mutation-diff job runs this
+// file as its own step, so the step already owns a job summary by the time the suite starts. Without a
+// summary of its own, a synthetic table or a synthetic rejection from test data is published as if it
+// were that runs own outcome. The suite points the variable at a file of its own, and the last describe
+// proves the file the suite inherited stayed empty.
+const suiteSummaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-suite-summary-"))
+const suiteSummary = path.join(suiteSummaryRoot, "suite-summary.md")
+fs.writeFileSync(suiteSummary, "")
+const inheritedJobSummary = process.env.GITHUB_STEP_SUMMARY
+process.env.GITHUB_STEP_SUMMARY = suiteSummary
+process.once("exit", () => fs.rmSync(suiteSummaryRoot, { recursive: true, force: true }))
 describe("mutation testing workflow", () => {
 	const readWorkflow = () =>
 		fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
@@ -868,14 +894,79 @@ describe("failure output", () => {
 
 	it("does not fail when the GitHub job summary cannot be written", () => {
 		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
 		const summaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-summary-"))
-		process.env.GITHUB_STEP_SUMMARY = summaryDirectory
+		// The platform hands this write a regular file, so the simulation targets a file path it cannot
+		// create instead of a directory, which no platform value of GITHUB_STEP_SUMMARY has ever been.
+		const summaryTarget = path.join(summaryDirectory, "absent", "_summary.md")
+		process.env.GITHUB_STEP_SUMMARY = summaryTarget
+		console.warn = (warning) => warnings.push(warning)
 
 		try {
 			assert.doesNotThrow(() => appendSummary([], ["advisory"], {}))
+			// A file the platform promised and the gate could not create is the failure; the advisory names
+			// the file it failed on instead of staying quiet about it.
+			assert.deepEqual(warnings, [
+				"::warning title=Mutation test advisory::advisory",
+				"::warning title=Mutation test advisory::Could not write the job summary: ENOENT: no such file or directory, open '" +
+					summaryTarget +
+					"'",
+			])
 		} finally {
 			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
 			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(summaryDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("names the file it could not append the job summary to", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		const summaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-summary-"))
+		const summaryTarget = path.join(summaryDirectory, "absent", "_summary.md")
+		process.env.GITHUB_STEP_SUMMARY = summaryTarget
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			appendSummary([], [], {})
+			const summaryWarning = warnings.find((warning) =>
+				warning.includes("::warning title=Mutation test advisory::Could not write the job summary"),
+			)
+			assert.ok(summaryWarning, warnings.join(" | "))
+			assert.ok(summaryWarning.includes(summaryTarget), summaryWarning)
+			assert.ok(summaryWarning.includes("ENOENT"), summaryWarning)
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(summaryDirectory, { recursive: true, force: true })
+		}
+	})
+
+	it("appends the summary to the file the platform provides", () => {
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		const summaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-summary-"))
+		const summaryFile = path.join(summaryDirectory, "_summary.md")
+		fs.writeFileSync(summaryFile, "# written by an earlier step\n")
+		process.env.GITHUB_STEP_SUMMARY = summaryFile
+		console.warn = (warning) => warnings.push(warning)
+		const manifest = { baseSha: "a".repeat(40), headSha: "b".repeat(40) }
+
+		try {
+			appendSummary([], ["manifest advisory"], manifest)
+			const written = fs.readFileSync(summaryFile, "utf8")
+			assert.ok(written.startsWith("# written by an earlier step\n"), written.slice(0, 120))
+			assert.ok(written.includes(formatSummary([], ["manifest advisory"], manifest)), written.slice(0, 120))
+			assert.deepEqual(warnings, ["::warning title=Mutation test advisory::manifest advisory"])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
 			fs.rmSync(summaryDirectory, { recursive: true, force: true })
 		}
 	})
@@ -1622,5 +1713,869 @@ describe("mutation target resolution execution", () => {
 		assert.equal(outputs.pr_numbers, "[]")
 		assert.equal(outputs.artifact_id, "")
 		assert.equal(queries.length, 0)
+	})
+})
+
+describe("gate rejection record", () => {
+	const rejectionMessage =
+		"extension has 2328 changed executable lines (limit 500). Split the PR or obtain a maintainer-reviewed narrow exclusion."
+	const rejectionError = () => new Error(rejectionMessage)
+	const headSha = "b".repeat(40)
+	const baseSha = "c".repeat(40)
+
+	it("records the rejection in the report root the artifact step uploads", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-rejection-"))
+		const reportRoot = path.join(repo, "reports", "mutation")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		delete process.env.GITHUB_STEP_SUMMARY
+
+		try {
+			assert.equal(fs.existsSync(reportRoot), false)
+			assert.doesNotThrow(() => recordRejection(reportRoot, baseSha, headSha, rejectionError()))
+			const body = fs.readFileSync(path.join(reportRoot, REJECTION_FILENAME), "utf8")
+			assert.ok(body.includes("Mutation gate rejected: " + rejectionMessage), body.slice(0, 200))
+			assert.ok(body.includes("- Base: `" + baseSha.slice(0, 12) + "`"), body.slice(0, 200))
+			assert.ok(body.includes("- Head: `" + headSha.slice(0, 12) + "`"), body.slice(0, 200))
+			assert.deepEqual(fs.readdirSync(reportRoot), [REJECTION_FILENAME])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("appends the rejection to the job summary the platform provides", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-rejection-"))
+		const reportRoot = path.join(repo, "reports", "mutation")
+		const summaryFile = path.join(repo, "_summary.md")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		fs.writeFileSync(summaryFile, "")
+		process.env.GITHUB_STEP_SUMMARY = summaryFile
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			recordRejection(reportRoot, baseSha, headSha, rejectionError())
+			assert.deepEqual(warnings, [])
+			const written = fs.readFileSync(summaryFile, "utf8")
+			assert.ok(written.includes("Mutation gate rejected: " + rejectionMessage), written.slice(0, 200))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("leaves an advisory instead of throwing when the report root cannot be written", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-rejection-"))
+		const occupied = path.join(repo, "reports")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		fs.writeFileSync(occupied, "not a directory")
+		delete process.env.GITHUB_STEP_SUMMARY
+		console.warn = (warning) => warnings.push(warning)
+
+		try {
+			assert.doesNotThrow(() => recordRejection(occupied, baseSha, headSha, rejectionError()))
+			assert.equal(warnings.length, 1, warnings.join(" | "))
+			assert.ok(
+				warnings[0].startsWith(
+					"::warning title=Mutation test advisory::Could not write the mutation gate rejection file:",
+				),
+				warnings[0],
+			)
+			assert.ok(warnings[0].includes(occupied), warnings[0])
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("leaves its record in the report root when the gate rejects a delta", () => {
+		// The script resolves its own imports from the repository it lives in, so the synthetic
+		// repository is built inside this one, where git ignores it and node can resolve typescript.
+		const scratchRoot = path.join(repositoryRoot, "reports", "mutation")
+		fs.mkdirSync(scratchRoot, { recursive: true })
+		const scratch = fs.mkdtempSync(path.join(scratchRoot, "u917-rejection-"))
+		const run = (...args) => execFileSync("git", args, { cwd: scratch, encoding: "utf8" }).trim()
+		const write = (filePath, contents) => {
+			fs.mkdirSync(path.join(scratch, path.dirname(filePath)), { recursive: true })
+			fs.writeFileSync(path.join(scratch, filePath), contents)
+		}
+
+		// The gate appends its rejection to GITHUB_STEP_SUMMARY, and this test runs the gate in a child
+		// process that would otherwise inherit the summary of the step running this suite. A rejection
+		// produced from synthetic test data would then be published as if it were the runs own outcome
+		// while the job passed. The child is pointed at a summary of its own and the file it would have
+		// inherited is kept as a probe that has to stay empty. The declarations sit outside the try
+		// because the finally block has to reach them.
+		const isolatedSummary = path.join(scratch, "isolated-step-summary.md")
+		const inheritedSummary = path.join(scratch, "inherited-step-summary.md")
+		fs.writeFileSync(isolatedSummary, "")
+		fs.writeFileSync(inheritedSummary, "")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		process.env.GITHUB_STEP_SUMMARY = inheritedSummary
+		try {
+			run("init", "--quiet", "--initial-branch", "main")
+			run("config", "user.email", "gate@example.com")
+			run("config", "user.name", "Gate")
+			run("config", "commit.gpgsign", "false")
+			run("config", "core.hooksPath", path.join(scratch, ".no-hooks"))
+			write("packages/core/src/value.ts", "export const value = () => 1\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "initial")
+			const beforeSha = run("rev-parse", "HEAD")
+
+			const lines = Array.from(
+				{ length: MAX_CHANGED_LINES + 50 },
+				(_, index) => "export const value" + index + " = " + index,
+			)
+			write("packages/core/src/value.ts", lines.join("\n") + "\n")
+			run("add", ".")
+			run("commit", "--quiet", "-m", "delta above the changed-line limit")
+			const afterSha = run("rev-parse", "HEAD")
+
+			fs.mkdirSync(path.join(scratch, "scripts"), { recursive: true })
+			fs.copyFileSync(
+				path.join(repositoryRoot, "scripts/stryker-diff.mjs"),
+				path.join(scratch, "scripts/stryker-diff.mjs"),
+			)
+			const result = spawnSync(
+				process.execPath,
+				["scripts/stryker-diff.mjs", "ci", "--base", beforeSha, "--head", afterSha, "--reports", "rejection"],
+				{
+					cwd: scratch,
+					encoding: "utf8",
+					timeout: 120000,
+					env: { ...process.env, GITHUB_STEP_SUMMARY: isolatedSummary },
+				},
+			)
+
+			assert.equal(result.status, 1, String(result.stderr).slice(0, 300))
+			assert.ok(
+				String(result.stderr).includes("changed executable lines (limit " + MAX_CHANGED_LINES + ")"),
+				String(result.stderr).slice(0, 300),
+			)
+			const reportDirectory = path.join(scratch, "rejection")
+			const recorded = fs.readFileSync(path.join(reportDirectory, REJECTION_FILENAME), "utf8")
+			assert.ok(recorded.includes("Mutation gate rejected: core has "), recorded.slice(0, 240))
+			assert.deepEqual(fs.readdirSync(reportDirectory), [REJECTION_FILENAME])
+			assert.equal(
+				fs.readFileSync(inheritedSummary, "utf8"),
+				"",
+				"the gate child appended to the job summary it inherited instead of the one it was given",
+			)
+			const published = fs.readFileSync(isolatedSummary, "utf8")
+			assert.ok(published.includes("Mutation gate rejected: core has "), published.slice(0, 240))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(scratch, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("declared binary resolution", () => {
+	const writeDeclaredPackage = (repo, packageName, bin, contents = "") => {
+		const packageDir = path.join(repo, "node_modules", packageName)
+		fs.mkdirSync(packageDir, { recursive: true })
+		fs.writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({ name: packageName, bin }))
+		const entry = typeof bin === "string" ? bin : Object.values(bin)[0]
+		const entryPath = path.join(packageDir, entry.replace(/^\.\//, ""))
+		fs.mkdirSync(path.dirname(entryPath), { recursive: true })
+		fs.writeFileSync(entryPath, contents)
+		return entryPath
+	}
+
+	it("reads the executable entry the package declares in both npm forms", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-declared-"))
+
+		try {
+			const mapped = writeDeclaredPackage(repo, "vitest", { vitest: "./vitest.mjs" })
+			assert.equal(resolveDeclaredBinEntry(repo, repo, "vitest", "vitest", repo), mapped)
+			const single = writeDeclaredPackage(repo, "@stryker-mutator/core", "./bin/stryker.js")
+			assert.equal(resolveDeclaredBinEntry(repo, repo, "@stryker-mutator/core", "stryker", repo), single)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("gives up when the declared file or the declaration is missing", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-declared-"))
+		const packageDir = path.join(repo, "node_modules", "vitest")
+		const packageJson = path.join(packageDir, "package.json")
+
+		try {
+			const entry = writeDeclaredPackage(repo, "vitest", { vitest: "./vitest.mjs" })
+			fs.rmSync(entry)
+			assert.equal(resolveDeclaredBinEntry(repo, repo, "vitest", "vitest", repo), undefined)
+			fs.writeFileSync(packageJson, JSON.stringify({ name: "vitest" }))
+			assert.equal(resolveDeclaredBinEntry(repo, repo, "vitest", "vitest", repo), undefined)
+			fs.writeFileSync(packageJson, "{ not json")
+			assert.equal(resolveDeclaredBinEntry(repo, repo, "vitest", "vitest", repo), undefined)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("prefers the declared entry over the platform shim", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-declared-"))
+		const strykerShim = path.join(repo, "node_modules", ".bin", "stryker")
+		fs.mkdirSync(path.dirname(strykerShim), { recursive: true })
+		fs.writeFileSync(strykerShim, "")
+		const strykerEntry = writeDeclaredPackage(repo, "@stryker-mutator/core", { stryker: "./bin/stryker.js" })
+		const vitestEntry = writeDeclaredPackage(repo, "vitest", { vitest: "./vitest.mjs" })
+		const packageShim = path.join(repo, "packages", "core", "node_modules", ".bin", "vitest")
+		fs.mkdirSync(path.dirname(packageShim), { recursive: true })
+		fs.writeFileSync(packageShim, "")
+		const packageEntry = {
+			id: "core",
+			root: "packages/core",
+			vitestConfig: "vitest.unit.config.ts",
+		}
+
+		try {
+			assert.equal(resolveStrykerBinary(repo, repo), strykerEntry)
+			assert.equal(resolveVitestBinary(repo, packageEntry), vitestEntry)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("falls back to the repository shim when nothing is declared", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-declared-"))
+		const strykerShim = path.join(repo, "node_modules", ".bin", "stryker")
+		fs.mkdirSync(path.dirname(strykerShim), { recursive: true })
+		fs.writeFileSync(strykerShim, "")
+
+		try {
+			assert.equal(resolveStrykerBinary(repo, repo), strykerShim)
+			assert.equal(
+				resolveVitestBinary(repo, { id: "core", root: "packages/core", vitestConfig: "vitest.unit.config.ts" }),
+				path.join(repo, "node_modules", ".bin", "vitest"),
+			)
+		} finally {
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("runs a JavaScript entry with the Node binary that is running the gate", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-vitest-entry-"))
+		const reportDirectory = path.join(repo, "reports")
+		const previousTestFile = process.env.U917_VITEST_TEST_FILE
+		const fake = [
+			'import fs from "node:fs"',
+			"const args = process.argv.slice(2)",
+			'const outputFile = args.find((arg) => arg.startsWith("--outputFile=")).slice("--outputFile=".length)',
+			'fs.writeFileSync(outputFile + ".exec.json", JSON.stringify({ execPath: process.execPath, argv: process.argv.slice(1) }))',
+			"fs.writeFileSync(outputFile, JSON.stringify({ testResults: [{ name: process.env.U917_VITEST_TEST_FILE }] }))",
+		].join("\n")
+		const entry = writeDeclaredPackage(repo, "vitest", { vitest: "./vitest.mjs" }, fake)
+		fs.mkdirSync(path.join(repo, "src", "utils"), { recursive: true })
+		fs.mkdirSync(reportDirectory, { recursive: true })
+		const packageEntry = {
+			id: "extension",
+			root: "src",
+			vitestConfig: "vitest.config.ts",
+			selectors: ["utils/value.ts:1-1"],
+		}
+		process.env.U917_VITEST_TEST_FILE = path.join(repo, "src", "utils", "value.test.ts")
+
+		try {
+			assert.deepEqual(discoverRelatedTestFiles(repo, packageEntry, reportDirectory), ["utils/value.test.ts"])
+			const record = JSON.parse(
+				fs.readFileSync(path.join(reportDirectory, "vitest-related.json.exec.json"), "utf8"),
+			)
+			assert.equal(record.execPath, process.execPath)
+			assert.equal(record.argv[0], entry)
+			assert.equal(record.argv[1], "related")
+			assert.ok(
+				record.argv.some((arg) => arg.startsWith("--outputFile=")),
+				record.argv.join(" "),
+			)
+		} finally {
+			if (previousTestFile === undefined) delete process.env.U917_VITEST_TEST_FILE
+			else process.env.U917_VITEST_TEST_FILE = previousTestFile
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("initial-test-run budget", () => {
+	const packageEntry = {
+		id: "core",
+		root: "packages/core",
+		vitestConfig: "vitest.unit.config.ts",
+		selectors: ["src/value.ts:1-1"],
+		changedExecutableLines: 1,
+	}
+	const writeStrykerStub = (repo, exitCode) => {
+		const packageDir = path.join(repo, "node_modules", "@stryker-mutator", "core")
+		fs.mkdirSync(packageDir, { recursive: true })
+		fs.writeFileSync(
+			path.join(packageDir, "package.json"),
+			JSON.stringify({ name: "@stryker-mutator/core", bin: { stryker: "./bin/stryker.js" } }),
+		)
+		const entryPath = path.join(packageDir, "bin", "stryker.js")
+		fs.mkdirSync(path.dirname(entryPath), { recursive: true })
+		const stub = [
+			'const fs = require("node:fs")',
+			"const args = process.argv.slice(2)",
+			'const kind = args.includes("--dryRunOnly") ? "preflight" : "run"',
+			'fs.writeFileSync(process.env.U917_STRYKER_RECORD + "." + kind + ".json", JSON.stringify({ execPath: process.execPath, argv1: process.argv[1], args }))',
+			'if (kind === "preflight") console.log("Instrumented 1 source file(s) with 1 mutant(s)")',
+			"process.exit(" + exitCode + ")",
+		].join("\n")
+		fs.writeFileSync(entryPath, stub)
+		return entryPath
+	}
+	const readInvocation = (recordPath, kind) => JSON.parse(fs.readFileSync(recordPath + "." + kind + ".json", "utf8"))
+
+	it("keeps the outer kill above the budget handed to the engine", () => {
+		assert.equal(DRY_RUN_TIMEOUT_MINUTES, 20)
+		assert.equal(ENGINE_DEFAULT_DRY_RUN_MINUTES, 5)
+		assert.equal(SPAWN_GRACE_MINUTES, 5)
+		assert.equal(spawnTimeoutMs, (DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES) * 60 * 1000)
+		assert.ok(spawnTimeoutMs > DRY_RUN_TIMEOUT_MINUTES * 60 * 1000)
+	})
+
+	it("hands every Stryker invocation the budget it names and logs the binary it used", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-budget-"))
+		const reportRoot = path.join(repo, "reports")
+		const recordPath = path.join(repo, "argv.json")
+		const previousRecord = process.env.U917_STRYKER_RECORD
+		const previousLog = console.log
+		const previousWarn = console.warn
+		const logs = []
+		process.env.U917_STRYKER_RECORD = recordPath
+		fs.mkdirSync(path.join(repo, "packages", "core", "src"), { recursive: true })
+		const entry = writeStrykerStub(repo, 0)
+		console.log = (line) => logs.push(String(line))
+		console.warn = () => {}
+
+		try {
+			const rows = runManifest(repo, { packages: [{ ...packageEntry }] }, reportRoot, {
+				readMutationReport: () => ({ files: {} }),
+			})
+			assert.equal(rows.length, 1)
+			const preflight = readInvocation(recordPath, "preflight")
+			const run = readInvocation(recordPath, "run")
+			for (const invocation of [preflight, run]) {
+				const budgetAt = invocation.args.indexOf("--dryRunTimeoutMinutes")
+				assert.ok(budgetAt >= 0, invocation.args.join(" "))
+				assert.equal(invocation.args[budgetAt + 1], String(DRY_RUN_TIMEOUT_MINUTES))
+				assert.equal(invocation.execPath, process.execPath)
+				assert.equal(invocation.argv1, entry)
+			}
+			assert.equal(preflight.args.includes("--dryRunOnly"), true)
+			assert.equal(run.args.includes("--dryRunOnly"), false)
+			const reported = logs.join("\n")
+			assert.ok(
+				logs.some(
+					(line) =>
+						line.includes("Stryker preflight starting via") && line.includes(path.relative(repo, entry)),
+				),
+				reported.slice(0, 400),
+			)
+			assert.ok(
+				logs.some((line) =>
+					line.includes(
+						"initial-test-run budget " +
+							DRY_RUN_TIMEOUT_MINUTES +
+							" min (engine schema default " +
+							ENGINE_DEFAULT_DRY_RUN_MINUTES +
+							" min)",
+					),
+				),
+				reported.slice(0, 400),
+			)
+		} finally {
+			if (previousRecord === undefined) delete process.env.U917_STRYKER_RECORD
+			else process.env.U917_STRYKER_RECORD = previousRecord
+			console.log = previousLog
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("names the budget, the binary, and that the exit is not a verdict when the engine fails", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-budget-"))
+		const reportRoot = path.join(repo, "reports")
+		const recordPath = path.join(repo, "argv.json")
+		const previousRecord = process.env.U917_STRYKER_RECORD
+		const previousLog = console.log
+		const previousWarn = console.warn
+		const warnings = []
+		process.env.U917_STRYKER_RECORD = recordPath
+		fs.mkdirSync(path.join(repo, "packages", "core", "src"), { recursive: true })
+		const entry = writeStrykerStub(repo, 1)
+		console.log = () => {}
+		console.warn = (warning) => warnings.push(String(warning))
+
+		try {
+			const rows = runManifest(repo, { packages: [{ ...packageEntry }] }, reportRoot, {
+				readMutationReport: () => ({ files: {} }),
+			})
+			assert.equal(rows[0].result, "Advisory incomplete")
+			const failure = warnings.find((warning) => warning.includes("Stryker preflight failed via"))
+			assert.ok(failure, warnings.join(" | ").slice(0, 400))
+			assert.ok(
+				failure.includes(
+					"initial-test-run budget " +
+						DRY_RUN_TIMEOUT_MINUTES +
+						" min (engine schema default " +
+						ENGINE_DEFAULT_DRY_RUN_MINUTES +
+						" min)",
+				),
+				failure.slice(0, 400),
+			)
+			assert.ok(failure.includes("(exit 1, which is not a mutant verdict on its own)"), failure.slice(0, 400))
+			assert.ok(failure.includes(path.relative(repo, entry)), failure.slice(0, 400))
+			assert.equal(fs.existsSync(recordPath + ".run.json"), false)
+		} finally {
+			if (previousRecord === undefined) delete process.env.U917_STRYKER_RECORD
+			else process.env.U917_STRYKER_RECORD = previousRecord
+			console.log = previousLog
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("manifest wall-clock budget", () => {
+	const packageEntry = (id, root) => ({
+		id,
+		root,
+		vitestConfig: "vitest.unit.config.ts",
+		selectors: ["src/value.ts:1-1"],
+		changedExecutableLines: 1,
+	})
+	const preflightLine = "Instrumented 1 source file(s) with 1 mutant(s)"
+
+	it("holds the manifest budget to the job timeout the workflow prints", () => {
+		const workflow = fs.readFileSync(path.join(repositoryRoot, ".github/workflows/mutation-testing.yml"), "utf8")
+		const printed = Number((/timeout-minutes: *(\d+)/.exec(workflow) || [])[1])
+		assert.ok(Number.isFinite(printed), "the mutation-diff job must print a timeout-minutes value")
+		assert.equal(JOB_TIMEOUT_MINUTES, printed, "the constant has to name the job limit it is measured against")
+		assert.equal(TERMINUS_RESERVE_MINUTES, 3)
+		assert.equal(MANIFEST_BUDGET_MINUTES, JOB_TIMEOUT_MINUTES - TERMINUS_RESERVE_MINUTES)
+		assert.equal(manifestBudgetMs, MANIFEST_BUDGET_MINUTES * 60 * 1_000)
+		// Two sequential initial test runs, each holding the full budget plus its grace, are already past
+		// the job limit, which is what the manifest budget exists for.
+		assert.ok(
+			2 * (DRY_RUN_TIMEOUT_MINUTES + SPAWN_GRACE_MINUTES) > JOB_TIMEOUT_MINUTES,
+			"two full runs have to be too much for the job or the manifest budget would be pointless",
+		)
+		assert.ok(
+			MANIFEST_BUDGET_MINUTES + TERMINUS_RESERVE_MINUTES <= JOB_TIMEOUT_MINUTES,
+			"the manifest budget plus the reserve has to stay inside the job",
+		)
+	})
+
+	it("hands a run only the budget the manifest has left and reports none left as a stop", () => {
+		assert.equal(manifestRunBudgetMinutes(0), DRY_RUN_TIMEOUT_MINUTES)
+		assert.equal(manifestRunBudgetMinutes(13.5), 8)
+		assert.equal(manifestRunBudgetMinutes(18), 4)
+		assert.equal(manifestRunBudgetMinutes(21.9), 0)
+		assert.equal(manifestRunBudgetMinutes(27), 0)
+		// The outer kill must stay above the budget handed over, or this tool and not the engine would be
+		// the one that stops an initial test run.
+		for (const spent of [0, 13.5, 18]) {
+			const minutes = manifestRunBudgetMinutes(spent)
+			const roomMinutes = MANIFEST_BUDGET_MINUTES - spent
+			assert.ok(
+				(minutes + SPAWN_GRACE_MINUTES) * 60_000 <= roomMinutes * 60_000,
+				"a run launched with " + spent + " min spent has to be able to finish inside the job",
+			)
+		}
+		const stop = manifestBudgetError(
+			packageEntry("core", "packages/core"),
+			"mutation run",
+			27,
+			MANIFEST_BUDGET_MINUTES,
+		)
+		assert.equal(stop.manifestBudgetStop, true)
+		assert.ok(stop.message.includes("was not launched"), stop.message)
+		assert.ok(stop.message.includes("27 min budget"), stop.message)
+		assert.ok(stop.message.includes("mutation-diff job carries 30 min"), stop.message)
+		assert.ok(
+			stop.message.includes("3 min is held back for the rejection record and the job summary"),
+			stop.message,
+		)
+	})
+
+	it("stops launching rather than walk past the job, and records the stop as a rejection", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-manifest-budget-"))
+		const reportRoot = path.join(repo, "reports")
+		const launches = []
+		const clockValues = [0, 0, 9 * 60_000, 18 * 60_000, 27 * 60_000]
+		let tick = 0
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const previousWarn = console.warn
+		const warnings = []
+		console.warn = (warning) => warnings.push(String(warning))
+		delete process.env.GITHUB_STEP_SUMMARY
+		let failure
+		try {
+			runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")] },
+				reportRoot,
+				{
+					runMutation: (_repoRoot, entry, _reportRoot, dryRunOnly, runMinutes) => {
+						launches.push([entry.id, dryRunOnly, runMinutes])
+						return dryRunOnly ? preflightLine : ""
+					},
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.ok(failure, "the manifest should have refused to launch a fourth run")
+			assert.equal(failure.manifestBudgetStop, true)
+			assert.deepEqual(
+				launches,
+				[
+					["core", true, DRY_RUN_TIMEOUT_MINUTES],
+					["core", false, 13],
+					["webview", true, 4],
+				],
+				JSON.stringify(launches),
+			)
+			assert.equal(
+				launches.some((launch) => launch[0] === "webview" && launch[1] === false),
+				false,
+				"the second package started its mutation run with no manifest budget left",
+			)
+			const rejectionRoot = path.join(repo, "rejection")
+			recordRejection(rejectionRoot, "b".repeat(40), "c".repeat(40), failure)
+			const recorded = fs.readFileSync(path.join(rejectionRoot, REJECTION_FILENAME), "utf8")
+			assert.ok(recorded.includes("was not launched"), recorded.slice(0, 240))
+			assert.equal(warnings.length, 0, warnings.join(" | "))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("shrinks the budget and the outer kill in the invocation it actually makes", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-manifest-wiring-"))
+		const reportRoot = path.join(repo, "reports")
+		const recordPath = path.join(repo, "invocations.jsonl")
+		fs.mkdirSync(path.join(repo, "packages", "core", "src"), { recursive: true })
+		fs.mkdirSync(path.join(repo, "packages", "webview"), { recursive: true })
+		const packageDir = path.join(repo, "node_modules", "@stryker-mutator", "core")
+		fs.mkdirSync(path.join(packageDir, "bin"), { recursive: true })
+		fs.writeFileSync(
+			path.join(packageDir, "package.json"),
+			JSON.stringify({ name: "@stryker-mutator/core", bin: { stryker: "./bin/stryker.js" } }),
+		)
+		fs.writeFileSync(
+			path.join(packageDir, "bin", "stryker.js"),
+			[
+				'const fs = require("node:fs")',
+				"const args = process.argv.slice(2)",
+				'const kind = args.includes("--dryRunOnly") ? "preflight" : "run"',
+				'fs.appendFileSync(process.env.U917_STRYKER_RECORD, JSON.stringify({ kind, args }) + "\\n")',
+				'if (kind === "preflight") console.log("Instrumented 1 source file(s) with 1 mutant(s)")',
+				"process.exit(0)",
+			].join("\n"),
+		)
+		const previousRecord = process.env.U917_STRYKER_RECORD
+		const previousLog = console.log
+		const previousWarn = console.warn
+		const logs = []
+		process.env.U917_STRYKER_RECORD = recordPath
+		console.log = (line) => logs.push(String(line))
+		console.warn = () => {}
+		const clockValues = [0, 0, 9 * 60_000, 18 * 60_000, 27 * 60_000]
+		let tick = 0
+		let failure
+		try {
+			runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")] },
+				reportRoot,
+				{
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.equal(failure?.manifestBudgetStop, true)
+			const invocations = fs
+				.readFileSync(recordPath, "utf8")
+				.split("\n")
+				.filter((line) => line.trim())
+				.map((line) => JSON.parse(line))
+			assert.deepEqual(
+				invocations.map((call) => call.kind),
+				["preflight", "run", "preflight"],
+				logs.join(" | ").slice(0, 400),
+			)
+			const budgets = invocations.map((call) => call.args[call.args.indexOf("--dryRunTimeoutMinutes") + 1])
+			assert.deepEqual(budgets, ["20", "13", "4"], JSON.stringify(budgets))
+			const logged = logs.join("\n")
+			for (const kill of ["outer kill 25 min", "outer kill 18 min", "outer kill 9 min"]) {
+				assert.ok(logged.includes(kill), logged.slice(0, 400))
+			}
+			for (const budget of [
+				"initial-test-run budget 20 min (engine schema default 5 min)",
+				"initial-test-run budget 13 min (engine schema default 5 min)",
+				"initial-test-run budget 4 min (engine schema default 5 min)",
+			]) {
+				assert.ok(logged.includes(budget), logged.slice(0, 400))
+			}
+			assert.ok(failure.message.includes("was not launched"), failure.message)
+		} finally {
+			if (previousRecord === undefined) delete process.env.U917_STRYKER_RECORD
+			else process.env.U917_STRYKER_RECORD = previousRecord
+			console.log = previousLog
+			console.warn = previousWarn
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+})
+
+describe("budget stop publishing and discovery cap", () => {
+	const packageEntry = (id, root, discoverRelatedTests) => ({
+		id,
+		root,
+		vitestConfig: "vitest.unit.config.ts",
+		selectors: ["src/value.ts:1-1"],
+		changedExecutableLines: 1,
+		...(discoverRelatedTests === undefined ? {} : { discoverRelatedTests }),
+	})
+	const preflightLine = "Instrumented 1 source file(s) with 1 mutant(s)"
+
+	it("publishes the finished package before a later budget stop is rethrown", () => {
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-stop-publish-"))
+		const reportRoot = path.join(repo, "reports")
+		fs.mkdirSync(reportRoot, { recursive: true })
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const suiteSummaryPath = path.join(repo, "step-summary.md")
+		fs.writeFileSync(suiteSummaryPath, "")
+		process.env.GITHUB_STEP_SUMMARY = suiteSummaryPath
+		const clockValues = [0, 0, 10 * 60_000, 26 * 60_000]
+		let tick = 0
+		let failure
+		try {
+			runManifest(
+				repo,
+				{
+					packages: [packageEntry("core", "packages/core"), packageEntry("webview", "packages/webview")],
+					headSha: "c".repeat(40),
+				},
+				reportRoot,
+				{
+					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => (dryRunOnly ? preflightLine : ""),
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+		} catch (error) {
+			failure = error
+		}
+		try {
+			assert.ok(failure, "the manifest should have refused the second preflight")
+			assert.equal(failure.manifestBudgetStop, true)
+			const commentPath = path.join(reportRoot, PR_COMMENT_FILENAME)
+			assert.ok(
+				fs.existsSync(commentPath),
+				"a budget stop threw away the row for the package that had already finished",
+			)
+			const comment = fs.readFileSync(commentPath, "utf8")
+			assert.ok(comment.includes("| core |"), comment.slice(0, 400))
+			assert.ok(!comment.includes("| webview |"), comment.slice(0, 400))
+			const published = fs.readFileSync(suiteSummaryPath, "utf8")
+			assert.ok(published.includes("| core |"), published.slice(0, 400))
+			const rejectionRoot = path.join(repo, "rejection")
+			recordRejection(rejectionRoot, "b".repeat(40), "c".repeat(40), failure)
+			const recorded = fs.readFileSync(path.join(rejectionRoot, REJECTION_FILENAME), "utf8")
+			assert.ok(recorded.includes("was not launched"), recorded.slice(0, 240))
+			assert.ok(!recorded.includes("| core |"), recorded.slice(0, 240))
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+
+	it("caps related-test discovery at the budget that is left and refuses it when none is", () => {
+		const caps = []
+		const launches = []
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-discovery-cap-"))
+		const reportRoot = path.join(repo, "reports")
+		const previousSummary = process.env.GITHUB_STEP_SUMMARY
+		const summaryFile = path.join(repo, "step-summary.md")
+		fs.writeFileSync(summaryFile, "")
+		process.env.GITHUB_STEP_SUMMARY = summaryFile
+		try {
+			fs.mkdirSync(reportRoot, { recursive: true })
+			// Four readings for one package: the manifest's own start, the time spent before related-test
+			// discovery, the preflight launch, and the mutation-run launch. With three readings the
+			// mutation-run launch runs out of clock, the harness assertion is thrown inside the
+			// package loop, and the loop reports it as an "Advisory incomplete" row instead of
+			// showing that the acceptance case never reached the engine at all.
+			const clockValues = [0, 19.5 * 60_000, 20 * 60_000, 20.5 * 60_000]
+			let tick = 0
+			const rows = runManifest(
+				repo,
+				{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+				reportRoot,
+				{
+					discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+						caps.push(timeoutMs)
+						return ["src/value.test.ts"]
+					},
+					runMutation: (_repoRoot, _entry, _reportRoot, dryRunOnly) => {
+						launches.push(dryRunOnly)
+						return dryRunOnly ? preflightLine : ""
+					},
+					readMutationReport: () => ({ files: {} }),
+					now: () => {
+						const value = clockValues[tick]
+						assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+						tick += 1
+						return value
+					},
+				},
+			)
+			assert.deepEqual(caps, [(MANIFEST_BUDGET_MINUTES - 19.5 - 3) * 60_000], JSON.stringify(caps))
+			assert.ok(caps[0] < 5 * 60_000, "discovery kept its full five minutes with 7.5 min of budget left")
+			assert.ok(
+				Number.isInteger(caps[0]),
+				"discovery was handed a fractional timeout: " + JSON.stringify(caps[0]),
+			)
+			assert.deepEqual(launches, [true, false], "a mutation phase was skipped: " + JSON.stringify(launches))
+			assert.equal(rows.length, 1, JSON.stringify(rows.map((row) => row.id)))
+			assert.equal(rows[0].result, "Passed", "the acceptance row read " + String(rows[0].result))
+			const refusedRoot = path.join(repo, "refused")
+			fs.mkdirSync(path.join(refusedRoot, "reports"), { recursive: true })
+			const refusals = []
+			const refusalClock = [0, 24.5 * 60_000]
+			let refusalTick = 0
+			let failure
+			try {
+				runManifest(
+					repo,
+					{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+					path.join(refusedRoot, "reports"),
+					{
+						discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+							refusals.push(timeoutMs)
+							return ["src/value.test.ts"]
+						},
+						now: () => {
+							const value = refusalClock[refusalTick]
+							assert.ok(refusalTick < refusalClock.length, "the refusal clock ran out of readings")
+							refusalTick += 1
+							return value
+						},
+					},
+				)
+			} catch (error) {
+				failure = error
+			}
+			assert.ok(failure, "discovery started although only 2.5 min of the budget was left")
+			assert.equal(failure.manifestBudgetStop, true)
+			assert.ok(failure.message.includes("related-test discovery was not launched"), failure.message)
+			assert.deepEqual(refusals, [], "discovery ran after the manifest said it had no room left")
+		} finally {
+			if (previousSummary === undefined) delete process.env.GITHUB_STEP_SUMMARY
+			else process.env.GITHUB_STEP_SUMMARY = previousSummary
+			fs.rmSync(repo, { recursive: true, force: true })
+		}
+	})
+	it("floors the discovery cap to whole milliseconds when the remaining budget is fractional", () => {
+		const caps = []
+		const repo = fs.mkdtempSync(path.join(os.tmpdir(), "stryker-discovery-floor-"))
+		const reportRoot = path.join(repo, "reports")
+		fs.mkdirSync(reportRoot, { recursive: true })
+		// 20.7 min of the 27-minute manifest budget spent leaves 3.3 min for related-test
+		// discovery. The elapsed clock is a fractional number of minutes at this spending, so the
+		// cap is a fractional number of milliseconds unless it is floored before it is handed to
+		// spawnSync's timeout option.
+		const clockValues = [0, 20.7 * 60_000, 20.7 * 60_000, 20.7 * 60_000]
+		let tick = 0
+		const rows = runManifest(
+			repo,
+			{ packages: [packageEntry("core", "packages/core", true)], headSha: "c".repeat(40) },
+			reportRoot,
+			{
+				discoverTests: (_repoRoot, _entry, _reportRoot, timeoutMs) => {
+					caps.push(timeoutMs)
+					return ["src/value.test.ts"]
+				},
+				runMutation: (_repoRoot, _entry, _reportRoot, _budgetMinutes) => preflightLine,
+				readMutationReport: () => ({ files: {} }),
+				now: () => {
+					const value = clockValues[tick]
+					assert.ok(tick < clockValues.length, "the injected clock ran out of readings")
+					tick += 1
+					return value
+				},
+			},
+		)
+		assert.equal(caps.length, 1, JSON.stringify(caps))
+		// The product this spending produces is fractional; the value handed to the engine must not be.
+		assert.ok(
+			!Number.isInteger((MANIFEST_BUDGET_MINUTES - 20.7 - 3) * 60_000),
+			"the fractional-minute case stopped being fractional",
+		)
+		assert.ok(Number.isInteger(caps[0]), "discovery was handed a fractional timeout: " + JSON.stringify(caps[0]))
+		assert.equal(caps[0], Math.floor((MANIFEST_BUDGET_MINUTES - 20.7 - 3) * 60_000), JSON.stringify(caps[0]))
+		assert.ok(caps[0] > 0, "discovery was refused although 3.3 min of budget was left")
+		// The two mutation launches that follow ran on their own budgets, which shows the cap above
+		// is a cap and not a refusal.
+		assert.equal(rows.length, 1, JSON.stringify(rows.map((row) => row.id)))
+		assert.equal(rows[0].result, "Passed", "the row read " + String(rows[0].result))
+		fs.rmSync(repo, { recursive: true, force: true })
+	})
+})
+
+describe("suite summary isolation", () => {
+	it("keeps the job summary the suite inherited free of what the suite published", () => {
+		if (inheritedJobSummary === undefined) {
+			// A local run has no step summary to protect. The isolation still ran, and there is nothing
+			// inherited to read, so the assertion covers the file the suite gave itself instead.
+			assert.equal(process.env.GITHUB_STEP_SUMMARY, suiteSummary)
+			assert.ok(fs.existsSync(suiteSummary))
+			return
+		}
+		const inherited = fs.readFileSync(inheritedJobSummary, "utf8")
+		assert.equal(
+			inherited,
+			"",
+			"the suite published into the job summary of the step that is running it: " + inherited.slice(0, 200),
+		)
 	})
 })
