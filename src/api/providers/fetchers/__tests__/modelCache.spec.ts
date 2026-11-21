@@ -1879,6 +1879,15 @@ describe("auth session cache", () => {
 		}
 	})
 
+	it("refreshModels lets a rejected session through instead of returning an empty catalog", async () => {
+		mockGetZooGatewayModels.mockRejectedValueOnce(new ZooGatewayModelsUnauthorizedError())
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		await expect(refreshModels(options, zooGatewayHandler)).rejects.toBeInstanceOf(
+			ZooGatewayModelsUnauthorizedError,
+		)
+	})
+
 	it("refreshModels recovery uses the session that started the request, not the current one", async () => {
 		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
 		const accountB: ModelRecord = { "b/1": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }

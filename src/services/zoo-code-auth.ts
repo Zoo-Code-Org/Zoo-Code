@@ -187,7 +187,8 @@ async function invalidateAndDeleteZooCodeToken(
 	rejectedToken: string | undefined = _cachedToken,
 ): Promise<void> {
 	_tokenEpoch++
-	_rejectedToken = rejectedToken
+	// A repeat clear with no active token must keep the marker from the first rejection.
+	_rejectedToken = rejectedToken ?? _rejectedToken
 	_cachedToken = undefined
 	_sessionCleared = true
 	const { clearAuthSessionModelsForProvider } = await import("../api/providers/fetchers/modelCache")

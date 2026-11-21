@@ -86,7 +86,7 @@ import { webviewMessageHandler } from "../webviewMessageHandler"
 import { registerCopilotModelBroadcast } from "../../../services/language-models/copilotModelBroadcast"
 import type { ClineProvider } from "../ClineProvider"
 import { experimentDefault } from "../../../shared/experiments"
-import { flushModels, getModels } from "../../../api/providers/fetchers/modelCache"
+import { flushModels, getAuthScopedSessionGeneration, getModels } from "../../../api/providers/fetchers/modelCache"
 import { getLMStudioModels } from "../../../api/providers/fetchers/lmstudio"
 import { getCommands } from "../../../services/command/commands"
 import { ensureDcgInstalled } from "../../../services/destructive-command-guard"
@@ -1171,12 +1171,32 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 
-	it("does not post a Zoo Gateway result that belongs to a session that ended", async () => {
-		mockGetModels.mockRejectedValueOnce(
-			Object.assign(new Error("Model catalog request belongs to a session that has ended"), {
-				name: "AuthScopedCatalogObsoleteError",
-			}),
-		)
+	const obsoleteCatalogError = () =>
+		Object.assign(new Error("Model catalog request belongs to a session that has ended"), {
+			name: "AuthScopedCatalogObsoleteError",
+		})
+	const currentSessionModels: ModelRecord = {
+		"zai/glm-5": { maxTokens: 4096, contextWindow: 8192, supportsPromptCache: false },
+	}
+
+	it("refetches an obsolete Zoo Gateway result for the current session before posting", async () => {
+		mockGetModels.mockRejectedValueOnce(obsoleteCatalogError()).mockResolvedValueOnce(currentSessionModels)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(2)
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: { [providerIdentifiers.zooGateway]: currentSessionModels },
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+	})
+
+	it("does not post a Zoo Gateway result when the refetch is also obsolete", async () => {
+		mockGetModels.mockRejectedValueOnce(obsoleteCatalogError()).mockRejectedValueOnce(obsoleteCatalogError())
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
@@ -1184,6 +1204,59 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 
 		expect(mockClineProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	it("refetches a Zoo Gateway result when the session changed while other providers loaded", async () => {
+		const previousSessionModels: ModelRecord = {
+			"old/model": { maxTokens: 1, contextWindow: 1, supportsPromptCache: false },
+		}
+		vi.mocked(getAuthScopedSessionGeneration).mockReturnValueOnce(0).mockReturnValueOnce(1)
+
+		// The first zoo call returns the previous session's catalog, the refetch returns the current one.
+		let zooCalls = 0
+		mockGetModels.mockImplementation(async (options) => {
+			if (options.provider !== providerIdentifiers.zooGateway) return {}
+			zooCalls++
+			return zooCalls === 1 ? previousSessionModels : currentSessionModels
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
+
+		const posted = vi
+			.mocked(mockClineProvider.postMessageToWebview)
+			.mock.calls.map(([message]) => message)
+			.find((message) => message.type === "routerModels")
+		expect(zooCalls).toBe(2)
+		expect(posted?.routerModels?.[providerIdentifiers.zooGateway]).toEqual(currentSessionModels)
+		mockGetModels.mockReset()
+	})
+
+	it("refreshes webview state when the sign-in state was unknown before and signed out after", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated)
+			.mockRejectedValueOnce(new Error("secret storage unavailable"))
+			.mockResolvedValueOnce(false)
+		mockGetModels.mockResolvedValueOnce({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not refresh webview state when the user was already signed out", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(false).mockResolvedValueOnce(false)
+		mockGetModels.mockResolvedValueOnce({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
 	})
 
 	it("still posts models when the Zoo sign-in state cannot be read", async () => {

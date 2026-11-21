@@ -30,6 +30,7 @@ import type {
 } from "../index"
 import { NOT_PROVIDED } from "./constants"
 import { RouterProvider } from "./router-provider"
+import { AuthScopedCatalogObsoleteError } from "./fetchers/modelCache"
 import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "./fetchers/zoo-gateway"
 import {
 	bridgeExternalAbortSignal,
@@ -212,7 +213,11 @@ export class ZooGatewayHandler extends RouterProvider implements SingleCompletio
 		try {
 			return await this.fetchModel()
 		} catch (error) {
-			if (error instanceof ZooGatewayModelsUnauthorizedError || isRequestAborted(error)) {
+			if (
+				error instanceof ZooGatewayModelsUnauthorizedError ||
+				error instanceof AuthScopedCatalogObsoleteError ||
+				isRequestAborted(error)
+			) {
 				throw error
 			}
 			console.error(

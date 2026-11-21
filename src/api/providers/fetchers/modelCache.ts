@@ -213,6 +213,11 @@ function invalidateAuthSessionEntry(cacheKey: string, provider: RouterName): voi
 	authSessionCache.delete(cacheKey)
 }
 
+/** Changes whenever a sign-out or flush invalidates the provider's session catalogs. */
+export function getAuthScopedSessionGeneration(provider: RouterName): number {
+	return isAuthScopedProvider(provider) ? (authScopedClearGeneration.get(provider) ?? 0) : 0
+}
+
 export function clearAuthSessionModelsForProvider(provider: RouterName): void {
 	for (const key of authSessionCache.keys()) {
 		if (authSessionKeyMatchesProvider(key, provider)) {
@@ -748,6 +753,11 @@ export const refreshModels = async (options: GetModelsOptions, handler: ApiHandl
 			// Stryker disable next-line BlockStatement: emptying catch falls through into non-auth refresh; covered by error-message assertion in tests
 		} catch (error) {
 			console.error(`[refreshModels] Failed to refresh ${authCacheKey} models:`, error)
+			// A rejected session must stop the caller (for example an inference request that
+			// refreshes for a missing model) instead of degrading to an empty catalog.
+			if (error instanceof ZooGatewayModelsUnauthorizedError) {
+				throw error
+			}
 			if (error instanceof AuthScopedCatalogObsoleteError) {
 				return {}
 			}

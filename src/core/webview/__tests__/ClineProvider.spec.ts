@@ -316,6 +316,7 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({}),
 	flushModels: vi.fn(),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+	getAuthScopedSessionGeneration: vi.fn().mockReturnValue(0),
 }))
 
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
@@ -400,6 +401,7 @@ vi.mock("../../../api/providers/fetchers/modelCache", () => ({
 	getModels: vi.fn().mockResolvedValue({}),
 	flushModels: vi.fn(),
 	getModelsFromCache: vi.fn().mockReturnValue(undefined),
+	getAuthScopedSessionGeneration: vi.fn().mockReturnValue(0),
 }))
 
 vi.mock("../diff/strategies/multi-search-replace", () => ({

@@ -247,7 +247,8 @@ describe("zoo-code-auth", () => {
 			const listener = mockSecrets.onDidChange.mock.calls.at(-1)?.[0] as (e: { key: string }) => void
 			listener({ key: "zoo-code-session-token" })
 			await clearZooCodeTokenIfCurrent("zoo_ext_a")
-			resolveRead("zoo_ext_a")
+			// A token other than the rejected one, so only the epoch check can drop this read.
+			resolveRead("zoo_ext_other")
 			await new Promise((resolve) => setTimeout(resolve, 0))
 
 			expect(getCachedZooCodeToken()).toBe("")
@@ -278,6 +279,19 @@ describe("zoo-code-auth", () => {
 
 			expect(getCachedZooCodeToken()).toBe("")
 			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
+		})
+
+		it("keeps the rejected-token marker when a later sign-out runs with no active token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			mockSecrets.delete.mockRejectedValueOnce(new Error("keychain unavailable"))
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).rejects.toThrow("keychain unavailable")
+			mockSecrets.delete.mockRejectedValueOnce(new Error("keychain unavailable"))
+			await expect(clearZooCodeToken()).rejects.toThrow("keychain unavailable")
+
+			await fireTokenChange()
+
+			expect(getCachedZooCodeToken()).toBe("")
 		})
 
 		it("applies a sign-in from another window after a cleared session", async () => {

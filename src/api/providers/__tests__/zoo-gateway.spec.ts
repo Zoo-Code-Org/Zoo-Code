@@ -77,6 +77,9 @@ vitest.mock("../fetchers/modelCache", () => ({
 		return Promise.resolve(DEFAULT_MODEL_CATALOG)
 	}),
 	getModelsFromCache: vitest.fn().mockReturnValue(undefined),
+	AuthScopedCatalogObsoleteError: class AuthScopedCatalogObsoleteError extends Error {
+		override name = "AuthScopedCatalogObsoleteError"
+	},
 }))
 
 const mockGetCachedZooCodeToken = vitest.hoisted(() => vitest.fn<() => string | undefined>(() => undefined))
@@ -673,6 +676,31 @@ describe("ZooGatewayHandler", () => {
 				expect.objectContaining({ model: "anthropic/claude-sonnet-4" }),
 				expect.anything(),
 			)
+		})
+
+		it("stops the request when a refresh for a missing model finds a rejected session", async () => {
+			const { getModels, refreshModels } = await import("../fetchers/modelCache")
+			const { ZooGatewayModelsUnauthorizedError } = await import("../fetchers/zoo-gateway")
+			const unauthorized = new ZooGatewayModelsUnauthorizedError()
+			// A fresh catalog that does not list the configured model makes fetchModel refresh.
+			vitest
+				.mocked(getModels)
+				.mockResolvedValueOnce({ "other/model": DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"] })
+			vitest.mocked(refreshModels).mockRejectedValueOnce(unauthorized)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(unauthorized)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
+		it("stops the request when the model lookup belongs to a session that ended", async () => {
+			const modelCache = await import("../fetchers/modelCache")
+			const obsolete = new modelCache.AuthScopedCatalogObsoleteError()
+			vitest.mocked(modelCache.getModels).mockRejectedValueOnce(obsolete)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(obsolete)
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it("still surfaces a rejected session from the model lookup", async () => {
