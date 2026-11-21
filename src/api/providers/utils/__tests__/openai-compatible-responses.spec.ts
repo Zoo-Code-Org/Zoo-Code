@@ -229,3 +229,64 @@ it("normalizes both history ID fields to the Responses call_id length limit", ()
 	expect(call!.call_id!.length).toBeLessThanOrEqual(OPENAI_CALL_ID_MAX_LENGTH)
 	expect(output?.call_id).toEqual(call?.call_id)
 })
+
+// These finite-domain properties use the same failure sentences as the request parameter model.
+it.each(
+	["a", "_", "\ud800", "😀"].flatMap((suffix) => [1, 54, 63, 64, 65, 100, 256].map((length) => ({ suffix, length }))),
+)("keeps history IDs bounded and paired: %j", ({ suffix, length }) => {
+	const id = "x".repeat(length - 1) + suffix
+	const input = makeInput({
+		messages: [
+			{ role: "assistant", content: [{ type: "tool_use", id, name: "read_file", input: {} }] },
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: id, content: "ok" }] },
+		],
+	})
+	const before = structuredClone(input.messages)
+	const body = buildResponsesRequest(input)
+	if (!Array.isArray(body.input)) throw new Error("Expected Responses input items")
+	const call = body.input.find((item) => item.type === "function_call")
+	const result = body.input.find((item) => item.type === "function_call_output")
+	if (call?.type !== "function_call" || result?.type !== "function_call_output") {
+		throw new Error("Expected a function call and result")
+	}
+	expect(call.call_id.length).toBeLessThanOrEqual(OPENAI_CALL_ID_MAX_LENGTH)
+	expect(call.call_id.length).toBeGreaterThan(0)
+	expect(result.call_id).toBe(call.call_id)
+	if (suffix === "a" && length <= OPENAI_CALL_ID_MAX_LENGTH) expect(call.call_id).toBe(id)
+	expectNoLoneSurrogates(body)
+	expect(input.messages).toEqual(before)
+	expect(buildResponsesRequest(input)).toEqual(body)
+})
+
+it.each(
+	["o1", "o3", "o4-mini", "gpt-5.1"].flatMap((modelId) =>
+		[true, false, undefined].flatMap((supportsTemperature) =>
+			[undefined, 0, 0.7].flatMap((modelTemperature) =>
+				[undefined, 0, 0.4].map((extraTemperature) => ({
+					modelId,
+					supportsTemperature,
+					modelTemperature,
+					extraTemperature,
+				})),
+			),
+		),
+	),
+)(
+	"removes o-series temperature after merging and preserves ordinary precedence: %j",
+	({ modelId, supportsTemperature, modelTemperature, extraTemperature }) => {
+		const extraBody = extraTemperature === undefined ? {} : { temperature: extraTemperature }
+		const input = makeInput({
+			options: { openAiModelId: modelId, modelTemperature },
+			modelInfo: { ...openAiModelInfoSaneDefaults, supportsTemperature },
+			extraBody,
+		})
+		const body = buildResponsesRequest(input)
+		const expected =
+			modelId === "gpt-5.1"
+				? ((supportsTemperature !== false ? modelTemperature : undefined) ?? extraTemperature)
+				: undefined
+		if (expected === undefined) expect(body).not.toHaveProperty("temperature")
+		else expect(body.temperature).toBe(expected)
+		expect(input.extraBody).toEqual(extraBody)
+	},
+)

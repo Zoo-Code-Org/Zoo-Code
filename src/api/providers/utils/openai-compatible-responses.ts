@@ -23,6 +23,11 @@ type ResponsesRequestInput = {
 	reasoningScope: string
 }
 
+/** Encode before truncating so both history ID fields use the same bounded representation. */
+function normalizeHistoryCallId(id: string): string {
+	return truncateOpenAiCallId(sanitizeIdentifierSurrogates(id))
+}
+
 /** Builds a request from explicit inputs without registering listeners or calling the SDK. */
 export function buildResponsesRequest({
 	options,
@@ -49,12 +54,11 @@ export function buildResponsesRequest({
 				typeof message.content === "string"
 					? message.content
 					: message.content.map((part) => {
-							if (part.type === "tool_use")
-								return { ...part, id: truncateOpenAiCallId(sanitizeIdentifierSurrogates(part.id)) }
+							if (part.type === "tool_use") return { ...part, id: normalizeHistoryCallId(part.id) }
 							if (part.type === "tool_result")
 								return {
 									...part,
-									tool_use_id: truncateOpenAiCallId(sanitizeIdentifierSurrogates(part.tool_use_id)),
+									tool_use_id: normalizeHistoryCallId(part.tool_use_id),
 								}
 							return part
 						}),
@@ -81,18 +85,6 @@ export function buildResponsesRequest({
 		}
 		// Only request encrypted reasoning content when reasoning is active.
 		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
-	}
-
-	// Omit temperature unless the model supports it and the user set a custom
-	// value, so the server's own default applies. Mirror the Chat Completions
-	// o-series handling (handleO3FamilyMessage): o1/o3/o4 models reject the
-	// temperature parameter outright, so never send it for them — otherwise an
-	// existing o-series profile with a custom temperature breaks the moment
-	// the Responses API toggle is enabled.
-	const modelId = options.openAiModelId ?? ""
-	const isOSeriesModel = modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")
-	if (!isOSeriesModel && modelInfo.supportsTemperature !== false && options.modelTemperature != null) {
-		requestBody.temperature = options.modelTemperature
 	}
 
 	// Mirror the Chat Completions max-tokens policy: only cap output when the
@@ -123,12 +115,14 @@ export function buildResponsesRequest({
 		requestBody.parallel_tool_calls = metadata?.parallelToolCalls ?? true
 	}
 	const request = { ...extraBody, ...requestBody }
-	// Mirror the Chat Completions o-series path, which owns
-	// `temperature: undefined`: because the guard above leaves
-	// requestBody.temperature absent for o-series models, an Extra Body
-	// temperature would otherwise survive the spread and reach a model that
-	// rejects the parameter outright. Remove it explicitly.
-	if (isOSeriesModel) delete request.temperature
+	// Apply temperature policy after merging so Extra Body cannot restore it for o-series.
+	const modelId = options.openAiModelId ?? ""
+	const isOSeriesModel = modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")
+	if (isOSeriesModel) {
+		delete request.temperature
+	} else if (modelInfo.supportsTemperature !== false && options.modelTemperature != null) {
+		request.temperature = options.modelTemperature
+	}
 	return request
 }
 
