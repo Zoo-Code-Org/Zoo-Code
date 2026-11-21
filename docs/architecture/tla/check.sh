@@ -19,11 +19,14 @@ for spec in $specs; do
 		if [ $all = 1 ] && ! ls "$spec".*.cfg >/dev/null 2>&1; then continue; fi
 		echo "WRONG $spec.cfg is missing"; bad=1; continue
 	fi
+	# The configs check SpecMC.tla when it exists. It holds the model-checking settings.
+	module=$spec.tla
+	[ ! -f "${spec}MC.tla" ] || module=${spec}MC.tla
 	for cfg in "$spec".cfg "$spec".*.cfg; do
 		[ -f "$cfg" ] || continue
 		want=pass
 		[ "$cfg" = "$spec.cfg" ] || want=fail
-		java -XX:+UseParallelGC -cp "$TLA_JAR" tlc2.TLC -metadir "$(mktemp -d -p "$meta")/s" -config "$cfg" "$spec.tla" >"$meta/out" 2>&1
+		java -XX:+UseParallelGC -cp "$TLA_JAR" tlc2.TLC -metadir "$(mktemp -d -p "$meta")/s" -config "$cfg" "$module" >"$meta/out" 2>&1
 		got=unknown
 		grep -q "No error has been found" "$meta/out" && got=pass
 		grep -q "violated" "$meta/out" && got=fail

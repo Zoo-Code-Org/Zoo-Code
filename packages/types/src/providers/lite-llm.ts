@@ -97,3 +97,12 @@ export function isLiteLLMPreserveReasoningModel(modelName: string | undefined): 
 
 	return modelId !== undefined && LITELLM_PRESERVE_REASONING_MODEL_ID_SET.has(modelId)
 }
+
+/**
+ * Checks whether `modelName` (a LiteLLM alias or routed `litellm_params.model`
+ * value) names a Gemini 2.5 or later model. These models validate thought
+ * signatures on function calls.
+ */
+export function isLiteLLMThoughtSignatureModel(modelName: string | undefined): boolean {
+	return /gemini[-\s](?:2\.5|[3-9]|[1-9]\d)/i.test(modelName ?? "")
+}

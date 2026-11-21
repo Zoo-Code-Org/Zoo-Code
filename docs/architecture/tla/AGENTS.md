@@ -90,7 +90,7 @@ Sources: [module structure](https://learning.tlapl.us/intro/module-structure/) a
 ## Run TLC
 
 1. Download `tla2tools.jar` to a folder outside the repo. Do not commit it.
-2. Run: `java -XX:+UseParallelGC -cp <jar> tlc2.TLC -metadir <folder outside the repo> -config Spec.Variant.cfg Spec.tla`. Without `-metadir`, TLC writes a `states` folder here.
+2. Run: `java -XX:+UseParallelGC -cp <jar> tlc2.TLC -metadir <folder outside the repo> -config Spec.Variant.cfg Spec.tla`. Without `-metadir`, TLC writes a `states` folder here. If `SpecMC.tla` exists, give it instead of `Spec.tla`. `check.sh` does this.
 3. If the system can end, add `CHECK_DEADLOCK FALSE` to the config. Without it, TLC reports the end as a deadlock.
 4. Pick the smallest constants that show the interaction. Two links are enough for interleaving.
 
