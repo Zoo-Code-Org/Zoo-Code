@@ -2,7 +2,7 @@ import type { EventEmitter } from "events"
 import type { Socket } from "net"
 
 import type { RooCodeEvents } from "./events.js"
-import type { RooCodeSettings } from "./global-settings.js"
+import type { GlobalState, RooCodeSettings } from "./global-settings.js"
 import type { HistoryItem } from "./history.js"
 import type { ProviderSettingsEntry, ProviderSettings } from "./provider-settings.js"
 import type { IpcMessage, IpcServerEvents } from "./ipc.js"
@@ -21,6 +21,7 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * Starts a new task with an optional initial message and images.
 	 * @param task Optional initial task message.
 	 * @param images Optional array of image data URIs (e.g., "data:image/webp;base64,...").
+	 * @param preserveOpenTabs When true, skips the new-tab editor cleanup (revert + close-all), preserving open tabs and dirty/unsaved editors.
 	 * @returns The ID of the new task.
 	 */
 	startNewTask({
@@ -28,11 +29,13 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 		text,
 		images,
 		newTab,
+		preserveOpenTabs,
 	}: {
 		configuration?: RooCodeSettings
 		text?: string
 		images?: string[]
 		newTab?: boolean
+		preserveOpenTabs?: boolean
 	}): Promise<string>
 	/**
 	 * Resumes a task with the given ID.
@@ -128,7 +131,9 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 */
 	getConfiguration(): RooCodeSettings
 	/**
-	 * Sets the configuration for the current task.
+	 * Sets the configuration for the extension. Writes target the extension-host (sidebar) view:
+	 * view-local values are pinned to the sidebar's per-view state, while global values are
+	 * written to the shared ContextProxy.
 	 * @param values An object containing key-value pairs to set.
 	 */
 	setConfiguration(values: RooCodeSettings): Promise<void>
@@ -193,6 +198,52 @@ export interface RooCodeAPI extends EventEmitter<RooCodeAPIEvents> {
 	 * closes idle terminals so the next command starts fresh.
 	 */
 	setTerminalProfile(name: string | undefined): void
+}
+
+/**
+ * Test-only extension API surface.
+ *
+ * These methods expose raw global-state reads and task ask control by ID that
+ * production callers must not rely on. The implementation is gated at runtime
+ * against VS Code ExtensionMode.Production, so only test hosts and the e2e
+ * harness keep access.
+ */
+/**
+ * GlobalState keys addressable through the test-only API surface.
+ *
+ * `taskHistory` is excluded at the type level because it carries user PII and the
+ * runtime refuses it for both accessors. Credential-bearing keys are still refused
+ * at runtime (a key union cannot express the resolution), and `setGlobalState`
+ * additionally requires the key to have a global-settings value schema.
+ */
+export type TestableGlobalStateKey = Exclude<keyof GlobalState, "taskHistory">
+
+export interface RooCodeTestOnlyApi {
+	/**
+	 * Programmatically approves the pending ask for a task by ID. Intended for use in tests only.
+	 */
+	approveTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Programmatically denies the pending ask for a task by ID. Intended for use in tests only.
+	 */
+	denyTaskAsk(taskId: string): Promise<boolean>
+	/**
+	 * Simulates selecting a follow-up suggestion for a task by ID, including its optional mode switch.
+	 * Intended for use in tests only.
+	 */
+	selectTaskFollowupSuggestion(options: { taskId: string; answer: string; mode?: string }): Promise<boolean>
+	/**
+	 * GlobalState keys the test-only accessors can address. `taskHistory` is excluded
+	 * because it carries user PII and both runtime methods reject it; credential-bearing
+	 * keys are rejected at runtime as well, which a key union cannot express.
+	 */
+	getGlobalState<K extends TestableGlobalStateKey>(key: K): GlobalState[K]
+	/**
+	 * Writes a value to VS Code globalState. Intended for use in tests only. The
+	 * implementation additionally requires the key to have a global-settings value
+	 * schema and rejects credential-bearing keys and `taskHistory` at runtime.
+	 */
+	setGlobalState<K extends TestableGlobalStateKey>(key: K, value: GlobalState[K]): Promise<void>
 }
 
 export interface RooCodeTestAPI extends RooCodeAPI {

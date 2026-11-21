@@ -8,9 +8,19 @@ import type { Task } from "../../core/task/Task"
 import { Package } from "../../shared/package"
 import { makeClineProviderFactory } from "../../test-utils/provider"
 
+const { mockGetAllInstances } = vi.hoisted(() => ({
+	// Stand-in for the live-instance list: startNewTask decides new-tab provider ownership by
+	// whether the provider the factory returned was already listed when the call started.
+	mockGetAllInstances: vi.fn<() => unknown[]>(),
+}))
+
 vi.mock("vscode", () => ({ commands: { executeCommand: vi.fn().mockResolvedValue(undefined) } }))
 vi.mock("@roo-code/ipc", () => ({ IpcServer: class {} }))
-vi.mock("../../core/webview/ClineProvider", () => ({ ClineProvider: class {} }))
+vi.mock("../../core/webview/ClineProvider", () => ({
+	ClineProvider: class {
+		static getAllInstances = mockGetAllInstances
+	},
+}))
 
 function createProvider(taskId: string) {
 	// Only the task identity is consumed by this API path; task execution is outside this test's scope.
@@ -21,6 +31,10 @@ function createProvider(taskId: string) {
 		postStateToWebview: vi.fn<ClineProvider["postStateToWebview"]>().mockResolvedValue(undefined),
 		postMessageToWebview: vi.fn<ClineProvider["postMessageToWebview"]>().mockResolvedValue(undefined),
 		createTask: vi.fn<ClineProvider["createTask"]>().mockResolvedValue(task),
+		dispose: vi.fn<ClineProvider["dispose"]>().mockResolvedValue(undefined),
+		// Plain property, not the real getter: ClineProvider is mocked in this file, so the
+		// prototype carries no accessor to shadow. startNewTask's teardown guard reads this.
+		isDisposed: false,
 	})
 }
 
@@ -33,6 +47,8 @@ describe("API - startNewTask routing", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		// Fresh ownership state per test: the factory provider is not live until it is created.
+		mockGetAllInstances.mockReturnValue([])
 		sidebar = createProvider("sidebar-task")
 		editor = createProvider("editor-task")
 		outputChannel = {
@@ -100,6 +116,85 @@ describe("API - startNewTask routing", () => {
 		expect(other.createTask).not.toHaveBeenCalled()
 	})
 
+	it("creates a task without a configuration without writing settings", async () => {
+		const taskId = await api.startNewTask({ text: "no configuration" })
+
+		// Omitted configuration means "use whatever the provider already has": no settings
+		// write, and the provider receives undefined so it cannot overwrite defaults.
+		expect(sidebar.createTask).toHaveBeenCalledExactlyOnceWith(
+			"no configuration",
+			undefined,
+			undefined,
+			{
+				consecutiveMistakeLimit: Number.MAX_SAFE_INTEGER,
+				toolRepetitionSoftLimit: 0,
+				segments: [{ source: "user", text: "no configuration" }],
+			},
+			undefined,
+		)
+		expect(taskId).toBe("sidebar-task")
+	})
+
+	it("disposes only the provider it created when the new-tab task creation fails", async () => {
+		editor.createTask.mockRejectedValueOnce(new Error("task creation failed"))
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("task creation failed")
+
+		// The provider this call created must not linger in the active-instance list; the
+		// pre-existing sidebar provider is not this call's to tear down.
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("rethrows the startup error when tearing down the aborted new tab fails", async () => {
+		const startupError = new Error("webview post failed")
+		const teardownError = new Error("provider teardown failed")
+		editor.postMessageToWebview.mockRejectedValueOnce(startupError)
+		editor.dispose.mockRejectedValueOnce(teardownError)
+		// enableLogging is what routes API logging to the output channel; the teardown failure
+		// has to stay visible there.
+		const loggingApi = new API(outputChannel, sidebar, providerFactory, undefined, true)
+
+		const thrown = await loggingApi
+			.startNewTask({ text: "new task", newTab: true })
+			.catch((error: unknown) => error)
+
+		// The teardown failure is logged beside the startup error and never substituted for
+		// it: the caller has to see why the task never started, not why cleanup failed.
+		expect(thrown).toBe(startupError)
+		expect(String(thrown)).not.toContain("provider teardown failed")
+		expect(outputChannel.appendLine).toHaveBeenCalledWith(
+			expect.stringContaining(
+				"[API#startNewTask] failed to dispose the aborted new-tab provider: provider teardown failed",
+			),
+		)
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("does not dispose an already disposed new-tab provider when the call fails", async () => {
+		// Disposal can win the race against the call - a tab the user closed mid-flight - and
+		// the flag is consulted twice: before starting the task, and again by the teardown
+		// guard. A second dispose would re-enter teardown on a provider that already tore its
+		// state down.
+		editor.isDisposed = true
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("The provider was disposed")
+
+		expect(editor.createTask).not.toHaveBeenCalled()
+		expect(editor.dispose).not.toHaveBeenCalled()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
+	it("disposes the created new-tab provider when a post fails before the task starts", async () => {
+		editor.postMessageToWebview.mockRejectedValueOnce(new Error("webview post failed"))
+
+		await expect(api.startNewTask({ text: "new task", newTab: true })).rejects.toThrow("webview post failed")
+
+		expect(editor.dispose).toHaveBeenCalledOnce()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
+	})
+
 	it("propagates tab-opening failures without starting a task in another chat", async () => {
 		const error = new Error("Cannot open editor chat")
 		vi.mocked(providerFactory.createInNewTab).mockRejectedValueOnce(error)
@@ -123,5 +218,21 @@ describe("API - startNewTask routing", () => {
 
 		expect(target.createTask).toHaveBeenCalledOnce()
 		expect(other.createTask).not.toHaveBeenCalled()
+	})
+
+	it("does not dispose a new-tab provider that was already live when the call started", async () => {
+		// Ownership is membership, not the newTab branch: createInNewTab can hand back a provider
+		// that was already registered (a tab that joined an existing view), and that provider
+		// belongs to whoever created it. Only a provider this call brought into the active
+		// instance list may be disposed by this call's teardown.
+		mockGetAllInstances.mockReturnValueOnce([sidebar, editor])
+		editor.createTask.mockRejectedValueOnce(new Error("joined tab task creation failed"))
+
+		await expect(api.startNewTask({ configuration: {}, text: "new task", newTab: true })).rejects.toThrow(
+			"joined tab task creation failed",
+		)
+
+		expect(editor.dispose).not.toHaveBeenCalled()
+		expect(sidebar.dispose).not.toHaveBeenCalled()
 	})
 })
