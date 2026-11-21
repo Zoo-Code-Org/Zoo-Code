@@ -6425,6 +6425,247 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("waits for every started sibling re-pin to settle before compensating a failed deletion", async () => {
+			// Promise.all rejects on the first rejection, which hands control back while a slower sibling
+			// write is still running: the compensation restores the deleted record, and that write can then
+			// re-apply the re-pin the rollback is undoing.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const failing = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const late = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// Both views pin the deleted profile, so both take the re-pin write.
+			failing["viewLocalState"].currentApiConfigName = "old-profile"
+			late["viewLocalState"].currentApiConfigName = "old-profile"
+			let lateDidSettle = false
+			// Only the durable half of a sibling re-pin is doubled: the failure and the slow write run
+			// through the same fan-out the compensation waits on. The cast surface is needed because the
+			// method is private and this test drives it on another instance.
+			type SiblingWriteSurface = { savePersistedViewState: (values: Record<string, unknown>) => Promise<void> }
+			const failingSurface = failing as unknown as SiblingWriteSurface
+			const lateSurface = late as unknown as SiblingWriteSurface
+			vi.spyOn(failingSurface, "savePersistedViewState").mockRejectedValue(
+				new Error("sibling re-pin write failed"),
+			)
+			// Nothing in the caller releases the slow sibling, so observing it settled proves that the
+			// fan-out waited for every started write rather than stopping at the first rejection.
+			vi.spyOn(lateSurface, "savePersistedViewState").mockImplementation(async () => {
+				await new Promise<void>((resolve) => setTimeout(resolve, 50))
+				lateDidSettle = true
+			})
+			vi.spyOn(failing, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(late, "postStateToWebview").mockResolvedValue(undefined)
+			let failureSeen = false
+			try {
+				await provider["rePinViewLocalStateForDeletedProfile"]("old-profile", "keeper-profile", {
+					apiProvider: providerIdentifiers.anthropic,
+					apiKey: "keeper-key",
+				}).catch((error: unknown) => {
+					failureSeen = error instanceof Error && error.message === "sibling re-pin write failed"
+				})
+				expect(failureSeen).toBe(true)
+				expect(lateDidSettle).toBe(true)
+			} finally {
+				await provider.dispose()
+				await failing.dispose()
+				await late.dispose()
+			}
+		})
+
+		it("leaves the shared selection untouched when the replacement cannot be read after the delete", async () => {
+			// The name moved before the replacement settings were known, so the shared provider keys kept
+			// the deleted profile while the shared selection named the surviving one.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			vi.spyOn(console, "error").mockImplementation(() => {})
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const oldProfile: ProviderSettingsEntry = {
+				name: "old-profile",
+				id: "old-id",
+				apiProvider: providerIdentifiers.openrouter,
+			}
+			const keeperProfile: ProviderSettingsEntry = {
+				name: "keeper-profile",
+				id: "keeper-id",
+				apiProvider: providerIdentifiers.anthropic,
+			}
+			await provider.contextProxy.setValue("listApiConfigMeta", [oldProfile, keeperProfile])
+			// The deleted profile is the shared selection and this view pins a surviving profile, so the
+			// shared re-pointing path is the one that runs here.
+			await provider.contextProxy.setValue("currentApiConfigName", "old-profile")
+			provider["viewLocalState"].currentApiConfigName = "keeper-profile"
+			// The pre-delete read answers; the read of the replacement profile does not.
+			vi.spyOn(provider.providerSettingsManager, "getProfile").mockImplementation(async (params) => {
+				if (!("name" in params) || params.name !== "keeper-profile") {
+					return {
+						name: "old-profile",
+						id: "old-id",
+						apiProvider: providerIdentifiers.openrouter,
+						apiKey: "old-key",
+					}
+				}
+				throw new Error("replacement read down")
+			})
+			vi.spyOn(provider.providerSettingsManager, "deleteConfig").mockResolvedValue(undefined)
+			const saveSpy = vi.spyOn(provider.providerSettingsManager, "saveConfig").mockResolvedValue("x")
+			const selectionWrites: Array<{ key: string; value: unknown }> = []
+			vi.spyOn(provider.contextProxy, "setValue").mockImplementation(async (key, value) => {
+				selectionWrites.push({ key: key as string, value })
+			})
+			vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			try {
+				await expect(provider.deleteProviderProfile(oldProfile)).rejects.toThrow(
+					"before moving the shared selection",
+				)
+				// The selection may stay where it is or come back from the compensation, but it must never
+				// land on the profile whose settings this call could not read.
+				const movedToKeeper = selectionWrites.filter(
+					(write) => write.key === "currentApiConfigName" && write.value === "keeper-profile",
+				)
+				expect(movedToKeeper).toEqual([])
+				// The deletion still ends compensated: the record comes back with its original id.
+				expect(saveSpy).toHaveBeenCalledWith(
+					"old-profile",
+					expect.objectContaining({ apiKey: "old-key", id: "old-id" }),
+				)
+			} finally {
+				await provider.dispose()
+			}
+		})
+
+		it("refreshes the originating view when the durable viewStates clear fails", async () => {
+			// The broadcast clears this view buffer and posts every sibling, leaving this view own post
+			// to resetState. A durable failure rethrew before that post ran, so the webview kept showing
+			// the state of a buffer the reset had already emptied.
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			provider["viewLocalState"] = { mode: "architect" }
+			const post = vi.spyOn(provider, "postStateToWebview").mockResolvedValue(undefined)
+			vi.spyOn(provider, "broadcastResetToAllInstances").mockRejectedValue(new Error("durable clear failed"))
+			try {
+				await expect(provider.resetState()).rejects.toThrow("durable clear failed")
+				expect(post).toHaveBeenCalledTimes(1)
+			} finally {
+				await provider.dispose()
+			}
+		})
+
+		it("rebuilds a task that follows the profile in a view pinned to another profile", async () => {
+			// A view does not have to pin a profile for a task of its own to follow it. The fan-out
+			// selected only pinned views, so such a task kept sending the settings the save replaced.
+			// The buffer copy stays pinned-only: a view that inherits the shared selection must not
+			// gain an overlay of another profile by accident.
+			vi.spyOn(console, "log").mockImplementation(() => {})
+			vi.spyOn(console, "warn").mockImplementation(() => {})
+			const savedSettings = { apiProvider: providerIdentifiers.anthropic, apiKey: "saved-key" }
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const follower = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			pinned["viewLocalState"].currentApiConfigName = "saved-profile"
+			follower["viewLocalState"].currentApiConfigName = "other-profile"
+			// The pinned view runs a task of its own under the saved profile, and the follower view
+			// pins elsewhere while its task follows the saved profile.
+			const pinnedTask = {
+				taskId: "pinned-task",
+				taskApiConfigName: "saved-profile",
+				updateApiConfiguration: vi.fn(),
+			}
+			vi.spyOn(pinned, "getCurrentTask").mockReturnValue(
+				pinnedTask as unknown as ReturnType<typeof pinned.getCurrentTask>,
+			)
+			const followerTask = {
+				taskId: "follower-task",
+				taskApiConfigName: "saved-profile",
+				updateApiConfiguration: vi.fn(),
+			}
+			vi.spyOn(follower, "getCurrentTask").mockReturnValue(
+				followerTask as unknown as ReturnType<typeof follower.getCurrentTask>,
+			)
+			// Both methods are private and this test drives them on sibling instances, so the cast
+			// surface is the documented way in.
+			type SiblingRefreshSurface = {
+				updateTaskApiHandlerIfNeeded: (settings: ProviderSettings, options?: { forceRebuild?: boolean }) => void
+				_saveViewLocalStateFromMutation: (values: Record<string, unknown>) => Promise<void>
+			}
+			const pinnedSurface = pinned as unknown as SiblingRefreshSurface
+			const followerSurface = follower as unknown as SiblingRefreshSurface
+			const pinnedHandler = vi.spyOn(pinnedSurface, "updateTaskApiHandlerIfNeeded").mockImplementation(() => {})
+			const followerHandler = vi
+				.spyOn(followerSurface, "updateTaskApiHandlerIfNeeded")
+				.mockImplementation(() => {})
+			const pinnedOverlay = vi
+				.spyOn(pinnedSurface, "_saveViewLocalStateFromMutation")
+				.mockResolvedValue(undefined)
+			const followerOverlay = vi
+				.spyOn(followerSurface, "_saveViewLocalStateFromMutation")
+				.mockResolvedValue(undefined)
+			const pinnedPost = vi.spyOn(pinned, "postStateToWebview").mockResolvedValue(undefined)
+			const followerPost = vi.spyOn(follower, "postStateToWebview").mockResolvedValue(undefined)
+			try {
+				await provider.refreshViewLocalStateForUpdatedProfile("saved-profile", savedSettings)
+				// The task that follows the profile is rebuilt in both views, pinned or not.
+				expect(followerHandler).toHaveBeenCalledWith(savedSettings, { forceRebuild: true })
+				expect(pinnedHandler).toHaveBeenCalledWith(savedSettings, { forceRebuild: true })
+				// Only the view that pins the profile gets the overlay copy.
+				expect(pinnedOverlay).toHaveBeenCalledWith({ apiConfiguration: savedSettings })
+				expect(followerOverlay).not.toHaveBeenCalled()
+				expect(follower["viewLocalState"].currentApiConfigName).toBe("other-profile")
+				expect(pinnedPost).toHaveBeenCalledTimes(1)
+				expect(followerPost).toHaveBeenCalledTimes(1)
+			} finally {
+				await provider.dispose()
+				await pinned.dispose()
+				await follower.dispose()
+			}
+		})
+
 		it("restores the manager record and shared state when a post-delete write fails", async () => {
 			const provider = new ClineProvider(
 				mockContext,

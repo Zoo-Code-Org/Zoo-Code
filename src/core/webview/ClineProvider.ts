@@ -4116,15 +4116,23 @@ export class ClineProvider
 			// settings into its overlay first, exactly as activation and upsert do before their
 			// shared writes.
 			if (deletedWasGlobal) {
+				// The selection may only move onto a profile whose settings this code can read. When the
+				// lookup above failed, writing the name would leave the shared provider keys on the deleted
+				// profile, so the shared surfaces would report one profile while serving another. Fail
+				// closed and let the compensation below put the deletion back.
+				if (!survivingSettings) {
+					throw new Error(
+						`Unable to resolve API profile '${profileToActivate}' before moving the shared selection after deleting '${profileToDelete.name}'`,
+					)
+				}
+
 				await this.snapshotSiblingOverlaysBeforeSharedSettingsWrite(profileToActivate)
 
 				// The shared selection changed, but this view's own pin still names a
 				// surviving profile: update the shared store only, leaving the
 				// view-local pin untouched.
 				await this.contextProxy.setValue("currentApiConfigName", profileToActivate)
-			}
 
-			if (deletedWasGlobal && survivingSettings) {
 				// The deleted profile was the globally active one, so the shared provider
 				// keys still carry its settings; replace them so getState() reports the
 				// surviving profile's configuration.
@@ -4777,8 +4785,15 @@ export class ClineProvider
 		// Skip a sibling that has begun teardown: dispose sets _disposed before it awaits task
 		// eviction, so the instance is still registered while its webview closes. Work aimed at it
 		// would be duplicate work its own teardown is already doing.
+		// A view does not have to be pinned to the profile for a task of its own to follow that profile:
+		// an unpinned view inherits the shared selection, and a view pinned elsewhere can hold a task
+		// whose sticky profile is the one that changed. Select on either relation, so a credential that
+		// left the profile cannot keep being sent by a running task that only reaches it through the task.
 		const affected = ClineProvider.getAllInstances().filter(
-			(instance) => !instance._disposed && instance !== this && instance.pinnedProfileName === name,
+			(instance) =>
+				!instance._disposed &&
+				instance !== this &&
+				(instance.pinnedProfileName === name || instance.getCurrentTask()?.taskApiConfigName === name),
 		)
 
 		if (affected.length === 0) {
@@ -4787,8 +4802,12 @@ export class ClineProvider
 
 		await Promise.all(
 			affected.map(async (instance) => {
+				// Only a view that pins the profile gets an overlay copy: writing the settings into a view that
+				// does not pin it would create an overlay where the view was inheriting the shared selection.
 				// Direct private access: compile-time safe across sibling instances.
-				await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				if (instance.pinnedProfileName === name) {
+					await instance._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
+				}
 
 				// The active task of a pinned view holds its own API handler built from
 				// the profile's settings: rebuild it with the saved settings or the
@@ -4851,7 +4870,10 @@ export class ClineProvider
 			)
 		}
 
-		await Promise.all(
+		// Wait for every started sibling write to settle before reporting a failure: Promise.all rejects
+		// on the first rejection, which would return control to the caller's compensation while a later
+		// sibling write was still running, and that write could re-apply the re-pin the rollback undid.
+		const settled = await Promise.allSettled(
 			affected.map(async (instance) => {
 				const values: Partial<RooCodeSettings> & Partial<ExtensionState> = {
 					currentApiConfigName: replacementName,
@@ -4890,6 +4912,14 @@ export class ClineProvider
 				}
 			}),
 		)
+
+		// A rejected entry means a sibling write failed. Every started write has settled by this point,
+		// so the caller's compensation can no longer race a write that was still in flight.
+		const firstRejected = settled.find((entry) => entry.status === "rejected")
+
+		if (firstRejected && firstRejected.status === "rejected") {
+			throw firstRejected.reason
+		}
 	}
 
 	/**
@@ -6645,7 +6675,24 @@ export class ClineProvider
 		}
 
 		// Clear durable and in-memory per-view state across live instances so parallel tabs don't keep stale state.
-		await this.broadcastResetToAllInstances()
+		try {
+			await this.broadcastResetToAllInstances()
+		} catch (broadcastError) {
+			// The helper clears this view buffer and posts every sibling, and leaves this view own post to
+			// the line below. When the durable clear rejected it rethrew before that post ran, so this
+			// webview kept showing the state of a buffer the reset had already emptied. Refresh once here,
+			// then surface the original failure unchanged.
+			try {
+				await this.postStateToWebview()
+			} catch (refreshError) {
+				this.log(
+					`[resetState] failed to refresh this view after a failed reset broadcast: ${
+						refreshError instanceof Error ? refreshError.message : String(refreshError)
+					}`,
+				)
+			}
+			throw broadcastError
+		}
 
 		await this.postStateToWebview()
 		await this.postMessageToWebview({ type: "action", action: "chatButtonClicked" })
