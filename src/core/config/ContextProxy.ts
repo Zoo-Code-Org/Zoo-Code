@@ -67,8 +67,21 @@ const globalSettingsExportSchema = globalSettingsSchema.omit({
 	taskHistory: true,
 	listApiConfigMeta: true,
 	currentApiConfigName: true,
+	// Per-view selection state is machine-local: it keeps flowing through the
+	// normal runtime and pruning paths but must not transfer between settings.
+	viewStates: true,
 })
 
+/**
+ * Global settings the API round trip may not carry in either direction. Per-view selections
+ * are minted and held by the extension host - they name a view, not a user - so a caller that
+ * could write them could pin another view's identity. The API surface consults this list on both
+ * of its settings writes and the settings import path consults it too; the export schema
+ * above omits the key in its own omit list, so a key added here must be added there as well.
+ */
+const NON_PORTABLE_SETTINGS_KEYS: readonly string[] = ["viewStates"]
+
+export const isNonPortableSettingsKey = (key: string): boolean => NON_PORTABLE_SETTINGS_KEYS.includes(key)
 export class ContextProxy {
 	private readonly originalContext: vscode.ExtensionContext
 
@@ -720,11 +733,20 @@ export class ContextProxy {
 		this.stateCache = {}
 		this.secretCache = {}
 
-		await Promise.all([
+		// Every key is cleared independently, so one rejection does not mean the rest never ran.
+		// Awaiting all of them keeps a rejection from returning while other clears are still in flight,
+		// which is what lets a caller refresh the views before a late clear lands. The first rejection
+		// stays the error the caller sees, unmodified and unwrapped.
+		const clearResults = await Promise.allSettled([
 			...GLOBAL_STATE_KEYS.map((key) => this.originalContext.globalState.update(key, undefined)),
 			...SECRET_STATE_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 			...GLOBAL_SECRET_KEYS.map((key) => this.originalContext.secrets.delete(key)),
 		])
+		const firstFailure = clearResults.find((result) => result.status === "rejected")
+
+		if (firstFailure && firstFailure.status === "rejected") {
+			throw firstFailure.reason
+		}
 
 		await this.initialize()
 	}

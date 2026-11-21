@@ -887,6 +887,38 @@ describe("ContextProxy", () => {
 			// Should reinitialize caches
 			expect(initializeSpy).toHaveBeenCalledTimes(1)
 		})
+
+		it("keeps a rejected clear from returning while another clear is still in flight", async () => {
+			// Every key is cleared on its own, so a rejection on one key does not mean the others never
+			// ran: some already committed and one below is still in flight. A caller that refreshes the
+			// live views after resetAllState must not be racing a clear this reset started, so the reset
+			// has to await every clear it issued. The first rejection stays the error the caller sees,
+			// by identity rather than wrapped in another error.
+			const firstRejection = new Error("secret store down")
+			const lateKey = SECRET_STATE_KEYS.filter((key: string) => key !== "apiKey")[0]
+			let lateClearSettled = false
+			let releaseLateClear: () => void = () => {}
+			const lateClear = new Promise<void>((resolve) => {
+				releaseLateClear = resolve
+			})
+			mockSecrets.delete.mockImplementation(async (key: string) => {
+				if (key === "apiKey") {
+					throw firstRejection
+				}
+				if (key === lateKey) {
+					await lateClear
+					lateClearSettled = true
+				}
+			})
+			// Released from a timer so the reset cannot return until it has awaited the late clear.
+			// Without that wait the rejection below surfaces while this clear is still pending, which is
+			// the interleaving the finding names.
+			const lateTimer = setTimeout(() => releaseLateClear(), 20)
+
+			await expect(proxy.resetAllState()).rejects.toBe(firstRejection)
+			clearTimeout(lateTimer)
+			expect(lateClearSettled).toBe(true)
+		})
 	})
 
 	describe("invalid apiProvider migration", () => {
@@ -1149,6 +1181,22 @@ Output only the summary of the conversation so far, without any additional comme
 				(call: any[]) => call[0] === "customSupportPrompts",
 			)
 			expect(customSupportPromptsUpdateCalls.length).toBe(0)
+		})
+	})
+
+	describe("export", () => {
+		it("should exclude viewStates from the exported settings", async () => {
+			await proxy.setValue("viewStates", {
+				"stable-sidebar-view": { mode: "architect", currentApiConfigName: "profile-a", updatedAt: 1 },
+			})
+			await proxy.setValue("customInstructions", "global instructions")
+
+			const exported = await proxy.export()
+
+			// Per-view selection state is machine-local and must never transfer
+			// between settings, while ordinary global settings keep round-tripping.
+			expect(exported).not.toHaveProperty("viewStates")
+			expect(exported?.customInstructions).toBe("global instructions")
 		})
 	})
 })
