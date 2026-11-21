@@ -554,3 +554,69 @@ describe("OpenAICompatible Component - openAiStrictToolSchemas checkbox", () => 
 		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiStrictToolSchemas", false)
 	})
 })
+
+describe("OpenAICompatible Component - openAiUseResponsesApi checkbox", () => {
+	const mockSetApiConfigurationField = vi.fn()
+	const mockOrganizationAllowList = {
+		allowAll: true,
+		providers: {},
+	}
+
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("renders the Responses API checkbox with its description", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		expect(screen.getByText("settings:providers.openAiUseResponsesApi")).toBeInTheDocument()
+		expect(screen.getByText("settings:providers.openAiUseResponsesApiDescription")).toBeInTheDocument()
+	})
+
+	it("defaults to unchecked when openAiUseResponsesApi is unset", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaiuseresponsesapi")
+		expect(checkboxInput).not.toBeChecked()
+	})
+
+	it("shows the checkbox as checked when openAiUseResponsesApi is true", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{ openAiUseResponsesApi: true } as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaiuseresponsesapi")
+		expect(checkboxInput).toBeChecked()
+	})
+
+	it("calls setApiConfigurationField when toggled on", () => {
+		render(
+			<OpenAICompatible
+				apiConfiguration={{} as ProviderSettings}
+				setApiConfigurationField={mockSetApiConfigurationField}
+				organizationAllowList={mockOrganizationAllowList}
+			/>,
+		)
+
+		const checkboxInput = screen.getByTestId("checkbox-input-settings:providers.openaiuseresponsesapi")
+		fireEvent.click(checkboxInput)
+
+		expect(mockSetApiConfigurationField).toHaveBeenCalledWith("openAiUseResponsesApi", true)
+	})
+})

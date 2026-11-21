@@ -525,6 +525,8 @@
 		"openAiBaseUrl": "URL bazowy",
 		"openAiStrictToolSchemas": "Ścisłe schematy narzędzi (strict: true)",
 		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, aby włączyć ścisłe przestrzeganie schematu. Wyłącz, aby korzystać z nieścisłego wywoływania narzędzi.",
+		"openAiUseResponsesApi": "Używaj API Responses",
+		"openAiUseResponsesApiDescription": "Wysyła żądania do /responses zamiast /chat/completions. Wymagane dla niektórych modeli rozumowania w punktach końcowych zgodnych z OpenAI. Rozumowanie i narzędzia pozostają aktywne.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
 		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",

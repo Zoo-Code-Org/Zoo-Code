@@ -523,6 +523,8 @@
 		"openAiBaseUrl": "Temel URL",
 		"openAiStrictToolSchemas": "Katı araç şemaları (strict: true)",
 		"openAiStrictToolSchemasDescription": "Şema uyumunu etkinleştirmek için araç şemalarıyla strict: true gönderir. Katı olmayan araç çağırmak için devre dışı bırakın.",
+		"openAiUseResponsesApi": "Responses API kullan",
+		"openAiUseResponsesApiDescription": "İstekleri /chat/completions yerine /responses adresine gönderir. OpenAI uyumlu uç noktalardaki bazı akıl yürütme modelleri için gereklidir. Akıl yürütme ve araçlar etkin kalır.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure dağıtım adı",
 		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",

@@ -524,6 +524,8 @@
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Esquemes d'eines estrictes (strict: true)",
 		"openAiStrictToolSchemasDescription": "Envia strict: true amb els esquemes d'eines per activar l'adherència estricta a l'esquema. Desactiva només per usar la crida d'eines no estricta.",
+		"openAiUseResponsesApi": "Utilitza l’API Responses",
+		"openAiUseResponsesApiDescription": "Envia les sol·licituds a /responses en lloc de /chat/completions. Cal per a alguns models de raonament en punts de connexió compatibles amb OpenAI. El raonament i les eines es mantenen activats.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom de desplegament d'Azure",
 		"azureOpenAiDeploymentNameDescription": "Introduïu el nom del desplegament d'Azure AI Studio, no el nom del model subjacent.",

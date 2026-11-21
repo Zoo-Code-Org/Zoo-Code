@@ -1133,6 +1133,7 @@ export const openAiProviderDefinition = createProviderDefinition({
 		openAiUseAzure: z.boolean().optional(),
 		azureApiVersion: z.string().optional(),
 		openAiStreamingEnabled: z.boolean().optional(),
+		openAiUseResponsesApi: z.boolean().optional(),
 		openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
 		openAiHeaders: z.record(z.string(), z.string()).optional(),
 		openAiExtraBody: openAiExtraBodySchema,
