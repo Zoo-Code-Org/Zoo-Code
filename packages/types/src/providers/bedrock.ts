@@ -21,12 +21,21 @@ export const bedrockDefaultPromptRouterModelId: BedrockModelId = "anthropic.clau
 // https://aws.amazon.com/bedrock/pricing, including older models that are part
 // of the default prompt routers AWS enabled for GA of the promot router
 // feature.
+//
+// `promptCacheTtlSupport` marks the models whose Converse cache points accept an
+// explicit `ttl` (ADR-0006 PR-C7). The 1h boundary is not a version rule: Opus 4.1
+// and Opus 4 are 5m-only while Opus 4.6/4.7/4.8 are 1h-capable, so the flag is set
+// per exact model id from the AWS "Supported TTL" table and never inferred from a
+// pattern. Rows without it are 5m-only, which makes Bedrock reject an explicit ttl
+// (ValidationException), so absence must stay the fail-closed default.
+// https://docs.aws.amazon.com/bedrock/latest/userguide/prompt-caching.html
 export const bedrockModels = {
 	"anthropic.claude-sonnet-4-5-20250929-v1:0": {
 		maxTokens: 64_000,
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 3.0,
 		outputPrice: 15.0,
@@ -42,6 +51,7 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 3.0, // $3 per million input tokens (≤200K context)
 		outputPrice: 15.0, // $15 per million output tokens (≤200K context)
@@ -69,6 +79,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -202,6 +213,7 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context)
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context)
@@ -228,6 +240,7 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
@@ -254,6 +267,7 @@ export const bedrockModels = {
 		contextWindow: 200_000, // Default 200K, extendable to 1M with beta flag 'context-1m-2025-08-07'
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0, // $5 per million input tokens (≤200K context) — verify against Bedrock console
 		outputPrice: 25.0, // $25 per million output tokens (≤200K context) — verify against Bedrock console
@@ -283,6 +297,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -304,6 +319,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -329,6 +345,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000, // 1M context window native (no beta header required)
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -355,6 +372,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -374,6 +392,7 @@ export const bedrockModels = {
 		contextWindow: 1_000_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		supportsReasoningBinary: true,
 		supportsTemperature: false,
@@ -393,6 +412,7 @@ export const bedrockModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 5.0,
 		outputPrice: 25.0,
@@ -466,6 +486,7 @@ export const bedrockModels = {
 		contextWindow: 200_000,
 		supportsImages: true,
 		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
 		supportsReasoningBudget: true,
 		inputPrice: 1.0,
 		outputPrice: 5.0,
