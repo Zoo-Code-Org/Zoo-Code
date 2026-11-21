@@ -390,6 +390,12 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
+		"infer": {
+			"provider": "Infer",
+			"apiKey": "Kunci API Infer",
+			"getApiKey": "Dapatkan Kunci API Infer",
+			"model": "Model"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",

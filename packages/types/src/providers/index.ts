@@ -30,6 +30,7 @@ export * from "./xai.js"
 export * from "./vercel-ai-gateway.js"
 export * from "./opencode-go.js"
 export * from "./kenari.js"
+export * from "./infer.js"
 export * from "./nanogpt.js"
 export * from "./kimi-code.js"
 export * from "./zai.js"
@@ -48,6 +49,7 @@ import { fireworksProviderDefinition } from "./fireworks.js"
 import { friendliProviderDefinition } from "./friendli.js"
 import { geminiProviderDefinition } from "./gemini.js"
 import { geminiCliProviderDefinition } from "./gemini-cli.js"
+import { inferProviderDefinition } from "./infer.js"
 import { kenariProviderDefinition } from "./kenari.js"
 import { kimiCodeProviderDefinition } from "./kimi-code.js"
 import { litellmProviderDefinition } from "./litellm.js"
@@ -112,6 +114,7 @@ export const providerDefinitionList = [
 	opencodeGoProviderDefinition,
 	kenariProviderDefinition,
 	nanoGptProviderDefinition,
+	inferProviderDefinition,
 	zooGatewayProviderDefinition,
 	basetenProviderDefinition,
 ] as const satisfies readonly ProviderDefinition[]

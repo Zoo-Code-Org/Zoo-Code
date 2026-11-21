@@ -31,6 +31,7 @@ describe("ProfileValidator", () => {
 			["ollama", { ollamaModelId: "model" }],
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
+			["infer", { inferModelId: "model" }],
 			["poe", { apiModelId: "model" }],
 			["moonshot", { apiModelId: "model" }],
 			["kimiCode", { apiModelId: "model" }],
@@ -299,6 +300,25 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+		})
+
+		// Test for infer provider which uses inferModelId
+		it(`should extract inferModelId for infer provider`, () => {
+			const allowList: OrganizationAllowList = {
+				allowAll: false,
+				providers: {
+					[providerIdentifiers.infer]: { allowAll: false, models: ["infer/test-model:stable"] },
+				},
+			}
+			const profile: ProviderSettings = {
+				apiProvider: providerIdentifiers.infer,
+				inferModelId: "infer/test-model:stable",
+			}
+
+			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
+			expect(
+				ProfileValidator.isProfileAllowed({ ...profile, inferModelId: "infer/test-model:official" }, allowList),
+			).toBe(false)
 		})
 
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {

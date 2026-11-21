@@ -390,6 +390,12 @@
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"kenariApiKey": "Kenari APIキー",
 		"getKenariApiKey": "Kenari APIキーを取得",
+		"infer": {
+			"provider": "Infer",
+			"apiKey": "Infer APIキー",
+			"getApiKey": "Infer APIキーを取得",
+			"model": "モデル"
+		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT APIキー",

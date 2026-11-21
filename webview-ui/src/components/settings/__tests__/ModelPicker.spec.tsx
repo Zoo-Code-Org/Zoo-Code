@@ -7,6 +7,7 @@ import { type Mock } from "vitest"
 
 import {
 	bedrockDefaultModelId,
+	inferDefaultModelId,
 	litellmDefaultModelId,
 	type ModelInfo,
 	type ProviderSettings,
@@ -368,6 +369,43 @@ describe("ModelPicker", () => {
 
 			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(customModelId)
 			expect(screen.getByTestId("model-picker-button")).not.toHaveTextContent(litellmDefaultModelId)
+		})
+	})
+
+	describe("Infer route selection", () => {
+		const inferModels: Record<string, ModelInfo> = {
+			"infer/test-model:low-cost": { displayName: "test-model (Low cost)", ...modelInfo },
+			"infer/test-model:official": { displayName: "test-model (Official)", ...modelInfo },
+		}
+
+		beforeEach(() => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.infer]: inferModels }))
+		})
+
+		it("keeps a stored route that the catalog no longer lists instead of reverting to the default", async () => {
+			// A route can leave the catalog for a while. Requests still use the stored
+			// selector, so the picker must keep displaying it.
+			const storedRoute = "infer/test-model:balanced"
+			const setField = vi.fn()
+
+			await act(async () => {
+				renderWithExtensionState(
+					<ModelPicker
+						apiConfiguration={{ apiProvider: providerIdentifiers.infer, inferModelId: storedRoute }}
+						defaultModelId={inferDefaultModelId}
+						models={inferModels}
+						modelIdKey="inferModelId"
+						serviceName="Infer"
+						serviceUrl="https://infer.flow7.org/models"
+						setApiConfigurationField={setField}
+						organizationAllowList={{ allowAll: true, providers: {} }}
+					/>,
+					{ queryClient },
+				)
+			})
+
+			expect(screen.getByTestId("model-picker-button")).toHaveTextContent(storedRoute)
+			expect(setField).not.toHaveBeenCalledWith("inferModelId", inferDefaultModelId, false)
 		})
 	})
 

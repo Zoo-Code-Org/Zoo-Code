@@ -1186,6 +1186,11 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.objectContaining({ provider: providerIdentifiers.kenari }),
 			expect.anything(),
 		)
+		// Infer's catalog is fetched only for Infer, so an aggregate request for another profile skips it.
+		expect(mockGetModels).not.toHaveBeenCalledWith(
+			expect.objectContaining({ provider: providerIdentifiers.infer }),
+			expect.anything(),
+		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1209,6 +1214,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				infer: {},
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1508,6 +1514,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				infer: {},
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1574,6 +1581,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
+				infer: {},
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
