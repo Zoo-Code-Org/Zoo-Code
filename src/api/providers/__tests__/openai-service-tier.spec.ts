@@ -8,8 +8,8 @@ vi.mock("openai", async () => {
 	return mockOpenAiResponsesClient(create)
 })
 
-const tiers = [undefined, "default", "flex", "priority", "fast"] as const
-// Exhaust the model's tier domain on both sides of the long-context threshold.
+const tiers = [undefined, "default", "flex", "priority", "fast", "unexpected-tier"] as const
+// Cover accepted and rejected tiers on both sides of the long-context threshold.
 const cases = (["gpt-6.2-sol", "gpt-6.2-astra"] as const).flatMap((apiModelId) =>
 	([undefined, "default", "priority"] as const).flatMap((requested) =>
 		tiers.flatMap((actual) =>
@@ -24,6 +24,7 @@ const paths = [
 	{ transport: "fetch", shape: "core" },
 	{ transport: "fetch", shape: "status" },
 	{ transport: "fetch", shape: "legacy" },
+	{ transport: "partial-sdk-fallback", shape: "core" },
 ] as const
 
 describe.each(paths)("OpenAI service tier costs via $transport ($shape)", ({ transport, shape }) => {
@@ -61,7 +62,14 @@ describe.each(paths)("OpenAI service tier costs via $transport ($shape)", ({ tra
 			if (transport === "sdk") {
 				create.mockImplementation(() => asyncStreamFrom<unknown>(events))
 			} else {
-				create.mockRejectedValue(new Error("Use fetch fallback"))
+				if (transport === "partial-sdk-fallback") {
+					create.mockImplementation(async function* () {
+						yield { type: "response.created", response: { service_tier: "fast" } }
+						throw new Error("SDK stream failed before usage")
+					})
+				} else {
+					create.mockRejectedValue(new Error("Use fetch fallback"))
+				}
 				vi.stubGlobal(
 					"fetch",
 					vi.fn().mockImplementation(
@@ -82,7 +90,8 @@ describe.each(paths)("OpenAI service tier costs via $transport ($shape)", ({ tra
 				openAiNativeServiceTier: requested,
 			})
 			const chunks = await collectStream(handler.createMessage("System", [{ role: "user", content: "Hi" }]))
-			const effective = actual === "fast" ? "priority" : (actual ?? requested)
+			const effective =
+				actual === "fast" ? "priority" : actual === "unexpected-tier" ? requested : (actual ?? requested)
 			const priority = effective === "priority"
 			const long = inputTokens > 272_000 && (effective === undefined || effective === "default" || priority)
 			const scale = (apiModelId === "gpt-6.2-astra" ? 4 : 1) * (priority ? 2 : 1)

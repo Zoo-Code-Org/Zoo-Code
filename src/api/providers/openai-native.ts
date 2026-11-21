@@ -621,6 +621,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw createAbortError(this.providerName)
 			}
 			// For errors, fallback to manual SSE via fetch
+			// The failed attempt's tier must not affect the fallback response's pricing.
+			this.lastServiceTier = undefined
 			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
