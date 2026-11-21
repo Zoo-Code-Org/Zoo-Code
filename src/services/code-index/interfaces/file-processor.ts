@@ -86,6 +86,8 @@ export interface IFileWatcher extends vscode.Disposable {
 }
 
 export interface BatchProcessingSummary {
+	/** True when this watcher has stopped accepting file events after repeated failures. */
+	circuitBreakerOpen?: boolean
 	/** All files attempted in the batch, including their final status. */
 	processedFiles: FileProcessingResult[]
 	/** Optional error if the entire batch operation failed (e.g., database connection issue). */
@@ -95,6 +97,8 @@ export interface BatchProcessingSummary {
 export interface FileProcessingResult {
 	path: string
 	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error"
+	/** Set only when the embedding request fails, rather than file preparation. */
+	failureSource?: "embedding"
 	error?: Error
 	reason?: string
 	newHash?: string

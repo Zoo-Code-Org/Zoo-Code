@@ -310,7 +310,12 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			if (stage === "parse") dependencies.parser.parseFile.mockRejectedValue(error)
 			if (stage === "embed") dependencies.embedder.createEmbeddings.mockRejectedValue(error)
 			const result = await new FilePreparation(dependencies).prepareFile(filePath)
-			expect(result).toEqual({ path: filePath, status: "local_error", error })
+			expect(result).toEqual({
+				path: filePath,
+				status: "local_error",
+				error,
+				...(stage === "embed" ? { failureSource: "embedding" } : {}),
+			})
 			expect(result.error).toBe(error)
 		},
 	)
