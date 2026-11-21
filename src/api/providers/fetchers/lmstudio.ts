@@ -48,6 +48,11 @@ type PendingLoad = { promise: Promise<void>; controller: AbortController; waiter
 const pendingLoads = new Map<string, PendingLoad>()
 // Runtime aliases support saved selections without adding entries to model dropdowns.
 const instanceAliases = new Map<string, Map<string, ModelInfo>>()
+// A refresh that started earlier must not replace a newer result (LmStudioLoad.tla, FreshWins).
+let lastTicket = 0
+const settledTickets = new Map<string, number>()
+const settleRefresh = (baseUrl: string, ticket: number): boolean =>
+	ticket > (settledTickets.get(baseUrl) ?? 0) && !!settledTickets.set(baseUrl, ticket)
 
 export const getLMStudioModelAlias = (modelId: string, baseUrl?: string): ModelInfo | undefined =>
 	instanceAliases.get(normalizeLMStudioBaseUrl(baseUrl))?.get(modelId)
@@ -61,61 +66,76 @@ const isUnsupportedEndpoint = (error: unknown): boolean =>
 // Older APIs may return HTTP 200 with an error string for an unsupported route.
 const errorBodySchema = z.object({ error: z.string() })
 
-async function discoverModels(baseUrl: string, externalSignal?: AbortSignal) {
+type Discovery =
+	| { version: "v1"; models: NativeModel[] }
+	| { version: "v0"; models: z.infer<typeof legacyListSchema>["data"] }
+	| { version: "openai"; models: z.infer<typeof openAIListSchema>["data"] }
+
+type Parsed = { result: Discovery } | { error: Error }
+const endpoint = <T>(
+	path: string,
+	schema: z.ZodType<T>,
+	toResult: (data: T, baseUrl: string) => Discovery,
+	fallbackNote?: string,
+) => ({
+	path,
+	fallbackNote,
+	parse(data: unknown, baseUrl: string): Parsed {
+		const parsed = schema.safeParse(data)
+		return parsed.success ? { result: toResult(parsed.data, baseUrl) } : { error: parsed.error }
+	},
+})
+
+// Tried in order (LmStudioDiscovery.tla, endpoints 1 to 3).
+const discoveryEndpoints = [
+	endpoint("/api/v1/models", nativeListSchema, ({ models: entries }, baseUrl) => {
+		const models = entries.flatMap((entry) => {
+			const parsed = nativeModelSchema.safeParse(entry)
+			return parsed.success ? [parsed.data] : []
+		})
+		const dropped = entries.length - models.length
+		if (dropped)
+			console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} dropped ${dropped} invalid catalog entries`)
+		return { version: "v1", models }
+	}),
+	endpoint(
+		"/api/v0/models",
+		legacyListSchema,
+		({ data }) => ({ version: "v0", models: data }),
+		"falling back to /api/v0/models",
+	),
+	endpoint(
+		"/v1/models",
+		openAIListSchema,
+		({ data }) => ({ version: "openai", models: data }),
+		"falling back to OpenAI-compatible discovery without vision or context metadata",
+	),
+]
+
+async function discoverModels(baseUrl: string, externalSignal?: AbortSignal): Promise<Discovery> {
 	const signal = mergeAbortSignalAndTimeout(externalSignal, MODEL_CATALOG_FETCH_TIMEOUT_MS)
 	let firstServerError: Error | undefined
-	try {
-		const { data } = await axios.get<unknown>(`${baseUrl}/api/v1/models`, { signal })
-		const parsedList = nativeListSchema.safeParse(data)
-		if (parsedList.success) {
-			const models = parsedList.data.models.flatMap((entry) => {
-				const parsed = nativeModelSchema.safeParse(entry)
-				return parsed.success ? [parsed.data] : []
-			})
-			const dropped = parsedList.data.models.length - models.length
-			if (dropped)
-				console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} dropped ${dropped} invalid catalog entries`)
-			return { version: "v1" as const, models }
+	for (const [index, { path, fallbackNote, parse }] of discoveryEndpoints.entries()) {
+		const last = index === discoveryEndpoints.length - 1
+		if (fallbackNote) console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} ${fallbackNote}`)
+		try {
+			const { data } = await axios.get<unknown>(`${baseUrl}${path}`, { signal })
+			const parsed = parse(data, baseUrl)
+			if ("result" in parsed) return parsed.result
+			// Older APIs may return HTTP 200 with an error string for an unsupported route.
+			const serverError = errorBodySchema.safeParse(data)
+			if (!serverError.success) throw last ? (firstServerError ?? parsed.error) : parsed.error
+			firstServerError ??= new Error(serverError.data.error)
+			if (last) throw firstServerError
+		} catch (error) {
+			if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
+			throwIfAborted(signal)
+			if (!isUnsupportedEndpoint(error)) throw error
+			// Keep the earlier server message only when the last endpoint is also unsupported.
+			if (last) throw firstServerError ?? error
 		}
-		const serverError = errorBodySchema.safeParse(data)
-		if (!serverError.success) throw parsedList.error
-		firstServerError ??= new Error(serverError.data.error)
-	} catch (error) {
-		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
-		throwIfAborted(signal)
-		if (!isUnsupportedEndpoint(error)) throw error
 	}
-
-	console.warn(`LM Studio at ${getLoggableOrigin(baseUrl)} falling back to /api/v0/models`)
-	try {
-		const { data } = await axios.get<unknown>(`${baseUrl}/api/v0/models`, { signal })
-		const parsedList = legacyListSchema.safeParse(data)
-		if (parsedList.success) return { version: "v0" as const, models: parsedList.data.data }
-		const serverError = errorBodySchema.safeParse(data)
-		if (!serverError.success) throw parsedList.error
-		firstServerError ??= new Error(serverError.data.error)
-	} catch (error) {
-		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
-		throwIfAborted(signal)
-		if (!isUnsupportedEndpoint(error)) throw error
-	}
-
-	console.warn(
-		`LM Studio at ${getLoggableOrigin(baseUrl)} falling back to OpenAI-compatible discovery without vision or context metadata`,
-	)
-	let data: unknown
-	try {
-		;({ data } = await axios.get<unknown>(`${baseUrl}/v1/models`, { signal }))
-	} catch (error) {
-		if (isTimeoutAbort(signal)) throw new Error("LM Studio model discovery timed out")
-		throwIfAborted(signal)
-		// Keep the earlier server message only when this endpoint is also unsupported.
-		throw isUnsupportedEndpoint(error) ? (firstServerError ?? error) : error
-	}
-	const parsed = openAIListSchema.safeParse(data)
-	if (parsed.success) return { version: "openai" as const, models: parsed.data.data }
-	const serverError = errorBodySchema.safeParse(data)
-	throw firstServerError ?? (serverError.success ? new Error(serverError.data.error) : parsed.error)
+	throw new Error("unreachable")
 }
 
 // Prefer the instance explicitly selected by the user; otherwise use server order.
@@ -191,7 +211,11 @@ export const forceFullModelDetailsLoad = async (
 					console.info(`LM Studio model load completed at ${getLoggableOrigin(baseUrl)}`)
 				}
 				throwIfAborted(loadSignal)
-				await flushModels({ provider: providerIdentifiers.lmstudio, baseUrl }, handler, true)
+				await flushModels(
+					{ provider: providerIdentifiers.lmstudio, baseUrl, signal: loadSignal },
+					handler,
+					true,
+				)
 			})().finally(() => {
 				if (pendingLoads.get(loadKey)?.promise === promise) pendingLoads.delete(loadKey)
 			})
@@ -221,6 +245,7 @@ export async function getLMStudioModels(
 	const models = Object.create(null) as Record<string, ModelInfo>
 	const loadedDetails = new Set<string>()
 	const aliases = new Map<string, ModelInfo>()
+	const ticket = ++lastTicket
 	try {
 		throwIfAborted(opts?.signal)
 		if (!URL.canParse(baseUrl)) return models
@@ -255,14 +280,14 @@ export async function getLMStudioModels(
 			for (const model of catalog.models)
 				models[model.id] = { ...lMStudioDefaultModelInfo, description: model.id, supportsImages: false }
 		}
-		if (opts?.commit !== false) {
+		if (opts?.commit !== false && settleRefresh(baseUrl, ticket)) {
 			serverVersions.set(baseUrl, catalog.version)
 			modelsWithLoadedDetails.set(baseUrl, loadedDetails)
 			instanceAliases.set(baseUrl, aliases)
 		}
 	} catch (error) {
 		if (!isTimeoutAbort(opts?.signal)) throwIfAborted(opts?.signal)
-		if (opts?.commit !== false) {
+		if (opts?.commit !== false && settleRefresh(baseUrl, ticket)) {
 			serverVersions.delete(baseUrl)
 			modelsWithLoadedDetails.delete(baseUrl)
 			instanceAliases.delete(baseUrl)

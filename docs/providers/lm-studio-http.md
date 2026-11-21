@@ -10,7 +10,7 @@ Zoo Code discovers models without `@lmstudio/sdk`. It tries these endpoints in o
 
 HTTP 404 or 405 starts the next discovery endpoint. HTTP 200 with a body of `{"error": "<message>"}` also starts the next endpoint for the two native routes. At the final `/v1/models` endpoint, an error body fails discovery. Authentication errors, network failures, timeouts, cancellation and other invalid bodies do not.
 
-All three discovery requests share a 15-second deadline. Explicit model loading has a separate 10-minute timeout. A failed refresh clears cached loaded-detail flags and instance aliases for that server; caller cancellation preserves them.
+All three discovery requests share a 15-second deadline. Explicit model loading has a separate 10-minute timeout. A failed refresh clears cached loaded-detail flags and instance aliases for that server; caller cancellation preserves them. Each refresh takes a ticket when it starts. A refresh that settles after a newer one does not change the cache.
 Settings previews do not update runtime metadata. Detected API versions are remembered per server until refresh or failure, so task preparation skips native loading for older APIs. A client load timeout or cancellation releases the local operation, but the server may still finish loading; a retry can create another instance.
 
 Older APIs do not expose the native model-load operation; chat/JIT remains responsible for loading on those servers.

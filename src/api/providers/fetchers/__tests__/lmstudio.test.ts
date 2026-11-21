@@ -421,7 +421,7 @@ describe("LM Studio explicit loading", () => {
 		await forceFullModelDetailsLoad(baseUrl, savedId, handler)
 		expect(post).not.toHaveBeenCalled()
 		expect(mockFlushModels).toHaveBeenCalledExactlyOnceWith(
-			{ provider: providerIdentifiers.lmstudio, baseUrl },
+			{ provider: providerIdentifiers.lmstudio, baseUrl, signal: expect.any(AbortSignal) },
 			handler,
 			true,
 		)
