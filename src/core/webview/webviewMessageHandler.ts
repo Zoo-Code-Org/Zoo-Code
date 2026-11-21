@@ -135,6 +135,11 @@ import {
 const handlerFor = (apiConfiguration: ProviderSettings, provider: RouterName): ApiHandler =>
 	buildApiHandler({ ...apiConfiguration, apiProvider: provider })
 
+// Matched by name so the check holds when modelCache is mocked in tests.
+function isObsoleteCatalogError(error: unknown) {
+	return error instanceof Error && error.name === "AuthScopedCatalogObsoleteError"
+}
+
 export const webviewMessageHandler = async (
 	provider: ClineProvider,
 	message: WebviewMessage,
@@ -1448,9 +1453,20 @@ export const webviewMessageHandler = async (
 
 			// Zoo Gateway discovery (including a forced refresh) clears the session on 401.
 			// Capture the auth state first so a sign-out caused by this request is pushed below.
+			// A failed secret read means "unknown": it must not block the reply for any provider.
 			const fetchesZooGateway = modelFetchPromises.some(({ key }) => key === providerIdentifiers.zooGateway)
 			const { isZooCodeAuthenticated } = await import("../../services/zoo-code-auth")
-			const zooAuthenticatedBefore = fetchesZooGateway && (await isZooCodeAuthenticated())
+			const readZooAuthenticated = async () => {
+				try {
+					return await isZooCodeAuthenticated()
+				} catch (error) {
+					console.error(
+						`[requestRouterModels] Could not read Zoo sign-in state: ${error instanceof Error ? error.message : String(error)}`,
+					)
+					return undefined
+				}
+			}
+			const zooAuthenticatedBefore = fetchesZooGateway && (await readZooAuthenticated()) === true
 
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
@@ -1465,10 +1481,17 @@ export const webviewMessageHandler = async (
 				}),
 			)
 
+			// A result from a session that ended during the request must not reach a newer
+			// session's picker, not even as an empty catalog.
+			let droppedObsoleteResult = false
+
 			results.forEach((result, index) => {
 				const routerName = modelFetchPromises[index].key
 
-				if (result.status === "fulfilled") {
+				if (result.status === "rejected" && isObsoleteCatalogError(result.reason)) {
+					droppedObsoleteResult = true
+					routerModels[routerName] = {}
+				} else if (result.status === "fulfilled") {
 					routerModels[routerName] = result.value.models
 
 					// Ollama and LM Studio settings pages still need these events. They are not fetched here.
@@ -1488,15 +1511,19 @@ export const webviewMessageHandler = async (
 				}
 			})
 
-			await provider.postMessageToWebview({
-				type: RouterModelsMessageType.routerModels,
-				routerModels,
-				values: providerFilter ? { provider: requestedProvider } : undefined,
-			})
+			// For a single-provider request, send nothing: the waiting picker retries and gets
+			// the current session's catalog.
+			if (!(providerFilter && droppedObsoleteResult)) {
+				await provider.postMessageToWebview({
+					type: RouterModelsMessageType.routerModels,
+					routerModels,
+					values: providerFilter ? { provider: requestedProvider } : undefined,
+				})
+			}
 
 			// Refresh state so the settings panel shows the sign-in prompt instead of an empty
 			// model list next to "Authenticated".
-			if (zooAuthenticatedBefore && !(await isZooCodeAuthenticated())) {
+			if (zooAuthenticatedBefore && (await readZooAuthenticated()) === false) {
 				await provider.postStateToWebview()
 			}
 			break

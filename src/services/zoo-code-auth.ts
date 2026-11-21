@@ -14,6 +14,10 @@ let secretStorage: vscode.SecretStorage | undefined
 // In-memory cache for synchronous access in ZooCodeHandler hot path
 let _cachedToken: string | undefined = undefined
 let _sessionCleared = false
+// Bumped on every token write or clear, so a secret read that started earlier cannot apply.
+let _tokenEpoch = 0
+// A token the gateway rejected. Ignored if secret storage still returns it after a failed delete.
+let _rejectedToken: string | undefined = undefined
 let _cachedUserName: string | undefined = undefined
 let _cachedUserEmail: string | undefined = undefined
 let _cachedUserImage: string | undefined = undefined
@@ -47,8 +51,16 @@ export async function initZooCodeAuth(context: vscode.ExtensionContext): Promise
 	// Watch for secret changes and update cache
 	context.secrets.onDidChange((e) => {
 		if (e.key === ZOO_CODE_TOKEN_KEY) {
+			const epochAtRead = _tokenEpoch
 			secretStorage?.get(ZOO_CODE_TOKEN_KEY).then((token) => {
+				if (epochAtRead !== _tokenEpoch || (token !== undefined && token === _rejectedToken)) {
+					return
+				}
 				_cachedToken = token
+				// Another window can sign in through the shared secret store.
+				if (token) {
+					_sessionCleared = false
+				}
 			})
 		}
 		if (e.key === ZOO_CODE_USER_NAME_KEY) {
@@ -117,8 +129,12 @@ export async function setZooCodeToken(token: string): Promise<void> {
 	const storage = secretStorage
 	await withTokenWriteLock(async () => {
 		await storage.store(ZOO_CODE_TOKEN_KEY, token)
+		_tokenEpoch++
 		_cachedToken = token
 		_sessionCleared = false
+		if (token === _rejectedToken) {
+			_rejectedToken = undefined
+		}
 	})
 }
 
@@ -166,7 +182,12 @@ export async function clearZooCodeUserInfo(): Promise<void> {
 
 // Invalidates the in-memory session before touching secret storage, so a failed delete
 // cannot leave a rejected session usable. Startup verification retries the delete.
-async function invalidateAndDeleteZooCodeToken(storage: vscode.SecretStorage): Promise<void> {
+async function invalidateAndDeleteZooCodeToken(
+	storage: vscode.SecretStorage,
+	rejectedToken: string | undefined = _cachedToken,
+): Promise<void> {
+	_tokenEpoch++
+	_rejectedToken = rejectedToken
 	_cachedToken = undefined
 	_sessionCleared = true
 	const { clearAuthSessionModelsForProvider } = await import("../api/providers/fetchers/modelCache")
@@ -191,7 +212,7 @@ export async function clearZooCodeTokenIfCurrent(rejectedToken: string): Promise
 		if (_cachedToken !== undefined && _cachedToken !== rejectedToken) {
 			return false
 		}
-		await invalidateAndDeleteZooCodeToken(storage)
+		await invalidateAndDeleteZooCodeToken(storage, rejectedToken)
 		return true
 	})
 }

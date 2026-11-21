@@ -231,6 +231,67 @@ describe("zoo-code-auth", () => {
 			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
 		})
 
+		const fireTokenChange = async () => {
+			const listener = mockSecrets.onDidChange.mock.calls.at(-1)?.[0] as (e: { key: string }) => void
+			listener({ key: "zoo-code-session-token" })
+			// Let the listener's secret read settle.
+			await new Promise((resolve) => setTimeout(resolve, 0))
+		}
+
+		it("ignores a secret read that started before the session was cleared", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			let resolveRead!: (value: string | undefined) => void
+			mockSecrets.get.mockReturnValueOnce(new Promise((resolve) => (resolveRead = resolve)))
+
+			const listener = mockSecrets.onDidChange.mock.calls.at(-1)?.[0] as (e: { key: string }) => void
+			listener({ key: "zoo-code-session-token" })
+			await clearZooCodeTokenIfCurrent("zoo_ext_a")
+			resolveRead("zoo_ext_a")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(getCachedZooCodeToken()).toBe("")
+		})
+
+		it("does not let a secret read that started before a sign-in overwrite the new token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			let resolveRead!: (value: string | undefined) => void
+			mockSecrets.get.mockReturnValueOnce(new Promise((resolve) => (resolveRead = resolve)))
+
+			const listener = mockSecrets.onDidChange.mock.calls.at(-1)?.[0] as (e: { key: string }) => void
+			listener({ key: "zoo-code-session-token" })
+			await setZooCodeToken("zoo_ext_b")
+			resolveRead("zoo_ext_a")
+			await new Promise((resolve) => setTimeout(resolve, 0))
+
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_b")
+		})
+
+		it("does not restore the rejected token from storage when the delete failed", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			mockSecrets.delete.mockRejectedValueOnce(new Error("keychain unavailable"))
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).rejects.toThrow("keychain unavailable")
+
+			await fireTokenChange()
+
+			expect(getCachedZooCodeToken()).toBe("")
+			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
+		})
+
+		it("applies a sign-in from another window after a cleared session", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			await clearZooCodeTokenIfCurrent("zoo_ext_a")
+
+			await mockSecrets.store("zoo-code-session-token", "zoo_ext_b")
+			await fireTokenChange()
+
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_b")
+			await expect(isZooCodeAuthenticated()).resolves.toBe(true)
+		})
+
 		it("reports authenticated again after a new sign-in", async () => {
 			await initZooCodeAuth(mockContext)
 			await setZooCodeToken("zoo_ext_a")

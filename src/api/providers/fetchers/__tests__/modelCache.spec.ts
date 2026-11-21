@@ -74,6 +74,7 @@ import NodeCache from "node-cache"
 import { TelemetryService } from "@roo-code/telemetry"
 import {
 	authScopedClearGenerationSizeForTests,
+	AuthScopedCatalogObsoleteError,
 	clearAuthSessionModelsForProvider,
 	flushModels,
 	getModels,
@@ -1530,7 +1531,7 @@ describe("auth session cache", () => {
 
 		// 4. Resolve fetch A with stale data — it should NOT write to cache
 		resolveFetchA(zooGatewayOk(staleModels))
-		await fetchAResult
+		await expect(fetchAResult).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 
 		// 5. Resolve fetch B with fresh data — it SHOULD write to cache
 		resolveFetchB(zooGatewayOk(freshModelsAfterSignOut))
@@ -1807,7 +1808,8 @@ describe("auth session cache", () => {
 	it.each([
 		["a failed revalidation", ({ reject }: RevalidationControls) => reject(new Error("network down"))],
 		["an empty revalidation", ({ resolve }: RevalidationControls) => resolve(zooGatewayOk({}))],
-	])("does not serve the previous session's catalog after sign-out on %s", async (_label, settle) => {
+		["a non-empty revalidation", ({ resolve }: RevalidationControls) => resolve(zooGatewayOk(zooModels))],
+	])("drops the result instead of returning a catalog after sign-out on %s", async (_label, settle) => {
 		vi.useFakeTimers()
 		try {
 			let controls!: RevalidationControls
@@ -1819,11 +1821,11 @@ describe("auth session cache", () => {
 			await getModels(options, zooGatewayHandler)
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
-			const revalidation = getModels(options, zooGatewayHandler).catch(() => "rejected")
+			const revalidation = getModels(options, zooGatewayHandler)
 			clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 			settle(controls)
 
-			expect(await revalidation).not.toEqual(zooModels)
+			await expect(revalidation).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1850,6 +1852,56 @@ describe("auth session cache", () => {
 			expect.objectContaining({ zooSessionToken: "zoo_ext_account_b" }),
 		)
 		mockResolveToken.mockImplementation((profileToken?: string) => profileToken || undefined)
+	})
+
+	it("falls back to a newer stored catalog when an older revalidation fails", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const refreshedModels: ModelRecord = { "new/b": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }
+		vi.useFakeTimers()
+		try {
+			let rejectRevalidation!: (reason: unknown) => void
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockReturnValueOnce(new Promise<ZooGatewayResult>((_r, reject) => (rejectRevalidation = reject)))
+				.mockResolvedValueOnce({ kind: "ok", models: refreshedModels, etag: '"v2"' })
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const revalidation = getModels(options, zooGatewayHandler)
+			await refreshModels(options, zooGatewayHandler)
+			rejectRevalidation(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+
+			expect(await revalidation).toEqual(refreshedModels)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("refreshModels recovery uses the session that started the request, not the current one", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const accountB: ModelRecord = { "b/1": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }
+		const mockResolveToken = vi.mocked(resolveZooGatewaySessionToken)
+		const options = { provider: providerIdentifiers.zooGateway }
+		let rejectRefresh!: (reason: unknown) => void
+		mockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk(accountB))
+			.mockReturnValueOnce(new Promise<ZooGatewayResult>((_r, reject) => (rejectRefresh = reject)))
+		try {
+			mockResolveToken.mockReturnValue("zoo_ext_account_b")
+			await getModels(options, zooGatewayHandler)
+
+			mockResolveToken.mockReturnValue("zoo_ext_account_a")
+			const refresh = refreshModels(options, zooGatewayHandler)
+			// The user switches to account B while A's refresh is still in flight.
+			mockResolveToken.mockReturnValue("zoo_ext_account_b")
+			rejectRefresh(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+
+			expect(await refresh).toEqual({})
+		} finally {
+			mockResolveToken.mockImplementation((profileToken?: string) => profileToken || undefined)
+		}
 	})
 
 	it("keeps the captured catalog when the size bound evicts the entry during a pending 304", async () => {
@@ -1880,7 +1932,7 @@ describe("auth session cache", () => {
 		}
 	})
 
-	it("returns an empty catalog when a flush invalidates the entry during a pending 304", async () => {
+	it("drops the result when a flush invalidates the entry during a pending 304", async () => {
 		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
 		vi.useFakeTimers()
 		try {
@@ -1897,7 +1949,7 @@ describe("auth session cache", () => {
 			await flushModels(options, zooGatewayHandler, false)
 			resolveRevalidation({ kind: "not_modified" })
 
-			expect(await revalidation).toEqual({})
+			await expect(revalidation).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1914,7 +1966,7 @@ describe("auth session cache", () => {
 		const pending = getModels(options, zooGatewayHandler)
 		await flushModels(options, zooGatewayHandler, false)
 		resolveFirst(zooGatewayOk(zooModels))
-		await pending
+		await expect(pending).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 
 		await getModels(options, zooGatewayHandler)
 		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
@@ -2361,7 +2413,7 @@ describe("auth session cache", () => {
 
 		// 4. Resolve fetch A with stale data
 		resolveFetchA(zooGatewayOk(staleModels))
-		await fetchAResult
+		await expect(fetchAResult).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 
 		// 5. Third call immediately after A resolves (B still pending).
 		//    If stale data was written (|| bug), it gets served from cache → returns stale.
@@ -2404,7 +2456,7 @@ describe("auth session cache", () => {
 
 		// 4. Resolve A (stale) and B (fresh)
 		resolveFetchA(zooGatewayOk(zooModels)) // stale pre-sign-out data
-		await fetchAResult
+		await expect(fetchAResult).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 
 		const bResult = await fetchBResult
 		expect(bResult).toEqual(freshModels2)
@@ -2445,12 +2497,12 @@ describe("auth session cache", () => {
 
 		// Resolve all with distinct data; only C's data should land in cache
 		resolveA(zooGatewayOk(models1))
-		await resA
+		await expect(resA).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 		// A must not have written back: a read while C is in flight joins C instead of
 		// serving A's stale catalog from the session cache.
 		const readDuringC = getModels(options, zooGatewayHandler)
 		resolveB(zooGatewayOk(models2))
-		await resB
+		await expect(resB).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 		resolveC(zooGatewayOk(models3))
 		const finalResult = await resC
 
@@ -2513,7 +2565,7 @@ describe("auth session cache", () => {
 
 		resolveZoo(zooGatewayOk(zooModels))
 		resolveKimi(kimiModels)
-		await zooPending
+		await expect(zooPending).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
 		expect(await kimiPending).toEqual(kimiModels)
 		expect(await kimiDeduped).toEqual(kimiModels)
 	})

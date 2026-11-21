@@ -659,16 +659,31 @@ describe("ZooGatewayHandler", () => {
 			},
 		)
 
-		it("keeps an ordinary model lookup failure while the caller signal is live", async () => {
+		it("sends the request with fallback metadata when the model catalog is unavailable", async () => {
 			const { getModels, refreshModels } = await import("../fetchers/modelCache")
 			const lookupFailure = new Error("model catalog unavailable")
 			vitest.mocked(getModels).mockRejectedValue(lookupFailure)
 			vitest.mocked(refreshModels).mockRejectedValue(lookupFailure)
 			const handler = new ZooGatewayHandler(mockOptions)
 
-			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).rejects.toBe(
-				lookupFailure,
+			await expect(handler.completePrompt("Test", { abortSignal: new AbortController().signal })).resolves.toBe(
+				"Test completion response",
 			)
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({ model: "anthropic/claude-sonnet-4" }),
+				expect.anything(),
+			)
+		})
+
+		it("still surfaces a rejected session from the model lookup", async () => {
+			const { getModels } = await import("../fetchers/modelCache")
+			const { ZooGatewayModelsUnauthorizedError } = await import("../fetchers/zoo-gateway")
+			const unauthorized = new ZooGatewayModelsUnauthorizedError()
+			vitest.mocked(getModels).mockRejectedValue(unauthorized)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(unauthorized)
+			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
 		it.each([

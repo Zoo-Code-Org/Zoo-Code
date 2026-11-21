@@ -254,8 +254,9 @@ describe("Zoo Gateway Fetchers", () => {
 
 			const thrown = await getZooGatewayModels(gatewayOptions()).catch((error: unknown) => error)
 
-			expect(thrown).toBeInstanceOf(Error)
 			expect(thrown).not.toBeInstanceOf(ZooGatewayModelsUnauthorizedError)
+			expect((thrown as Error).message).toBe("Zoo Gateway models request used a session that was replaced")
+			expect(clearZooCodeTokenIfCurrent).toHaveBeenCalledWith("zoo_ext_test_token")
 			consoleErrorSpy.mockRestore()
 		})
 
