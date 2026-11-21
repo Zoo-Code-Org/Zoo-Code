@@ -34,6 +34,9 @@
 \* Refactor gate: 698 focused tests, types, lint, and all 37 TLC configs pass their expected checks.
 \* Four code mutations fail assertions. No new defect or replay false alarm was found.
 \* Refactor cost: about 3 agent minutes. No model state or invariant was added.
+\* PR 2498 incremental review: OSeriesRecognition extends the model-name boundary in a small domain.
+\* Review gate: 233280 states pass; twelve parameter sabotage configs fail with invariant error 12.
+\* The recognition gate and review ratchet counts are in OSeriesRecognition.
 CONSTANT ParameterBoundary
 VARIABLE source
 Domain == [modelFamily : {"ordinary", "oSeries"}, extraTemperature : {"unset", "custom"},

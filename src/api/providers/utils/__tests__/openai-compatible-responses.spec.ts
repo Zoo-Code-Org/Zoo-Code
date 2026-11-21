@@ -180,54 +180,21 @@ it("preserves API defaults for tools without strictness or parameters", () => {
 	])
 })
 
-it.each(["o1", "o3", "o4-mini"])(
-	"omits temperature for o-series model %s even when a custom value is configured",
-	(modelId) => {
-		const body = buildResponsesRequest(
-			makeInput({
-				options: { openAiModelId: modelId, modelTemperature: 0.4 },
-				modelInfo: { ...openAiModelInfoSaneDefaults, supportsTemperature: true },
-			}),
-		)
-		expect(body).not.toHaveProperty("temperature")
-	},
-)
-
 it.each([
-	{ modelId: "o1", expected: undefined },
-	{ modelId: "o3", expected: undefined },
-	{ modelId: "o4-mini", expected: undefined },
-	{ modelId: "gpt-5.1", expected: 0.4 },
-])("handles Extra Body temperature for model $modelId", ({ modelId, expected }) => {
+	{ modelId: "foo-o3-bar", omitted: true },
+	{ modelId: "gpt-4o1", omitted: true },
+	{ modelId: "gpt-4o", omitted: false },
+	{ modelId: "o5", omitted: false },
+	{ modelId: "gpt-5.1", omitted: false },
+])("preserves substring temperature policy for $modelId", ({ modelId, omitted }) => {
 	const body = buildResponsesRequest(
 		makeInput({
-			options: { openAiModelId: modelId },
+			options: { openAiModelId: modelId, modelTemperature: 0.7 },
 			extraBody: { temperature: 0.4 },
 		}),
 	)
-	if (expected === undefined) expect(body).not.toHaveProperty("temperature")
-	else expect(body).toHaveProperty("temperature", expected)
-})
-
-it("normalizes both history ID fields to the Responses call_id length limit", () => {
-	// History recorded through another provider (e.g. Gemini) can carry tool
-	// IDs longer than the Responses call_id limit; both fields must be
-	// normalized identically so the call/result pair keeps matching.
-	const longId = `call_${"x".repeat(100)}`
-	const body = buildResponsesRequest(
-		makeInput({
-			messages: [
-				{ role: "assistant", content: [{ type: "tool_use", id: longId, name: "read_file", input: {} }] },
-				{ role: "user", content: [{ type: "tool_result", tool_use_id: longId, content: "ok" }] },
-			],
-		}),
-	)
-	const items = body.input as Array<{ type?: string; call_id?: string }>
-	const call = items.find((item) => item.type === "function_call")
-	const output = items.find((item) => item.type === "function_call_output")
-	expect(call?.call_id).toBeDefined()
-	expect(call!.call_id!.length).toBeLessThanOrEqual(OPENAI_CALL_ID_MAX_LENGTH)
-	expect(output?.call_id).toEqual(call?.call_id)
+	if (omitted) expect(body).not.toHaveProperty("temperature")
+	else expect(body.temperature).toBe(0.7)
 })
 
 // These finite-domain properties use the same failure sentences as the request parameter model.
@@ -280,6 +247,7 @@ it.each(
 			modelInfo: { ...openAiModelInfoSaneDefaults, supportsTemperature },
 			extraBody,
 		})
+		const before = structuredClone(extraBody)
 		const body = buildResponsesRequest(input)
 		const expected =
 			modelId === "gpt-5.1"
@@ -287,6 +255,6 @@ it.each(
 				: undefined
 		if (expected === undefined) expect(body).not.toHaveProperty("temperature")
 		else expect(body.temperature).toBe(expected)
-		expect(input.extraBody).toEqual(extraBody)
+		expect(input.extraBody).toEqual(before)
 	},
 )

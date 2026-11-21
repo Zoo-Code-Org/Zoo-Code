@@ -22,6 +22,7 @@ import { TagMatcher } from "../../utils/tag-matcher"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
+import { isOSeriesModelId } from "./utils/is-o-series-model"
 import { buildResponsesRequest } from "./utils/openai-compatible-responses"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
@@ -162,7 +163,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
 
-		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
+		if (isOSeriesModelId(modelId)) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
 			return
 		}

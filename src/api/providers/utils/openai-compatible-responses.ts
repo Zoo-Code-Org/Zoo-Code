@@ -1,4 +1,5 @@
 import type OpenAI from "openai"
+import { isOSeriesModelId } from "./is-o-series-model"
 import type { ModelInfo } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
@@ -117,8 +118,7 @@ export function buildResponsesRequest({
 	const request = { ...extraBody, ...requestBody }
 	// Apply temperature policy after merging so Extra Body cannot restore it for o-series.
 	const modelId = options.openAiModelId ?? ""
-	const isOSeriesModel = modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")
-	if (isOSeriesModel) {
+	if (isOSeriesModelId(modelId)) {
 		delete request.temperature
 	} else if (modelInfo.supportsTemperature !== false && options.modelTemperature != null) {
 		request.temperature = options.modelTemperature
