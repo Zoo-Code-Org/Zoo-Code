@@ -25,7 +25,9 @@ describe("CustomToolRegistry", () => {
 		])("uses the expected cache path for $platform/$uid/$options", ({ platform, uid, options, base, suffix }) => {
 			vi.stubGlobal("process", { ...process, platform, getuid: uid === undefined ? undefined : () => uid })
 			const instance = new CustomToolRegistry(options)
-			expect(instance["cacheDir"]).toBe(options?.cacheDir ?? path.join(base, `dynamic-tools-cache-${suffix}`))
+			expect(instance["cacheDir"]).toBe(
+				path.resolve(options?.cacheDir ?? path.join(base, `dynamic-tools-cache-${suffix}`)),
+			)
 		})
 	})
 
