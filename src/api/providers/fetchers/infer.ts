@@ -59,6 +59,12 @@ const getLimit = (model: InferModel, route: InferRoute, limit: InferLimit): numb
 /** Maps one catalog route to model info. Prices are published per 1M tokens in USD, as ModelInfo expects. */
 export const parseInferRoute = (model: InferModel, routeId: string, route: InferRoute): ModelInfo => {
 	const maxTokens = getLimit(model, route, "max_output_tokens")
+	// Infer bills cache writes at the input rate when a route has no separate cache-write
+	// price. The catalog shows that as an omitted or zero rate.
+	const cacheWritesPrice =
+		route.cache_write_per_million_usd !== undefined && route.cache_write_per_million_usd > 0
+			? route.cache_write_per_million_usd
+			: route.input_per_million_usd
 
 	return {
 		contextWindow: getLimit(model, route, "max_context_tokens") ?? openAiModelInfoSaneDefaults.contextWindow,
@@ -71,9 +77,7 @@ export const parseInferRoute = (model: InferModel, routeId: string, route: Infer
 		...(route.cached_input_per_million_usd !== undefined
 			? { cacheReadsPrice: route.cached_input_per_million_usd }
 			: {}),
-		...(route.cache_write_per_million_usd !== undefined
-			? { cacheWritesPrice: route.cache_write_per_million_usd }
-			: {}),
+		...(cacheWritesPrice !== undefined ? { cacheWritesPrice } : {}),
 		// The name is a remote string and ModelInfo.description is rendered as Markdown,
 		// so it is only surfaced as the plain-text displayName.
 		displayName: `${model.name ?? model.slug} (${INFER_ROUTE_LABELS.get(routeId) ?? routeId})`,
