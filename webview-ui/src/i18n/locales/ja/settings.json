@@ -442,6 +442,10 @@
 			}
 		},
 		"useCustomBaseUrl": "カスタムベースURLを使用",
+		"useCustomDeploymentName": "カスタムデプロイ名を使用",
+		"openAiNativeDeploymentName": "デプロイ名",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "選択したモデルの代わりにAPIリクエストでモデルとして送信されます。Azure AI Foundryのように、エンドポイントがデプロイ名でモデルを指定する場合に使用します。機能と料金は、引き続き選択したモデルから取得されます。",
 		"useReasoning": "推論を有効化",
 		"customHeaders": "カスタムヘッダー",
 		"headerName": "ヘッダー名",

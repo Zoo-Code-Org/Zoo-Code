@@ -444,6 +444,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Utilitzar URL base personalitzada",
+		"useCustomDeploymentName": "Utilitzar un nom de desplegament personalitzat",
+		"openAiNativeDeploymentName": "Nom del desplegament",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "S'envia com a model a les sol·licituds de l'API en lloc del model seleccionat. Feu-lo servir quan el vostre punt d'accés adreça els models pel nom de desplegament, com ara Azure AI Foundry. Les capacitats i els preus encara provenen del model seleccionat.",
 		"useReasoning": "Activar raonament",
 		"customHeaders": "Capçaleres personalitzades",
 		"headerName": "Nom de la capçalera",

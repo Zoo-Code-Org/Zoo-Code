@@ -445,6 +445,10 @@
 			}
 		},
 		"useCustomBaseUrl": "Użyj niestandardowego URL bazowego",
+		"useCustomDeploymentName": "Użyj niestandardowej nazwy wdrożenia",
+		"openAiNativeDeploymentName": "Nazwa wdrożenia",
+		"openAiNativeDeploymentNamePlaceholder": "my-deployment",
+		"openAiNativeDeploymentNameDescription": "Wysyłana jako model w żądaniach API zamiast wybranego modelu. Użyj, gdy punkt końcowy adresuje modele według nazwy wdrożenia, np. Azure AI Foundry. Możliwości i ceny nadal pochodzą z wybranego modelu.",
 		"useReasoning": "Włącz rozumowanie",
 		"customHeaders": "Niestandardowe nagłówki",
 		"headerName": "Nazwa nagłówka",
