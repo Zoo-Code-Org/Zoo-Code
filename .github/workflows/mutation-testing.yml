@@ -14,11 +14,69 @@ concurrency:
     cancel-in-progress: true
 
 jobs:
+    # The open pull request map is read in a job that never checks out or runs pull-request
+    # code, so the token cannot reach anything the contributor controls. Only the filtered map
+    # crosses into the job that runs the gate. Each entry carries the draft flag and the base ref: a
+    # draft pull request is not gated, and a pull request whose base is another branch is not the
+    # branch this unit lands on, so either one makes the gate measure against the event base instead.
+    stacked_map:
+        name: Resolve the stacked parent
+        runs-on: ubuntu-latest
+        timeout-minutes: 10
+        permissions:
+            contents: read
+            pull-requests: read
+            # The map is published as an artifact for the gate job, which is the only artifact this
+            # job writes; it never sees pull-request code because this job checks out nothing.
+            actions: write
+        steps:
+            - name: Read the open pull request heads
+              id: read_map
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  # The fallback must itself be a command: this step runs bash with -e, so a bare '[]'
+                  # is executed as a program name and an API failure would abort the job instead of
+                  # measuring against the event base.
+                  # --jq runs once per page, so a paginated call emits one JSON array per page; the
+                  # gate reads that stream, not a single array.
+                  # The base ref travels with every entry: the gate only measures a unit against a parent
+                  # that targets the branch the unit itself targets.
+                  STACKED_MAP="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls?state=open&per_page=100" --jq '[.[] | {number: .number, headSha: .head.sha, draft: (.draft == true), baseRef: .base.ref}]')" || STACKED_MAP="$(printf '[]')"
+                  # Publish the map as a file in an artifact rather than as a job output that the gate
+                  # step then receives as an argument: Linux caps one argument or environment string at
+                  # 128 KiB (MAX_ARG_STRLEN), and a map past that cap makes the gate step unstartable
+                  # instead of merely large. A failed write aborts this job: a truncated or missing map
+                  # would leave the gate measuring against the event base while still reporting success.
+                  case "$STACKED_MAP" in
+                      "["*) ;;
+                      *) echo "::error title=Stacked unit base::The stacked map is not a JSON array" >&2; exit 1 ;;
+                  esac
+                  printf '%s\n' "$STACKED_MAP" > stacked-map.json
+
+            # A failed upload must not skip the gate: the download side already treats a missing
+            # artifact as "measure against the event base" (stricter, never looser), and that
+            # fallback can only run if this job still succeeds.
+            - name: Publish the stacked map
+              continue-on-error: true
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: mutation-stacked-map
+                  path: stacked-map.json
+                  if-no-files-found: error
+                  retention-days: 1
+
     mutation-diff:
         name: mutation-diff
+        needs: stacked_map
         if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
         runs-on: ubuntu-latest
         timeout-minutes: 30
+        # Only the filtered map crosses into this job, and it crosses as a file: the token stays in the
+        # job that read it. actions:write covers reading that artifact and publishing the reports below.
+        permissions:
+            contents: read
+            actions: write
         steps:
             - name: Record merge-queue enforcement
               if: github.event_name == 'merge_group'
@@ -46,14 +104,34 @@ jobs:
               if: github.event_name == 'pull_request'
               run: pnpm test:mutation-ci
 
+            - name: Read the stacked map
+              if: github.event_name == 'pull_request'
+              # Downloaded outside the checkout on purpose: a pull request can commit .mutation/stacked-map.json
+              # itself, and with continue-on-error a missing artifact would leave that committed file in place for
+              # the gate to read as if it were the map. Under RUNNER_TEMP a missing artifact means no file, which
+              # degrades to the event base - stricter than the intended measurement, never looser - and the gate
+              # logs it.
+              continue-on-error: true
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: mutation-stacked-map
+                  path: ${{ runner.temp }}/mutation-stacked-map
+
             - name: Enforce executable-line scope and run advisory mutation testing
               if: github.event_name == 'pull_request'
               env:
                   HEAD_SHA: ${{ github.sha }}
+                  PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
                   PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
               run: |
                   BASE_SHA="$(git rev-parse "$HEAD_SHA^1")"
-                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA"
+                  # The merge commit's second parent is the pull request head. When that head's own
+                  # parent is another open pull request's head, this PR is a stacked unit, so the gate
+                  # measures only this unit's delta instead of every unmerged ancestor.
+                  # The event already carries that head for provenance, so it wins here; deriving it from
+                  # the merge commit stays as the fallback for a manual run with no pull_request payload.
+                  PR_HEAD_SHA="${PR_HEAD_SHA:-$(git rev-parse "$HEAD_SHA^2" 2>/dev/null || git rev-parse "$HEAD_SHA")}"
+                  node scripts/stryker-diff.mjs ci --base "$BASE_SHA" --head "$HEAD_SHA" --pr-head "$PR_HEAD_SHA" --pr-base-ref "$PR_BASE_REF" --stacked-map-file "${RUNNER_TEMP}/mutation-stacked-map/stacked-map.json"
 
             - name: Upload mutation reports
               id: mutation_report
