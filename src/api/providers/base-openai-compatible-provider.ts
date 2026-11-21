@@ -6,14 +6,17 @@ import { type ModelInfo, openAiModelInfoSaneDefaults } from "@roo-code/types"
 import { type ApiHandlerOptions, getModelMaxOutputTokens } from "../../shared/api"
 import { TagMatcher } from "../../utils/tag-matcher"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
+import { handleOpenAIRequestError } from "./utils/error-handler"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { DEFAULT_HEADERS } from "./constants"
 import { BaseProvider } from "./base-provider"
-import { handleOpenAIError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { RequestConfigBuilder } from "./config-builder/request-config-builder"
+import { createAbortError, mergeAbortSignalAndTimeout, throwIfAborted } from "./utils/abort-signal"
+import { getRequestTimeoutMs } from "./utils/request-timeout"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -21,6 +24,13 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 	defaultProviderModelId: ModelName
 	providerModels: Record<ModelName, ModelInfo>
 	defaultTemperature?: number
+}
+
+/** Subset of OpenAI.RequestOptions built per request for the abort-signal wiring. */
+type OpenAiRequestConfig = {
+	signal?: AbortSignal
+	/** Per-request SDK timeout (ms); overrides the client-level default when set. */
+	timeout?: number
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
@@ -67,7 +77,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		})
 	}
 
-	protected createStream(
+	protected async createStream(
 		systemPrompt: string,
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
@@ -103,11 +113,10 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			;(params as any).thinking = { type: "enabled" }
 		}
 
-		try {
-			return this.client.chat.completions.create(params, requestOptions)
-		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
-		}
+		// Creation errors are normalized once in createMessage: subclasses can override this
+		// method and return the SDK promise without awaiting it, so a catch here would not
+		// cover every provider.
+		return await this.client.chat.completions.create(params, requestOptions)
 	}
 
 	override async *createMessage(
@@ -115,7 +124,22 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const stream = await this.createStream(systemPrompt, messages, metadata)
+		throwIfAborted(metadata?.abortSignal)
+		const signal = metadata?.abortSignal
+
+		// Per-request abort wiring (RequestConfigBuilder adoption): subclasses inherit
+		// it by receiving the built config as createStream's requestOptions.
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>().setAbortSignal(metadata).build()
+		// Request creation can reject before the stream exists. Some subclasses return the
+		// SDK promise without awaiting it (e.g. FriendliHandler.createStream), so their own
+		// catch cannot fire; normalize creation-time failures here so an abort during request
+		// creation reaches Task.ts as an AbortError instead of a raw APIUserAbortError.
+		let stream: AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>
+		try {
+			stream = await this.createStream(systemPrompt, messages, metadata, requestConfig)
+		} catch (error) {
+			throw handleOpenAIRequestError(error, this.providerName, signal)
+		}
 
 		const matcher = new TagMatcher(
 			["think", "thought"],
@@ -129,64 +153,118 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
 
-		for await (const chunk of stream) {
-			// Check for provider-specific error responses (e.g., MiniMax base_resp)
-			const chunkAny = chunk as any
-			if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
-				throw new Error(
-					`${this.providerName} API Error (${chunkAny.base_resp.status_code}): ${chunkAny.base_resp.status_msg || "Unknown error"}`,
-				)
-			}
+		// An iterator error is normalized only after the usage record below has been handed to the
+		// caller, so a mid-stream failure cannot bypass the tokens already streamed.
+		let streamError: unknown = undefined
 
-			const delta = chunk.choices?.[0]?.delta
-			const finishReason = chunk.choices?.[0]?.finish_reason
-
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
-
-			if (delta?.content) {
-				for (const processedChunk of matcher.update(delta.content)) {
-					yield processedChunk
+		try {
+			for await (const chunk of stream) {
+				// Streaming-loop abort defense: the for-await above already pulled this
+				// chunk; the top-of-loop break stops *processing* (and yielding) buffered
+				// content that arrived after the caller's signal aborted.
+				if (signal?.aborted) {
+					break
 				}
-			}
+				// Check for provider-specific error responses (e.g., MiniMax base_resp).
+				// ChatCompletionChunk has no base_resp member, so read it through an
+				// unknown guard instead of casting the whole chunk.
+				const chunkUnknown: unknown = chunk
+				const baseResp: unknown =
+					typeof chunkUnknown === "object" && chunkUnknown !== null && "base_resp" in chunkUnknown
+						? (chunkUnknown as { base_resp?: unknown }).base_resp
+						: undefined
+				const baseRespFields =
+					baseResp !== null && typeof baseResp === "object"
+						? (baseResp as Record<string, unknown>)
+						: undefined
+				const baseRespStatusCode = baseRespFields?.["status_code"]
+				const baseRespStatusMsg = baseRespFields?.["status_msg"]
+				if (baseRespStatusCode && baseRespStatusCode !== 0) {
+					throw new Error(
+						`${this.providerName} API Error (${baseRespStatusCode}): ${String(baseRespStatusMsg || "Unknown error")}`,
+					)
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					if (toolCall.id) {
-						activeToolCallIds.add(toolCall.id)
+				const delta = chunk.choices?.[0]?.delta
+				const finishReason = chunk.choices?.[0]?.finish_reason
+
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
+
+				if (delta?.content) {
+					for (const processedChunk of matcher.update(delta.content)) {
+						if (signal?.aborted) {
+							break
+						}
+						yield processedChunk
 					}
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						if (signal?.aborted) {
+							break
+						}
+						if (toolCall.id) {
+							activeToolCallIds.add(toolCall.id)
+						}
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
 				}
-			}
 
-			// Emit tool_call_end events when finish_reason is "tool_calls"
-			// This ensures tool calls are finalized even if the stream doesn't properly close
-			if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
-				for (const id of activeToolCallIds) {
-					yield { type: "tool_call_end", id }
+				// Emit tool_call_end events when finish_reason is "tool_calls"
+				// This ensures tool calls are finalized even if the stream doesn't properly close
+				if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
+					for (const id of activeToolCallIds) {
+						if (signal?.aborted) {
+							break
+						}
+						yield { type: "tool_call_end", id }
+					}
+					activeToolCallIds.clear()
 				}
-				activeToolCallIds.clear()
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+				if (chunk.usage) {
+					lastUsage = chunk.usage
+				}
 			}
+		} catch (error) {
+			// The creation-site catch does not cover errors raised by the async
+			// iterator itself (e.g. a mid-stream abort); record them here so the usage
+			// record below still reaches the caller before the normalized error does.
+			streamError = error
 		}
 
+		// Usage before the verdict: a captured usage record must reach the caller ahead of an
+		// abort or an iterator error, or the cost of the tokens already streamed disappears
+		// from the task's accounting exactly when the stream stops early.
 		if (lastUsage) {
 			yield this.processUsageMetrics(lastUsage, this.getModel().info)
 		}
 
-		// Process any remaining content
+		if (streamError !== undefined) {
+			throw handleOpenAIRequestError(streamError, this.providerName, metadata?.abortSignal)
+		}
+
+		// Post-loop abort defense: a signal that aborted while the loop was running must
+		// surface the Task.ts abort contract instead of letting the stream end normally
+		// with the matcher.final() content below.
+		if (signal?.aborted) {
+			throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
+		}
+
+		// Process any remaining content. No cancellation re-check is needed here: the throw above
+		// already covers an aborted caller signal, and matcher.final() is a synchronous array, so
+		// no await exists between that check and this loop in which an abort could appear.
 		for (const processedChunk of matcher.final()) {
 			yield processedChunk
 		}
@@ -212,7 +290,9 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
+		throwIfAborted(options?.abortSignal)
+
 		const { id: modelId, info: modelInfo } = this.getModel()
 
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
@@ -225,8 +305,31 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 			;(params as any).thinking = { type: "enabled" }
 		}
 
+		// CompletePromptOptions is not ApiHandlerCreateMessageMetadata (required taskId),
+		// so the abort/timeout merge goes through setOption; the helper treats
+		// timeoutMs <= 0 as "no explicit timeout". The per-request timeout is
+		// forwarded as well: without it the SDK falls back to the client-level
+		// default, which can still expire before a larger per-request timeoutMs.
+		const requestTimeout = getRequestTimeoutMs(options?.timeoutMs)
+		const requestSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
+		const requestConfig = new RequestConfigBuilder<OpenAiRequestConfig>()
+			.setOption("signal", requestSignal)
+			.setOption("timeout", requestTimeout)
+			.build()
+
 		try {
-			const response = await this.client.chat.completions.create(params)
+			const response = await this.client.chat.completions.create(params, requestConfig)
+
+			// A cancellation that lands while the response is in flight must not be reported as a
+			// completed prompt: the response is discarded and the abort contract is raised instead.
+			if (options?.abortSignal?.aborted) {
+				throw handleOpenAIRequestError(
+					createAbortError(this.providerName),
+					this.providerName,
+					options.abortSignal,
+					requestSignal,
+				)
+			}
 
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const responseAny = response as any
@@ -238,7 +341,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
-			throw handleOpenAIError(error, this.providerName)
+			throw handleOpenAIRequestError(error, this.providerName, options?.abortSignal, requestSignal)
 		}
 	}
 
