@@ -20,12 +20,15 @@ vi.mock("@roo-code/telemetry", () => ({
 vi.mock("fs/promises", () => ({
 	default: {
 		readFile: vi.fn(),
-		// ApplyDiffTool stats around its own read to capture the version token its guarded publish
-		// consumes, so the fs double has to carry a stat. Rejecting keeps the fixture honest about
-		// the case the code already tolerates: no stat, no token, publish unguarded-by-token.
-		stat: vi
-			.fn()
-			.mockRejectedValue(Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })),
+		// ApplyDiffTool stats around its read so the guarded publish is authorised against the
+		// version the diff was computed from; one shared stats object means the file did not change
+		// underneath the read. Same fixture shape as applyDiffTool.failureReporting.spec.ts.
+		// Merging main changed this row rather than dropping it: main's fixture rejected ENOENT to
+		// describe a tree where ApplyDiffTool made no stat call at all, and the merged tree's code -
+		// this unit's, at ApplyDiffTool.ts:88 and :90 - does stat around the read, so the double has
+		// to resolve for the read-time version token to exist. No main-side assertion in this file
+		// depended on the rejection: its rows assert only isPathOutsideWorkspace.
+		stat: vi.fn().mockResolvedValue({ dev: 1n, ino: 2n, size: 4n, mtimeNs: 100n, ctimeNs: 100n }),
 	},
 }))
 
@@ -83,7 +86,27 @@ const approvalPaths = [
 describe("ApplyDiffTool isOutsideWorkspace", () => {
 	let askApproval: ReturnType<typeof vi.fn<ToolCallbacks["askApproval"]>>
 
-	function createTask(preventFocusDisruption = false): Task {
+	function createTask(preventFocusDisruption = false, relPath: string = INSIDE_PATH): Task {
+		// The diff-view double mirrors the one behaviour execute now depends on: open() re-reads the
+		// file and records that text as the save baseline, which is what the stale-base guard in
+		// ApplyDiffTool compares. Reading through the same fs mock the tool reads through keeps the
+		// fixture's base consistent; a double that leaves originalContent at "" reports a stale base
+		// that never happened. Stale-base itself is covered by applyDiffTool.guardedWrite.spec.ts,
+		// which overrides open() with a different content.
+		const diffViewProviderStub = {
+			editType: undefined as "create" | "modify" | undefined,
+			originalContent: "" as string | undefined,
+			open: vi.fn(async () => {
+				diffViewProviderStub.originalContent = String(await vi.mocked(fs.readFile)(relPath as never))
+			}),
+			update: vi.fn().mockResolvedValue(undefined),
+			reset: vi.fn().mockResolvedValue(undefined),
+			revertChanges: vi.fn().mockResolvedValue(undefined),
+			saveChanges: vi.fn().mockResolvedValue(undefined),
+			saveDirectly: vi.fn().mockResolvedValue(undefined),
+			scrollToFirstDiff: vi.fn(),
+			pushToolWriteResult: vi.fn().mockResolvedValue("Changes successfully applied."),
+		}
 		const task = {
 			cwd: CWD,
 			consecutiveMistakeCount: 0,
@@ -105,23 +128,15 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 				getName: () => "test",
 				applyDiff: vi.fn().mockResolvedValue({ success: true, content: "new\n" }),
 			},
-			diffViewProvider: {
-				editType: undefined,
-				originalContent: "",
-				open: vi.fn().mockImplementation(async function () {
-					// The real open() re-reads the file and records that text as the save baseline; ApplyDiffTool
-					// compares that baseline against its own read and fails closed when they differ, so the
-					// double has to emulate the re-read instead of a no-op.
-					task.diffViewProvider.originalContent = "old\n"
-				}),
-				update: vi.fn().mockResolvedValue(undefined),
-				reset: vi.fn().mockResolvedValue(undefined),
-				revertChanges: vi.fn().mockResolvedValue(undefined),
-				saveChanges: vi.fn().mockResolvedValue(undefined),
-				saveDirectly: vi.fn().mockResolvedValue(undefined),
-				scrollToFirstDiff: vi.fn(),
-				pushToolWriteResult: vi.fn().mockResolvedValue("Changes successfully applied."),
-			},
+			diffViewProvider: diffViewProviderStub,
+			// execute records the read-time version token here on the preventFocusDisruption save path.
+			// Merging main kept this branch's stub rather than main's inline double. Both emulate the
+			// real open() re-read that records the save baseline, and both land on "old\n" because the
+			// fs mock resolves that text, so main's fail-closed assertion survives; the stub is kept
+			// because its re-read goes through the same fs double the tool reads through, which is what
+			// keeps a stale base from being reported that never happened. The observe field stays on
+			// this double because the merged product code calls task.observationRegistry.observe here.
+			observationRegistry: { observe: vi.fn() },
 			fileContextTracker: { trackFileContext: vi.fn().mockResolvedValue(undefined) },
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue(undefined),
@@ -136,7 +151,7 @@ describe("ApplyDiffTool isOutsideWorkspace", () => {
 	async function runExecute(relPath: string, isOutside: boolean, preventFocusDisruption = false): Promise<string> {
 		vi.mocked(isPathOutsideWorkspace).mockReturnValue(isOutside)
 
-		await applyDiffTool.execute({ path: relPath, diff: DIFF }, createTask(preventFocusDisruption), {
+		await applyDiffTool.execute({ path: relPath, diff: DIFF }, createTask(preventFocusDisruption, relPath), {
 			askApproval,
 			handleError: vi.fn().mockResolvedValue(undefined),
 			pushToolResult: vi.fn(),

@@ -38,6 +38,19 @@ describe("ObservationRegistry", () => {
 		expect(reg.has("/y.ts")).toBe(false)
 	})
 
+	it("forget drops one path and leaves every other path observed", () => {
+		const reg = new ObservationRegistry()
+		reg.observe("/x.ts", "t1")
+		reg.observe("/y.ts", "t2")
+
+		expect(reg.forget("/x.ts")).toBe(true)
+		expect(reg.has("/x.ts")).toBe(false)
+		expect(reg.get("/y.ts")?.version).toBe("t2")
+		expect(reg.size).toBe(1)
+
+		// Forgetting a path nobody observed reports rather than throws.
+		expect(reg.forget("/z.ts")).toBe(false)
+	})
 	it("size reflects the number of observed entries", () => {
 		const reg = new ObservationRegistry()
 		expect(reg.size).toBe(0)

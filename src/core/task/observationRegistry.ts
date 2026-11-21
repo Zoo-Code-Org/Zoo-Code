@@ -56,6 +56,18 @@ export class ObservationRegistry {
 		return this.entries.has(absolutePath)
 	}
 
+	/**
+	 * Drop the observation for one path, leaving every other path observed.
+	 *
+	 * A tool that abandons its own read - a stale diff it will not save - must not leave
+	 * that read's version token behind as authority for some later write. Retiring the
+	 * whole registry would strip observations that belong to other files and to other
+	 * tasks' work, so the removal is per path. Reports whether an entry was removed.
+	 */
+	forget(absolutePath: string): boolean {
+		return this.entries.delete(absolutePath)
+	}
+
 	clear(): void {
 		this.entries.clear()
 	}

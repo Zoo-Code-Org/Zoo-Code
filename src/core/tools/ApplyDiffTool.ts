@@ -9,6 +9,7 @@ import { isPathOutsideWorkspace } from "../../utils/pathUtils"
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
 import { fileExistsAtPath } from "../../utils/fs"
+import { versionTokenOfStat } from "../../utils/versionToken"
 import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
@@ -74,7 +75,25 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The diff below is built from this exact read, so the save that follows must be
+			// authorized against the version captured here - not against whatever version the
+			// diff view happens to stat afterwards (there is no diff view on the
+			// focus-disruption path). Same contract as ApplyPatchTool's hunk read: stat
+			// around the read and keep the token only when the file did not change underneath
+			// it. The token stays local until the guarded publish consumes it: observing at
+			// read time would leave it in the task-wide registry through a failed hunk, a
+			// rejection, and the diff-view branch, where a later write_to_file could spend it
+			// on an unrelated overwrite.
+			let readVersionToken: string | undefined
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					readVersionToken = preReadToken
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -177,21 +196,64 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					return
 				}
 
-				// Save directly without showing diff view or opening the file
+				// Save directly without showing diff view or opening the file. The diff is
+				// applied to an existing file, so edit-guard semantics require a prior read.
+				// The observation is recorded here, at the guarded publish that consumes it,
+				// so a failed hunk, a rejection, and the diff-view branch leave no token in
+				// the task-wide registry.
 				task.diffViewProvider.editType = "modify"
 				task.diffViewProvider.originalContent = originalContent
+				if (readVersionToken === undefined && task.observationRegistry.has(absolutePath)) {
+					// This read straddled a write (or one of its stats failed), so it produced no token
+					// of its own, yet an earlier read left this path observed. Publishing now would let
+					// that other read's token authorize an overwrite of content this tool never
+					// verified - the failure the unobserved-edit guard exists to stop, reached through a
+					// registry entry the guard has no reason to distrust. Fail closed. When nothing is
+					// observed the read still continues and the guard's own remediation answers, which
+					// is the behavior the stat-failure rows in applyDiffTool.guardedWrite.spec.ts lock.
+					throw new Error(
+						`The file ${relPath} changed while it was being read for this diff, so nothing was saved. Read the file again and reapply the diff against the current content.`,
+					)
+				}
+				if (readVersionToken !== undefined) {
+					task.observationRegistry.observe(absolutePath, readVersionToken)
+				}
 				await task.diffViewProvider.saveDirectly(
 					relPath,
 					diffResult.content,
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					"edit",
 				)
 			} else {
 				// Original behavior with diff view
 				// Show diff view before asking for approval
 				task.diffViewProvider.editType = "modify"
 				await task.diffViewProvider.open(relPath)
+				// The diff above was computed against this tool's own read, but open() re-reads
+				// the file and records that newer text as the save baseline. If the file changed
+				// between the two reads, saveChanges() would guard the newer baseline while
+				// publishing content derived from the older one, silently overwriting the write
+				// that landed in between. Fail closed instead: nothing is saved until the model
+				// re-reads and reapplies against the current content.
+				if (task.diffViewProvider.originalContent !== originalContent) {
+					task.consecutiveMistakeCount++
+					task.recordToolError("apply_diff")
+					const staleError = `The file ${relPath} changed after it was read for this diff, so the diff was not applied. Read the file again and reapply the diff to its current content.`
+					await task.say("error", staleError)
+					task.didToolFailInCurrentTurn = true
+					await task.diffViewProvider.revertChanges()
+					// The rollback retires the editor buffer, but open() had already recorded the
+					// newer on-disk version as this flow's observation (DiffViewProvider.ts:149-157).
+					// Leaving it current would let a later write - write_to_file with the
+					// focus-disruption save - publish on a read this tool abandoned, so retire that
+					// path only; other files keep what their own reads recorded.
+					task.observationRegistry.forget(absolutePath)
+					task.processQueuedMessages()
+					pushToolResult(staleError)
+					return
+				}
 				await task.diffViewProvider.update(diffResult.content, true)
 				task.diffViewProvider.scrollToFirstDiff()
 
