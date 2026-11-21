@@ -184,47 +184,37 @@ export class SimpleInstaller {
 
 		// Merge parameters (method-specific override global)
 		const itemParameters = item.type === "mcp" ? item.parameters || [] : []
-		const allParameters = [...itemParameters, ...methodParameters]
-		const uniqueParameters = Array.from(new Map(allParameters.map((p) => [p.key, p])).values())
 
-		// Replace parameters if provided
-		if (options?.parameters && uniqueParameters.length > 0) {
-			for (const param of uniqueParameters) {
-				const value = options.parameters[param.key]
-				if (value !== undefined) {
-					contentToUse = contentToUse.replace(new RegExp(`{{${param.key}}}`, "g"), String(value))
-				}
-			}
-		}
-
-		// Handle _selectedIndex from parameters if provided
+		// Handle _selectedIndex from parameters before parsing the selected template.
 		if (options?.parameters?._selectedIndex !== undefined && Array.isArray(item.content)) {
 			const index = options.parameters._selectedIndex
 			if (index >= 0 && index < item.content.length) {
-				// Array of McpInstallationMethod objects
 				const method = item.content[index]
 				contentToUse = method.content
 				methodParameters = method.parameters || []
-
-				// Re-merge parameters with the newly selected method
-				const itemParametersForNewMethod = item.type === "mcp" ? item.parameters || [] : []
-				const allParametersForNewMethod = [...itemParametersForNewMethod, ...methodParameters]
-				const uniqueParametersForNewMethod = Array.from(
-					new Map(allParametersForNewMethod.map((p) => [p.key, p])).values(),
-				)
-
-				// Re-apply parameter replacements to the newly selected content
-				for (const param of uniqueParametersForNewMethod) {
-					const value = options.parameters[param.key]
-					if (value !== undefined) {
-						contentToUse = contentToUse.replace(new RegExp(`{{${param.key}}}`, "g"), String(value))
-					}
-				}
 			}
 		}
 
+		const parameters = new Map<string, string>()
+		for (const param of [...itemParameters, ...methodParameters]) {
+			const value = options?.parameters?.[param.key]
+			if (value !== undefined) {
+				parameters.set(`{{${param.key}}}`, String(value))
+			}
+		}
+		const placeholders = new RegExp(
+			Array.from(parameters.keys(), (key) => key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|"),
+			"g",
+		)
+
+		// Parse first so parameter data cannot change JSON keys, types, or structure.
+		// A callback keeps replacement tokens literal and avoids substituting inserted values again.
+		const mcpData = JSON.parse(contentToUse, (_key, value: unknown) =>
+			typeof value === "string" && parameters.size > 0
+				? value.replace(placeholders, (placeholder) => parameters.get(placeholder)!)
+				: value,
+		)
 		const filePath = await this.getMcpFilePath(target)
-		const mcpData = JSON.parse(contentToUse)
 
 		// Read existing file or create new structure
 		let existingData: any = { mcpServers: {} }
