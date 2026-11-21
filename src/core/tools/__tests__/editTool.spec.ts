@@ -154,6 +154,31 @@ describe("editTool", () => {
 		toolResult = undefined
 	})
 
+	it("publishes through the guarded saveDirectly with update kind when focus disruption is on", async () => {
+		// The tool knows whether it replaced an existing file, and the guard's kind decides what the
+		// publish has to be authorized against, so the call has to carry that knowledge. providerRef
+		// is a loose double in this harness and getState is a per-test vi.fn, so reach it through one
+		// documented cast instead of re-typing the whole stub.
+		const providerRef = mockTask.providerRef as unknown as {
+			deref: () => { getState: ReturnType<typeof vi.fn> } | undefined
+		}
+		providerRef.deref()?.getState.mockResolvedValue({
+			diagnosticsEnabled: true,
+			writeDelayMs: 1000,
+			experiments: { preventFocusDisruption: true },
+		})
+
+		await executeEditTool({ file_path: "test/path.txt", old_string: "Line 2", new_string: "Modified Line 2" })
+
+		const calls = (mockTask.diffViewProvider.saveDirectly as unknown as ReturnType<typeof vi.fn>).mock.calls
+		expect(calls).toHaveLength(1)
+		expect(calls[0]?.[5]).toBe("update")
+		// Index 6 is the basis-authority flag: EditTool built this edit from the bytes it just read,
+		// so it is the kind of caller that may re-observe what that read proves.
+		expect(calls[0]?.[6]).toBe(true)
+		expect(mockTask.diffViewProvider.saveChanges).not.toHaveBeenCalled()
+	})
+
 	/**
 	 * Helper function to execute the edit tool with different parameters
 	 */
