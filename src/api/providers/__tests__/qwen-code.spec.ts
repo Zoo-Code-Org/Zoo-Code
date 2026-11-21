@@ -784,6 +784,8 @@ describe("QwenCodeHandler abort wiring", () => {
 
 	describe("completePrompt", () => {
 		it("reports an elapsed timeout as TimeoutError while the caller signal stays live", async () => {
+			// The record is module-wide, so scope it to this request before asserting on it.
+			abortFailures.length = 0
 			mockCreate.mockImplementationOnce((_params?: unknown, opts?: { signal?: AbortSignal }) => {
 				return new Promise((_resolve, reject) => {
 					const signal = opts?.signal
@@ -813,14 +815,16 @@ describe("QwenCodeHandler abort wiring", () => {
 			expect(caught).toBeInstanceOf(Error)
 			expect((caught as Error).name).toBe("TimeoutError")
 			expect((caught as Error).message).toBe("The Qwen Code completion request timed out")
-			// The SDK rejection is normalized into a fresh contract AbortError by callApiWithRetry
-			// before the provider wraps it, so the cause can only be one of the abort errors this
-			// request actually created - not a discarded cause, and not an unrelated error.
+			// callApiWithRetry normalizes the SDK rejection into a contract AbortError before the
+			// provider wraps it, so pinning "the cause is the failure this request had in hand"
+			// means requiring that exactly one abort error was created for this request and that
+			// it is the cause: a provider that discarded the caught error and invented a second,
+			// indistinguishable one would create two instances and fail here.
 			const cause = (caught as { cause?: unknown }).cause
-			expect(cause).toBeInstanceOf(Error)
+			expect(abortFailures).toHaveLength(1)
+			expect(cause).toBe(abortFailures[0])
 			expect((cause as Error).name).toBe("AbortError")
 			expect((cause as Error).message).toBe("The Qwen Code request was aborted")
-			expect(abortFailures).toContain(cause)
 		})
 
 		it("passes the merged signal through and nothing without options", async () => {
