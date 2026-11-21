@@ -11,7 +11,12 @@
 \* Tests: tool-usage-attribution checks four calls for static and MCP tools, aggregate counts, and no per-call event.
 \* Scope excludes task completion delivery, removed unused APIs, policy text, other payload fields, and cloud sync.
 \* Cost: two small model files, four configs, 36 IDs and two call sequences. Agent time is not measured; TLC runs took under 1 second.
-\* Gate: TLA_JAR=<jar> ./check.sh TelemetryBoundaryMC. Review counts: covered 0, added 0, gap 0.
+\* Gate: TLA_JAR=<jar> ./check.sh TelemetryBoundaryMC. Review counts: covered 0, added 0, gap 2.
+\* PR 2329, user-supplied review finding 7: gap. No thread URL was supplied.
+\* The model checks pseudonymous sinks, not privacy wording or resistance to joining known IDs.
+\* PRIVACY.md now states that the hash remains a persistent device ID and can be personal data.
+\* Expected and result: this text change does not alter identity projection. No new runtime finding is expected.
+\* Follow-up privacy line wrapping: gap. Layout has no runtime state. Only whitespace changed.
 EXTENDS Naturals
 CONSTANTS HashHost, HashWebview, PerCall, MaxCalls
 VARIABLES host, webview, calls, aggregate, events

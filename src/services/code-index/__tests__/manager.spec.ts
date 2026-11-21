@@ -552,24 +552,40 @@ describe("CodeIndexManager - handleSettingsChange regression", () => {
 			;(manager as any)._serviceFactory = {}
 		})
 
-		it.each([1, 2, 4])(
-			"disposes each tripped watcher before clearing it across %i recoveries",
-			async (restarts) => {
-				const orchestrator = manager["_orchestrator"]!
-				for (let restart = 0; restart < restarts; restart++) {
-					const stop = vi.spyOn(orchestrator, "stopWatcher").mockImplementation(() => {
-						expect(manager["_orchestrator"]).toBe(orchestrator)
-					})
-					manager["_orchestrator"] = orchestrator
-					await manager.recoverFromError()
-					expect(stop).toHaveBeenCalledTimes(1)
-					expect(manager["_orchestrator"]).toBeUndefined()
-					await manager.recoverFromError()
-					expect(stop).toHaveBeenCalledTimes(1)
-					stop.mockRestore()
-				}
-			},
-		)
+		it("stops the watcher before clearing its owner and accepts recovery without an owner", async () => {
+			const orchestrator = manager["_orchestrator"]!
+			const ownersAtStop: Array<CodeIndexOrchestrator | undefined> = []
+			const stop = vi.spyOn(orchestrator, "stopWatcher").mockImplementation(() => {
+				ownersAtStop.push(manager["_orchestrator"])
+			})
+			await manager.recoverFromError()
+			expect(ownersAtStop).toEqual([orchestrator])
+			expect(manager["_orchestrator"]).toBeUndefined()
+			await manager.recoverFromError()
+			expect(stop).toHaveBeenCalledTimes(1)
+		})
+
+		it("clears service references and releases the recovery guard when stopping the watcher throws", async () => {
+			const error = new Error("Watcher disposal failed")
+			const orchestrator = manager["_orchestrator"]!
+			const stop = vi.spyOn(orchestrator, "stopWatcher").mockImplementation(() => {
+				throw error
+			})
+			const log = vi.spyOn(console, "error").mockImplementation(() => {})
+			try {
+				await expect(manager.recoverFromError()).resolves.toBeUndefined()
+				expect(stop).toHaveBeenCalledOnce()
+				expect(log).toHaveBeenCalledWith("Failed to clear error state during recovery:", error)
+				expect(manager["_orchestrator"]).toBeUndefined()
+				expect(manager["_configManager"]).toBeUndefined()
+				expect(manager["_serviceFactory"]).toBeUndefined()
+				expect(manager["_searchService"]).toBeUndefined()
+				await manager.recoverFromError()
+				expect(manager["_stateManager"].setSystemState).toHaveBeenCalledWith("Standby", "")
+			} finally {
+				log.mockRestore()
+			}
+		})
 
 		it("should clear error state when recoverFromError is called", async () => {
 			// Act

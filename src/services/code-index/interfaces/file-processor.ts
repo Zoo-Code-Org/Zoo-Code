@@ -97,6 +97,8 @@ export interface BatchProcessingSummary {
 export interface FileProcessingResult {
 	path: string
 	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error"
+	/** Set only when the embedding request fails, rather than file preparation. */
+	failureSource?: "embedding"
 	error?: Error
 	reason?: string
 	newHash?: string

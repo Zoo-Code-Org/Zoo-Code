@@ -514,28 +514,25 @@ export class FileWatcher implements IFileWatcher {
 			overallBatchError,
 		)
 
-		// Circuit-breaker bookkeeping. A batch counts as failed when the batch-level
-		// pipeline broke (deletion/upsert errors) or every file attempted in the batch
-		// failed (e.g. a broken embedder rejecting every createEmbeddings call).
-		// Isolated per-file failures do not count, so one unreadable file cannot trip
-		// the breaker for healthy indexing.
+		// A single rejected input does not establish an embedding service failure.
+		// Storage failures count at any batch size. File read and parse errors stay local.
 		const resultsByPath = new Map(batchResults.map((result) => [result.path, result]))
-		const allAttemptedFilesFailed =
-			filesToUpsertDetails.length > 0 &&
-			filesToUpsertDetails.every((detail) => {
-				const status = resultsByPath.get(detail.path)?.status
-				return status === "error" || status === "local_error"
-			})
+		const allAttemptedEmbeddingsFailed =
+			filesToUpsertDetails.length >= 2 &&
+			filesToUpsertDetails.every((detail) => resultsByPath.get(detail.path)?.failureSource === "embedding")
 
-		if (overallBatchError !== undefined || allAttemptedFilesFailed) {
-			this.consecutiveFailedBatches++
-		} else {
-			this.consecutiveFailedBatches = 0
-		}
+		this.consecutiveFailedBatches =
+			overallBatchError !== undefined || allAttemptedEmbeddingsFailed ? this.consecutiveFailedBatches + 1 : 0
 
 		if (!this.circuitBreakerOpen && this.consecutiveFailedBatches >= CIRCUIT_BREAKER_BATCH_THRESHOLD) {
 			this.circuitBreakerOpen = true
 			this.accumulatedEvents.clear()
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: "File watcher stopped after repeated indexing failures",
+				location: "FileWatcher.processBatch",
+				errorType: "circuit_breaker_open",
+				failedBatches: this.consecutiveFailedBatches,
+			})
 			console.error(
 				`[FileWatcher] Circuit breaker opened after ${this.consecutiveFailedBatches} consecutive failed batches; ` +
 					`dropping further file-system events for this workspace until the embedder or vector store configuration changes.`,

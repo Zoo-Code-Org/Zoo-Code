@@ -1111,7 +1111,7 @@
 	},
 	"services/code-index/processors/__tests__/file-watcher.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 24
 		}
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {

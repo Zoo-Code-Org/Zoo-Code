@@ -4,12 +4,15 @@ import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
 import { FilePreparation } from "../file-preparation"
-import type { FileProcessingResult } from "../../interfaces"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import { codeParser } from "../parser"
+import type { BatchProcessingSummary, FileProcessingResult } from "../../interfaces"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
 // Mock TelemetryService
-vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
+vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureEvent: vi.fn(),
@@ -102,7 +105,7 @@ describe("FileWatcher", () => {
 	let mockIgnoreInstance: any
 
 	const waitForNextBatch = () =>
-		new Promise<any>((resolve) => {
+		new Promise<BatchProcessingSummary>((resolve) => {
 			const disposable = fileWatcher.onDidFinishBatchProcessing((summary) => {
 				disposable.dispose()
 				resolve(summary)
@@ -360,10 +363,14 @@ describe("FileWatcher", () => {
 	})
 
 	describe("per-workspace circuit breaker", () => {
-		/** Fire one create event, flush the debounce window, and wait for the batch to finish. */
-		const runBatch = async (filePath: string) => {
+		/** Queue file events, flush the debounce window, and wait for the batch to finish. */
+		const runBatch = async (filePath: string, type: "create" | "delete" = "create", files = 1) => {
 			const batchPromise = waitForNextBatch()
-			await mockOnDidCreate({ fsPath: filePath })
+			for (let index = 0; index < files; index++) {
+				await (type === "delete" ? mockOnDidDelete : mockOnDidCreate)({
+					fsPath: index === 0 ? filePath : `${filePath}.peer.ts`,
+				})
+			}
 			await vi.advanceTimersByTimeAsync(500)
 			return batchPromise
 		}
@@ -374,11 +381,11 @@ describe("FileWatcher", () => {
 
 			// Three consecutive all-fail batches trip the breaker on the third.
 			for (let i = 0; i < 3; i++) {
-				const summary = await runBatch(`/mock/workspace/src/broken-${i}.ts`)
-				expect(summary.processedFiles).toHaveLength(1)
+				const summary = await runBatch(`/mock/workspace/src/broken-${i}.ts`, "create", 2)
+				expect(summary.processedFiles).toHaveLength(2)
 				expect(summary.processedFiles[0].status).toBe("local_error")
 			}
-			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(3)
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(6)
 
 			// Further events are dropped: no batch starts and no embedder call is made.
 			const started = vi.fn()
@@ -386,7 +393,74 @@ describe("FileWatcher", () => {
 			await mockOnDidCreate({ fsPath: "/mock/workspace/src/after-breaker.ts" })
 			await vi.advanceTimersByTimeAsync(500)
 			expect(started).not.toHaveBeenCalled()
-			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(3)
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(6)
+		})
+
+		it.each(["stat", "read", "parse", "embed"] as const)(
+			"does not count repeated single-file %s failures as service failures",
+			async (stage) => {
+				await fileWatcher.initialize()
+				for (let index = 0; index < 4; index++) {
+					const error = new Error(`${stage} failed`)
+					if (stage === "stat") vi.mocked(vscode.workspace.fs.stat).mockRejectedValueOnce(error)
+					if (stage === "read") vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
+					if (stage === "parse") vi.mocked(codeParser.parseFile).mockRejectedValueOnce(error)
+					if (stage === "embed") mockEmbedder.createEmbeddings.mockRejectedValueOnce(error)
+					const summary = await runBatch(`/mock/workspace/src/local-${index}.ts`)
+					expect(summary.processedFiles).toEqual([
+						{
+							path: `/mock/workspace/src/local-${index}.ts`,
+							status: "local_error",
+							error,
+							...(stage === "embed" ? { failureSource: "embedding" } : {}),
+						},
+					])
+					expect(summary.circuitBreakerOpen).toBe(false)
+				}
+			},
+		)
+
+		it("counts failed delete-only batches and drops later deletions", async () => {
+			await fileWatcher.initialize()
+			const error = new Error("Vector store unavailable")
+			mockVectorStore.deletePointsByMultipleFilePaths.mockRejectedValue(error)
+			for (let index = 0; index < 3; index++) {
+				const summary = await runBatch(`/mock/workspace/src/deleted-${index}.ts`, "delete")
+				expect(summary.batchError).toBe(error)
+				expect(summary.circuitBreakerOpen).toBe(index === 2)
+			}
+			await mockOnDidDelete({ fsPath: "/mock/workspace/src/after-trip.ts" })
+			expect(fileWatcher["accumulatedEvents"].size).toBe(0)
+			expect(vi.getTimerCount()).toBe(0)
+			await vi.advanceTimersByTimeAsync(500)
+			expect(mockVectorStore.deletePointsByMultipleFilePaths).toHaveBeenCalledTimes(3)
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+		})
+
+		it("reports one trip and clears events without scheduling more work", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("Embedder unavailable"))
+			const capture = vi.mocked(TelemetryService.instance.captureEvent)
+			for (let index = 0; index < 3; index++) {
+				await runBatch(`/mock/workspace/src/broken-${index}.ts`, "create", 2)
+				expect(
+					capture.mock.calls.filter(([, props]) => props?.errorType === "circuit_breaker_open"),
+				).toHaveLength(index === 2 ? 1 : 0)
+			}
+			for (let index = 0; index < 4; index++) {
+				await mockOnDidCreate({ fsPath: `/mock/workspace/src/dropped-${index}.ts` })
+				expect(fileWatcher["accumulatedEvents"].size).toBe(0)
+				expect(vi.getTimerCount()).toBe(0)
+			}
+			expect(capture).toHaveBeenCalledWith(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: "File watcher stopped after repeated indexing failures",
+				location: "FileWatcher.processBatch",
+				errorType: "circuit_breaker_open",
+				failedBatches: 3,
+			})
+			expect(capture.mock.calls.filter(([, props]) => props?.errorType === "circuit_breaker_open")).toHaveLength(
+				1,
+			)
 		})
 
 		it("resets the failure counter when a batch succeeds between failures", async () => {
@@ -397,8 +471,8 @@ describe("FileWatcher", () => {
 
 			// Two consecutive failures...
 			fail()
-			await runBatch("/mock/workspace/src/fail-1.ts")
-			await runBatch("/mock/workspace/src/fail-2.ts")
+			await runBatch("/mock/workspace/src/fail-1.ts", "create", 2)
+			await runBatch("/mock/workspace/src/fail-2.ts", "create", 2)
 
 			// ...then a success resets the counter.
 			succeed()
@@ -406,13 +480,14 @@ describe("FileWatcher", () => {
 
 			// Only two failures since the reset: the breaker must stay closed.
 			fail()
-			await runBatch("/mock/workspace/src/fail-3.ts")
-			await runBatch("/mock/workspace/src/fail-4.ts")
+			await runBatch("/mock/workspace/src/fail-3.ts", "create", 2)
+			await runBatch("/mock/workspace/src/fail-4.ts", "create", 2)
 
 			const started = vi.fn()
 			fileWatcher.onDidStartBatchProcessing(started)
 			const batchPromise = waitForNextBatch()
 			await mockOnDidCreate({ fsPath: "/mock/workspace/src/fail-5.ts" })
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/fail-5-peer.ts" })
 			await vi.advanceTimersByTimeAsync(500)
 			await batchPromise
 			expect(started).toHaveBeenCalledTimes(1)
