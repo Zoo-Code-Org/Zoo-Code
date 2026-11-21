@@ -97,6 +97,18 @@
 \* Null result: the existing model found no new failure. No external review was read.
 \* Rebase cost: about 3 agent minutes. TLC needs a local socket outside the sandbox.
 
+\* PR 2643 review ratchet: 1 covered, 0 added, 0 gap. Origin isolation was already modeled.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4655457066
+\* Finding: the handler replay test accepted a constant origin. Expect mismatch tests to reject it.
+\* Replay: four handler cases vary only endpoint or model, with streaming on and off.
+\* Code sabotage: a constant origin fails all four cases. Restoring origin derivation passes.
+\* Result: fixed holds (507 states), all 15 variants fail as expected, and 254 focused tests pass.
+\* Types and lint pass; suppression counts are unchanged. No new model failure. Cost: about 3 agent minutes.
+
+\* Final rebase result: both header records remain. Model logic is unchanged.
+\* Fixed holds (507 states); all 15 variants fail. All 867 tests, types and lint pass.
+\* Suppression counts stay equal. No new model failure. Cost: about 1 agent minute.
+
 EXTENDS Naturals, Sequences
 
 VARIABLE history   \* One assistant message per turn. Each message has the fields of Message.
