@@ -349,6 +349,21 @@
 			"copy_code": "Kodu kopyala"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Paralel araştırmalar",
+		"progress": "{{total}} görevin {{completed}} tanesi tamamlandı",
+		"status": {
+			"queued": "Kuyrukta",
+			"running": "Çalışıyor",
+			"completed": "Tamamlandı",
+			"failed": "Başarısız",
+			"aborted": "İptal edildi"
+		},
+		"openReport": "Rapor",
+		"openDebugLog": "JSON günlüğü",
+		"goToTask": "Göreve git",
+		"noReport": "Henüz rapor yok"
+	},
 	"profileViolationWarning": "Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
 	"shellIntegration": {
 		"title": "Komut Çalıştırma Uyarısı",

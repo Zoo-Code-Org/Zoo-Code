@@ -12,6 +12,7 @@ export const experimentIds = [
 	"runSlashCommand",
 	"customTools",
 	"parallelToolExecution",
+	"parallelSubtasks",
 	"dynamicThinkingEffort",
 ] as const
 
@@ -29,6 +30,7 @@ export const experimentsSchema = z.object({
 	runSlashCommand: z.boolean().optional(),
 	customTools: z.boolean().optional(),
 	parallelToolExecution: z.boolean().optional(),
+	parallelSubtasks: z.boolean().optional(),
 	dynamicThinkingEffort: z.boolean().optional(),
 })
 

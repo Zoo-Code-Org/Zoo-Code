@@ -130,3 +130,24 @@ export function abandonDelegatedChild(
 		},
 	}
 }
+
+/**
+ * Registers a read-only background child in its parent's `childIds` (D10).
+ *
+ * A background child runs outside the delegation state machine: the parent's
+ * status and its singular `awaitingChildId` are deliberately left untouched,
+ * so the closed-world lifecycle model and every existing delegation test keep
+ * their meaning. Registration exists so the delete cascade, cost aggregation,
+ * and diagnostics see the child exactly as they see a delegated one.
+ *
+ * Idempotent: re-registering the same child is a no-op.
+ */
+export function addBackgroundChild(parent: HistoryItem, childId: string): HistoryItem {
+	if (parent.childIds?.includes(childId)) {
+		return parent
+	}
+	return {
+		...parent,
+		childIds: Array.from(new Set([...(parent.childIds ?? []), childId])),
+	}
+}

@@ -345,6 +345,21 @@
 			"copy_code": "コードをコピー"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "並列調査",
+		"progress": "{{total}}件中{{completed}}件完了",
+		"status": {
+			"queued": "キュー待ち",
+			"running": "実行中",
+			"completed": "完了",
+			"failed": "失敗",
+			"aborted": "中止"
+		},
+		"openReport": "レポート",
+		"openDebugLog": "JSONログ",
+		"goToTask": "タスクへ移動",
+		"noReport": "まだレポートがありません"
+	},
 	"profileViolationWarning": "現在のプロファイルは組織の設定と互換性がありません",
 	"shellIntegration": {
 		"title": "コマンド実行警告",

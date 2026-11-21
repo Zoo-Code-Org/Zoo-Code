@@ -79,6 +79,18 @@ function subtaskResult(ts: number, childTaskId?: string): ClineMessage {
 	return { ts, type: "say", say: "subtask_result", text: "Subtask completed", childTaskId }
 }
 
+function parallelSubtasksSay(ts: number, childTaskIds: string[]): ClineMessage {
+	return {
+		ts,
+		type: "say",
+		say: "tool",
+		text: JSON.stringify({
+			tool: "parallelSubtasks",
+			subtasks: childTaskIds.map((taskId) => ({ taskId, label: taskId, mode: "code", status: "completed" })),
+		}),
+	}
+}
+
 function expectSubtaskLink(childTaskId: string) {
 	fireEvent.click(screen.getByRole("button", { name: "Go to subtask" }))
 	expect(mockPostMessage).toHaveBeenCalledWith({ type: "showTaskWithId", text: childTaskId })
@@ -259,6 +271,43 @@ describe("ChatRow - subtask links", () => {
 			const result = subtaskResult(2000)
 			renderChatRow(result, undefined, [...(includeAsk ? [newTask(1000)] : []), result])
 			expect(screen.queryByRole("button", { name: "Go to subtask" })).not.toBeInTheDocument()
+		})
+	})
+
+	describe("background children in the positional fallback (F-07)", () => {
+		it("skips background children when resolving a legacy result position", () => {
+			const result = subtaskResult(2000)
+			renderChatRow(result, { childIds: ["bg-1", "bg-2", "serial-1"] }, [
+				parallelSubtasksSay(900, ["bg-1", "bg-2"]),
+				newTask(1000),
+				result,
+			])
+			expectSubtaskLink("serial-1")
+		})
+
+		it("skips background children when resolving a pending legacy ask", () => {
+			const pending = newTask(3000)
+			renderChatRow(pending, { childIds: ["bg-1", "bg-2", "serial-1", "serial-2"] }, [
+				parallelSubtasksSay(500, ["bg-1", "bg-2"]),
+				newTask(1000),
+				pending,
+			])
+			expectSubtaskLink("serial-2")
+		})
+
+		it("ignores other tool rows that carry a subtasks array", () => {
+			const lookalike: ClineMessage = {
+				ts: 900,
+				type: "say",
+				say: "tool",
+				text: JSON.stringify({
+					tool: "runSlashCommand",
+					subtasks: [{ taskId: "serial-1", label: "serial-1", mode: "code", status: "completed" }],
+				}),
+			}
+			const result = subtaskResult(2000)
+			renderChatRow(result, { childIds: ["serial-1"] }, [lookalike, newTask(1000), result])
+			expectSubtaskLink("serial-1")
 		})
 	})
 })

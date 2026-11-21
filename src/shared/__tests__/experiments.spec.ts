@@ -22,6 +22,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				parallelSubtasks: false,
 				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)
@@ -34,6 +35,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				parallelSubtasks: false,
 				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(true)
@@ -46,6 +48,7 @@ describe("experiments", () => {
 				runSlashCommand: false,
 				customTools: false,
 				parallelToolExecution: false,
+				parallelSubtasks: false,
 				dynamicThinkingEffort: false,
 			}
 			expect(Experiments.isEnabled(experiments, EXPERIMENT_IDS.PREVENT_FOCUS_DISRUPTION)).toBe(false)

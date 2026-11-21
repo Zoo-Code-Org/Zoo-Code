@@ -382,6 +382,21 @@
 			"copy_code": "Salin kode"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "Investigasi paralel",
+		"progress": "{{completed}} dari {{total}} selesai",
+		"status": {
+			"queued": "Antrian",
+			"running": "Berjalan",
+			"completed": "Selesai",
+			"failed": "Gagal",
+			"aborted": "Dibatalkan"
+		},
+		"openReport": "Laporan",
+		"openDebugLog": "Log JSON",
+		"goToTask": "Ke tugas",
+		"noReport": "Belum ada laporan yang tersedia"
+	},
 	"profileViolationWarning": "Profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
 	"shellIntegration": {
 		"title": "Peringatan Eksekusi Perintah",

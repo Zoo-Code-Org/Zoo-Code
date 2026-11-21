@@ -64,8 +64,8 @@ function isHistoryItem(value: unknown): value is HistoryItem {
 	return value !== null && typeof value === "object" && "id" in value && typeof value.id === "string"
 }
 
-function isSafeTaskId(value: string): boolean {
-	return /^[A-Za-z0-9_-]{1,128}$/.test(value)
+export function isSafeTaskId(value: unknown): value is string {
+	return typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value)
 }
 
 function hasParentCycle(item: HistoryItem, byId: Map<string, HistoryItem>): boolean {

@@ -48,6 +48,11 @@ export const historyItemSchema = z.object({
 	delegatedToId: z.string().optional(), // Last child this parent delegated to
 	childIds: z.array(z.string()).optional(), // All children spawned by this task
 	awaitingChildId: z.string().optional(), // Child currently awaited (set when delegated)
+	// Marks a read-only background child (design D10/D11): the parent registers the
+	// child in `childIds` and stamps the child with `backgroundParentTaskId`, but the
+	// singular `awaitingChildId` field is never written for a background child, so the
+	// delegation state machine is untouched.
+	backgroundParentTaskId: z.string().optional(),
 	completedByChildId: z.string().optional(), // Child that completed and resumed this parent
 	completionResultSummary: z.string().optional(), // Summary from completed child
 	pendingAction: pendingTaskActionSchema.optional(),

@@ -8,10 +8,18 @@
  * `Task.ask` to `presentAssistantMessage`, where it selects the structured
  * `formatResponse.toolAutoDenied` payload instead of the user-rejection
  * wording — and marks the denial as scoped to its own tool call, so it never
- * aborts the rest of the turn.
+ * aborts the rest of the turn. The `background_policy` kind is used when a
+ * background child's ask is resolved by policy rather than by a user click.
  */
 export type AutoDenyDetail = {
-	kind: "dcg" | "denylist" | "not_allowlisted" | "dangerous_substitution" | "malformed_command" | "guard_unavailable"
+	kind:
+		| "dcg"
+		| "denylist"
+		| "not_allowlisted"
+		| "dangerous_substitution"
+		| "malformed_command"
+		| "guard_unavailable"
+		| "background_policy"
 	/** Offending sub-command text (or the full command when no single offending sub-command applies). */
 	command?: string
 	/** Matched denied prefix, for `denylist` denials. */
@@ -48,5 +56,7 @@ export function buildAutoDenyReason(detail: AutoDenyDetail): string {
 		}
 		case "guard_unavailable":
 			return `Command \`${detail.command ?? "(unknown)"}\` was not executed: the Destructive Command Guard is enabled but supplied no verdict, which is an internal guard-state inconsistency, not a policy denial. You may retry the same command.`
+		case "background_policy":
+			return "This task is a read-only background sub-task and cannot ask you anything. Complete the investigation with the read-only tools you have and report your findings through attempt_completion."
 	}
 }

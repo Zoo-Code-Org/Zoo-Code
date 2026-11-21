@@ -113,8 +113,13 @@ describe("Native Tools Filtering by Mode", () => {
 			const { isToolAllowedForMode } = await import("../../tools/validateToolUse")
 			const { ALWAYS_AVAILABLE_TOOLS } = await import("../../../shared/tools")
 
-			// Always-available tools should work even with no groups
-			ALWAYS_AVAILABLE_TOOLS.forEach((tool) => {
+			// Always-available tools should work even with no groups. The
+			// experiment-gated members of the class are excluded here and covered
+			// by their own gate tests: the always-available short-circuit sits
+			// above the generic EXPERIMENT_IDS check, so a gated tool needs its
+			// own flag check and is deliberately unavailable until it is on.
+			const ungatedAlwaysAvailable = ALWAYS_AVAILABLE_TOOLS.filter((tool) => tool !== "parallel_subtasks")
+			ungatedAlwaysAvailable.forEach((tool) => {
 				expect(isToolAllowedForMode(tool as any, "restrictive", [restrictiveMode])).toBe(true)
 			})
 		})

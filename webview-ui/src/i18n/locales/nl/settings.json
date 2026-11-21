@@ -937,6 +937,10 @@
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Dynamisch denkwerk",
 			"description": "Bereidt het set_thinking_effort-gereedschap voor op latere ondersteuning: deze instelling slaat alleen de voorkeur op, het gedrag per verzoek volgt in later werk. (experimenteel)"
+		},
+		"PARALLEL_SUBTASKS": {
+			"name": "Parallelle subtaken inschakelen",
+			"description": "Wanneer ingeschakeld, kan Zoo meerdere alleen-lezen achtergrondonderzoekstaken in verschillende modi en modellen starten en hun rapporten verzamelen. Onderliggende taken zijn structureel geblokkeerd voor het schrijven van bestanden, het uitvoeren van opdrachten of het delegeren van verdere subtaken."
 		}
 	},
 	"temperature": {

@@ -117,6 +117,17 @@ function doesFileMatchRegex(filePath: string, pattern: string): boolean {
 	}
 }
 
+/**
+ * Always-available tools that stay behind an experiment flag.
+ *
+ * The always-available class short-circuits above the generic EXPERIMENT_IDS
+ * gate further down, so a tool that must not ship until its flag is on needs
+ * its own check here. Keyed by canonical tool name so an alias resolves first.
+ */
+const EXPERIMENT_GATED_ALWAYS_AVAILABLE_TOOLS: Partial<Record<ToolName, ExperimentId>> = {
+	parallel_subtasks: "parallelSubtasks",
+}
+
 export function isToolAllowedForMode(
 	tool: string,
 	modeSlug: string,
@@ -147,6 +158,13 @@ export function isToolAllowedForMode(
 
 	// Always allow these tools (unless explicitly disabled above)
 	if (ALWAYS_AVAILABLE_TOOLS.includes(tool as any)) {
+		// Experiment-gated always-available tools: the class above short-circuits
+		// before the generic EXPERIMENT_IDS gate below, so the flag is checked
+		// here. An absent flag reads as off, matching the registry default.
+		const requiredExperiment = EXPERIMENT_GATED_ALWAYS_AVAILABLE_TOOLS[resolvedTool as ToolName]
+		if (requiredExperiment !== undefined && !experiments?.[requiredExperiment]) {
+			return false
+		}
 		return true
 	}
 

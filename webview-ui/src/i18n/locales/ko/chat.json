@@ -345,6 +345,21 @@
 			"copy_code": "코드 복사"
 		}
 	},
+	"parallelSubtasks": {
+		"title": "병렬 조사",
+		"progress": "{{total}}개 중 {{completed}}개 완료",
+		"status": {
+			"queued": "대기 중",
+			"running": "실행 중",
+			"completed": "완료됨",
+			"failed": "실패함",
+			"aborted": "중단됨"
+		},
+		"openReport": "보고서",
+		"openDebugLog": "JSON 로그",
+		"goToTask": "작업으로 이동",
+		"noReport": "아직 보고서가 없습니다"
+	},
 	"profileViolationWarning": "현재 프로필이 조직 설정과 호환되지 않습니다",
 	"shellIntegration": {
 		"title": "명령 실행 경고",

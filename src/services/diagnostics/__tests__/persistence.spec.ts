@@ -4,7 +4,7 @@ import * as path from "path"
 
 import type { HistoryItem } from "@roo-code/types"
 
-import { collectPersistenceDiagnostics } from "../persistence"
+import { collectPersistenceDiagnostics, isSafeTaskId } from "../persistence"
 
 vi.mock("fs/promises", { spy: true })
 
@@ -230,5 +230,31 @@ describe("collectPersistenceDiagnostics", () => {
 
 		expect(result.tasks).toHaveLength(2)
 		expect(result.tasks.every((task) => task.integrityFindings.includes("parentCycle"))).toBe(true)
+	})
+})
+
+describe("isSafeTaskId", () => {
+	it.each([
+		["a plain task id", "task-1_abc-DEF", true],
+		["a 128-char id", "a".repeat(128), true],
+		["an empty string", "", false],
+		["a 129-char id", "a".repeat(129), false],
+		["a traversal attempt", "../outside", false],
+		["an absolute path", "/absolute", false],
+		["a dotted name", "has.dot", false],
+		["a name with a space", "has space", false],
+	])("classifies %s", (_label, value, expected) => {
+		expect(isSafeTaskId(value)).toBe(expected)
+	})
+
+	it("rejects non-string inputs instead of coercing them through the regex", () => {
+		// RegExp.test stringifies its input, so these values would otherwise match:
+		// "12345", "true", "abc-DEF" (array join), and the object's toString.
+		expect(isSafeTaskId(12345)).toBe(false)
+		expect(isSafeTaskId(true)).toBe(false)
+		expect(isSafeTaskId(["abc-DEF"])).toBe(false)
+		expect(isSafeTaskId({ toString: () => "abc-DEF" })).toBe(false)
+		expect(isSafeTaskId(null)).toBe(false)
+		expect(isSafeTaskId(undefined)).toBe(false)
 	})
 })
