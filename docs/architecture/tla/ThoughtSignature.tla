@@ -52,7 +52,7 @@
 \* NoReset passes it. NoReset needs two requests on one handler. The test "resets it per request" covers that.
 \* OldRegex passes it. The test sets the catalog flag. The fetcher and matcher tests fail on OldRegex.
 \* Cost: TLC runs each config in under 2 seconds. Agent time is not measured.
-\* Review: 2 covered, 1 added, 5 gap, 1 on the spec files (PR 2119). See the list below Rejected.
+\* Review: 2 covered, 1 added, 5 gap, 2 on the spec files (PR 2119). See the list below Rejected.
 \* The first version came after the code and the reviews. It is not an independent first pass.
 
 EXTENDS Naturals, Sequences
@@ -148,6 +148,7 @@ Rejected(t, listed, k, i) ==
 \* gap: 4532185306 (a throw and a reasoning id), 4532185311 (test helper). The spec has no ids or exceptions.
 \* gap: edelauna R1 path test, CodeRabbit on sanitizeLiteLlmCallId and its test. The PR removed that code.
 \* spec file: CodeRabbit 4634073736. The variants moved to ThoughtSignatureMC.tla. No verdict or state count changed.
+\* spec file: CodeRabbit 4650658263. CapturedNative called Captured, its own replacement. The Legacy violation hid it.
 \* Rounds 2 and 3 are not review findings. Round 2 fixes the round 1 finding of this spec.
 \* Round 3 comes from a web search for best practice (BerriAI/litellm#19739, vercel/ai#15550).
 \* Round 4 comes from the simplify pass. A property must constrain the result, not only reject a crash.

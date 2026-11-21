@@ -30,6 +30,6 @@ CapturedKept(t, k, minted) ==
     IF k > 1 /\ history[k - 1].by = t /\ Real(history[k - 1].sig) THEN history[k - 1].sig
     ELSE IF minted THEN [by |-> t, step |-> k] ELSE None
 \* Legacy: the old LiteLLM handler did not read the signature.
-CapturedNative(t, k, minted) == IF LiteLlm(t) THEN None ELSE Captured(t, k, minted)
+CapturedNative(t, k, minted) == IF ~LiteLlm(t) /\ minted THEN [by |-> t, step |-> k] ELSE None
 
 ====
