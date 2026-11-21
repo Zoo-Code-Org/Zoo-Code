@@ -586,6 +586,14 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						is_error: true,
 					})
 
+					// A partial delta is never validated or parsed, so this task's write_to_file stream
+					// state and its preview can already exist when the completed block turns out to
+					// carry no native arguments. The loop breaks here without reaching handle(), so
+					// nothing else releases them.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
+
 					break
 				}
 			}
@@ -797,6 +805,14 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 						error.message,
 					)
 
+					// A partial delta may already have registered this task's write_to_file stream
+					// state and opened a preview. Validation rejects the completed block before
+					// writeToFileTool.handle() runs, so nothing else releases them and the task would
+					// carry a stale stream into its next write.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
+
 					break
 				}
 
@@ -831,11 +847,27 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				// repetition will eventually escalate to a hard block.
 				if (repetitionCheck.action === "soft_block") {
 					pushToolResult(formatResponse.toolError(repetitionCheck.message))
+					// Same family as the validation branch above: the completed block is refused
+					// before handle() runs, so a stream that had already started owns nobody but
+					// here - the model gets the justification request, and this task's partial
+					// stream state, its abort listener, and any preview are released the same way.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
 					break
 				}
 
 				// Hard block: stop and ask the user for guidance.
 				if (repetitionCheck.action === "hard_block") {
+					// Same family as the validation branch above: the completed block is refused
+					// before handle() runs, so a stream that had already started owns nobody but
+					// here. Release BEFORE the prompt: the prompt can stay open indefinitely, and
+					// an ask() that rejects would skip a release placed after it - the refused
+					// write's state, abort listener, and unapproved preview must not be held
+					// hostage to an answer that may never come.
+					if (block.name === "write_to_file") {
+						await writeToFileTool.releaseStreamAfterValidationRejection(cline)
+					}
 					// Handle repetition similar to mistake_limit_reached pattern.
 					const { response, text, images } = await cline.ask(
 						repetitionCheck.askUser.messageKey as ClineAsk,
