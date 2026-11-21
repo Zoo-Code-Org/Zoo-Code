@@ -41,8 +41,8 @@ go—and, importantly, where they don't.
   product analytics and error grouping. PostHog event data is retained for 12
   months under our current project configuration. This PostHog-based telemetry
   does **not** collect your code or AI prompts. (Separately, if you sign in to
-  Zoo Code Cloud and enable Cloud sync, the Cloud sync pipeline — which is
-  distinct from this PostHog telemetry — does transmit task messages so they
+  Zoo Code Cloud and enable Cloud sync, the Cloud sync pipeline, which is
+  distinct from this PostHog telemetry, does transmit task messages so they
   can be shared or synced through your Cloud account; that feature is
   controlled by its own Cloud sync settings.) Telemetry is on by default. To
   turn it off, choose "Disabled" in the settings or in the notice shown on

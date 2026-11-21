@@ -74,7 +74,7 @@ function setup() {
 
 function enqueueBatch(watcher: FileWatcher, path: string, type: "create" | "delete" = "create", files = 1) {
 	for (let index = 0; index < files; index++) {
-		const filePath = index === 0 ? path : `${path}.peer.ts`
+		const filePath = index === 0 ? path : `${path}.peer-${index}.ts`
 		watcher["accumulatedEvents"].set(filePath, { uri: makeUri(filePath), type })
 	}
 }
@@ -96,8 +96,9 @@ describe("watcher source-to-state properties", () => {
 				for (const [index, failed] of history.entries()) {
 					prepare.mockImplementation(async (path) => ({
 						path,
-						status: failed ? "local_error" : "skipped",
-						failureSource: failed ? "embedding" : undefined,
+						status: failed ? "local_error" : "processed_for_batching",
+						pointsToUpsert: [],
+						embeddingOutcome: failed ? "failure" : "success",
 					}))
 					const before = prepare.mock.calls.length
 					enqueueBatch(watcher, `/workspace/${index}.ts`, "create", 2)
@@ -119,7 +120,7 @@ describe("watcher source-to-state properties", () => {
 				prepare.mockImplementation(async (path) => ({
 					path,
 					status: "local_error",
-					failureSource: "embedding",
+					embeddingOutcome: "failure",
 				}))
 				enqueueBatch(watcher, "/workspace/recovered.ts", "create", 2)
 				const before = prepare.mock.calls.length
@@ -133,7 +134,16 @@ describe("watcher source-to-state properties", () => {
 	)
 })
 
-const outcomes = ["success", "local", "singleEmbedding", "embedding", "delete"] as const
+const outcomes = [
+	"success",
+	"local",
+	"singleEmbedding",
+	"embedding",
+	"delete",
+	"idle",
+	"mixed",
+	"embeddingSkipped",
+] as const
 const sourceHistories = Array.from({ length: outcomes.length ** 4 }, (_, sequence) =>
 	Array.from(
 		{ length: 4 },
@@ -154,21 +164,32 @@ describe("watcher failure-source properties", () => {
 			try {
 				for (const [index, outcome] of history.entries()) {
 					const path = `/workspace/${index}.ts`
-					const result: FileProcessingResult = {
-						path,
-						status: outcome === "success" ? "skipped" : "local_error",
-						...(outcome === "embedding" || outcome === "singleEmbedding"
-							? { failureSource: "embedding" as const }
-							: {}),
-					}
-					prepare.mockImplementation(async (path) => ({ ...result, path }))
+					prepare.mockImplementation(async (filePath): Promise<FileProcessingResult> => {
+						if (outcome === "idle" || (outcome === "embeddingSkipped" && filePath.endsWith("peer-2.ts"))) {
+							return { path: filePath, status: "skipped" }
+						}
+						if (outcome === "local") return { path: filePath, status: "local_error" }
+						const succeeded =
+							outcome === "success" || (outcome === "mixed" && filePath.endsWith("peer-1.ts"))
+						return {
+							path: filePath,
+							status: succeeded ? "processed_for_batching" : "local_error",
+							pointsToUpsert: [],
+							embeddingOutcome: succeeded ? "success" : "failure",
+						}
+					})
 					vi.mocked(store.deletePointsByMultipleFilePaths).mockRejectedValue(new Error("Store unavailable"))
-					const files = outcome === "embedding" ? 2 : 1
+					const files =
+						outcome === "embeddingSkipped" ? 3 : outcome === "embedding" || outcome === "mixed" ? 2 : 1
 					enqueueBatch(watcher, path, outcome === "delete" ? "delete" : "create", files)
 					const before = prepare.mock.calls.length
 					await watcher["triggerBatchProcessing"]()
 					expect(prepare.mock.calls.length - before).toBe(open || outcome === "delete" ? 0 : files)
-					if (!open) failures = outcome === "embedding" || outcome === "delete" ? failures + 1 : 0
+					if (!open) {
+						if (outcome === "embedding" || outcome === "embeddingSkipped" || outcome === "delete")
+							failures++
+						else if (outcome !== "idle" && outcome !== "local") failures = 0
+					}
 					open ||= failures >= 3
 					expect(state.state).toBe(open ? "Error" : "Indexed")
 					expect(watcher["accumulatedEvents"].size).toBe(0)

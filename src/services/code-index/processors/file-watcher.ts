@@ -290,10 +290,12 @@ export class FileWatcher implements IFileWatcher {
 		pathsToExplicitlyDelete: string[],
 	): Promise<{
 		pointsForBatchUpsert: PointStruct[]
+		embeddingOutcomes: NonNullable<FileProcessingResult["embeddingOutcome"]>[]
 		successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }>
 		processedCount: number
 	}> {
 		const pointsForBatchUpsert: PointStruct[] = []
+		const embeddingOutcomes: NonNullable<FileProcessingResult["embeddingOutcome"]>[] = []
 		const successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }> = []
 		const filesToProcessConcurrently = [...filesToUpsertDetails]
 
@@ -328,6 +330,7 @@ export class FileWatcher implements IFileWatcher {
 					if (directError) {
 						batchResults.push({ path, status: "error", error: directError })
 					} else if (result) {
+						if (result.embeddingOutcome) embeddingOutcomes.push(result.embeddingOutcome)
 						if (result.status === "skipped" || result.status === "local_error") {
 							batchResults.push(result)
 						} else if (result.status === "processed_for_batching" && result.pointsToUpsert) {
@@ -377,6 +380,7 @@ export class FileWatcher implements IFileWatcher {
 
 		return {
 			pointsForBatchUpsert,
+			embeddingOutcomes,
 			successfullyProcessedForUpsert,
 			processedCount: processedCountInBatch,
 		}
@@ -495,6 +499,7 @@ export class FileWatcher implements IFileWatcher {
 		// Phase 2: Process files and prepare upserts
 		const {
 			pointsForBatchUpsert,
+			embeddingOutcomes,
 			successfullyProcessedForUpsert,
 			processedCount: upsertCount,
 		} = await this._processFilesAndPrepareUpserts(
@@ -516,13 +521,14 @@ export class FileWatcher implements IFileWatcher {
 
 		// A single rejected input does not establish an embedding service failure.
 		// Storage failures count at any batch size. File read and parse errors stay local.
-		const resultsByPath = new Map(batchResults.map((result) => [result.path, result]))
 		const allAttemptedEmbeddingsFailed =
-			filesToUpsertDetails.length >= 2 &&
-			filesToUpsertDetails.every((detail) => resultsByPath.get(detail.path)?.failureSource === "embedding")
+			embeddingOutcomes.length >= 2 && embeddingOutcomes.every((outcome) => outcome === "failure")
 
-		this.consecutiveFailedBatches =
-			overallBatchError !== undefined || allAttemptedEmbeddingsFailed ? this.consecutiveFailedBatches + 1 : 0
+		if (overallBatchError !== undefined || allAttemptedEmbeddingsFailed) {
+			this.consecutiveFailedBatches++
+		} else if (embeddingOutcomes.length > 0) {
+			this.consecutiveFailedBatches = 0
+		}
 
 		if (!this.circuitBreakerOpen && this.consecutiveFailedBatches >= CIRCUIT_BREAKER_BATCH_THRESHOLD) {
 			this.circuitBreakerOpen = true

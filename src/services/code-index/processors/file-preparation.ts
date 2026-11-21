@@ -13,6 +13,7 @@ export class FilePreparation {
 
 	public async prepareFile(filePath: string): Promise<FileProcessingResult> {
 		const dependencies = this.dependencies
+		let embeddingOutcome: FileProcessingResult["embeddingOutcome"]
 		try {
 			const skipReason = await this.getSkipReason(filePath)
 			if (skipReason !== undefined) {
@@ -33,9 +34,10 @@ export class FilePreparation {
 				let embeddings: number[][]
 				try {
 					const result = await dependencies.embedder.createEmbeddings(blocks.map((block) => block.content))
+					embeddingOutcome = "success"
 					embeddings = result.embeddings
 				} catch (error) {
-					return { path: filePath, status: "local_error", error: error as Error, failureSource: "embedding" }
+					return { path: filePath, status: "local_error", error: error as Error, embeddingOutcome: "failure" }
 				}
 				pointsToUpsert = this.preparePoints(blocks, embeddings)
 			}
@@ -45,12 +47,14 @@ export class FilePreparation {
 				status: "processed_for_batching",
 				newHash,
 				pointsToUpsert,
+				...(embeddingOutcome ? { embeddingOutcome } : {}),
 			}
 		} catch (error) {
 			return {
 				path: filePath,
 				status: "local_error",
 				error: error as Error,
+				...(embeddingOutcome ? { embeddingOutcome } : {}),
 			}
 		}
 	}

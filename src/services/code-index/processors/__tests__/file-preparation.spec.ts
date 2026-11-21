@@ -188,6 +188,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			path: filePath,
 			status: "processed_for_batching",
 			newHash: hash,
+			embeddingOutcome: "success",
 			pointsToUpsert: [
 				{
 					id: uuidv5(`${normalizedFilePath}:2`, QDRANT_CODE_BLOCK_NAMESPACE),
@@ -314,7 +315,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 				path: filePath,
 				status: "local_error",
 				error,
-				...(stage === "embed" ? { failureSource: "embedding" } : {}),
+				...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
 			})
 			expect(result.error).toBe(error)
 		},
