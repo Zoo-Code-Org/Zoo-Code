@@ -28,28 +28,54 @@
 \* Cost: about 12 minutes of agent work. The four-config TLC gate takes about 3 seconds.
 \* Checks: 168 focused tests, both type checks, and lint pass. Suppression counts did not change.
 \* Gate: TLA_JAR=/tmp/tla-tools/tla2tools.jar ./check.sh GeminiCapabilities.
-\* Review: 0 covered, 0 added, 0 gap. No PR review has run.
+\* Review: 0 covered, 1 added, 1 gap. PR 2640 adds NoUnsupportedEffort and models without effort support.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4655065689.
+\* Failure: a stored level reaches a model without effort support when the budget branch is inactive.
+\* Expect: NoEffortGuard fails. The fixed model holds. Budget requests and boolean effort support remain valid.
+\* Gap: the review asks to remove spec files. Scope is not a source-to-sink behavior in this model.
+\* The user requested SDD. The spec policy requires a spec for each change. The files remain in this PR.
+\* Result: the fixed model holds in 224 states. All four defect configs fail as expected.
+\* Replay: nine assertions fail before the guard. They cover five levels, inactive budgets, and absent or false support.
+\* The guard keeps enabled and required budget paths ahead of the effort check. Boolean true remains supported.
+\* Review checks: 126 reasoning tests, src type checking, and lint pass. Suppression counts did not change.
+\* No further runtime defect was found. Review cost: about 4 minutes of agent work and five TLC runs.
+\* Simplify expectation: reject unknown selections before fallback. All current verdicts must stay the same.
+\* KnownLevels supplies both the input domain and the recognition rule. No state variable is added.
+\* Simplify result: 224 states and all five config verdicts are unchanged. No new defect was found.
+\* All 126 reasoning tests, type checking, and lint pass. Cost: about one minute and five TLC runs.
 EXTENDS TLC
-CONSTANT CatalogFixed, LevelsFixed, VertexListedOnly
+CONSTANT CatalogFixed, LevelsFixed, VertexListedOnly, EffortGuard
 VARIABLE input
-Models == {"flash", "carbon", "hydrogen", "neon"}
-Levels == {"minimal", "low", "medium", "high", "xhigh", "invalid", "disable", "unset"}
-Allowed(model) == {"low", "medium", "high"} \cup
-    (IF model \in {"hydrogen", "neon"} THEN {"xhigh"} ELSE {})
+NewModels == {"flash", "carbon", "hydrogen", "neon"}
+Models == NewModels \cup {"budget", "standard", "boolean"}
+KnownLevels == {"minimal", "low", "medium", "high", "xhigh"}
+Levels == KnownLevels \cup {"invalid", "disable", "unset"}
+Allowed(model) == IF model \in {"budget", "standard"} THEN {}
+                  ELSE IF model = "boolean" THEN KnownLevels
+                  ELSE {"low", "medium", "high"} \cup
+                       (IF model \in {"hydrogen", "neon"} THEN {"xhigh"} ELSE {})
 Available(provider, model) == provider = "gemini" \/ model # "neon"
-Inputs == [provider : {"gemini", "vertex"}, model : Models, level : Levels]
+Inputs == [provider : {"gemini", "vertex"}, model : Models, level : Levels, enabled : BOOLEAN]
 Init == input \in Inputs
 Next == UNCHANGED input
 Spec == Init /\ [][Next]_input
 Default == "none"
-Registered == CatalogFixed /\ (Available(input.provider, input.model) \/ ~VertexListedOnly)
-RecognizedLevels == {"minimal", "low", "medium", "high"} \cup (IF LevelsFixed THEN {"xhigh"} ELSE {})
+Registered == IF input.model \in NewModels
+              THEN CatalogFixed /\ (Available(input.provider, input.model) \/ ~VertexListedOnly) ELSE TRUE
+RecognizedLevels == IF LevelsFixed THEN KnownLevels ELSE KnownLevels \ {"xhigh"}
+HasEffort == input.model \notin {"budget", "standard"}
 Selected == IF input.level = "unset" THEN Default ELSE input.level
-Effort == IF Selected \in RecognizedLevels \ Allowed(input.model) THEN Default ELSE Selected
-Sent == IF Effort \in RecognizedLevels THEN Effort ELSE "none"
-Expected == IF input.level = "unset" THEN Default
+Effort == IF HasEffort /\ input.model # "boolean" /\ Selected \in RecognizedLevels \ Allowed(input.model)
+          THEN Default ELSE Selected
+BudgetSelected == input.model = "budget" /\ input.enabled
+Sent == IF BudgetSelected THEN "budget"
+        ELSE IF (~EffortGuard \/ HasEffort) /\ Effort \in RecognizedLevels THEN Effort ELSE "none"
+Expected == IF BudgetSelected THEN "budget"
+            ELSE IF ~HasEffort THEN "none"
+            ELSE IF input.level = "unset" THEN Default
             ELSE IF input.level \in {"invalid", "disable"} THEN "none"
             ELSE IF input.level \in Allowed(input.model) THEN input.level ELSE Default
 RegistrationMatchesAvailability == Registered = Available(input.provider, input.model)
 SupportedLevelsReachRequest == Sent = Expected
+NoUnsupportedEffort == ~HasEffort /\ ~BudgetSelected => Sent = "none"
 ====

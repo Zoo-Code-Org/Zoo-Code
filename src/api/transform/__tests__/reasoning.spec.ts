@@ -982,6 +982,49 @@ describe("reasoning.ts", () => {
 			expect(result).toBeUndefined()
 		})
 
+		it.each(["minimal", "low", "medium", "high", "xhigh"] as const)(
+			"does not send stored %s to a budget model when reasoning is disabled",
+			(level) => {
+				expect(
+					getGeminiReasoning({
+						model: geminiModels["gemini-2.5-flash"],
+						reasoningBudget: 2048,
+						settings: { reasoningEffort: level, enableReasoningEffort: false },
+					}),
+				).toBeUndefined()
+			},
+		)
+
+		it.each([true, false, undefined])("keeps the budget path when enabled=%s", (enabled) => {
+			expect(
+				getGeminiReasoning({
+					model: geminiModels["gemini-2.5-flash"],
+					reasoningBudget: 2048,
+					settings: { reasoningEffort: "xhigh", enableReasoningEffort: enabled },
+				}),
+			).toEqual(enabled ? { thinkingBudget: 2048, includeThoughts: true } : undefined)
+		})
+
+		it.each([true, false, undefined])("keeps array-backed xhigh when enabled=%s", (enabled) => {
+			expect(
+				getGeminiReasoning({
+					model: geminiModels["gemini-4-hydrogen"],
+					reasoningBudget: undefined,
+					settings: { reasoningEffort: "xhigh", enableReasoningEffort: enabled },
+				}),
+			).toEqual({ thinkingLevel: "xhigh", includeThoughts: true })
+		})
+
+		it.each([false, undefined] as const)("does not send effort when support is %s", (support) => {
+			expect(
+				getGeminiReasoning({
+					model: { ...baseModel, supportsReasoningEffort: support, reasoningEffort: "high" },
+					reasoningBudget: undefined,
+					settings: { reasoningEffort: "xhigh" },
+				}),
+			).toBeUndefined()
+		})
+
 		it("should use thinkingBudget for budget-based models", () => {
 			const geminiModel: ModelInfo = {
 				...baseModel,
