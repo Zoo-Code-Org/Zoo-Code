@@ -157,6 +157,72 @@ describe("parseCommand", () => {
 		})
 	})
 
+	describe("chain operators on a line with a multi-line quoted argument", () => {
+		it.each([
+			{
+				input: `cd cmd-test && node -e "\nconsole.log('hello world');\n"`,
+				expected: ["cd cmd-test", `node -e "\nconsole.log('hello world');\n"`],
+			},
+			{
+				input: `node -e "\nconsole.log(1)\n" || echo failed`,
+				expected: [`node -e "\nconsole.log(1)\n"`, "echo failed"],
+			},
+			{
+				input: "cd a; node -e '\nx\n' | tee out.txt",
+				expected: ["cd a", "node -e '\nx\n'", "tee out.txt"],
+			},
+			{
+				input: 'git commit -m "line 1\nline 2" && git push',
+				expected: ['git commit -m "line 1\nline 2"', "git push"],
+			},
+			{
+				input: `echo $'first\nline' && printf $"second\r\nline"`,
+				expected: [`echo $'first\nline'`, `printf $"second\r\nline"`],
+			},
+			{
+				input: "echo 'first\nline' & echo done",
+				expected: ["echo 'first\nline'", "echo done"],
+			},
+			{
+				input: "echo 'first\nline';ls",
+				expected: ["echo 'first\nline'", "ls"],
+			},
+		])("splits $input into each chained command", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
+
+		it("restores each quote by its full index when a line has more than ten quotes", () => {
+			const singleLineQuotes = Array.from({ length: 10 }, (_, i) => `'q${i}'`).join(" ")
+			const input = `echo ${singleLineQuotes} 'q10\nend' && ls`
+			expect(parseCommand(input).commands).toEqual([`echo ${singleLineQuotes} 'q10\nend'`, "ls"])
+		})
+
+		it("keeps operators inside the multi-line quoted argument", () => {
+			const input = `sh -c "cd a && node x\necho done" && ls`
+			expect(parseCommand(input).commands).toEqual([`sh -c "cd a && node x\necho done"`, "ls"])
+		})
+	})
+
+	describe("# inside a word and glob patterns", () => {
+		it.each([
+			{ input: "echo safe#blocked && node -v", expected: ["echo safe#blocked", "node -v"] },
+			{ input: "echo safe#blocked 'a\nb' && node -v", expected: ["echo safe#blocked 'a\nb'", "node -v"] },
+			{ input: "curl http://x/#frag && node y", expected: ["curl http://x/#frag", "node y"] },
+			{ input: "rm *", expected: ["rm *"] },
+			{ input: "rm * 'a\nb'", expected: ["rm * 'a\nb'"] },
+			{ input: "ls *.ts && echo x", expected: ["ls *.ts", "echo x"] },
+		])("keeps the word text in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
+
+		it.each([
+			{ input: "echo hi # comment && rm x", expected: ["echo hi"] },
+			{ input: "echo hi 'a\nb' # comment && rm x", expected: ["echo hi 'a\nb'"] },
+		])("drops a comment that starts a word in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
+	})
+
 	describe("real-world wrapped multi-line script (regression)", () => {
 		it("treats a wrapper command with an embedded multi-line script as a single command", () => {
 			const input = [
@@ -183,6 +249,19 @@ describe("parseCommand", () => {
 			const { commands: result } = parseCommand("echo $(whoami)")
 			expect(result).toContain("whoami")
 		})
+
+		it.each([
+			{ input: "reboot$(printf 'x')", expected: ["printf 'x'", "reboot$(printf 'x')"] },
+			{ input: "reboot$(printf '\n')", expected: ["printf '\n'", "reboot$(printf '\n')"] },
+			{ input: "$(printf re)boot", expected: ["printf re", "$(printf re)boot"] },
+			{ input: "$(printf re)boot 'a\nb'", expected: ["printf re", "$(printf re)boot 'a\nb'"] },
+			{ input: "`printf re`boot", expected: ["printf re", "$(printf re)boot"] },
+			{ input: "echo*$(reboot)", expected: ["reboot", "echo*$(reboot)"] },
+			{ input: "ls *$(reboot).ts 'a\nb'", expected: ["reboot", "ls *$(reboot).ts 'a\nb'"] },
+			{ input: "echo $(a)$(b)", expected: ["echo", "a", "b"] },
+		])("keeps the outer word and every substitution in $input", ({ input, expected }) => {
+			expect(parseCommand(input).commands).toEqual(expected)
+		})
 	})
 
 	describe("shell-quote parse-failure fallback", () => {
@@ -200,6 +279,13 @@ describe("parseCommand", () => {
 			expect(result).toEqual(["sh -c $'echo hi'", "echo done"])
 			expect(result.join(" ")).not.toContain("SQUOTE")
 			expect(result.join(" ")).not.toContain("__")
+		})
+
+		it("splits outer operators and keeps operators inside a multi-line quote in the fallback path", () => {
+			forceShellQuoteFailure = true
+
+			const { commands: result } = parseCommand(`cd a && node -e "x && y\nz | w" ; ls`)
+			expect(result).toEqual(["cd a", `node -e "x && y\nz | w"`, "ls"])
 		})
 	})
 
