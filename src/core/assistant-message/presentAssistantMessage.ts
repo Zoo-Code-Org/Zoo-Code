@@ -45,6 +45,7 @@ import { codebaseSearchTool } from "../tools/CodebaseSearchTool"
 
 import { formatResponse } from "../prompts/responses"
 import { sanitizeToolUseId } from "../../utils/tool-id"
+import { stripThinkingTags } from "../../utils/text-normalization"
 
 /**
  * Maps a raw, potentially model-controlled tool name to a safe analytics key.
@@ -435,9 +436,8 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				// Have to do this for partial and complete since sending
 				// content in thinking tags to markdown renderer will
 				// automatically be removed.
-				// Strip any streamed <thinking> tags from text output.
-				content = content.replace(/<thinking>\s?/g, "")
-				content = content.replace(/\s?<\/thinking>/g, "")
+				// Shared with resume-time matching in Task so the two cannot diverge.
+				content = stripThinkingTags(content)
 			}
 
 			await cline.say("text", content, undefined, block.partial)

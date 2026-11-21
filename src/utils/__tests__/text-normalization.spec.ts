@@ -1,4 +1,4 @@
-import { normalizeString, unescapeHtmlEntities } from "../text-normalization"
+import { normalizeString, stripThinkingTags, unescapeHtmlEntities } from "../text-normalization"
 
 describe("Text normalization utilities", () => {
 	describe("normalizeString", () => {
@@ -99,6 +99,24 @@ describe("Text normalization utilities", () => {
 			const input = "array&#91;0&rsqb; and &lsqb;1&#93;"
 			const expected = "array[0] and [1]"
 			expect(unescapeHtmlEntities(input)).toBe(expected)
+		})
+	})
+
+	describe("stripThinkingTags", () => {
+		// Streaming writes the bubble through this helper and resume matching compares
+		// through it, so each half of the strip is pinned separately: a change to one
+		// regex alone must fail here rather than silently stop restoring bubbles.
+		it.each([
+			{ name: "an opening tag", input: "<thinking>\nHalf a sentence", expected: "Half a sentence" },
+			{ name: "a closing tag", input: "Half a sentence\n</thinking>", expected: "Half a sentence" },
+			{ name: "both tags", input: "<thinking>\nHalf a sentence\n</thinking>", expected: "Half a sentence" },
+			{ name: "repeated tags", input: "<thinking><thinking>\ntext", expected: "text" },
+		])("strips $name", ({ input, expected }) => {
+			expect(stripThinkingTags(input)).toBe(expected)
+		})
+
+		it("leaves text without tags untouched", () => {
+			expect(stripThinkingTags("Half a sentence")).toBe("Half a sentence")
 		})
 	})
 })
