@@ -74,6 +74,54 @@ function fuzzySearch(lines: string[], searchChunk: string, startIndex: number, e
 	return { bestScore, bestMatchIndex, bestMatchContent }
 }
 
+// A caller only needs to tell 0 / 1 / >=2 apart, but the error message reports the exact count while it
+// is cheap, so the scan stops at the fourth hit. Two and three hits are reported exactly ("2", "3");
+// beyond that the count is a lower bound and is shown as "at least 2" instead of a wrong number. Scanning
+// further costs a full-file Levenshtein sweep for a number the message cannot use.
+const MAX_MATCHES = 4
+
+interface MatchScan {
+	matches: { index: number; score: number; content: string }[]
+	/** True when the scan stopped at the cap, so `matches.length` is a lower bound. */
+	truncated: boolean
+}
+
+/**
+ * Returns up to `MAX_MATCHES` positions in `lines` whose slice scores at least `threshold` against
+ * `searchChunk`, so a full-file retry can tell a unique match from a duplicated one.
+ */
+function findAllMatches(lines: string[], searchChunk: string, threshold: number): MatchScan {
+	const searchLen = searchChunk.split(/\r?\n/).length
+	const matches: MatchScan["matches"] = []
+
+	for (let index = 0; index + searchLen <= lines.length; index++) {
+		const content = lines.slice(index, index + searchLen).join("\n")
+		const score = getSimilarity(content, searchChunk)
+		if (score >= threshold) {
+			matches.push({ index, score, content })
+			if (matches.length === MAX_MATCHES) {
+				return { matches, truncated: true }
+			}
+		}
+	}
+
+	return { matches, truncated: false }
+}
+
+interface StaleHintCandidate {
+	searchContent: string
+	replaceContent: string
+}
+
+interface StaleHintResolution {
+	/** Set only when exactly one position qualifies, so the hint can be overridden safely. */
+	match?: StaleHintCandidate & { matchIndex: number; bestMatchScore: number; bestMatchContent: string }
+	/** Number of qualifying positions found by the most ambiguous candidate; 0 means absent. */
+	matchCount: number
+	/** True when `matchCount` is a lower bound because the scan stopped at its cap. */
+	matchCountTruncated: boolean
+}
+
 export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 	private fuzzyThreshold: number
 	private bufferLines: number
@@ -347,6 +395,70 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 		return repaired || diffContent
 	}
 
+	/**
+	 * Recovers from a stale `:start_line:` hint. The buffered search only covers a window around the
+	 * hint, so a file that grew since the line number was read fails even when the SEARCH text is
+	 * still present verbatim. Retries over the whole file and accepts the match only when exactly one
+	 * position qualifies, so a stale hint can never silently edit a different occurrence. If the
+	 * literal SEARCH text is itself ambiguous, every candidate is refused and the largest count found
+	 * is reported.
+	 */
+	private resolveStaleHint(
+		resultLines: string[],
+		searchContent: string,
+		replaceContent: string,
+	): StaleHintResolution {
+		const candidates: StaleHintCandidate[] = [{ searchContent, replaceContent }]
+
+		// Mirror the in-window fallback: retry with line numbers stripped when the plain form fails.
+		const aggressiveSearchContent = stripLineNumbers(searchContent, true)
+		if (aggressiveSearchContent !== searchContent) {
+			candidates.push({
+				searchContent: aggressiveSearchContent,
+				replaceContent: stripLineNumbers(replaceContent, true),
+			})
+		}
+
+		let matchCount = 0
+		let matchCountTruncated = false
+		// The plain candidate is the literal text the model wrote. Once it appears in several places
+		// the block is ambiguous, and a lone hit in a later stripped candidate is no evidence of a
+		// unique target: accepting it would edit a line the model never pointed at.
+		let ambiguous = false
+
+		for (const candidate of candidates) {
+			const { matches, truncated } = findAllMatches(resultLines, candidate.searchContent, this.fuzzyThreshold)
+			if (matches.length === 0) {
+				continue
+			}
+
+			if (matches.length === 1 && !ambiguous) {
+				const [match] = matches
+				return {
+					match: {
+						...candidate,
+						matchIndex: match.index,
+						bestMatchScore: match.score,
+						bestMatchContent: match.content,
+					},
+					matchCount: 1,
+					matchCountTruncated: false,
+				}
+			}
+
+			ambiguous = ambiguous || matches.length > 1
+
+			// Report the most ambiguous candidate, not whichever ran last: the stripped variant can
+			// match fewer places than the plain one, and under-reporting hides the real ambiguity.
+			if (matches.length > matchCount) {
+				matchCount = matches.length
+				matchCountTruncated = truncated
+			}
+		}
+
+		return { matchCount, matchCountTruncated }
+	}
+
 	async applyDiff(
 		originalContent: string,
 		diffContent: string,
@@ -444,7 +556,8 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				replaceContent = stripLineNumbers(replaceContent)
 			}
 
-			// Validate that search and replace content are not identical
+			// Validate that search and replace content are not identical. Stripping below can collapse
+			// a pair that differed raw, so the same check runs again before the replacement is built.
 			if (searchContent === replaceContent) {
 				diffResults.push({
 					success: false,
@@ -513,6 +626,27 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 				bestMatchContent = midContent
 			}
 
+			// A stale :start_line: hint bounds the search to a window around it, so a file that grew
+			// since the hint was read can miss a unique match. Retry over the whole file first.
+			let staleHintDuplicateCount = 0
+			let staleHintCountTruncated = false
+
+			if ((matchIndex === -1 || bestMatchScore < this.fuzzyThreshold) && startLine) {
+				const staleHint = this.resolveStaleHint(resultLines, searchContent, replaceContent)
+				staleHintDuplicateCount = staleHint.matchCount
+				staleHintCountTruncated = staleHint.matchCountTruncated
+
+				if (staleHint.match) {
+					matchIndex = staleHint.match.matchIndex
+					bestMatchScore = staleHint.match.bestMatchScore
+					bestMatchContent = staleHint.match.bestMatchContent
+					searchContent = staleHint.match.searchContent
+					replaceContent = staleHint.match.replaceContent
+					searchLines = searchContent.split(/\r?\n/)
+					replaceLines = replaceContent ? replaceContent.split(/\r?\n/) : []
+				}
+			}
+
 			// Try aggressive line number stripping as a fallback if regular matching fails
 			if (matchIndex === -1 || bestMatchScore < this.fuzzyThreshold) {
 				// Strip both search and replace content once (simultaneously)
@@ -560,6 +694,13 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					const malformedMarkerHint = looksLikeMalformedMarker
 						? `\n- LIKELY CAUSE: the first line of your search content looks like a malformed start-line marker and was therefore searched for as literal file text${separatorSwallowed ? ', together with the "-------" line after it' : ""}. The only recognized form is ":start_line:<number>" on the line immediately after "<<<<<<< SEARCH", optionally followed by a "-------" line. Remove or correct that line and retry.`
 						: ""
+					// A duplicated match is refused rather than guessed between, so say so instead of implying absence.
+					// The scan stops at its cap, so a truncated count is reported as "at least 2" rather than a wrong number.
+					const duplicateCount = staleHintCountTruncated ? "at least 2" : `${staleHintDuplicateCount}`
+					const duplicateHint =
+						staleHintDuplicateCount > 1
+							? `\n- LIKELY CAUSE: the SEARCH text matches ${duplicateCount} separate places in the file, so the stale :start_line: hint cannot pick one. Include more surrounding lines to make the match unique.`
+							: ""
 
 					diffResults.push({
 						success: false,
@@ -574,7 +715,7 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 							`- Search Length: ${searchChunk.length} characters\n` +
 							`- Best Match Location: ${bestMatchLocation}\n` +
 							`- Best Match Length: ${bestMatchContent ? bestMatchContent.length : 0} characters\n` +
-							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}\n` +
+							`- Tried both standard and aggressive line number stripping${malformedMarkerHint}${duplicateHint}\n` +
 							`- Tip: Use the read_file tool to get the latest content of the file before attempting ` +
 							`to use the apply_diff tool again, as the file content may have changed\n` +
 							`- Tip: The SEARCH block must contain complete, whole lines — partial-line (substring) matching is not supported. ` +
@@ -582,6 +723,20 @@ export class MultiSearchReplaceDiffStrategy implements DiffStrategy {
 					})
 					continue
 				}
+			}
+
+			// Stripping above can make SEARCH and REPLACE identical even though they differed raw, and
+			// applying that pair would report success while writing the file back unchanged.
+			if (searchContent === replaceContent) {
+				diffResults.push({
+					success: false,
+					error:
+						`Search and replace content are identical - no changes would be made\n\n` +
+						`Debug Info:\n` +
+						`- Search and replace must be different to make changes\n` +
+						`- Use read_file to verify the content you want to change`,
+				})
+				continue
 			}
 
 			// Get the matched lines from the original content
