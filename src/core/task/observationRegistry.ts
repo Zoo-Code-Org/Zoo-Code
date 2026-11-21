@@ -8,6 +8,11 @@
  * Pure in-memory — zero I/O, no dependencies. The S4 guarded-write consults
  * these observations for the version check and for the completeness check that
  * gates a full-file replacement.
+ *
+ * Only observe, forget and get are exposed: the S4 guard is the only named consumer. A
+ * per-task instance needs no reset - the next task constructs a new registry - so has, size
+ * and clear land with whoever needs them (a registry shared across tasks would need the
+ * reset, and that is not decided yet).
  */
 
 export interface FileObservation {
@@ -52,12 +57,13 @@ export class ObservationRegistry {
 		return this.entries.get(absolutePath)
 	}
 
-	has(absolutePath: string): boolean {
-		return this.entries.has(absolutePath)
-	}
-
-	clear(): void {
-		this.entries.clear()
+	/**
+	 * Drop the observation for a file. A read that cannot compute a version token must not
+	 * leave an earlier entry behind, because the write guard would then compare against a
+	 * token that no longer describes the last read.
+	 */
+	forget(absolutePath: string): boolean {
+		return this.entries.delete(absolutePath)
 	}
 
 	/**
@@ -76,9 +82,5 @@ export class ObservationRegistry {
 	/** Whether close() has already run; observations are ignored once this is true. */
 	get closed(): boolean {
 		return this.retired
-	}
-
-	get size(): number {
-		return this.entries.size
 	}
 }
