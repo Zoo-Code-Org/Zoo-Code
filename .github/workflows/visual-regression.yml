@@ -78,6 +78,21 @@ jobs:
               with:
                   path: apps/vscode-e2e/.vscode-test/
                   key: vscode-theme-fixtures-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}-v1
+            # Retry the download in a separate process because a connection reset can
+            # terminate Node before the downloader completes its internal retries.
+            - name: Download pinned VS Code
+              working-directory: apps/vscode-e2e
+              run: |
+                  for attempt in 1 2 3; do
+                      if node -e "const { downloadAndUnzipVSCode } = require('@vscode/test-electron'); const version = require('./package.json').devDependencies['@types/vscode']; downloadAndUnzipVSCode(version).catch((err) => { console.error(err); process.exit(1); });"; then
+                          exit 0
+                      fi
+                      echo "VS Code download attempt ${attempt} failed"
+                      if [ "$attempt" -lt 3 ]; then
+                          sleep 15
+                      fi
+                  done
+                  exit 1
             - name: Test theme fixture serialization
               run: pnpm --filter @roo-code/vscode-e2e themes:test
             - name: Check generated VS Code theme fixtures
@@ -113,6 +128,21 @@ jobs:
               with:
                   path: apps/vscode-e2e/.vscode-test/
                   key: vscode-electron-visual-${{ runner.os }}-${{ steps.vscode-version.outputs.version }}-v1
+            # Retry the download in a separate process because a connection reset can
+            # terminate Node before the downloader completes its internal retries.
+            - name: Download pinned VS Code
+              working-directory: apps/vscode-e2e
+              run: |
+                  for attempt in 1 2 3; do
+                      if node -e "const { downloadAndUnzipVSCode } = require('@vscode/test-electron'); const version = require('./package.json').devDependencies['@types/vscode']; downloadAndUnzipVSCode(version).catch((err) => { console.error(err); process.exit(1); });"; then
+                          exit 0
+                      fi
+                      echo "VS Code download attempt ${attempt} failed"
+                      if [ "$attempt" -lt 3 ]; then
+                          sleep 15
+                      fi
+                  done
+                  exit 1
             - name: Run Extension Host visual tests
               run: xvfb-run -a pnpm --filter @roo-code/vscode-e2e test:visual:electron
             - name: Upload Extension Host visual artifacts
