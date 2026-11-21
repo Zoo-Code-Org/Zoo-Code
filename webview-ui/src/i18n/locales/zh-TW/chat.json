@@ -494,5 +494,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "已隱藏 {{count}} 行"
+	},
+	"reasoningEffortSelector": {
+		"title": "推理強度",
+		"description": "切換此設定檔請求所使用的推理強度。選擇「預設」將還原設定檔中的設定。",
+		"default": "預設",
+		"off": "關閉",
+		"overrideActive": "推理強度覆寫已生效"
 	}
 }

@@ -36,6 +36,12 @@ export const baseProviderSettingsShape = {
 	toolRepetitionSoftLimit: nullableOptional(z.number().min(0).nullish()),
 	enableReasoningEffort: z.boolean().optional(),
 	reasoningEffort: reasoningEffortSettingSchema.optional(),
+	// Chat quick-switch override on top of `reasoningEffort`. Set by the chat
+	// input's reasoning-effort selector, it replaces the configured effort for
+	// requests without rewriting the profile's saved value. Cleared (key
+	// removed) when the chat selector picks "Default" or the profile's model
+	// changes. Lives here, not per-provider, so every provider carries it.
+	reasoningEffortOverride: reasoningEffortSettingSchema.optional(),
 	modelMaxTokens: z.number().optional(),
 	modelMaxThinkingTokens: z.number().optional(),
 	verbosity: verbosityLevelsSchema.optional(),

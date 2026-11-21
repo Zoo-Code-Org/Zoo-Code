@@ -509,5 +509,12 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} baris tersembunyi"
+	},
+	"reasoningEffortSelector": {
+		"title": "Upaya penalaran",
+		"description": "Mengubah upaya penalaran yang digunakan untuk permintaan konfigurasi ini. \"Bawaan\" memulihkan setelan profil.",
+		"default": "Bawaan",
+		"off": "Mati",
+		"overrideActive": "Pengesampingan upaya penalaran aktif"
 	}
 }

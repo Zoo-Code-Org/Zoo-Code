@@ -209,6 +209,27 @@ export const stories: Record<string, Story> = {
 		const { ChatTextAreaStory } = await import("@/components/chat/__tests__/ChatTextArea.visual.fixture")
 		return <ChatTextAreaStory />
 	},
+	"chat-text-area-reasoning-effort": async ({ override = "" } = {}) => {
+		const [{ ChatTextAreaStory }, { providerIdentifiers }] = await Promise.all([
+			import("@/components/chat/__tests__/ChatTextArea.visual.fixture"),
+			import("@roo-code/types"),
+		])
+		// A reasoning-capable OpenAI-compatible profile, so the quick switcher renders.
+		// `override` presets a chat override to show the active-override treatment.
+		const apiConfiguration = {
+			apiProvider: providerIdentifiers.openai,
+			openAiModelId: "test-model",
+			enableReasoningEffort: true,
+			reasoningEffortOverride: override ? override : undefined,
+			openAiCustomModelInfo: {
+				contextWindow: 128_000,
+				supportsPromptCache: false,
+				supportsReasoningEffort: ["low", "medium", "high"],
+				reasoningEffort: "medium",
+			},
+		} satisfies import("@roo-code/types").ProviderSettings
+		return <ChatTextAreaStory initialState={{ apiConfiguration }} />
+	},
 	"history-empty": async () => {
 		const [{ AppProviders }, { default: HistoryView }] = await Promise.all([
 			import("../AppProviders"),

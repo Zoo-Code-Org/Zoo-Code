@@ -512,5 +512,12 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} gizli satır",
 		"hiddenLines_other": "{{count}} gizli satır"
+	},
+	"reasoningEffortSelector": {
+		"title": "Akıl yürütme düzeyi",
+		"description": "Bu yapılandırmanın isteklerinde kullanılan akıl yürütme düzeyini değiştirir. \"Varsayılan\" profil ayarını geri yükler.",
+		"default": "Varsayılan",
+		"off": "Kapalı",
+		"overrideActive": "Akıl yürütme düzeyi geçersiz kılması etkin"
 	}
 }

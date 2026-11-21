@@ -31,6 +31,8 @@ import {
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
 	type MentionSegment,
+	reasoningEffortSettingValues,
+	type ReasoningEffortSetting,
 } from "@roo-code/types"
 import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
@@ -2511,6 +2513,23 @@ export const webviewMessageHandler = async (
 				!Array.isArray(patch)
 			) {
 				await provider.updateProfileModel(message.text, expectedProvider, patch)
+			}
+			break
+		}
+		case "updateReasoningEffortOverride": {
+			const { expectedProvider, effort } = message.values ?? {}
+
+			if (message.text && typeof expectedProvider === "string") {
+				// `null` clears the override ("Default"); anything else must be a known effort.
+				const isValidEffort =
+					effort === null ||
+					(typeof effort === "string" &&
+						reasoningEffortSettingValues.includes(effort as ReasoningEffortSetting))
+
+				if (isValidEffort) {
+					const selectedEffort = effort as ReasoningEffortSetting | null
+					await provider.updateProfileReasoningEffort(message.text, expectedProvider, selectedEffort)
+				}
 			}
 			break
 		}
