@@ -1487,23 +1487,6 @@ describe("auth session cache", () => {
 		expect(mockSet).not.toHaveBeenCalled()
 	})
 
-	it("clearAuthSessionModelsForProvider prevents a resolved in-flight fetch from repopulating the cache", async () => {
-		// Regression guard: an in-flight fetch that resolves after clearAuthSessionModelsForProvider
-		// must not repopulate the session cache (which would leak a prior session's catalog).
-		mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
-		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
-
-		// Fetch and populate cache
-		await getModels(options, zooGatewayHandler)
-
-		// Sign out — clears cache and in-flight map
-		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
-
-		// A new getModels call after sign-out must refetch (cache was cleared)
-		await getModels(options, zooGatewayHandler)
-		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
-	})
-
 	it("in-flight fetch started before sign-out does not repopulate cache when a new fetch starts after sign-out", async () => {
 		// Race condition: fetch A starts → sign-out → fetch B starts → fetch A resolves.
 		// Fetch A must NOT write back its stale pre-sign-out data because the generation counter
@@ -1597,6 +1580,22 @@ describe("auth session cache", () => {
 
 			// Must have refetched — entry was stale at exact TTL
 			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("still serves the session catalog 1 ms before the TTL boundary", async () => {
+		vi.useFakeTimers()
+		try {
+			mockGetZooGatewayModels.mockResolvedValue(zooGatewayOk(zooModels))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 - 1)
+			await getModels(options, zooGatewayHandler)
+
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(1)
 		} finally {
 			vi.useRealTimers()
 		}
@@ -1734,6 +1733,103 @@ describe("auth session cache", () => {
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("touches the re-read entry, not the pre-fetch snapshot, when a refresh lands during a 304", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const refreshedModels: ModelRecord = {
+			"openai/gpt-5": { maxTokens: 32000, contextWindow: 400000, supportsPromptCache: true },
+		}
+		vi.useFakeTimers()
+		try {
+			let resolveRevalidation!: (v: ZooGatewayResult) => void
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockReturnValueOnce(new Promise((r) => (resolveRevalidation = r)))
+				.mockResolvedValueOnce({ kind: "ok", models: refreshedModels, etag: '"v2"' })
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const revalidation = getModels(options, zooGatewayHandler)
+			await refreshModels(options, zooGatewayHandler)
+			resolveRevalidation({ kind: "not_modified" })
+
+			expect(await revalidation).toEqual(refreshedModels)
+			expect(await getModels(options, zooGatewayHandler)).toEqual(refreshedModels)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(3)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("keeps the captured catalog when the size bound evicts the entry during a pending 304", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const otherModels: ModelRecord = { "x/y": { maxTokens: 1, contextWindow: 1, supportsPromptCache: false } }
+		vi.useFakeTimers()
+		try {
+			let resolveRevalidation!: (v: ZooGatewayResult) => void
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockReturnValueOnce(new Promise((r) => (resolveRevalidation = r)))
+				.mockResolvedValue(zooGatewayOk(otherModels))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const revalidation = getModels(options, zooGatewayHandler)
+			// Fill the session cache past its bound so the oldest entry (this one) is evicted.
+			for (let i = 0; i < 64; i++) {
+				await getModels({ provider: providerIdentifiers.zooGateway, apiKey: `other-${i}` }, zooGatewayHandler)
+			}
+			resolveRevalidation({ kind: "not_modified" })
+
+			expect(await revalidation).toEqual(zooModels)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("returns an empty catalog when a flush invalidates the entry during a pending 304", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		vi.useFakeTimers()
+		try {
+			let resolveRevalidation!: (v: ZooGatewayResult) => void
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
+				.mockReturnValueOnce(new Promise((r) => (resolveRevalidation = r)))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const revalidation = getModels(options, zooGatewayHandler)
+			await flushModels(options, zooGatewayHandler, false)
+			resolveRevalidation({ kind: "not_modified" })
+
+			expect(await revalidation).toEqual({})
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("flushModels eviction stops a pending fetch from repopulating the session cache", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		let resolveFirst!: (v: ZooGatewayResult) => void
+		mockGetZooGatewayModels
+			.mockReturnValueOnce(new Promise((r) => (resolveFirst = r)))
+			.mockResolvedValueOnce(zooGatewayOk(zooModels))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const pending = getModels(options, zooGatewayHandler)
+		await flushModels(options, zooGatewayHandler, false)
+		resolveFirst(zooGatewayOk(zooModels))
+		await pending
+
+		await getModels(options, zooGatewayHandler)
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
 	})
 
 	it("flushModels clears session cache and can force a refetch", async () => {
@@ -2262,6 +2358,9 @@ describe("auth session cache", () => {
 		// Resolve all with distinct data; only C's data should land in cache
 		resolveA(zooGatewayOk(models1))
 		await resA
+		// A must not have written back: a read while C is in flight joins C instead of
+		// serving A's stale catalog from the session cache.
+		const readDuringC = getModels(options, zooGatewayHandler)
 		resolveB(zooGatewayOk(models2))
 		await resB
 		resolveC(zooGatewayOk(models3))
@@ -2269,6 +2368,11 @@ describe("auth session cache", () => {
 
 		// C was the last fetch with matching generation — result must be models3
 		expect(finalResult).toEqual(models3)
+		expect(await readDuringC).toEqual(models3)
+		// Only C may have written back; the cache must serve models3 without a new fetch.
+		mockGetZooGatewayModels.mockClear()
+		expect(await getModels(options, zooGatewayHandler)).toEqual(models3)
+		expect(mockGetZooGatewayModels).not.toHaveBeenCalled()
 
 		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 	})

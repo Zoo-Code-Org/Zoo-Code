@@ -197,7 +197,18 @@ function touchAuthSessionEntry(cacheKey: string, entry: AuthSessionCacheEntry): 
 	enforceAuthSessionCacheBound()
 }
 
-function deleteAuthSessionEntry(cacheKey: string): void {
+function bumpAuthScopedClearGeneration(provider: RouterName): void {
+	if (isAuthScopedProvider(provider)) {
+		// Stryker disable next-line ArithmeticOperator: write-back only checks inequality vs generationAtStart; +1 and -1 are equivalent
+		authScopedClearGeneration.set(provider, (authScopedClearGeneration.get(provider) ?? 0) + 1)
+	}
+}
+
+// Evicts one session identity and invalidates its pending fetch so that fetch cannot
+// repopulate the entry after the flush.
+function invalidateAuthSessionEntry(cacheKey: string, provider: RouterName): void {
+	inFlightAuthScopedFetch.delete(cacheKey)
+	bumpAuthScopedClearGeneration(provider)
 	authSessionCache.delete(cacheKey)
 }
 
@@ -218,17 +229,10 @@ export function clearAuthSessionModelsForProvider(provider: RouterName): void {
 	// Bump generation so in-flight fetches that started before this clear
 	// know they should not write back stale data. Keyed by provider (not cache key)
 	// because the cache entry may not exist yet when sign-out occurs.
-	if (isAuthScopedProvider(provider)) {
-		// Stryker disable next-line ArithmeticOperator: write-back only checks inequality vs generationAtStart; +1 and -1 are equivalent
-		authScopedClearGeneration.set(provider, (authScopedClearGeneration.get(provider) ?? 0) + 1)
-	}
+	bumpAuthScopedClearGeneration(provider)
 }
 
-type AuthScopedFetchResult = {
-	models: ModelRecord
-	etag?: string
-	notModified?: boolean
-}
+type AuthScopedFetchResult = { kind: "ok"; models: ModelRecord; etag?: string } | { kind: "not_modified" }
 
 async function fetchAuthScopedModelsFromProvider(
 	options: AuthScopedGetModelsOptions,
@@ -242,12 +246,12 @@ async function fetchAuthScopedModelsFromProvider(
 				ifNoneMatch,
 			})
 			if (result.kind === "not_modified") {
-				return { models: {}, notModified: true }
+				return { kind: "not_modified" }
 			}
-			return { models: result.models, etag: result.etag }
+			return { kind: "ok", models: result.models, etag: result.etag }
 		}
 		case providerIdentifiers.kimiCode:
-			return { models: await getKimiCodeModels(options.apiKey) }
+			return { kind: "ok", models: await getKimiCodeModels(options.apiKey) }
 	}
 }
 
@@ -284,7 +288,7 @@ async function resolveAuthScopedModels(
 				existing?.etag,
 			)
 
-			if (fetched.notModified) {
+			if (fetched.kind === "not_modified") {
 				// Re-read from the Map: a concurrent sign-out could have cleared
 				// the entry between when we captured `existing` and now.
 				const current = getAuthSessionEntry(cacheKey)
@@ -293,7 +297,15 @@ async function resolveAuthScopedModels(
 					reportedEmptyModelResponse.delete(cacheKey)
 					return current.models
 				}
-				// Sign-out cleared the entry while the 304 was in-flight.
+				// The entry can also vanish through the size bound while the 304 is pending.
+				// A 304 carries no body, so keep the captured catalog unless a sign-out or
+				// flush invalidated this provider in the meantime.
+				const generationNow = authScopedClearGeneration.get(authProvider) ?? 0
+				if (generationNow === generationAtStart && existing && authSessionHasModels(existing.models)) {
+					touchAuthSessionEntry(cacheKey, existing)
+					reportedEmptyModelResponse.delete(cacheKey)
+					return existing.models
+				}
 				return {}
 			} else {
 				const modelCount = Object.keys(fetched.models).length
@@ -330,6 +342,10 @@ async function resolveAuthScopedModels(
 				authSessionHasModels(existing.models) &&
 				!(error instanceof ZooGatewayModelsUnauthorizedError)
 			) {
+				console.error(
+					`[MODEL_CACHE] ${provider} model fetch failed; serving the previous session catalog:`,
+					error instanceof Error ? error.message : String(error),
+				)
 				return existing.models
 			}
 			throw error
@@ -795,7 +811,7 @@ export const flushModels = async (
 				console.error(`[flushModels] Failed to refresh auth-scoped ${cacheKey} models:`, error)
 			}
 		} else {
-			deleteAuthSessionEntry(cacheKey)
+			invalidateAuthSessionEntry(cacheKey, options.provider)
 		}
 		return
 	}

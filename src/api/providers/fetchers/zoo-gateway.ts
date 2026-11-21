@@ -25,15 +25,17 @@ export class ZooGatewayModelsUnauthorizedError extends Error {
 	}
 }
 
-/**
- * getZooGatewayModels
- *
- * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
- */
-
 export type ZooGatewayModelsFetchResult =
 	{ kind: "ok"; models: Record<string, ModelInfo>; etag?: string } | { kind: "not_modified" }
 
+/**
+ * Fetches models from the Zoo Gateway API. Requires authentication via the zoo_ext_ token.
+ *
+ * Pass `ifNoneMatch` with a previously returned `etag` to revalidate; the result is
+ * `not_modified` when the catalog is unchanged. Returns an empty `ok` catalog when no
+ * session token is available. Throws `ZooGatewayModelsUnauthorizedError` (after clearing
+ * the session) on 401, and a sanitized `Error` on any other failure.
+ */
 export async function getZooGatewayModels(
 	options?: ApiHandlerOptions & { ifNoneMatch?: string },
 ): Promise<ZooGatewayModelsFetchResult> {

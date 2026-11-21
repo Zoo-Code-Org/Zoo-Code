@@ -234,7 +234,6 @@ export class KimiCodeOAuthManager {
 		this.credentials = null
 		this.state = { status: "idle" }
 		const { clearAuthSessionModelsForProvider } = await import("../../api/providers/fetchers/modelCache")
-		const { providerIdentifiers } = await import("@roo-code/types")
 		clearAuthSessionModelsForProvider(providerIdentifiers.kimiCode)
 	}
 

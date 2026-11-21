@@ -1,5 +1,7 @@
 import * as vscode from "vscode"
 
+import { providerIdentifiers } from "@roo-code/types"
+
 import { t } from "../i18n"
 
 const ZOO_CODE_TOKEN_KEY = "zoo-code-session-token"
@@ -155,7 +157,6 @@ export async function clearZooCodeToken(): Promise<void> {
 	_cachedToken = undefined
 	_sessionCleared = true
 	const { clearAuthSessionModelsForProvider } = await import("../api/providers/fetchers/modelCache")
-	const { providerIdentifiers } = await import("@roo-code/types")
 	clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
 }
 
