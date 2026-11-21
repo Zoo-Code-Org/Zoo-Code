@@ -7,8 +7,11 @@
 \* Fixed passes in 11 states. Raw fails in check.sh. No new bug beyond issue 1287 was found.
 \* False alarms: tool results without a prior call fail conversion. Valid excludes these inputs.
 \* Cost: about 5 minutes of agent work; each TLC run takes less than 1 second.
-\* Review: 0 covered, 0 added, 0 gap. No PR review was available.
-\* Live REST replay: Vertex gemini-3.7-flash streamGenerateContent rejects the model tail (400).
+\* Review: 0 covered, 0 added, 3 gap. PR 2641, user-supplied review findings 1-3 (no thread URL supplied).
+\* Gap 1: test-oracle duplication is outside the model. Tests now check the actual request properties.
+\* Gap 2: reasoning-entry filtering precedes the modeled source. Provider tests cover both final roles.
+\* Gap 3: evidence and header freshness are outside the state model. The manual results remain below.
+\* Manual live REST replay: Vertex gemini-3.7-flash streamGenerateContent rejects the model tail (400).
 \* The same history with the user continuation returns streamed candidates (200).
 \* Limits: tool-response matching and empty turns are outside this model. The live replay uses REST.
 \* Simplify: Request is derived. Conversion is an oracle. There is one state variable.
