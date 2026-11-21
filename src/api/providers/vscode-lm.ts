@@ -28,7 +28,7 @@ import { CONTEXT_WINDOW_EXCEEDED_STATUS } from "../../core/context/context-manag
 
 import { BaseProvider } from "./base-provider"
 import { getVsCodeLmModelInfo } from "./vscode-lm-capabilities"
-import { createAbortError, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
+import { bridgeExternalAbortSignal, createAbortError, hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 
 /**
@@ -1180,23 +1180,22 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		this.currentRequestCancellation = new vscode.CancellationTokenSource()
 		const cancellationTokenSource = this.currentRequestCancellation
 
-		// Bridge the caller's abort signal (e.g. a task abort) into the request's
-		// cancellation token: the VS Code LM API cannot carry an AbortSignal
-		// directly, so cancellation is signalled to the host through the token.
-		// The listener is kept in a named const and removed in the finally block
-		// because { once: true } only detaches it when the signal actually aborts.
-		let onExternalAbort: (() => void) | undefined
+		// Bridge the caller's abort signal (e.g. a task abort) into the request's cancellation
+		// token: the VS Code LM API cannot carry an AbortSignal directly, so cancellation is
+		// signalled to the host through the token. The hook is the single place a caller abort
+		// is recorded - it runs for a live abort and for a signal that was already aborted at
+		// call time - and dispose() in the finally block detaches the listener, which
+		// { once: true } alone would not do for a signal that never aborts.
 		// Recorded separately from the token: cleanup also cancels the token, and a
 		// host token's flag is not observable before its cancel settles, so the
 		// token alone cannot always tell a caller's abort apart at a re-check point.
 		let abortedByCaller = false
-		if (externalAbortSignal) {
-			onExternalAbort = () => {
+		const bridge = bridgeExternalAbortSignal(externalAbortSignal, {
+			onAbort: () => {
 				abortedByCaller = true
 				cancellationTokenSource.cancel()
-			}
-			externalAbortSignal.addEventListener("abort", onExternalAbort, { once: true })
-		}
+			},
+		})
 
 		// Accumulate the text and count at the end of the stream to reduce token counting overhead.
 		let accumulatedText: string = ""
@@ -1282,10 +1281,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		}
 
 		try {
-			// Fail fast if the caller already aborted before we even started: do not
-			// initialize or invoke the host request for a cancelled request.
+			// Fail fast if the caller already aborted before we even started: do not initialize or
+			// invoke the host request for a cancelled request. The bridge hook has already
+			// cancelled this request's token for an already-aborted signal, so only the bail-out
+			// is needed here.
 			if (externalAbortSignal?.aborted) {
-				cancellationTokenSource.cancel()
 				throw createAbortError(this.providerName)
 			}
 
@@ -1559,12 +1559,10 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				throw new Error(`Zoo Code <Language Model API>: Response stream error: ${errorMessage}`)
 			}
 		} finally {
-			// Detach the abort bridge listener on every path (success, error, and
-			// early consumer break); { once: true } alone would leak it when the
-			// request completes without the signal ever aborting.
-			if (externalAbortSignal && onExternalAbort) {
-				externalAbortSignal.removeEventListener("abort", onExternalAbort)
-			}
+			// Detach the abort bridge listener on every path (success, error, and early consumer
+			// break); { once: true } alone would leak it when the request completes without the
+			// signal ever aborting.
+			bridge.dispose()
 			// Cancel before disposing: VS Code's CancellationTokenSource.dispose()
 			// frees resources without cancelling the token, so a premature consumer
 			// closure (break/return) would otherwise leave the host request running and
@@ -1673,17 +1671,11 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			timeoutId = setTimeout(() => tokenSource.cancel(), toSdkTimeoutMs(timeoutMs))
 		}
 
-		// Bridge the external abort signal: a pre-aborted signal cancels the token
-		// immediately, otherwise a one-shot listener relays the abort to the host.
-		let onAbort: (() => void) | undefined
-		if (externalAbortSignal) {
-			if (externalAbortSignal.aborted) {
-				tokenSource.cancel()
-			} else {
-				onAbort = () => tokenSource.cancel()
-				externalAbortSignal.addEventListener("abort", onAbort, { once: true })
-			}
-		}
+		// Bridge the external abort signal: the hook cancels the token for a live abort and for
+		// a signal that was already aborted at call time, so this path needs no separate
+		// pre-abort branch. Nothing here consumes the bridge's AbortController - the host API
+		// only takes a CancellationToken - but the hook is the side effect this provider needs.
+		const bridge = bridgeExternalAbortSignal(externalAbortSignal, { onAbort: () => tokenSource.cancel() })
 
 		// The request counts as aborted when the host-side token was cancelled
 		// (timeout or bridged signal) or when the external signal itself aborted.
@@ -1741,11 +1733,9 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 		} finally {
 			// clearTimeout(undefined) is a spec no-op, so clear unconditionally.
 			clearTimeout(timeoutId)
-			// { once: true } only detaches the listener when the signal actually
-			// aborts, so remove it explicitly on every path.
-			if (externalAbortSignal && onAbort) {
-				externalAbortSignal.removeEventListener("abort", onAbort)
-			}
+			// dispose() detaches the bridge listener on every path: { once: true } only detaches it
+			// when the signal actually aborts.
+			bridge.dispose()
 			this.activeCompletionTokens.delete(tokenSource)
 			tokenSource.dispose()
 		}
