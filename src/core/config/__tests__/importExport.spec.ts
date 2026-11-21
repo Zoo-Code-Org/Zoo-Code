@@ -24,6 +24,7 @@ import { safeWriteJson } from "../../../utils/safeWriteJson"
 
 import type { Mock } from "vitest"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
+import { t } from "../../../i18n"
 
 function createDeferred<T>() {
 	let resolve!: (value: T) => void
@@ -1616,10 +1617,14 @@ describe("importExport", () => {
 			expect(mockContextProxy.export).toHaveBeenCalled()
 			expect(fs.mkdir).toHaveBeenCalledWith("/mock/path", { recursive: true })
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			})
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/zoo-code-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 		})
 
 		it("should include globalSettings when allowedMaxRequests is null", async () => {
@@ -1648,10 +1653,14 @@ describe("importExport", () => {
 				contextProxy: mockContextProxy,
 			})
 
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			})
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/zoo-code-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 		})
 
 		it("should handle errors during the export process", async () => {
@@ -1678,10 +1687,203 @@ describe("importExport", () => {
 			expect(mockProviderSettingsManager.export).toHaveBeenCalled()
 			expect(mockContextProxy.export).toHaveBeenCalled()
 			expect(fs.mkdir).toHaveBeenCalledWith("/mock/path", { recursive: true })
-			expect(safeWriteJson).toHaveBeenCalled() // safeWriteJson is called, but it will throw
-			// The error is caught and the function exits silently.
-			// Optionally, ensure no error message was shown if that's part of "silent"
-			// expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+		})
+
+		it("notifies the user when the export write is refused, and still swallows the failure", async () => {
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
+				fsPath: "/mock/path/zoo-code-settings.json",
+			})
+
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "test",
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			// The refusal this unit introduced: refuseSymlinkTarget is set at the call above, so a
+			// link at the path the user picked makes the writer reject instead of publishing.
+			const refusal = new Error(
+				"safeWriteJson: refusing to write through the symlink now at /mock/path/zoo-code-settings.json (before publication); the payload would land at /elsewhere/settings.json",
+			)
+			;(safeWriteJson as Mock).mockRejectedValueOnce(refusal)
+
+			const showErrorMessageSpy = vi.spyOn(vscode.window, "showErrorMessage").mockResolvedValue(undefined)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			// The contract the caller relies on: webviewMessageHandler awaits exportSettings without a
+			// try, so a refusal must not become an unhandled rejection.
+			await expect(
+				exportSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+				}),
+			).resolves.toBeUndefined()
+
+			// The user learns the file did not land, through the same channel and the same key shape the
+			// import route uses. Expected is computed with the same t() call the module makes, so the
+			// assertion holds whether this lane resolves t to the string or to the key.
+			expect(showErrorMessageSpy).toHaveBeenCalledTimes(1)
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(
+				t("common:errors.settings_export_failed", { error: refusal.message }),
+			)
+			expect(showErrorMessageSpy).toHaveBeenCalledWith(expect.stringContaining("errors.settings_export_failed"))
+			expect(showErrorMessageSpy).not.toHaveBeenCalledWith(expect.stringContaining("settings_import_failed"))
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to export settings:", refusal)
+
+			showErrorMessageSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
+		})
+
+		// The writer mocked at the top of this file answers every path with undefined, so it cannot
+		// say what a refusal looks like on disk. This row lifts that mock for one test, re-imports
+		// the module so exportSettings calls the real writer, and plants a real link at the path the
+		// dialog returned: the ordinary destination gets the payload, the linked one keeps its own
+		// content and the user is told. Only vscode's dialog stays doubled, as everywhere else here.
+		it("publishes through the real writer to an ordinary destination and refuses a link the user never chose", async () => {
+			const fsActual = await vi.importActual<typeof import("fs/promises")>("fs/promises")
+			const osActual = await vi.importActual<typeof import("os")>("os")
+
+			vi.doUnmock("../../../utils/safeWriteJson")
+			vi.doUnmock("fs/promises")
+			vi.resetModules()
+			const { exportSettings: exportWithRealWriter } = await import("../importExport")
+			// resetModules gave the module under test a fresh vscode mock, so the dialog has to be
+			// steered on that instance rather than on the one this file imported at the top.
+			const vscodeFresh = await import("vscode")
+
+			const providerProfiles = {
+				currentApiConfigName: "real",
+				apiConfigs: { real: { apiProvider: providerIdentifiers.openai, id: "real-id" } },
+				migrations: { rateLimitSecondsMigrated: false },
+			}
+			const globalSettings = { mode: "code" }
+			const fakeProviderSettingsManager = { export: vi.fn().mockResolvedValue(providerProfiles) }
+			const fakeContextProxy = {
+				getValue: vi.fn().mockReturnValue(undefined),
+				setValue: vi.fn().mockResolvedValue(undefined),
+				export: vi.fn().mockResolvedValue(globalSettings),
+			}
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+			// The fresh instance carries the real vscode signatures, so the doubled dialogs are read
+			// through the same Mock cast the rest of this file uses.
+			const showSaveDialogFresh = vscodeFresh.window.showSaveDialog as Mock
+			const showErrorMessageSpy = vscodeFresh.window.showErrorMessage as Mock
+			const roots: string[] = []
+			try {
+				// Ordinary destination: a real directory, no link anywhere on the route.
+				const ordinaryDir = await fsActual.mkdtemp(path.join(osActual.tmpdir(), "zoo-export-ordinary-"))
+				roots.push(ordinaryDir)
+				const ordinaryPath = path.join(ordinaryDir, "zoo-code-settings.json")
+				showSaveDialogFresh.mockResolvedValue({ fsPath: ordinaryPath })
+
+				await expect(
+					exportWithRealWriter({
+						providerSettingsManager: fakeProviderSettingsManager as never,
+						contextProxy: fakeContextProxy as never,
+					}),
+				).resolves.toBeUndefined()
+
+				expect(JSON.parse(await fsActual.readFile(ordinaryPath, "utf8"))).toEqual({
+					providerProfiles,
+					globalSettings,
+				})
+				expect(showErrorMessageSpy).not.toHaveBeenCalled()
+
+				// Linked destination: a junction standing where the user asked for the file. Creating
+				// it needs no privileges, unlike a file symlink, which this box refuses with EPERM.
+				const linkDir = await fsActual.mkdtemp(path.join(osActual.tmpdir(), "zoo-export-link-"))
+				roots.push(linkDir)
+				const referentDir = path.join(linkDir, "referent")
+				await fsActual.mkdir(referentDir)
+				const linkedPath = path.join(linkDir, "zoo-code-settings.json")
+				let planted = true
+				try {
+					await fsActual.symlink(referentDir, linkedPath, "junction")
+				} catch (error) {
+					planted = false
+					console.log("skipping the linked half: this platform refused to plant a link:", String(error))
+				}
+				if (planted) {
+					showErrorMessageSpy.mockReset()
+					showSaveDialogFresh.mockResolvedValue({ fsPath: linkedPath })
+
+					await expect(
+						exportWithRealWriter({
+							providerSettingsManager: fakeProviderSettingsManager as never,
+							contextProxy: fakeContextProxy as never,
+						}),
+					).resolves.toBeUndefined()
+
+					// Nothing was published onto the link: the entry is still the link itself and the
+					// referent directory gained no payload.
+					expect((await fsActual.lstat(linkedPath)).isSymbolicLink()).toBe(true)
+					expect(await fsActual.readdir(referentDir)).toEqual([])
+					expect(showErrorMessageSpy).toHaveBeenCalledTimes(1)
+					const reported = consoleErrorSpy.mock.calls.find((call) => call[0] === "Failed to export settings:")
+					expect(reported).toBeDefined()
+					const reportedError = reported?.[1]
+					expect(showErrorMessageSpy).toHaveBeenCalledWith(
+						t("common:errors.settings_export_failed", {
+							error: reportedError instanceof Error ? reportedError.message : String(reportedError),
+						}),
+					)
+					expect(showErrorMessageSpy).toHaveBeenCalledWith(
+						expect.stringContaining("errors.settings_export_failed"),
+					)
+				}
+			} finally {
+				consoleErrorSpy.mockRestore()
+				showErrorMessageSpy.mockRestore()
+				for (const root of roots) {
+					await fsActual.rm(root, { recursive: true, force: true }).catch(() => {})
+				}
+				// Put the writer mock back and clear the registry so later rows keep the file's setup.
+				vi.doMock("../../../utils/safeWriteJson")
+				vi.resetModules()
+			}
+		})
+
+		// The route is awaited by webviewMessageHandler without a try, so a notification channel that
+		// fails must not turn the swallowed write failure into a rejection the webview never sees.
+		it("swallows a failing failure notification instead of rejecting the export route", async () => {
+			;(vscode.window.showSaveDialog as Mock).mockResolvedValue({
+				fsPath: "/mock/path/zoo-code-settings.json",
+			})
+			mockProviderSettingsManager.export.mockResolvedValue({
+				currentApiConfigName: "test",
+				apiConfigs: { test: { apiProvider: providerIdentifiers.openai, id: "test-id" } },
+				migrations: { rateLimitSecondsMigrated: false },
+			})
+			mockContextProxy.export.mockResolvedValue({ mode: "code" })
+
+			const refusal = new Error(
+				"safeWriteJson: refusing to write through the symlink at /mock/path/zoo-code-settings.json",
+			)
+			;(safeWriteJson as Mock).mockRejectedValueOnce(refusal)
+
+			const notificationFailure = new Error("Notification channel closed")
+			const showErrorMessageSpy = vi
+				.spyOn(vscode.window, "showErrorMessage")
+				.mockRejectedValueOnce(notificationFailure)
+			const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+			await expect(
+				exportSettings({
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+				}),
+			).resolves.toBeUndefined()
+
+			expect(consoleErrorSpy).toHaveBeenCalledWith("Failed to export settings:", refusal)
+			expect(showErrorMessageSpy).toHaveBeenCalledTimes(1)
+			expect(consoleErrorSpy).toHaveBeenCalledWith(
+				"Failed to notify the user about the export failure:",
+				notificationFailure,
+			)
+
+			showErrorMessageSpy.mockRestore()
+			consoleErrorSpy.mockRestore()
 		})
 
 		it("should handle errors during directory creation", async () => {
@@ -1771,10 +1973,14 @@ describe("importExport", () => {
 					contextProxy: mockContextProxy,
 				})
 
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings,
-				})
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings,
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should export model dimension for OpenAI Compatible provider", async () => {
@@ -1924,10 +2130,14 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should maintain backward compatibility with existing exports", async () => {
@@ -1967,10 +2177,14 @@ describe("importExport", () => {
 				})
 
 				// Should not modify settings for non-openai-compatible providers
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 
 			it("should handle missing current provider gracefully", async () => {
@@ -2012,10 +2226,14 @@ describe("importExport", () => {
 				})
 
 				// Should not throw an error and should preserve original settings
-				expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/zoo-code-settings.json", {
-					providerProfiles: mockProviderProfiles,
-					globalSettings: mockGlobalSettings, // Should remain unchanged
-				})
+				expect(safeWriteJson).toHaveBeenCalledWith(
+					"/mock/path/zoo-code-settings.json",
+					{
+						providerProfiles: mockProviderProfiles,
+						globalSettings: mockGlobalSettings, // Should remain unchanged
+					},
+					{ refuseSymlinkTarget: true },
+				)
 			})
 		})
 
@@ -2249,10 +2467,14 @@ describe("importExport", () => {
 			})
 
 			// Step 4: Verify the exported data includes the model dimension
-			expect(safeWriteJson).toHaveBeenCalledWith("/mock/path/test-settings.json", {
-				providerProfiles: mockProviderProfiles,
-				globalSettings: mockGlobalSettings,
-			})
+			expect(safeWriteJson).toHaveBeenCalledWith(
+				"/mock/path/test-settings.json",
+				{
+					providerProfiles: mockProviderProfiles,
+					globalSettings: mockGlobalSettings,
+				},
+				{ refuseSymlinkTarget: true },
+			)
 
 			// Step 5: Get the exported data for import test
 			const exportedData = (safeWriteJson as Mock).mock.calls[0][1]
