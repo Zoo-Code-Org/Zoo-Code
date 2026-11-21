@@ -9,6 +9,7 @@ import {
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
 	DEEP_SEEK_DEFAULT_TEMPERATURE,
+	DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS,
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPENAI_AZURE_AI_INFERENCE_PATH,
 	parseOpenAiExtraBody,
@@ -596,11 +597,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			| OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 		modelInfo: ModelInfo,
 	): void {
-		// Only add max_completion_tokens if includeMaxTokens is true
-		if (this.options.includeMaxTokens === true) {
+		// Unset means the default (checked in the UI); only an explicit false opts out
+		if (this.options.includeMaxTokens ?? DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS) {
 			// Use user-configured modelMaxTokens if available, otherwise fall back to model's default maxTokens
 			// Using max_completion_tokens as max_tokens is deprecated
-			requestOptions.max_completion_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
+			const maxTokens = this.options.modelMaxTokens || modelInfo.maxTokens
+			if (maxTokens) {
+				requestOptions.max_completion_tokens = maxTokens
+			}
 		}
 	}
 
