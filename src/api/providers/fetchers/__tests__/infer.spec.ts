@@ -112,6 +112,34 @@ describe("Infer model fetcher", () => {
 	})
 
 	it.each([
+		["omitted", undefined],
+		["zero", 0],
+	])("prices cache writes at the input rate when the cache-write rate is %s", async (_label, rate) => {
+		const overrides: Record<string, unknown> =
+			rate === undefined ? { cache_write_per_million_usd: undefined } : { cache_write_per_million_usd: rate }
+		mockCatalog([model("model-a", { "low-cost": route("infer/model-a:low-cost", overrides) })])
+
+		const models = await getInferModels()
+
+		expect(models["infer/model-a:low-cost"].cacheWritesPrice).toBe(2)
+	})
+
+	it("omits the cache-write price when the route publishes no prices", async () => {
+		mockCatalog([
+			model("model-a", {
+				"low-cost": route("infer/model-a:low-cost", {
+					input_per_million_usd: undefined,
+					cache_write_per_million_usd: undefined,
+				}),
+			}),
+		])
+
+		const models = await getInferModels()
+
+		expect(models["infer/model-a:low-cost"]).not.toHaveProperty("cacheWritesPrice")
+	})
+
+	it.each([
 		["balanced", "Balanced"],
 		["stable", "Stable"],
 		["future-route", "future-route"],

@@ -313,6 +313,28 @@ describe("InferHandler", () => {
 		},
 	)
 
+	it.each([
+		{
+			entry: "createMessage",
+			run: (h: InferHandler, signal: AbortSignal) =>
+				h.createMessage("system", messages, { taskId: "t", abortSignal: signal }).next(),
+		},
+		{
+			entry: "completePrompt",
+			run: (h: InferHandler, signal: AbortSignal) => h.completePrompt("ping", { abortSignal: signal }),
+		},
+	])("$entry stops waiting for a cold catalog when the caller aborts", async ({ run }) => {
+		vi.mocked(getModels).mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const handler = new InferHandler({ inferModelId: MODEL_ID })
+		const pending = run(handler, controller.signal)
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
 	it("does not send the OpenAI Compatible custom headers to the fixed endpoint", () => {
 		new InferHandler({ inferApiKey: "test-key", openAiHeaders: { "X-Custom-Header": "leaked" } })
 		expect(vi.mocked(OpenAI)).toHaveBeenCalledTimes(1)

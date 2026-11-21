@@ -130,7 +130,9 @@ export class InferHandler extends RouterProvider implements SingleCompletionHand
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		const { id: modelId, info } = await this.fetchModel()
+		// A cancelled task stops waiting for the catalog. The shared catalog fetch continues.
+		await this.ensureModelFetched(metadata?.abortSignal)
+		const { id: modelId, info } = this.getModel()
 
 		const openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
 			{ role: "system", content: systemPrompt },
@@ -206,7 +208,8 @@ export class InferHandler extends RouterProvider implements SingleCompletionHand
 	 * @throws Error with an Infer prefix if the request fails.
 	 */
 	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
-		const { id: modelId, info } = await this.fetchModel()
+		await this.ensureModelFetched(options?.abortSignal)
+		const { id: modelId, info } = this.getModel()
 
 		try {
 			// max_tokens is not sent, for the same reason as in createMessage.
