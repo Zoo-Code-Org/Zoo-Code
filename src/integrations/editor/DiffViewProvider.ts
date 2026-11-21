@@ -21,8 +21,38 @@ import { Task } from "../../core/task/Task"
 
 import { DecorationController } from "./DecorationController"
 
+/** Narrow ENOENT test so a rollback can tolerate a file or dir that never landed. */
+function isEnoent(error: unknown): boolean {
+	return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "ENOENT"
+}
+
+/**
+ * The approved document save reported failure: the content the user accepted never reached disk.
+ * Typed so the caller's failure handling can tell a failed write from an unrelated teardown error,
+ * and so a discarded boolean can never let the success bookkeeping run on a write that did not land.
+ */
+export class DocumentSaveFailedError extends Error {
+	constructor(absolutePath: string) {
+		super(
+			`Failed to save ${absolutePath}: the document save reported failure; the approved content is not on disk.`,
+		)
+		this.name = "DocumentSaveFailedError"
+	}
+}
+
 export const DIFF_VIEW_URI_SCHEME = "cline-diff"
 export const DIFF_VIEW_LABEL_CHANGES = "Original ↔ Zoo's Changes"
+
+/**
+ * What one save computed for its own edit: the patch the user typed into the diff view and the
+ * problems that showed up after that save. saveChanges() also parks this pair on the provider, and
+ * a retry or a second write on the same provider can park its own pair before the first save's
+ * report is serialized, so the report is built from the pair that travelled with the call.
+ */
+export interface WriteSaveResults {
+	newProblemsMessage: string | undefined
+	userEdits: string | undefined
+}
 
 // TODO: https://github.com/cline/cline/pull/3354
 export class DiffViewProvider {
@@ -31,8 +61,16 @@ export class DiffViewProvider {
 	userEdits?: string
 	editType?: "create" | "modify"
 	isEditing = false
+	// Set once saveChanges() has passed its commit point. revertChanges() must then stand
+	// down: the write is durable, and an abort-driven teardown must not restore the old
+	// content over it (or unlink a newly created file).
+	private writeCommitted = false
 	originalContent: string | undefined
 	private createdDirs: string[] = []
+	// Directories a caller (WriteToFileTool.execute) created before this transaction.
+	// open() folds them into createdDirs so revertChanges() removes them too: without
+	// them the caller's preflight mkdir left parent directories on disk after a rollback.
+	private adoptedCreatedDirs: string[] = []
 	private documentWasOpen = false
 	// Tracks whether the target file's tab was pinned before the diff session.
 	// Closing the tab to open the diff drops VS Code's pin state, so we restore
@@ -90,11 +128,21 @@ export class DiffViewProvider {
 		this.taskRef = new WeakRef(task)
 	}
 
+	/**
+	 * Record directories a caller created before this diff transaction so the rollback
+	 * removes them too. revertChanges() only deletes what createdDirs holds, and a
+	 * pre-created directory makes the provider's own mkdir return nothing.
+	 */
+	adoptCreatedDirs(createdDirs: string[]): void {
+		this.adoptedCreatedDirs.push(...createdDirs)
+	}
+
 	async open(relPath: string): Promise<void> {
 		this.relPath = relPath
 		const fileExists = this.editType === "modify"
 		const absolutePath = path.resolve(this.cwd, relPath)
 		this.isEditing = true
+		this.writeCommitted = false
 
 		// Capture the current scroll position before we close the tab so we can
 		// restore it after saving/reverting.
@@ -127,7 +175,7 @@ export class DiffViewProvider {
 
 		// For new files, create any necessary directories and keep track of new
 		// directories to delete if the user denies the operation.
-		this.createdDirs = await createDirectoriesForFile(absolutePath)
+		this.createdDirs = [...this.adoptedCreatedDirs, ...(await createDirectoriesForFile(absolutePath))]
 
 		// Make sure the file exists before we open it.
 		if (!fileExists) {
@@ -143,12 +191,19 @@ export class DiffViewProvider {
 		const tabs = vscode.window.tabGroups.all
 			.map((tg) => tg.tabs)
 			.flat()
-			.filter(
-				(tab) =>
-					tab.input instanceof vscode.TabInputText &&
-					tab.input.uri.scheme === "file" &&
-					arePathsEqual(tab.input.uri.fsPath, absolutePath),
-			)
+			.filter((tab) => {
+				// A new-file diff session's tab is a TabInputTextDiff, not a plain TabInputText:
+				// matching only the latter left the dirty diff document open when the user had no
+				// plain tab for the file, one save away from persisting the unapproved content.
+				const input = tab.input
+				if (input instanceof vscode.TabInputText) {
+					return input.uri.scheme === "file" && arePathsEqual(input.uri.fsPath, absolutePath)
+				}
+				if (input instanceof vscode.TabInputTextDiff) {
+					return input.modified.scheme === "file" && arePathsEqual(input.modified.fsPath, absolutePath)
+				}
+				return false
+			})
 
 		for (const tab of tabs) {
 			// Remember the pin state so we can restore it after the diff closes;
@@ -163,7 +218,12 @@ export class DiffViewProvider {
 					console.error(`Failed to close tab ${tab.label}`, err)
 				}
 			}
-			this.documentWasOpen = true
+			// Only a plain text tab means the file was open for the user: a TabInputTextDiff
+			// match is the previous diff session's own tab, and treating it as "was open"
+			// would make keepOrCloseEditedFile() open (and leave) a plain tab afterward.
+			if (tab.input instanceof vscode.TabInputText) {
+				this.documentWasOpen = true
+			}
 		}
 
 		// Snapshot unrelated preview tabs so we can restore them if opening the
@@ -326,6 +386,7 @@ export class DiffViewProvider {
 	async saveChanges(
 		diagnosticsEnabled: boolean = true,
 		writeDelayMs: number = DEFAULT_WRITE_DELAY_MS,
+		onCommit?: () => void,
 	): Promise<{
 		newProblemsMessage: string | undefined
 		userEdits: string | undefined
@@ -338,10 +399,38 @@ export class DiffViewProvider {
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 		const updatedDocument = this.activeDiffEditor.document
 		const editedContent = updatedDocument.getText()
+		// Capture the fields the continuation below reads, as editedContent is already captured. saveChanges
+		// awaits provider state twice, the tab closes, and the diagnostics window before it
+		// normalizes EOLs and builds the user-edits patch, and reset() can land inside any of
+		// those awaits: Task.ts resets the provider at the top of every new API attempt, and
+		// this tool resets it on its own teardown paths. Reading this.newContent or this.relPath
+		// after those awaits threw a TypeError for a write that had already saved and had
+		// already passed the commit point, and getNewDiagnostics compared against the empty
+		// list reset() installs, so every current problem looked new. Measured: interleaving
+		// reset() into the provider-state await throws
+		// "Cannot read properties of undefined (reading 'includes')" at the EOL line with
+		// document.save() already called once.
+		const newContentForEol = this.newContent
+		const relPathForPatch = this.relPath
+		const preDiagnosticsForCompare = this.preDiagnostics
 
 		if (updatedDocument.isDirty) {
-			await updatedDocument.save()
+			const saved = await updatedDocument.save()
+			// A save that reports false never landed: the buffer is still dirty and the file holds
+			// the previous content (or nothing for a new file). Throw before the commit point and
+			// before any success bookkeeping, so the caller keeps its rollback and the existing
+			// failure handling runs. A save that rejects still propagates as before.
+			if (!saved) {
+				throw new DocumentSaveFailedError(absolutePath)
+			}
 		}
+
+		// The write is irreversible from here: a clean document already matches disk, and a saved
+		// one has landed. Everything below (closing the diff views, tab bookkeeping, diagnostics)
+		// can still reject, and a caller that rolls the tool call back after this point would undo
+		// a write the user approved - so it is told, at the commit point rather than on return.
+		onCommit?.()
+		this.writeCommitted = true
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
 		// programmatic editor activation below.
@@ -407,7 +496,7 @@ export class DiffViewProvider {
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
 			const newProblems = await diagnosticsToProblemsString(
-				getNewDiagnostics(this.preDiagnostics, postDiagnostics),
+				getNewDiagnostics(preDiagnosticsForCompare, postDiagnostics),
 				[
 					vscode.DiagnosticSeverity.Error, // only including errors since warnings can be distracting (if user wants to fix warnings they can use the @problems mention)
 				],
@@ -422,18 +511,18 @@ export class DiffViewProvider {
 
 		// If the edited content has different EOL characters, we don't want to
 		// show a diff with all the EOL differences.
-		const newContentEOL = this.newContent.includes("\r\n") ? "\r\n" : "\n"
+		const newContentEOL = newContentForEol.includes("\r\n") ? "\r\n" : "\n"
 
 		// Normalize EOL characters without trimming content
 		const normalizedEditedContent = editedContent.replace(/\r\n|\n/g, newContentEOL)
 
 		// Just in case the new content has a mix of varying EOL characters.
-		const normalizedNewContent = this.newContent.replace(/\r\n|\n/g, newContentEOL)
+		const normalizedNewContent = newContentForEol.replace(/\r\n|\n/g, newContentEOL)
 
 		if (normalizedEditedContent !== normalizedNewContent) {
 			// User made changes before approving edit.
 			const userEdits = formatResponse.createPrettyPatch(
-				this.relPath.toPosix(),
+				relPathForPatch!.toPosix(),
 				normalizedNewContent,
 				normalizedEditedContent,
 			)
@@ -461,18 +550,33 @@ export class DiffViewProvider {
 	 * @param isNewFile Whether this is a new file or an existing file being modified
 	 * @returns Formatted message (JSON)
 	 */
-	async pushToolWriteResult(task: Task, cwd: string, isNewFile: boolean): Promise<string> {
+	async pushToolWriteResult(
+		task: Task,
+		cwd: string,
+		isNewFile: boolean,
+		// The results of the save whose call this reports, taken from that save rather than from the
+		// copies it parked on the provider: a retry or a second write on the same provider parks its own
+		// pair before this call runs, and the parked pair then describes a different edit.
+		savedResults?: WriteSaveResults,
+	): Promise<string> {
 		if (!this.relPath) {
 			throw new Error("No file path available in DiffViewProvider")
 		}
 
+		// The pair this report is about. When the caller handed one over, the report is scoped to that
+		// save; when it did not, the report falls back to the pair parked on the provider, which is the
+		// behaviour the tools that have not threaded a result yet depend on.
+		const userEdits = savedResults === undefined ? this.userEdits : savedResults.userEdits
+		const newProblemsMessage =
+			savedResults === undefined ? this.newProblemsMessage : savedResults.newProblemsMessage
+
 		// Only send user_feedback_diff if userEdits exists
-		if (this.userEdits) {
+		if (userEdits) {
 			// Create say object for UI feedback
 			const say: ClineSayTool = {
 				tool: isNewFile ? "newFileCreated" : "editedExistingFile",
 				path: getReadablePath(cwd, this.relPath),
-				diff: this.userEdits,
+				diff: userEdits,
 			}
 
 			// Send the user feedback
@@ -483,7 +587,7 @@ export class DiffViewProvider {
 		const notices = [
 			"You do not need to re-read the file, as you have seen all changes",
 			"Proceed with the task using these changes as the new baseline.",
-			...(this.userEdits
+			...(userEdits
 				? [
 						"If the user's edits have addressed part of the task or changed the requirements, adjust your approach accordingly.",
 					]
@@ -502,24 +606,54 @@ export class DiffViewProvider {
 			notice: notices.join(" "),
 		}
 
-		if (this.userEdits) {
-			result.user_edits = this.userEdits
+		if (userEdits) {
+			result.user_edits = userEdits
 		}
 
-		if (this.newProblemsMessage) {
-			result.problems = this.newProblemsMessage
+		if (newProblemsMessage) {
+			result.problems = newProblemsMessage
 		}
 
 		return JSON.stringify(result)
 	}
 
+	/**
+	 * Remove a file this edit created. Tolerates ENOENT: when open() failed before the
+	 * placeholder was written (or the write itself failed) there is nothing to delete, and
+	 * that must not abort the rollback.
+	 */
+	private async removeCreatedFile(absolutePath: string): Promise<void> {
+		try {
+			await fs.unlink(absolutePath)
+		} catch (error: unknown) {
+			if (!isEnoent(error)) {
+				throw error
+			}
+		}
+	}
+
+	/** Same tolerance for a directory this edit created that never made it to disk. */
+	private async removeCreatedDir(dirPath: string): Promise<void> {
+		try {
+			await fs.rmdir(dirPath)
+		} catch (error: unknown) {
+			if (!isEnoent(error)) {
+				throw error
+			}
+		}
+	}
+
 	async revertChanges(): Promise<void> {
-		if (!this.relPath || !this.activeDiffEditor) {
+		// Both guards are required. relPath survives a completed edit, so without isEditing a later
+		// teardown would take the new-file branch for the PREVIOUS edit's target and unlink an
+		// existing user file - permanently. isEditing alone is not enough: open() sets it before the
+		// first await, and that is exactly the state a failed open() leaves behind, where the
+		// placeholder and the created directories still have to be rolled back.
+		if (!this.relPath || !this.isEditing || this.writeCommitted) {
 			return
 		}
 
 		const fileExists = this.editType === "modify"
-		const updatedDocument = this.activeDiffEditor.document
 		const absolutePath = path.resolve(this.cwd, this.relPath)
 
 		// Stop tracking touches and cancel any pending scroll-to-diff before any
@@ -528,21 +662,56 @@ export class DiffViewProvider {
 		this.cancelDeferredScroll()
 
 		if (!fileExists) {
-			if (updatedDocument.isDirty) {
-				await updatedDocument.save()
+			// open() creates the parent directories and an empty placeholder file BEFORE it
+			// awaits openDiffEditor(). If that await rejects there is no activeDiffEditor, and
+			// the previous early return here left the placeholder and the new directories on
+			// disk: the next execute() then saw an empty file and treated the requested new file
+			// as an existing one, so a denial preserved the debris. The filesystem rollback runs
+			// either way; only the document work needs an editor.
+			if (this.activeDiffEditor) {
+				const updatedDocument = this.activeDiffEditor.document
+				if (updatedDocument.isDirty) {
+					// The buffer holds the streamed content of a write that was never approved. Saving
+					// it here persisted exactly what this rollback is undoing - local history, file
+					// watchers, and, if the delete below fails, the content itself. Discard the buffer
+					// (force-close the tab) instead; the file goes away a moment later anyway.
+					await this.discardFileTab(absolutePath)
+					await this.closeAllDiffViews()
+				} else {
+					await this.closeAllDiffViews()
+					// The file was newly created for this edit; close its transiently
+					// opened tab before deleting it from disk.
+					await this.closeFileTab(absolutePath)
+				}
 			}
 
-			await this.closeAllDiffViews()
-			// The file was newly created for this edit; close its transiently
-			// opened tab before deleting it from disk.
-			await this.closeFileTab(absolutePath)
-			await fs.unlink(absolutePath)
+			if (this.activeDiffEditor) {
+				await this.removeCreatedFile(absolutePath)
+			} else {
+				// open() failed before the diff editor existed, so the file is still the empty
+				// placeholder this edit created. Another process may have written the path in the
+				// meantime; an in-place write keeps the inode, so check the content instead and
+				// leave a non-empty file alone.
+				const stillEmptyPlaceholder = await fs
+					.stat(absolutePath)
+					.then((stats) => stats.size === 0)
+					.catch(() => false)
+				if (stillEmptyPlaceholder) {
+					await this.removeCreatedFile(absolutePath)
+				}
+			}
 
 			// Remove only the directories we created, in reverse order.
 			for (let i = this.createdDirs.length - 1; i >= 0; i--) {
-				await fs.rmdir(this.createdDirs[i])
+				await this.removeCreatedDir(this.createdDirs[i])
 			}
 		} else {
+			// Only reachable after a successful open(), so the editor exists.
+			const updatedDocument = this.activeDiffEditor?.document
+			if (!updatedDocument) {
+				return
+			}
+
 			// Revert document.
 			const edit = new vscode.WorkspaceEdit()
 
@@ -555,9 +724,42 @@ export class DiffViewProvider {
 
 			// Apply the edit and save, since contents shouldn't have changed
 			// this won't show in local history unless of course the user made
-			// changes and saved during the edit.
-			await vscode.workspace.applyEdit(edit)
-			await updatedDocument.save()
+			// changes and saved during the edit. applyEdit() resolves false when the workspace
+			// refused the edit and save() resolves false when the editor refused the save: both
+			// booleans were dropped, so a rollback whose restore never applied or whose save never
+			// landed was reported to the caller as a completed rollback. Capture each result the
+			// way the pre-stream restore and the refused close do, keep a rejection as the cause,
+			// and throw before any later bookkeeping so nothing proceeds on the assumption that
+			// the original content came back and reached disk.
+			let applied: boolean
+			let applyError: Error | undefined
+			try {
+				applied = await vscode.workspace.applyEdit(edit)
+			} catch (error) {
+				applied = false
+				applyError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!applied) {
+				throw new Error(
+					`Rollback could not restore the original content for ${absolutePath}; the workspace edit was not applied, so the document may still hold the unapproved content.`,
+					{ cause: applyError },
+				)
+			}
+
+			let saved: boolean
+			let saveError: Error | undefined
+			try {
+				saved = await updatedDocument.save()
+			} catch (error) {
+				saved = false
+				saveError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!saved) {
+				throw new Error(
+					`Rollback could not save the restored document for ${absolutePath}; the original content may not be on disk.`,
+					{ cause: saveError },
+				)
+			}
 
 			await this.closeAllDiffViews()
 
@@ -847,6 +1049,131 @@ export class DiffViewProvider {
 	// Close the plain (non-diff) editor tab for the target file. Used when the
 	// file was opened transiently for the diff and the user never interacted
 	// with it, so it should not linger after accept/deny.
+	/**
+	 * Close the tab for this path WITHOUT saving. Used by the new-file rollback, where the
+	 * buffer holds unapproved streamed content that must never reach disk; closeFileTab()
+	 * deliberately skips dirty tabs, so a dirty buffer needs the forced close.
+	 *
+	 * A close that fails or is refused is a rollback failure: the buffer would still hold the
+	 * content the user never approved, one save away from disk. Put the pre-stream content back
+	 * so nothing saveable survives, and propagate - the caller must not keep deleting around a
+	 * buffer it could not discard.
+	 */
+	private async discardFileTab(absolutePath: string): Promise<void> {
+		const tabs = vscode.window.tabGroups.all
+			.flatMap((group) => group.tabs)
+			.filter((tab) => {
+				const input = tab.input
+				if (input instanceof vscode.TabInputText) {
+					return input.uri.scheme === "file" && arePathsEqual(input.uri.fsPath, absolutePath)
+				}
+				// A composite diff tab for the same file counts too. The plain tab can be closed while
+				// the diff tab survives - the user closes it, or it was never opened separately -
+				// and TabInputTextDiff is not a TabInputText, so a text-only filter left the tab
+				// holding the unapproved content open while the rollback unlinked the file under it.
+				// closeAllDiffViews() will not take it either: it skips dirty tabs. This is the only
+				// place that can restore and close it before the unlink.
+				if (input instanceof vscode.TabInputTextDiff) {
+					return input.modified.scheme === "file" && arePathsEqual(input.modified.fsPath, absolutePath)
+				}
+				return false
+			})
+
+		for (const tab of tabs) {
+			// tabGroups.close()'s second argument is preserveFocus, not a force-discard flag: a
+			// dirty tab prompts or is refused, which is how unapproved streamed content survived a
+			// "forced" close. Restore the buffer to its pre-stream content and save it clean first,
+			// so close() never sees a dirty tab and nothing unapproved reaches disk. saveBufferClean
+			// reports a save that did not land, so a false there stops this loop before the close is
+			// attempted: the tab stays open on the restored buffer instead of being closed on a dirty
+			// one, and the caller keeps its failure instead of receiving a misattributed close error.
+			await this.restorePreStreamBuffer(absolutePath)
+			await this.saveBufferClean(absolutePath)
+
+			let closed: boolean
+			let closeError: Error | undefined
+			try {
+				closed = await vscode.window.tabGroups.close(tab)
+			} catch (error) {
+				closed = false
+				closeError = error instanceof Error ? error : new Error(String(error))
+			}
+			if (!closed) {
+				throw new Error(
+					`Rollback could not close the restored buffer for ${absolutePath}; its content was put back to the pre-stream state but the tab is still open.`,
+					{ cause: closeError },
+				)
+			}
+		}
+	}
+
+	/**
+	 * Replace an open buffer's content with what it held before streaming started. Runs before
+	 * the rollback closes the tab, so an unapproved buffer is never handed to close() dirty and
+	 * never survives a close that the editor vetoes. An edit the workspace did not apply is a
+	 * failed restore and throws, so the rollback cannot report success on a buffer that never
+	 * came back.
+	 */
+	private async restorePreStreamBuffer(absolutePath: string): Promise<void> {
+		const document = vscode.workspace.textDocuments.find(
+			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		if (!document) {
+			return
+		}
+		const edit = new vscode.WorkspaceEdit()
+		const range = new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length))
+		edit.replace(document.uri, range, this.originalContent ?? "")
+		// applyEdit() resolves false when the edit was not applied: the buffer would still hold the
+		// unapproved streamed content, and the save that follows would persist exactly what this
+		// rollback is undoing. Capture the result like the close below does, treat false as a
+		// failed restore, and throw before saveBufferClean runs so the caller keeps its failure.
+		// A rejection is kept as the cause.
+		let applied: boolean
+		let applyError: Error | undefined
+		try {
+			applied = await vscode.workspace.applyEdit(edit)
+		} catch (error) {
+			applied = false
+			applyError = error instanceof Error ? error : new Error(String(error))
+		}
+		if (!applied) {
+			throw new Error(
+				`Rollback could not restore the pre-stream buffer for ${absolutePath}; the workspace edit was not applied, so the buffer may still hold the unapproved content.`,
+				{ cause: applyError },
+			)
+		}
+	}
+
+	/**
+	 * Save a restored buffer so it is clean when the rollback closes it. close() has no
+	 * force-discard parameter, so a dirty tab would prompt or be refused; saving the restored
+	 * content is what makes the close unconditional. For a new file the placeholder is unlinked
+	 * a moment later, so the saved content is transient by design.
+	 *
+	 * The save result is read here, before the caller attempts the close, exactly as the
+	 * existing-file rollback reads it. A save that reports false never landed: the buffer is still
+	 * dirty, so the close would hand content the user never approved to the editor and the failure
+	 * the rollback reported would name the close rather than the save that failed. Reporting it
+	 * here stops this attempt before the close is tried: the tab is still open on the
+	 * restored-but-unsaved buffer when the error is raised, the rollback does not unlink the file
+	 * underneath it, and a later attempt may still close that tab. A save that rejects still
+	 * propagates as before.
+	 */
+	private async saveBufferClean(absolutePath: string): Promise<void> {
+		const document = vscode.workspace.textDocuments.find(
+			(document) => document.uri.scheme === "file" && arePathsEqual(document.uri.fsPath, absolutePath),
+		)
+		if (document?.isDirty) {
+			const saved = await document.save()
+			if (!saved) {
+				throw new Error(
+					`Rollback could not save the restored buffer for ${absolutePath}: the document save reported failure, so this attempt stopped before closing the tab, rather than closing on content the user never approved.`,
+				)
+			}
+		}
+	}
+
 	private async closeFileTab(absolutePath: string): Promise<void> {
 		const tabs = vscode.window.tabGroups.all
 			.flatMap((group) => group.tabs)
@@ -1110,10 +1437,14 @@ export class DiffViewProvider {
 		this.cancelDeferredScroll()
 
 		await this.closeAllDiffViews()
+		this.relPath = undefined
+		this.newContent = undefined
 		this.editType = undefined
 		this.isEditing = false
+		this.writeCommitted = false
 		this.originalContent = undefined
 		this.createdDirs = []
+		this.adoptedCreatedDirs = []
 		this.documentWasOpen = false
 		this.documentWasPinned = false
 		this.activeDiffEditor = undefined
