@@ -25,13 +25,21 @@ function signatureOf(toolCall: unknown): string | undefined {
 		: undefined
 }
 
-/**
- * Read the thought signature from `provider_specific_fields` of tool calls, the slot that
- * LiteLLM fills for Gemini. LiteLLM also embeds it in the tool call id, but the history
- * sanitizes ids, so the id copy does not survive.
- */
+/** Read proxy signatures before history sanitization changes the encoded ID. */
 export function readThoughtSignature(toolCalls: readonly unknown[] | null | undefined): string | undefined {
-	return toolCalls?.map(signatureOf).find((signature) => signature !== undefined)
+	let encoded: string | undefined
+	for (const call of toolCalls ?? []) {
+		const explicit = signatureOf(call)
+		if (explicit) return explicit
+		// A later call can carry an explicit field, which takes priority over the ID.
+		if (encoded !== undefined) continue
+		if (typeof call !== "object" || call === null || !("id" in call) || typeof call.id !== "string") continue
+		const marker = call.id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+		if (marker < 0) continue
+		const signature = call.id.slice(marker + LITELLM_THOUGHT_SIGNATURE_ID_MARKER.length)
+		if (signature) encoded = signature
+	}
+	return encoded
 }
 
 function collectThoughtSignatures(
@@ -86,14 +94,18 @@ export function applyThoughtSignatures(
 		if (message.role !== "assistant" || !message.tool_calls?.length) {
 			return message
 		}
-		return {
+		let signed = false
+		const toolCalls = message.tool_calls.map((toolCall) => {
+			const signature = storedSignatures.get(toolCall.id) ?? fallback?.(toolCall.id)
+			signed ||= Boolean(signature)
+			return signature ? { ...toolCall, provider_specific_fields: { thought_signature: signature } } : toolCall
+		})
+		const result: OpenAI.Chat.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
 			...message,
-			tool_calls: message.tool_calls.map((toolCall) => {
-				const signature = storedSignatures.get(toolCall.id) ?? fallback?.(toolCall.id)
-				return signature
-					? { ...toolCall, provider_specific_fields: { thought_signature: signature } }
-					: toolCall
-			}),
+			tool_calls: toolCalls,
 		}
+		// LiteLLM can turn this text into an unsigned Gemini thought part.
+		if (signed) delete result.reasoning_content
+		return result
 	})
 }

@@ -55,6 +55,48 @@
 \* Review: 2 covered, 1 added, 5 gap, 2 on the spec files (PR 2119). See the list below Rejected.
 \* The first version came after the code and the reviews. It is not an independent first pass.
 
+\* Issue 2304 first pass: expect an ID-only response to lose its signature.
+\* SignatureDelivered must cover minted signatures absent from provider fields.
+\* Replay: readThoughtSignature and OpenAiHandler.createMessage. Sink: applyThoughtSignatures.
+\* Expected: IdOnly fails SignatureDelivered. Replay: three ID-only reader cases fail on the old code.
+\* Result: fixed passes (507 states). All 14 variants fail. IdOnly fails with 24 states.
+\* Live replay: Gemini 3.8 Flash accepts the preserved signature (200) and rejects corrupt bytes (400).
+\* Live replay also accepts the bypass (200). The issue claim that Vertex always rejects it did not hold.
+\* Live scope: the native Vertex endpoint received a 420-character signature from gemini-3.8-flash.
+\* Replay mapped the converted provider field back to a Vertex function-call part. No LiteLLM gateway was tested.
+\* Handler tests check the OpenAI and LiteLLM request contracts. gemini-2.5-flash returned 404 on this endpoint.
+\* Saved signatures already corrupted by ID sanitization cannot be recovered. Preserve original bytes before storage.
+\* Keep OpenAI Responses ID limits and unsigned provider reasoning. Do not replace valid signatures with a bypass.
+\* Google contract: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures
+\* Cache tuning is separate. Normal turns append environment details. Resume can refresh the latest user message.
+\* Keep global time and cost defaults. This change does not assess cache performance.
+\* Validation before refactor: 590 tests in five suites passed, including history storage and ID validation.
+\* Validation after refactor: 552 tests in three provider suites passed. Types and lint passed. Suppression counts stayed equal.
+\* Property: thought-signature.spec.ts, proxy signature round trip property (40 source/sink cases).
+\* Cost: about 8 agent minutes through live replay. Each TLC config takes under 2 seconds.
+\* Code sabotage: retaining reasoning_content fails all 40 property cases. The guard was then restored.
+\* Null result: the fixed model found no further failure within this domain.
+\* Scope: the proxy backends share the signature contract. Existing bypass rules model LiteLLM only.
+\* Scope: ID bytes and fragmented ID streams remain outside the model. The property checks complete IDs.
+\* Review: 0 covered, 0 added, 0 gap. No external review was read for this change.
+
+\* Reader simplification: expect no new failure. A later explicit field must beat an earlier encoded ID.
+\* Invariant: SignatureSourcePriority. Sabotage: prefer the encoded candidate over an explicit field.
+\* Source: readThoughtSignature receives tool_calls. Sink: its returned signature enters history.
+\* Refactor result: fixed holds (507 states). All 15 variants fail, including EncodedFirst.
+\* Replay: encoded-first code sabotage fails the later-explicit-field test. The fixed reader passes.
+\* Null result: the reader refactor found no new behavior failure. No speed gain was measured.
+\* Refactor cost: about 3 agent minutes. Each TLC config takes under 2 seconds.
+
+\* Main rebase expectation: retain request signature reset before Responses API dispatch.
+\* Failure: a new request exposes a signature from the prior request. NoReset covers this failure.
+\* Keep getReasoningDetails and both thought-signature accessors after the merge.
+\* Model limit: Responses API dispatch is outside this model. Handler tests check that path.
+\* Rebase result: fixed holds (507 states). All 15 sabotage variants fail as expected.
+\* Property and handler checks: 863 tests pass in three suites. Types and lint pass. Suppression counts stay equal.
+\* Null result: the existing model found no new failure. No external review was read.
+\* Rebase cost: about 3 agent minutes. TLC needs a local socket outside the sandbox.
+
 EXTENDS Naturals, Sequences
 
 VARIABLE history   \* One assistant message per turn. Each message has the fields of Message.
@@ -92,7 +134,7 @@ Real(s) == s.by \in Backends
 \* getThoughtSignatureOrigin of the handler that streamed the message. Native Gemini stores none.
 StoredOrigin(m) == IF LiteLlm(m.by) /\ Real(m.sig) THEN Origin(m.by) ELSE "none"
 Sigs == {None, Bypass} \cup [by : Backends, step : Nat \ {0}]
-Message == [by : Backends, n : 1..2, marker : BOOLEAN, sig : Sigs]
+Message == [by : Backends, n : 1..2, marker : BOOLEAN, minted : BOOLEAN, sig : Sigs]
 
 TypeOK == history \in Seq(Message)
 
@@ -103,13 +145,17 @@ Captured(t, k, minted) == IF minted THEN [by |-> t, step |-> k] ELSE None
 
 \* A turn on backend t returns n tool calls. A Gemini backend can sign the first call.
 \* LiteLLM then also writes the signature into the id of that call, after __thought__.
-Turn(t, n, minted) ==
+CaptureFromId == TRUE
+
+Turn(t, n, minted, idOnly) ==
     LET k == Len(history) + 1
     IN /\ minted => RunsGemini(t)
        /\ history' = Append(history, [by |-> t, n |-> n, marker |-> minted /\ LiteLlm(t),
-                                      sig |-> Captured(t, k, minted)])
+                                      minted |-> minted,
+                                      sig |-> IF idOnly /\ LiteLlm(t) /\ ~CaptureFromId THEN None
+                                              ELSE Captured(t, k, minted)])
 
-Next == \E t \in Backends, n \in 1..2, minted \in BOOLEAN : Turn(t, n, minted)
+Next == \E t \in Backends, n \in 1..2, minted \in BOOLEAN, idOnly \in BOOLEAN : Turn(t, n, minted, idOnly)
 Spec == Init /\ [][Next]_history
 
 \* applyThoughtSignatures sends a stored signature only to the backend that minted it.
@@ -153,6 +199,20 @@ Rejected(t, listed, k, i) ==
 \* Round 3 comes from a web search for best practice (BerriAI/litellm#19739, vercel/ai#15550).
 \* Round 4 comes from the simplify pass. A property must constrain the result, not only reject a crash.
 
+\* applyThoughtSignatures omits unsigned reasoning text when it attaches a signature.
+EchoSignedReasoning == FALSE
+ReasoningSent(t, listed, k) == EchoSignedReasoning /\ Sent(t, listed, k, 1) # None
+NoUnsignedThought ==
+    \A t \in Backends, listed \in Listed, k \in 1..Len(history) : ~ReasoningSent(t, listed, k)
+
+\* Candidate values are oracles for fields and ID suffixes, including no signature.
+PreferExplicit == TRUE
+SelectedSignature(field, encoded) ==
+    IF field # None /\ PreferExplicit THEN field ELSE IF encoded # None THEN encoded ELSE field
+SignatureSourcePriority == Len(history) > 0 =>
+    \A field, encoded \in {None, [by |-> "g1", step |-> 1], [by |-> "g2", step |-> 1]} :
+        SelectedSignature(field, encoded) = (IF field # None THEN field ELSE encoded)
+
 \* Safety: no backend rejects a tool call in the history.
 NoRejectedCall ==
     \A t \in Backends, listed \in Listed, k \in 1..Len(history) :
@@ -166,6 +226,7 @@ NoCorruptIdDecode ==
 \* Safety: a LiteLLM backend gets back the signature it minted, on the first call of that message.
 SignatureDelivered ==
     \A t \in Backends, listed \in BOOLEAN, k \in 1..Len(history) :
-        LiteLlm(t) /\ history[k].by = t /\ Real(history[k].sig) => Sent(t, listed, k, 1) = history[k].sig
+        LiteLlm(t) /\ history[k].by = t /\ history[k].minted =>
+            Sent(t, listed, k, 1) = [by |-> t, step |-> k]
 
 ====

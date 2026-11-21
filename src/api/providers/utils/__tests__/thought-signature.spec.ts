@@ -1,5 +1,9 @@
 import OpenAI from "openai"
 
+import { convertToR1Format } from "../../../transform/r1-format"
+import { convertToOpenAiMessages } from "../../../transform/openai-format"
+import { sanitizeToolUseId } from "../../../../utils/tool-id"
+import { toolResultsMessage } from "../../../../test-utils/thought-signature"
 import { sanitizeOpenAiCallId } from "../../../../utils/tool-id"
 import { signedAssistantMessage, TEST_THOUGHT_SIGNATURE as signature } from "../../../../test-utils/thought-signature"
 import { applyThoughtSignatures, readThoughtSignature, thoughtSignatureOrigin } from "../thought-signature"
@@ -30,8 +34,39 @@ describe("readThoughtSignature", () => {
 		expect(readThoughtSignature(toolCalls)).toBe(signature)
 	})
 
+	it.each([64, 200, 2000])("preserves an ID-only signature of length %i", (length) => {
+		const signature = "+/Aa".repeat(length / 4) + "=="
+		expect(readThoughtSignature([{ id: `call_1__thought__${signature}` }])).toBe(signature)
+	})
+
+	it("prefers explicit fields over the encoded ID", () => {
+		expect(
+			readThoughtSignature([
+				{ id: "call_1__thought__old", provider_specific_fields: { thought_signature: "real" } },
+			]),
+		).toBe("real")
+	})
+
+	it.each([
+		{
+			calls: [
+				{ id: "call_1__thought__encoded" },
+				{ provider_specific_fields: { thought_signature: "explicit" } },
+			],
+			expected: "explicit",
+		},
+		{ calls: [{ id: "call_1__thought__first" }, { id: "call_2__thought__second" }], expected: "first" },
+		{ calls: [{ id: "call_1__thought__" }, { id: "call_2__thought__second" }], expected: "second" },
+	])("selects $expected from ordered signature sources", ({ calls, expected }) => {
+		expect(readThoughtSignature(calls)).toBe(expected)
+	})
+
 	it.each([
 		["no tool calls", undefined],
+		["a null call", [null]],
+		["a non-string ID", [{ id: 42 }]],
+		["an unsigned ID", [{ id: "call_1" }]],
+		["an empty encoded signature", [{ id: "call_1__thought__" }]],
 		["null tool calls", null],
 		["no provider_specific_fields", [{ index: 0 }]],
 		["an empty signature", [{ index: 0, provider_specific_fields: { thought_signature: "" } }]],
@@ -152,5 +187,55 @@ describe("applyThoughtSignatures", () => {
 		]
 
 		expect(applyThoughtSignatures([], messages, { origin, fallback: () => bypass })).toEqual(messages)
+	})
+})
+
+describe("proxy signature round trip property", () => {
+	const cases = [1, 16, 64, 200, 2000].flatMap((length) =>
+		[false, true].flatMap((explicit) =>
+			[false, true].flatMap((truncate) => [false, true].map((r1) => ({ length, explicit, truncate, r1 }))),
+		),
+	)
+	it.each(cases)(
+		"delivers signature length=$length explicit=$explicit truncate=$truncate r1=$r1",
+		({ length, explicit, truncate, r1 }) => {
+			const normalizeToolCallId = truncate ? sanitizeOpenAiCallId : (id: string) => id
+			const signature = "+/Aa".repeat(length) + "=="
+			const id = `call_1__thought__${signature}`
+			const received = readThoughtSignature([
+				{ id, ...(explicit ? { provider_specific_fields: { thought_signature: signature } } : {}) },
+			])
+			expect(received).toBe(signature)
+			const storedId = sanitizeToolUseId(id)
+			const history = [
+				signedAssistantMessage([storedId], {
+					signature: received,
+					origin,
+					leadingBlocks: [{ type: "reasoning", text: "unsigned" }],
+				}),
+				toolResultsMessage([storedId]),
+			]
+			const request = applyThoughtSignatures(
+				history,
+				(r1 ? convertToR1Format : convertToOpenAiMessages)(history, { normalizeToolCallId }),
+				{
+					origin,
+					normalizeToolCallId,
+				},
+			)
+			expect(request[0]).toMatchObject({ tool_calls: [signed(normalizeToolCallId(storedId), signature)] })
+			expect(request[0]).not.toHaveProperty("reasoning_content")
+			expect(request[1]).toMatchObject({ tool_call_id: normalizeToolCallId(storedId) })
+		},
+	)
+
+	it("keeps unsigned provider reasoning", () => {
+		const message = {
+			role: "assistant" as const,
+			content: "",
+			tool_calls: [toolCall("call_1")],
+			reasoning_content: "DeepSeek reasoning",
+		}
+		expect(applyThoughtSignatures([], [message], { origin })).toEqual([message])
 	})
 })

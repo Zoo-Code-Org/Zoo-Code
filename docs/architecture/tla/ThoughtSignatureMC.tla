@@ -2,6 +2,13 @@
 \* Model-checking settings and variants for ThoughtSignature. Each config replaces operators with these.
 EXTENDS ThoughtSignature
 
+\* Issue 2304: the old reader ignores a signature present only in the ID.
+IgnoreId == FALSE
+\* Reader sabotage: an encoded ID wins over a later explicit field.
+EncodedFirst == FALSE
+\* Issue 2304: remove the guard that omits unsigned reasoning.
+EchoUnsigned == TRUE
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 

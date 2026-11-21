@@ -688,6 +688,29 @@ describe("LiteLLMHandler", () => {
 					expect(handler.getThoughtSignatureOrigin()).toBe(thoughtSignatureOrigin(endpoint, "gemini-3-pro"))
 				})
 
+				it("captures a signature sent only in the tool call ID", async () => {
+					useModel("gemini-3-pro")
+					mockStream([
+						{
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{
+												index: 0,
+												id: `call_1__thought__${TEST_THOUGHT_SIGNATURE}`,
+												function: { name: "read_file", arguments: "{}" },
+											},
+										],
+									},
+								},
+							],
+						},
+					])
+					await collectStream(handler.createMessage("system", [], metadata))
+					expect(handler.getThoughtSignature()).toBe(TEST_THOUGHT_SIGNATURE)
+				})
+
 				it("captures the signature from a streamed tool call and resets it per request", async () => {
 					useModel("gemini-3-pro")
 					mockStream(signedToolCallStream)

@@ -39,6 +39,7 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
+import { applyThoughtSignatures, readThoughtSignature, thoughtSignatureOrigin } from "./utils/thought-signature"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import {
 	bridgeExternalAbortSignal,
@@ -74,6 +75,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected options: ApiHandlerOptions
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
+	private lastThoughtSignature: string | undefined
+	private signatureOrigin: string | undefined
 	private readonly extraBody: Record<string, unknown>
 	private responsesReasoning: OpenAI.Responses.ResponseReasoningItem[] = []
 
@@ -144,6 +147,11 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		this.lastThoughtSignature = undefined
+		this.signatureOrigin = thoughtSignatureOrigin(
+			this.options.openAiBaseUrl || "https://api.openai.com/v1",
+			this.options.openAiModelId ?? "",
+		)
 		const modelId = this.options.openAiModelId ?? ""
 		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
 		// OpenAI deployments of reasoning models behind corporate gateways) reject
@@ -237,7 +245,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 					(this.options.modelTemperature != null || deepseekReasoner) && {
 						temperature: this.options.modelTemperature ?? DEEP_SEEK_DEFAULT_TEMPERATURE,
 					}),
-				messages: convertedMessages,
+				messages: applyThoughtSignatures(messages, convertedMessages, { origin: this.signatureOrigin }),
 				stream: true as const,
 				...(isGrokXAI ? {} : { stream_options: { include_usage: true } }),
 				...(reasoning && reasoning),
@@ -275,6 +283,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			for await (const chunk of stream) {
 				const delta = chunk.choices?.[0]?.delta ?? {}
 				const finishReason = chunk.choices?.[0]?.finish_reason
+				this.lastThoughtSignature ??= readThoughtSignature(delta.tool_calls)
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
@@ -314,6 +323,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
 			}
 
+			requestOptions.messages = applyThoughtSignatures(messages, requestOptions.messages, {
+				origin: this.signatureOrigin,
+			})
 			// Add max_tokens if needed
 			this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 			requestOptions = this.withExtraBody(requestOptions)
@@ -329,6 +341,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			const message = response.choices?.[0]?.message
+			this.lastThoughtSignature = readThoughtSignature(message?.tool_calls)
 
 			if (message?.tool_calls) {
 				for (const toolCall of message.tool_calls) {
@@ -442,6 +455,14 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			provider: providerIdentifiers.openai,
 			endpoint,
 		}))
+	}
+
+	getThoughtSignature(): string | undefined {
+		return this.lastThoughtSignature
+	}
+
+	getThoughtSignatureOrigin(): string | undefined {
+		return this.signatureOrigin
 	}
 
 	protected processUsageMetrics(usage: OpenAiUsage, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
