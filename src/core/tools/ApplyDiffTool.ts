@@ -13,6 +13,8 @@ import { RecordSource } from "../context-tracking/FileContextTrackerTypes"
 import { unescapeHtmlEntities } from "../../utils/text-normalization"
 import { EXPERIMENT_IDS, experiments } from "../../shared/experiments"
 import { computeDiffStats, sanitizeUnifiedDiff } from "../diff/stats"
+import { versionTokenOfStat } from "../../utils/versionToken"
+import { canonicalizeForApproval } from "./guardedWrite"
 import type { DiffResult, ToolUse } from "../../shared/tools"
 
 import { BaseTool, ToolCallbacks } from "./BaseTool"
@@ -74,7 +76,30 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				return
 			}
 
+			// The read below is the version this patch was computed against, so it doubles as the
+			// observation the guarded publish compares against. Without it, an apply_diff against a
+			// file the model never opened is an unobserved edit and the guard refuses the approved
+			// patch; with a token for a version the model never saw, the publish would overwrite a
+			// newer file without the re-read remediation. Observe only when the two stats agree, so
+			// the token describes one unchanged version. Incomplete on purpose: the model has seen
+			// only the patch's hunks, so this read must not become authority for a later full-file
+			// replacement. A prior observation is carried - partial stays partial, complete stays
+			// complete - only while it still describes the version that was read; an older one is
+			// left exactly as the model earned it. Same policy as ApplyPatchTool's hunk read.
+			const preReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
 			const originalContent: string = await fs.readFile(absolutePath, "utf-8")
+			const postReadStats = await fs.stat(absolutePath, { bigint: true }).catch(() => undefined)
+			if (preReadStats && postReadStats) {
+				const preReadToken = versionTokenOfStat(preReadStats)
+				if (preReadToken === versionTokenOfStat(postReadStats)) {
+					const prior = task.observationRegistry.get(absolutePath)
+					if (prior === undefined) {
+						task.observationRegistry.observe(absolutePath, preReadToken, false)
+					} else if (prior.version === preReadToken) {
+						task.observationRegistry.observe(absolutePath, preReadToken, prior.complete === true)
+					}
+				}
+			}
 
 			// Apply the diff to the original content
 			const diffResult = (await task.diffStrategy?.applyDiff(
@@ -140,6 +165,11 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 			// Check if file is write-protected
 			const isWriteProtected = task.rooProtectedController?.isWriteProtected(relPath) || false
 			const isOutsideWorkspace = isPathOutsideWorkspace(absolutePath)
+			// Bound an approved outside-workspace write to the identity the user actually saw,
+			// captured before the approval, as every other write tool on this chain does.
+			const approvedCanonicalTarget = isOutsideWorkspace
+				? await canonicalizeForApproval(absolutePath, relPath)
+				: undefined
 
 			const sharedMessageProps: ClineSayTool = {
 				tool: "appliedDiff",
@@ -186,6 +216,14 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 					false,
 					diagnosticsEnabled,
 					writeDelayMs,
+					// apply_diff patches a file that already exists, so this publish is a targeted edit:
+					// the edit guard accepts the observation this tool just recorded for its own read.
+					"edit",
+					// Seventh parameter is completeOverride (this call claims no completeness of its
+					// own); the eighth is the approval flag for a target outside every workspace root.
+					undefined,
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
 				)
 			} else {
 				// Original behavior with diff view
@@ -225,7 +263,16 @@ export class ApplyDiffTool extends BaseTool<"apply_diff"> {
 				}
 
 				// Call saveChanges to update the DiffViewProvider properties
-				await task.diffViewProvider.saveChanges(diagnosticsEnabled, writeDelayMs)
+				// The diff-view save is the same targeted hunk as the guarded save on the other arm:
+				// it must select the same edit guard, otherwise a partial read is rejected and the
+				// approved patch is thrown away.
+				await task.diffViewProvider.saveChanges(
+					diagnosticsEnabled,
+					writeDelayMs,
+					"edit",
+					isOutsideWorkspace,
+					approvedCanonicalTarget,
+				)
 			}
 
 			// Track file edit operation
