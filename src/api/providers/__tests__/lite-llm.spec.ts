@@ -1,8 +1,20 @@
 import OpenAI from "openai"
 import { Anthropic } from "@anthropic-ai/sdk"
 
+import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
+
 import { LiteLLMHandler } from "../lite-llm"
 import { getModels } from "../fetchers/modelCache"
+import { prepareApiConversationMessage } from "../../../core/task/apiConversationHistory"
+import { sanitizeToolUseId } from "../../../utils/tool-id"
+import {
+	SANITIZED_LITELLM_TOOL_CALL_ID,
+	TEST_THOUGHT_SIGNATURE,
+	signedAssistantMessage,
+	sentToolCalls,
+	toolResultsMessage,
+} from "../../../test-utils/thought-signature"
+import { thoughtSignatureOrigin } from "../utils/thought-signature"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { type ModelInfo, type ModelRecord, litellmDefaultModelId, litellmDefaultModelInfo } from "@roo-code/types"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
@@ -541,182 +553,6 @@ describe("LiteLLMHandler", () => {
 	})
 
 	describe("Gemini thought signature injection", () => {
-		describe("isGeminiModel detection", () => {
-			it("should detect Gemini 3 models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("gemini-3-flash")).toBe(true)
-				expect(isGeminiModel("gemini-3-pro-preview")).toBe(true)
-			})
-
-			it("should detect Gemini 2.5 models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gemini-2.5-pro")).toBe(true)
-				expect(isGeminiModel("gemini-2.5-flash")).toBe(true)
-			})
-
-			it("should detect Gemini models with spaces (LiteLLM model groups)", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				// LiteLLM model groups often use space-separated names with title case
-				expect(isGeminiModel("Gemini 3 Pro")).toBe(true)
-				expect(isGeminiModel("Gemini 3 Flash")).toBe(true)
-				expect(isGeminiModel("gemini 3 pro")).toBe(true)
-				expect(isGeminiModel("Gemini 2.5 Pro")).toBe(true)
-				expect(isGeminiModel("gemini 2.5 flash")).toBe(true)
-			})
-
-			it("should detect provider-prefixed Gemini models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("google/gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("vertex_ai/gemini-3-pro")).toBe(true)
-				expect(isGeminiModel("vertex/gemini-2.5-pro")).toBe(true)
-				// Space-separated variants with provider prefix
-				expect(isGeminiModel("google/gemini 3 pro")).toBe(true)
-				expect(isGeminiModel("vertex_ai/gemini 2.5 pro")).toBe(true)
-			})
-
-			it("should not detect non-Gemini models", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const isGeminiModel = (handler as any).isGeminiModel.bind(handler)
-
-				expect(isGeminiModel("gpt-4")).toBe(false)
-				expect(isGeminiModel("claude-3-opus")).toBe(false)
-				expect(isGeminiModel("gemini-1.5-pro")).toBe(false)
-				expect(isGeminiModel("gemini-2.0-flash")).toBe(false)
-			})
-		})
-
-		describe("injectThoughtSignatureForGemini", () => {
-			// Base64 encoded "skip_thought_signature_validator"
-			const dummySignature = Buffer.from("skip_thought_signature_validator").toString("base64")
-
-			it("should inject provider_specific_fields.thought_signature for assistant messages with tool_calls", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const injectThoughtSignature = (handler as any).injectThoughtSignatureForGemini.bind(handler)
-
-				const messages = [
-					{ role: "user", content: "Hello" },
-					{
-						role: "assistant",
-						content: "",
-						tool_calls: [
-							{ id: "call_123", type: "function", function: { name: "test_tool", arguments: "{}" } },
-						],
-					},
-					{ role: "tool", tool_call_id: "call_123", content: "result" },
-				]
-
-				const result = injectThoughtSignature(messages)
-
-				// The first tool call should have provider_specific_fields.thought_signature injected
-				expect(result[1].tool_calls[0].provider_specific_fields).toBeDefined()
-				expect(result[1].tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
-			})
-
-			it("should not inject if assistant message has no tool_calls", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const injectThoughtSignature = (handler as any).injectThoughtSignatureForGemini.bind(handler)
-
-				const messages = [
-					{ role: "user", content: "Hello" },
-					{ role: "assistant", content: "Hi there!" },
-				]
-
-				const result = injectThoughtSignature(messages)
-
-				// No changes should be made
-				expect(result[1].tool_calls).toBeUndefined()
-			})
-
-			it("should always overwrite existing thought_signature", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const injectThoughtSignature = (handler as any).injectThoughtSignatureForGemini.bind(handler)
-
-				const existingSignature = "existing_signature_base64"
-
-				const messages = [
-					{ role: "user", content: "Hello" },
-					{
-						role: "assistant",
-						content: "",
-						tool_calls: [
-							{
-								id: "call_123",
-								type: "function",
-								function: { name: "test_tool", arguments: "{}" },
-								provider_specific_fields: { thought_signature: existingSignature },
-							},
-						],
-					},
-				]
-
-				const result = injectThoughtSignature(messages)
-
-				// Should overwrite with dummy signature (always inject to ensure compatibility)
-				expect(result[1].tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
-			})
-
-			it("should inject signature into ALL tool calls for parallel calls", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const injectThoughtSignature = (handler as any).injectThoughtSignatureForGemini.bind(handler)
-
-				const messages = [
-					{ role: "user", content: "Hello" },
-					{
-						role: "assistant",
-						content: "",
-						tool_calls: [
-							{ id: "call_first", type: "function", function: { name: "tool1", arguments: "{}" } },
-							{ id: "call_second", type: "function", function: { name: "tool2", arguments: "{}" } },
-							{ id: "call_third", type: "function", function: { name: "tool3", arguments: "{}" } },
-						],
-					},
-				]
-
-				const result = injectThoughtSignature(messages)
-
-				// ALL tool calls should have the signature
-				expect(result[1].tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
-				expect(result[1].tool_calls[1].provider_specific_fields.thought_signature).toBe(dummySignature)
-				expect(result[1].tool_calls[2].provider_specific_fields.thought_signature).toBe(dummySignature)
-			})
-
-			it("should preserve existing provider_specific_fields when adding thought_signature", () => {
-				const handler = new LiteLLMHandler(mockOptions)
-				const injectThoughtSignature = (handler as any).injectThoughtSignatureForGemini.bind(handler)
-
-				const messages = [
-					{ role: "user", content: "Hello" },
-					{
-						role: "assistant",
-						content: "",
-						tool_calls: [
-							{
-								id: "call_123",
-								type: "function",
-								function: { name: "test_tool", arguments: "{}" },
-								provider_specific_fields: { other_field: "value" },
-							},
-						],
-					},
-				]
-
-				const result = injectThoughtSignature(messages)
-
-				// Should have both existing field and new thought_signature
-				expect(result[1].tool_calls[0].provider_specific_fields.other_field).toBe("value")
-				expect(result[1].tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
-			})
-		})
-
 		describe("createMessage integration with Gemini models", () => {
 			// Base64 encoded "skip_thought_signature_validator"
 			const dummySignature = Buffer.from("skip_thought_signature_validator").toString("base64")
@@ -790,6 +626,376 @@ describe("LiteLLMHandler", () => {
 				// First tool call should have the thought signature
 				expect(assistantMessage.tool_calls[0].provider_specific_fields).toBeDefined()
 				expect(assistantMessage.tool_calls[0].provider_specific_fields.thought_signature).toBe(dummySignature)
+			})
+
+			describe("real thought signature round trip", () => {
+				const origin = thoughtSignatureOrigin("http://localhost:4000", "gemini-3-pro")
+				const metadata = makeCreateMessageMetadata({
+					tools: [
+						{
+							type: "function",
+							function: { name: "read_file", description: "Read a file", parameters: {} },
+						},
+					],
+				})
+
+				function mockStream(chunks: unknown[]) {
+					mockCreate.mockReturnValue({
+						withResponse: vi.fn().mockResolvedValue({ data: asyncStreamFrom(chunks) }),
+					})
+				}
+
+				function useModel(id: string, info: Partial<ModelInfo> = {}, listed = true) {
+					const modelInfo = { ...litellmDefaultModelInfo, ...info }
+					vi.spyOn(handler, "fetchModel").mockResolvedValue({ id, info: modelInfo })
+					handler["models"] = listed ? { [id]: modelInfo } : {}
+				}
+
+				const signedToolCallStream = [
+					{ choices: [{ delta: { content: "Reading the file." } }] },
+					{
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											id: `call_1__thought__${TEST_THOUGHT_SIGNATURE}`,
+											function: { name: "read_file", arguments: "" },
+											provider_specific_fields: { thought_signature: TEST_THOUGHT_SIGNATURE },
+										},
+									],
+								},
+							},
+						],
+					},
+					{ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '{"path":' } }] } }] },
+					{ choices: [{ delta: { tool_calls: [{ index: 0, function: { arguments: '"a.ts"}' } }] } }] },
+					{ choices: [{ delta: {} }], usage: { prompt_tokens: 1, completion_tokens: 1 } },
+				]
+
+				it.each([
+					["a configured base URL", "http://gateway:4000", "http://gateway:4000"],
+					["no base URL", undefined, "http://localhost:4000"],
+				])("names the origin and the client endpoint from %s", async (_case, litellmBaseUrl, endpoint) => {
+					handler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl })
+					useModel("gemini-3-pro")
+					mockStream(signedToolCallStream)
+
+					await collectStream(handler.createMessage("system", [{ role: "user", content: "Hi" }], metadata))
+
+					expect(vi.mocked(OpenAI)).toHaveBeenLastCalledWith(expect.objectContaining({ baseURL: endpoint }))
+					expect(handler.getThoughtSignatureOrigin()).toBe(thoughtSignatureOrigin(endpoint, "gemini-3-pro"))
+				})
+
+				it("captures the signature from a streamed tool call and resets it per request", async () => {
+					useModel("gemini-3-pro")
+					mockStream(signedToolCallStream)
+
+					await collectStream(handler.createMessage("system", [{ role: "user", content: "Hi" }], metadata))
+					expect(handler.getThoughtSignature()).toBe(TEST_THOUGHT_SIGNATURE)
+					expect(handler.getThoughtSignatureOrigin()).toBe(origin)
+
+					mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+					await collectStream(handler.createMessage("system", [{ role: "user", content: "Hi" }], metadata))
+					expect(handler.getThoughtSignature()).toBeUndefined()
+				})
+
+				it("stores the streamed signature in the history and sends it on the next request", async () => {
+					useModel("gemini-4-pro")
+					mockStream(signedToolCallStream)
+					await collectStream(handler.createMessage("system", [{ role: "user", content: "Hi" }], metadata))
+
+					const historyId = sanitizeToolUseId(`call_1__thought__${TEST_THOUGHT_SIGNATURE}`)
+					const assistantMessage = prepareApiConversationMessage({
+						message: {
+							role: "assistant",
+							content: [{ type: "tool_use", id: historyId, name: "read_file", input: { path: "a.ts" } }],
+						},
+						api: handler,
+						apiConfiguration: { apiProvider: providerIdentifiers.litellm, litellmModelId: "gemini-4-pro" },
+						apiConversationHistory: [],
+					})
+					mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+					await collectStream(
+						handler.createMessage(
+							"system",
+							[{ role: "user", content: "Hi" }, assistantMessage, toolResultsMessage([historyId])],
+							metadata,
+						),
+					)
+
+					expect(sentToolCalls(mockCreate)).toEqual([
+						expect.objectContaining({
+							provider_specific_fields: { thought_signature: TEST_THOUGHT_SIGNATURE },
+						}),
+					])
+				})
+
+				const bypassed = expect.objectContaining({
+					provider_specific_fields: { thought_signature: dummySignature },
+				})
+				const untouched = expect.not.objectContaining({ provider_specific_fields: expect.anything() })
+				const real = expect.objectContaining({
+					provider_specific_fields: { thought_signature: TEST_THOUGHT_SIGNATURE },
+				})
+
+				it.each([
+					{
+						modelId: "gemini-3-pro",
+						preserveReasoning: undefined,
+						storedBy: "this backend",
+						storedOrigin: origin,
+						expected: [real, bypassed],
+					},
+					{
+						modelId: "gemini-3-pro",
+						preserveReasoning: true,
+						storedBy: "this backend",
+						storedOrigin: origin,
+						expected: [real, bypassed],
+					},
+					{
+						modelId: "gemini-4-pro",
+						preserveReasoning: undefined,
+						storedBy: "this backend",
+						storedOrigin: thoughtSignatureOrigin("http://localhost:4000/", "gemini-4-pro"),
+						expected: [real, bypassed],
+					},
+					{
+						modelId: "gemini-3-pro",
+						preserveReasoning: undefined,
+						storedBy: "another backend",
+						storedOrigin: "another-backend",
+						expected: [bypassed, bypassed],
+					},
+					{
+						modelId: "gpt-4",
+						preserveReasoning: undefined,
+						storedBy: "another backend",
+						storedOrigin: "another-backend",
+						expected: [untouched, untouched],
+					},
+				])(
+					"writes signatures for $modelId with a signature from $storedBy (preserveReasoning=$preserveReasoning)",
+					async ({ modelId, preserveReasoning, storedOrigin, expected }) => {
+						useModel(modelId, { preserveReasoning })
+						const historyIds = ["call_1", "call_2"]
+						mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+						await collectStream(
+							handler.createMessage(
+								"system",
+								[
+									{ role: "user", content: "Hello" },
+									signedAssistantMessage(historyIds, { origin: storedOrigin }),
+									toolResultsMessage(historyIds),
+								],
+								metadata,
+							),
+						)
+
+						expect(sentToolCalls(mockCreate)).toEqual(expected)
+					},
+				)
+
+				it.each([
+					{ catalog: "a model missing from the catalog", listed: false, expected: [bypassed] },
+					{ catalog: "an unflagged model in the catalog", listed: true, expected: [untouched] },
+				])("handles a sanitized __thought__ id on $catalog", async ({ listed, expected }) => {
+					useModel("my-gateway-model", {}, listed)
+					const historyId = SANITIZED_LITELLM_TOOL_CALL_ID
+					mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+					await collectStream(
+						handler.createMessage(
+							"system",
+							[
+								{ role: "user", content: "Hello" },
+								{
+									role: "assistant",
+									content: [{ type: "tool_use", id: historyId, name: "read_file", input: {} }],
+								},
+								toolResultsMessage([historyId]),
+							],
+							metadata,
+						),
+					)
+
+					expect(sentToolCalls(mockCreate)).toEqual(expected)
+				})
+
+				it.each([
+					{ flag: true, expected: [bypassed, bypassed] },
+					{ flag: undefined, expected: [untouched, untouched] },
+				])(
+					"sends the bypass for calls from another model on an alias when requiresThoughtSignatures is $flag",
+					async ({ flag, expected }) => {
+						useModel("team-model", { requiresThoughtSignatures: flag })
+						const historyIds = ["toolu_1", "toolu_2"]
+						mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+						await collectStream(
+							handler.createMessage(
+								"system",
+								[
+									{ role: "user", content: "Hello" },
+									{
+										role: "assistant",
+										content: historyIds.map((id) => ({
+											type: "tool_use",
+											id,
+											name: "read_file",
+											input: {},
+										})),
+									},
+									toolResultsMessage(historyIds),
+								],
+								metadata,
+							),
+						)
+
+						expect(sentToolCalls(mockCreate)).toEqual(expected)
+					},
+				)
+
+				// Mirrors docs/architecture/tla/ThoughtSignature.tla: no backend rejects a tool call in the history.
+				describe("never sends a call that a backend rejects", () => {
+					// flagged: the catalog sets requiresThoughtSignatures. The fetcher spec covers that mapping.
+					type Backend = { name: string; url?: string; model: string; flagged: boolean; runsGemini: boolean }
+					const g1: Backend = {
+						name: "g1",
+						url: "http://u1:4000",
+						model: "gemini-3-pro",
+						flagged: true,
+						runsGemini: true,
+					}
+					const g2: Backend = { ...g1, name: "g2", url: "http://u2:4000" }
+					const g4: Backend = { ...g1, name: "g4", model: "gemini-4-pro" }
+					const alias: Backend = { ...g1, name: "alias", model: "team-model" }
+					const other: Backend = {
+						...g1,
+						name: "other",
+						model: "team-claude",
+						flagged: false,
+						runsGemini: false,
+					}
+					const native: Backend = { name: "native", model: "gemini-3-pro", flagged: true, runsGemini: true }
+					const targets = [g1, g2, g4, alias, other]
+					const cases = [...targets, native].flatMap((source) =>
+						(source.runsGemini ? [true, false] : [false]).flatMap((minted) =>
+							[1, 2].flatMap((n) =>
+								targets.flatMap((target) =>
+									[true, false].map((listed) => ({ source, minted, n, target, listed })),
+								),
+							),
+						),
+					)
+
+					// A model missing from the catalog gets the default info, as in RouterProvider.getModel.
+					function useCatalog(target: LiteLLMHandler, backend: Backend, listed = true) {
+						const requiresThoughtSignatures = listed && backend.flagged ? true : undefined
+						const info = { ...litellmDefaultModelInfo, requiresThoughtSignatures }
+						vi.spyOn(target, "fetchModel").mockResolvedValue({ id: backend.model, info })
+						target["models"] = listed ? { [backend.model]: info } : {}
+					}
+
+					async function historyMessage(source: Backend, minted: boolean, n: number) {
+						const signature = `AY89sig${source.name}`
+						const mintedId = `call_0__thought__${signature}`
+						const viaLiteLlm = minted && source.url !== undefined
+						const ids = Array.from({ length: n }, (_, i) =>
+							sanitizeToolUseId(i === 0 && viaLiteLlm ? mintedId : `call_${i}`),
+						)
+						const toolUses: Anthropic.Messages.ToolUseBlockParam[] = ids.map((id) => ({
+							type: "tool_use",
+							id,
+							name: "read_file",
+							input: {},
+						}))
+						if (!minted) {
+							return { ids, signature, message: { role: "assistant" as const, content: toolUses } }
+						}
+						if (!viaLiteLlm) {
+							return { ids, signature, message: signedAssistantMessage(ids, { signature }) }
+						}
+						const sourceHandler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl: source.url })
+						useCatalog(sourceHandler, source)
+						mockStream([
+							{
+								choices: [
+									{
+										delta: {
+											tool_calls: [
+												{
+													index: 0,
+													id: mintedId,
+													function: { name: "read_file", arguments: "{}" },
+													provider_specific_fields: { thought_signature: signature },
+												},
+											],
+										},
+									},
+								],
+							},
+						])
+						await collectStream(
+							sourceHandler.createMessage("system", [{ role: "user", content: "Hi" }], metadata),
+						)
+						const message = prepareApiConversationMessage({
+							message: { role: "assistant", content: toolUses },
+							api: sourceHandler,
+							apiConfiguration: {
+								apiProvider: providerIdentifiers.litellm,
+								litellmModelId: source.model,
+							},
+							apiConversationHistory: [],
+						})
+						return { ids, signature, message }
+					}
+
+					it.each(cases)(
+						"$source.name history (minted=$minted, $n calls) sent to $target.name (listed=$listed)",
+						async ({ source, minted, n, target, listed }) => {
+							const { ids, signature, message } = await historyMessage(source, minted, n)
+							handler = new LiteLLMHandler({ ...mockOptions, litellmBaseUrl: target.url })
+							useCatalog(handler, target, listed)
+							mockStream([{ choices: [{ delta: { content: "ok" } }] }])
+
+							await collectStream(
+								handler.createMessage(
+									"system",
+									[{ role: "user", content: "Hello" }, message, toolResultsMessage(ids)],
+									metadata,
+								),
+							)
+
+							const sent = (sentToolCalls(mockCreate) ?? []).map((call, i) => {
+								const fields = (call as { provider_specific_fields?: { thought_signature?: string } })
+									.provider_specific_fields
+								return { i, id: call.id, sig: fields?.thought_signature }
+							})
+							// NoCorruptIdDecode holds for every catalog outcome. NoRejectedCall needs a listed model.
+							// A non-Gemini backend can reject the field (BerriAI/litellm#19739).
+							const decodesCorruptId = ({ sig, id }: (typeof sent)[number]) =>
+								sig === undefined && id.includes("__thought__")
+							const invalidOrMissing = ({ i, sig }: (typeof sent)[number]) =>
+								sig === undefined
+									? i === 0
+									: sig !== dummySignature && !(sig === signature && source === target && i === 0)
+							const rejected = sent.filter((call) =>
+								target.runsGemini
+									? decodesCorruptId(call) || (listed && invalidOrMissing(call))
+									: listed && call.sig !== undefined,
+							)
+							// SignatureDelivered: a LiteLLM backend gets back the signature it minted.
+							const delivered = !(minted && source === target) || sent[0]?.sig === signature
+							expect(sent).toHaveLength(n)
+							expect(rejected).toEqual([])
+							expect(delivered).toBe(true)
+						},
+					)
+				})
 			})
 
 			it("should not inject thought signatures for non-Gemini models", async () => {
