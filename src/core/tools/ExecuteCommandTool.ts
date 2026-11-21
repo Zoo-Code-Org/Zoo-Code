@@ -13,10 +13,11 @@ import { buildAutoDenyReason, checkAutoApproval } from "../auto-approval"
 import { BLANKET_DENY_AUTO_DENY_KINDS, isBlanketDenyEngaged, Task } from "../task/Task"
 import type { ClineProvider } from "../webview/ClineProvider"
 
+import "../../utils/path"
 import type { DcgDecision } from "../../services/destructive-command-guard"
-import { ToolUse, ToolResponse } from "../../shared/tools"
+import type { ToolUse, ToolResponse } from "../../shared/tools"
 import { formatResponse } from "../prompts/responses"
-import { unescapeHtmlEntities } from "../../utils/text-normalization"
+import { unescapeHtmlEntities, stripAnsi, truncateTerminalOutput } from "../../utils/text-normalization"
 import { parseCommand } from "../../shared/parse-command"
 import {
 	ExitCodeDetails,
@@ -706,17 +707,20 @@ export async function executeCommandInTerminal(
 		}
 
 		const exitStatus = formatExitStatus(exitDetails)
+		// Inline completed output is retained up to compressTerminalOutput limits (500 lines / 50K chars);
+		// head/tail truncation is reserved for persisted artifacts in formatPersistedOutput.
+		const sanitizedResult = stripAnsi(result)
 
 		return [
 			false,
-			`Command executed in terminal within working directory '${currentWorkingDir}'. ${exitStatus}\nOutput:\n${result}`,
+			`Command executed in terminal within working directory '${currentWorkingDir}'. ${exitStatus}\nOutput:\n${sanitizedResult}`,
 		]
 	} else {
 		return [
 			false,
 			[
 				`Command is still running in terminal ${workingDir ? ` from '${workingDir.toPosix()}'` : ""}.`,
-				result.length > 0 ? `Here's the output so far:\n${result}\n` : "\n",
+				result.length > 0 ? `Here's the output so far:\n${truncateTerminalOutput(result)}\n` : "\n",
 				"You will be updated on the terminal status and new output in the future.",
 			].join("\n"),
 		]
@@ -762,6 +766,7 @@ function formatPersistedOutput(
 	const exitStatus = formatExitStatus(exitDetails)
 	const sizeStr = formatBytes(result.totalBytes)
 	const artifactId = result.artifactPath ? path.basename(result.artifactPath) : ""
+	const cleanPreview = truncateTerminalOutput(result.preview)
 
 	return [
 		`Command executed in '${workingDir}'. ${exitStatus}`,
@@ -769,7 +774,7 @@ function formatPersistedOutput(
 		`Output (${sizeStr}) persisted. Artifact ID: ${artifactId}`,
 		"",
 		"Preview:",
-		result.preview,
+		cleanPreview,
 		"",
 		"Use read_command_output tool to view full output if needed.",
 	].join("\n")

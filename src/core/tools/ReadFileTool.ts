@@ -24,6 +24,11 @@ import { getReadablePath } from "../../utils/path"
 import { extractTextFromFile, addLineNumbers, getSupportedBinaryFormats } from "../../integrations/misc/extract-text"
 import { readWithIndentation, readWithSlice } from "../../integrations/misc/indentation-reader"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
+import {
+	truncateFileOutput,
+	ADAPTIVE_FULL_READ_THRESHOLD,
+	SLIDING_WINDOW_PREVIEW_LIMIT,
+} from "../../utils/text-normalization"
 import type { ToolUse, PushToolResult } from "../../shared/tools"
 
 import {
@@ -313,7 +318,47 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 
 		let output = result.content
 
-		if (result.wasTruncated) {
+		// Solution 1: Adaptive sliding-window truncation.
+		// When both offset and limit are omitted, files <= ADAPTIVE_FULL_READ_THRESHOLD (300 lines) are returned in full
+		// to eliminate multi-turn round trip penalties. Files > 300 lines get a 200-line head/tail window.
+		let adaptiveTruncated = false
+		let adaptiveHeadCount = 0
+		let adaptiveTailStart = 0
+		let adaptiveDisplayedLines = 0
+		let adaptiveOmittedStart = 0
+		let adaptiveOmittedCount = 0
+
+		if (
+			entry.offset === undefined &&
+			entry.limit === undefined &&
+			result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD
+		) {
+			const truncated = truncateFileOutput(
+				addLineNumbers(content, 1),
+				SLIDING_WINDOW_PREVIEW_LIMIT,
+				result.totalLines,
+			)
+			if (truncated.wasTruncated) {
+				output = truncated.content
+				adaptiveTruncated = true
+				adaptiveHeadCount = Math.floor(SLIDING_WINDOW_PREVIEW_LIMIT / 2)
+				const tailCount = SLIDING_WINDOW_PREVIEW_LIMIT - adaptiveHeadCount
+				adaptiveTailStart = result.totalLines - tailCount + 1
+				adaptiveOmittedStart = adaptiveHeadCount + 1
+				const omittedEnd = adaptiveTailStart - 1
+				adaptiveOmittedCount = omittedEnd - adaptiveOmittedStart + 1
+				adaptiveDisplayedLines = truncated.returnedLines
+			}
+		}
+
+		if (adaptiveTruncated) {
+			// Put truncation warning at TOP (before content) to match @ mention format
+			output = `IMPORTANT: File content truncated.
+	Status: Showing lines 1-${adaptiveHeadCount} and ${adaptiveTailStart}-${result.totalLines} (${adaptiveDisplayedLines} lines) of ${result.totalLines} total lines.
+	To read more: Use the read_file tool with offset=${adaptiveOmittedStart} and limit=${adaptiveOmittedCount}.
+	
+	${output}`
+		} else if (result.wasTruncated) {
 			const startLine = offset1
 			const endLine = offset1 + result.returnedLines - 1
 			const nextOffset = endLine + 1
@@ -322,7 +367,7 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 	Status: Showing lines ${startLine}-${endLine} of ${result.totalLines} total lines.
 	To read more: Use the read_file tool with offset=${nextOffset} and limit=${limit}.
 	
-	${result.content}`
+	${output}`
 		} else if (result.returnedLines === 0 && result.totalLines === 0) {
 			output = "Note: File is empty"
 		}
@@ -769,8 +814,14 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					continue
 				}
 
-				// Read text file
-				const rawContent = await fs.readFile(fullPath, "utf8")
+				// Read text file (mirrors executeNew: read as Buffer, then decode as UTF-8)
+				const fileData = await fs.readFile(fullPath)
+				const rawContent =
+					typeof fileData === "string"
+						? fileData
+						: Buffer.isBuffer(fileData)
+							? fileData.toString("utf-8")
+							: String(fileData ?? "")
 
 				// Handle line ranges if specified
 				let content: string
@@ -792,6 +843,13 @@ export class ReadFileTool extends BaseTool<"read_file"> {
 					// Read with default limits using slice mode
 					const result = readWithSlice(rawContent, 0, DEFAULT_LINE_LIMIT)
 					content = result.content
+					if (result.totalLines > ADAPTIVE_FULL_READ_THRESHOLD) {
+						content = truncateFileOutput(
+							addLineNumbers(rawContent, 1),
+							SLIDING_WINDOW_PREVIEW_LIMIT,
+							result.totalLines,
+						).content
+					}
 					if (result.wasTruncated) {
 						content += `\n\n[File truncated: showing ${result.returnedLines} of ${result.totalLines} total lines]`
 					}

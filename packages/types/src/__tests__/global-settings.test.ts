@@ -51,3 +51,25 @@ describe("collapseCommandOutputByDefault global setting", () => {
 		expect(globalSettingsSchema.safeParse({ collapseCommandOutputByDefault: "true" }).success).toBe(false)
 	})
 })
+
+describe("allowedMaxTokens global setting", () => {
+	it("accepts and exposes the persisted setting", () => {
+		expect(globalSettingsSchema.parse({ allowedMaxTokens: 50_000 })).toEqual({
+			allowedMaxTokens: 50_000,
+		})
+		expect(GLOBAL_SETTINGS_KEYS).toContain("allowedMaxTokens")
+	})
+
+	it("accepts nullish values for unset budget", () => {
+		expect(globalSettingsSchema.parse({ allowedMaxTokens: null })).toEqual({
+			allowedMaxTokens: null,
+		})
+		expect(globalSettingsSchema.parse({ allowedMaxTokens: undefined })).toEqual({
+			allowedMaxTokens: undefined,
+		})
+	})
+
+	it("rejects non-number values", () => {
+		expect(globalSettingsSchema.safeParse({ allowedMaxTokens: "50000" }).success).toBe(false)
+	})
+})

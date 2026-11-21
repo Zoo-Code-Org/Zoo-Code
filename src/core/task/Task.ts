@@ -256,6 +256,7 @@ export interface TaskOptions extends CreateTaskOptions {
 	enableCheckpoints?: boolean
 	checkpointTimeout?: number
 	consecutiveMistakeLimit?: number
+	tokenCircuitBreakerLimit?: number
 	task?: string
 	/** Origin of each part of `task`. Absent means all generated, so no mention expands. */
 	segments?: MentionSegment[]
@@ -443,6 +444,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private retiredApis = new Set<ApiHandler>()
 	private rateLimitClock: RateLimitClock
 	private autoApprovalHandler: AutoApprovalHandler
+	tokenCircuitBreakerLimit: number = 0
 
 	toolRepetitionDetector: ToolRepetitionDetector
 	rooIgnoreController?: RooIgnoreController
@@ -717,6 +719,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		enableCheckpoints = true,
 		checkpointTimeout = DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 		consecutiveMistakeLimit = DEFAULT_CONSECUTIVE_MISTAKE_LIMIT,
+		tokenCircuitBreakerLimit = 0,
 		toolRepetitionSoftLimit = DEFAULT_TOOL_REPETITION_SOFT_LIMIT,
 		taskId,
 		task,
@@ -789,6 +792,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.api = buildApiHandler(this.apiConfiguration)
 		this.rateLimitClock = rateLimitClock ?? createRateLimitClock()
 		this.autoApprovalHandler = new AutoApprovalHandler()
+		this.tokenCircuitBreakerLimit = tokenCircuitBreakerLimit ?? 0
 
 		this.consecutiveMistakeLimit = consecutiveMistakeLimit ?? DEFAULT_CONSECUTIVE_MISTAKE_LIMIT
 		this.toolRepetitionSoftLimit = normalizeToolRepetitionSoftLimit(
@@ -4080,6 +4084,36 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				this.consecutiveMistakeCount = 0
 			}
 
+			// Token Circuit Breaker: Halt runaway loops if cumulative tokens exceed configured limit
+			if (this.tokenCircuitBreakerLimit > 0) {
+				await this.saveClineMessages()
+
+				const metrics = this.getTokenUsage()
+				const totalTokens = (metrics.totalTokensIn || 0) + (metrics.totalTokensOut || 0)
+				if (totalTokens >= this.tokenCircuitBreakerLimit) {
+					const { response, text } = await this.ask(
+						"mistake_limit_reached",
+						`Token circuit breaker tripped: cumulative token limit reached (${totalTokens.toLocaleString()} / ${this.tokenCircuitBreakerLimit.toLocaleString()} tokens). Please review and decide whether to proceed.`,
+					)
+
+					if (response === "yesButtonClicked" || response === "messageResponse") {
+						currentUserContent.push({
+							type: "text" as const,
+							text:
+								response === "messageResponse" && text
+									? `User approved exceeding token budget: ${text}`
+									: "User approved continuing beyond token circuit breaker limit.",
+						})
+						// Bump threshold to allow subsequent turns up to the next budget checkpoint
+						this.tokenCircuitBreakerLimit = totalTokens + this.tokenCircuitBreakerLimit
+					} else {
+						throw new Error(
+							`[TokenCircuitBreaker] Cumulative token limit of ${this.tokenCircuitBreakerLimit.toLocaleString()} tokens exceeded. Task paused.`,
+						)
+					}
+				}
+			}
+
 			// Getting verbose details is an expensive operation, it uses ripgrep to
 			// top-down build file structure of project which for large projects can
 			// take a few seconds. For the best UX we show a placeholder api_req_started
@@ -4226,6 +4260,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						cancelReason,
 						streamingFailedMessage,
 					} satisfies ClineApiReqInfo)
+
+					// Token Circuit Breaker: warn if turn tokens approach or exceed limit
+					if (this.tokenCircuitBreakerLimit > 0) {
+						const turnTokens = (costResult.totalInputTokens || 0) + (costResult.totalOutputTokens || 0)
+						if (turnTokens >= this.tokenCircuitBreakerLimit) {
+							console.warn(
+								`[TokenCircuitBreaker] Turn token consumption (${turnTokens.toLocaleString()}) reached or exceeded configured threshold (${this.tokenCircuitBreakerLimit.toLocaleString()}).`,
+							)
+						}
+					}
 				}
 
 				const abortStream = async (cancelReason: ClineApiReqCancelReason, streamingFailedMessage?: string) => {

@@ -80,6 +80,7 @@ describe("executeCommand", () => {
 		// Mock TerminalRegistry.getOrCreateTerminal
 		;(TerminalRegistry.getOrCreateTerminal as any).mockResolvedValue(mockTerminal)
 		vitest.mocked(Terminal.isActiveShellCmdExe).mockReturnValue(false)
+		vitest.mocked(Terminal.compressTerminalOutput).mockImplementation((input: string) => input)
 	})
 
 	afterEach(() => {
@@ -513,6 +514,34 @@ describe("executeCommand", () => {
 			expect(result).toContain("Command execution was not successful")
 			expect(result).toContain("Exit code: 1")
 			expect(result).toContain("within working directory '/test/project'")
+		})
+
+		it("should retain all lines for inline completed output without head/tail truncation", async () => {
+			const multiLineOutput = Array.from({ length: 200 }, (_, i) => `line ${i + 1}`).join("\n")
+			mockTerminal.getCurrentWorkingDirectory.mockReturnValue("/test/project")
+			mockTerminal.runCommand.mockImplementation((_command: string, callbacks: RooTerminalCallbacks) => {
+				setTimeout(() => {
+					void callbacks.onCompleted(multiLineOutput, mockProcess)
+					callbacks.onShellExecutionComplete({ exitCode: 0 }, mockProcess)
+				}, 0)
+				return mockProcess
+			})
+
+			const options: ExecuteCommandOptions = {
+				executionId: "test-multiline",
+				toolCallId: "test-tool-call-multiline",
+				command: "seq 1 200",
+				terminalShellIntegrationDisabled: false,
+			}
+
+			const [rejected, result] = await executeCommandInTerminal(mockTask, options)
+
+			expect(rejected).toBe(false)
+			expect(result).toContain("line 1\n")
+			expect(result).toContain("line 100\n")
+			expect(result).toContain("line 105\n")
+			expect(result).toContain("line 200")
+			expect(result).not.toContain("lines omitted")
 		})
 
 		it("should handle command terminated by signal", async () => {

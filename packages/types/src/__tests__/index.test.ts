@@ -7,6 +7,12 @@ describe("GLOBAL_STATE_KEYS", () => {
 		expect(GLOBAL_STATE_KEYS).toContain("autoApprovalEnabled")
 	})
 
+	it("should contain auto-approval limit keys", () => {
+		expect(GLOBAL_STATE_KEYS).toContain("allowedMaxRequests")
+		expect(GLOBAL_STATE_KEYS).toContain("allowedMaxCost")
+		expect(GLOBAL_STATE_KEYS).toContain("allowedMaxTokens")
+	})
+
 	it("should contain provider settings keys", () => {
 		expect(GLOBAL_STATE_KEYS).toContain("anthropicBaseUrl")
 	})

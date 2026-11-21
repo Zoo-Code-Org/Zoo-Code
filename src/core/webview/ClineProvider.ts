@@ -1641,8 +1641,14 @@ export class ClineProvider
 			)
 		}
 
-		const { apiConfiguration, enableCheckpoints, checkpointTimeout, experiments, diffFuzzyThreshold } =
-			await this.getState()
+		const {
+			apiConfiguration,
+			enableCheckpoints,
+			checkpointTimeout,
+			experiments,
+			diffFuzzyThreshold,
+			allowedMaxTokens,
+		} = await this.getState()
 		const task = new Task({
 			provider: this,
 			apiConfiguration,
@@ -1650,6 +1656,7 @@ export class ClineProvider
 			checkpointTimeout,
 			consecutiveMistakeLimit: apiConfiguration.consecutiveMistakeLimit,
 			toolRepetitionSoftLimit: apiConfiguration.toolRepetitionSoftLimit,
+			tokenCircuitBreakerLimit: allowedMaxTokens ?? undefined,
 			historyItem,
 			experiments,
 			rootTask: historyItem.rootTask,
@@ -3215,6 +3222,7 @@ export class ClineProvider
 			alwaysAllowSubtasks,
 			allowedMaxRequests,
 			allowedMaxCost,
+			allowedMaxTokens,
 			autoCondenseContext,
 			autoCondenseContextPercent,
 			soundEnabled,
@@ -3380,6 +3388,7 @@ export class ClineProvider
 			alwaysAllowSubtasks: alwaysAllowSubtasks ?? false,
 			allowedMaxRequests,
 			allowedMaxCost,
+			allowedMaxTokens,
 			autoCondenseContext: autoCondenseContext ?? true,
 			autoCondenseContextPercent: autoCondenseContextPercent ?? 100,
 			uriScheme: vscode.env.uriScheme,
@@ -3632,6 +3641,7 @@ export class ClineProvider
 			diagnosticsEnabled: stateValues.diagnosticsEnabled ?? true,
 			allowedMaxRequests: stateValues.allowedMaxRequests,
 			allowedMaxCost: stateValues.allowedMaxCost,
+			allowedMaxTokens: stateValues.allowedMaxTokens,
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
@@ -4425,6 +4435,7 @@ export class ClineProvider
 			experiments,
 			organizationAllowList,
 			diffFuzzyThreshold,
+			allowedMaxTokens,
 		} = await this.getState()
 		const effectiveApiConfiguration = getEffectiveTaskApiConfiguration(
 			apiConfiguration,
@@ -4449,6 +4460,7 @@ export class ClineProvider
 			checkpointTimeout,
 			consecutiveMistakeLimit: effectiveApiConfiguration.consecutiveMistakeLimit,
 			toolRepetitionSoftLimit: effectiveApiConfiguration.toolRepetitionSoftLimit,
+			tokenCircuitBreakerLimit: allowedMaxTokens ?? undefined,
 			task: text,
 			images,
 			experiments,

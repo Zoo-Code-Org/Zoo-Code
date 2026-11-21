@@ -1,12 +1,12 @@
 import { useState, useCallback, useMemo } from "react"
 import { useEvent } from "react-use"
-import { LanguageModelChatSelector } from "vscode"
 import { LoaderCircle, LogIn, RefreshCw, UserCog } from "lucide-react"
 
 import {
 	type ProviderSettings,
 	type ExtensionMessage,
 	type ModelInfo,
+	type LanguageModelChatSelector,
 	VsCodeLmModelsMessageType,
 	providerIdentifiers,
 } from "@roo-code/types"
