@@ -14,6 +14,7 @@ import { importSettingsWithFeedback } from "../core/config/importExport"
 import { MdmService } from "../services/mdm/MdmService"
 import { registerRipgrepDiagnosticCommand } from "../services/ripgrep/diagnostic"
 import { createDiagnosticsReport } from "../services/diagnostics"
+import { generateCommitMessage } from "../services/git/commitMessageGenerator"
 
 /**
  * Helper to get the visible ClineProvider instance or log if not found.
@@ -224,6 +225,14 @@ const getCommandsMap = ({
 		} catch (error) {
 			outputChannel.appendLine(`[toggleAutoApprove] postMessageToWebview failed: ${error}`)
 		}
+	},
+	generateGitCommitMessage: async (context?: unknown) => {
+		const visibleProvider = ClineProvider.getVisibleInstance() ?? provider
+		await generateCommitMessage({
+			provider: visibleProvider,
+			outputChannel,
+			context,
+		})
 	},
 })
 
