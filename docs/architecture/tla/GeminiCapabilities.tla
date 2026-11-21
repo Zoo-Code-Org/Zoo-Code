@@ -20,6 +20,16 @@
 \* Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
 \* Carbon rejects xhigh. Hydrogen accepts xhigh. Prices and other capabilities are not verified.
 \* AGENTS.md requires the cost and findings in this header.
+\* Capability update: vendor guides set medium for Flash and Carbon, and high for Hydrogen and Neon.
+\* Expected result: defaults reach the request for unset or unsupported known levels. Unknown levels stay absent.
+\* Budgets and temperature use documented support rules. Live acceptance alone does not establish support.
+\* Sources: https://aistudio.google.com/docs/thinking and each model developer guide.
+\* Live checks: 42 requests. Vertex rejects Carbon and Hydrogen budgets. Other accepted budgets can exceed their limits.
+\* Sampling checks are not proof of effect. Google documents custom temperature as ignored.
+\* Flash storage has an hourly rate. No separate cache write rate is listed, so cacheWritesPrice stays unset.
+\* Replay: removing the catalog defaults fails seven reasoning tests. The edit was removed.
+\* Result: 125 reasoning tests and 20 catalog tests pass. Both type checks and lint pass.
+\* TLC: 224 states pass. All four defect configs fail. Update cost: about six minutes of agent work.
 EXTENDS TLC
 CONSTANT CatalogFixed, LevelsFixed, VertexListedOnly, EffortGuard
 VARIABLE input
@@ -36,7 +46,8 @@ Inputs == [provider : {"gemini", "vertex"}, model : Models, level : Levels, enab
 Init == input \in Inputs
 Next == UNCHANGED input
 Spec == Init /\ [][Next]_input
-Default == "none"
+Default == IF input.model \in {"flash", "carbon"} THEN "medium"
+           ELSE IF input.model \in {"hydrogen", "neon"} THEN "high" ELSE "none"
 Registered == IF input.model \in NewModels
               THEN CatalogFixed /\ (Available(input.provider, input.model) \/ ~VertexListedOnly) ELSE TRUE
 RecognizedLevels == IF LevelsFixed THEN KnownLevels ELSE KnownLevels \ {"xhigh"}

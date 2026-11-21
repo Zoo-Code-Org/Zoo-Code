@@ -15,7 +15,7 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
-	// Leave defaults and capabilities unset when evidence is missing.
+	// Use thinking levels. Google does not support budgets or custom temperature for these models.
 	// Prices and untested capabilities come from the Gemini API. Vertex prices are not verified.
 	// Flash works in Express mode and rejects xhigh.
 	// Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
@@ -28,8 +28,12 @@ export const vertexModels = {
 		supportsImages: true,
 		supportsPromptCache: true,
 		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
 		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
 		// TODO (2027-01-01): Set input to $1.50, output to $7.50, and cache reads to $0.15 per million tokens.
+		// Google lists cache storage per hour, not a separate cache write price.
 		inputPrice: 0.75,
 		outputPrice: 3.75,
 		cacheReadsPrice: 0.075,
@@ -42,6 +46,9 @@ export const vertexModels = {
 		supportsPromptCache: true,
 		// Only implicit caching is supported.
 		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
 		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
 		// TODO (2026-12-01): Set input to $4, output to $20, and cache reads to $0.20 per million tokens.
 		inputPrice: 2,
@@ -56,6 +63,9 @@ export const vertexModels = {
 		supportsPromptCache: true,
 		// Only implicit caching is supported.
 		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
 		inputPrice: 1.5,
 		outputPrice: 7.5,
 		cacheReadsPrice: 0.075,

@@ -78,17 +78,41 @@ it("exposes the documented thinking levels and pricing for Gemini 3.1 Flash Lite
 })
 
 const newGeminiModels = [
-	{ id: "gemini-3.8-flash", levels: ["low", "medium", "high"], price: [0.75, 3.75, 0.075], vertex: true },
-	{ id: "gemini-4-carbon", levels: ["low", "medium", "high"], price: [2, 10, 0.1], vertex: true },
-	{ id: "gemini-4-hydrogen", levels: ["low", "medium", "high", "xhigh"], price: [1.5, 7.5, 0.075], vertex: true },
-	{ id: "gemini-4-neon", levels: ["low", "medium", "high", "xhigh"], price: [3, 15, 0.15], vertex: false },
+	{
+		id: "gemini-3.8-flash",
+		levels: ["low", "medium", "high"],
+		price: [0.75, 3.75, 0.075],
+		defaultLevel: "medium",
+		vertex: true,
+	},
+	{
+		id: "gemini-4-carbon",
+		levels: ["low", "medium", "high"],
+		price: [2, 10, 0.1],
+		defaultLevel: "medium",
+		vertex: true,
+	},
+	{
+		id: "gemini-4-hydrogen",
+		levels: ["low", "medium", "high", "xhigh"],
+		price: [1.5, 7.5, 0.075],
+		defaultLevel: "high",
+		vertex: true,
+	},
+	{
+		id: "gemini-4-neon",
+		levels: ["low", "medium", "high", "xhigh"],
+		price: [3, 15, 0.15],
+		defaultLevel: "high",
+		vertex: false,
+	},
 ]
 
 describe.each([
 	["Gemini API", geminiModels],
 	["Vertex AI", vertexModels],
 ])("new Gemini models on %s", (provider, catalog: Record<string, ModelInfo>) => {
-	it.each(newGeminiModels)("registers $id only where available", ({ id, levels, price, vertex }) => {
+	it.each(newGeminiModels)("registers $id only where available", ({ id, levels, price, defaultLevel, vertex }) => {
 		if (provider === "Vertex AI" && !vertex) {
 			expect(catalog).not.toHaveProperty(id)
 			return
@@ -101,13 +125,14 @@ describe.each([
 			supportsImages: true,
 			supportsPromptCache: true,
 			supportsReasoningEffort: levels,
+			reasoningEffort: defaultLevel,
+			supportsReasoningBudget: false,
+			supportsTemperature: false,
 			inputPrice: price[0],
 			outputPrice: price[1],
 			cacheReadsPrice: price[2],
 		})
-		if (id.startsWith("gemini-4-")) {
-			expect(model).not.toHaveProperty("cacheWritesPrice")
-		}
+		expect(model).not.toHaveProperty("cacheWritesPrice")
 	})
 })
 
