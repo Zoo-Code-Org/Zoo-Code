@@ -232,6 +232,13 @@ export class DeepSeekHandler extends OpenAiHandler {
 	// quantities: top-level `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
 	// and nested `prompt_tokens_details.cached_tokens`. The normalizer resolves
 	// one value per field and never sums the shapes.
+	//
+	// This is the only handler that bills cache misses as cache writes, and it
+	// is the reason the normalizer keeps the two counters apart. Every
+	// `deepSeekModels` row sets `inputPrice: 0` on purpose ("the inputs are
+	// priced as cache read/write"), so a miss left in the input bucket would be
+	// billed at zero. Every other provider prices misses through `inputPrice`,
+	// which is why they must not opt in here.
 	// https://api-docs.deepseek.com/api/create-chat-completion
 	protected override processUsageMetrics(usage: any, _modelInfo?: any): ApiStreamUsageChunk {
 		const normalized = normalizeChatUsage(usage)
@@ -240,7 +247,7 @@ export class DeepSeekHandler extends OpenAiHandler {
 			type: "usage",
 			inputTokens: normalized?.inputTokens ?? 0,
 			outputTokens: normalized?.outputTokens ?? 0,
-			cacheWriteTokens: normalized?.cacheWriteTokens,
+			cacheWriteTokens: normalized?.cacheWriteTokens ?? normalized?.cacheMissTokens,
 			cacheReadTokens: normalized?.cacheReadTokens,
 		}
 	}
