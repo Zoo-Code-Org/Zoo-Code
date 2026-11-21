@@ -9,6 +9,7 @@ import {
 	RooCodeEventName,
 	type ClineMessage,
 	type GlobalState,
+	type HistoryItem,
 	type PendingTaskAction,
 	type ProviderSettings,
 } from "@roo-code/types"
@@ -23,6 +24,7 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { attemptCompletionTool, type AttemptCompletionCallbacks } from "../../tools/AttemptCompletionTool"
 import type { ToolUse } from "../../../shared/tools"
 import { setAbortLatch } from "../../../test-utils/run-state"
+import { ToolRouter } from "../../../services/tools/ToolRouter"
 
 type TaskPersistenceAccess = {
 	addToApiConversationHistory: (message: Anthropic.MessageParam) => Promise<void>
@@ -304,6 +306,291 @@ describe("Task persistence", () => {
 		mockProvider.postStateToWebviewWithoutTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.updateTaskHistory = vi.fn().mockResolvedValue(undefined)
 		mockProvider.log = vi.fn()
+	})
+
+	describe("MCP tool attachments", () => {
+		const scope = [{ serverName: "github", toolName: "issues", description: "" }]
+		afterEach(() => vi.restoreAllMocks())
+		it.each([{ names: [] }, { names: ["mcp--github--issues"] }])(
+			"persists a single initial selection: $names",
+			async ({ names }) => {
+				const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial").mockResolvedValue(names)
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "find tickets",
+					startTask: false,
+				})
+				await Promise.all([
+					task.initializeAttachedMcpTools(scope, 30),
+					task.initializeAttachedMcpTools(scope, 30),
+				])
+				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
+				expect([...task.attachedMcpToolNames]).toEqual(names)
+				expect(mockTaskMetadata).toHaveBeenCalledWith(expect.objectContaining({ attachedMcpToolNames: names }))
+				await task.initializeAttachedMcpTools(scope, 10)
+				expect(rank).toHaveBeenCalledTimes(1)
+				rank.mockRestore()
+			},
+		)
+
+		it("checks a waiting caller's scope after an earlier selection completes", async () => {
+			const gate = createDeferred<string[]>()
+			const rank = vi
+				.spyOn(ToolRouter.getInstance(), "attachInitial")
+				.mockReturnValueOnce(gate.promise)
+				.mockResolvedValueOnce(["mcp--other--search"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "find tickets",
+				startTask: false,
+			})
+			const first = task.initializeAttachedMcpTools(scope, 1)
+			const second = task.initializeAttachedMcpTools(
+				[{ serverName: "other", toolName: "search", description: "tickets" }],
+				1,
+			)
+			gate.resolve(["mcp--github--issues"])
+			await Promise.all([first, second])
+			expect(rank).toHaveBeenCalledTimes(2)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues", "mcp--other--search"])
+		})
+
+		it("revalidates an active task when its entire selection leaves the live scope", async () => {
+			vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+				.mockResolvedValueOnce(["mcp--github--issues"])
+				.mockResolvedValueOnce(["mcp--other--search"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "find tickets",
+				startTask: false,
+			})
+			await task.initializeAttachedMcpTools(scope, 1)
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "other", toolName: "search", description: "tickets" }],
+				1,
+			)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues", "mcp--other--search"])
+			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					attachedMcpToolNames: ["mcp--github--issues", "mcp--other--search"],
+				}),
+			)
+		})
+
+		it.each([
+			{ names: [], savedNames: [] },
+			{ names: ["mcp--github--issues"], savedNames: ["mcp--github--issues"] },
+			{
+				names: ["mcp--github--issues", "mcp--missing--tool"],
+				savedNames: ["mcp--github--issues", "mcp--missing--tool"],
+			},
+		])("restores initialized selections without reranking: $names", async ({ names, savedNames }) => {
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				historyItem: {
+					id: "restored",
+					number: 1,
+					ts: 1,
+					task: "find tickets",
+					tokensIn: 0,
+					tokensOut: 0,
+					totalCost: 0,
+					attachedMcpToolNames: savedNames,
+				},
+			})
+			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			expect([...task.attachedMcpToolNames]).toEqual(names)
+			expect(rank).not.toHaveBeenCalled()
+			rank.mockRestore()
+		})
+
+		it("retains unavailable restored names while reranking and when their scope returns", async () => {
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial").mockResolvedValue(["mcp--github--issues"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				startTask: false,
+				historyItem: { ...legacyHistory(), attachedMcpToolNames: ["mcp--catalog--returning"] },
+			})
+			await task.initializeAttachedMcpTools([{ serverName: "github", toolName: "issues", description: "" }], 30)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
+			await task.initializeAttachedMcpTools(
+				[{ serverName: "catalog", toolName: "returning", description: "" }],
+				30,
+			)
+			expect([...task.attachedMcpToolNames]).toEqual(["mcp--catalog--returning", "mcp--github--issues"])
+			expect(rank).toHaveBeenCalledTimes(1)
+		})
+
+		it.each(["history", "messages", "provider"] as const)(
+			"keeps selection without retrying on a %s save failure",
+			async (stage) => {
+				const rank = vi
+					.spyOn(ToolRouter.getInstance(), "attachInitial")
+					.mockResolvedValue(["mcp--github--issues"])
+				const log = vi.spyOn(console, "error").mockImplementation(() => {})
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "find tickets",
+					startTask: false,
+				})
+				await task["taskApiConfigReady"]
+				const metadataResult = await mockTaskMetadata()
+				mockTaskMetadata.mockImplementation(async (options: { attachedMcpToolNames?: string[] }) => ({
+					...metadataResult,
+					historyItem: { ...metadataResult.historyItem, attachedMcpToolNames: options.attachedMcpToolNames },
+				}))
+				const lostProvider =
+					stage === "provider" ? vi.spyOn(task["providerRef"], "deref").mockReturnValue(undefined) : undefined
+				if (stage === "history")
+					vi.mocked(mockProvider.updateTaskHistory).mockRejectedValueOnce(new Error("disk full"))
+				if (stage === "messages") mockSaveTaskMessages.mockRejectedValueOnce(new Error("disk full"))
+				await expect(task.initializeAttachedMcpTools(scope, 30)).resolves.toBeUndefined()
+				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
+				expect(log).toHaveBeenCalledWith(
+					expect.stringContaining("keeping in-memory selection"),
+					expect.any(Error),
+				)
+				const persistenceFailures = () =>
+					log.mock.calls.filter(
+						([message]) =>
+							typeof message === "string" &&
+							message.startsWith("[Task] Failed to persist MCP tool selection"),
+					).length
+				expect(persistenceFailures()).toBe(1)
+				await task.initializeAttachedMcpTools(scope, 30)
+				expect(rank).toHaveBeenCalledTimes(1)
+				expect(persistenceFailures()).toBe(1)
+				lostProvider?.mockRestore()
+				await task["saveClineMessages"]()
+				expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+					expect.objectContaining({ attachedMcpToolNames: ["mcp--github--issues"] }),
+				)
+				expect(mockProvider.updateTaskHistory).toHaveBeenLastCalledWith(
+					expect.objectContaining({ attachedMcpToolNames: ["mcp--github--issues"] }),
+				)
+				mockTaskMetadata.mockResolvedValue(metadataResult)
+				log.mockRestore()
+				rank.mockRestore()
+			},
+		)
+
+		function legacyHistory(): HistoryItem {
+			return {
+				id: "legacy-task",
+				number: 1,
+				ts: 1,
+				task: "find tickets",
+				tokensIn: 0,
+				tokensOut: 0,
+				totalCost: 0,
+			}
+		}
+
+		it.each([undefined, null, "abc", 12, {}, [12], ["invalid"], ["mcp__github__issues"]])(
+			"treats invalid or absent persisted selection %j as uninitialized",
+			async (value) => {
+				const historyItem = legacyHistory()
+				// Model unvalidated external history without weakening the production types.
+				Reflect.set(historyItem, "attachedMcpToolNames", value)
+				const rank = vi
+					.spyOn(ToolRouter.getInstance(), "attachInitial")
+					.mockResolvedValue(["mcp--github--issues"])
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem,
+					startTask: false,
+				})
+				await task.initializeAttachedMcpTools(scope, 30)
+				expect([...task.attachedMcpToolNames]).toEqual(["mcp--github--issues"])
+				expect(rank).toHaveBeenCalledExactlyOnceWith("find tickets", scope, 30)
+				rank.mockRestore()
+			},
+		)
+
+		it("does not persist an empty selection before initialization", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: legacyHistory(),
+				startTask: false,
+			})
+			await task["saveClineMessages"]()
+			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+				expect.objectContaining({ attachedMcpToolNames: undefined }),
+			)
+		})
+
+		it.each([undefined, "", "   "])(
+			"attaches bounded tools for images-only or blank tasks (%j)",
+			async (taskText) => {
+				const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial")
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: taskText,
+					images: ["image-data"],
+					startTask: false,
+				})
+				await task.initializeAttachedMcpTools([], 2)
+				expect(mockTaskMetadata).not.toHaveBeenCalled()
+				await task.initializeAttachedMcpTools(
+					[
+						{ serverName: "a b", toolName: "t", description: "" },
+						{ serverName: "a_b", toolName: "t", description: "" },
+						{ serverName: "other", toolName: "u", description: "" },
+						{ serverName: "extra", toolName: "v", description: "" },
+					],
+					2,
+				)
+				expect([...task.attachedMcpToolNames]).toEqual(["mcp--a_b--t", "mcp--other--u"])
+				expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+					expect.objectContaining({ attachedMcpToolNames: ["mcp--a_b--t", "mcp--other--u"] }),
+				)
+				expect(rank).not.toHaveBeenCalled()
+				rank.mockRestore()
+			},
+		)
+
+		it.each([false, true])("preserves historical MCP names (previously initialized: %s)", async (initialized) => {
+			const historyItem = {
+				...legacyHistory(),
+				...(initialized ? { attachedMcpToolNames: ["mcp--catalog--top"] } : {}),
+			}
+			const rank = vi.spyOn(ToolRouter.getInstance(), "attachInitial").mockResolvedValue(["mcp--catalog--top"])
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem,
+				startTask: false,
+			})
+			task.apiConversationHistory = [
+				{
+					role: "assistant",
+					content: [
+						{ type: "tool_use", id: "old", name: "mcp--catalog--previous", input: {} },
+						{ type: "tool_use", id: "native", name: "read_file", input: {} },
+					],
+				},
+			]
+			await task.initializeAttachedMcpTools([{ serverName: "catalog", toolName: "top", description: "" }], 1)
+			expect(task.attachedMcpToolNames).toEqual(new Set(["mcp--catalog--previous", "mcp--catalog--top"]))
+			expect(rank).toHaveBeenCalledTimes(initialized ? 0 : 1)
+			expect(mockTaskMetadata).toHaveBeenLastCalledWith(
+				expect.objectContaining({
+					attachedMcpToolNames: expect.arrayContaining(["mcp--catalog--previous", "mcp--catalog--top"]),
+				}),
+			)
+			rank.mockRestore()
+		})
 	})
 
 	// ── saveApiConversationHistory (via retrySaveApiConversationHistory) ──

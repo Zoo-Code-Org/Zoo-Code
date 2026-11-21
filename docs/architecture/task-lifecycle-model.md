@@ -6,7 +6,7 @@ Zoo Code checks task lifecycle protocols through one umbrella command for indepe
 pnpm lifecycle:model-check
 ```
 
-The baseline command runs eight independent bounded checks in sequence:
+The baseline command runs twelve independent bounded checks in sequence:
 
 1. the persisted task delegation lifecycle;
 2. shared-store concurrency across task-history hosts;
@@ -14,8 +14,12 @@ The baseline command runs eight independent bounded checks in sequence:
 4. the task cleanup protocol;
 5. request-stream parser scoping;
 6. completion persistence;
-7. delegated-mode reader refinement; and
-8. tool-turn continuation.
+7. file-replacement restart behavior;
+8. delegated-mode reader refinement;
+9. tool-turn continuation;
+10. queued message landing;
+11. MCP selection initialization and scope changes; and
+12. MCP request-preparation cancellation.
 
 The planned two-sibling fan-out protocol is intentionally outside the baseline and CI umbrella. Run it explicitly with `pnpm fanout-protocol:model-check`; it describes optional future functionality, not current production coverage.
 
@@ -68,12 +72,12 @@ The same `pnpm lifecycle:model-check` command also runs a second bounded explore
 - a write delta is computed relative to that host's cache;
 - revalidation under the per-file disk lock checks only status-transition legality;
 - the rejected-delegation settlement compare-and-clear decides inside the disk merge callback, so a replacement action persisted by another host is never cleared;
-- fields absent from the delta preserve the current disk value, `childIds` are unioned, and other same-field conflicts are last-writer-wins;
+- fields absent from the delta preserve the current disk value, `childIds` and MCP attachment names are unioned, and other same-field conflicts are last-writer-wins;
 - `atomicUpdatePair` commits its files in order, with another host able to act between file commits;
 - successful pair-operation cache entries publish together after both file writes; if the second write fails, the cache publishes only the first committed record;
 - cache refresh is explicit and may occur after an external live-task snapshot was captured.
 
-There is no production record version or compare-and-swap token today. The model therefore does not invent one. It checks host-mutex and file-lock ownership, whole-file delta rejection, disk-field preservation, `childIds` union, and pair write order in every state reachable within six bounded scenarios. Those scenarios include distinct-task writes from #920 and a second-write pair failure, and all seven phases (`read`, `prepare`, `revalidate`, `commit`, `refresh`, `reject`, and `fail`) must remain reachable without exceeding the state/depth budgets. Positive semantic landmarks additionally require a stale cache beside newer disk state, the first pair write committed while the second is pending, and the same committed prefix retained after the second write fails.
+There is no production record version or compare-and-swap token today. The model therefore does not invent one. It checks host-mutex and file-lock ownership, whole-file delta rejection, disk-field preservation, `childIds` union, MCP attachment union, and pair write order in every state reachable within fourteen bounded scenarios. Those scenarios include distinct-task writes from #920 and a second-write pair failure, and all seven phases (`read`, `prepare`, `revalidate`, `commit`, `refresh`, `reject`, and `fail`) must remain reachable without exceeding the state/depth budgets. Positive semantic landmarks additionally require a stale cache beside newer disk state, the first pair write committed while the second is pending, and the same committed prefix retained after the second write fails. MCP landmarks additionally require concurrent attachment union and a late empty snapshot that retains a newer attachment. Four MCP scenarios cover both one-host and two-host interleavings.
 
 Two desired properties are currently false and remain issue-keyed shortest-witness ratchets rather than silently allowed assertion failures:
 
@@ -87,6 +91,17 @@ CI fails if either exact causal witness or violation class changes, a witness di
 The known-unsafe witnesses currently compare exact shortest action sequences. This is intentionally simple and reviewable, but brittle to harmless action renames or serialization refactors. A causal partial-order comparator would reduce that brittleness but would add a second trace-equivalence protocol to maintain. Until that complexity is justified, update an exact witness only after confirming the terminal violation class and required causal ordering are unchanged.
 
 `TaskHistoryStore.realConcurrency.spec.ts` complements the abstract interleavings with real-filesystem checks through the real `proper-lockfile` and filesystem rename path, including stale-settlement compare-and-clear. History-file deletion holds the same per-file advisory lock as `safeWriteJson` around each unlink, and the real-filesystem suite covers a deletion that targets the settlement read-to-commit window plus schema and task-ID validation of the locked disk record before settlement (#1726). That lock serialization is best-effort: a lock acquisition or unlink failure is swallowed, so a deletion can proceed without the lock and the two sides serialize only when both acquire it. Restart recovery is covered by `Task.persistence.spec.ts`: it refreshes the persisted record first, treats a refreshed interrupted `create_subtask` action as rejected, settles that exact action before replay, adopts the authoritative pending action, blocks replay when an adopted action is missing from the loaded conversation, and stops replay on a failed refresh, lookup, or settlement rather than creating another child. Broader VS Code E2E remains reserved for other restart and extension-host behavior.
+
+## MCP tool models
+
+`pnpm mcp-tools:model-check` runs the independent selection and request-preparation
+checkers, and is included in the lifecycle umbrella. The selection checker
+replays schedules against production `McpToolSelection`; the preparation checker
+uses production cancellation latches with abstract request effects. Bounds,
+fault injections, landmarks, production tests, and limits are documented in
+[MCP dynamic tool loading](./mcp-dynamic-tool-loading.md#typescript-model-checks).
+Catalog lookup and settings defaults use property tests rather than state-space
+models. These concerns do not add states to the persisted delegation graph.
 
 ## Task cleanup protocol model
 

@@ -34,3 +34,18 @@ describe("mergeHistoryDelta", () => {
 		expect(mergeHistoryDelta(disk, incoming, { id: disk.id, status: undefined }).status).toBe("active")
 	})
 })
+
+describe("MCP attachment delta normalization", () => {
+	it.each([null, 42, {}, "abc", [42], ["invalid"], ["mcp--catalog--old", 42]])(
+		"normalizes malformed on-disk attachments %j before unioning",
+		(value) => {
+			const disk = { ...item("active"), attachedMcpToolNames: value }
+			const incoming = { ...item("active"), attachedMcpToolNames: ["mcp--catalog--new"] }
+			expect(mergeHistoryDelta(disk, incoming, incoming).attachedMcpToolNames).toEqual(
+				Array.isArray(value) && value.includes("mcp--catalog--old")
+					? ["mcp--catalog--old", "mcp--catalog--new"]
+					: ["mcp--catalog--new"],
+			)
+		},
+	)
+})

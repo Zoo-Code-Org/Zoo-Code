@@ -1,3 +1,4 @@
+import { getMcpToolCatalog, resolveMcpToolFromCatalog } from "../prompts/tools/native-tools/mcp_server"
 import { markToolRejected } from "../task/toolExecutionContext"
 import { DispatchState, transitionDispatch } from "../task/dispatchState"
 import { serializeError } from "serialize-error"
@@ -323,6 +324,7 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 			// We need the original name to find the actual MCP connection
 			const mcpHub = cline.providerRef.deref()?.getMcpHub()
 			let resolvedServerName = mcpBlock.serverName
+			let resolvedToolName = mcpBlock.toolName
 			if (mcpHub) {
 				const originalName = mcpHub.findServerNameBySanitizedName(mcpBlock.serverName)
 				if (originalName) {
@@ -330,6 +332,27 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				}
 			}
 
+			// Use the enabled, mode-scoped catalog that builds declarations. Canonical
+			// collisions keep the same first entry at declaration and dispatch.
+			if (mcpHub && mcpBlock.name.length === 64) {
+				const mode = await cline.getTaskMode()
+				const allowedServers = getModeBySlug(
+					mode ?? defaultModeSlug,
+					policySnapshot.customModes,
+				)?.allowedMcpServers
+				const catalog = getMcpToolCatalog(mcpHub, allowedServers)
+				const resolved = resolveMcpToolFromCatalog(catalog, mcpBlock.name)
+				if (resolved) {
+					resolvedServerName = resolved.serverName
+					resolvedToolName = resolved.tool.name
+				} else {
+					if (!mcpBlock.partial) {
+						pushToolResult(formatResponse.toolError("MCP tool is unavailable in the current catalog."))
+						cline.recordToolError("use_mcp_tool", "MCP tool is unavailable in the current catalog.")
+					}
+					break
+				}
+			}
 			// Execute the MCP tool using the same handler as use_mcp_tool
 			// Create a synthetic ToolUse block that the useMcpToolTool can handle
 			const syntheticToolUse: ToolUse<"use_mcp_tool"> = {
@@ -338,13 +361,13 @@ async function presentAssistantMessageBlock(cline: Task, policySnapshot: Request
 				name: "use_mcp_tool",
 				params: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: JSON.stringify(mcpBlock.arguments),
 				},
 				partial: mcpBlock.partial,
 				nativeArgs: {
 					server_name: resolvedServerName,
-					tool_name: mcpBlock.toolName,
+					tool_name: resolvedToolName,
 					arguments: mcpBlock.arguments,
 				},
 			}

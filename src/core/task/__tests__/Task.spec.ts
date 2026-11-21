@@ -41,11 +41,11 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import * as buildTools from "../build-tools"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
 	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
-	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (
 		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
 	) => Promise<void>
@@ -5137,7 +5137,7 @@ describe("Cline", () => {
 				expect(abortSpy).toHaveBeenCalled()
 
 				// Verify the controller was cleared
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 
 				// Verify logging
 				expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining("Aborting current HTTP request"))
@@ -5202,7 +5202,7 @@ describe("Cline", () => {
 					expect(options.metadata?.abortSignal).toBe(task.currentRequestAbortController!.signal)
 				})
 
-				it("should omit abortSignal from condenseContext metadata when no current request exists", async () => {
+				it("creates a cancellable condenseContext request when no current request exists", async () => {
 					const task = new Task({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
@@ -5217,7 +5217,8 @@ describe("Cline", () => {
 					expect(summarizeConversation).toHaveBeenCalled()
 					const [options] = vi.mocked(summarizeConversation).mock.calls.at(-1)!
 					expect(options.metadata).toBeDefined()
-					expect("abortSignal" in (options.metadata ?? {})).toBe(false)
+					expect(options.metadata?.abortSignal).toBe(task.currentRequestAbortController?.signal)
+					expect(options.metadata?.abortSignal).toBeDefined()
 				})
 
 				it("should pass AbortController signal to createMessage metadata", async () => {
@@ -5338,6 +5339,305 @@ describe("Cline", () => {
 					expect(allowedFunctionNames.every((name) => toolNames.includes(name))).toBe(true)
 				})
 
+				it.each([
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.gemini,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 100,
+						initialK: 7,
+						expected: 100,
+						saveFailure: false,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.anthropic,
+						threshold: 50,
+						initialK: 7,
+						expected: 7,
+						saveFailure: true,
+						historyCall: false,
+					},
+					{
+						provider: providerIdentifiers.gemini,
+						threshold: 50,
+						initialK: 7,
+						expected: 8,
+						saveFailure: false,
+						historyCall: true,
+					},
+				])(
+					"sends $expected of 100 MCP tools in the initial $provider API request",
+					async ({ provider, threshold, initialK, expected, saveFailure, historyCall }) => {
+						const apiConfiguration: ProviderSettings = { ...mockApiConfig, apiProvider: provider }
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration,
+							task: "search tickets",
+							startTask: false,
+						})
+						const access = getTaskTestAccess(task)
+						vi.spyOn(access, "getSystemPrompt").mockResolvedValue("mock system prompt")
+						// Message and history persistence have focused round-trip coverage.
+						const save = vi.spyOn(access, "saveClineMessages").mockResolvedValue(true)
+						if (saveFailure) save.mockRejectedValue(new Error("persistent storage failure"))
+						vi.spyOn(task.api, "getModel").mockReturnValue({
+							id: "test-model",
+							info: { contextWindow: 200000, maxTokens: 4096, supportsPromptCache: false },
+						})
+						const state = await mockProvider.getState()
+						vi.spyOn(mockProvider, "getState").mockResolvedValue({
+							...state,
+							apiConfiguration,
+							requestDelaySeconds: 0,
+							"mcp.dynamicLoad.threshold": threshold,
+							"mcp.dynamicLoad.initialK": initialK,
+						})
+						// Native tool generation only reads the hub's public server list.
+						const hub = {
+							getServers: () => [
+								{
+									name: "catalog",
+									config: "{}",
+									status: "connected" as const,
+									tools: Array.from({ length: 100 }, (_, index) => ({
+										name: `tool_${index}`,
+										description: "search tickets",
+									})),
+								},
+							],
+						} as McpHub
+						vi.spyOn(mockProvider, "getMcpHub").mockReturnValue(hub)
+						const createMessage = vi
+							.spyOn(task.api, "createMessage")
+							.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+						task.apiConversationHistory = [
+							{ role: "user", content: [{ type: "text", text: "search tickets" }], ts: Date.now() },
+						]
+						if (historyCall) {
+							task.apiConversationHistory.push(
+								{
+									role: "assistant",
+									content: [
+										{ type: "tool_use", id: "previous", name: "mcp--catalog--tool_99", input: {} },
+									],
+								},
+								{
+									role: "user",
+									content: [{ type: "tool_result", tool_use_id: "previous", content: "done" }],
+								},
+							)
+						}
+						await task.attemptApiRequest(0).next()
+						expect(createMessage).toHaveBeenCalledTimes(1)
+						const metadata = requireDefined(createMessage.mock.calls[0])[2]
+						const names = requireDefined(metadata?.tools).flatMap((tool) =>
+							"function" in tool ? [tool.function.name] : [],
+						)
+						expect(names.filter((name) => name.startsWith("mcp--"))).toHaveLength(expected)
+						if (historyCall) expect(names).toContain("mcp--catalog--tool_99")
+						expect(names).toContain("read_file")
+						expect(names).not.toContain("mcp_load")
+						if (provider === providerIdentifiers.gemini)
+							expect(
+								metadata?.allowedFunctionNames?.filter((name) => name.startsWith("mcp--")),
+							).toHaveLength(expected)
+					},
+				)
+
+				it.each(["abort", "abandoned"] as const)(
+					"stops a request canceled during tool building: %s",
+					async (flag) => {
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration: mockApiConfig,
+							task: "search tickets",
+							startTask: false,
+						})
+						vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock prompt")
+						vi.spyOn(task.api, "getModel").mockReturnValue({
+							id: "test-model",
+							info: { contextWindow: 200000, maxTokens: 4096, supportsPromptCache: false },
+						})
+						const createMessage = vi.spyOn(task.api, "createMessage")
+						let release = () => {}
+						const gate = new Promise<void>((resolve) => {
+							release = resolve
+						})
+						let entered = () => {}
+						const building = new Promise<void>((resolve) => {
+							entered = resolve
+						})
+						const build = vi
+							.spyOn(buildTools, "buildNativeToolsArrayWithRestrictions")
+							.mockImplementation(async () => {
+								entered()
+								await gate
+								return { tools: [] }
+							})
+						try {
+							const request = task.attemptApiRequest(0).next()
+							await building
+							if (flag === "abort") setAbortLatch(task, true)
+							else task[flag] = true
+							release()
+							await expect(request).rejects.toThrow("aborted during request construction")
+							expect(createMessage).not.toHaveBeenCalled()
+							expect(task["currentRequestAbortController"]).toBeUndefined()
+						} finally {
+							release()
+							build.mockRestore()
+						}
+					},
+				)
+
+				it.each(
+					(["manual", "recovery", "automatic"] as const).flatMap((path) =>
+						(["none", "build", "environment", "prompt", "summary"] as const).map((cancelAt) => ({
+							path,
+							cancelAt,
+						})),
+					),
+				)(
+					"passes tools and handles cancellation in $path condensation ($cancelAt)",
+					async ({ path, cancelAt }) => {
+						const task = new Task({
+							provider: mockProvider,
+							apiConfiguration: mockApiConfig,
+							task: "search tickets",
+							startTask: false,
+						})
+						const state = await mockProvider.getState()
+						vi.spyOn(mockProvider, "getState").mockResolvedValue({
+							...state,
+							requestDelaySeconds: 0,
+							autoCondenseContext: true,
+							"mcp.dynamicLoad.threshold": 2,
+							"mcp.dynamicLoad.initialK": 1,
+						})
+						const access = getTaskTestAccess(task)
+						vi.spyOn(access, "getSystemPrompt").mockResolvedValue("mock prompt")
+						vi.spyOn(access, "saveClineMessages").mockResolvedValue(true)
+						vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+						const model: ModelInfo = { contextWindow: 50000, maxTokens: 1024, supportsPromptCache: false }
+						vi.spyOn(task.api, "getModel").mockReturnValue({ id: "routing-test", info: model })
+						vi.spyOn(task.api, "countTokens").mockResolvedValue(1000)
+						vi.spyOn(task, "getTokenUsage").mockReturnValue({
+							totalCost: 0,
+							totalTokensIn: 0,
+							totalTokensOut: 0,
+							contextTokens: 100000,
+						})
+						vi.spyOn(task.api, "createMessage").mockReturnValue(
+							asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+						)
+						task.apiConversationHistory = [
+							{ role: "user", content: [{ type: "text", text: "search tickets" }], ts: Date.now() },
+						]
+						const tools: Awaited<
+							ReturnType<typeof buildTools.buildNativeToolsArrayWithRestrictions>
+						>["tools"] = [
+							{
+								type: "function",
+								function: {
+									name: "mcp--catalog--selected",
+									parameters: { type: "object", properties: {} },
+								},
+							},
+						]
+						const build = vi
+							.spyOn(buildTools, "buildNativeToolsArrayWithRestrictions")
+							.mockResolvedValue({ tools })
+						const summariesBefore = vi.mocked(summarizeConversation).mock.calls.length
+						const overwrite = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+						if (cancelAt === "build")
+							build.mockImplementationOnce(async () => {
+								setAbortLatch(task, true)
+								return { tools }
+							})
+						if (cancelAt === "environment")
+							vi.mocked(getEnvironmentDetails).mockImplementationOnce(async () => {
+								setAbortLatch(task, true)
+								return ""
+							})
+						// Late-start and late-commit invariants in check-mcp-request-preparation.ts:
+						// cancellation at any preparation boundary prevents later effects.
+						if (cancelAt === "prompt")
+							vi.mocked(access.getSystemPrompt).mockImplementationOnce(async () => {
+								setAbortLatch(task, true)
+								return "mock prompt"
+							})
+						if (cancelAt === "summary")
+							vi.mocked(summarizeConversation).mockImplementationOnce(async ({ metadata }) => {
+								expect(metadata?.abortSignal).toBeDefined()
+								setAbortLatch(task, true)
+								task["currentRequestAbortController"]?.abort()
+								expect(metadata?.abortSignal?.aborted).toBe(true)
+								return { messages: [], summary: "canceled", cost: 0, newContextTokens: 1 }
+							})
+						try {
+							if (path === "manual") await task.condenseContext()
+							else if (path === "recovery") await access.handleContextWindowExceededError(model)
+							else if (cancelAt === "prompt")
+								await expect(task.attemptApiRequest(0).next()).rejects.toThrow(
+									"aborted during request construction",
+								)
+							else await task.attemptApiRequest(0).next()
+							if (path !== "manual" && !(path === "automatic" && cancelAt === "prompt")) {
+								const notifications = vi
+									.mocked(mockProvider.postMessageToWebview)
+									.mock.calls.map(([message]) => message)
+									.filter((message) =>
+										["condenseTaskContextStarted", "condenseTaskContextResponse"].includes(
+											message.type,
+										),
+									)
+								expect(notifications).toEqual([
+									{ type: "condenseTaskContextStarted", text: task.taskId },
+									{ type: "condenseTaskContextResponse", text: task.taskId },
+								])
+							}
+							if (cancelAt !== "none") {
+								expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(
+									summariesBefore + (cancelAt === "summary" ? 1 : 0),
+								)
+								expect(overwrite).not.toHaveBeenCalled()
+								return
+							}
+							expect(vi.mocked(summarizeConversation).mock.calls.length).toBe(summariesBefore + 1)
+							expect(vi.mocked(summarizeConversation).mock.calls.at(-1)?.[0].metadata?.tools).toEqual(
+								tools,
+							)
+							expect(build).toHaveBeenCalledTimes(path === "automatic" ? 2 : 1)
+							for (const [options] of build.mock.calls) {
+								expect(options).toEqual(
+									expect.objectContaining({
+										task,
+										mcpDynamicLoadThreshold: 2,
+										mcpDynamicLoadInitialK: 1,
+									}),
+								)
+							}
+						} finally {
+							build.mockRestore()
+						}
+					},
+				)
+
 				it("should invoke abort on currentRequestAbortController during first-chunk wait", async () => {
 					const task = new Task({
 						provider: mockProvider,
@@ -5355,7 +5655,7 @@ describe("Cline", () => {
 					task.cancelCurrentRequest()
 
 					expect(abortSpy).toHaveBeenCalledTimes(1)
-					expect(task.currentRequestAbortController).toBeUndefined()
+					expect(task["currentRequestAbortController"]).toBeUndefined()
 				})
 
 				it("should reject streaming consumption when aborted between chunks", async () => {
@@ -5564,7 +5864,7 @@ describe("Cline", () => {
 						},
 					]
 
-					expect(task.currentRequestAbortController).toBeUndefined()
+					expect(task["currentRequestAbortController"]).toBeUndefined()
 
 					const iterator = task.attemptApiRequest(0)
 					await iterator.next()
@@ -6300,7 +6600,7 @@ describe("Cline", () => {
 				expect(createMessageSpy).not.toHaveBeenCalled()
 				// The per-request controller is only created once the request is
 				// committed, so a cancelled construction never reaches it.
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 				await cancelling
 			} finally {
 				vi.useRealTimers()
@@ -6360,7 +6660,7 @@ describe("Cline", () => {
 				expect(createMessageSpy).not.toHaveBeenCalled()
 				// The per-request controller is only created once the request is
 				// committed, so a disposed construction never reaches it.
-				expect(task.currentRequestAbortController).toBeUndefined()
+				expect(task["currentRequestAbortController"]).toBeUndefined()
 				await disposal
 			} finally {
 				vi.useRealTimers()
@@ -7335,10 +7635,6 @@ describe("Cline", () => {
 					await pendingPostState
 				})
 			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
-			vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({
-				enabledToolCount: 0,
-				enabledServerCount: 0,
-			})
 			const initiateTaskLoopSpy = vi.spyOn(taskAccess, "initiateTaskLoop").mockResolvedValue(undefined)
 
 			const startPromise = taskAccess.startTask("new task")

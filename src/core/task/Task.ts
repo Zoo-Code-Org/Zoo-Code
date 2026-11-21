@@ -54,10 +54,9 @@ import {
 	DEFAULT_CHECKPOINT_TIMEOUT_SECONDS,
 	MAX_CHECKPOINT_TIMEOUT_SECONDS,
 	MIN_CHECKPOINT_TIMEOUT_SECONDS,
-	MAX_MCP_TOOLS_THRESHOLD,
-	countEnabledMcpTools,
 	providerIdentifiers,
 	type MentionSegment,
+	attachedMcpToolNamesSchema,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 import { CloudService } from "@roo-code/cloud"
@@ -102,6 +101,8 @@ import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
+import { McpToolSelection } from "./mcpToolSelection"
+import type { ToolDoc } from "../../services/tools/types"
 
 // core modules
 import { ToolRepetitionDetector } from "../tools/ToolRepetitionDetector"
@@ -300,6 +301,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	readonly instanceId: string
 	readonly metadata: TaskMetadata
+	private readonly mcpToolSelection: McpToolSelection
+
+	get attachedMcpToolNames(): Set<string> {
+		return this.mcpToolSelection.names
+	}
 
 	// The observed on-disk version of each file this task has read. Declared here so the
 	// read tools can record it; a write guard later compares a token against this registry.
@@ -768,6 +774,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			images: historyItem ? [] : images,
 		}
 		this._isHistoryTask = !!historyItem && !task && !images
+		const savedMcpToolNames = attachedMcpToolNamesSchema.parse(historyItem?.attachedMcpToolNames)
+		this.mcpToolSelection = new McpToolSelection(savedMcpToolNames)
 
 		// Normal use-case is usually retry similar history task with new workspace.
 		this.workspacePath = parentTask
@@ -1866,8 +1874,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * `merge` (default `true`) is passed through to `saveTaskMessages`: the in-memory
 	 * snapshot is merged with the on-disk record. `overwriteClineMessages` passes `false`
 	 * to replace the stored messages outright.
+	 * MCP initialization uses strict mode to detect metadata failures, retain the
+	 * in-memory selection, and let later normal saves retry persistence.
 	 */
-	private async saveClineMessages(merge = true): Promise<boolean> {
+	private async saveClineMessages(merge = true, requireMetadataPersistence = false): Promise<boolean> {
 		try {
 			await saveTaskMessages({
 				messages: structuredClone(this.clineMessages),
@@ -1896,6 +1906,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				mode: this._taskMode || defaultModeSlug, // Use the task's own mode, not the current provider mode.
 				apiConfigName: this._taskApiConfigName, // Use the task's own provider profile, not the current provider profile.
 				initialStatus: this.initialStatus,
+				attachedMcpToolNames: this.mcpToolSelection.initialized ? [...this.attachedMcpToolNames] : undefined,
 			})
 
 			// Emit token/tool usage updates using debounced function
@@ -1906,12 +1917,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.debouncedEmitTokenUsage(tokenUsage, this.toolUsage)
 
 			const provider = this.providerRef.deref()
+			if (requireMetadataPersistence && !provider)
+				throw new Error("Provider lost while saving MCP tool selection")
 			const existingStatus = provider?.taskHistoryStore.get(this.taskId)?.status
 			await provider?.updateTaskHistory(existingStatus ? { ...historyItem, status: existingStatus } : historyItem)
 		} catch (error) {
 			// The message array was persisted above; a metadata or task-history failure must
 			// not mask that write (see the method docs). The next saveClineMessages() call
 			// recomputes and re-emits the metadata update.
+			if (requireMetadataPersistence) throw error
 			console.error("Failed to save task metadata:", error)
 		}
 
@@ -2755,6 +2769,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
 		if (provider) {
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
+				task: this,
+				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 				provider,
 				cwd: this.cwd,
 				mode,
@@ -2767,6 +2784,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 			allTools = toolsResult.tools
 		}
+
+		if (this.abort || this.abandoned) return
+		this.currentRequestAbortController ??= new AbortController()
 
 		// Build metadata with tools and taskId for the condensing API call
 		const metadata: ApiHandlerCreateMessageMetadata = {
@@ -3044,37 +3064,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// Start / Resume / Abort / Dispose
 
 	/**
-	 * Get enabled MCP tools count for this task.
-	 * Returns the count along with the number of servers contributing.
-	 *
-	 * @returns Object with enabledToolCount and enabledServerCount
-	 */
-	private async getEnabledMcpToolsCount(): Promise<{ enabledToolCount: number; enabledServerCount: number }> {
-		try {
-			const provider = this.providerRef.deref()
-			if (!provider) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const { mcpEnabled } = (await provider.getState()) ?? {}
-			if (!(mcpEnabled ?? true)) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const mcpHub = await McpServerManager.getInstance(provider.context, provider)
-			if (!mcpHub) {
-				return { enabledToolCount: 0, enabledServerCount: 0 }
-			}
-
-			const servers = mcpHub.getServers()
-			return countEnabledMcpTools(servers)
-		} catch (error) {
-			console.error("[Task#getEnabledMcpToolsCount] Error counting MCP tools:", error)
-			return { enabledToolCount: 0, enabledServerCount: 0 }
-		}
-	}
-
-	/**
 	 * Manually start a **new** task when it was created with `startTask: false`.
 	 *
 	 * This fires task startup as a background async operation after the provider
@@ -3124,6 +3113,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return this._runPromise
 	}
 
+	/** Revalidate the current scope and persist additions before use. */
+	public async initializeAttachedMcpTools(scopedTools: ToolDoc[], initialK: number): Promise<void> {
+		await this.mcpToolSelection.initialize(
+			scopedTools,
+			initialK,
+			this.metadata.task ?? "",
+			this.apiConversationHistory,
+			async () => {
+				try {
+					if (!(await this.saveClineMessages(true, true)))
+						throw new Error("Failed to save MCP tool selection")
+				} catch (error) {
+					// Keep the selection on failure. Normal history saves retry it.
+					console.error("[Task] Failed to persist MCP tool selection; keeping in-memory selection:", error)
+				}
+			},
+		)
+	}
+
 	private async startTask(task?: string, images?: string[]): Promise<void> {
 		try {
 			// `conversationHistory` (for API) and `clineMessages` (for webview)
@@ -3142,31 +3150,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 			await this.say("text", task, images)
 
-			// Check for too many MCP tools and warn the user
-			const { enabledToolCount, enabledServerCount } = await this.getEnabledMcpToolsCount()
-			if (enabledToolCount > MAX_MCP_TOOLS_THRESHOLD) {
-				await this.say(
-					"too_many_tools_warning",
-					JSON.stringify({
-						toolCount: enabledToolCount,
-						serverCount: enabledServerCount,
-						threshold: MAX_MCP_TOOLS_THRESHOLD,
-					}),
-					undefined,
-					undefined,
-					undefined,
-					undefined,
-					{ isNonInteractive: true },
-				)
-			}
-
 			// Surface once per new task which `disabledTools` entries carry no
 			// disabling weight (protocol tools are exempt from user disabling).
 			// Detection reads the raw list, so the notice also fires when a
 			// model-profile `excludedTools` entry suppresses the tool through a
 			// separate route. `startTask` runs exactly once per new task, which
 			// is what bounds this to a single notice. The block is guarded like
-			// `getEnabledMcpToolsCount` above: this is a telemetry-class notice,
+			// other startup notices: this is a telemetry-class notice,
 			// so a rejection from the state read or the say must never keep the
 			// task loop from starting.
 			try {
@@ -5644,46 +5634,55 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Send condenseTaskContextStarted to show in-progress indicator
 		await this.providerRef.deref()?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 
-		// Build tools for condensing metadata (same tools used for normal API calls)
-		const provider = this.providerRef.deref()
-		let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
-		if (provider) {
-			const toolsResult = await buildNativeToolsArrayWithRestrictions({
-				provider,
-				cwd: this.cwd,
-				mode,
-				customModes: state?.customModes,
-				experiments: state?.experiments,
-				apiConfiguration,
-				disabledTools: state?.disabledTools,
-				modelInfo,
-				includeAllToolsWithRestrictions: false,
-			})
-			allTools = toolsResult.tools
-		}
-
-		// Build metadata with tools and taskId for the condensing API call
-		const metadata: ApiHandlerCreateMessageMetadata = {
-			mode,
-			taskId: this.taskId,
-			...(this.currentRequestAbortController?.signal
-				? {
-						abortSignal: this.currentRequestAbortController.signal,
-					}
-				: {}),
-			...(allTools.length > 0
-				? {
-						tools: allTools,
-						tool_choice: "auto",
-						parallelToolCalls: true,
-					}
-				: {}),
-		}
-
 		try {
+			// Build tools for condensing metadata (same tools used for normal API calls)
+			const provider = this.providerRef.deref()
+			let allTools: import("openai").default.Chat.ChatCompletionTool[] = []
+			if (provider) {
+				const toolsResult = await buildNativeToolsArrayWithRestrictions({
+					task: this,
+					mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+					mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+					provider,
+					cwd: this.cwd,
+					mode,
+					customModes: state?.customModes,
+					experiments: state?.experiments,
+					apiConfiguration,
+					disabledTools: state?.disabledTools,
+					modelInfo,
+					includeAllToolsWithRestrictions: false,
+				})
+				allTools = toolsResult.tools
+			}
+
+			if (this.abort || this.abandoned) return
+			this.currentRequestAbortController ??= new AbortController()
+
+			// Build metadata with tools and taskId for the condensing API call
+			const metadata: ApiHandlerCreateMessageMetadata = {
+				mode,
+				taskId: this.taskId,
+				...(this.currentRequestAbortController?.signal
+					? {
+							abortSignal: this.currentRequestAbortController.signal,
+						}
+					: {}),
+				...(allTools.length > 0
+					? {
+							tools: allTools,
+							tool_choice: "auto",
+							parallelToolCalls: true,
+						}
+					: {}),
+			}
+
 			// Generate environment details to include in the condensed summary
 			const environmentDetails = await getEnvironmentDetails(this, true)
 			const filesReadByRoo = await this.getFilesReadByRooSafely("handleContextWindowExceededError")
+
+			const systemPrompt = await this.getSystemPrompt(state, modelInfo)
+			if (this.abort || this.abandoned) return
 
 			// Force aggressive truncation by keeping only 75% of the conversation history
 			const truncateResult = await manageContext({
@@ -5694,7 +5693,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(state, modelInfo),
+				systemPrompt,
 				taskId: this.taskId,
 				// Recovery must summarize like the automatic path: same prompt and folded file context.
 				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
@@ -5707,6 +5706,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
 			})
+
+			if (this.abort || this.abandoned) return
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -5892,59 +5893,67 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					?.postMessageToWebview({ type: "condenseTaskContextStarted", text: this.taskId })
 			}
 
-			// Build tools for condensing metadata (same tools used for normal API calls)
-			// This ensures the condensing API call includes tool definitions for providers that need them
-			let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
-			{
-				const provider = this.providerRef.deref()
-				if (provider) {
-					const toolsResult = await buildNativeToolsArrayWithRestrictions({
-						provider,
-						cwd: this.cwd,
-						mode,
-						customModes: state?.customModes,
-						experiments: state?.experiments,
-						apiConfiguration,
-						disabledTools: state?.disabledTools,
-						modelInfo: requestModelInfo,
-						includeAllToolsWithRestrictions: false,
-					})
-					contextMgmtTools = toolsResult.tools
+			try {
+				// Build tools for condensing metadata (same tools used for normal API calls)
+				// This ensures the condensing API call includes tool definitions for providers that need them
+				let contextMgmtTools: import("openai").default.Chat.ChatCompletionTool[] = []
+				{
+					const provider = this.providerRef.deref()
+					if (provider) {
+						const toolsResult = await buildNativeToolsArrayWithRestrictions({
+							task: this,
+							mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+							mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
+							provider,
+							cwd: this.cwd,
+							mode,
+							customModes: state?.customModes,
+							experiments: state?.experiments,
+							apiConfiguration,
+							disabledTools: state?.disabledTools,
+							modelInfo: requestModelInfo,
+							includeAllToolsWithRestrictions: false,
+						})
+						contextMgmtTools = toolsResult.tools
+					}
 				}
-			}
 
-			// Build metadata with tools and taskId for the condensing API call
-			const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
-				mode,
-				taskId: this.taskId,
-				...(this.currentRequestAbortController?.signal
-					? {
-							abortSignal: this.currentRequestAbortController.signal,
-						}
-					: {}),
-				...(contextMgmtTools.length > 0
-					? {
-							tools: contextMgmtTools,
-							tool_choice: "auto",
-							parallelToolCalls: true,
-						}
-					: {}),
-			}
+				if (this.abort || this.abandoned) return
+				this.currentRequestAbortController ??= new AbortController()
 
-			// Only generate environment details when context management will actually run.
-			// getEnvironmentDetails(this, true) triggers a recursive workspace listing which
-			// adds overhead - avoid this for the common case where context is below threshold.
-			const contextMgmtEnvironmentDetails = contextManagementWillRun
-				? await getEnvironmentDetails(this, true)
-				: undefined
+				// Build metadata with tools and taskId for the condensing API call
+				const contextMgmtMetadata: ApiHandlerCreateMessageMetadata = {
+					mode,
+					taskId: this.taskId,
+					...(this.currentRequestAbortController?.signal
+						? {
+								abortSignal: this.currentRequestAbortController.signal,
+							}
+						: {}),
+					...(contextMgmtTools.length > 0
+						? {
+								tools: contextMgmtTools,
+								tool_choice: "auto",
+								parallelToolCalls: true,
+							}
+						: {}),
+				}
 
-			// Get files read by Roo for code folding - only when context management will run
-			const contextMgmtFilesReadByRoo =
-				contextManagementWillRun && autoCondenseContext
-					? await this.getFilesReadByRooSafely("attemptApiRequest")
+				// Only generate environment details when context management will actually run.
+				// getEnvironmentDetails(this, true) triggers a recursive workspace listing which
+				// adds overhead - avoid this for the common case where context is below threshold.
+				const contextMgmtEnvironmentDetails = contextManagementWillRun
+					? await getEnvironmentDetails(this, true)
 					: undefined
 
-			try {
+				// Get files read by Roo for code folding - only when context management will run
+				const contextMgmtFilesReadByRoo =
+					contextManagementWillRun && autoCondenseContext
+						? await this.getFilesReadByRooSafely("attemptApiRequest")
+						: undefined
+
+				if (this.abort || this.abandoned) return
+
 				const truncateResult = await manageContext({
 					messages: this.apiConversationHistory,
 					totalTokens: contextTokens,
@@ -5965,6 +5974,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				if (this.abort || this.abandoned) return
+
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
@@ -6032,6 +6043,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 
 			const toolsResult = await buildNativeToolsArrayWithRestrictions({
+				task: this,
+				mcpDynamicLoadThreshold: state?.["mcp.dynamicLoad.threshold"],
+				mcpDynamicLoadInitialK: state?.["mcp.dynamicLoad.initialK"],
 				provider,
 				cwd: this.cwd,
 				mode,
@@ -6044,6 +6058,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 			allTools = toolsResult.tools
 			allowedFunctionNames = toolsResult.allowedFunctionNames
+		}
+
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
 		}
 
 		const shouldIncludeTools = allTools.length > 0
