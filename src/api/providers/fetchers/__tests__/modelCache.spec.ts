@@ -49,6 +49,9 @@ vi.mock("../nanogpt")
 vi.mock("../moonshot")
 vi.mock("../zoo-gateway")
 vi.mock("../kimi-code")
+vi.mock("../../../../services/zoo-code-auth", () => ({
+	resolveZooGatewaySessionToken: vi.fn((profileToken?: string) => profileToken || undefined),
+}))
 
 // Mock ContextProxy with a simple static instance
 vi.mock("../../../core/config/ContextProxy", () => ({
@@ -80,6 +83,7 @@ import {
 } from "../modelCache"
 import { getKimiCodeModels } from "../kimi-code"
 import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "../zoo-gateway"
+import { resolveZooGatewaySessionToken } from "../../../../services/zoo-code-auth"
 
 const mockGetZooGatewayModels = getZooGatewayModels as Mock<typeof getZooGatewayModels>
 const mockGetKimiCodeModels = getKimiCodeModels as Mock<typeof getKimiCodeModels>
@@ -1735,7 +1739,7 @@ describe("auth session cache", () => {
 		}
 	})
 
-	it("touches the re-read entry, not the pre-fetch snapshot, when a refresh lands during a 304", async () => {
+	it("serves but does not renew a newer catalog when a 304 for the older ETag arrives", async () => {
 		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
 		const refreshedModels: ModelRecord = {
 			"openai/gpt-5": { maxTokens: 32000, contextWindow: 400000, supportsPromptCache: true },
@@ -1747,21 +1751,105 @@ describe("auth session cache", () => {
 				.mockResolvedValueOnce({ kind: "ok", models: zooModels, etag: '"v1"' })
 				.mockReturnValueOnce(new Promise((r) => (resolveRevalidation = r)))
 				.mockResolvedValueOnce({ kind: "ok", models: refreshedModels, etag: '"v2"' })
+				.mockResolvedValueOnce({ kind: "ok", models: refreshedModels, etag: '"v2"' })
 			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
 
 			await getModels(options, zooGatewayHandler)
 			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
 
+			// Revalidation for "v1" is pending while a forced refresh stores "v2".
 			const revalidation = getModels(options, zooGatewayHandler)
 			await refreshModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(1000)
 			resolveRevalidation({ kind: "not_modified" })
-
 			expect(await revalidation).toEqual(refreshedModels)
+
+			// "v2" was stored 1 s before the 304 arrived. At its own TTL it must be stale,
+			// which fails if the 304 for "v1" renewed it.
+			vi.advanceTimersByTime(5 * 60 * 1000 - 1000)
 			expect(await getModels(options, zooGatewayHandler)).toEqual(refreshedModels)
-			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(3)
+			expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(4)
 		} finally {
 			vi.useRealTimers()
 		}
+	})
+
+	it("does not let an older fetch overwrite a newer refresh", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		const olderModels: ModelRecord = { "old/a": { maxTokens: 1, contextWindow: 1, supportsPromptCache: false } }
+		const newerModels: ModelRecord = { "new/b": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }
+		let resolveOlder!: (v: ZooGatewayResult) => void
+		let rejectLatest!: (reason: unknown) => void
+		mockGetZooGatewayModels
+			.mockReturnValueOnce(new Promise((r) => (resolveOlder = r)))
+			.mockResolvedValueOnce(zooGatewayOk(newerModels))
+			.mockReturnValueOnce(new Promise((_r, reject) => (rejectLatest = reject)))
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const older = getModels(options, zooGatewayHandler) // A
+		await refreshModels(options, zooGatewayHandler) // B stores newerModels
+		const latest = refreshModels(options, zooGatewayHandler) // C owns the in-flight slot
+		resolveOlder(zooGatewayOk(olderModels))
+		await older
+		rejectLatest(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+		await latest
+
+		mockGetZooGatewayModels.mockClear()
+		expect(await getModels(options, zooGatewayHandler)).toEqual(newerModels)
+		expect(mockGetZooGatewayModels).not.toHaveBeenCalled()
+	})
+
+	type RevalidationControls = {
+		resolve: (v: Awaited<ReturnType<typeof getZooGatewayModels>>) => void
+		reject: (reason: unknown) => void
+	}
+
+	it.each([
+		["a failed revalidation", ({ reject }: RevalidationControls) => reject(new Error("network down"))],
+		["an empty revalidation", ({ resolve }: RevalidationControls) => resolve(zooGatewayOk({}))],
+	])("does not serve the previous session's catalog after sign-out on %s", async (_label, settle) => {
+		vi.useFakeTimers()
+		try {
+			let controls!: RevalidationControls
+			mockGetZooGatewayModels
+				.mockResolvedValueOnce(zooGatewayOk(zooModels))
+				.mockReturnValueOnce(new Promise((resolve, reject) => (controls = { resolve, reject })))
+			const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+			await getModels(options, zooGatewayHandler)
+			vi.advanceTimersByTime(5 * 60 * 1000 + 1)
+
+			const revalidation = getModels(options, zooGatewayHandler).catch(() => "rejected")
+			clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+			settle(controls)
+
+			expect(await revalidation).not.toEqual(zooModels)
+		} finally {
+			vi.useRealTimers()
+		}
+	})
+
+	it("keys the catalog by the session token actually sent, not the profile token", async () => {
+		const accountA: ModelRecord = { "a/1": { maxTokens: 1, contextWindow: 1, supportsPromptCache: false } }
+		const accountB: ModelRecord = { "b/1": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }
+		const mockResolveToken = vi.mocked(resolveZooGatewaySessionToken)
+		mockGetZooGatewayModels
+			.mockResolvedValueOnce(zooGatewayOk(accountA))
+			.mockResolvedValueOnce(zooGatewayOk(accountB))
+		// A non-Zoo profile is active, so the request carries no profile token.
+		const options = { provider: providerIdentifiers.zooGateway }
+
+		mockResolveToken.mockReturnValue("zoo_ext_account_a")
+		expect(await getModels(options, zooGatewayHandler)).toEqual(accountA)
+
+		mockResolveToken.mockReturnValue("zoo_ext_account_b")
+		expect(await getModels(options, zooGatewayHandler)).toEqual(accountB)
+
+		expect(mockGetZooGatewayModels).toHaveBeenCalledTimes(2)
+		expect(mockGetZooGatewayModels).toHaveBeenLastCalledWith(
+			expect.objectContaining({ zooSessionToken: "zoo_ext_account_b" }),
+		)
+		mockResolveToken.mockImplementation((profileToken?: string) => profileToken || undefined)
 	})
 
 	it("keeps the captured catalog when the size bound evicts the entry during a pending 304", async () => {

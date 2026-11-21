@@ -329,6 +329,7 @@ vi.mock("../../../services/zoo-code-auth", () => ({
 	handleAuthCallback: vi.fn(),
 	setZooCodeUserInfo: vi.fn(),
 	disconnectZooCode: vi.fn(),
+	isZooCodeAuthenticated: vi.fn().mockResolvedValue(false),
 }))
 
 vi.mock("../../../shared/modes", () => ({

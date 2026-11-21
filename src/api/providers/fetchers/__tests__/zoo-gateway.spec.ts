@@ -4,12 +4,14 @@ import axios from "axios"
 
 import type { ApiHandlerOptions } from "../../../../shared/api"
 import type { VercelAiGatewayModel } from "../vercel-ai-gateway"
-import { clearZooCodeToken } from "../../../../services/zoo-code-auth"
+import { clearZooCodeTokenIfCurrent } from "../../../../services/zoo-code-auth"
 import { getZooGatewayModels, parseZooGatewayModel, ZooGatewayModelsUnauthorizedError } from "../zoo-gateway"
 
 vitest.mock("axios")
 vitest.mock("../../../../services/zoo-code-auth", () => ({
-	clearZooCodeToken: vitest.fn(async function () {}),
+	clearZooCodeTokenIfCurrent: vitest.fn(async function () {
+		return true
+	}),
 	getCachedZooCodeToken: vitest.fn(function () {
 		return ""
 	}),
@@ -200,13 +202,30 @@ describe("Zoo Gateway Fetchers", () => {
 			expect(thrown).not.toHaveProperty("config")
 			expect((thrown as Error).message).toContain("status=502")
 			expect((thrown as Error).message).not.toContain("should-never-be-logged")
-			expect(clearZooCodeToken).not.toHaveBeenCalled()
+			expect(clearZooCodeTokenIfCurrent).not.toHaveBeenCalled()
 			const logged = consoleErrorSpy.mock.calls.map((args) => String(args[0])).join("\n")
 			expect(logged).toContain("status=502")
 			expect(logged).toContain("code=ECONNRESET")
 			expect(logged).not.toContain("should-never-be-logged")
 			expect(logged).not.toContain("Authorization")
 			consoleErrorSpy.mockRestore()
+		})
+
+		it.each([
+			[199, false],
+			[200, true],
+			[203, true],
+			[299, true],
+			[300, false],
+			[304, true],
+			[401, false],
+			[500, false],
+		])("accepts status %i as a catalog response: %s", async (status, accepted) => {
+			mockAxiosGet.mockResolvedValueOnce({ status: 200, headers: {}, data: { object: "list", data: [] } })
+
+			await getZooGatewayModels(gatewayOptions())
+
+			expect(mockAxiosGet.mock.calls[0]?.[1]?.validateStatus?.(status)).toBe(accepted)
 		})
 
 		it("clears the session and throws an unauthorized error on 401", async () => {
@@ -220,7 +239,40 @@ describe("Zoo Gateway Fetchers", () => {
 			await expect(getZooGatewayModels(gatewayOptions())).rejects.toBeInstanceOf(
 				ZooGatewayModelsUnauthorizedError,
 			)
-			expect(clearZooCodeToken).toHaveBeenCalledTimes(1)
+			expect(clearZooCodeTokenIfCurrent).toHaveBeenCalledWith("zoo_ext_test_token")
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("does not report unauthorized when a newer session replaced the rejected token", async () => {
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
+			vi.mocked(clearZooCodeTokenIfCurrent).mockResolvedValueOnce(false)
+			mockAxiosGet.mockRejectedValueOnce(
+				Object.assign(new Error("Request failed with status code 401"), {
+					response: { status: 401, statusText: "Unauthorized" },
+				}),
+			)
+
+			const thrown = await getZooGatewayModels(gatewayOptions()).catch((error: unknown) => error)
+
+			expect(thrown).toBeInstanceOf(Error)
+			expect(thrown).not.toBeInstanceOf(ZooGatewayModelsUnauthorizedError)
+			consoleErrorSpy.mockRestore()
+		})
+
+		it("still reports unauthorized when removing the session from secret storage fails", async () => {
+			const consoleErrorSpy = vitest.spyOn(console, "error").mockImplementation(function () {})
+			vi.mocked(clearZooCodeTokenIfCurrent).mockRejectedValueOnce(new Error("keychain unavailable"))
+			mockAxiosGet.mockRejectedValueOnce(
+				Object.assign(new Error("Request failed with status code 401"), {
+					response: { status: 401, statusText: "Unauthorized" },
+				}),
+			)
+
+			await expect(getZooGatewayModels(gatewayOptions())).rejects.toBeInstanceOf(
+				ZooGatewayModelsUnauthorizedError,
+			)
+			const logged = consoleErrorSpy.mock.calls.map((args) => String(args[0])).join(" ")
+			expect(logged).toContain("keychain unavailable")
 			consoleErrorSpy.mockRestore()
 		})
 

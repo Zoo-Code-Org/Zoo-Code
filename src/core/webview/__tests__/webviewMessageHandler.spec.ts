@@ -14,6 +14,7 @@ vi.mock("../../../api", () => ({
 }))
 vi.mock("../../../services/zoo-code-auth", () => ({
 	disconnectZooCode: vi.fn().mockResolvedValue(undefined),
+	isZooCodeAuthenticated: vi.fn().mockResolvedValue(false),
 }))
 vi.mock("../../../api/providers/fetchers/lmstudio", () => ({
 	getLMStudioModels: vi.fn(),
@@ -1133,7 +1134,9 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		})
 	})
 
-	it("refreshes webview state when Zoo Gateway discovery fails so a cleared session shows sign-in", async () => {
+	it("refreshes webview state when Zoo Gateway discovery signs the user out", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
 		mockGetModels.mockRejectedValueOnce(new Error("Zoo Gateway session is no longer valid"))
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1149,7 +1152,36 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
 	})
 
+	it("refreshes webview state when a forced Zoo Gateway refresh signs the user out", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(true).mockResolvedValueOnce(false)
+		// The forced refresh clears the session, so the follow-up read finds no token and returns {}.
+		mockGetModels.mockResolvedValueOnce({})
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway, refresh: true },
+		})
+
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("does not refresh webview state when Zoo Gateway discovery fails without a sign-out", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(true).mockResolvedValueOnce(true)
+		mockGetModels.mockRejectedValueOnce(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockClineProvider.postStateToWebview).not.toHaveBeenCalled()
+	})
+
 	it("does not refresh webview state when Zoo Gateway discovery succeeds", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(true).mockResolvedValueOnce(true)
 		mockGetModels.mockResolvedValueOnce({
 			"zai/glm-5": { maxTokens: 4096, contextWindow: 8192, supportsPromptCache: false },
 		})

@@ -22,6 +22,7 @@ import { GetModelsOptions } from "../../../shared/api"
 import type { ApiHandler } from "../../index"
 import { getKimiCodeModels } from "./kimi-code"
 import { getZooGatewayModels, ZooGatewayModelsUnauthorizedError } from "./zoo-gateway"
+import { resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
 
 const memoryCache = new NodeCache({ stdTTL: 5 * 60, checkperiod: 5 * 60 })
 
@@ -255,11 +256,26 @@ async function fetchAuthScopedModelsFromProvider(
 	}
 }
 
+// The Zoo Gateway fetcher sends the signed-in session token in preference to the profile
+// token, so key, coalesce, and revalidate by that same effective token. Otherwise a sign-in
+// that replaces the token could be served the previous token's catalog.
+function withEffectiveAuthToken(options: GetModelsOptions): GetModelsOptions {
+	if (options.provider !== providerIdentifiers.zooGateway) {
+		return options
+	}
+	return { ...options, apiKey: resolveZooGatewaySessionToken(options.apiKey) }
+}
+
+function getAuthScopedCacheKey(options: GetModelsOptions, handler: ApiHandler): string {
+	return getCacheKey(withEffectiveAuthToken(options), handler)
+}
+
 async function resolveAuthScopedModels(
-	options: GetModelsOptions,
+	requestedOptions: GetModelsOptions,
 	handler: ApiHandler,
 	{ forceRefresh = false }: { forceRefresh?: boolean } = {},
 ): Promise<ModelRecord> {
+	const options = withEffectiveAuthToken(requestedOptions)
 	const { provider } = options
 	const cacheKey = getCacheKey(options, handler)
 	const existing = getAuthSessionEntry(cacheKey)
@@ -280,28 +296,32 @@ async function resolveAuthScopedModels(
 	// between when we started and when we try to write back results.
 	const authProvider = provider as AuthScopedProvider
 	const generationAtStart = authScopedClearGeneration.get(authProvider) ?? 0
+	const notInvalidatedSinceStart = () => (authScopedClearGeneration.get(authProvider) ?? 0) === generationAtStart
+	const sentEtag = existing?.etag
+	// Filled in once the flight promise exists; read only after the fetch settles.
+	const flight: { own?: Promise<ModelRecord> } = {}
 
 	const fetchPromise = (async () => {
 		try {
-			const fetched = await fetchAuthScopedModelsFromProvider(
-				assertAuthScopedGetModelsOptions(options),
-				existing?.etag,
-			)
+			const fetched = await fetchAuthScopedModelsFromProvider(assertAuthScopedGetModelsOptions(options), sentEtag)
 
 			if (fetched.kind === "not_modified") {
 				// Re-read from the Map: a concurrent sign-out could have cleared
 				// the entry between when we captured `existing` and now.
 				const current = getAuthSessionEntry(cacheKey)
 				if (current && authSessionHasModels(current.models)) {
-					touchAuthSessionEntry(cacheKey, current)
+					// The 304 validated the catalog we sent the ETag for. If a newer catalog
+					// replaced it meanwhile, serve that one but keep its own freshness window.
+					if (current.etag === sentEtag) {
+						touchAuthSessionEntry(cacheKey, current)
+					}
 					reportedEmptyModelResponse.delete(cacheKey)
 					return current.models
 				}
 				// The entry can also vanish through the size bound while the 304 is pending.
 				// A 304 carries no body, so keep the captured catalog unless a sign-out or
 				// flush invalidated this provider in the meantime.
-				const generationNow = authScopedClearGeneration.get(authProvider) ?? 0
-				if (generationNow === generationAtStart && existing && authSessionHasModels(existing.models)) {
+				if (notInvalidatedSinceStart() && existing && authSessionHasModels(existing.models)) {
 					touchAuthSessionEntry(cacheKey, existing)
 					reportedEmptyModelResponse.delete(cacheKey)
 					return existing.models
@@ -312,10 +332,10 @@ async function resolveAuthScopedModels(
 				if (modelCount > 0) {
 					// Guard against re-populating the cache after a sign-out invalidated
 					// this key between when we started the fetch and when it resolved.
-					// Check both: (1) the in-flight promise is still ours, and (2) no sign-out
+					// Check both: (1) this fetch still owns the in-flight slot, so an older
+					// fetch cannot overwrite a newer refresh, and (2) no sign-out or flush
 					// bumped the generation while we were fetching.
-					const generationNow = authScopedClearGeneration.get(authProvider) ?? 0
-					if (inFlightAuthScopedFetch.has(cacheKey) && generationNow === generationAtStart) {
+					if (inFlightAuthScopedFetch.get(cacheKey) === flight.own && notInvalidatedSinceStart()) {
 						setAuthSessionEntry(cacheKey, fetched.models, fetched.etag)
 						reportedEmptyModelResponse.delete(cacheKey)
 					}
@@ -329,15 +349,17 @@ async function resolveAuthScopedModels(
 				})
 			}
 
-			if (existing && authSessionHasModels(existing.models)) {
+			// Never fall back to a catalog captured before a sign-out or flush.
+			if (notInvalidatedSinceStart() && existing && authSessionHasModels(existing.models)) {
 				return existing.models
 			}
 
 			return fetched.models
 		} catch (error) {
 			// A rejected session must reach the UI as a sign-in prompt, not be masked by the
-			// previous catalog.
+			// previous catalog, and a catalog captured before a sign-out must not be served.
 			if (
+				notInvalidatedSinceStart() &&
 				existing &&
 				authSessionHasModels(existing.models) &&
 				!(error instanceof ZooGatewayModelsUnauthorizedError)
@@ -361,6 +383,7 @@ async function resolveAuthScopedModels(
 			inFlightAuthScopedFetch.delete(cacheKey)
 		}
 	})
+	flight.own = fetchWithCleanup
 	inFlightAuthScopedFetch.set(cacheKey, fetchWithCleanup)
 	return fetchWithCleanup
 }
@@ -705,8 +728,9 @@ export const refreshModels = async (options: GetModelsOptions, handler: ApiHandl
 			return await resolveAuthScopedModels(options, handler, { forceRefresh: true })
 			// Stryker disable next-line BlockStatement: emptying catch falls through into non-auth refresh; covered by error-message assertion in tests
 		} catch (error) {
-			console.error(`[refreshModels] Failed to refresh ${cacheKey} models:`, error)
-			const existing = getAuthSessionEntry(cacheKey)
+			const authCacheKey = getAuthScopedCacheKey(options, handler)
+			console.error(`[refreshModels] Failed to refresh ${authCacheKey} models:`, error)
+			const existing = getAuthSessionEntry(authCacheKey)
 			// Stryker disable next-line ConditionalExpression,BlockStatement,EqualityOperator: resolveAuthScopedModels only throws when no usable session entry remains
 			if (existing && authSessionHasModels(existing.models)) {
 				return existing.models
@@ -803,7 +827,7 @@ export const flushModels = async (
 	refresh: boolean = false,
 ): Promise<void> => {
 	if (handler.getModelCacheScope().authScoped) {
-		const cacheKey = getCacheKey(options, handler)
+		const cacheKey = getAuthScopedCacheKey(options, handler)
 		if (refresh) {
 			try {
 				await resolveAuthScopedModels(options, handler, { forceRefresh: true })

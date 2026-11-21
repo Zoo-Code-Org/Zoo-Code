@@ -4,6 +4,7 @@ import { providerIdentifiers } from "@roo-code/types"
 import * as modelCache from "../../api/providers/fetchers/modelCache"
 import {
 	clearZooCodeToken,
+	clearZooCodeTokenIfCurrent,
 	clearZooCodeUserInfo,
 	disconnectZooCode,
 	getCachedZooCodeToken,
@@ -11,6 +12,7 @@ import {
 	getZooCodeBaseUrl,
 	handleAuthCallback,
 	initZooCodeAuth,
+	isZooCodeAuthenticated,
 	resolveZooGatewaySessionToken,
 	setZooCodeToken,
 	setZooCodeUserInfo,
@@ -179,6 +181,64 @@ describe("zoo-code-auth", () => {
 
 			expect(clearSessionSpy).toHaveBeenCalledWith(providerIdentifiers.zooGateway)
 			clearSessionSpy.mockRestore()
+		})
+	})
+
+	describe("clearZooCodeTokenIfCurrent", () => {
+		it("clears the session when the rejected token is still active", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).resolves.toBe(true)
+
+			expect(getCachedZooCodeToken()).toBe("")
+			expect(mockSecrets.delete).toHaveBeenCalledWith("zoo-code-session-token")
+			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
+		})
+
+		it("keeps a newer session when a late rejection names the old token", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_b")
+
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).resolves.toBe(false)
+
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_b")
+			expect(mockSecrets.delete).not.toHaveBeenCalled()
+		})
+
+		it("does not let a check-then-clear for the old token remove a sign-in that started first", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+
+			const signIn = setZooCodeToken("zoo_ext_b")
+			const lateRejection = clearZooCodeTokenIfCurrent("zoo_ext_a")
+			await Promise.all([signIn, lateRejection])
+
+			await expect(lateRejection).resolves.toBe(false)
+			expect(getCachedZooCodeToken()).toBe("zoo_ext_b")
+			await expect(mockSecrets.get("zoo-code-session-token")).resolves.toBe("zoo_ext_b")
+		})
+
+		it("invalidates the session in memory even when the secret delete fails", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			mockSecrets.delete.mockRejectedValueOnce(new Error("keychain unavailable"))
+
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).rejects.toThrow("keychain unavailable")
+
+			expect(getCachedZooCodeToken()).toBe("")
+			expect(resolveZooGatewaySessionToken("zoo_ext_profile")).toBeUndefined()
+			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
+		})
+
+		it("reports authenticated again after a new sign-in", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			await clearZooCodeTokenIfCurrent("zoo_ext_a")
+
+			await setZooCodeToken("zoo_ext_b")
+
+			await expect(isZooCodeAuthenticated()).resolves.toBe(true)
 		})
 	})
 

@@ -3,7 +3,11 @@ import axios from "axios"
 import type { ModelInfo } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../../shared/api"
-import { clearZooCodeToken, getZooCodeBaseUrl, resolveZooGatewaySessionToken } from "../../../services/zoo-code-auth"
+import {
+	clearZooCodeTokenIfCurrent,
+	getZooCodeBaseUrl,
+	resolveZooGatewaySessionToken,
+} from "../../../services/zoo-code-auth"
 
 import {
 	type VercelAiGatewayModel,
@@ -33,8 +37,10 @@ export type ZooGatewayModelsFetchResult =
  *
  * Pass `ifNoneMatch` with a previously returned `etag` to revalidate; the result is
  * `not_modified` when the catalog is unchanged. Returns an empty `ok` catalog when no
- * session token is available. Throws `ZooGatewayModelsUnauthorizedError` (after clearing
- * the session) on 401, and a sanitized `Error` on any other failure.
+ * session token is available. On 401, clears the session if the rejected token is still
+ * active and throws `ZooGatewayModelsUnauthorizedError`; if a newer session replaced it, the
+ * session is left alone and a sanitized `Error` is thrown. Any other failure throws a
+ * sanitized `Error`.
  */
 export async function getZooGatewayModels(
 	options?: ApiHandlerOptions & { ifNoneMatch?: string },
@@ -59,7 +65,7 @@ export async function getZooGatewayModels(
 		const response = await axios.get(`${baseURL}/models`, {
 			headers,
 			timeout: MODEL_DISCOVERY_TIMEOUT_MS,
-			validateStatus: (status) => status === 200 || status === 304,
+			validateStatus: (status) => (status >= 200 && status < 300) || status === 304,
 		})
 
 		if (response.status === 304) {
@@ -104,7 +110,18 @@ export async function getZooGatewayModels(
 		)
 
 		if (status === 401) {
-			await clearZooCodeToken()
+			let cleared = true
+			try {
+				cleared = await clearZooCodeTokenIfCurrent(sessionToken)
+			} catch (clearError) {
+				// The session is already invalidated in memory; only persisting the removal failed.
+				console.error(
+					`Failed to remove the rejected Zoo Gateway session from secret storage: ${clearError instanceof Error ? clearError.message : String(clearError)}`,
+				)
+			}
+			if (!cleared) {
+				throw new Error("Zoo Gateway models request used a session that was replaced")
+			}
 			throw new ZooGatewayModelsUnauthorizedError()
 		}
 

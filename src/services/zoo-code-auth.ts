@@ -102,11 +102,24 @@ export async function getZooCodeToken(): Promise<string | undefined> {
 	return secretStorage.get(ZOO_CODE_TOKEN_KEY)
 }
 
+// Serializes token writes so a check-then-clear (see clearZooCodeTokenIfCurrent) cannot
+// interleave with a sign-in storing a newer token.
+let tokenWriteChain: Promise<unknown> = Promise.resolve()
+
+function withTokenWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+	const result = tokenWriteChain.then(operation, operation)
+	tokenWriteChain = result.catch(() => undefined)
+	return result
+}
+
 export async function setZooCodeToken(token: string): Promise<void> {
 	if (!secretStorage) return
-	await secretStorage.store(ZOO_CODE_TOKEN_KEY, token)
-	_cachedToken = token
-	_sessionCleared = false
+	const storage = secretStorage
+	await withTokenWriteLock(async () => {
+		await storage.store(ZOO_CODE_TOKEN_KEY, token)
+		_cachedToken = token
+		_sessionCleared = false
+	})
 }
 
 export async function setZooCodeUserInfo(info: {
@@ -151,13 +164,36 @@ export async function clearZooCodeUserInfo(): Promise<void> {
 	_cachedUserImage = undefined
 }
 
-export async function clearZooCodeToken(): Promise<void> {
-	if (!secretStorage) return
-	await secretStorage.delete(ZOO_CODE_TOKEN_KEY)
+// Invalidates the in-memory session before touching secret storage, so a failed delete
+// cannot leave a rejected session usable. Startup verification retries the delete.
+async function invalidateAndDeleteZooCodeToken(storage: vscode.SecretStorage): Promise<void> {
 	_cachedToken = undefined
 	_sessionCleared = true
 	const { clearAuthSessionModelsForProvider } = await import("../api/providers/fetchers/modelCache")
 	clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+	await storage.delete(ZOO_CODE_TOKEN_KEY)
+}
+
+export async function clearZooCodeToken(): Promise<void> {
+	if (!secretStorage) return
+	const storage = secretStorage
+	await withTokenWriteLock(() => invalidateAndDeleteZooCodeToken(storage))
+}
+
+/**
+ * Clears the session only if `rejectedToken` is still the active token. Returns false when a
+ * newer session replaced it, so a late 401 for an old token cannot sign out the new one.
+ */
+export async function clearZooCodeTokenIfCurrent(rejectedToken: string): Promise<boolean> {
+	if (!secretStorage) return false
+	const storage = secretStorage
+	return withTokenWriteLock(async () => {
+		if (_cachedToken !== undefined && _cachedToken !== rejectedToken) {
+			return false
+		}
+		await invalidateAndDeleteZooCodeToken(storage)
+		return true
+	})
 }
 
 export function getZooCodeBaseUrl(): string {
@@ -243,6 +279,7 @@ export async function verifyZooCodeToken(): Promise<"valid" | "invalid" | "unrea
 }
 
 export async function isZooCodeAuthenticated(): Promise<boolean> {
+	if (_sessionCleared) return false
 	const token = await getZooCodeToken()
 	return !!token
 }

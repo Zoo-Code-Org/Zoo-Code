@@ -1446,6 +1446,12 @@ export const webviewMessageHandler = async (
 				? candidates.filter(({ key }) => key === providerFilter)
 				: candidates
 
+			// Zoo Gateway discovery (including a forced refresh) clears the session on 401.
+			// Capture the auth state first so a sign-out caused by this request is pushed below.
+			const fetchesZooGateway = modelFetchPromises.some(({ key }) => key === providerIdentifiers.zooGateway)
+			const { isZooCodeAuthenticated } = await import("../../services/zoo-code-auth")
+			const zooAuthenticatedBefore = fetchesZooGateway && (await isZooCodeAuthenticated())
+
 			// If refresh flag is set and we have a specific provider, flush its cache first
 			if (shouldRefresh && providerFilter && modelFetchPromises.length > 0) {
 				const targetCandidate = modelFetchPromises[0]
@@ -1488,10 +1494,9 @@ export const webviewMessageHandler = async (
 				values: providerFilter ? { provider: requestedProvider } : undefined,
 			})
 
-			// A rejected session clears the Zoo token during discovery; refresh state so the
-			// settings panel shows the sign-in prompt instead of an empty model list.
-			const zooGatewayIndex = modelFetchPromises.findIndex(({ key }) => key === providerIdentifiers.zooGateway)
-			if (zooGatewayIndex !== -1 && results[zooGatewayIndex].status === "rejected") {
+			// Refresh state so the settings panel shows the sign-in prompt instead of an empty
+			// model list next to "Authenticated".
+			if (zooAuthenticatedBefore && !(await isZooCodeAuthenticated())) {
 				await provider.postStateToWebview()
 			}
 			break
