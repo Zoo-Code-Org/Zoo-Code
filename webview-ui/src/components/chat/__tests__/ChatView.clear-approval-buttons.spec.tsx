@@ -363,7 +363,7 @@ describe("ChatView approval button behavior", () => {
 		})
 
 		it("enables Run/Deny when a partial command ask completes in a later snapshot (#998 review round 2)", async () => {
-			const { queryByText } = renderChatView()
+			const { queryByText, getByRole } = renderChatView()
 
 			// The live partial command ask presents the command controls but
 			// keeps them disabled while the ask is still streaming in.
@@ -371,20 +371,30 @@ describe("ChatView approval button behavior", () => {
 				hydrateState([task, { ...commandAsk(2), partial: true }])
 			})
 
+			await waitFor(
+				() => {
+					expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeDisabled()
+					expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeDisabled()
+				},
+				{ timeout: 5000 },
+			)
+
 			// The next snapshot completes the ask and appends a say. The
-			// completed ask must restore the enabled Run/Deny controls even
-			// though clineAsk already reads "command".
+			// completed ask must restore the ENABLED Run/Deny controls even
+			// though clineAsk already reads "command" — presence of the
+			// labels alone would not establish the enabled state.
 			await act(async () => {
 				hydrateState([task, commandAsk(2), say("text", 3)])
 			})
 
 			await waitFor(
 				() => {
-					expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
-					expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+					expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled()
+					expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeEnabled()
 				},
 				{ timeout: 5000 },
 			)
+			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 		})
 
 		it("keeps a newer tool ask's controls when the command ask is answered in the same snapshot (#998 review round 2)", async () => {
