@@ -43,11 +43,13 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 - **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
 - **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
 
-## v3.96.0 新功能
+## Zoo Code v3.98.1 新功能
 
-- ✨ **全新聊天設定與診斷:** 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。
-- 💸 **更精準的供應商計費與快取:** 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。
-- 🧭 **更可靠、更快速的對話:** 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。
+- 💫預覽 Zoo Pass：只要你的 Zoo Gateway 帳戶中有任意金額的餘額，即可在 12 月 1 日前免費無限使用 GLM-5.3-Flash。
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 模型與推理：支援 GPT-6.2 Sol、GPT-6.2 Astra 和 Claude Sonnet 5.5。可為每個 LiteLLM 設定檔設定推理強度。
+- 🛡️ 安全：改善技能和命令中繼資料解析、提及處理、供應商連結及 CLI 核准檢查。
+- 🔧 修正：修正 OpenAI 服務層級費用，識別工作區符號連結，並補充更多介面翻譯。
 
 ## Zoo Code 能為您做什麼？
 

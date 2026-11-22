@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} fichier modifié dans cette conversation",
 		"header_many": "{{count}} fichiers modifiés dans cette conversation",
-		"header_other": "{{count}} fichiers modifiés dans cette conversation"
+		"header_other": "{{count}} fichiers modifiés dans cette conversation",
+		"lineStatsAriaLabel": "Lignes ajoutées : {{added}}, lignes supprimées : {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espace disponible : {{amount}} tokens",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Ajouter à la liste autorisée",
 		"removeFromAllowed": "Retirer de la liste autorisée",
 		"addToDenied": "Ajouter à la liste refusée",
-		"removeFromDenied": "Retirer de la liste refusée"
+		"removeFromDenied": "Retirer de la liste refusée",
+		"pid": "(PID : {{pid}})",
+		"clickToEditPattern": "Clique pour modifier le motif"
 	},
 	"text": {
 		"rooSaid": "Zoo a dit"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} approuvé automatiquement",
 		"triggerLabel_many": "{{count}} approuvés automatiquement",
 		"triggerLabel_other": "{{count}} approuvés automatiquement",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activé",
+		"toggleAriaLabel": "Activer/désactiver l'approbation automatique"
 	},
 	"reasoning": {
 		"thinking": "Réflexion",
@@ -326,10 +331,12 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.96.0",
-			"highlight1": "✨ Nouveaux réglages de chat et diagnostics: Affiche l'horodatage des messages avec des formats d'heure et de date configurables, règle le TTL du cache de prompts pour les profils Anthropic et génère des rapports de diagnostic respectueux de la vie privée.",
-			"highlight2": "💸 Des coûts et un cache fournisseurs plus précis: Garde intacts les résultats d'outils Anthropic, adopte les tokens de sortie cumulés dans les coûts Anthropic et MiniMax, lit les compteurs de cache de prompts de DeepSeek, cible le cache Responses de xAI et facture les lectures de cache Mistral à 0,1x.",
-			"highlight3": "🧭 Des chats plus fiables et plus rapides: Reprends les tâches terminées après un redémarrage, restaure les checkpoints quand le commit enregistré manque, recharge automatiquement un renderer de webview mort, limite les mises à jour de streaming et charge les langues à la demande."
+			"heading": "Nouveautés de Zoo Code v3.98.1",
+			"highlight0": "💫Découvre Zoo Pass avec GLM-5.3-Flash illimité gratuitement jusqu'au 1er décembre avec n'importe quel solde sur ton compte Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modèles et raisonnement : Utilise GPT-6.2 Sol, GPT-6.2 Astra et Claude Sonnet 5.5. Règle l'effort de raisonnement pour chaque profil LiteLLM.",
+			"highlight2": "🛡️ Sécurité : Amélioration du traitement des métadonnées des compétences et commandes, des mentions, des liens fournisseurs et des approbations CLI.",
+			"highlight3": "🔧 Corrections : Coûts des niveaux de service OpenAI, reconnaissance des liens symboliques de l'espace de travail et davantage de textes traduits."
 		}
 	},
 	"costs": {
@@ -370,7 +377,8 @@
 		"didSearch_one": "{{count}} résultat trouvé",
 		"didSearch_many": "{{count}} résultats trouvés",
 		"didSearch_other": "{{count}} résultats trouvés",
-		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)"
+		"resultTooltip": "Score de similarité : {{score}} (cliquer pour ouvrir le fichier)",
+		"displayError": "Erreur lors de l'affichage des résultats de recherche."
 	},
 	"read-batch": {
 		"approve": {
@@ -422,7 +430,17 @@
 		"noResults": "Aucun résultat",
 		"problems": "Problèmes",
 		"terminal": "Terminal",
-		"url": "Coller l'URL pour récupérer le contenu"
+		"url": "Coller l'URL pour récupérer le contenu",
+		"gitCommits": "Commits Git",
+		"gitCommitsDescription": "Rechercher dans l'historique du dépôt",
+		"workingChanges": "Modifications en cours",
+		"workingChangesDescription": "Modifications actuelles non commitées",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash du commit Git",
+		"addFile": "Ajouter un fichier",
+		"addFolder": "Ajouter un dossier",
+		"commands": "Commandes",
+		"modes": "Modes"
 	},
 	"queuedMessages": {
 		"title": "Messages en file d'attente",
@@ -435,7 +453,28 @@
 	"todo": {
 		"partial": "{{completed}} sur {{total}} tâches terminées",
 		"complete": "{{total}} tâches terminées",
-		"updated": "La liste des tâches a été mise à jour"
+		"updated": "La liste des tâches a été mise à jour",
+		"listUpdated": "Liste de tâches mise à jour",
+		"userEdit": "Modification de l'utilisateur",
+		"userEdits": "Modifications de l'utilisateur",
+		"edit": "Modifier",
+		"done": "Terminé",
+		"itemPlaceholder": "Saisis une tâche",
+		"newItemPlaceholder": "Saisis une tâche, appuie sur Entrée pour l'ajouter",
+		"remove": "Retirer",
+		"add": "Ajouter",
+		"cancel": "Annuler",
+		"addTodo": "+ Ajouter une tâche",
+		"status": {
+			"notStarted": "Non commencée",
+			"inProgress": "En cours",
+			"completed": "Terminée"
+		},
+		"deleteDialog": {
+			"title": "Supprimer la tâche",
+			"description": "Es-tu sûr de vouloir supprimer cette tâche ?",
+			"confirm": "Supprimer"
+		}
 	},
 	"tooManyTools": {
 		"title": "Trop d'outils activés",
@@ -459,5 +498,26 @@
 		"title": "Fournisseur plus pris en charge",
 		"message": "Ce fournisseur n'est plus disponible. Choisis un fournisseur pris en charge pour continuer.",
 		"openSettings": "Ouvrir les paramètres"
+	},
+	"zooCodeAuth": {
+		"signIn": "Se connecter à Zoo Code",
+		"goToDashboard": "Aller au tableau de bord",
+		"signOut": "Se déconnecter",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code : {{account}}",
+		"connected": "Connecté"
+	},
+	"arguments": "Arguments :",
+	"copyAsMarkdown": "Copier en Markdown",
+	"openInPreview": "Ouvrir dans l'aperçu",
+	"codeAccordion": {
+		"userEdits": "Modifications de l'utilisateur",
+		"consoleLogs": "Journaux de la console",
+		"openFileAriaLabel": "Ouvrir le fichier : {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} ligne masquée",
+		"hiddenLines_many": "{{count}} de lignes masquées",
+		"hiddenLines_other": "{{count}} lignes masquées"
 	}
 }

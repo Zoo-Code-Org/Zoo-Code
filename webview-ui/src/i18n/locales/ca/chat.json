@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} fitxer canviat en aquesta conversa",
 		"header_many": "{{count}} fitxers canviats en aquesta conversa",
-		"header_other": "{{count}} fitxers canviats en aquesta conversa"
+		"header_other": "{{count}} fitxers canviats en aquesta conversa",
+		"lineStatsAriaLabel": "Línies afegides: {{added}}, línies eliminades: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "Espai disponible: {{amount}} tokens",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Afegeix a la llista permesa",
 		"removeFromAllowed": "Elimina de la llista permesa",
 		"addToDenied": "Afegeix a la llista denegada",
-		"removeFromDenied": "Elimina de la llista denegada"
+		"removeFromDenied": "Elimina de la llista denegada",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Fes clic per editar el patró"
 	},
 	"text": {
 		"rooSaid": "En Zoo ha dit"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} aprovació automàtica",
 		"triggerLabel_many": "{{count}} aprovacions automàtiques",
 		"triggerLabel_other": "{{count}} aprovacions automàtiques",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activat",
+		"toggleAriaLabel": "Commuta l'aprovació automàtica"
 	},
 	"reasoning": {
 		"thinking": "Pensant",
@@ -326,10 +331,12 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Què hi ha de nou al Zoo Code v3.96.0",
-			"highlight1": "✨ Nous ajustos de xat i diagnòstics: Mostra marques de temps als missatges amb formats d'hora i data configurables, ajusta el TTL de la cau de prompts per als perfils d'Anthropic i genera informes de diagnòstic que preserven la privacitat.",
-			"highlight2": "💸 Costos i cau dels proveïdors més precisos: Manté intactes els resultats d'eines d'Anthropic, adopta els tokens de sortida acumulatius en els costos d'Anthropic i MiniMax, llegeix els comptadors de cau de prompts de DeepSeek, apunta a la cau de Responses de xAI i factura les lectures de cau de Mistral a 0,1x.",
-			"highlight3": "🧭 Xats més fiables i ràpids: Repren les tasques completades després d'un reinici, restaura checkpoints quan falta el commit desat, recarrega automàticament un renderitzador de webview mort, regula les actualitzacions de streaming i carrega els idiomes sota demanda."
+			"heading": "Novetats de Zoo Code v3.98.1",
+			"highlight0": "💫Prova Zoo Pass amb GLM-5.3-Flash il·limitat de franc fins a l'1 de desembre amb qualsevol saldo al teu compte de Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Models i raonament: Utilitza GPT-6.2 Sol, GPT-6.2 Astra i Claude Sonnet 5.5. Configura l'esforç de raonament per a cada perfil de LiteLLM.",
+			"highlight2": "🛡️ Seguretat: Millores en el processament de metadades d'habilitats i ordres, mencions, enllaços de proveïdors i aprovacions de la CLI.",
+			"highlight3": "🔧 Correccions: Costos dels nivells de servei d'OpenAI, reconeixement d'enllaços simbòlics de l'espai de treball i més textos traduïts."
 		}
 	},
 	"costs": {
@@ -370,7 +377,8 @@
 		"didSearch_one": "S'ha trobat {{count}} resultat",
 		"didSearch_many": "S'han trobat {{count}} resultats",
 		"didSearch_other": "S'han trobat {{count}} resultats",
-		"resultTooltip": "Puntuació de similitud: {{score}} (fes clic per obrir el fitxer)"
+		"resultTooltip": "Puntuació de similitud: {{score}} (fes clic per obrir el fitxer)",
+		"displayError": "Error en mostrar els resultats de la cerca."
 	},
 	"read-batch": {
 		"approve": {
@@ -430,12 +438,43 @@
 		"noResults": "Sense resultats",
 		"problems": "Problemes",
 		"terminal": "Terminal",
-		"url": "Enganxa la URL per obtenir-ne el contingut"
+		"url": "Enganxa la URL per obtenir-ne el contingut",
+		"gitCommits": "Commits de Git",
+		"gitCommitsDescription": "Cerca a l'historial del repositori",
+		"workingChanges": "Canvis en curs",
+		"workingChangesDescription": "Canvis actuals sense confirmar",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash del commit de Git",
+		"addFile": "Afegeix un fitxer",
+		"addFolder": "Afegeix una carpeta",
+		"commands": "Ordres",
+		"modes": "Modes"
 	},
 	"todo": {
 		"partial": "{{completed}} de {{total}} tasques pendents fetes",
 		"complete": "{{total}} tasques pendents fetes",
-		"updated": "S'ha actualitzat la llista de tasques pendents"
+		"updated": "S'ha actualitzat la llista de tasques pendents",
+		"listUpdated": "Llista de tasques actualitzada",
+		"userEdit": "Edició de l'usuari",
+		"userEdits": "Edicions de l'usuari",
+		"edit": "Edita",
+		"done": "Fet",
+		"itemPlaceholder": "Introdueix una tasca",
+		"newItemPlaceholder": "Introdueix una tasca i prem Retorn per afegir-la",
+		"remove": "Elimina",
+		"add": "Afegeix",
+		"cancel": "Cancel·la",
+		"addTodo": "+ Afegeix una tasca",
+		"status": {
+			"notStarted": "No iniciada",
+			"inProgress": "En curs",
+			"completed": "Completada"
+		},
+		"deleteDialog": {
+			"title": "Elimina la tasca",
+			"description": "Segur que vols eliminar aquesta tasca?",
+			"confirm": "Elimina"
+		}
 	},
 	"tooManyTools": {
 		"title": "Massa eines habilitades",
@@ -459,5 +498,26 @@
 		"title": "Proveïdor ja no compatible",
 		"message": "Aquest proveïdor ja no està disponible. Selecciona un proveïdor compatible per continuar.",
 		"openSettings": "Obrir configuració"
+	},
+	"zooCodeAuth": {
+		"signIn": "Inicia sessió a Zoo Code",
+		"goToDashboard": "Ves al tauler",
+		"signOut": "Tanca la sessió",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Connectat"
+	},
+	"arguments": "Arguments:",
+	"copyAsMarkdown": "Copia com a Markdown",
+	"openInPreview": "Obre a la previsualització",
+	"codeAccordion": {
+		"userEdits": "Edicions de l'usuari",
+		"consoleLogs": "Registres de la consola",
+		"openFileAriaLabel": "Obre el fitxer: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} línia oculta",
+		"hiddenLines_many": "{{count}} de línies ocultes",
+		"hiddenLines_other": "{{count}} línies ocultes"
 	}
 }

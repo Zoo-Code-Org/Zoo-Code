@@ -47,11 +47,13 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.96.0
+## Nouveautés de Zoo Code v3.98.1
 
-- ✨ **Nouveaux réglages de chat et diagnostics:** Affiche l'horodatage des messages avec des formats d'heure et de date configurables, règle le TTL du cache de prompts pour les profils Anthropic et génère des rapports de diagnostic respectueux de la vie privée.
-- 💸 **Des coûts et un cache fournisseurs plus précis:** Garde intacts les résultats d'outils Anthropic, adopte les tokens de sortie cumulés dans les coûts Anthropic et MiniMax, lit les compteurs de cache de prompts de DeepSeek, cible le cache Responses de xAI et facture les lectures de cache Mistral à 0,1x.
-- 🧭 **Des chats plus fiables et plus rapides:** Reprends les tâches terminées après un redémarrage, restaure les checkpoints quand le commit enregistré manque, recharge automatiquement un renderer de webview mort, limite les mises à jour de streaming et charge les langues à la demande.
+- 💫Découvre Zoo Pass avec GLM-5.3-Flash illimité gratuitement jusqu'au 1er décembre avec n'importe quel solde sur ton compte Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modèles et raisonnement : Utilise GPT-6.2 Sol, GPT-6.2 Astra et Claude Sonnet 5.5. Règle l'effort de raisonnement pour chaque profil LiteLLM.
+- 🛡️ Sécurité : Amélioration du traitement des métadonnées des compétences et commandes, des mentions, des liens fournisseurs et des approbations CLI.
+- 🔧 Corrections : Coûts des niveaux de service OpenAI, reconnaissance des liens symboliques de l'espace de travail et davantage de textes traduits.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

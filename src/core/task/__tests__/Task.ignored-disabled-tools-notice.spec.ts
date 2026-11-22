@@ -129,6 +129,7 @@ function createMockProvider(disabledTools: string[] | undefined): ClineProvider 
 			globalStorageUri: { fsPath: "/test/storage" },
 		},
 		getState: vi.fn().mockResolvedValue(providerState),
+		getSkillsManager: vi.fn(),
 		log: vi.fn(),
 		on: vi.fn(),
 		off: vi.fn(),
@@ -200,6 +201,8 @@ async function startTaskWithFailingStateRead() {
 		startTask: false,
 	})
 
+	// Mention expansion also reads the state. This test covers the notice read only.
+	vi.spyOn(task, "userInputContent").mockResolvedValue([])
 	const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
 	const taskAccess = getStartTaskAccess(task)
 	vi.spyOn(taskAccess, "getEnabledMcpToolsCount").mockResolvedValue({

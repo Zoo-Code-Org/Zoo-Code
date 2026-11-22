@@ -22,7 +22,8 @@
 	"fileChangesInConversation": {
 		"header_one": "{{count}} archivo modificado en esta conversación",
 		"header_many": "{{count}} archivos modificados en esta conversación",
-		"header_other": "{{count}} archivos modificados en esta conversación"
+		"header_other": "{{count}} archivos modificados en esta conversación",
+		"lineStatsAriaLabel": "Líneas añadidas: {{added}}, líneas eliminadas: {{removed}}"
 	},
 	"retry": {
 		"title": "Reintentar",
@@ -233,7 +234,9 @@
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
 		"addToDenied": "Agregar a la lista de denegados",
-		"removeFromDenied": "Eliminar de la lista de denegados"
+		"removeFromDenied": "Eliminar de la lista de denegados",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Haz clic para editar el patrón"
 	},
 	"text": {
 		"rooSaid": "Zoo ha dicho"
@@ -292,7 +295,9 @@
 		"triggerLabel_one": "{{count}} aprobación automática",
 		"triggerLabel_many": "{{count}} aprobaciones automáticas",
 		"triggerLabel_other": "{{count}} aprobaciones automáticas",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activado",
+		"toggleAriaLabel": "Alternar aprobación automática"
 	},
 	"reasoning": {
 		"thinking": "Pensando",
@@ -326,10 +331,12 @@
 		"title": "Zoo Code {{version}} publicado",
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novedades de Zoo Code v3.96.0",
-			"highlight1": "✨ Nuevos ajustos de chat y diagnósticos: Muestra marcas de tiempo en los mensajes con formatos de hora y fecha configurables, ajusta el TTL de la caché de prompts para los perfiles de Anthropic y genera informes de diagnóstico que respetan la privacidad.",
-			"highlight2": "💸 Costes y caché de proveedores más precisos: Mantiene intactos los resultados de herramientas de Anthropic, adopta los tokens de salida acumulativos en los costes de Anthropic y MiniMax, lee los contadores de caché de prompts de DeepSeek, apunta a la caché de Responses de xAI y factura las lecturas de caché de Mistral a 0,1x.",
-			"highlight3": "🧭 Chats más fiables y rápidos: Reanuda tareas completadas tras un reinicio, restaura checkpoints cuando falta el commit guardado, recarga automáticamente un renderizador de webview muerto, limita las actualizaciones de streaming y carga los idiomas bajo demanda."
+			"heading": "Novedades de Zoo Code v3.98.1",
+			"highlight0": "💫Prueba Zoo Pass con GLM-5.3-Flash ilimitado gratis hasta el 1 de diciembre con cualquier saldo en tu cuenta de Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modelos y razonamiento: Usa GPT-6.2 Sol, GPT-6.2 Astra y Claude Sonnet 5.5. Configura el esfuerzo de razonamiento para cada perfil de LiteLLM.",
+			"highlight2": "🛡️ Seguridad: Mejoras en el procesamiento de metadatos de habilidades y comandos, menciones, enlaces de proveedores y aprobaciones de la CLI.",
+			"highlight3": "🔧 Correcciones: Costos de los niveles de servicio de OpenAI, reconocimiento de enlaces simbólicos del espacio de trabajo y más textos traducidos."
 		}
 	},
 	"costs": {
@@ -370,7 +377,8 @@
 		"didSearch_one": "Se encontró {{count}} resultado",
 		"didSearch_many": "Se encontraron {{count}} resultados",
 		"didSearch_other": "Se encontraron {{count}} resultados",
-		"resultTooltip": "Puntuación de similitud: {{score}} (haz clic para abrir el archivo)"
+		"resultTooltip": "Puntuación de similitud: {{score}} (haz clic para abrir el archivo)",
+		"displayError": "Error al mostrar los resultados de búsqueda."
 	},
 	"read-batch": {
 		"approve": {
@@ -422,7 +430,17 @@
 		"noResults": "No hay resultados",
 		"problems": "Problemas",
 		"terminal": "Terminal",
-		"url": "Pega la URL para obtener el contenido"
+		"url": "Pega la URL para obtener el contenido",
+		"gitCommits": "Commits de Git",
+		"gitCommitsDescription": "Buscar en el historial del repositorio",
+		"workingChanges": "Cambios en curso",
+		"workingChangesDescription": "Cambios actuales sin confirmar",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash del commit de Git",
+		"addFile": "Añadir archivo",
+		"addFolder": "Añadir carpeta",
+		"commands": "Comandos",
+		"modes": "Modos"
 	},
 	"queuedMessages": {
 		"title": "Mensajes en cola",
@@ -435,7 +453,28 @@
 	"todo": {
 		"partial": "{{completed}} de {{total}} tareas pendientes realizadas",
 		"complete": "{{total}} tareas pendientes realizadas",
-		"updated": "Se actualizó la lista de tareas pendientes"
+		"updated": "Se actualizó la lista de tareas pendientes",
+		"listUpdated": "Lista de tareas actualizada",
+		"userEdit": "Edición del usuario",
+		"userEdits": "Ediciones del usuario",
+		"edit": "Editar",
+		"done": "Listo",
+		"itemPlaceholder": "Escribe una tarea",
+		"newItemPlaceholder": "Escribe una tarea y pulsa Enter para añadirla",
+		"remove": "Quitar",
+		"add": "Añadir",
+		"cancel": "Cancelar",
+		"addTodo": "+ Añadir tarea",
+		"status": {
+			"notStarted": "Sin empezar",
+			"inProgress": "En curso",
+			"completed": "Completada"
+		},
+		"deleteDialog": {
+			"title": "Eliminar tarea",
+			"description": "¿Seguro que quieres eliminar esta tarea?",
+			"confirm": "Eliminar"
+		}
 	},
 	"tooManyTools": {
 		"title": "Demasiadas herramientas habilitadas",
@@ -459,5 +498,26 @@
 		"title": "Proveedor ya no compatible",
 		"message": "Este proveedor ya no está disponible. Selecciona un proveedor compatible para continuar.",
 		"openSettings": "Abrir configuración"
+	},
+	"zooCodeAuth": {
+		"signIn": "Inicia sesión en Zoo Code",
+		"goToDashboard": "Ir al panel",
+		"signOut": "Cerrar sesión",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Conectado"
+	},
+	"arguments": "Argumentos:",
+	"copyAsMarkdown": "Copiar como Markdown",
+	"openInPreview": "Abrir en vista previa",
+	"codeAccordion": {
+		"userEdits": "Ediciones del usuario",
+		"consoleLogs": "Registros de la consola",
+		"openFileAriaLabel": "Abrir archivo: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} línea oculta",
+		"hiddenLines_many": "{{count}} de líneas ocultas",
+		"hiddenLines_other": "{{count}} líneas ocultas"
 	}
 }

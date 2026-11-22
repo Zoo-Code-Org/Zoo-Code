@@ -9,6 +9,8 @@ import {
 } from "@roo-code/types"
 
 import type { DcgDecision } from "../../services/destructive-command-guard/runner"
+import { realpath } from "fs/promises"
+import path from "path"
 
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
@@ -87,6 +89,39 @@ function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string
 	return paths.every((filePath) => matchFun(filePath))
 }
 
+async function resolveCanonicalWorkspaceRoot(cwd: string | undefined): Promise<string | undefined> {
+	if (!cwd) return undefined
+
+	try {
+		// Read tools resolve paths lexically before accessing the filesystem.
+		// Verify that same root: resolving symlink/.. first can identify a different directory.
+		return await realpath(path.resolve(cwd))
+	} catch (error) {
+		console.error(`[auto-approval] Failed to resolve workspace root ${cwd}:`, error)
+		return undefined
+	}
+}
+
+function hasConflictingReadPaths(tool: ClineSayTool, cwd: string | undefined): boolean {
+	if (process.platform === "win32") return false
+
+	// Complete read messages already carry the native target in content. On POSIX,
+	// display formatting can change literal backslashes into directory separators.
+	// Keep baseline lexical matching when those spellings disagree; do not expand
+	// permissions through a canonical root using a lossy display path.
+	const files = [tool, ...(tool.batchFiles ?? [])]
+	const hasConflictingPaths = files.some(({ path: displayPath, content }) => {
+		if (typeof displayPath !== "string" || typeof content !== "string") return false
+
+		const resolvedDisplayPath = path.resolve(cwd ?? "", displayPath)
+		const resolvedNativePath = path.resolve(cwd ?? "", content)
+
+		return resolvedDisplayPath !== resolvedNativePath
+	})
+
+	return hasConflictingPaths
+}
+
 /**
  * Whether a read-only tool action is fully covered by the read allowlist patterns.
  *
@@ -105,20 +140,23 @@ function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string
  * narrows the list it appears in. This also means that negating a read is
  * ineffective while a non-negated write pattern still matches the file.
  */
-function isReadAllowedByPatterns(
+async function isReadAllowedByPatterns(
 	tool: ClineSayTool,
 	cwd: string | undefined,
 	state: Pick<ExtensionState, "allowedReadFiles" | "allowedWriteFiles">,
-): boolean {
-	if (tool.tool !== "readFile") {
+): Promise<boolean> {
+	if (tool.tool !== "readFile" || (!state.allowedReadFiles?.length && !state.allowedWriteFiles?.length)) {
 		return false
 	}
 
+	// Task-local root only. Unknown roots keep lexical matching; never resolve
+	// individual file aliases here, since those can point outside the workspace.
+	const canonicalCwd = hasConflictingReadPaths(tool, cwd) ? undefined : await resolveCanonicalWorkspaceRoot(cwd)
 	return areAllNamedFilesMatched(
 		tool,
 		(filePath) =>
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedReadFiles }) ||
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedWriteFiles }),
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedReadFiles }) ||
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedWriteFiles }),
 	)
 }
 
@@ -392,7 +430,7 @@ export async function checkAutoApproval({
 			// `alwaysAllowReadOnly` permission. Such a pattern names its
 			// location, including outside the workspace, so it also stands in for
 			// `alwaysAllowReadOnlyOutsideWorkspace`.
-			const isAllowedReadFile = isReadAllowedByPatterns(tool, cwd, state)
+			const isAllowedReadFile = await isReadAllowedByPatterns(tool, cwd, state)
 
 			const isReadAllowed =
 				isAllowedReadFile ||

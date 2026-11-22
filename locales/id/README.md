@@ -46,11 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.96.0
+## Yang baru di Zoo Code v3.98.1
 
-- ✨ **Setelan obrolan dan diagnostik baru:** Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.
-- 💸 **Biaya dan cache penyedia yang lebih akurat:** Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.
-- 🧭 **Obrolan yang lebih andal dan cepat:** Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan.
+- 💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Model dan penalaran: Gunakan GPT-6.2 Sol, GPT-6.2 Astra, dan Claude Sonnet 5.5. Atur upaya penalaran untuk setiap profil LiteLLM.
+- 🛡️ Keamanan: Perbaikan penguraian metadata skill dan perintah, penanganan penyebutan, tautan penyedia, dan pemeriksaan persetujuan CLI.
+- 🔧 Perbaikan: Biaya tingkat layanan OpenAI, pengenalan tautan simbolis ruang kerja, dan lebih banyak teks UI yang diterjemahkan.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

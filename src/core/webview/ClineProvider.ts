@@ -92,6 +92,7 @@ import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 import { Package } from "../../shared/package"
 import { findLast } from "../../shared/array"
 import { supportPrompt } from "../../shared/support-prompt"
+import { generatedSegments, joinSegments } from "../../shared/mentionSegments"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { experimentDefault } from "../../shared/experiments"
@@ -140,7 +141,7 @@ import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, MentionSegment, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -476,7 +477,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.96.0-settings-costs-reliability" // v3.96.0 chat settings, provider costs, and reliability
+	public readonly latestAnnouncementId = "nov-2026-v3.98.1-pass-models-security" // v3.98.1 Zoo Pass, model support, and security
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1635,19 +1636,22 @@ export class ClineProvider
 		const { customSupportPrompts } = await this.getState()
 
 		// TODO: Improve type safety for promptType.
-		const prompt = supportPrompt.create(promptType, params, customSupportPrompts)
+		// Only the typed input is a user segment. The template and its other params are generated.
+		const segments = supportPrompt.createSegments(promptType, params, customSupportPrompts)
+		const prompt = joinSegments(segments)
 
 		if (command === "addToContext") {
 			await this.postMessageToWebview({
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				segments: [...segments, ...generatedSegments("\n\n")],
 			})
 			await this.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
 		}
 
-		await this.createTask(prompt)
+		await this.createTask(prompt, undefined, undefined, { segments })
 	}
 
 	public static async handleTerminalAction(
@@ -1664,20 +1668,22 @@ export class ClineProvider
 		}
 
 		const { customSupportPrompts } = await visibleProvider.getState()
-		const prompt = supportPrompt.create(promptType, params, customSupportPrompts)
+		const segments = supportPrompt.createSegments(promptType, params, customSupportPrompts)
+		const prompt = joinSegments(segments)
 
 		if (command === "terminalAddToContext") {
 			await visibleProvider.postMessageToWebview({
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				segments: [...segments, ...generatedSegments("\n\n")],
 			})
 			await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
 		}
 
 		try {
-			await visibleProvider.createTask(prompt)
+			await visibleProvider.createTask(prompt, undefined, undefined, { segments })
 		} catch (error) {
 			if (error instanceof OrganizationAllowListViolationError) {
 				// Errors from terminal commands seem to get swallowed / ignored.
@@ -2450,12 +2456,6 @@ export class ClineProvider
 
 		const nonce = getNonce()
 
-		// Get the OpenRouter base URL from configuration
-		const { apiConfiguration } = await this.getState()
-		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
-		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
-
 		const stylesUri = getUri(webview, this.contextProxy.extensionUri, [
 			"webview-ui",
 			"build",
@@ -2492,7 +2492,7 @@ export class ClineProvider
 			`img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:`,
 			`media-src ${webview.cspSource}`,
 			`script-src 'unsafe-eval' ${webview.cspSource} https://*.posthog.com http://${localServerUrl} http://0.0.0.0:${localPort} 'nonce-${nonce}'`,
-			`connect-src ${webview.cspSource} ${openRouterDomain} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
+			`connect-src ${webview.cspSource} https://* https://*.posthog.com ws://${localServerUrl} ws://0.0.0.0:${localPort} http://${localServerUrl} http://0.0.0.0:${localPort}`,
 		]
 
 		return /*html*/ `
@@ -2566,12 +2566,6 @@ export class ClineProvider
 		*/
 		const nonce = getNonce()
 
-		// Get the OpenRouter base URL from configuration
-		const { apiConfiguration } = await this.getState()
-		const openRouterBaseUrl = apiConfiguration.openRouterBaseUrl || "https://openrouter.ai"
-		// Extract the domain for CSP
-		const openRouterDomain = openRouterBaseUrl.match(/^(https?:\/\/[^/]+)/)?.[1] || "https://openrouter.ai"
-
 		// Tip: Install the es6-string-html VS Code extension to enable code highlighting below
 		return /*html*/ `
         <!DOCTYPE html>
@@ -2580,7 +2574,7 @@ export class ClineProvider
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width,initial-scale=1,shrink-to-fit=no">
             <meta name="theme-color" content="#000000">
-            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' 'strict-dynamic'; connect-src ${webview.cspSource} ${openRouterDomain} https://api.requesty.ai https://us.i.posthog.com;">
+            <meta http-equiv="Content-Security-Policy" content="default-src 'none'; font-src ${webview.cspSource} data:; style-src ${webview.cspSource} 'unsafe-inline'; img-src ${webview.cspSource} https://storage.googleapis.com https://img.clerk.com https://avatars.githubusercontent.com https://lh3.googleusercontent.com data:; media-src ${webview.cspSource}; script-src ${webview.cspSource} 'wasm-unsafe-eval' 'nonce-${nonce}' 'strict-dynamic'; connect-src ${webview.cspSource} https://us.i.posthog.com;">
             <link rel="stylesheet" type="text/css" href="${stylesUri}">
 			<link href="${codiconsUri}" rel="stylesheet" />
 			<script nonce="${nonce}">
@@ -5280,7 +5274,10 @@ export class ClineProvider
 		text?: string,
 		images?: string[],
 		parentTask?: Task,
-		options: CreateTaskOptions & { handoffExecutionContext?: DelegatedChildContext } = {},
+		options: CreateTaskOptions & {
+			handoffExecutionContext?: DelegatedChildContext
+			segments?: MentionSegment[]
+		} = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {

@@ -46,11 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.96.0 में नया क्या है
+## Zoo Code v3.98.1 में नया क्या है
 
-- ✨ **नई चैट सेटिंग्स और डायग्नोस्टिक्स:** कॉन्फ़िगर करने योग्य समय और तारीख फ़ॉर्मैट के साथ मैसेज टाइमस्टैम्प दिखाएँ, Anthropic प्रोफ़ाइल के लिए prompt-cache TTL सेट करें, और प्राइवेसी-सेफ डायग्नोस्टिक्स रिपोर्ट बनाएँ।
-- 💸 **ज़्यादा सटीक प्रोवाइडर लागत और कैशिंग:** Anthropic टूल रिज़ल्ट को बरकरार रखें, Anthropic और MiniMax लागतों में क्यूमुलेटिव आउटपुट token अपनाएँ, DeepSeek के prompt-cache काउंटर पढ़ें, xAI Responses कैश को टारगेट करें, और Mistral कैश रीड को 0.1x पर बिल करें।
-- 🧭 **ज़्यादा भरोसेमंद और तेज़ चैट:** रीस्टार्ट के बाद पूरी हुई टास्क फिर से शुरू करें, सेव किया गया commit मौजूद न होने पर checkpoint रीस्टोर करें, बंद पड़े webview रेंडरर को अपने आप रीलोड करें, स्ट्रीमिंग अपडेट को थ्रॉटल करें, और भाषाएँ मांग पर लोड करें।
+- 💫अपने Zoo Gateway खाते में किसी भी राशि के साथ 1 दिसंबर तक असीमित GLM-5.3-Flash के साथ Zoo Pass का मुफ़्त पूर्वावलोकन करें।
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 मॉडल और रीजनिंग: GPT-6.2 Sol, GPT-6.2 Astra और Claude Sonnet 5.5 का उपयोग करें। हर LiteLLM प्रोफ़ाइल के लिए रीजनिंग प्रयास सेट करें।
+- 🛡️ सुरक्षा: स्किल और कमांड मेटाडेटा पार्सिंग, उल्लेखों, प्रदाता लिंक और CLI अनुमोदन जाँच में सुधार।
+- 🔧 सुधार: OpenAI सेवा स्तर की लागत ठीक की गई, कार्यक्षेत्र के प्रतीकात्मक लिंक पहचाने जाते हैं और अधिक UI पाठ का अनुवाद किया गया।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

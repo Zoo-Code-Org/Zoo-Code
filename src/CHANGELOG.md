@@ -1,5 +1,96 @@
 # Zoo Code Changelog
 
+## [3.98.1]
+
+### Models and Provider Controls
+
+- Add GPT-6.2 Sol and Astra to OpenAI Native and Codex, and correct service-tier cost handling (#2483 by @WebMad, PR #2484 by @WebMad)
+- Add Claude Sonnet 5.5 across supported providers (#2335 by @hideki-kanehashi, PR #2521 by @bigyao25)
+- Add a reasoning effort override for each LiteLLM profile (#2199 by @RytisLT, PR #2476 by @RytisLT)
+- Expose Max reasoning effort for DeepSeek V4.1 Flash on OpenCode Go (#2477 by @haalogen, PR #2478 by @haalogen)
+
+### Security and Reliability
+
+- Restrict mention expansion to authorized user input (#2461 by @edelauna, PR #2421 by @coderabbitai)
+- Prevent content security policy injection through OpenRouter URLs (#2460 by @edelauna, PR #2422 by @coderabbitai)
+- Require consent before Requesty deep links replace provider credentials (PR #2408 by @coderabbitai)
+- Prevent code execution when parsing skill and command metadata (PR #2456 by @coderabbitai)
+- Harden skill and command metadata parsing (PR #2457 by @coderabbitai)
+- Prevent code execution when reading and updating skill metadata (PR #2465 by @coderabbitai)
+- Enforce the CLI host approval policy for task configurations (PR #2472 by @coderabbitai)
+- Escape untrusted text in all CLI approval prompts (PR #2473 by @coderabbitai)
+- Match symbolic links to workspace roots during automatic approval (PR #2454 by @WebMad)
+- Secure command parsing and improve task titles, cancellation, observation tracking, profiles, recovery, translations, and CI (PR #2455 by @coderabbitai)
+
+### Tools and Interface
+
+- Tell the model which command syntax cmd.exe and PowerShell use (PR #2115 by @PierrunoYT)
+- Translate the remaining hardcoded UI labels (#2425 by @rrewll, PR #2458 by @rrewll)
+- Add a shared tool router and invalidate its MCP index when servers change (PR #2322 by @edelauna)
+- Remove 35 broken or unmaintained MCP listings and retire the IO Intelligence provider (#2624 by @edelauna, PR #2625 by @zoomote)
+
+### Testing and Maintenance
+
+- Require authentication for the VS Code E2E mock server (PR #2474 by @coderabbitai)
+- Move shared skill test fixtures into a named test helper (PR #2417 by @easonLiangWorldedtech)
+- Correct two mutation-testing exclusion directives (PR #2428 by @easonLiangWorldedtech)
+- Add discussion forms and a PR checklist item for new provider and MCP listings (PR #2517 by @zoomote)
+- Use Simplified Technical English in listing discussion templates and remove title prefixes (PR #2518 by @zoomote)
+
+### Previous Release Housekeeping
+
+- Merge the previous v3.98.0 release preparation after publication (PR #2451 by @zoomote)
+
+## [3.98.0]
+
+- **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.
+- **Expanded model and provider support:** Use GPT-6.1 Terra, fetch the latest Friendli model list, and keep Zoo Gateway first in provider settings.
+- **Safer, more responsive chats and edits:** Cancel OpenAI Native and Requesty requests cleanly, protect outside-workspace diffs from accidental auto-approval, switch UI languages consistently, and avoid ambiguous JSON backup recovery.
+
+### Automatic Task Titles and Model Controls
+
+- Automatically generate titles for new root tasks (#2333 by @daewoongoh, PR #2398 by @daewoongoh)
+- Add an experimental dynamic thinking-effort toggle (#2079 by @easonLiangWorldedtech, PR #1521 by @easonLiangWorldedtech)
+
+### Expanded Model and Provider Support
+
+- Add GPT-6.1 Terra support (#2380 by @bigyao25, PR #2379 by @bigyao25)
+- Fetch Friendli models from `/v1/models` (#2332 by @Lee-Si-Yoon, PR #2331 by @Lee-Si-Yoon)
+- Pin Zoo Gateway as the first provider in settings (PR #2419 by @taltas)
+
+### Safer, More Responsive Chats and Edits
+
+- Add abort-signal support for OpenAI Native (#404 by @Fuzzillogic, PR #1291 by @easonLiangWorldedtech)
+- Add abort-signal support for Requesty completePrompt and shared helpers (PR #1537 by @easonLiangWorldedtech)
+- Fix: Prevent apply_diff edits outside the workspace from being auto-approved (#2249 by @tvanomr, PR #2343 by @kanchinadd98)
+- Update outside-workspace apply_diff test doubles for guarded writes (PR #2372 by @easonLiangWorldedtech)
+- Fix: Keep UI text in the selected language after a language change (#2185 by @rrewll, PR #2194 by @rrewll)
+- Fix: Correct Marketplace tag tooltip and Clear tags translations (#2369 by @rrewll, PR #2373 by @rrewll)
+- Fix: Refuse ambiguous backup recency during JSON file recovery (PR #2395 by @easonLiangWorldedtech)
+
+### Task State and Internal Infrastructure
+
+- Add an observation registry and Task run-state fields (PR #2384 by @easonLiangWorldedtech)
+- Read abort and abortReason from run-state latches (#1797 by @edelauna, PR #2283 by @edelauna)
+
+### Testing, CI, and Repository Automation
+
+- Correct Turbo cache inputs and document the build cache input contract (#2290 by @edelauna, PR #2324 by @app/zoomote2)
+- Add flaky test detection to Playwright (PR #2358 by @rrewll)
+- Finish CSS transitions after visual theme changes in webview tests (#2326 by @rrewll, PR #2327 by @rrewll)
+
+### Dependencies and Maintenance
+
+- Update AI SDK core and providers (PR #2274 by @app/renovate)
+- Update AI SDKs and providers (PR #2276 by @app/renovate)
+- Update Zustand to v5.0.16 (PR #2275 by @app/renovate)
+- Update @types/katex (PR #2273 by @app/renovate)
+- Update @copilotkit/aimock to v1.47.0 (PR #2277 by @app/renovate)
+
+### Housekeeping
+
+- Merge the previous v3.96.0 release preparation after its publication; this is prior-release housekeeping, not a v3.98.0 feature (PR #2341 by @app/zoomote2)
+
 ## [3.96.0]
 
 - ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.

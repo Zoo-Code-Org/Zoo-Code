@@ -70,7 +70,8 @@
 		"goToMcp": "Ke Tab MCP",
 		"goToModes": "Ke Pengaturan Mode",
 		"moreInfoMcp": "Lihat dokumentasi MCP {{name}}",
-		"validationRequired": "Silakan berikan nilai untuk {{paramName}}"
+		"validationRequired": "Silakan berikan nilai untuk {{paramName}}",
+		"optional": "(opsional)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Menemukan masalah dengan item marketplace atau punya saran untuk yang baru? <0>Buka GitHub issue</0> untuk memberi tahu kami!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Mode"
 	}
 }

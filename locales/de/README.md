@@ -47,11 +47,13 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.96.0
+## Neu in Zoo Code v3.98.1
 
-- ✨ **Neue Chat-Einstellungen und Diagnose:** Zeige Nachrichten-Zeitstempel mit konfigurierbaren Zeit- und Datumsformaten, stimme die Prompt-Cache-TTL für Anthropic-Profile ab und erstelle datenschutzfreundliche Diagnoseberichte.
-- 💸 **Genauere Anbieterkosten und Caching:** Anthropic-Ergebnisse bleiben intakt, kumulative Output-Tokens fließen in Anthropic- und MiniMax-Kosten ein, DeepSeek-Prompt-Cache-Zähler werden ausgelesen, der xAI-Responses-Cache wird gezielt angesprochen und Mistral-Cache-Lesungen werden mit 0,1x abgerechnet.
-- 🧭 **Zuverlässigere und schnellere Chats:** Setze abgeschlossene Aufgaben nach einem Neustart fort, stelle Checkpoints wieder her, wenn der gespeicherte Commit fehlt, lade einen toten Webview-Renderer automatisch neu, drossle Streaming-Updates und lade Sprachen bei Bedarf.
+- 💫Teste den Zoo Pass mit unbegrenztem GLM-5.3-Flash kostenlos bis zum 1. Dezember, wenn du einen beliebigen Geldbetrag auf deinem Zoo Gateway-Konto hast.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modelle und Reasoning: Nutze GPT-6.2 Sol, GPT-6.2 Astra und Claude Sonnet 5.5. Stelle den Reasoning-Aufwand für jedes LiteLLM-Profil ein.
+- 🛡️ Sicherheit: Verbesserte Verarbeitung von Skill- und Befehlsmetadaten, Erwähnungen, Anbieterlinks und CLI-Freigaben.
+- 🔧 Korrekturen: Korrekte OpenAI-Service-Tier-Kosten, Erkennung symbolischer Workspace-Links und mehr übersetzte UI-Texte.
 
 ## Was kann Zoo Code für DICH tun?
 

@@ -25,12 +25,37 @@ export type OpenAiCodexModelId = keyof typeof openAiCodexModels
 
 export const openAiCodexDefaultModelId: OpenAiCodexModelId = "gpt-5.6-sol"
 
+const gpt62CodexModelInfo = {
+	maxTokens: 128_000,
+	// Zoo Code uses the Codex catalog's max_context_window for both models.
+	contextWindow: 872_000,
+	includedTools: ["apply_patch"],
+	excludedTools: ["apply_diff", "write_to_file"],
+	supportsImages: true,
+	supportsPromptCache: true,
+	supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+	requiredReasoningEffort: true,
+	reasoningEffort: "low",
+	supportsVerbosity: true,
+	supportsTemperature: false,
+	inputPrice: 0,
+	outputPrice: 0,
+} as const satisfies ModelInfo
+
 /**
  * Models available through the Codex OAuth flow.
  * These models are accessible to ChatGPT Plus/Pro subscribers.
  * Costs are 0 as they are covered by the subscription.
  */
 export const openAiCodexModels = {
+	"gpt-6.2-sol": {
+		...gpt62CodexModelInfo,
+		description: "GPT-6.2 Sol for everyday coding and agent workflows via ChatGPT subscription",
+	},
+	"gpt-6.2-astra": {
+		...gpt62CodexModelInfo,
+		description: "GPT-6.2 Astra for complex software engineering and professional work via ChatGPT subscription",
+	},
 	// https://github.com/openai/codex/blob/main/codex-rs/models-manager/models.json
 	"gpt-6.1-terra": {
 		maxTokens: 128000,

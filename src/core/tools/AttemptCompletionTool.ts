@@ -218,7 +218,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 				task.flushTelemetryInstallment("attempt_completion")
 			}
 
-			const { response, text, images, queuedMessageId } = await task.ask("completion_result", "", false)
+			const { response, text, images, queuedMessageId, segments } = await task.ask("completion_result", "", false)
 
 			if (response === "yesButtonClicked") {
 				// A stale history replay reruns this handler on a fresh Task instance for a
@@ -245,6 +245,8 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			}
 
 			const feedbackText = `<user_message>\n${text}\n</user_message>`
+			// Only user segments expand. The tool result repeats the text by design.
+			task.userMessageContent.push(...(await task.userInputContent(text ?? "", segments)))
 			pushToolResult(formatResponse.toolResult(feedbackText, images))
 		} catch (error) {
 			await handleError("inspecting site", error as Error)

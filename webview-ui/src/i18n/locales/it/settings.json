@@ -6,7 +6,8 @@
 		"cancel": "Annulla",
 		"select": "Seleziona",
 		"add": "Aggiungi intestazione",
-		"remove": "Rimuovi"
+		"remove": "Rimuovi",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Cerca impostazioni...",
@@ -81,7 +82,9 @@
 			"detailTasksImported_other": "Importati {{count}} di {{total}} cronologie attività.",
 			"detailPreparing": "Preparazione dell'importazione della cronologia Roo Code.",
 			"progressAriaLabel": "Avanzamento importazione cronologia Roo Code"
-		}
+		},
+		"version": "Versione: {{version}}",
+		"versionWithCommit": "Versione: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Gestisci i tuoi comandi slash per eseguire rapidamente flussi di lavoro e azioni personalizzate. <DocsLink>Scopri di più</DocsLink>",
@@ -389,12 +392,6 @@
 		"getOpencodeGoApiKey": "Ottieni chiave API Opencode Go",
 		"kenariApiKey": "Chiave API Kenari",
 		"getKenariApiKey": "Ottieni chiave API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Chiave API IO Intelligence",
-			"getApiKey": "Ottieni chiave API IO Intelligence",
-			"model": "Modello"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chiave API NanoGPT",
@@ -527,6 +524,8 @@
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Schemi di strumenti strict (strict: true)",
 		"openAiStrictToolSchemasDescription": "Invia strict: true con gli schemi di strumenti per abilitare l'aderenza rigorosa allo schema. Disattiva per usare il tool calling non rigoroso.",
+		"openAiUseResponsesApi": "Usa l’API Responses",
+		"openAiUseResponsesApiDescription": "Invia le richieste a /responses anziché a /chat/completions. Necessario per alcuni modelli di ragionamento su endpoint compatibili con OpenAI. Il ragionamento e gli strumenti restano attivi.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome della distribuzione Azure",
 		"azureOpenAiDeploymentNameDescription": "Inserisci il nome della distribuzione configurato in Azure AI Studio, non il nome del modello sottostante.",
@@ -537,6 +536,13 @@
 		"codestralBaseUrlDesc": "Imposta un URL opzionale per i modelli Codestral.",
 		"xaiApiKey": "Chiave API xAI",
 		"getXaiApiKey": "Ottieni chiave API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Invia nuovamente il ragionamento al modello",
+			"auto": "Automatico",
+			"on": "Attivato",
+			"off": "Disattivato",
+			"description": "Invia nuovamente al modello il ragionamento precedente in testo semplice. Automatico segue il rilevamento del modello; Attivato lo invia sempre; Disattivato non lo invia mai. Non attiva la generazione del ragionamento né lo nasconde nella chat."
+		},
 		"litellmApiKey": "Chiave API LiteLLM",
 		"litellmBaseUrl": "URL base LiteLLM",
 		"awsCredentials": "Credenziali AWS",
@@ -686,6 +692,17 @@
 			"signInDescription": "Accedi per utilizzare Zoo Gateway con il tuo account",
 			"authenticated": "Autenticato",
 			"authenticatedAs": "Autenticato come {{name}}"
+		},
+		"awsAuthMethod": "Metodo di autenticazione",
+		"qwenCode": {
+			"oauthPathLabel": "Percorso delle credenziali OAuth",
+			"oauthPathDescription": "Percorso del tuo file di credenziali OAuth di Qwen. Se lo lasci vuoto, viene usato {{defaultPath}}.",
+			"description": "Qwen Code è un'API basata su OAuth che richiede l'autenticazione tramite il client ufficiale di Qwen. Prima devi configurare le credenziali OAuth.",
+			"gettingStarted": "Per iniziare:",
+			"step1": "1. Installa il client ufficiale di Qwen",
+			"step2": "2. Autenticati con il tuo account",
+			"step3": "3. Le credenziali OAuth verranno salvate automaticamente",
+			"setupInstructions": "Istruzioni di configurazione"
 		}
 	},
 	"checkpoints": {
@@ -917,7 +934,8 @@
 			"refreshing": "Aggiornamento...",
 			"refreshSuccess": "Strumenti aggiornati con successo",
 			"refreshError": "Impossibile aggiornare gli strumenti",
-			"toolParameters": "Parametri"
+			"toolParameters": "Parametri",
+			"required": "obbligatorio"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Sforzo di pensiero dinamico",
@@ -957,7 +975,13 @@
 			"freeRequests_other": "* Gratuito fino a {{count}} richieste al minuto. Dopo, la fatturazione dipende dalla dimensione del prompt.",
 			"pricingDetails": "Per maggiori informazioni, vedi i dettagli sui prezzi.",
 			"billingEstimate": "* La fatturazione è una stima - il costo esatto dipende dalle dimensioni del prompt."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_many": "{{count, number}} di token",
+		"tokensValue_other": "{{count, number}} token",
+		"pricePerMillionTokens": "{{price}} / 1M di token",
+		"showMore": "Altro",
+		"showLess": "Meno"
 	},
 	"modelPicker": {
 		"automaticFetch": "L'estensione recupera automaticamente l'elenco più recente dei modelli disponibili su <serviceLink>{{serviceName}}</serviceLink>. Se non sei sicuro di quale modello scegliere, Zoo Code funziona meglio con <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Puoi anche cercare \"free\" per opzioni gratuite attualmente disponibili.",
@@ -1022,7 +1046,8 @@
 			"inputPrice": "es. 0.0001",
 			"outputPrice": "es. 0.0002",
 			"cacheWritePrice": "es. 0.00005"
-		}
+		},
+		"defaultValue": "Predefinito: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Predefinito: http://localhost:11434",
@@ -1051,7 +1076,9 @@
 			"input": "Input",
 			"output": "Output",
 			"cacheReads": "Letture cache"
-		}
+		},
+		"label": "Livello di servizio",
+		"tooltip": "Per un'elaborazione più rapida delle richieste API, prova il livello di servizio con elaborazione prioritaria. Per prezzi più bassi con una latenza maggiore, prova il livello di elaborazione flex."
 	},
 	"ui": {
 		"collapseThinking": {
