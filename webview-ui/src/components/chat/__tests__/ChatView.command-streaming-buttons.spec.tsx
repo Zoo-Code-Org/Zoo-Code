@@ -162,8 +162,10 @@ describe("ChatView command ask approval buttons while streaming", () => {
 			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 			expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
 		})
-		expect(queryByText(RUN_BUTTON_LABEL)).toBeEnabled()
-		expect(queryByText(DENY_BUTTON_LABEL)).toBeEnabled()
+		// Enabled state must be asserted on the button element, not its label
+		// span: a span passes toBeEnabled even when its button is disabled.
+		expect(screen.getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled()
+		expect(screen.getByRole("button", { name: DENY_BUTTON_LABEL })).toBeEnabled()
 	})
 
 	// Replays the TLC sequence on real code: HandlePartial, then AskComplete
@@ -184,7 +186,7 @@ describe("ChatView command ask approval buttons while streaming", () => {
 			expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
 			expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
 		})
-		expect(queryByText(RUN_BUTTON_LABEL)).toBeEnabled()
+		expect(screen.getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled()
 	})
 
 	// Property sweep from the invariant sentence: the Run/Deny pair is drawn
