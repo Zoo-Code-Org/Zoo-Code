@@ -461,8 +461,8 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 		it("should not count messages hidden by condensation as visible", () => {
 			const result = truncateConversation(condensedHistory, 0.5, "test-task-id")
 
-			// The visible set is the summary plus six live messages.
-			// raw = floor((7 - 1) * 0.5) = 3, rounded to even = 2.
+			// The candidates are the six live messages after the summary.
+			// raw = floor((6 - 1) * 0.5) = 2, already even.
 			expect(result.messagesRemoved).toBe(2)
 		})
 
@@ -472,9 +472,10 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			const tagged = result.messages.filter((msg) => msg.truncationParent === result.truncationId)
 			expect(tagged.length).toBe(2)
 
-			// The two live messages after the summary are the ones hidden.
-			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBe(result.truncationId)
+			// The first live message is skipped; the next two live messages are hidden.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
 			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
 
 			// Messages already hidden by condensation must not get a truncationParent.
 			for (const msg of result.messages) {
@@ -526,6 +527,98 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			expect(result.messages.find((m) => m.content === "Orphan 2")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "Orphan 3")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "Orphan 4")?.truncationParent).toBe(result.truncationId)
+		})
+
+		it("applies the latest-summary boundary: pre-summary orphans are not candidates and the summary is never tagged", () => {
+			// A rewind left an orphan tag before the summary. The sink's fresh-start
+			// slice starts at the summary, so the orphan is dead to the API and must
+			// not be a candidate. The summary is the first effective message and is
+			// never tagged (PR 2647 review round 3).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "Orphan", ts: 1000, condenseParent: "condense-gone" },
+				{
+					role: "assistant",
+					content: "Summary of the conversation",
+					ts: 1100,
+					isSummary: true,
+					condenseId: "c1",
+				},
+				...Array.from({ length: 6 }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `Live ${i + 1}`,
+					ts: 1200 + i * 100,
+				})),
+			]
+
+			const result = truncateConversation(history, 0.5, "test-task-id")
+
+			// The candidates are the six live messages: raw = floor((6 - 1) * 0.5) = 2.
+			expect(result.messagesRemoved).toBe(2)
+
+			// The summary and the pre-summary orphan carry no truncation tag.
+			const summary = result.messages.find((m) => m.content === "Summary of the conversation")
+			expect(summary?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "Orphan")?.truncationParent).toBeUndefined()
+
+			// Skip-first keeps the first live message; the next two are tagged.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
+		})
+
+		it("nested summaries: only the latest summary bounds truncation", () => {
+			// Two condensations: the sink slices from the second summary, so every
+			// message before it is dead regardless of which tag it carries.
+			const tagged = (n: number, prefix: string, parent: string, startTs: number) =>
+				Array.from({ length: n }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `${prefix} ${i + 1}`,
+					ts: startTs + i * 100,
+					condenseParent: parent,
+				}))
+
+			const history: ApiMessage[] = [
+				...tagged(4, "Dead", "c1", 1000),
+				{
+					role: "assistant",
+					content: "Summary one",
+					ts: 1500,
+					isSummary: true,
+					condenseId: "c1",
+				},
+				...tagged(4, "Dead2", "c2", 1600),
+				{
+					role: "assistant",
+					content: "Summary two",
+					ts: 2100,
+					isSummary: true,
+					condenseId: "c2",
+				},
+				...Array.from({ length: 5 }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `Live ${i + 1}`,
+					ts: 2200 + i * 100,
+				})),
+			]
+
+			const result = truncateConversation(history, 0.5, "test-task-id")
+
+			// The candidates are the five live messages: raw = floor((5 - 1) * 0.5) = 2.
+			expect(result.messagesRemoved).toBe(2)
+
+			// Only the two oldest live messages after the skipped first are tagged.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 4")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "Live 5")?.truncationParent).toBeUndefined()
+
+			// Both summaries and every dead message stay untagged.
+			for (const msg of result.messages) {
+				if (msg.isSummary || msg.condenseParent) {
+					expect(msg.truncationParent).toBeUndefined()
+				}
+			}
 		})
 	})
 

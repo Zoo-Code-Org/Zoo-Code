@@ -4,13 +4,7 @@ import crypto from "crypto"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
-import {
-	MAX_CONDENSE_THRESHOLD,
-	MIN_CONDENSE_THRESHOLD,
-	summarizeConversation,
-	SummarizeResponse,
-	getExistingSummaryIds,
-} from "../condense"
+import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -101,19 +95,24 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 
 	const truncationId = crypto.randomUUID()
 
-	// Filter to only visible messages (those not already truncated or condensed).
-	// A condenseParent tag hides a message only when its summary still exists.
-	// Matched tags stay excluded (issue 1823). Orphaned tags after a rewind stay
-	// selectable, because the sink shows those messages again (issue 1823 review).
+	// Filter to only visible messages, mirroring the sink's fresh-start slice
+	// (getEffectiveApiHistory): when a summary exists, the API receives only the
+	// messages from the latest summary onward, so candidates start there. The
+	// latest summary stays the first effective message and is never a candidate.
+	// With no summary, every non-truncated, non-marker message stays a candidate,
+	// orphaned condenseParent tags included (PR 2647 review thread).
 	// We need to track original indices to correctly tag messages in the full array
-	const existingSummaryIds = getExistingSummaryIds(messages)
+	let lastSummaryIndex = -1
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].isSummary) {
+			lastSummaryIndex = i
+			break
+		}
+	}
+	const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
-		if (
-			!msg.truncationParent &&
-			!msg.isTruncationMarker &&
-			!(msg.condenseParent && existingSummaryIds.has(msg.condenseParent))
-		) {
+		if (index >= boundary && index !== lastSummaryIndex && !msg.truncationParent && !msg.isTruncationMarker) {
 			visibleIndices.push(index)
 		}
 	})
@@ -398,16 +397,22 @@ export async function manageContext({
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 
 		// Calculate new context tokens after truncation by counting the messages the
-		// API still receives: hidden by neither truncation nor condensation, and not
-		// the truncation marker itself. A condenseParent tag hides a message only when
-		// its summary still exists. Matched tags stay excluded (issue 1823); orphaned
-		// tags after a rewind stay counted, matching the sink (issue 1823 review).
-		const existingSummaryIds = getExistingSummaryIds(truncationResult.messages)
-		const effectiveMessages = truncationResult.messages.filter(
-			(msg) =>
-				!msg.truncationParent &&
-				!msg.isTruncationMarker &&
-				!(msg.condenseParent && existingSummaryIds.has(msg.condenseParent)),
+		// API still receives. The sink's fresh-start slice (getEffectiveApiHistory)
+		// starts at the latest summary, so the count covers the summary plus the
+		// messages after it; the summary is counted and never a truncation candidate.
+		// With no summary, every non-truncated, non-marker message is counted,
+		// orphaned condenseParent tags included (PR 2647 review thread).
+		const truncatedMessages = truncationResult.messages
+		let lastSummaryIndex = -1
+		for (let i = truncatedMessages.length - 1; i >= 0; i--) {
+			if (truncatedMessages[i].isSummary) {
+				lastSummaryIndex = i
+				break
+			}
+		}
+		const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
+		const effectiveMessages = truncatedMessages.filter(
+			(msg, index) => index >= boundary && !msg.truncationParent && !msg.isTruncationMarker,
 		)
 
 		// Include system prompt tokens so this value matches what we send to the API.
