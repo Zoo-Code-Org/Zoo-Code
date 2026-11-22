@@ -619,6 +619,25 @@ describe("OpenRouterHandler", () => {
 			)
 		})
 
+		it("emits the canonical error event for a null error-value chunk (#1302)", async () => {
+			// The '"error" in chunk' guard admits a null error value (PR 2645
+			// mutation report): the handler must emit the canonical error event, not a TypeError.
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockStream = asyncStreamFrom([{ error: null }])
+
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const proto = OpenAI.prototype as unknown as { chat: { completions: { create: unknown } } }
+			proto.chat = { completions: { create: mockCreate } }
+
+			const generator = handler.createMessage("test", [])
+			await expect(generator.next()).rejects.toThrow("openrouter API Error undefined: Unknown error")
+
+			expect(mockCaptureException.mock.calls.length).toBe(1)
+			const captured = mockCaptureException.mock.calls[0]?.[0]
+			expect(captured).toBeInstanceOf(ApiProviderError)
+			expect(extractApiProviderErrorProperties(captured as ApiProviderError).provider).toBe("openrouter")
+		})
+
 		it("captures telemetry when createMessage throws an exception", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockRejectedValue(new Error("Connection failed"))

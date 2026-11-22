@@ -30,6 +30,8 @@
 \* captures between cases. Covered: TelemetryCanonical models the emission
 \* for every error site. The defect was in the test double. Fixed in the
 \* test file. Added 0. Gap 0.
+\* Mutation round: PR 2645 report. The null error-value input the in-guard
+\* admits was unpinned. The invariants cover it. A focused test pins it.
 \* Replay: the test on main asserts "OpenRouter API Error 500" as the thrown
 \* message and providerIdentifiers.openrouter as the telemetry value for one
 \* event. Both spellings are real. See openrouter.spec.ts.
