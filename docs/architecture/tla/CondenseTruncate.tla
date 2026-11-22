@@ -39,12 +39,17 @@
 \* Gap: the sink also sends the marker text. The code count and this model exclude the
 \* marker. The error is small and constant. Out of scope for this fix.
 \* Cost: each run takes under 10 seconds. Agent time is not measured.
-\* Result: CondenseTruncate.cfg (Fixed) holds with 398 distinct states. UnfixedRemoved
+\* Result: CondenseTruncate.cfg (Fixed) holds with 400 distinct states. UnfixedRemoved
 \* and UnfixedCount fail with 48 states each. CoarseSelection fails with 3 states.
 \* CoarseCount fails with 749 states. MatchedSelection fails with 3 states.
 \* MatchedSummary fails with 221 states. MatchedCount fails with 222 states.
 \* Every variant models a rule that this fix replaces, so each failure is a reproduction.
-\* Findings: covered 4, added 3, gap 2. The two failures of issue 1823 are covered
+\* The round-4 review (thread 4657986893) found that excluding the summary from
+\* the candidates split tool_use/tool_result pairs, and the Messages API rejects
+\* a split pair. Added: the summary is the first candidate and skip-first keeps
+\* it untagged (VisMsg Fixed uses i >= LastSumIdx, SelectionMatchesLive simplified
+\* to the sink rule). The pair-integrity unit test replays it on the real code.
+\* Findings: covered 4, added 4, gap 2. The two failures of issue 1823 are covered
 \* findings. The round-2 review had two findings: the oracle duplication is covered, the
 \* orphan regression is added (Rewind action, Coarse mode, SelectionMatchesLive).
 \* The round-3 review had three findings: the missing boundary is added (boundary VisMsg,
@@ -102,7 +107,8 @@ LiveMsg(i) ==
 LiveCount == Cardinality({i \in 1..n : LiveMsg(i)})
 
 \* The visible filter of truncateConversation per mode.
-\* Fixed: the latest-summary boundary. The summary itself is never a candidate.
+\* Fixed: the latest-summary boundary. The summary is the first candidate;
+\* the skip-first rule in Truncate keeps it untagged (review round 4).
 \* Matched: the code on the reviewed head. Tags decide, position does not.
 \* Coarse: hides every tagged message (the first version of the fix).
 \* Buggy: ignores condenseParent (the code before the fix).
@@ -111,7 +117,7 @@ VisMsg(mode, i) ==
         /\ ~msgs[i].trunc
         /\ ~msgs[i].mark
         /\ \/ ~HasSummary
-           \/ i > LastSumIdx
+           \/ i >= LastSumIdx
     ELSE IF mode = "Matched" THEN
         /\ ~msgs[i].trunc
         /\ ~msgs[i].mark
@@ -231,11 +237,10 @@ RemovedIsLive == last.rep = last.lost
 CountExact == ~repValid \/ repTokens = LiveCount
 
 \* The opposite of Failures 3 and 4: the selection rule and the sink agree on
-\* every message. The latest summary is live but never removable.
+\* every message. The summary is live and a candidate. Skip-first keeps it.
 SelectionMatchesLive ==
     \A i \in 1..n :
-        (VisMsg(Mode, i) <=> /\ LiveMsg(i)
-                             /\ ~(HasSummary /\ i = LastSumIdx))
+        (VisMsg(Mode, i) <=> LiveMsg(i))
 
 \* The opposite of the summary half of Failure 4: the latest summary is the
 \* first effective message, so no truncation may ever tag it.

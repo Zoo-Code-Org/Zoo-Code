@@ -97,10 +97,11 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 
 	// Filter to only visible messages, mirroring the sink's fresh-start slice
 	// (getEffectiveApiHistory): when a summary exists, the API receives only the
-	// messages from the latest summary onward, so candidates start there. The
-	// latest summary stays the first effective message and is never a candidate.
-	// With no summary, every non-truncated, non-marker message stays a candidate,
-	// orphaned condenseParent tags included (PR 2647 review thread).
+	// messages from the latest summary onward, so candidates start there, at the
+	// summary itself. The summary is the first candidate and the skip-first rule
+	// below keeps it untagged — excluding it split tool_use/tool_result pairs
+	// (PR 2647 review round 4). With no summary, every non-truncated, non-marker
+	// message stays a candidate, orphaned condenseParent tags included.
 	// We need to track original indices to correctly tag messages in the full array
 	let lastSummaryIndex = -1
 	for (let i = messages.length - 1; i >= 0; i--) {
@@ -112,7 +113,7 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 	const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
-		if (index >= boundary && index !== lastSummaryIndex && !msg.truncationParent && !msg.isTruncationMarker) {
+		if (index >= boundary && !msg.truncationParent && !msg.isTruncationMarker) {
 			visibleIndices.push(index)
 		}
 	})

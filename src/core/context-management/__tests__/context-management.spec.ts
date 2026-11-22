@@ -1784,13 +1784,13 @@ describe("Context Management", () => {
 			const result = await runTruncation(messages)
 			expect(result.truncationId).toBeDefined()
 
-			// The candidates are the live messages after the summary. The first is
-			// skipped and the next two are hidden (removed is even). The count covers
+			// The summary is the first candidate and skip-first keeps it; the two
+			// oldest live messages are hidden (removed is even). The count covers
 			// the system prompt, the summary and the kept live messages.
 			const expected =
 				systemPrompt.length +
 				"The summary text".length +
-				"live message one".length +
+				"live three".length +
 				"live four".length +
 				"live five".length
 			expect(result.newContextTokensAfterTruncation).toBe(expected)
@@ -1839,10 +1839,10 @@ describe("Context Management", () => {
 			const summary = result.messages.find((m) => m.isSummary)
 			expect(summary?.truncationParent).toBeUndefined()
 
-			// The two candidates after the skipped first live message are tagged.
-			expect(result.messages.find((m) => m.content === "live one")?.truncationParent).toBeUndefined()
+			// Skip-first keeps the summary; the two oldest live messages are tagged.
+			expect(result.messages.find((m) => m.content === "live one")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "live two")?.truncationParent).toBe(result.truncationId)
-			expect(result.messages.find((m) => m.content === "live three")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "live three")?.truncationParent).toBeUndefined()
 		})
 
 		it("matches the API-visible count: a pre-summary orphan and matched condensed messages are not counted", async () => {

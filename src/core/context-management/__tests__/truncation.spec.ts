@@ -472,10 +472,11 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			const tagged = result.messages.filter((msg) => msg.truncationParent === result.truncationId)
 			expect(tagged.length).toBe(2)
 
-			// The first live message is skipped; the next two live messages are hidden.
-			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
+			// The summary is the first candidate; skip-first protects it, and the
+			// two oldest live messages are hidden.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
-			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBeUndefined()
 
 			// Messages already hidden by condensation must not get a truncationParent.
 			for (const msg of result.messages) {
@@ -552,7 +553,7 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 
 			const result = truncateConversation(history, 0.5, "test-task-id")
 
-			// The candidates are the six live messages: raw = floor((6 - 1) * 0.5) = 2.
+			// The candidates are the summary plus six live: raw = floor((7 - 1) * 0.5) = 3, even 2.
 			expect(result.messagesRemoved).toBe(2)
 
 			// The summary and the pre-summary orphan carry no truncation tag.
@@ -560,10 +561,58 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			expect(summary?.truncationParent).toBeUndefined()
 			expect(result.messages.find((m) => m.content === "Orphan")?.truncationParent).toBeUndefined()
 
-			// Skip-first keeps the first live message; the next two are tagged.
-			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
+			// Skip-first keeps the summary; the two oldest live messages are tagged.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
-			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBeUndefined()
+		})
+
+		it("keeps tool_use/tool_result pairs whole when a user-role summary leads the candidates", () => {
+			// Real summaries carry role "user" (summarizeConversation). The summary
+			// is the first candidate, so skip-first protects it and truncation hides
+			// the oldest tool exchange whole. Excluding the summary split a pair,
+			// and the Messages API rejects split pairs (PR 2647 review round 4).
+			const toolUse = (id: string) => [{ type: "tool_use" as const, id, name: "probe", input: {} }]
+			const toolResult = (id: string) => [{ type: "tool_result" as const, tool_use_id: id, content: "ok" }]
+			const history: ApiMessage[] = [
+				{ role: "user", content: "The summary text", ts: 1000, isSummary: true, condenseId: "c-1" },
+				{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+				{ role: "user", content: toolResult("t1"), ts: 1200 },
+				{ role: "assistant", content: toolUse("t2"), ts: 1300 },
+				{ role: "user", content: toolResult("t2"), ts: 1400 },
+				{ role: "assistant", content: toolUse("t3"), ts: 1500 },
+				{ role: "user", content: toolResult("t3"), ts: 1600 },
+			]
+
+			const result = truncateConversation(history, 0.5, "test-task-id")
+
+			// Seven candidates: the summary plus six turns. raw = 3, even 2.
+			expect(result.messagesRemoved).toBe(2)
+
+			// The summary stays untagged; the first tool exchange goes, whole.
+			expect(result.messages.find((m) => m.content === "The summary text")?.truncationParent).toBeUndefined()
+			const tagged = result.messages.filter((m) => m.truncationParent === result.truncationId)
+			expect(tagged.length).toBe(2)
+			const blocks = (m: ApiMessage) => (Array.isArray(m.content) ? m.content : [])
+			expect(blocks(tagged[0])[0]).toMatchObject({ type: "tool_use", id: "t1" })
+			expect(blocks(tagged[1])[0]).toMatchObject({ type: "tool_result", tool_use_id: "t1" })
+
+			// Every remaining tool_result still follows its tool_use at the sink.
+			const effective = getEffectiveApiHistory(result.messages).filter((m) => !m.isTruncationMarker)
+			effective.forEach((msg, index) => {
+				for (const block of blocks(msg)) {
+					if (block.type === "tool_result") {
+						const prev = effective[index - 1]
+						const prevIds =
+							prev === undefined
+								? []
+								: blocks(prev)
+										.filter((b) => b.type === "tool_use")
+										.map((b) => (b as { id?: string }).id)
+						expect(prevIds).toContain((block as { tool_use_id?: string }).tool_use_id)
+					}
+				}
+			})
 		})
 
 		it("nested summaries: only the latest summary bounds truncation", () => {
@@ -603,13 +652,13 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 
 			const result = truncateConversation(history, 0.5, "test-task-id")
 
-			// The candidates are the five live messages: raw = floor((5 - 1) * 0.5) = 2.
+			// The candidates are the second summary plus five live: raw = floor((6 - 1) * 0.5) = 2.
 			expect(result.messagesRemoved).toBe(2)
 
-			// Only the two oldest live messages after the skipped first are tagged.
-			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBeUndefined()
+			// Skip-first keeps the second summary; the two oldest live are tagged.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBe(result.truncationId)
 			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
-			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 3")?.truncationParent).toBeUndefined()
 			expect(result.messages.find((m) => m.content === "Live 4")?.truncationParent).toBeUndefined()
 			expect(result.messages.find((m) => m.content === "Live 5")?.truncationParent).toBeUndefined()
 
