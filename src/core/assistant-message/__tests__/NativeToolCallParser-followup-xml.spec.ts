@@ -75,6 +75,29 @@ describe("NativeToolCallParser - ask_followup_question legacy XML recovery", () 
 		expect(nativeArgs?.question).toBe("Q?")
 	})
 
+	it("selects the enclosing parameter wrapper before a follow_up tag inside its payload", () => {
+		// The first <follow_up> match sits inside the parameter payload's
+		// JSON string. The enclosing parameter block opens earlier in the
+		// source and must be recovered instead (review thread 4658490177).
+		const question = 'Q?<parameter name="follow_up">[{"text":"Use <follow_up>[]</follow_up>"}]</parameter>'
+		const nativeArgs = nativeArgsOf({ question })
+
+		expect(nativeArgs).not.toBeNull()
+		expect(nativeArgs?.follow_up).toEqual([{ text: "Use <follow_up>[]</follow_up>" }])
+		expect(nativeArgs?.question).toBe("Q?")
+	})
+
+	it("selects the enclosing follow_up wrapper before a parameter tag inside its payload", () => {
+		// Symmetric case: the parameter-style tag sits inside the follow_up
+		// payload's JSON string. The enclosing follow_up block opens first.
+		const question = 'Q?<follow_up>[{"text":"Use <parameter name=\\"follow_up\\">[]</parameter>"}]</follow_up>'
+		const nativeArgs = nativeArgsOf({ question })
+
+		expect(nativeArgs).not.toBeNull()
+		expect(nativeArgs?.follow_up).toEqual([{ text: 'Use <parameter name="follow_up">[]</parameter>' }])
+		expect(nativeArgs?.question).toBe("Q?")
+	})
+
 	it("keeps an explicit follow_up array and leaves its question untouched", () => {
 		const nativeArgs = nativeArgsOf({
 			question: issueQuestion,

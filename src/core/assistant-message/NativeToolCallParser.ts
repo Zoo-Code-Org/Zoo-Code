@@ -399,13 +399,19 @@ export class NativeToolCallParser {
 			{ open: /<parameter\s+name=["']follow_up["']>/, close: /<\/parameter>/g },
 		]
 
-		for (const pattern of patterns) {
-			const openMatch = pattern.open.exec(question)
+		// Select the enclosing wrapper before tags inside its JSON payload
+		// (review thread 4658490177). Match both forms and process the
+		// earliest opening tag: a wrapper tag that appears inside another
+		// form's payload opens later and must not be recovered first.
+		const candidates = patterns
+			.map((pattern) => ({ pattern, open: pattern.open.exec(question) }))
+			.filter(
+				(candidate): candidate is { pattern: (typeof patterns)[number]; open: RegExpExecArray } =>
+					candidate.open !== null,
+			)
+			.sort((a, b) => a.open.index - b.open.index)
 
-			if (!openMatch) {
-				continue
-			}
-
+		for (const { pattern, open: openMatch } of candidates) {
 			// A closing tag inside a JSON string is payload content, not a
 			// boundary (review thread 4658157957). Try every closing-tag
 			// candidate until one yields a payload that parses to an array.
