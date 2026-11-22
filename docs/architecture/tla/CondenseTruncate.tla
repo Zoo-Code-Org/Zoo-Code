@@ -35,6 +35,8 @@
 \* RemovedIsLive and CountExact already model the sink rule, so the defect was in the
 \* test double, fixed there. The orphan regression is added: the Rewind action, the Coarse
 \* mode, and the SelectionMatchesLive invariant express it (PR 2647 review thread).
+\* Mutation round (PR 2647): the getExistingSummaryIds guard lacked direct tests. The
+\* SummaryExists rule already models it. Two focused unit tests now pin the guard.
 \* The gap is the marker text below.
 \* Replay: UnfixedRemoved and UnfixedCount keep the counterexample AddMsg x4, Condense,
 \* Truncate (2 removed reported, 0 live removed). CoarseSelection gives Condense, Rewind:
