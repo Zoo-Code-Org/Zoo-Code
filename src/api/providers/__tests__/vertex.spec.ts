@@ -121,9 +121,9 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					model: expect.any(String),
 					contents: [{ role: "user", parts: [{ text: "Test prompt" }] }],
-					config: expect.objectContaining({
-						temperature: 1,
-					}),
+					// #242: temperature is omitted when no custom temperature is set,
+					// so the server default applies.
+					config: expect.objectContaining({}),
 				}),
 			)
 		})
@@ -161,7 +161,7 @@ describe("VertexHandler", () => {
 					config: expect.objectContaining({
 						abortSignal: controller.signal,
 						httpOptions: undefined,
-						temperature: 1,
+						// #242: temperature is omitted when no custom temperature is set.
 					}),
 				}),
 			)
