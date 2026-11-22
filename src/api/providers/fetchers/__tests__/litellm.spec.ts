@@ -913,4 +913,28 @@ describe("getLiteLLMModels", () => {
 			expect(result["glm-5-flash"]).not.toHaveProperty("preserveReasoning")
 		})
 	})
+
+	describe("requiresThoughtSignatures inference", () => {
+		it.each([
+			["a Gemini routed model", "team-model", "gemini/gemini-3-pro", true],
+			["a Gemini name on another routed model", "gemini-4-pro", "openai/my-proxy-route", false],
+			["a non-Gemini routed model", "team-claude", "anthropic/claude-sonnet-4", false],
+		])("sets the flag from the routed model for %s", async (_case, modelName, routedModel, flagged) => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{
+							model_name: modelName,
+							model_info: { max_tokens: 8192, max_input_tokens: 128000 },
+							litellm_params: { model: routedModel },
+						},
+					],
+				},
+			})
+
+			const result = await getLiteLLMModels("test-api-key", "http://localhost:4000")
+
+			expect(result[modelName]?.requiresThoughtSignatures).toBe(flagged || undefined)
+		})
+	})
 })

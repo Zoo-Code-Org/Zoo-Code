@@ -2,6 +2,7 @@ import { reactConfig } from "@roo-code/config-eslint/react"
 import { i18nLanguageSwitchSelectors } from "@roo-code/config-eslint/i18n-language-switch"
 import { createProviderIdentifierConfig } from "@roo-code/config-eslint/provider-identifiers"
 import { createI18nDotKeyConfig, getI18nDotKeySelectors } from "@roo-code/config-eslint/i18n-keys"
+import { createI18nLiteralStringConfig, i18nLiteralSelectors } from "@roo-code/config-eslint/i18n-literal-strings"
 import { providerIdentifiers, retiredProviderIdentifiers } from "@roo-code/types/provider-identifiers"
 
 const i18nDotKeyConfig = createI18nDotKeyConfig(`${import.meta.dirname}/src/i18n/locales/en`)
@@ -11,6 +12,10 @@ export default [
 	{ ignores: ["playwright/.cache/**"] },
 	...reactConfig,
 	createProviderIdentifierConfig({ providerIdentifiers, retiredProviderIdentifiers }),
+	createI18nLiteralStringConfig({
+		files: ["src/**/*.tsx"],
+		ignores: ["src/**/__tests__/**", "src/**/__mocks__/**", "src/**/*.spec.tsx", "src/**/*.test.tsx"],
+	}),
 	i18nDotKeyConfig,
 	{
 		rules: {
@@ -97,14 +102,17 @@ export default [
 	},
 	{
 		// The block above replaces no-restricted-syntax for the same files, so repeat the i18n dot-key
-		// selectors. Keep the dot-key config's ignores so test files stay out of that check.
+		// selectors. Keep the dot-key config's ignores so test files stay out of that check and out of the
+		// literal-string selectors, and add __mocks__, which the literal-string plugin config also skips.
 		...i18nDotKeyConfig,
 		files: ["src/**/*.{ts,tsx}"],
+		ignores: [...i18nDotKeyConfig.ignores, "src/**/__mocks__/**"],
 		rules: {
 			"no-restricted-syntax": [
 				"error",
 				...i18nLanguageSwitchSelectors,
 				...getI18nDotKeySelectors(i18nDotKeyConfig),
+				...i18nLiteralSelectors,
 			],
 		},
 	},

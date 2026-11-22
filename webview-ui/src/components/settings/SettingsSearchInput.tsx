@@ -64,7 +64,7 @@ export function SettingsSearchInput({
 					type="button"
 					onClick={() => onChange("")}
 					className="absolute cursor-pointer right-2 top-1/2 -translate-y-1/2 text-vscode-descriptionForeground hover:text-vscode-foreground focus:outline-none"
-					aria-label="Clear search">
+					aria-label={t("common:ui.clear_search_aria_label")}>
 					<X className="size-3.5" />
 				</button>
 			)}

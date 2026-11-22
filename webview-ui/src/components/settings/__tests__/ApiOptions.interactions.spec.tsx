@@ -35,6 +35,18 @@ type SelectMockProps = ChildrenProps & {
 	onValueChange?: (value: string) => void
 }
 
+type VSCodeDropdownMockProps = ChildrenProps & {
+	value?: string
+	onChange?: (event: Event) => void
+	id?: string
+	"aria-label"?: string
+	className?: string
+}
+
+type VSCodeOptionMockProps = ChildrenProps & {
+	value: string
+}
+
 type UseSelectedModelReturn = { provider?: string; id?: string; info: Record<string, never> }
 
 const { modelPickerMock, useOpenRouterModelProvidersMock, useRouterModelsMock, useSelectedModelMock } = vi.hoisted(
@@ -115,7 +127,6 @@ vi.mock("../providers", () => {
 		VercelAiGateway: provider("provider-vercel-ai-gateway"),
 		OpenCodeGo: provider("provider-opencode-go"),
 		Kenari: provider("provider-kenari"),
-		IOIntelligence: provider("provider-io-intelligence"),
 		NanoGPT: provider("provider-nanogpt"),
 		ZooGateway: provider("provider-zoo-gateway"),
 		MiniMax: provider("provider-minimax"),
@@ -151,6 +162,12 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 		</label>
 	),
 	VSCodeLink: ({ children }: ChildrenProps) => <span>{children}</span>,
+	VSCodeDropdown: ({ children, value, onChange, ...props }: VSCodeDropdownMockProps) => (
+		<select value={value} onChange={(event) => onChange?.(event.nativeEvent)} {...props}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value }: VSCodeOptionMockProps) => <option value={value}>{children}</option>,
 }))
 
 vi.mock("@/components/ui", () => ({
@@ -386,7 +403,6 @@ describe("ApiOptions interactions", () => {
 		providerIdentifiers.vercelAiGateway,
 		providerIdentifiers.opencodeGo,
 		providerIdentifiers.kenari,
-		providerIdentifiers.ioIntelligence,
 		providerIdentifiers.nanogpt,
 		providerIdentifiers.zooGateway,
 		providerIdentifiers.fireworks,

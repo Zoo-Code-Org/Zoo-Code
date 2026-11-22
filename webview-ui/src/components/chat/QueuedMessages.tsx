@@ -1,7 +1,8 @@
 import { useState } from "react"
 import { useAppTranslation } from "@src/i18n/TranslationContext"
 
-import { QueuedMessage } from "@roo-code/types"
+import type { MentionSegment, QueuedMessage } from "@roo-code/types"
+import { applyEdit, generatedSegments, normalizeSegments } from "@roo/mentionSegments"
 
 import { Button } from "@src/components/ui"
 
@@ -12,31 +13,44 @@ import { Mention } from "./Mention"
 interface QueuedMessagesProps {
 	queue: QueuedMessage[]
 	onRemove: (index: number) => void
-	onUpdate: (index: number, newText: string) => void
+	onUpdate: (index: number, newText: string, segments: MentionSegment[]) => void
 }
+
+type EditState = { isEditing: boolean; value: string; segments: MentionSegment[] }
 
 export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProps) => {
 	const { t } = useAppTranslation()
-	const [editingStates, setEditingStates] = useState<Record<string, { isEditing: boolean; value: string }>>({})
+	const [editingStates, setEditingStates] = useState<Record<string, EditState>>({})
 
 	if (queue.length === 0) {
 		return null
 	}
 
-	const getEditState = (messageId: string, currentText: string) => {
-		return editingStates[messageId] || { isEditing: false, value: currentText }
+	const getEditState = (message: QueuedMessage): EditState =>
+		editingStates[message.id] || {
+			isEditing: false,
+			value: message.text,
+			segments: normalizeSegments(message.text, message.segments),
+		}
+
+	const setEditState = (message: QueuedMessage, isEditing: boolean, value: string, segments: MentionSegment[]) => {
+		setEditingStates((prev) => ({ ...prev, [message.id]: { isEditing, value, segments } }))
 	}
 
-	const setEditState = (messageId: string, isEditing: boolean, value?: string) => {
-		setEditingStates((prev) => ({
-			...prev,
-			[messageId]: { isEditing, value: value ?? prev[messageId]?.value ?? "" },
-		}))
+	// Tag each input event here. The saved text alone cannot show which parts the user typed.
+	const handleChange = (message: QueuedMessage, previous: EditState, e: React.ChangeEvent<HTMLTextAreaElement>) => {
+		const value = e.target.value
+		const inputType = e.nativeEvent instanceof InputEvent ? e.nativeEvent.inputType : ""
+		// Undo and redo bring back older text with unknown origin. The whole text is generated.
+		const segments = inputType.startsWith("history")
+			? generatedSegments(value)
+			: applyEdit(previous.segments, previous.value, value)
+		setEditState(message, true, value, segments)
 	}
 
-	const handleSaveEdit = (index: number, messageId: string, newValue: string) => {
-		onUpdate(index, newValue)
-		setEditState(messageId, false)
+	const handleSaveEdit = (index: number, message: QueuedMessage, state: EditState) => {
+		onUpdate(index, state.value, state.segments)
+		setEditState(message, false, state.value, state.segments)
 	}
 
 	return (
@@ -44,7 +58,7 @@ export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProp
 			<div className="text-vscode-descriptionForeground text-md mb-2">{t("chat:queuedMessages.title")}</div>
 			<div className="flex flex-col gap-2 max-h-[300px] overflow-y-auto pr-2">
 				{queue.map((message, index) => {
-					const editState = getEditState(message.id, message.text)
+					const editState = getEditState(message)
 
 					return (
 						<div
@@ -64,15 +78,20 @@ export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProp
 												}
 											}}
 											value={editState.value}
-											onChange={(e) => setEditState(message.id, true, e.target.value)}
-											onBlur={() => handleSaveEdit(index, message.id, editState.value)}
+											onChange={(e) => handleChange(message, editState, e)}
+											onBlur={() => handleSaveEdit(index, message, editState)}
 											onKeyDown={(e) => {
 												if (e.key === "Enter" && !e.shiftKey) {
 													e.preventDefault()
-													handleSaveEdit(index, message.id, editState.value)
+													handleSaveEdit(index, message, editState)
 												}
 												if (e.key === "Escape") {
-													setEditState(message.id, false, message.text)
+													setEditState(
+														message,
+														false,
+														message.text,
+														normalizeSegments(message.text, message.segments),
+													)
 												}
 											}}
 											className="w-full bg-vscode-input-background text-vscode-input-foreground border border-vscode-input-border rounded px-2 py-1 resize-none focus:outline-0 focus:ring-1 focus:ring-vscode-focusBorder"
@@ -82,7 +101,14 @@ export const QueuedMessages = ({ queue, onRemove, onUpdate }: QueuedMessagesProp
 										/>
 									) : (
 										<div
-											onClick={() => setEditState(message.id, true, message.text)}
+											onClick={() =>
+												setEditState(
+													message,
+													true,
+													message.text,
+													normalizeSegments(message.text, message.segments),
+												)
+											}
 											className="cursor-pointer hover:bg-vscode-list-hoverBackground px-1 py-0.5 -mx-1 -my-0.5 rounded transition-colors"
 											title={t("chat:queuedMessages.clickToEdit")}>
 											<Mention text={message.text} withShadow />

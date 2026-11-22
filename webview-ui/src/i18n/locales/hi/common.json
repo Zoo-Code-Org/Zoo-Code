@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "खोजें...",
-		"no_results": "कोई परिणाम नहीं मिला"
+		"no_results": "कोई परिणाम नहीं मिला",
+		"close": "बंद करें",
+		"clear_search_aria_label": "खोज साफ़ करें"
 	},
 	"mermaid": {
 		"loading": "मरमेड डायग्राम जनरेट हो रहा है...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "चित्र"
 		},
-		"noData": "कोई छवि डेटा नहीं"
+		"noData": "कोई छवि डेटा नहीं",
+		"generatedAlt": "AI द्वारा बनाई गई छवि",
+		"thumbnailAlt": "थंबनेल {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "संदेश हटाएं",

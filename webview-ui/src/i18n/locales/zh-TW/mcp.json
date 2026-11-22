@@ -55,5 +55,10 @@
 		"running": "執行中",
 		"completed": "已完成",
 		"error": "錯誤"
-	}
+	},
+	"resource": {
+		"returns": "回傳",
+		"unknownMimeType": "未知"
+	},
+	"toggleServerAriaLabel": "啟用/停用 {{serverName}} 伺服器"
 }

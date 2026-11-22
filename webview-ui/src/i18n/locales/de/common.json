@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "Suchen...",
-		"no_results": "Keine Ergebnisse gefunden"
+		"no_results": "Keine Ergebnisse gefunden",
+		"close": "Schließen",
+		"clear_search_aria_label": "Suche löschen"
 	},
 	"mermaid": {
 		"loading": "Mermaid-Diagramm wird generiert...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "Bild"
 		},
-		"noData": "Keine Bilddaten"
+		"noData": "Keine Bilddaten",
+		"generatedAlt": "KI-generiertes Bild",
+		"thumbnailAlt": "Vorschaubild {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "Nachricht löschen",

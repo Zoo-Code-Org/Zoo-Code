@@ -5,7 +5,7 @@ import type { ProviderSettings, ProviderSettingsEntry } from "./provider-setting
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
-import type { ClineMessage, QueuedMessage } from "./message.js"
+import type { ClineMessage, MentionSegment, QueuedMessage } from "./message.js"
 import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
 import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
@@ -170,6 +170,8 @@ export interface ExtensionMessage {
 		| "switchTab"
 		| "toggleAutoApprove"
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
+	/** With `invoke: "setChatBoxMessage"`: origin of each part of `text`. Absent means all generated. */
+	segments?: MentionSegment[]
 	/**
 	 * Partial state updates are allowed to reduce message size (e.g. omit large fields like taskHistory).
 	 * The webview is responsible for merging.
@@ -551,7 +553,15 @@ export interface UpdateTodoListPayload {
 	todos: any[]
 }
 
-export type EditQueuedMessagePayload = Pick<QueuedMessage, "id" | "text" | "images">
+// Segments stay unknown. normalizeSegments fails closed on a bad list.
+export const editQueuedMessagePayloadSchema = z.object({
+	id: z.string(),
+	text: z.string(),
+	images: z.array(z.string()).optional(),
+	segments: z.unknown().optional(),
+})
+
+export type EditQueuedMessagePayload = z.infer<typeof editQueuedMessagePayloadSchema>
 
 export interface WebviewMessage {
 	type:
@@ -857,6 +867,8 @@ export interface WebviewMessage {
 	updatedSettings?: RooCodeSettings
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
+	/** Origin of each part of `text`. Absent or not matching `text` means all generated. */
+	segments?: MentionSegment[]
 	// Worktree properties
 	worktreePath?: string
 	worktreeBranch?: string
