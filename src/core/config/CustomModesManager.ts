@@ -243,9 +243,15 @@ export class CustomModesManager {
 			return { status: "unreadable", reason: "the file is not valid YAML" }
 		}
 
-		// Ensure settings has customModes property
-		if (!settings || typeof settings !== "object" || !settings.customModes) {
+		// A missing key is a definition list of length zero. A key that is there and holds something
+		// that is not a list is a definition set nobody can read, and folding it into "no modes"
+		// would let a rollback restore emptiness over definitions it never saw.
+		if (!settings || typeof settings !== "object" || settings.customModes === undefined) {
 			return { status: "ok", modes: [] }
+		}
+		if (!Array.isArray(settings.customModes)) {
+			const kind = settings.customModes === null ? "null" : typeof settings.customModes
+			return { status: "invalid", reason: `customModes is ${kind}, not a list of mode definitions` }
 		}
 
 		const result = customModesSettingsSchema.safeParse(settings)

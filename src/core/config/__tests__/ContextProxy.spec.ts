@@ -1290,6 +1290,10 @@ Output only the summary of the conversation so far, without any additional comme
 			expect(Object.getPrototypeOf(stateCache)).toBe(Object.prototype)
 			expect(stateCache["polluted"]).toBeUndefined()
 			expect(mockGlobalState.update).not.toHaveBeenCalledWith("__proto__", expect.anything())
+			// Both keys are written above, so both effects are asserted: the cache must not grow an
+			// own constructor either, and the store must never see that key.
+			expect(Object.prototype.hasOwnProperty.call(stateCache, "constructor")).toBe(false)
+			expect(mockGlobalState.update).not.toHaveBeenCalledWith("constructor", expect.anything())
 		})
 		it("settles every delete before the reset rejects, so no save can land between the guard coming down and a straggler erasing it", async () => {
 			const durable = new Map<string, string | undefined>()

@@ -32,7 +32,7 @@ import { joinSegments } from "../../../shared/mentionSegments"
 import type { MentionSegment } from "@roo-code/types"
 import { experimentDefault } from "../../../shared/experiments"
 import { setTtsEnabled } from "../../../utils/tts"
-import { ContextProxy } from "../../config/ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../../config/ContextProxy"
 import { ProviderSettingsManager } from "../../config/ProviderSettingsManager"
 import { importSettingsFromPath } from "../../config/importExport"
 import { WorkspaceIndexingEnablementManager } from "../../../services/code-index/workspace-indexing-enablement-manager"
@@ -7669,6 +7669,162 @@ describe("ClineProvider", () => {
 		expect(written["polluted"]).toBeUndefined()
 		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
 		expect(provider.getValue("mode")).toBe("architect")
+
+		await provider.dispose()
+	})
+	it("keeps a payload-named viewStates map out of the shared write", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		await provider.contextProxy.setValue("viewStates", { "legacy-view": { updatedAt: 1 } })
+		const logSpy = vi.spyOn(provider, "log")
+
+		await provider.setValues({ viewStates: { "mine-view": { updatedAt: 2 } } })
+
+		// The map belongs to the host: the per-view writers name one entry in it after re-reading the
+		// whole map. A payload that names the map itself would drop every other view's entry.
+		expect(logSpy).toHaveBeenCalledWith(
+			expect.stringContaining("Ignored viewStates: the host owns the per-view map"),
+		)
+		expect(provider.getValue("viewStates")).toEqual({ "legacy-view": { updatedAt: 1 } })
+
+		await provider.dispose()
+	})
+
+	it("resyncs the state when a failed batch stored customModes and failed on a later key", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const restoredMode = {
+			slug: "batch-mode",
+			name: "Batch",
+			roleDefinition: "r",
+			groups: ["read" as const],
+		}
+		// What the merged read finds after the rollback: a mode the batch never named, so the resync
+		// payload cannot be confused with the payload the batch was writing.
+		const preBatchMode = {
+			slug: "pre-batch-mode",
+			name: "Pre-batch",
+			roleDefinition: "r",
+			groups: ["read" as const],
+		}
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([preBatchMode]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [], failures: [] }),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		// The batch stored customModes and failed on a later key: the files are already back to
+		// the definitions found before the batch, while the state still holds the batch's modes.
+		const partialCommit = new SettingsWriteError(
+			["customModes"],
+			["autoApproval"],
+			new Error("configuration write failed"),
+		)
+		const write = vi.spyOn(provider, "setValues").mockRejectedValueOnce(partialCommit).mockResolvedValue(undefined)
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [restoredMode] }),
+		).rejects.toThrow("configuration write failed")
+
+		// The batch write carries the payload createTask was handed; the second write is the resync
+		// posting the merged read - the files' pre-batch definitions - through the same door setValues
+		// used. Skipping it on settingsApplied alone leaves the batch's mode posted as a phantom.
+		expect(write).toHaveBeenCalledTimes(2)
+		expect(write).toHaveBeenLastCalledWith({ customModes: [preBatchMode] })
+
+		await provider.dispose()
+	})
+
+	it("leaves the state alone when the failed batch stored nothing", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		const batchMode = {
+			slug: "batch-mode",
+			name: "Batch",
+			roleDefinition: "r",
+			groups: ["read" as const],
+		}
+		// What the merged read finds after the rollback: a mode the batch never named, so the resync
+		// payload cannot be confused with the payload the batch was writing.
+		const preBatchMode = {
+			slug: "pre-batch-mode",
+			name: "Pre-batch",
+			roleDefinition: "r",
+			groups: ["read" as const],
+		}
+		const manager = provider["customModesManager"]
+		Object.assign(manager, {
+			getCustomModes: vi.fn().mockResolvedValue([preBatchMode]),
+			getCustomModeDefinitions: vi.fn().mockResolvedValue({ definitions: [], failures: [] }),
+			updateCustomMode: vi.fn().mockResolvedValue(undefined),
+			removeCustomModeEntry: vi.fn().mockResolvedValue(true),
+		})
+		const nothingCommitted = new SettingsWriteError(
+			[],
+			["customModes", "autoApproval"],
+			new Error("configuration write failed"),
+		)
+		const write = vi.spyOn(provider, "setValues").mockRejectedValue(nothingCommitted)
+
+		await expect(
+			provider.createTask("text", undefined, undefined, {}, { customModes: [batchMode] }),
+		).rejects.toThrow("configuration write failed")
+
+		// Nothing reached the state, so the rollback must not write the merged list over a state this
+		// batch never touched: only the batch's own write happens.
+		expect(write).toHaveBeenCalledTimes(1)
+		expect(write).not.toHaveBeenCalledWith({ customModes: [preBatchMode] })
+
+		await provider.dispose()
+	})
+
+	it("rebuilds the saving view's task once when the sibling refresh follows the same save", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// Only the fields the sibling refresh reads are real: the profile name selects the instance,
+		// and apiConfiguration is the snapshot the rebuild decision compares against.
+		// Task has far more members than this double; only the four the sibling refresh reads are
+		// real, and the shapes do not overlap, so the assertion goes through unknown rather than
+		// adding another explicit any to a file already at its suppression baseline.
+		const rebuild = vi.fn()
+		const task = {
+			taskId: "task-1",
+			taskApiConfigName: "sibling-refresh-profile",
+			apiConfiguration: { apiProvider: providerIdentifiers.openai },
+			updateApiConfiguration: rebuild,
+		} as unknown as Task
+		vi.spyOn(provider, "getCurrentTask").mockReturnValue(task)
+		const settings: ProviderSettings = { apiProvider: providerIdentifiers.openai }
+
+		// The saving view already rebuilt its own task on this save: the refresh must skip it.
+		await provider["refreshSiblingsAfterProfileSave"]("sibling-refresh-profile", settings, true)
+		expect(rebuild).not.toHaveBeenCalled()
+
+		// Without the flag the same instance is rebuilt again in the same save, which is the
+		// duplicate this guard exists to catch.
+		await provider["refreshSiblingsAfterProfileSave"]("sibling-refresh-profile", settings)
+		expect(rebuild).toHaveBeenCalledTimes(1)
 
 		await provider.dispose()
 	})

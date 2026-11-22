@@ -883,6 +883,37 @@ describe("CustomModesManager", () => {
 			expect(snapshot.definitions.map((mode) => mode.slug)).toEqual(["project-only"])
 		})
 
+		it("reports a definition key that holds a non-list as invalid, not as empty", async () => {
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockSettingsPath) {
+					// The file parses and the key is there; only its value is wrong. Folding this into
+					// "no modes" would let a rollback restore emptiness over definitions nobody read.
+					return "customModes: null\n"
+				}
+				throw enoent()
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([{ path: mockSettingsPath, reason: "invalid" }])
+		})
+
+		it("keeps a missing definition key an empty snapshot rather than a failure", async () => {
+			;(fs.readFile as Mock).mockImplementation(async (filePath: string) => {
+				if (filePath === mockSettingsPath) {
+					return "somethingElse: true\n"
+				}
+				throw enoent()
+			})
+			;(fileExistsAtPath as Mock).mockResolvedValue(false)
+
+			const snapshot = await manager.getCustomModeDefinitions(["any-mode"])
+
+			expect(snapshot.definitions).toEqual([])
+			expect(snapshot.failures).toEqual([])
+		})
 		it("keeps a transient existence probe from emptying the file it snapshots", async () => {
 			// The probe that guards creation reports the file missing while it still holds a
 			// definition, which is what a transient failure looks like. A snapshot that creates on

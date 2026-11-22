@@ -133,7 +133,7 @@ import { t } from "../../i18n"
 import { buildApiHandler } from "../../api"
 import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../api/providers/fetchers/lmstudio"
 
-import { ContextProxy } from "../config/ContextProxy"
+import { ContextProxy, SettingsWriteError } from "../config/ContextProxy"
 import { withoutInvalidDisplaySettings } from "../config/displaySettings"
 import { ProviderSettingsManager } from "../config/ProviderSettingsManager"
 import { CustomModesManager, type CustomModesSnapshot } from "../config/CustomModesManager"
@@ -2931,7 +2931,8 @@ export class ClineProvider
 
 			if (signal.aborted) return id
 
-			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
+			// The rebuild below is this view's own: the sibling loop must not do it a second time.
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings, true)
 
 			// Change the provider for the current task.
 			// TODO: We should rename `buildApiHandler` for clarity (e.g. `getProviderClient`).
@@ -2945,14 +2946,16 @@ export class ClineProvider
 			// A non-activating save still changes the profile's settings: refresh every view
 			// that buffered a copy (pinned siblings included), or their getState() keeps the
 			// pre-save values.
+			let savingViewsTaskRebuilt = false
 			if (this.pinnedProfileName === name) {
 				await this._saveViewLocalStateFromMutation({ apiConfiguration: providerSettings })
 				// Only rebuild a task that actually runs under the saved profile.
 				if (this.getCurrentTask()?.taskApiConfigName === name) {
 					this.updateTaskApiHandlerIfNeeded(providerSettings, { forceRebuild: true })
+					savingViewsTaskRebuilt = true
 				}
 			}
-			await this.refreshSiblingsAfterProfileSave(name, providerSettings)
+			await this.refreshSiblingsAfterProfileSave(name, providerSettings, savingViewsTaskRebuilt)
 		}
 
 		if (signal.aborted) return id
@@ -2964,8 +2967,15 @@ export class ClineProvider
 	 * Refresh the buffered overlay of every live sibling pinned to a saved profile and rebuild
 	 * any task that follows it. The handler rebuild is independent of the pin: a task restored
 	 * from history can follow profile A while its view pins profile B.
+	 *
+	 * The saving view is skipped when its own path has already (or is about to) rebuilt its task:
+	 * rebuilding it twice in one save costs a second handler construction for the same settings.
 	 */
-	private async refreshSiblingsAfterProfileSave(name: string, providerSettings: ProviderSettings): Promise<void> {
+	private async refreshSiblingsAfterProfileSave(
+		name: string,
+		providerSettings: ProviderSettings,
+		skipSavingViewsTask = false,
+	): Promise<void> {
 		for (const instance of ClineProvider.getAllInstances()) {
 			if (instance === this || instance._disposed || instance.pinnedProfileName !== name) {
 				continue
@@ -2981,6 +2991,9 @@ export class ClineProvider
 		} = providerSettings as ProviderSettings & { name?: string; id?: string }
 		for (const instance of ClineProvider.getAllInstances()) {
 			if (instance._disposed || instance.getCurrentTask()?.taskApiConfigName !== name) {
+				continue
+			}
+			if (instance === this && skipSavingViewsTask) {
 				continue
 			}
 			instance.updateTaskApiHandlerIfNeeded(taskSettings, { forceRebuild: true })
@@ -4464,6 +4477,14 @@ export class ClineProvider
 			this.log(`[setValues] Ignored an invalid value for ${key}`),
 		)
 
+		// viewStates is the host-owned map: only the per-view writers below name entries in it, and
+		// they re-read it fresh before writing. A programmatic payload that names the whole map
+		// would replace every view's entry with one caller's copy of it.
+		if ("viewStates" in sanitizedValues) {
+			this.log("[setValues] Ignored viewStates: the host owns the per-view map")
+			delete sanitizedValues.viewStates
+		}
+
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
 			// a new Task would read it from getState() and persist it into task history.
@@ -5220,7 +5241,12 @@ export class ClineProvider
 				// over a state this batch never touched.
 				// rejected setValues, left the state as it was, and the rollback must not write the merged list
 				// Only a batch that reached setValues put anything into the state: a failure before it, or a
-				if (settingsApplied) {
+				// A partial commit is the exception the flag cannot see: customModes stored and a later key
+				// failed, so the files are already back to the pre-batch definitions while the state still
+				// holds this batch's modes. Without the resync the next save posts that phantom back.
+				const committedCustomModes =
+					error instanceof SettingsWriteError && error.committed.includes("customModes")
+				if (settingsApplied || committedCustomModes) {
 					// The batch handed its modes to the state through setValues before the failure; the files are
 					// back to the definitions found before the batch, so the state must follow the files.
 					// Otherwise getValues() keeps posting a mode that no longer exists on disk, and the next
