@@ -39,7 +39,12 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import { applyThoughtSignatures, readThoughtSignature, thoughtSignatureOrigin } from "./utils/thought-signature"
+import {
+	applyThoughtSignatures,
+	readThoughtSignature,
+	thoughtSignatureOrigin,
+	ThoughtSignatureReader,
+} from "./utils/thought-signature"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import {
 	bridgeExternalAbortSignal,
@@ -279,11 +284,12 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let lastUsage
 			const activeToolCallIds = new Set<string>()
+			const signatureReader = new ThoughtSignatureReader()
 
 			for await (const chunk of stream) {
 				const delta = chunk.choices?.[0]?.delta ?? {}
 				const finishReason = chunk.choices?.[0]?.finish_reason
-				this.lastThoughtSignature ??= readThoughtSignature(delta.tool_calls)
+				this.lastThoughtSignature = signatureReader.read(delta.tool_calls)
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {

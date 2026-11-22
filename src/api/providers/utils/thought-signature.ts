@@ -25,21 +25,31 @@ function signatureOf(toolCall: unknown): string | undefined {
 		: undefined
 }
 
+/** Keep the first explicit signature, or the first ID fallback, across response chunks. */
+export class ThoughtSignatureReader {
+	private explicit: string | undefined
+	private encoded: string | undefined
+
+	read(toolCalls: readonly unknown[] | null | undefined): string | undefined {
+		if (this.explicit !== undefined) return this.explicit
+		for (const call of toolCalls ?? []) {
+			this.explicit = signatureOf(call)
+			if (this.explicit !== undefined) return this.explicit
+			// Keep looking for an explicit field after an ID fallback, including in later chunks.
+			if (this.encoded !== undefined) continue
+			if (typeof call !== "object" || call === null || !("id" in call) || typeof call.id !== "string") continue
+			const marker = call.id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+			if (marker < 0) continue
+			const signature = call.id.slice(marker + LITELLM_THOUGHT_SIGNATURE_ID_MARKER.length)
+			if (signature) this.encoded = signature
+		}
+		return this.encoded
+	}
+}
+
 /** Read proxy signatures before history sanitization changes the encoded ID. */
 export function readThoughtSignature(toolCalls: readonly unknown[] | null | undefined): string | undefined {
-	let encoded: string | undefined
-	for (const call of toolCalls ?? []) {
-		const explicit = signatureOf(call)
-		if (explicit) return explicit
-		// A later call can carry an explicit field, which takes priority over the ID.
-		if (encoded !== undefined) continue
-		if (typeof call !== "object" || call === null || !("id" in call) || typeof call.id !== "string") continue
-		const marker = call.id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
-		if (marker < 0) continue
-		const signature = call.id.slice(marker + LITELLM_THOUGHT_SIGNATURE_ID_MARKER.length)
-		if (signature) encoded = signature
-	}
-	return encoded
+	return new ThoughtSignatureReader().read(toolCalls)
 }
 
 function collectThoughtSignatures(

@@ -23,7 +23,7 @@ import { sanitizeOpenAiCallId } from "../../utils/tool-id"
 import {
 	LITELLM_THOUGHT_SIGNATURE_ID_MARKER,
 	applyThoughtSignatures,
-	readThoughtSignature,
+	ThoughtSignatureReader,
 	thoughtSignatureOrigin,
 } from "./utils/thought-signature"
 
@@ -300,6 +300,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				.withResponse()
 
 			let lastUsage
+			const signatureReader = new ThoughtSignatureReader()
 
 			for await (const chunk of completion) {
 				// Stop consuming buffered chunks once the request is aborted (the
@@ -326,7 +327,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
-					this.lastThoughtSignature ??= readThoughtSignature(delta.tool_calls)
+					this.lastThoughtSignature = signatureReader.read(delta.tool_calls)
 					for (const toolCall of delta.tool_calls) {
 						throwIfAborted(requestSignal)
 						yield {

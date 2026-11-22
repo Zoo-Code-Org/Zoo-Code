@@ -6,7 +6,12 @@ import { sanitizeToolUseId } from "../../../../utils/tool-id"
 import { toolResultsMessage } from "../../../../test-utils/thought-signature"
 import { sanitizeOpenAiCallId } from "../../../../utils/tool-id"
 import { signedAssistantMessage, TEST_THOUGHT_SIGNATURE as signature } from "../../../../test-utils/thought-signature"
-import { applyThoughtSignatures, readThoughtSignature, thoughtSignatureOrigin } from "../thought-signature"
+import {
+	applyThoughtSignatures,
+	readThoughtSignature,
+	thoughtSignatureOrigin,
+	ThoughtSignatureReader,
+} from "../thought-signature"
 
 const origin = "litellm|http://localhost:4000|gemini-3-pro"
 const bypass = "bypass"
@@ -73,6 +78,33 @@ describe("readThoughtSignature", () => {
 		["a non-string signature", [{ index: 0, provider_specific_fields: { thought_signature: 42 } }]],
 	])("returns undefined for %s", (_case, toolCalls) => {
 		expect(readThoughtSignature(toolCalls)).toBeUndefined()
+	})
+})
+
+describe("ThoughtSignatureReader stream priority property", () => {
+	// Mirrors StreamSignaturePriority: the first explicit field wins, or the first ID if no field exists.
+	const candidates = [
+		{ source: "none", value: undefined, call: {} },
+		...["a", "b"].flatMap((value) => [
+			{ source: "encoded", value, call: { id: `call_1__thought__${value}` } },
+			{ source: "explicit", value, call: { provider_specific_fields: { thought_signature: value } } },
+		]),
+	]
+	const streams = candidates.flatMap((a) =>
+		candidates.flatMap((b) => candidates.map((c) => ({ sources: [a, b, c] }))),
+	)
+
+	it.each(streams)("selects by source priority for $sources", ({ sources }) => {
+		const reader = new ThoughtSignatureReader()
+		expect(reader.read(undefined)).toBeUndefined()
+		for (let count = 1; count <= sources.length; count++) {
+			const prefix = sources.slice(0, count)
+			const expected =
+				prefix.find((candidate) => candidate.source === "explicit")?.value ??
+				prefix.find((candidate) => candidate.source === "encoded")?.value
+			expect(reader.read([sources[count - 1].call])).toBe(expected)
+			expect(reader.read(null)).toBe(expected)
+		}
 	})
 })
 

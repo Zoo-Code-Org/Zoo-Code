@@ -109,7 +109,20 @@
 \* Fixed holds (507 states); all 15 variants fail. All 867 tests, types and lint pass.
 \* Suppression counts stay equal. No new model failure. Cost: about 1 agent minute.
 
-EXTENDS Naturals, Sequences
+\* PR 2643 review ratchet: add streamed source priority. The prior invariant covered one batch only.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4660532072
+\* Failure: the first ID fallback prevents a later explicit field from entering history.
+\* Expect StreamFirstWins to fail. Replay both handlers with encoded then explicit chunks.
+\* Extend this subsystem through ThoughtSignatureStream to keep the source rules separate.
+\* Result: the old rule fails the invariant. Both handler replays keep encoded-0 instead of explicit-1.
+\* Fixed holds (507 states). All 16 variants fail, including StreamFirstWins after one turn.
+\* Property: ThoughtSignatureReader stream priority property checks 125 streams and each prefix.
+\* Code sabotage: keep the first value. The property fails 18 cases. Restore the reader and all 1,000 tests pass.
+\* Types, lint and both Knip checks pass. Suppression counts stay equal.
+\* Review totals for PR 2643: 1 covered, 1 added, 0 gap. Null result: no further failure in this input domain.
+\* Cost: about 5 agent minutes. The model does not check fragmented signature bytes or gateway behavior.
+
+EXTENDS Naturals, Sequences, ThoughtSignatureStream
 
 VARIABLE history   \* One assistant message per turn. Each message has the fields of Message.
 
@@ -224,6 +237,8 @@ SelectedSignature(field, encoded) ==
 SignatureSourcePriority == Len(history) > 0 =>
     \A field, encoded \in {None, [by |-> "g1", step |-> 1], [by |-> "g2", step |-> 1]} :
         SelectedSignature(field, encoded) = (IF field # None THEN field ELSE encoded)
+
+StreamPriorityAfterTurn == Len(history) > 0 => StreamSignaturePriority
 
 \* Safety: no backend rejects a tool call in the history.
 NoRejectedCall ==

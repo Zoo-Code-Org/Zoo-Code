@@ -9,6 +9,9 @@ EncodedFirst == FALSE
 \* Issue 2304: remove the guard that omits unsigned reasoning.
 EchoUnsigned == TRUE
 
+\* Streaming sabotage: keep the first signature, including an ID fallback.
+KeepFirstCaptured(previous, chunk) == IF previous # StreamNone THEN previous ELSE chunk
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 

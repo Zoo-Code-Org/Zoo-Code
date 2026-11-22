@@ -688,6 +688,41 @@ describe("LiteLLMHandler", () => {
 					expect(handler.getThoughtSignatureOrigin()).toBe(thoughtSignatureOrigin(endpoint, "gemini-3-pro"))
 				})
 
+				it.each([
+					{ sources: ["encoded", "explicit"], expected: "explicit-1" },
+					{ sources: ["explicit", "encoded"], expected: "explicit-0" },
+					{ sources: ["explicit", "explicit"], expected: "explicit-0" },
+					{ sources: ["encoded", "encoded"], expected: "encoded-0" },
+				])("keeps signature source priority across $sources chunks", async ({ sources, expected }) => {
+					useModel("gemini-3-pro")
+					const chunks = sources.map((source, index) => ({
+						choices: [
+							{
+								delta: {
+									tool_calls: [
+										{
+											index: 0,
+											...(index === 0
+												? { id: "call_1", function: { name: "read_file", arguments: "{}" } }
+												: {}),
+											...(source === "explicit"
+												? {
+														provider_specific_fields: {
+															thought_signature: `explicit-${index}`,
+														},
+													}
+												: { id: `call_1__thought__encoded-${index}` }),
+										},
+									],
+								},
+							},
+						],
+					}))
+					mockStream([...chunks, { choices: [{ delta: { tool_calls: [{ index: 0 }] } }] }])
+					await collectStream(handler.createMessage("system", [], metadata))
+					expect(handler.getThoughtSignature()).toBe(expected)
+				})
+
 				it("captures a signature sent only in the tool call ID", async () => {
 					useModel("gemini-3-pro")
 					mockStream([
