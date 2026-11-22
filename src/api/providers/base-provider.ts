@@ -135,6 +135,36 @@ export abstract class BaseProvider implements ApiHandler {
 							if (nonNullTypes.length > 0) {
 								normalizedProp.type = [...nonNullTypes, "null"]
 							}
+						} else if (
+							normalizedProp.type === undefined &&
+							(Array.isArray(normalizedProp.anyOf) || Array.isArray(normalizedProp.oneOf))
+						) {
+							// A composed schema with no top-level type: the type
+							// branches above cannot make it accept null. Add a
+							// null alternative and keep every original one (#547).
+							const combinator = Array.isArray(normalizedProp.anyOf) ? "anyOf" : "oneOf"
+							const alternatives = normalizedProp[combinator] as unknown[]
+							const hasNullAlternative = alternatives.some((alt) => {
+								if (
+									alt === null ||
+									typeof alt !== "object" ||
+									!("type" in (alt as Record<string, unknown>))
+								) {
+									return false
+								}
+								const altType = (alt as Record<string, unknown>).type
+								return altType === "null" || (Array.isArray(altType) && altType.includes("null"))
+							})
+							if (!hasNullAlternative) {
+								normalizedProp[combinator] = [...alternatives, { type: "null" }]
+							}
+						}
+						// An enum rejects every value outside its list, so a
+						// "null" type alone still rejects null. Include null in
+						// the enum of an originally optional property; declared
+						// required enums stay unchanged (#547).
+						if (Array.isArray(normalizedProp.enum) && !normalizedProp.enum.includes(null)) {
+							normalizedProp.enum = [...normalizedProp.enum, null]
 						}
 					} else if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
 						// Handle nullable types by removing null

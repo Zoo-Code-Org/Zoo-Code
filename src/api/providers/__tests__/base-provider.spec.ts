@@ -7,6 +7,42 @@ import type { ApiStream } from "../../transform/stream"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 import { flushMacrotasks } from "../../../test-utils/timers"
 
+// A minimal JSON Schema acceptance oracle for the constructs the strict
+// conversion emits (type, enum, anyOf/oneOf). It answers "does this property
+// schema accept the value", the same question a Draft 2020-12 validator asks.
+// Mock evidence only: no live API request.
+const isSchemaNode = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
+
+const acceptsValue = (schema: unknown, value: unknown): boolean => {
+	if (!isSchemaNode(schema)) {
+		return false
+	}
+	if (Array.isArray(schema.anyOf)) {
+		return schema.anyOf.some((alternative) => acceptsValue(alternative, value))
+	}
+	if (Array.isArray(schema.oneOf)) {
+		return schema.oneOf.some((alternative) => acceptsValue(alternative, value))
+	}
+	if (schema.type !== undefined) {
+		const types: unknown[] = Array.isArray(schema.type) ? schema.type : [schema.type]
+		const jsType =
+			value === null
+				? "null"
+				: typeof value === "number"
+					? Number.isInteger(value)
+						? "integer"
+						: "number"
+					: typeof value
+		if (!types.includes(jsType)) {
+			return false
+		}
+	}
+	if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+		return false
+	}
+	return true
+}
+
 // Create a concrete implementation for testing
 class TestProvider extends BaseProvider {
 	createMessage(_systemPrompt: string, _messages: Anthropic.Messages.MessageParam[]): ApiStream {
@@ -399,6 +435,103 @@ describe("BaseProvider", () => {
 			expect(parameters.properties.file_pattern.type).toEqual(["string", "null"])
 			expect(parameters.properties.file_pattern.pattern).toBeUndefined()
 			expect(parameters.properties.file_pattern.description).toContain("pattern")
+		})
+
+		it("adds a null alternative to an optional composed schema without a top-level type (mock, #547)", () => {
+			// Mock evidence only: no live API request. Neither type branch
+			// applies to a composed schema, so the property must gain a
+			// null alternative or the model cannot omit it.
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					target: { anyOf: [{ type: "string" }, { type: "integer" }] },
+					mode: { oneOf: [{ type: "string" }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const target = result.properties.target
+			const mode = result.properties.mode
+
+			expect(result.required).toEqual(["path", "target", "mode"])
+			// Every declared alternative survives; only a null one is added.
+			expect(target.anyOf).toEqual([{ type: "string" }, { type: "integer" }, { type: "null" }])
+			expect(mode.oneOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(acceptsValue(target, null)).toBe(true)
+			expect(acceptsValue(target, "docs")).toBe(true)
+			expect(acceptsValue(target, 7)).toBe(true)
+			expect(acceptsValue(target, true)).toBe(false)
+			expect(acceptsValue(mode, null)).toBe(true)
+			expect(acceptsValue(mode, "read")).toBe(true)
+		})
+
+		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {
+			// Mock evidence only: no live API request. The enum rejects
+			// every value outside its list, so an optional enum property
+			// needs null in the enum as well as in the type.
+			const schema = {
+				type: "object",
+				required: ["speed"],
+				properties: {
+					speed: { type: "string", enum: ["fast", "safe"] },
+					mode: { type: "string", enum: ["read", "write"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const speed = result.properties.speed
+			const mode = result.properties.mode
+
+			// The complete converted property, per the review thread.
+			expect(result.required).toEqual(["speed", "mode"])
+			expect(speed).toEqual({ type: "string", enum: ["fast", "safe"] })
+			expect(mode).toEqual({ type: ["string", "null"], enum: ["read", "write", null] })
+			expect(acceptsValue(mode, null)).toBe(true)
+			expect(acceptsValue(mode, "read")).toBe(true)
+			expect(acceptsValue(mode, "bogus")).toBe(false)
+			expect(acceptsValue(speed, null)).toBe(false)
+		})
+
+		it("replays the enum-constrained optional property through the converter and a validator (mock, #547)", () => {
+			// Mock evidence only: no live API request. Replay of the
+			// review case: a type-only oracle passes the emitted schema,
+			// but only a validator that also checks enum membership
+			// accepts null for an enum-constrained optional property.
+			// The unconstrained optional string is the passing control.
+			const tools = [
+				{
+					type: "function" as const,
+					function: {
+						name: "search",
+						description: "Search files",
+						parameters: {
+							type: "object",
+							required: ["path"],
+							properties: {
+								path: { type: "string" },
+								style: { type: "string", enum: ["fast", "safe"] },
+								query: { type: "string" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			// The schema-acceptance oracle answers the question a Draft
+			// 2020-12 validator asks about the emitted property.
+			expect(acceptsValue(parameters.properties.style, null)).toBe(true)
+			expect(acceptsValue(parameters.properties.style, "fast")).toBe(true)
+			expect(acceptsValue(parameters.properties.style, "other")).toBe(false)
+			// Passing control: the unconstrained optional string.
+			expect(acceptsValue(parameters.properties.query, null)).toBe(true)
+			expect(acceptsValue(parameters.properties.query, "text")).toBe(true)
+			// The declared required property stays a value property.
+			expect(acceptsValue(parameters.properties.path, null)).toBe(false)
 		})
 	})
 

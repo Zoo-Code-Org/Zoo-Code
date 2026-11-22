@@ -161,8 +161,11 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 	 * Chat Completions: { type: "function", function: { name, description, parameters } }
 	 * Responses API: { type: "function", name, description, parameters }
 	 *
-	 * Uses base provider's convertToolSchemaForOpenAI() for schema hardening
+	 * Uses base provider's convertToolsForOpenAI() for schema hardening
 	 * (additionalProperties: false, ensureAllRequired) and handles MCP tools.
+	 * The parameters of non-MCP tools are converted exactly once, there: a
+	 * second pass would read the rewritten required list as declared and
+	 * strip the nullability the first pass added to optional parameters.
 	 */
 	private mapResponseTools(tools?: any[]): any[] | undefined {
 		const converted = this.convertToolsForOpenAI(tools)
@@ -177,9 +180,9 @@ export class XAIHandler extends BaseProvider implements SingleCompletionHandler 
 					type: "function",
 					name: tool.function.name,
 					description: tool.function.description,
-					parameters: isMcp
-						? tool.function.parameters
-						: this.convertToolSchemaForOpenAI(tool.function.parameters),
+					// Already hardened by convertToolsForOpenAI for non-MCP
+					// tools, and passed through unchanged for MCP tools.
+					parameters: tool.function.parameters,
 					strict: !isMcp,
 				}
 			})
