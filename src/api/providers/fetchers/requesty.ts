@@ -14,6 +14,16 @@ import { mergeAbortSignals, throwIfAborted } from "../utils/abort-signal"
 // bound this call at all, so they are not the precedent.
 const REQUESTY_MODELS_TIMEOUT_MS = 10_000
 
+const REQUESTY_ADAPTIVE_REASONING_MODELS = new Set([
+	"anthropic/claude-fable-5.1",
+	"anthropic/claude-fable-5",
+	"anthropic/claude-sonnet-5",
+	"anthropic/claude-sonnet-5-5",
+	"anthropic/claude-opus-5",
+	"anthropic/claude-opus-5-5",
+	"anthropic/claude-haiku-5-5",
+])
+
 export async function getRequestyModels(
 	baseUrl?: string,
 	apiKey?: string,
@@ -73,31 +83,7 @@ export async function getRequestyModels(
 				cacheReadsPrice: parseApiPrice(rawModel.cached_price),
 			}
 
-			if (rawModel.id === "anthropic/claude-fable-5.1" || rawModel.id === "anthropic/claude-fable-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-sonnet-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-opus-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-opus-5-5") {
-				modelInfo.supportsReasoningBudget = true
-				modelInfo.supportsReasoningBinary = true
-				modelInfo.supportsTemperature = false
-			}
-
-			if (rawModel.id === "anthropic/claude-haiku-5-5") {
+			if (REQUESTY_ADAPTIVE_REASONING_MODELS.has(rawModel.id)) {
 				modelInfo.supportsReasoningBudget = true
 				modelInfo.supportsReasoningBinary = true
 				modelInfo.supportsTemperature = false

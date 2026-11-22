@@ -15,11 +15,11 @@ import {
 	type ProviderSettings,
 	type Command as SlashCommand,
 	type WebviewMessage,
-	type EditQueuedMessagePayload,
 	TelemetryEventName,
 	RooCodeSettings,
 	ExperimentId,
 	checkoutDiffPayloadSchema,
+	editQueuedMessagePayloadSchema,
 	checkoutRestorePayloadSchema,
 	getCompletionCheckpoint,
 	providerIdentifiers,
@@ -30,6 +30,7 @@ import {
 	RouterModelsMessageType,
 	VsCodeLmModelsMessageType,
 	isTelemetryOptedIn,
+	type MentionSegment,
 } from "@roo-code/types"
 import { handleRequestProviderInfo } from "./providerInfoHandler"
 import { customToolRegistry } from "@roo-code/core"
@@ -91,6 +92,7 @@ import {
 	openGitHubAccountManagement,
 } from "../../api/providers/github-copilot"
 import { openMention } from "../mentions"
+import { generatedSegments, normalizeSegments, userText } from "../../shared/mentionSegments"
 import { resolveImageMentions } from "../mentions/resolveImageMentions"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getWorkspacePath } from "../../utils/path"
@@ -227,21 +229,25 @@ export const webviewMessageHandler = async (
 	 * Resolves image file mentions in incoming messages.
 	 * Matches read_file behavior: respects size limits and model capabilities.
 	 */
-	const resolveIncomingImages = async (payload: { text?: string; images?: string[] }) => {
+	const resolveIncomingImages = async (payload: { text?: string; images?: string[]; segments: MentionSegment[] }) => {
 		const text = payload.text ?? ""
 		const images = payload.images
 		const currentTask = provider.getCurrentTask()
 		const state = await provider.getState()
+		// Scan only user segments, so generated mentions attach no images.
 		const resolved = await resolveImageMentions({
-			text,
+			text: userText(payload.segments),
 			images,
 			cwd: getCurrentCwd(),
 			rooIgnoreController: currentTask?.rooIgnoreController,
 			maxImageFileSize: state.maxImageFileSize,
 			maxTotalImageSize: state.maxTotalImageSize,
 		})
-		return resolved
+		return { text, images: resolved.images }
 	}
+	// Fails closed: segments that are missing or do not match the text are all generated.
+	const segmentsOf = (message: { text?: string; segments?: unknown }) =>
+		normalizeSegments(message.text ?? "", message.segments)
 	/**
 	 * Shared utility to find message indices based on timestamp.
 	 * When multiple messages share the same timestamp (e.g., after condense),
@@ -438,6 +444,7 @@ export const webviewMessageHandler = async (
 		editedContent: string,
 		restoreCheckpoint?: boolean,
 		images?: string[],
+		segments?: MentionSegment[],
 	): Promise<void> => {
 		const currentCline = provider.getCurrentTask()
 		if (!currentCline) {
@@ -557,7 +564,7 @@ export const webviewMessageHandler = async (
 			// Update the UI to reflect the deletion
 			await provider.postStateToWebview()
 
-			await currentCline.submitUserMessage(editedContent, images)
+			await currentCline.submitUserMessage(editedContent, images, undefined, undefined, segments)
 		} catch (error) {
 			console.error("Error in edit message:", error)
 			vscode.window.showErrorMessage(
@@ -712,12 +719,19 @@ export const webviewMessageHandler = async (
 			// agentically running promises in old instance don't affect our new
 			// task. This essentially creates a fresh slate for the new task.
 			try {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments: segmentsOf(message),
+				})
 				await provider.createTask(
 					resolved.text,
 					resolved.images,
 					undefined,
-					{ taskId: message.taskId },
+					{
+						taskId: message.taskId,
+						segments: segmentsOf(message),
+					},
 					message.taskConfiguration,
 				)
 				// Task created successfully - notify the UI to reset
@@ -737,10 +751,15 @@ export const webviewMessageHandler = async (
 
 		case "askResponse":
 			{
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				const segments = segmentsOf(message)
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments,
+				})
 				provider
 					.getCurrentTask()
-					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images)
+					?.handleWebviewAskResponse(message.askResponse!, resolved.text, resolved.images, segments)
 			}
 			break
 
@@ -1203,7 +1222,6 @@ export const webviewMessageHandler = async (
 						[providerIdentifiers.moonshot]: {},
 						[providerIdentifiers.opencodeGo]: {},
 						[providerIdentifiers.kenari]: {},
-						[providerIdentifiers.ioIntelligence]: {},
 						[providerIdentifiers.nanogpt]: {},
 						[providerIdentifiers.kimiCode]: {},
 						[providerIdentifiers.friendli]: {},
@@ -1385,22 +1403,6 @@ export const webviewMessageHandler = async (
 			candidates.push({
 				key: providerIdentifiers.kenari,
 				options: { provider: providerIdentifiers.kenari, apiKey: kenariApiKey },
-			})
-
-			// IO Intelligence's /models catalog is public; an optional key can scope
-			// the visible model set. Prefer an explicitly supplied unsaved key.
-			const ioIntelligenceApiKey = message?.values?.ioIntelligenceApiKey ?? apiConfiguration.ioIntelligenceApiKey
-			if (message?.values?.ioIntelligenceApiKey !== undefined) {
-				await flushModels(
-					{ provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
-					handlerFor(apiConfiguration, providerIdentifiers.ioIntelligence),
-					true,
-				)
-			}
-
-			candidates.push({
-				key: providerIdentifiers.ioIntelligence,
-				options: { provider: providerIdentifiers.ioIntelligence, apiKey: ioIntelligenceApiKey },
 			})
 
 			// NanoGPT's detailed catalog is public, while an optional key can expose a
@@ -2616,12 +2618,19 @@ export const webviewMessageHandler = async (
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {
-				const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
+				// Stored messages carry no segments, so fail closed: nothing is expanded.
+				const editSegments = generatedSegments(message.text)
+				const resolved = await resolveIncomingImages({
+					text: message.text,
+					images: message.images,
+					segments: editSegments,
+				})
 				await handleEditMessageConfirm(
 					message.messageTs,
 					resolved.text,
 					message.restoreCheckpoint,
 					resolved.images,
+					editSegments,
 				)
 			}
 			break
@@ -4030,8 +4039,9 @@ export const webviewMessageHandler = async (
 		 */
 
 		case "queueMessage": {
-			const resolved = await resolveIncomingImages({ text: message.text, images: message.images })
-			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images)
+			const segments = segmentsOf(message)
+			const resolved = await resolveIncomingImages({ text: message.text, images: message.images, segments })
+			provider.getCurrentTask()?.messageQueueService.addMessage(resolved.text, resolved.images, segments)
 			break
 		}
 		case "removeQueuedMessage": {
@@ -4039,9 +4049,23 @@ export const webviewMessageHandler = async (
 			break
 		}
 		case "editQueuedMessage": {
-			if (message.payload) {
-				const { id, text, images } = message.payload as EditQueuedMessagePayload
-				provider.getCurrentTask()?.messageQueueService.updateMessage(id, text, images)
+			const edit = editQueuedMessagePayloadSchema.safeParse(message.payload)
+			if (edit.success) {
+				const { id, text, segments: given } = edit.data
+				const queue = provider.getCurrentTask()?.messageQueueService
+				// The edit holds the message during the image scan, so a drain cannot send the old text.
+				const token = queue?.beginEdit(id)
+				if (queue && token !== undefined) {
+					let images = edit.data.images
+					try {
+						images = (await resolveIncomingImages({ text, images, segments: segmentsOf(edit.data) })).images
+					} catch (error) {
+						provider.log(`[editQueuedMessage] Image scan failed: ${error}`)
+					}
+					queue.commitEdit(id, token, text, images, given)
+				} else {
+					provider.log("[editQueuedMessage] Edit dropped: the message already left the queue.")
+				}
 			}
 
 			break

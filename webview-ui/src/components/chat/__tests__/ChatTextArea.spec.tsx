@@ -282,6 +282,68 @@ describe("ChatTextArea", () => {
 			expect(setInputValue).toHaveBeenCalledWith("Enhanced test prompt")
 		})
 
+		it("routes the enhanced prompt through the generated-text setter when provided", () => {
+			const setInputValue = vi.fn()
+			const setInputValueGenerated = vi.fn()
+			Object.defineProperty(document, "execCommand", { value: undefined, writable: true })
+
+			render(
+				<ChatTextArea
+					{...defaultProps}
+					setInputValue={setInputValue}
+					setInputValueGenerated={setInputValueGenerated}
+					inputValue="Original prompt"
+				/>,
+			)
+
+			window.dispatchEvent(
+				new MessageEvent("message", { data: { type: "enhancedPrompt", text: "Enhanced test prompt" } }),
+			)
+
+			expect(setInputValueGenerated).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValue).not.toHaveBeenCalled()
+		})
+
+		it("routes the native enhanced-prompt input event through the generated-text setter, then manual edits through setInputValue", () => {
+			const setInputValue = vi.fn()
+			const setInputValueGenerated = vi.fn()
+			// Mimic the browser: execCommand fires an input event on the textarea.
+			const target: { el?: HTMLTextAreaElement } = {}
+			Object.defineProperty(document, "execCommand", {
+				value: vi.fn((_cmd: string, _ui: boolean, value: string) => {
+					if (target.el) {
+						fireEvent.input(target.el, { target: { value } })
+					}
+					return true
+				}),
+				writable: true,
+			})
+
+			const { container } = render(
+				<ChatTextArea
+					{...defaultProps}
+					setInputValue={setInputValue}
+					setInputValueGenerated={setInputValueGenerated}
+					inputValue="Original prompt"
+				/>,
+			)
+			const textarea = container.querySelector("textarea")!
+			target.el = textarea
+
+			act(() => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "enhancedPrompt", text: "Enhanced test prompt" } }),
+				)
+			})
+
+			expect(setInputValueGenerated).toHaveBeenCalledWith("Enhanced test prompt")
+			expect(setInputValue).not.toHaveBeenCalled()
+
+			fireEvent.change(textarea, { target: { value: "typed by hand" } })
+
+			expect(setInputValue).toHaveBeenCalledWith("typed by hand")
+		})
+
 		it("should not crash when textarea ref is not available", () => {
 			const setInputValue = vi.fn()
 
@@ -622,6 +684,59 @@ describe("ChatTextArea", () => {
 
 				// Should set the newest conversation message (first in reversed array)
 				expect(setInputValue).toHaveBeenCalledWith("Third prompt")
+			})
+
+			it("restores the draft with its segments after history navigation", () => {
+				const draft = [{ text: "ctx @/a", source: "generated" as const }]
+				const setInputValueWithSegments = vi.fn()
+				const { container } = render(
+					<ChatTextArea
+						{...defaultProps}
+						inputValue="ctx @/a"
+						getInputSegments={() => draft}
+						setInputValueWithSegments={setInputValueWithSegments}
+					/>,
+				)
+				const textarea = container.querySelector("textarea")!
+				textarea.setSelectionRange(0, 0)
+
+				fireEvent.keyDown(textarea, { key: "ArrowUp" })
+				expect(setInputValueWithSegments).toHaveBeenLastCalledWith("Third prompt", [
+					{ text: "Third prompt", source: "generated" },
+				])
+
+				fireEvent.keyDown(textarea, { key: "ArrowDown" })
+				expect(setInputValueWithSegments).toHaveBeenLastCalledWith("ctx @/a", draft)
+			})
+
+			it.each([
+				{ inputType: "historyUndo", generated: true },
+				{ inputType: "historyRedo", generated: true },
+				{ inputType: "insertText", generated: false },
+			])("marks the draft generated only for $inputType: $generated", ({ inputType, generated }) => {
+				const setInputValue = vi.fn()
+				const setInputValueWithSegments = vi.fn()
+				const { container } = render(
+					<ChatTextArea
+						{...defaultProps}
+						inputValue=""
+						setInputValue={setInputValue}
+						setInputValueWithSegments={setInputValueWithSegments}
+					/>,
+				)
+				const textarea = container.querySelector("textarea")!
+
+				fireEvent.input(textarea, { target: { value: "ctx @/secret" }, inputType })
+
+				if (generated) {
+					expect(setInputValueWithSegments).toHaveBeenCalledWith("ctx @/secret", [
+						{ text: "ctx @/secret", source: "generated" },
+					])
+					expect(setInputValue).not.toHaveBeenCalled()
+				} else {
+					expect(setInputValue).toHaveBeenCalledWith("ctx @/secret")
+					expect(setInputValueWithSegments).not.toHaveBeenCalled()
+				}
 			})
 
 			it("should navigate through history with multiple arrow up presses", () => {
