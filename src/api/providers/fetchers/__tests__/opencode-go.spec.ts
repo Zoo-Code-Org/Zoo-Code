@@ -379,6 +379,20 @@ describe("Opencode Go Fetchers", () => {
 			expect(max.maxTokens).toBe(8_888)
 		})
 
+		it("keeps a live zero max-token value for a curated model", () => {
+			const info = parseOpencodeGoModel({ id: "glm-5.1", context_window: 150_000, max_output_tokens: 0 })
+			// 0 is a live value, not an absent field: ?? falls back only on null and undefined.
+			expect(info.maxTokens).toBe(0)
+			// The registry context window stays authoritative.
+			expect(info.contextWindow).toBe(204_800)
+		})
+
+		it("keeps a live zero context window for an unknown model", () => {
+			const info = parseOpencodeGoModel({ id: "x", context_window: 0 })
+			expect(info.contextWindow).toBe(0)
+			expect(info.maxTokens).toBe(opencodeGoDefaultModelInfo.maxTokens)
+		})
+
 		it("uses native registry defaults when the live payload omits volatile fields", () => {
 			const info = parseOpencodeGoModel({ id: "deepseek-v4-flash" })
 			const native = getOpencodeGoModelInfo("deepseek-v4-flash")!
