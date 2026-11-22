@@ -5,27 +5,32 @@
 \* completePrompt in LiteLlmHandler, NativeOllamaHandler, OpenAiNativeHandler,
 \* MistralHandler, LmStudioHandler, VercelAiGatewayHandler,
 \* ZooGatewayHandler, KenariHandler, NanoGptHandler, FriendliHandler, ZaiHandler,
-\* GeminiHandler. Each writes (or omits) one temperature field in the request body.
+\* GeminiHandler, and the two non-adaptive paths of AwsBedrockHandler. Each
+\* writes (or omits) one temperature field in the request body.
 \* Exception: a reasoning format that requires temperature (DeepSeek reasoner in
 \* openai.ts PR 247, ollama useR1Format) sends its default when no custom value is set.
-\* Not covered: AwsBedrockHandler. Its constructor replaces a nullish setting with
-\* a retained default, and its non-adaptive request paths send that default. An
-\* explicit 0 is kept; nothing is omitted, so no omission invariant applies to it.
 \* Review ratchet: PR 2650 round 1 (comment 4658152524) removed Bedrock from the
-\* sink list. The first version claimed Bedrock as an omission sink; the omission
-\* invariant holds only for the providers that implement omission.
+\* sink list as not covered, because the constructor retained a default. Round 2
+\* (comment 4658222935) restored Bedrock as an omission sink after the fix: the
+\* constructor keeps a nullish setting nullish and both non-adaptive request
+\* paths omit the key. The adaptive-thinking paths omit unconditionally and stay
+\* outside this spec as a capability gate.
 \* Failure: the user turns custom temperature off and a provider still writes a
 \* temperature field (often 0), or overwrites an explicit 0, or writes null.
 \* Invariant: no temperature field when the value is nullish and the model is not a
 \* reasoner format. An explicit 0 and any custom number are sent unchanged.
-\* Expect: LegacyDefault, LegacyTruthy and NullPasses fail on unset or zero input.
-\* Fixed holds. The provider constants are oracles.
+\* Expect: LegacyDefault, LegacyTruthy, NullPasses and BedrockRetainedDefault
+\* fail on unset or zero input. Fixed holds. The provider constants are oracles.
+\* BedrockRetainedDefault reproduces the pre-fix Bedrock shape (constructor
+\* clobber plus a non-adaptive send of the default) that round 2 removed.
 \* Cost: each TLC run takes less than 1 second. Agent work takes about 3 hours.
-\* Result: Fixed holds in 12 states. LegacyDefault, LegacyTruthy and
-\* NullPasses each fail in 7 states. No false alarm was retained.
-\* Gate: Fixed must pass. LegacyDefault, LegacyTruthy and NullPasses must fail.
+\* Result: Fixed holds in 12 states. LegacyDefault, LegacyTruthy, NullPasses and
+\* BedrockRetainedDefault each fail in 7 states. No false alarm was retained.
+\* Gate: Fixed must pass. LegacyDefault, LegacyTruthy, NullPasses and
+\* BedrockRetainedDefault must fail.
 \* Property test: src/api/providers/__tests__/temperature-omission.spec.ts.
-\* Not modeled: supportsTemperature capability gates, maxTokens and message fields.
+\* Not modeled: supportsTemperature capability gates, Bedrock adaptive-thinking
+\* paths, maxTokens and message fields.
 
 EXTENDS TLC
 CONSTANT Variant
@@ -36,10 +41,13 @@ Inputs == [setting : {"nullish", "zero", "custom"}, reasoner : BOOLEAN]
 \* Assembly maps the source value to the field written into one request body.
 \* Fixed omits the field for a nullish value, except for a reasoner format.
 \* Each Variant models one unfixed assembly shape seen in the provider files.
+\* BedrockRetainedDefault is the pre-fix Bedrock shape: the constructor
+\* clobbered a nullish setting and the non-adaptive paths sent the default.
 AssembleValue(s, r) ==
     IF Variant = "LegacyDefault" /\ s = "nullish" THEN "default"
     ELSE IF Variant = "LegacyTruthy" /\ s \in {"nullish", "zero"} THEN "default"
     ELSE IF Variant = "NullPasses" /\ s = "nullish" THEN "null"
+    ELSE IF Variant = "BedrockRetainedDefault" /\ s = "nullish" THEN "default"
     ELSE IF r /\ s = "nullish" THEN "default"
     ELSE IF s = "nullish" THEN "absent"
     ELSE s
