@@ -353,3 +353,59 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		errorSpy.mockRestore()
 	})
 })
+
+describe("command-ask marking guards (#998 review)", () => {
+	type MarkingStub = {
+		updateClineMessage: ReturnType<typeof vi.fn>
+		saveClineMessages: ReturnType<typeof vi.fn>
+	}
+
+	const say = (ts: number, text: string): ClineMessage => ({ ts, type: "say", say: "text", text })
+	const toolAsk = (ts: number): ClineMessage => ({
+		ts,
+		type: "ask",
+		ask: "tool",
+		text: '{"tool":"readFile"}',
+		partial: false,
+	})
+	const commandAsk = (ts: number, answered = false): ClineMessage => ({
+		ts,
+		type: "ask",
+		ask: "command",
+		text: "git status --porcelain",
+		partial: false,
+		...(answered ? { isAnswered: true } : {}),
+	})
+
+	it("marks the newest unanswered command ask, not a newer unanswered tool ask", () => {
+		const task = buildTask(undefined)
+		const olderCommand = commandAsk(3)
+		const newerToolAsk = toolAsk(4)
+		const tailSay = say(5, "thinking")
+		task.clineMessages.push(say(1, "Initial task"), olderCommand, newerToolAsk, tailSay)
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		expect(olderCommand.isAnswered).toBe(true)
+		expect(newerToolAsk.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledTimes(1)
+		expect(stub.updateClineMessage.mock.calls[0][0]).toBe(olderCommand)
+		expect(stub.saveClineMessages).toHaveBeenCalledTimes(1)
+	})
+
+	it("ignores a say record that carries an ask field", () => {
+		const task = buildTask(undefined)
+		// A legacy record can carry both a say and an ask field. The parser
+		// allows it; the marking predicate must not treat it as an ask.
+		const legacySay: ClineMessage = { ts: 3, type: "say", say: "text", text: "legacy record", ask: "command" }
+		task.clineMessages.push(say(1, "Initial task"), legacySay)
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		expect(legacySay.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).not.toHaveBeenCalled()
+		expect(stub.saveClineMessages).not.toHaveBeenCalled()
+	})
+})

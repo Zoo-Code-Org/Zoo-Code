@@ -663,3 +663,319 @@ describe("ChatView approval button behavior", () => {
 		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "clearTask" })
 	})
 })
+
+describe("warm-state reconciliation of recovered command asks (#998 review)", () => {
+	const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Initial task" }
+
+	const commandAsk = (ts: number, answered = false): ClineMessage => ({
+		type: "ask",
+		ask: "command",
+		ts,
+		text: "git status",
+		partial: false,
+		...(answered ? { isAnswered: true } : {}),
+	})
+
+	const partialCommandAsk = (ts: number): ClineMessage => ({
+		type: "ask",
+		ask: "command",
+		ts,
+		text: "git status",
+		partial: true,
+	})
+
+	const say = (kind: string, ts: number, partial = false): ClineMessage => ({
+		type: "say",
+		say: kind,
+		ts,
+		// The isStreaming memo parses an api_req_started text as a cost record.
+		text: kind === "api_req_started" ? '{"tokensIn":100,"tokensOut":50,"cost":0.001}' : "command output",
+		partial,
+	})
+
+	const toolAsk = (ts: number): ClineMessage => ({
+		type: "ask",
+		ask: "tool",
+		ts,
+		text: '{"tool":"readFile"}',
+		partial: false,
+	})
+
+	// The ask switch does not handle this ask, so clineAsk keeps its old value.
+	const maxReqAsk = (ts: number): ClineMessage => ({
+		type: "ask",
+		ask: "auto_approval_max_req_reached",
+		ts,
+		text: "",
+		partial: false,
+	})
+
+	// A legacy say record can carry an ask field. The parser allows it.
+	const legacyCommandSay = (ts: number): ClineMessage => ({
+		type: "say",
+		say: "text",
+		ts,
+		text: "legacy record",
+		ask: "command",
+	})
+
+	const settle = async (getAllByTestId: (id: string) => HTMLElement[]) => {
+		await waitFor(() => expect(getAllByTestId("chat-row").length).toBeGreaterThan(0))
+		await act(async () => {
+			await Promise.resolve()
+		})
+	}
+
+	const sentTypes = () =>
+		(vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.map(([m]) => (m as { type?: string }).type)
+
+	const asked = (response: string) =>
+		(vscode.postMessage as ReturnType<typeof vi.fn>).mock.calls.some(
+			([m]) =>
+				(m as { type?: string; askResponse?: string }).type === "askResponse" &&
+				(m as { askResponse?: string }).askResponse === response,
+		)
+
+	const cancelled = () => sentTypes().includes("cancelTask")
+
+	beforeEach(() => vi.clearAllMocks())
+
+	it("clears recovered Run/Deny when the host stamps the masked ask answered", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("command_output", 3)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		// The host stamps isAnswered through messageUpdated. The trailing say
+		// stays the last message, so only the messages-keyed reconcile sees it.
+		await act(async () => {
+			hydrateState([task, commandAsk(2, true), say("command_output", 3)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("keeps recovered Run/Deny while the ask stays unanswered", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("command_output", 3)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("command_output", 3), say("text", 4)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+	})
+
+	it("clears Run/Deny when the host stamps a live command ask", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		// A dwell-timeout approval stamps the ask without a click.
+		await act(async () => {
+			hydrateState([task, commandAsk(2, true)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("Deny answers the recovered command ask behind a partial text say", async () => {
+		const { queryByText, getByRole, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("text", 3, true)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: DENY_BUTTON_LABEL }))
+		})
+
+		expect(asked("noButtonClicked")).toBe(true)
+		expect(cancelled()).toBe(false)
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+
+		// The answered ts is remembered, so later partial says cannot re-show.
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("text", 3, true), say("text", 4, true)])
+		})
+		// Wait for the state post to land before the absence check.
+		await waitFor(() =>
+			expect(getAllByTestId("chat-row").some((row) => row.textContent?.includes('"ts":4'))).toBe(true),
+		)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("Deny cancels the stream when a tool ask streams and no command ask waits", async () => {
+		const { getByRole, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, toolAsk(2)])
+		})
+		await waitFor(() => expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeInTheDocument())
+
+		await act(async () => {
+			hydrateState([task, toolAsk(2), say("text", 3, true)])
+		})
+		// Wait for the state post to land before the click reads isStreaming.
+		await waitFor(() =>
+			expect(getAllByTestId("chat-row").some((row) => row.textContent?.includes('"ts":3'))).toBe(true),
+		)
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: DENY_BUTTON_LABEL }))
+		})
+		expect(cancelled()).toBe(true)
+		expect(asked("noButtonClicked")).toBe(false)
+	})
+
+	it("Deny cancels when a tool ask streams even if an older command ask waits", async () => {
+		const { getByRole, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), toolAsk(3)])
+		})
+		await waitFor(() => expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeInTheDocument())
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), toolAsk(3), say("text", 4, true)])
+		})
+		// Wait for the state post to land before the click reads isStreaming.
+		await waitFor(() =>
+			expect(getAllByTestId("chat-row").some((row) => row.textContent?.includes('"ts":4'))).toBe(true),
+		)
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: DENY_BUTTON_LABEL }))
+		})
+
+		expect(cancelled()).toBe(true)
+		expect(asked("noButtonClicked")).toBe(false)
+	})
+
+	it("clears stale Run/Deny when a newer ask supersedes the recovered command ask", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		// The ask switch does not handle the newer ask, so clineAsk stays "command".
+		await act(async () => {
+			hydrateState([task, commandAsk(2), maxReqAsk(3)])
+		})
+		await act(async () => {
+			hydrateState([task, commandAsk(2), maxReqAsk(3), say("text", 4)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("keeps tool approval buttons when an older command ask is answered", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2, true), toolAsk(3)])
+		})
+		await waitFor(() => expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2, true), toolAsk(3), say("text", 4)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText("chat:approve.title")).toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+	})
+
+	it("Deny on a tool ask with no command ask sends noButtonClicked and does not cancel", async () => {
+		const { getByRole } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, toolAsk(2)])
+		})
+		await waitFor(() => expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeInTheDocument())
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: DENY_BUTTON_LABEL }))
+		})
+
+		expect(asked("noButtonClicked")).toBe(true)
+		expect(cancelled()).toBe(false)
+	})
+
+	it("keeps no Run/Deny when the masked command ask is partial", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, partialCommandAsk(2), say("command_output", 3)])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("shows Run/Deny for the real ask when a legacy say record carries an ask field", async () => {
+		const { queryByText, getByRole, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), legacyCommandSay(3)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: DENY_BUTTON_LABEL }))
+		})
+		expect(asked("noButtonClicked")).toBe(true)
+
+		// The recorded ts is the real ask's, so a later say cannot re-show.
+		await act(async () => {
+			hydrateState([task, commandAsk(2), legacyCommandSay(3), say("text", 4)])
+		})
+		// Wait for the state post to land before the absence check.
+		await waitFor(() =>
+			expect(getAllByTestId("chat-row").some((row) => row.textContent?.includes('"ts":4'))).toBe(true),
+		)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+
+	it("clears stale Run/Deny when a replaced snapshot holds no command ask", async () => {
+		const { queryByText, getAllByTestId } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("command_output", 3)])
+		})
+		await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+		await act(async () => {
+			hydrateState([{ type: "say", say: "task", ts: 10, text: "Another task" }])
+		})
+		await settle(getAllByTestId)
+
+		expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+	})
+})

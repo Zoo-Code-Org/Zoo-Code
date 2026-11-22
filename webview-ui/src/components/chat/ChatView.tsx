@@ -90,6 +90,17 @@ const CHAT_VIEWPORT_BUFFER = {
 
 const isMac = navigator.platform.toUpperCase().indexOf("MAC") >= 0
 
+// A command ask that still waits for a Run or Deny answer (#998). A partial
+// ask, a host-stamped ask, and the ts that the user answered locally do not
+// count. A say never carries an ask, but a legacy record can. Only type
+// "ask" counts.
+const isPendingCommandAsk = (message: ClineMessage, answeredTs: number | null): boolean =>
+	message.type === "ask" &&
+	message.ask === "command" &&
+	message.isAnswered !== true &&
+	message.partial !== true &&
+	message.ts !== answeredTs
+
 const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewProps> = (
 	{ isHidden, showAnnouncement, hideAnnouncement },
 	ref,
@@ -528,30 +539,58 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					// still waits for an answer (#998). The say must not mask
 					// the ask's Run/Deny buttons. Scan back to the newest ask.
 					// An api_req_started say supersedes it; so does any newer ask.
-					if (lastMessage.say !== "api_req_started" && clineAskRef.current !== "command") {
-						const maskedAsk = findLast(
-							messages,
-							(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
-						)
-						if (
-							maskedAsk?.type === "ask" &&
-							maskedAsk.ask === "command" &&
-							maskedAsk.isAnswered !== true &&
-							maskedAsk.partial !== true &&
-							maskedAsk.ts !== answeredCommandAskTsRef.current
-						) {
-							// Mirror the ask branch's command presentation.
-							setSendingDisabled(false)
-							setClineAsk("command")
-							setEnableButtons(true)
-							setPrimaryButtonKey("chat:runCommand.title")
-							setSecondaryButtonKey("chat:reject.title")
+					const maskedAsk = findLast(
+						messages,
+						(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+					)
+					// The newest ask is a live command ask when it is pending.
+					const maskedCommandAskPending =
+						maskedAsk !== undefined && isPendingCommandAsk(maskedAsk, answeredCommandAskTsRef.current)
+					if (clineAskRef.current === "command") {
+						// Reconcile a recovered command ask with the host state:
+						// the controls stay up only while that ask stays live.
+						// A newer ask must clear them, not leave them lingering (#998).
+						if (!maskedCommandAskPending) {
+							setSendingDisabled(true)
+							setClineAsk(undefined)
+							setEnableButtons(false)
+							setPrimaryButtonKey(undefined)
+							setSecondaryButtonKey(undefined)
 						}
+					} else if (maskedCommandAskPending) {
+						// Mirror the ask branch's command presentation.
+						setSendingDisabled(false)
+						setClineAsk("command")
+						setEnableButtons(true)
+						setPrimaryButtonKey("chat:runCommand.title")
+						setSecondaryButtonKey("chat:reject.title")
 					}
 					break
 			}
 		}
 	}, [lastMessage, secondLastMessage])
+
+	// (#998) A host answer can settle the ask without a click: the
+	// dwell-timeout approval and a queued reply stamp isAnswered through
+	// messageUpdated. The trailing say stays the last message, so the effect
+	// above cannot see the stamp. Reconcile from the messages array: clear
+	// the controls when the newest command ask is settled.
+	useEffect(() => {
+		if (clineAskRef.current !== "command") {
+			return
+		}
+		const newestCommandAsk = findLast(
+			messagesRef.current,
+			(message: ClineMessage) => message.type === "ask" && message.ask === "command",
+		)
+		if (newestCommandAsk && newestCommandAsk.isAnswered) {
+			setSendingDisabled(true)
+			setClineAsk(undefined)
+			setEnableButtons(false)
+			setPrimaryButtonKey(undefined)
+			setSecondaryButtonKey(undefined)
+		}
+	}, [messages])
 
 	// Update button text when messages change (e.g., completion_result is added) for subtasks in resume_task state
 	useEffect(() => {
@@ -907,14 +946,15 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// (#998) The user answered the pending command ask. Remember its ts
 			// so a say that arrives before the host stamps isAnswered cannot
 			// re-show the Run/Deny buttons.
-			if (clineAsk === "command") {
-				const answeredCommandAsk = messagesRef.current.findLast(
-					(message: ClineMessage) =>
-						message.type === "ask" && message.ask === "command" && !message.isAnswered,
-				)
-				if (answeredCommandAsk) {
-					answeredCommandAskTsRef.current = answeredCommandAsk.ts
-				}
+			// Stryker disable next-line ConditionalExpression: a non-command Run click cannot make the recorded ts observable. The recorded ts is read only while a command ask is the newest ask, and a non-command click implies that a different ask is the newest one. The memory is reset on task change.
+			const answeredCommandAsk =
+				clineAsk === "command"
+					? messagesRef.current.findLast((message: ClineMessage) =>
+							isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+						)
+					: undefined
+			if (answeredCommandAsk) {
+				answeredCommandAskTsRef.current = answeredCommandAsk.ts
 			}
 
 			switch (clineAsk) {
@@ -977,23 +1017,27 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			const trimmedInput = text?.trim()
 
-			if (isStreaming) {
+			// (#998) The user answered the pending command ask. Remember its ts
+			// so a say that arrives before the host stamps isAnswered cannot
+			// re-show the Run/Deny buttons. A recovered command ask can also
+			// sit behind a partial text say, so isStreaming is true while the
+			// ask still waits: the buttons must answer the command, and Deny
+			// must not take the streaming-cancel branch.
+			const pendingCommandAsk =
+				clineAsk === "command"
+					? messagesRef.current.findLast((message: ClineMessage) =>
+							isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+						)
+					: undefined
+
+			if (isStreaming && !pendingCommandAsk) {
 				vscode.postMessage({ type: "cancelTask" })
 				setDidClickCancel(true)
 				return
 			}
 
-			// (#998) The user answered the pending command ask. Remember its ts
-			// so a say that arrives before the host stamps isAnswered cannot
-			// re-show the Run/Deny buttons.
-			if (clineAsk === "command") {
-				const answeredCommandAsk = messagesRef.current.findLast(
-					(message: ClineMessage) =>
-						message.type === "ask" && message.ask === "command" && !message.isAnswered,
-				)
-				if (answeredCommandAsk) {
-					answeredCommandAskTsRef.current = answeredCommandAsk.ts
-				}
+			if (pendingCommandAsk) {
+				answeredCommandAskTsRef.current = pendingCommandAsk.ts
 			}
 
 			switch (clineAsk) {
