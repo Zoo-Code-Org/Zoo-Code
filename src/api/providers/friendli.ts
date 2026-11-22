@@ -85,7 +85,6 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 			apiKey: options.friendliApiKey || NOT_PROVIDED,
 			defaultProviderModelId: friendliDefaultModelId,
 			providerModels: friendliModels,
-			defaultTemperature: 0.6,
 		})
 	}
 
@@ -240,12 +239,11 @@ export class FriendliHandler extends BaseOpenAiCompatibleProvider<FriendliModelI
 				format: "openai",
 			}) ?? undefined
 
-		const temperature = this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature
-
 		const params: FriendliChatCompletionParams = {
 			model,
 			max_tokens,
-			temperature,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 			stream: true,
 			stream_options: { include_usage: true },

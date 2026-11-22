@@ -272,13 +272,14 @@ describe("BaseOpenAiCompatibleProvider", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "test-model",
-					temperature: 0,
 					messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
 					stream: true,
 					stream_options: { include_usage: true },
 				}),
 				undefined,
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 
 		it("should yield usage data from stream", async () => {

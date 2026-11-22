@@ -29,7 +29,7 @@ vitest.mock("../../../i18n", () => ({
 import type { MockInstance } from "vitest"
 import OpenAI from "openai"
 
-import { zooGatewayDefaultModelId, ZOO_GATEWAY_DEFAULT_TEMPERATURE } from "@roo-code/types"
+import { zooGatewayDefaultModelId } from "@roo-code/types"
 
 import { ZooGatewayHandler, classifyGatewayApiError, toGatewayStreamError } from "../zoo-gateway"
 import { ApiHandlerOptions } from "../../../shared/api"
@@ -396,17 +396,14 @@ describe("ZooGatewayHandler", () => {
 			)
 		})
 
-		it("uses the default temperature when none is provided", async () => {
+		it("omits temperature when none is provided (#242)", async () => {
 			const handler = new ZooGatewayHandler(mockOptions)
 
 			await handler.createMessage("prompt", [{ role: "user", content: "Hi" }]).next()
 
-			expect(mockCreate).toHaveBeenCalledWith(
-				expect.objectContaining({
-					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
-				}),
-				expect.any(Object),
-			)
+			const call = mockCreate.mock.calls[mockCreate.mock.calls.length - 1][0]
+			expect(call.temperature).toBeUndefined()
+			expect("temperature" in call).toBe(false)
 		})
 
 		it("adds cache breakpoints for supported models", async () => {
@@ -525,11 +522,12 @@ describe("ZooGatewayHandler", () => {
 					model: "anthropic/claude-sonnet-4",
 					messages: [{ role: "user", content: "Complete this: Hello" }],
 					stream: false,
-					temperature: ZOO_GATEWAY_DEFAULT_TEMPERATURE,
 					max_completion_tokens: 64000,
 				}),
 				{},
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
 		it("wraps errors with a Zoo Gateway prefix", async () => {

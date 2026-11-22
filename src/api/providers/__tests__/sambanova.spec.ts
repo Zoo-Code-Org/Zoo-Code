@@ -115,12 +115,13 @@ describe("SambaNovaHandler", () => {
 			expect.objectContaining({
 				model: modelId,
 				max_tokens: modelInfo.maxTokens,
-				temperature: 0.7,
 				messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
 				stream: true,
 				stream_options: { include_usage: true },
 			}),
 			undefined,
 		)
+		// No custom temperature: the request must omit the field (#242).
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 })

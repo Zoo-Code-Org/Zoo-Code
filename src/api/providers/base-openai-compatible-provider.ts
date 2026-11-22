@@ -20,7 +20,6 @@ type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerO
 	baseURL: string
 	defaultProviderModelId: ModelName
 	providerModels: Record<ModelName, ModelInfo>
-	defaultTemperature?: number
 }
 
 export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
@@ -29,7 +28,6 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 {
 	protected readonly providerName: string
 	protected readonly baseURL: string
-	protected readonly defaultTemperature: number
 	protected readonly defaultProviderModelId: ModelName
 	protected readonly providerModels: Record<ModelName, ModelInfo>
 
@@ -42,7 +40,6 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		baseURL,
 		defaultProviderModelId,
 		providerModels,
-		defaultTemperature,
 		...options
 	}: BaseOpenAiCompatibleProviderOptions<ModelName>) {
 		super()
@@ -51,7 +48,6 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		this.baseURL = baseURL
 		this.defaultProviderModelId = defaultProviderModelId
 		this.providerModels = providerModels
-		this.defaultTemperature = defaultTemperature ?? 0
 
 		this.options = options
 
@@ -84,12 +80,11 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 				format: "openai",
 			}) ?? undefined
 
-		const temperature = this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature
-
 		const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
 			model,
 			max_tokens,
-			temperature,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
 			stream: true,
 			stream_options: { include_usage: true },

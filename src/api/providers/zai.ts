@@ -5,7 +5,6 @@ import {
 	internationalZAiDefaultModelId,
 	mainlandZAiDefaultModelId,
 	type ModelInfo,
-	ZAI_DEFAULT_TEMPERATURE,
 	zaiApiLineConfigs,
 	getZAiModels,
 } from "@roo-code/types"
@@ -43,7 +42,6 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			apiKey: options.zaiApiKey ?? NOT_PROVIDED,
 			defaultProviderModelId: defaultModelId,
 			providerModels: models,
-			defaultTemperature: ZAI_DEFAULT_TEMPERATURE,
 		})
 	}
 
@@ -93,15 +91,14 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 			}) ??
 				undefined)
 
-		const temperature = this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature
-
 		// Use Z.ai format to preserve reasoning_content and merge post-tool text into tool messages
 		const convertedMessages = convertToZAiFormat(messages, { mergeToolResultText: true })
 
 		const params: ZAiChatCompletionParams = {
 			model,
 			max_tokens,
-			temperature,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			messages: [{ role: "system", content: systemPrompt }, ...convertedMessages],
 			stream: true,
 			stream_options: { include_usage: true },
@@ -153,7 +150,8 @@ export class ZAiHandler extends BaseOpenAiCompatibleProvider<string> {
 		const params: ZAiChatCompletionParams = {
 			model,
 			messages: [{ role: "user", content: prompt }],
-			temperature: this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			thinking: { type: "enabled", clear_thinking: false },
 			reasoning_effort: reasoningEffort,
 		}

@@ -784,9 +784,8 @@ describe("NativeOllamaHandler", () => {
 				model: "llama2",
 				messages: [{ role: "user", content: "Tell me a joke" }],
 				stream: false,
-				options: {
-					temperature: 0,
-				},
+				// No custom temperature: options must omit the field (#242).
+				options: {},
 			})
 			expect(result).toBe("This is the response")
 		})
@@ -849,7 +848,7 @@ describe("NativeOllamaHandler", () => {
 					model: "llama2",
 					messages: [{ role: "user", content: "Test prompt" }],
 					stream: false,
-					options: { temperature: 0 },
+					options: {},
 				}),
 			)
 			expect(mockChat).toHaveBeenCalledTimes(1)
@@ -868,7 +867,7 @@ describe("NativeOllamaHandler", () => {
 					model: "llama2",
 					messages: [{ role: "user", content: "Test prompt" }],
 					stream: false,
-					options: { temperature: 0 },
+					options: {},
 				}),
 			)
 		})

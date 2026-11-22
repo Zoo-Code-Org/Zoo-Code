@@ -298,7 +298,6 @@ describe("GeminiHandler", () => {
 				expect.objectContaining({
 					model: GEMINI_MODEL_NAME,
 					config: expect.objectContaining({
-						temperature: 1,
 						systemInstruction: systemPrompt,
 					}),
 				}),
@@ -415,7 +414,6 @@ describe("GeminiHandler", () => {
 				contents: [{ role: "user", parts: [{ text: "Test prompt" }] }],
 				config: {
 					httpOptions: undefined,
-					temperature: 1,
 				},
 			})
 		})
@@ -451,7 +449,6 @@ describe("GeminiHandler", () => {
 				config: {
 					abortSignal: controller.signal,
 					httpOptions: undefined,
-					temperature: 1,
 				},
 			})
 		})
@@ -481,7 +478,6 @@ describe("GeminiHandler", () => {
 				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
 				config: {
 					httpOptions: undefined,
-					temperature: 1,
 				},
 			})
 		})
@@ -498,7 +494,6 @@ describe("GeminiHandler", () => {
 				config: {
 					abortSignal: controller.signal,
 					httpOptions: { timeout: 10000 },
-					temperature: 1,
 				},
 			})
 		})
@@ -513,7 +508,6 @@ describe("GeminiHandler", () => {
 				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
 				config: {
 					httpOptions: { timeout: 5000 },
-					temperature: 1,
 				},
 			})
 		})
@@ -528,7 +522,6 @@ describe("GeminiHandler", () => {
 				contents: [{ role: "user", parts: [{ text: "test prompt" }] }],
 				config: {
 					httpOptions: undefined,
-					temperature: 1,
 				},
 			})
 		})

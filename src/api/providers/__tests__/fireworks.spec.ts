@@ -526,16 +526,17 @@ describe("FireworksHandler", () => {
 			expect.objectContaining({
 				model: modelId,
 				max_tokens: modelInfo.maxTokens,
-				temperature: 0.5,
 				messages: expect.arrayContaining([{ role: "system", content: systemPrompt }]),
 				stream: true,
 				stream_options: { include_usage: true },
 			}),
 			undefined,
 		)
+		// No custom temperature: the request must omit the field (#242).
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
-	it("should use provider default temperature of 0.5 for models without defaultTemperature", async () => {
+	it("should omit temperature for models without a custom value (#242)", async () => {
 		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-instruct"
 		const handlerWithModel = new FireworksHandler({
 			apiModelId: modelId,
@@ -547,15 +548,11 @@ describe("FireworksHandler", () => {
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
 
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				temperature: 0.5,
-			}),
-			undefined,
-		)
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
-	it("should use model defaultTemperature (1.0) over provider default (0.5) for kimi-k2-thinking", async () => {
+	it("should omit temperature for kimi-k2-thinking when no custom value is set (#242)", async () => {
 		const modelId: FireworksModelId = "accounts/fireworks/models/kimi-k2-thinking"
 		const handlerWithModel = new FireworksHandler({
 			apiModelId: modelId,
@@ -567,13 +564,8 @@ describe("FireworksHandler", () => {
 		const messageGenerator = handlerWithModel.createMessage("system", [])
 		await messageGenerator.next()
 
-		// Model's defaultTemperature (1.0) should take precedence over provider's default (0.5)
-		expect(mockCreate).toHaveBeenCalledWith(
-			expect.objectContaining({
-				temperature: 1.0,
-			}),
-			undefined,
-		)
+		expect(mockCreate).toHaveBeenCalledTimes(1)
+		expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 	})
 
 	it("should use user-specified temperature over model and provider defaults", async () => {

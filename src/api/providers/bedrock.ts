@@ -268,7 +268,8 @@ export class AwsBedrockHandler extends BaseProvider implements SingleCompletionH
 			if (this.arnInfo.awsUseCrossRegionInference) this.options.awsUseCrossRegionInference = true
 		}
 
-		if (!this.options.modelTemperature) {
+		// An explicit 0 is a real custom value; only fill the default when unset (#242).
+		if (this.options.modelTemperature == null) {
 			this.options.modelTemperature = BEDROCK_DEFAULT_TEMPERATURE
 		}
 

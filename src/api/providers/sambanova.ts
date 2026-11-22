@@ -13,7 +13,6 @@ export class SambaNovaHandler extends BaseOpenAiCompatibleProvider<SambaNovaMode
 			apiKey: options.sambaNovaApiKey,
 			defaultProviderModelId: sambaNovaDefaultModelId,
 			providerModels: sambaNovaModels,
-			defaultTemperature: 0.7,
 		})
 	}
 }

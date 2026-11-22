@@ -15,7 +15,8 @@
 \* Expect: LegacyDefault, LegacyTruthy and NullPasses fail on unset or zero input.
 \* Fixed holds. The provider constants are oracles.
 \* Cost: each TLC run takes less than 1 second. Agent work takes about 3 hours.
-\* Result: see Result lines below. Null results are data.
+\* Result: Fixed holds in 12 states. LegacyDefault, LegacyTruthy and
+\* NullPasses each fail in 7 states. No false alarm was retained.
 \* Gate: Fixed must pass. LegacyDefault, LegacyTruthy and NullPasses must fail.
 \* Property test: src/api/providers/__tests__/temperature-omission.spec.ts.
 \* Not modeled: supportsTemperature capability gates, maxTokens and message fields.

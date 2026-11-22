@@ -270,8 +270,12 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			requestOptions.max_tokens = maxTokens
 		}
 
-		if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
-			requestOptions.temperature = this.options.modelTemperature ?? 0
+		if (
+			info.supportsTemperature !== false &&
+			this.supportsTemperature(modelId) &&
+			this.options.modelTemperature != null
+		) {
+			requestOptions.temperature = this.options.modelTemperature
 		}
 
 		// LiteLLM recognizes X-<vendor>-Session-ID for per-conversation request correlation.
@@ -485,8 +489,12 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				;(requestOptions as { reasoning_effort?: ReasoningEffortExtended }).reasoning_effort = reasoningEffort
 			}
 
-			if (info.supportsTemperature !== false && this.supportsTemperature(modelId)) {
-				requestOptions.temperature = this.options.modelTemperature ?? 0
+			if (
+				info.supportsTemperature !== false &&
+				this.supportsTemperature(modelId) &&
+				this.options.modelTemperature != null
+			) {
+				requestOptions.temperature = this.options.modelTemperature
 			}
 
 			// Newer OpenAI models require max_completion_tokens instead of the deprecated max_tokens parameter.

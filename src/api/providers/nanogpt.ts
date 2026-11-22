@@ -157,7 +157,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		}
 
 		if (
-			this.options.modelTemperature !== undefined &&
+			this.options.modelTemperature != null &&
 			info.supportsTemperature !== false &&
 			this.supportsTemperature(canonicalModelId)
 		) {
@@ -212,7 +212,7 @@ export class NanoGptHandler extends RouterProvider implements SingleCompletionHa
 		}
 
 		if (
-			this.options.modelTemperature !== undefined &&
+			this.options.modelTemperature != null &&
 			info.supportsTemperature !== false &&
 			this.supportsTemperature(canonicalModelId)
 		) {

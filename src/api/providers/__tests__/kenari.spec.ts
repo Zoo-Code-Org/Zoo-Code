@@ -257,9 +257,9 @@ describe("KenariHandler", () => {
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({
 					model: "openai/o3-mini",
-					temperature: undefined,
 				}),
 			)
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 
 		it("sends an explicitly configured model temperature", async () => {
@@ -313,9 +313,10 @@ describe("KenariHandler", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 					max_completion_tokens: 32768,
-					temperature: expect.any(Number),
 				}),
 			)
+			// No custom temperature: the request must omit the field (#242).
+			expect(mockCreate.mock.calls[0][0]).not.toHaveProperty("temperature")
 		})
 	})
 

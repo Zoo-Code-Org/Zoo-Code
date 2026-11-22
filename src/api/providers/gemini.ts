@@ -348,14 +348,14 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			},
 		]
 
-		// Determine temperature respecting model capabilities and defaults:
+		// Determine temperature respecting model capabilities:
 		// - If supportsTemperature is explicitly false, ignore user overrides
 		//   and pin to the model's defaultTemperature (or omit if undefined).
-		// - Otherwise, allow the user setting to override, falling back to model default,
-		//   then to 1 for Gemini provider default.
+		// - Otherwise, only send the user's custom value; omit when unset so
+		//   the server default applies (#242).
 		const supportsTemperature = info.supportsTemperature !== false
 		const temperatureConfig: number | undefined = supportsTemperature
-			? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
+			? (this.options.modelTemperature ?? undefined)
 			: info.defaultTemperature
 
 		// Reject cleartext (non-loopback) base URLs before building the request so the
@@ -369,7 +369,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			httpOptions: this.options.googleGeminiBaseUrl ? { baseUrl: this.options.googleGeminiBaseUrl } : undefined,
 			thinkingConfig,
 			maxOutputTokens,
-			temperature: temperatureConfig,
+			...(temperatureConfig !== undefined && { temperature: temperatureConfig }),
 			...(tools.length > 0 ? { tools } : {}),
 		}
 
@@ -696,7 +696,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 		try {
 			const supportsTemperature = info.supportsTemperature !== false
 			const temperatureConfig: number | undefined = supportsTemperature
-				? (this.options.modelTemperature ?? info.defaultTemperature ?? 1)
+				? (this.options.modelTemperature ?? undefined)
 				: info.defaultTemperature
 			const httpOpts: { timeout?: number; baseUrl?: string } = {}
 			if (requestTimeoutMs !== undefined) {
@@ -715,7 +715,7 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 
 			const promptConfig: GenerateContentConfig = {
 				httpOptions: Object.keys(httpOpts).length > 0 ? httpOpts : undefined,
-				temperature: temperatureConfig,
+				...(temperatureConfig !== undefined && { temperature: temperatureConfig }),
 			}
 
 			// @google/genai expects request cancellation on config.abortSignal

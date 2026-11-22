@@ -4,7 +4,6 @@ import OpenAI from "openai"
 import {
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
-	KENARI_DEFAULT_TEMPERATURE,
 	KENARI_BASE_URL,
 	providerIdentifiers,
 	type ModelRecord,
@@ -82,9 +81,9 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 		const body: OpenAI.Chat.ChatCompletionCreateParams = {
 			model: modelId,
 			messages: openAiMessages,
-			temperature: this.supportsTemperature(modelId)
-				? (this.options.modelTemperature ?? KENARI_DEFAULT_TEMPERATURE)
-				: undefined,
+			// Only send temperature when the user set a custom value (#242).
+			...(this.supportsTemperature(modelId) &&
+				this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			max_completion_tokens: info.maxTokens,
 			stream: true,
 			stream_options: { include_usage: true },
@@ -150,8 +149,8 @@ export class KenariHandler extends RouterProvider implements SingleCompletionHan
 				stream: false,
 			}
 
-			if (this.supportsTemperature(modelId)) {
-				requestOptions.temperature = this.options.modelTemperature ?? KENARI_DEFAULT_TEMPERATURE
+			if (this.supportsTemperature(modelId) && this.options.modelTemperature != null) {
+				requestOptions.temperature = this.options.modelTemperature
 			}
 
 			requestOptions.max_completion_tokens = info.maxTokens

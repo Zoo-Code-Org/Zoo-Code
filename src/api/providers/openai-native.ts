@@ -414,10 +414,9 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 						},
 					}
 				: {}),
-			// Only include temperature if the model supports it
-			...(model.info.supportsTemperature !== false && {
-				temperature: this.options.modelTemperature ?? OPENAI_NATIVE_DEFAULT_TEMPERATURE,
-			}),
+			// Only include temperature if the model supports it and the user set one (#242).
+			...(model.info.supportsTemperature !== false &&
+				this.options.modelTemperature != null && { temperature: this.options.modelTemperature }),
 			// Explicitly include the calculated max output tokens.
 			// Use the per-request reserved output computed by Roo (params.maxTokens from getModelParams).
 			...(model.maxTokens ? { max_output_tokens: model.maxTokens } : {}),
@@ -1882,9 +1881,9 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				}
 			}
 
-			// Only include temperature if the model supports it
-			if (model.info.supportsTemperature !== false) {
-				requestBody.temperature = this.options.modelTemperature ?? OPENAI_NATIVE_DEFAULT_TEMPERATURE
+			// Only include temperature if the model supports it and the user set one (#242).
+			if (model.info.supportsTemperature !== false && this.options.modelTemperature != null) {
+				requestBody.temperature = this.options.modelTemperature
 			}
 
 			// Include max_output_tokens if available

@@ -2749,7 +2749,9 @@ describe("OpenAiNativeHandler", () => {
 			const parsedBody = JSON.parse(body)
 			expect(parsedBody.model).toBe("gpt-5.3-chat-latest")
 			expect(parsedBody.max_output_tokens).toBe(16_384)
-			expect(parsedBody.temperature).toBe(0)
+			// No custom temperature: the request must omit the field (#242).
+			expect(parsedBody.temperature).toBeUndefined()
+			expect("temperature" in parsedBody).toBe(false)
 			expect(parsedBody.reasoning?.effort).toBeUndefined()
 			expect(parsedBody.text?.verbosity).toBeUndefined()
 

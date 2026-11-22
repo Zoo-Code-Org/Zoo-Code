@@ -12,7 +12,6 @@ export class BasetenHandler extends BaseOpenAiCompatibleProvider<BasetenModelId>
 			apiKey: options.basetenApiKey,
 			defaultProviderModelId: basetenDefaultModelId,
 			providerModels: basetenModels,
-			defaultTemperature: 0.5,
 		})
 	}
 }
