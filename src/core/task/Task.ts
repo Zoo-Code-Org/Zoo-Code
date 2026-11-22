@@ -2549,9 +2549,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 
 		// Mark the last command-approval ask as answered when the user answers (#998).
+		// A text reply (messageResponse) settles it too, mirroring the follow-up
+		// branch above: without the stamp a denied command's user_feedback say makes
+		// the webview restore block match the unstamped ask and re-show Run/Deny.
 		// The webview keeps the ask's Run/Deny buttons only while the ask is
 		// unanswered, so the stamp stops a later snapshot from re-showing them.
-		if (askResponse === "yesButtonClicked" || askResponse === "noButtonClicked") {
+		if (
+			askResponse === "messageResponse" ||
+			askResponse === "yesButtonClicked" ||
+			askResponse === "noButtonClicked"
+		) {
 			const lastCommandAskIndex = findLastIndex(
 				this.clineMessages,
 				(msg) => msg.type === "ask" && msg.ask === "command" && !msg.isAnswered,

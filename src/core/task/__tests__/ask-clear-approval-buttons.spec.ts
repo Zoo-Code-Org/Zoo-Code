@@ -214,3 +214,142 @@ describe("manual command-ask marking (#998)", () => {
 		expect(toolAsk.isAnswered).toBeUndefined()
 	})
 })
+
+describe("command-ask marking across a mixed history (#998 review)", () => {
+	// The marking predicate must find the newest UNANSWERED command ask, not
+	// the newest command ask and not the newest message. A snapshot from a
+	// resumed task interleaves says, tool asks, and command asks.
+	type MarkingStub = {
+		updateClineMessage: ReturnType<typeof vi.fn>
+		saveClineMessages: ReturnType<typeof vi.fn>
+	}
+
+	const say = (ts: number, text: string): ClineMessage => ({ ts, type: "say", say: "text", text })
+	const toolAsk = (ts: number): ClineMessage => ({
+		ts,
+		type: "ask",
+		ask: "tool",
+		text: "readFile",
+		partial: false,
+	})
+	const commandAsk = (ts: number, answered = false): ClineMessage => ({
+		ts,
+		type: "ask",
+		ask: "command",
+		text: "git status --porcelain",
+		partial: false,
+		...(answered ? { isAnswered: true } : {}),
+	})
+
+	it("marks the newest unanswered command ask in a mixed history and leaves every other entry untouched", () => {
+		const task = buildTask(undefined)
+		const taskSay = say(1, "Initial task")
+		const tool = toolAsk(2)
+		const olderCommand = commandAsk(3)
+		const interleavedSay = say(4, "thinking")
+		const answeredCommand = commandAsk(5, true)
+		const tailSay = say(6, "command output")
+		task.clineMessages.push(taskSay, tool, olderCommand, interleavedSay, answeredCommand, tailSay)
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		// The full resulting history: only the newest unanswered command ask
+		// gains isAnswered. A newer ANSWERED command ask, says, and tool asks
+		// must all stay untouched.
+		expect(olderCommand.isAnswered).toBe(true)
+		expect(taskSay.isAnswered).toBeUndefined()
+		expect(tool.isAnswered).toBeUndefined()
+		expect(interleavedSay.isAnswered).toBeUndefined()
+		expect(answeredCommand.isAnswered).toBe(true)
+		expect(tailSay.isAnswered).toBeUndefined()
+
+		// The exact message passed to updateClineMessage is the marked ask.
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledTimes(1)
+		expect(stub.updateClineMessage.mock.calls[0][0]).toBe(olderCommand)
+		expect(stub.saveClineMessages).toHaveBeenCalledTimes(1)
+	})
+
+	it("marks nothing and neither updates nor saves when the history holds no command ask", () => {
+		const task = buildTask(undefined)
+		const taskSay = say(1, "Initial task")
+		const tool = toolAsk(2)
+		const tailSay = say(3, "command output")
+		task.clineMessages.push(taskSay, tool, tailSay)
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		expect(taskSay.isAnswered).toBeUndefined()
+		expect(tool.isAnswered).toBeUndefined()
+		expect(tailSay.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).not.toHaveBeenCalled()
+		expect(stub.saveClineMessages).not.toHaveBeenCalled()
+	})
+
+	it("marks the latest unanswered command ask when the user replies with text (messageResponse)", () => {
+		const task = buildTask(undefined)
+		const older = commandAsk(Date.now() - 2)
+		const latest = commandAsk(Date.now() - 1)
+		task.clineMessages.push(older, latest)
+
+		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
+
+		expect(latest.isAnswered).toBe(true)
+		expect(older.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledTimes(1)
+		expect(stub.updateClineMessage.mock.calls[0][0]).toBe(latest)
+		expect(stub.saveClineMessages).toHaveBeenCalledTimes(1)
+	})
+
+	it("leaves the command ask unmarked for an objectResponse", () => {
+		const task = buildTask(undefined)
+		const command = commandAsk(Date.now() - 1)
+		task.clineMessages.push(command)
+
+		task.handleWebviewAskResponse("objectResponse")
+
+		expect(command.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).not.toHaveBeenCalled()
+		expect(stub.saveClineMessages).not.toHaveBeenCalled()
+	})
+
+	it("logs without throwing when updateClineMessage rejects", async () => {
+		const task = buildTask(undefined)
+		const command = commandAsk(Date.now() - 1)
+		task.clineMessages.push(command)
+		const failure = new Error("update failed")
+		;(task as unknown as { updateClineMessage: ReturnType<typeof vi.fn> }).updateClineMessage = vi.fn(async () => {
+			throw failure
+		})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		expect(() => task.handleWebviewAskResponse("noButtonClicked")).not.toThrow()
+		// Let the rejected promise reach its catch handler.
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(errorSpy).toHaveBeenCalledWith("[Task#handleWebviewAskResponse] updateClineMessage failed:", failure)
+		expect(command.isAnswered).toBe(true)
+		errorSpy.mockRestore()
+	})
+
+	it("logs without throwing when saveClineMessages rejects", async () => {
+		const task = buildTask(undefined)
+		const command = commandAsk(Date.now() - 1)
+		task.clineMessages.push(command)
+		const failure = new Error("save failed")
+		;(task as unknown as { saveClineMessages: ReturnType<typeof vi.fn> }).saveClineMessages = vi.fn(async () => {
+			throw failure
+		})
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {})
+
+		expect(() => task.handleWebviewAskResponse("noButtonClicked")).not.toThrow()
+		await new Promise((resolve) => setTimeout(resolve, 0))
+
+		expect(errorSpy).toHaveBeenCalledWith("Failed to save answered command-ask state:", failure)
+		expect(command.isAnswered).toBe(true)
+		errorSpy.mockRestore()
+	})
+})
