@@ -16,7 +16,7 @@ export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
 	// Use thinking levels. Google does not support budgets or custom temperature for these models.
-	// Prices and untested capabilities come from the Gemini API. Vertex prices are not verified.
+	// Flash, Carbon, and Hydrogen prices come from the Gemini API. Neon uses verified Vertex global prices.
 	// Flash works in Express mode and rejects xhigh.
 	// Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
 	// Carbon rejects xhigh. Hydrogen accepts xhigh.
@@ -69,6 +69,23 @@ export const vertexModels = {
 		inputPrice: 1.5,
 		outputPrice: 7.5,
 		cacheReadsPrice: 0.075,
+	},
+	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-neon
+	// Available in global, us, and eu. Prices use the standard global tier, verified 2026-11-22.
+	// https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+	"gemini-4-neon": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
+		inputPrice: 3,
+		outputPrice: 15,
+		cacheReadsPrice: 0.15,
 	},
 	// https://cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
 	// Available in the global, us, and eu locations.

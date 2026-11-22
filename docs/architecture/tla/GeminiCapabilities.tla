@@ -1,37 +1,33 @@
 ---- MODULE GeminiCapabilities ----
 \* Sources: geminiModels, vertexModels, and the user's thinking level.
 \* Sink: getGeminiReasoning and its thinkingConfig. Transport is an oracle.
-\* Failures: missing registrations, unlisted Vertex models, dropped levels, and unsupported effort requests.
+\* Failures: missing registrations, dropped levels, and unsupported effort requests.
 \* Invariants: RegistrationMatchesAvailability, SupportedLevelsReachRequest, and NoUnsupportedEffort.
-\* Expected result: each defect config fails when an entry, xhigh support, or the effort guard is missing.
-\* Vendor facts are inputs. This model does not verify prices or provider capabilities.
-\* KnownLevels defines valid levels. The budget check runs before the effort guard.
-\* Replay: seven missing entries and two xhigh paths failed before registration and level fixes.
-\* Replay: nine assertions failed before the effort guard. The Vertex Neon absence test detects sabotage.
-\* Result: all 224 states pass with the fixes. All four defect configs fail. No new code defect was found.
-\* Tests: google-models.test.ts checks availability. reasoning.spec.ts checks each known level.
-\* Cost: about 17 minutes of agent work. The five-config gate takes about three seconds.
-\* Review: 1 covered, 1 added, 5 gaps. The effort guard required NoUnsupportedEffort.
-\* Guard finding: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4655065689.
-\* Covered: the later review reports the same effort guard issue.
-\* Gaps: scope, price expiry, vendor evidence, test independence, and header maintenance are outside this model.
-\* Review changes: add dates for price updates, state Vertex assumptions, and use fixed test expectations.
-\* Vertex replay: Flash responds through Express mode and rejects xhigh.
-\* Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
-\* Carbon rejects xhigh. Hydrogen accepts xhigh. Prices and other capabilities are not verified.
-\* AGENTS.md requires the cost and findings in this header.
-\* Capability update: vendor guides set medium for Flash and Carbon, and high for Hydrogen and Neon.
-\* Expected result: defaults reach the request for unset or unsupported known levels. Unknown levels stay absent.
-\* Budgets and temperature use documented support rules. Live acceptance alone does not establish support.
+\* Expected: all four models are registered on both providers. Supported levels and defaults reach the request.
+\* Expected: unknown or disabled levels stay absent. Budget selection precedes the effort-support guard.
+\* Vendor facts are inputs. This model does not verify prices, provider capabilities, or code correctness.
+\* Review: 2 covered, 1 added, 5 gaps. The effort guard required NoUnsupportedEffort.
+\* Guard thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4655065689.
+\* Covered: the repeated guard finding and Torey's missing Vertex Neon finding.
+\* Neon thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2640#discussion_r4659915941.
+\* The original availability input excluded Vertex Neon incorrectly. RequiredRegistrations now includes it.
+\* Gaps: scope, price expiry, vendor evidence, test independence, and header maintenance.
+\* Replay: missing entries, dropped xhigh, and the absent effort guard failed focused tests before their fixes.
+\* Replay: removing defaults failed seven reasoning tests. Missing Vertex Neon failed the catalog test.
+\* Live checks: Flash works in Express mode. Carbon and Hydrogen work in global, but return 404 in us-central1.
+\* Flash and Carbon reject xhigh. Hydrogen accepts it. Vertex Neon accepts default, HIGH, and XHIGH in global.
+\* Budget checks: 42 requests showed that acceptance does not establish support. Vertex rejects Carbon and Hydrogen budgets.
+\* Google documents medium defaults for Flash and Carbon, high for Hydrogen and Neon, and ignored custom temperature.
+\* Flash cache storage uses an hourly rate. No separate cache write rate is listed, so cacheWritesPrice stays unset.
 \* Sources: https://aistudio.google.com/docs/thinking and each model developer guide.
-\* Live checks: 42 requests. Vertex rejects Carbon and Hydrogen budgets. Other accepted budgets can exceed their limits.
-\* Sampling checks are not proof of effect. Google documents custom temperature as ignored.
-\* Flash storage has an hourly rate. No separate cache write rate is listed, so cacheWritesPrice stays unset.
-\* Replay: removing the catalog defaults fails seven reasoning tests. The edit was removed.
-\* Result: 125 reasoning tests and 20 catalog tests pass. Both type checks and lint pass.
-\* TLC: 224 states pass. All four defect configs fail. Update cost: about six minutes of agent work.
+\* Neon source: https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-neon.
+\* Result before cleanup: 224 states pass. All four defect configs fail. No new defect beyond review findings was found.
+\* Tests: 20 catalog and 126 reasoning tests pass. Both type checks and lint pass.
+\* Cost: about 31 minutes of agent work across implementation and review fixes. The gate takes about three seconds.
+\* Cleanup: explicit registration sets preserve 224 states and all five config outcomes. All 146 focused tests pass.
+\* Cleanup cost: about two minutes of agent work. No new code defect was found.
 EXTENDS TLC
-CONSTANT CatalogFixed, LevelsFixed, VertexListedOnly, EffortGuard
+CONSTANT CatalogFixed, LevelsFixed, VertexNeonRegistered, EffortGuard
 VARIABLE input
 NewModels == {"flash", "carbon", "hydrogen", "neon"}
 Models == NewModels \cup {"budget", "standard", "boolean"}
@@ -41,15 +37,15 @@ Allowed(model) == IF model \in {"budget", "standard"} THEN {}
                   ELSE IF model = "boolean" THEN KnownLevels
                   ELSE {"low", "medium", "high"} \cup
                        (IF model \in {"hydrogen", "neon"} THEN {"xhigh"} ELSE {})
-Available(provider, model) == provider = "gemini" \/ model # "neon"
+RequiredRegistrations == {"gemini", "vertex"} \X NewModels
 Inputs == [provider : {"gemini", "vertex"}, model : Models, level : Levels, enabled : BOOLEAN]
 Init == input \in Inputs
 Next == UNCHANGED input
 Spec == Init /\ [][Next]_input
 Default == IF input.model \in {"flash", "carbon"} THEN "medium"
            ELSE IF input.model \in {"hydrogen", "neon"} THEN "high" ELSE "none"
-Registered == IF input.model \in NewModels
-              THEN CatalogFixed /\ (Available(input.provider, input.model) \/ ~VertexListedOnly) ELSE TRUE
+Registered == IF ~CatalogFixed THEN {}
+              ELSE RequiredRegistrations \ (IF VertexNeonRegistered THEN {} ELSE {<<"vertex", "neon">>})
 RecognizedLevels == IF LevelsFixed THEN KnownLevels ELSE KnownLevels \ {"xhigh"}
 HasEffort == input.model \notin {"budget", "standard"}
 Selected == IF input.level = "unset" THEN Default ELSE input.level
@@ -63,7 +59,8 @@ Expected == IF BudgetSelected THEN "budget"
             ELSE IF input.level = "unset" THEN Default
             ELSE IF input.level \in {"invalid", "disable"} THEN "none"
             ELSE IF input.level \in Allowed(input.model) THEN input.level ELSE Default
-RegistrationMatchesAvailability == Registered = Available(input.provider, input.model)
+RegistrationMatchesAvailability ==
+    (<<input.provider, input.model>> \in Registered) = (<<input.provider, input.model>> \in RequiredRegistrations)
 SupportedLevelsReachRequest == Sent = Expected
 NoUnsupportedEffort == ~HasEffort /\ ~BudgetSelected => Sent = "none"
 ====

@@ -83,40 +83,32 @@ const newGeminiModels = [
 		levels: ["low", "medium", "high"],
 		price: [0.75, 3.75, 0.075],
 		defaultLevel: "medium",
-		vertex: true,
 	},
 	{
 		id: "gemini-4-carbon",
 		levels: ["low", "medium", "high"],
 		price: [2, 10, 0.1],
 		defaultLevel: "medium",
-		vertex: true,
 	},
 	{
 		id: "gemini-4-hydrogen",
 		levels: ["low", "medium", "high", "xhigh"],
 		price: [1.5, 7.5, 0.075],
 		defaultLevel: "high",
-		vertex: true,
 	},
 	{
 		id: "gemini-4-neon",
 		levels: ["low", "medium", "high", "xhigh"],
 		price: [3, 15, 0.15],
 		defaultLevel: "high",
-		vertex: false,
 	},
 ]
 
 describe.each([
 	["Gemini API", geminiModels],
 	["Vertex AI", vertexModels],
-])("new Gemini models on %s", (provider, catalog: Record<string, ModelInfo>) => {
-	it.each(newGeminiModels)("registers $id only where available", ({ id, levels, price, defaultLevel, vertex }) => {
-		if (provider === "Vertex AI" && !vertex) {
-			expect(catalog).not.toHaveProperty(id)
-			return
-		}
+])("new Gemini models on %s", (_provider, catalog: Record<string, ModelInfo>) => {
+	it.each(newGeminiModels)("registers available model $id", ({ id, levels, price, defaultLevel }) => {
 		expect(catalog).toHaveProperty(id)
 		const model = catalog[id]
 		expect(model).toMatchObject({

@@ -740,16 +740,14 @@ describe("reasoning.ts", () => {
 
 	describe("Gemini reasoning (effort models)", () => {
 		describe.each([
-			["Gemini", geminiModels, true],
-			["Vertex", vertexModels, false],
-		])("new model thinking levels on %s", (_provider, catalog: Record<string, ModelInfo>, includesNeon) => {
+			["Gemini", geminiModels],
+			["Vertex", vertexModels],
+		])("new model thinking levels on %s", (_provider, catalog: Record<string, ModelInfo>) => {
 			const cases = [
 				{ id: "gemini-3.8-flash", defaultLevel: "medium", levels: ["low", "medium", "high"] },
 				{ id: "gemini-4-carbon", defaultLevel: "medium", levels: ["low", "medium", "high"] },
 				{ id: "gemini-4-hydrogen", defaultLevel: "high", levels: ["low", "medium", "high", "xhigh"] },
-				...(includesNeon
-					? [{ id: "gemini-4-neon", defaultLevel: "high", levels: ["low", "medium", "high", "xhigh"] }]
-					: []),
+				{ id: "gemini-4-neon", defaultLevel: "high", levels: ["low", "medium", "high", "xhigh"] },
 			]
 			it.each(cases)("preserves each supported choice for $id", ({ id, levels, defaultLevel }) => {
 				const model = catalog[id]
