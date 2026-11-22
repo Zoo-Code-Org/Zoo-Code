@@ -114,6 +114,55 @@ describe("Task.ask auto-approval stamping", () => {
 		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
 	})
 
+	it("waits for its own approval for each command in a multi-command request (#998)", async () => {
+		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider: ProviderStub = {
+			postMessageToWebview,
+			getState: async () => ({
+				autoApprovalEnabled: false,
+				alwaysAllowExecute: false,
+				allowedCommands: [],
+				deniedCommands: [],
+			}),
+		}
+
+		const task = buildTask(provider)
+		await attachQueue(task)
+
+		// True when the promise settles on its own within the window.
+		const settledWithoutResponse = (p: Promise<unknown>) =>
+			Promise.race([p.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250))])
+
+		// Command #1: prompts and waits for the user's approval.
+		const ask1 = task.ask("command", 'echo "cmd1"', false)
+		expect(await settledWithoutResponse(ask1)).toBe(false)
+		task.approveAsk()
+		expect((await ask1).response).toBe("yesButtonClicked")
+
+		// Command #2: must not inherit command #1's approval. It stays
+		// pending until its own response arrives — no execution before
+		// each approval.
+		const ask2 = task.ask("command", 'echo "cmd2"', false)
+		expect(await settledWithoutResponse(ask2)).toBe(false)
+		task.approveAsk()
+		expect((await ask2).response).toBe("yesButtonClicked")
+
+		// Command #3: same — one prompt per command.
+		const ask3 = task.ask("command", 'echo "cmd3"', false)
+		expect(await settledWithoutResponse(ask3)).toBe(false)
+		task.approveAsk()
+		expect((await ask3).response).toBe("yesButtonClicked")
+
+		// One prompt per command: three command asks were presented.
+		const harness = task as unknown as {
+			addToClineMessages: { mock: { calls: Array<[ClineMessage]> } }
+		}
+		const commandAsks = harness.addToClineMessages.mock.calls
+			.map(([message]) => message)
+			.filter((message) => message.type === "ask" && message.ask === "command")
+		expect(commandAsks.length).toBe(3)
+	})
+
 	it("does not stamp isAnswered for the followup timeout branch", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
