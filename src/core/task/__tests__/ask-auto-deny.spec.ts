@@ -1022,3 +1022,38 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		checkAutoApprovalSpy.mockRestore()
 	})
 })
+
+describe("Task.ask forwards file targets to the policy", () => {
+	it("decides a file ask on the tool's targets rather than its display path", async () => {
+		const provider: ProviderStub = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
+			getSkillsManager: () => undefined,
+			cwd: TASK_CWD,
+			getState: async () => ({ autoApprovalEnabled: true, allowedReadFiles: ["docs/**"] }),
+		}
+		const task = buildTask(provider, TASK_CWD)
+		await attachQueue(task)
+		const fileTargets = [{ absolutePath: `${TASK_CWD}/docs/notes.md`, isOutsideWorkspace: false }]
+		const checkAutoApprovalSpy = vi.spyOn(autoApprovalModule, "checkAutoApproval")
+
+		// Only the target is allowlisted, so the ask is auto-approved only if it reaches the policy;
+		// otherwise it waits for a user who never answers.
+		const askPromise = task.ask(
+			"tool",
+			JSON.stringify({ tool: "readFile", path: "notes.md" }),
+			false,
+			undefined,
+			false,
+			{ fileTargets },
+		)
+		const outcome = await Promise.race([
+			askPromise.then(({ response }) => response),
+			new Promise<string>((resolve) => setTimeout(() => resolve("still waiting for the user"), 3_000)),
+		])
+
+		expect(outcome).toBe("yesButtonClicked")
+		expect(checkAutoApprovalSpy).toHaveBeenCalledWith(expect.objectContaining({ cwd: TASK_CWD, fileTargets }))
+		checkAutoApprovalSpy.mockRestore()
+	})
+})
