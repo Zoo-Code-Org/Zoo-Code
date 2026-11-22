@@ -4,6 +4,7 @@ import axios from "axios"
 
 import {
 	type ModelInfo,
+	providerIdentifiers,
 	azureOpenAiDefaultApiVersion,
 	isAzureAiInferenceBaseUrl,
 	isAzureOpenAiBaseUrl,
@@ -21,7 +22,17 @@ import { TagMatcher } from "../../utils/tag-matcher"
 import { convertToOpenAiMessages } from "../transform/openai-format"
 import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
+import { isOSeriesModelId } from "./utils/is-o-series-model"
+import { buildResponsesRequest } from "./utils/openai-compatible-responses"
+import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
+import { assertResponsesApiSuccess } from "../transform/responses-api-error"
+import {
+	readResponsesReasoningItem,
+	responsesReasoningScope,
+	type ScopedResponsesReasoningItem,
+} from "../transform/responses-api-reasoning"
+import { OutputTokenLimitError } from "./utils/output-token-limit-error"
 import { getModelParams } from "../transform/model-params"
 
 import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
@@ -29,6 +40,21 @@ import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import {
+	bridgeExternalAbortSignal,
+	createAbortError,
+	isRequestAborted,
+	hasUsableTimeout,
+	toSdkTimeoutMs,
+} from "./utils/abort-signal"
+
+function isAzureV1BaseUrl(baseUrl?: string): boolean {
+	try {
+		return /\/openai\/v1\/?$/.test(new URL(baseUrl ?? "").pathname)
+	} catch {
+		return false
+	}
+}
 
 type OpenAiUsage =
 	| {
@@ -49,6 +75,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
 	private readonly extraBody: Record<string, unknown>
+	private responsesReasoning: OpenAI.Responses.ResponseReasoningItem[] = []
 
 	constructor(options: ApiHandlerOptions) {
 		super()
@@ -65,7 +92,24 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			...(this.options.openAiHeaders || {}),
 		}
 
-		if (isAzureAiInference) {
+		const isAzureV1 = isAzureV1BaseUrl(baseURL)
+		if (isAzureAiInference && this.options.openAiUseResponsesApi) {
+			throw new Error(
+				"Responses API requires an /openai/v1 base URL for Azure AI Inference. Update the Base URL or disable Use Responses API.",
+			)
+		}
+		if (isAzureV1 || (isAzureOpenAi && this.options.openAiUseResponsesApi && !this.options.azureApiVersion)) {
+			// Azure's v1 API supports Responses without a dated api-version parameter.
+			const responsesBaseURL = isAzureV1
+				? baseURL
+				: `${baseURL.replace(/\/openai\/?$/i, "").replace(/\/$/, "")}/openai/v1`
+			this.client = new OpenAI({
+				baseURL: responsesBaseURL,
+				apiKey,
+				defaultHeaders: headers,
+				timeout: this.timeoutMs,
+			})
+		} else if (isAzureAiInference) {
 			// Azure AI Inference Service (e.g., for DeepSeek) uses a different path structure
 			this.client = new OpenAI({
 				baseURL,
@@ -100,9 +144,18 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
+		const modelId = this.options.openAiModelId ?? ""
+		// Opt-in Responses API path: some OpenAI-compatible endpoints (e.g. Azure
+		// OpenAI deployments of reasoning models behind corporate gateways) reject
+		// `reasoning_effort` combined with function tools on /chat/completions and
+		// require /responses instead.
+		if (this.options.openAiUseResponsesApi) {
+			yield* this.handleResponsesApiMessage(systemPrompt, messages, metadata)
+			return
+		}
+
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
-		const modelId = this.options.openAiModelId ?? ""
 		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
 		// the same strict value as `??`.
@@ -110,7 +163,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
 
-		if (modelId.includes("o1") || modelId.includes("o3") || modelId.includes("o4")) {
+		if (isOSeriesModelId(modelId)) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
 			return
 		}
@@ -299,6 +352,98 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
+	/** Sends the opt-in Responses request through the shared input and stream transforms. */
+	private async *handleResponsesApiMessage(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): ApiStream {
+		this.responsesReasoning = []
+		const { info: modelInfo, reasoning } = this.getModel()
+		// Stryker disable next-line LogicalOperator: equivalent. An unset option makes `&&`
+		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
+		// the same strict value as `??`.
+		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
+
+		const reasoningItems = new Map<string, OpenAI.Responses.ResponseReasoningItem>()
+		const captureReasoning = (value: unknown) => {
+			const item = readResponsesReasoningItem(value)
+			if (item) reasoningItems.set(item.id, item)
+		}
+		const body = buildResponsesRequest({
+			options: this.options,
+			modelInfo,
+			reasoning,
+			systemPrompt,
+			messages,
+			metadata,
+			tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
+			extraBody: this.extraBody,
+			reasoningScope: responsesReasoningScope(this.client.baseURL),
+		})
+
+		// Bridge the external abort signal only after every throw-prone part of
+		// request construction has run, so a construction failure cannot leak a
+		// listener on the caller's long-lived signal.
+		const { signal: abortSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			metadata?.abortSignal,
+		)
+
+		try {
+			const requestOptions = abortSignal ? { signal: abortSignal } : undefined
+			if (body.stream) {
+				const stream = await this.client.responses.create({ ...body, stream: true }, requestOptions)
+				let completed = false
+				yield* processResponsesApiStream(stream, createUsageNormalizer(), {
+					onOutputItem: captureReasoning,
+					onCompleted: (output) => {
+						completed = true
+						if (output) {
+							reasoningItems.clear()
+							output.forEach(captureReasoning)
+						}
+					},
+				})
+				if (!completed) throw new Error("Responses API stream ended before a completed response")
+			} else {
+				const response = await this.client.responses.create({ ...body, stream: false }, requestOptions)
+				assertResponsesApiSuccess(response)
+				for (const item of response.output) {
+					captureReasoning(item)
+					if (item.type === "message") {
+						for (const content of item.content) {
+							if (content.type === "output_text") yield { type: "text", text: content.text }
+						}
+					} else if (item.type === "function_call") {
+						yield { type: "tool_call", id: item.call_id, name: item.name, arguments: item.arguments }
+					} else if (item.type === "reasoning") {
+						for (const summary of item.summary ?? []) yield { type: "reasoning", text: summary.text }
+					}
+				}
+				const usage = createUsageNormalizer()(response.usage)
+				if (usage) yield usage
+			}
+			this.responsesReasoning = [...reasoningItems.values()]
+		} catch (error) {
+			if (error instanceof OutputTokenLimitError) throw error
+			if (isRequestAborted(error, abortSignal)) throw createAbortError(this.providerName)
+			throw handleOpenAIError(error, this.providerName)
+		} finally {
+			removeExternalAbortListener()
+		}
+	}
+
+	getReasoningDetails(): ScopedResponsesReasoningItem[] | undefined {
+		if (!this.options.openAiUseResponsesApi || !this.responsesReasoning.length) return undefined
+		const endpoint = responsesReasoningScope(this.client.baseURL)
+		return structuredClone(this.responsesReasoning).map((item) => ({
+			...item,
+			format: "openai-responses-v1" as const,
+			provider: providerIdentifiers.openai,
+			endpoint,
+		}))
+	}
+
 	protected processUsageMetrics(usage: OpenAiUsage, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
 		const inputTokens = usage?.prompt_tokens || 0
 		const reportedCacheReadTokens = usage?.cache_read_input_tokens ?? usage?.prompt_tokens_details?.cached_tokens
@@ -354,8 +499,38 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		}
 	}
 
-	async completePrompt(prompt: string, _options?: CompletePromptOptions): Promise<string> {
+	async completePrompt(prompt: string, options?: CompletePromptOptions): Promise<string> {
 		try {
+			if (this.options.openAiUseResponsesApi) {
+				const model = this.getModel()
+				const body = buildResponsesRequest({
+					options: { ...this.options, openAiStreamingEnabled: false },
+					modelInfo: model.info,
+					reasoning: model.reasoning,
+					systemPrompt: "",
+					messages: [{ role: "user", content: prompt }],
+					tools: undefined,
+					extraBody: this.extraBody,
+					reasoningScope: responsesReasoningScope(this.client.baseURL),
+				})
+				const response = await this.client.responses.create(
+					{ ...body, stream: false },
+					{
+						...(options?.abortSignal ? { signal: options.abortSignal } : {}),
+						...(hasUsableTimeout(options?.timeoutMs) ? { timeout: toSdkTimeoutMs(options.timeoutMs) } : {}),
+					},
+				)
+				assertResponsesApiSuccess(response)
+				return response.output
+					.flatMap((item) =>
+						item.type === "message"
+							? item.content
+									.filter((content) => content.type === "output_text")
+									.map((content) => content.text)
+							: [],
+					)
+					.join("")
+			}
 			const isAzureAiInference = this._isAzureAiInference(this.options.openAiBaseUrl)
 			const model = this.getModel()
 			const modelInfo = model.info
@@ -382,6 +557,8 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
+			if (error instanceof OutputTokenLimitError) throw error
+			if (isRequestAborted(error, options?.abortSignal)) throw createAbortError(this.providerName)
 			if (error instanceof Error) {
 				const wrapped = new Error(`${this.providerName} completion error: ${error.message}`, { cause: error })
 				const source = error as Error & { status?: number; errorDetails?: unknown; code?: unknown }
@@ -582,7 +759,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	protected _isAzureAiInference(baseUrl?: string): boolean {
-		return isAzureAiInferenceBaseUrl(baseUrl)
+		return isAzureAiInferenceBaseUrl(baseUrl) && !isAzureV1BaseUrl(baseUrl)
 	}
 
 	/**

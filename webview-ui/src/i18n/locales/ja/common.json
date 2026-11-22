@@ -18,7 +18,9 @@
 	},
 	"ui": {
 		"search_placeholder": "検索...",
-		"no_results": "結果が見つかりません"
+		"no_results": "結果が見つかりません",
+		"close": "閉じる",
+		"clear_search_aria_label": "検索をクリア"
 	},
 	"mermaid": {
 		"loading": "Mermaidダイアグラムを生成中...",
@@ -41,7 +43,9 @@
 		"tabs": {
 			"view": "画像"
 		},
-		"noData": "画像データなし"
+		"noData": "画像データなし",
+		"generatedAlt": "AI 生成画像",
+		"thumbnailAlt": "サムネイル {{index}}"
 	},
 	"confirmation": {
 		"deleteMessage": "メッセージを削除",

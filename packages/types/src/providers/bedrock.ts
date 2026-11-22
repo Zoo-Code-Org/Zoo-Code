@@ -83,6 +83,26 @@ export const bedrockModels = {
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
 	},
+	"anthropic.claude-sonnet-5-5": {
+		maxTokens: 128_000,
+		supportsMaxTokens: true,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		promptCacheTtlSupport: ["5m", "1h"],
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheWritesPrice1h: 4,
+		cacheReadsPrice: 0.1,
+		minTokensPerCachePoint: 512,
+		maxCachePoints: 4,
+		cachableFields: ["system", "messages", "tools"],
+		description: "Claude Sonnet 5.5 is the best combination of speed and intelligence for everyday tasks.",
+	},
 	"amazon.nova-pro-v1:0": {
 		maxTokens: 5000,
 		contextWindow: 300_000,
@@ -759,6 +779,7 @@ export const BEDROCK_THINKING_DISABLE_MODEL_IDS = [
 // - Claude Sonnet 4.5
 // - Claude Sonnet 4.6
 // - Claude Sonnet 5
+// - Claude Sonnet 5.5
 // - Claude Haiku 4.5
 // - Claude Opus 4.5
 // - Claude Opus 4.6
@@ -772,6 +793,7 @@ export const BEDROCK_GLOBAL_INFERENCE_MODEL_IDS = [
 	"anthropic.claude-sonnet-4-5-20250929-v1:0",
 	"anthropic.claude-sonnet-4-6",
 	"anthropic.claude-sonnet-5",
+	"anthropic.claude-sonnet-5-5",
 	"anthropic.claude-haiku-4-5-20251001-v1:0",
 	"anthropic.claude-opus-4-5-20251101-v1:0",
 	"anthropic.claude-opus-4-6-v1",

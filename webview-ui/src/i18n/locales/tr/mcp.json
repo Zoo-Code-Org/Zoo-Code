@@ -55,5 +55,10 @@
 		"running": "Çalışıyor",
 		"completed": "Tamamlandı",
 		"error": "Hata"
-	}
+	},
+	"resource": {
+		"returns": "Döndürür",
+		"unknownMimeType": "Bilinmiyor"
+	},
+	"toggleServerAriaLabel": "{{serverName}} sunucusunu aç/kapat"
 }

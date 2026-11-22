@@ -184,7 +184,6 @@ const _dynamicProviderExtras = {
 	[providerIdentifiers.moonshot]: {} as { apiKey?: string; baseUrl?: string },
 	[providerIdentifiers.opencodeGo]: {} as { apiKey?: string },
 	[providerIdentifiers.kenari]: {} as { apiKey?: string },
-	[providerIdentifiers.ioIntelligence]: {} as { apiKey?: string },
 	[providerIdentifiers.nanogpt]: {} as { apiKey?: string },
 	[providerIdentifiers.kimiCode]: {} as { apiKey?: string },
 	[providerIdentifiers.friendli]: {} as object,

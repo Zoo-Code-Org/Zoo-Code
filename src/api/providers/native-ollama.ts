@@ -478,10 +478,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// request error.
 			client = this._createOllamaClient(bridge.controller.signal)
 
-			// Race model discovery against the external signal: the discovery
-			// fetch receives the signal so an aborted request is cancelled at
-			// the network level, and the race rejects a request aborted during
-			// discovery instead of proceeding to chat() with a stale model.
+			// Cancel this wait without cancelling discovery for other requests.
+			// Do not start chat after this request is aborted.
 			const { id: modelId } = externalAbortSignal
 				? await rejectOnAbort(this.fetchModel(externalAbortSignal), externalAbortSignal, "Ollama")
 				: await this.fetchModel(undefined)
@@ -652,26 +650,23 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 	}
 
 	/**
-	 * Fetches the model list. The optional signal is forwarded to the
-	 * discovery fetch (both /api/tags and /api/show) so an aborted or
-	 * timed-out request is cancelled at the network level instead of
-	 * settling in the background.
+	 * Share one bounded catalog load. Each signal cancels only its caller's wait.
+	 * Empty and failed loads remain retryable; a populated catalog is reused.
 	 */
 	async fetchModel(signal?: AbortSignal) {
-		this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, { signal })
+		await this.ensureCatalogLoaded(async () => {
+			// The shared fetch owns its timeout, independent of request cancellation.
+			const fetchSignal = AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS)
+			this.models = await getOllamaModels(this.options.ollamaBaseUrl, this.options.ollamaApiKey, {
+				signal: fetchSignal,
+			})
+			return Object.keys(this.models).length > 0
+		}, signal)
 		return this.getModel()
 	}
 
 	async ensureModelFetched(signal?: AbortSignal): Promise<void> {
-		await this.ensureCatalogLoaded(async () => {
-			// This path bypasses getModels()'s single-flight, so it carries its own
-			// bound: a hung Ollama endpoint would otherwise leave the shared
-			// catalogFetch pending forever and block every later retry. The timeout
-			// is fetch-local so the caller's signal stays independent of it.
-			await this.fetchModel(AbortSignal.timeout(MODEL_CATALOG_FETCH_TIMEOUT_MS))
-			// An empty catalog must stay retryable instead of being memoized.
-			return Object.keys(this.models).length > 0
-		}, signal)
+		await this.fetchModel(signal)
 	}
 
 	override getModel(): { id: string; info: ModelInfo } {
@@ -729,13 +724,8 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 				throw createAbortError("Ollama")
 			}
 
-			// Model discovery goes through Axios (getOllamaModels) and never touches
-			// the Ollama client, so client.abort() alone cannot reject it. The
-			// discovery fetch receives the per-request signal (bridged from the
-			// external abort, merged with the per-request timeout) so an aborted
-			// or timed-out request is cancelled at the network level; the race
-			// remains the backstop that rejects a stalled discovery instead of
-			// hanging past the deadline.
+			// The request deadline cancels this wait. Shared discovery keeps its
+			// own timeout so other requests can still use the result.
 			const discoverySignal = mergeAbortSignalAndTimeout(controller.signal, options?.timeoutMs)
 			// mergeAbortSignalAndTimeout yields undefined when neither an external
 			// signal nor a positive timeout applies; no race is needed then.

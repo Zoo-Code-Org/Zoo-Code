@@ -713,12 +713,10 @@ const ModesView = () => {
 						<Trans t={t} i18nKey="prompts:modes.createModeHelpText">
 							<VSCodeLink
 								href={buildDocLink("basic-usage/using-modes", "prompts_view_modes")}
-								style={{ display: "inline" }}
-								aria-label="Learn about using modes"></VSCodeLink>
+								style={{ display: "inline" }}></VSCodeLink>
 							<VSCodeLink
 								href={buildDocLink("features/custom-modes", "prompts_view_modes")}
-								style={{ display: "inline" }}
-								aria-label="Learn about customizing modes"></VSCodeLink>
+								style={{ display: "inline" }}></VSCodeLink>
 						</Trans>
 					</div>
 
@@ -1335,7 +1333,7 @@ const ModesView = () => {
 											"prompts_mode_specific_global_rules",
 										)}
 										style={{ display: "inline" }}
-										aria-label="Learn about global custom instructions for modes"
+										aria-label={t("prompts:customInstructions.loadFromFileAriaLabel")}
 									/>
 								),
 							}}
@@ -1390,7 +1388,7 @@ const ModesView = () => {
 									"prompts_global_custom_instructions",
 								)}
 								style={{ display: "inline" }}
-								aria-label="Learn more about global custom instructions"></VSCodeLink>
+								aria-label={t("prompts:globalCustomInstructions.learnMoreAriaLabel")}></VSCodeLink>
 						</Trans>
 					</div>
 					<VSCodeTextArea
@@ -1437,7 +1435,7 @@ const ModesView = () => {
 											"prompts_global_rules",
 										)}
 										style={{ display: "inline" }}
-										aria-label="Learn about setting up global custom instructions"
+										aria-label={t("prompts:globalCustomInstructions.loadFromFileAriaLabel")}
 									/>
 								),
 							}}
@@ -1617,7 +1615,7 @@ const ModesView = () => {
 												const checked = target.checked
 												setNewModeAllowedMcpServers(checked ? [] : undefined)
 											}}>
-											Restrict to specific MCP servers
+											{t("prompts:mcpServers.restrict")}
 										</VSCodeCheckbox>
 										{newModeAllowedMcpServers !== undefined && (
 											<McpServerChecklist
