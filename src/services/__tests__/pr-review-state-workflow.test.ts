@@ -4395,6 +4395,20 @@ describe("PR review-state workflow concurrency groups (#1707)", () => {
 			expect(branchA).not.toBe(branchB)
 		})
 
+		it("collapses branches that differ only by case, as GitHub compares group names", () => {
+			// GitHub's scheduler compares concurrency group names case-insensitively, so
+			// `feature/a` and `feature/A` are one group no matter how the key is spelled:
+			// the two strings below differ, and folded to one case they are equal. The
+			// group being shared is accepted, not fought, because the resolver the key
+			// points at compares head branches case-insensitively too, so the run that
+			// survives reconciles both targets rather than the one whose spelling won.
+			const lower = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA }))
+			const upper = followupGroupFor(forkRun({ branch: "feature/A", sha: SHA }))
+
+			expect(lower.toLowerCase()).toBe(upper.toLowerCase())
+			expect(lower).not.toBe(upper)
+		})
+
 		it("includes the head owner in the fallback group", () => {
 			const upstream = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "Zoo-Code-Org" }))
 			const contributor = followupGroupFor(forkRun({ branch: "feature/a", sha: SHA, owner: "contributor" }))

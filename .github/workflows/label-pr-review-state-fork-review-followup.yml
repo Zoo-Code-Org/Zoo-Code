@@ -43,6 +43,13 @@ permissions:
 # targets. Repeated completions for one target share branch and SHA and still
 # coalesce.
 #
+# GitHub compares group names case-insensitively, so two branches that differ
+# only by letter case - feature/a and feature/A, which two forks can hold at
+# the same commit - do share a group. That is accepted instead of fought: the
+# resolver below compares head branches case-insensitively as well, so
+# whichever run survives reconciles every PR the group stands for rather than
+# only the one whose spelling happened to arrive first.
+#
 # cancel-in-progress stays false: a running dispatch must finish every PR it
 # resolved, so only pending duplicates are dropped. The run id is the last
 # fallback so a payload with neither an associated PR nor a head branch and SHA
@@ -97,11 +104,17 @@ jobs:
                       // Resolve which PRs the completed run targeted. Review runs
                       // backfill pull_requests empty for fork PRs, and the head
                       // owner is not recoverable from head_repository, so the
-                      // fallback lists open PRs and matches the exact head branch,
-                      // SHA, and base repository. The workflow_run branch of
-                      // label-pr-review-state.yml keeps an owner-and-branch query
-                      // instead: its runs are CI runs triggered by pull_request,
-                      // whose head_repository is the real fork.
+                      // fallback lists open PRs and matches the head branch
+                      // case-insensitively, the head SHA, and the base repository.
+                      // Group names are compared case-insensitively above, so a
+                      // case-sensitive match here would let the run that survived the
+                      // shared group reconcile only its own branch's PR and drop the
+                      // other target - the failure the key exists to avoid. GitHub's
+                      // own identity comparisons (usernames, the base repository
+                      // below) are case-insensitive too.
+                      // The workflow_run branch of label-pr-review-state.yml keeps an
+                      // owner-and-branch query instead: its runs are CI runs triggered
+                      // by pull_request, whose head_repository is the real fork.
                       let prNumbers = [];
                       if (run.pull_requests?.length > 0) {
                         prNumbers = run.pull_requests.map(pr => pr.number);
@@ -116,13 +129,13 @@ jobs:
                         prNumbers = candidates
                           .filter(pr =>
                             pr.head?.sha === run.head_sha &&
-                            pr.head?.ref === run.head_branch &&
+                            pr.head?.ref?.toLowerCase() === run.head_branch?.toLowerCase() &&
                             pr.base?.repo?.full_name?.toLowerCase() === baseRepository
                           )
                           .map(pr => pr.number);
                         core.info(
                           `Resolved workflow_run ${run.id ?? '(unknown)'} to ` +
-                          `${prNumbers.length} PR(s) by exact head branch, SHA, and base repository`
+                          `${prNumbers.length} PR(s) by case-insensitive head branch, SHA, and base repository`
                         );
                       }
 
