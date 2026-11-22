@@ -493,6 +493,9 @@ describe("BaseProvider", () => {
 					// Already null-accepting through the enum: no second null
 					// alternative may be appended (oneOf is exactly-one).
 					channel: { oneOf: [{ enum: ["read", null] }] },
+					// Both combinators present: each must accept null on its
+					// own, so both gain a null alternative.
+					format: { anyOf: [{ type: "string" }], oneOf: [{ type: "integer" }] },
 				},
 			}
 
@@ -500,6 +503,7 @@ describe("BaseProvider", () => {
 			const label = result.properties.label
 			const access = result.properties.access
 			const channel = result.properties.channel
+			const format = result.properties.format
 
 			// label: the type widened AND the anyOf gained a null alternative,
 			// so both siblings accept null and string values still validate.
@@ -519,6 +523,12 @@ describe("BaseProvider", () => {
 			expect(channel.oneOf).toEqual([{ enum: ["read", null] }])
 			expect(acceptsValue(channel, null)).toBe(true)
 			expect(acceptsValue(channel, "read")).toBe(true)
+
+			// format: both combinators gain a null alternative — normalizing
+			// only anyOf would leave oneOf rejecting null (sibling AND).
+			expect(format.anyOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(format.oneOf).toEqual([{ type: "integer" }, { type: "null" }])
+			expect(acceptsValue(format, null)).toBe(true)
 		})
 
 		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {

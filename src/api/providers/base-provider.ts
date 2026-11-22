@@ -176,12 +176,12 @@ export abstract class BaseProvider implements ApiHandler {
 						// both directions wrong: {type:["string","null"],
 						// enum:["read"]} rejects null via the enum, while
 						// {enum:["read",null]} accepts null with no type.
-						const combinator = Array.isArray(normalizedProp.anyOf)
-							? "anyOf"
-							: Array.isArray(normalizedProp.oneOf)
-								? "oneOf"
-								: undefined
-						if (combinator) {
+						// Both combinators are normalized when both are
+						// present, because each must accept null on its own.
+						for (const combinator of ["anyOf", "oneOf"] as const) {
+							if (!Array.isArray(normalizedProp[combinator])) {
+								continue
+							}
 							const alternatives = normalizedProp[combinator] as unknown[]
 							const nullAccepting = alternatives.filter((alt) =>
 								BaseProvider.schemaAlternativeAcceptsNull(alt),
