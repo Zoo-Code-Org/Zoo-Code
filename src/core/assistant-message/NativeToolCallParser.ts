@@ -427,6 +427,8 @@ export class NativeToolCallParser {
 				}
 
 				// Remove the XML block and the remaining legacy wrapper tags.
+				// The `\s` (not `\s+`) before the attribute is enough: the
+				// `[^>]*` that follows absorbs any further whitespace.
 				const matchedBlock = question.slice(
 					openMatch.index,
 					payloadStart + closeMatch.index + closeMatch[0].length,
@@ -434,8 +436,8 @@ export class NativeToolCallParser {
 				const cleaned = question
 					.replace(matchedBlock, "")
 					.replace(/<\/?question>/g, "")
-					.replace(/<\/?invoke(?:\s+[^>]*)?>/g, "")
-					.replace(/<\/?parameter(?:\s+[^>]*)?>/g, "")
+					.replace(/<\/?invoke(?:\s[^>]*)?>/g, "")
+					.replace(/<\/?parameter(?:\s[^>]*)?>/g, "")
 					.trim()
 
 				return { followUp: parsed, question: cleaned }
@@ -962,6 +964,9 @@ export class NativeToolCallParser {
 					if (question !== undefined && (followUp === undefined || followUp === null)) {
 						const recovered = this.recoverFollowUpFromLegacyXml(question)
 
+						// Stryker disable next-line ConditionalExpression: recovered is null only
+						// when recovery already failed; forcing the branch dereferences null,
+						// which the parseToolCall catch maps to the same null reject.
 						if (recovered) {
 							followUp = recovered.followUp
 							question = recovered.question
