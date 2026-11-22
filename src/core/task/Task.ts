@@ -2547,6 +2547,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				})
 			}
 		}
+
+		// Mark the last command-approval ask as answered when the user answers (#998).
+		// The webview keeps the ask's Run/Deny buttons only while the ask is
+		// unanswered, so the stamp stops a later snapshot from re-showing them.
+		if (askResponse === "yesButtonClicked" || askResponse === "noButtonClicked") {
+			const lastCommandAskIndex = findLastIndex(
+				this.clineMessages,
+				(msg) => msg.type === "ask" && msg.ask === "command" && !msg.isAnswered,
+			)
+			if (lastCommandAskIndex !== -1) {
+				this.clineMessages[lastCommandAskIndex].isAnswered = true
+				void this.updateClineMessage(this.clineMessages[lastCommandAskIndex]).catch((error) => {
+					console.error("[Task#handleWebviewAskResponse] updateClineMessage failed:", error)
+				})
+				this.saveClineMessages().catch((error) => {
+					console.error("Failed to save answered command-ask state:", error)
+				})
+			}
+		}
 	}
 
 	/**

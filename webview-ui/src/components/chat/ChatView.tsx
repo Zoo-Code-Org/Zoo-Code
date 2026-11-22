@@ -222,6 +222,9 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 	const autoApproveTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 	const userRespondedRef = useRef<boolean>(false)
+	// ts of the command ask the user answered locally (#998). A say can arrive
+	// before the host stamps isAnswered on the ask, so the webview remembers it.
+	const answeredCommandAskTsRef = useRef<number | null>(null)
 	// Origin of each part of the chat box value. Null means all of it is user text.
 	const segmentsRef = useRef<MentionSegment[] | null>(null)
 	// Trimmed chat box segments for the text. A value that does not match the text is all generated.
@@ -521,6 +524,30 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "completion_result":
 							break
 					}
+					// A full-state snapshot can end in a say while a command ask
+					// still waits for an answer (#998). The say must not mask
+					// the ask's Run/Deny buttons. Scan back to the newest ask.
+					// An api_req_started say supersedes it; so does any newer ask.
+					if (lastMessage.say !== "api_req_started" && clineAskRef.current !== "command") {
+						const maskedAsk = findLast(
+							messages,
+							(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+						)
+						if (
+							maskedAsk?.type === "ask" &&
+							maskedAsk.ask === "command" &&
+							maskedAsk.isAnswered !== true &&
+							maskedAsk.partial !== true &&
+							maskedAsk.ts !== answeredCommandAskTsRef.current
+						) {
+							// Mirror the ask branch's command presentation.
+							setSendingDisabled(false)
+							setClineAsk("command")
+							setEnableButtons(true)
+							setPrimaryButtonKey("chat:runCommand.title")
+							setSecondaryButtonKey("chat:reject.title")
+						}
+					}
 					break
 			}
 		}
@@ -563,6 +590,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			autoApproveTimeoutRef.current = null
 		}
 		userRespondedRef.current = false
+		answeredCommandAskTsRef.current = null
 	}, [currentTaskId])
 
 	const taskTs = task?.ts
@@ -876,6 +904,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 			const trimmedInput = text?.trim()
 
+			// (#998) The user answered the pending command ask. Remember its ts
+			// so a say that arrives before the host stamps isAnswered cannot
+			// re-show the Run/Deny buttons.
+			if (clineAsk === "command") {
+				const answeredCommandAsk = messagesRef.current.findLast(
+					(message: ClineMessage) =>
+						message.type === "ask" && message.ask === "command" && !message.isAnswered,
+				)
+				if (answeredCommandAsk) {
+					answeredCommandAskTsRef.current = answeredCommandAsk.ts
+				}
+			}
+
 			switch (clineAsk) {
 				case "api_req_failed":
 				case "command":
@@ -940,6 +981,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				vscode.postMessage({ type: "cancelTask" })
 				setDidClickCancel(true)
 				return
+			}
+
+			// (#998) The user answered the pending command ask. Remember its ts
+			// so a say that arrives before the host stamps isAnswered cannot
+			// re-show the Run/Deny buttons.
+			if (clineAsk === "command") {
+				const answeredCommandAsk = messagesRef.current.findLast(
+					(message: ClineMessage) =>
+						message.type === "ask" && message.ask === "command" && !message.isAnswered,
+				)
+				if (answeredCommandAsk) {
+					answeredCommandAskTsRef.current = answeredCommandAsk.ts
+				}
 			}
 
 			switch (clineAsk) {

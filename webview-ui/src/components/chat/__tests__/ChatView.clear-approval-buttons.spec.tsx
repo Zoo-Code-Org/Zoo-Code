@@ -252,6 +252,235 @@ describe("ChatView approval button behavior", () => {
 		})
 	})
 
+	describe("masked command asks in a full-state snapshot (#998)", () => {
+		const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Initial task" }
+
+		const commandAsk = (ts: number, answered = false): ClineMessage => ({
+			type: "ask",
+			ask: "command",
+			ts,
+			text: "git ls-files -u",
+			partial: false,
+			...(answered ? { isAnswered: true } : {}),
+		})
+
+		const say = (kind: string, ts: number, partial = false): ClineMessage => ({
+			type: "say",
+			say: kind,
+			ts,
+			// The isStreaming memo parses an api_req_started text as a cost record.
+			text: kind === "api_req_started" ? '{"tokensIn":100,"tokensOut":50,"cost":0.001}' : "command output",
+			partial,
+		})
+
+		// An absence assertion must run after the rows render and the effects
+		// flush. Otherwise it passes before the ask was ever presented.
+		const settle = async (getAllByTestId: (id: string) => HTMLElement[]) => {
+			await waitFor(() => expect(getAllByTestId("chat-row").length).toBeGreaterThan(0))
+			await act(async () => {
+				await Promise.resolve()
+			})
+		}
+
+		it.each([
+			{ label: "command_output say", tail: say("command_output", 3) },
+			{ label: "partial command_output say", tail: say("command_output", 3, true) },
+			{ label: "text say", tail: say("text", 3) },
+			{ label: "error say", tail: say("error", 3) },
+		])(
+			"shows Run/Deny when the snapshot ends in a $label after an unanswered command ask",
+			async ({ tail }: { tail: ClineMessage }) => {
+				const { queryByText } = renderChatView()
+
+				await act(async () => {
+					hydrateState([task, commandAsk(2), tail])
+				})
+
+				await waitFor(
+					() => {
+						expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
+						expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+					},
+					// A larger budget than the 1 s default keeps the check
+					// stable on a loaded test machine.
+					{ timeout: 5000 },
+				)
+			},
+		)
+
+		it("keeps no Run/Deny when the masked command ask is already answered", async () => {
+			const { queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2, true), say("command_output", 3)])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("keeps no Run/Deny when api_req_started supersedes the masked command ask", async () => {
+			const { queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2), say("api_req_started", 3)])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("shows the newest unanswered command ask, not an older answered one", async () => {
+			const { queryByText } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2, true), commandAsk(3), say("command_output", 4)])
+			})
+
+			await waitFor(
+				() => {
+					expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument()
+					expect(queryByText(DENY_BUTTON_LABEL)).toBeInTheDocument()
+				},
+				// A larger budget than the 1 s default keeps the check
+				// stable on a loaded test machine.
+				{ timeout: 5000 },
+			)
+		})
+
+		it("keeps no Run/Deny when the newest masked command ask is answered", async () => {
+			const { queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2), commandAsk(3, true), say("command_output", 4)])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("keeps no Run/Deny when a newer command_output ask supersedes the masked command ask", async () => {
+			const { queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([
+					task,
+					commandAsk(2),
+					{ type: "ask", ask: "command_output", ts: 3, text: "", partial: false },
+					say("text", 4),
+				])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		it("does not re-show Run/Deny after the user answers the masked ask and output streams", async () => {
+			const { getByText, queryByText, getAllByTestId } = renderChatView()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2), say("command_output", 3, true)])
+			})
+			await waitFor(() => expect(getByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), { timeout: 5000 })
+
+			await act(async () => {
+				fireEvent.click(getByText(RUN_BUTTON_LABEL))
+			})
+
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({ type: "askResponse", askResponse: "yesButtonClicked" }),
+			)
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+
+			await act(async () => {
+				hydrateState([task, commandAsk(2), say("command_output", 3, true), say("command_output", 4, true)])
+			})
+			await settle(getAllByTestId)
+
+			expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+			expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
+		})
+
+		// Property test from the AskPresentation.tla invariant sentences:
+		// F1 a masked pending command ask shows Run, F2 an answered ask never
+		// does, F3 an api_req_started supersedes. The mirror below is the
+		// derivation the fixed code implements.
+		// The suite renders 32 snapshot shapes, so give it a larger budget
+		// than the 5 s default.
+		it("matches the derivation for every generated snapshot shape", async () => {
+			const deriveRunButton = (msgs: ClineMessage[]): boolean => {
+				const last = msgs.at(-1)
+				if (!last) {
+					return false
+				}
+				if (last.type === "ask") {
+					return last.ask === "command" && last.isAnswered !== true
+				}
+				if (last.say === "api_req_started") {
+					return false
+				}
+				for (let i = msgs.length - 1; i >= 0; i--) {
+					const message = msgs[i]
+					if (message.type === "ask") {
+						return message.ask === "command" && message.isAnswered !== true && message.partial !== true
+					}
+					if (message.type === "say" && message.say === "api_req_started") {
+						return false
+					}
+				}
+				return false
+			}
+
+			// Each prefix models the messages before the snapshot tail. A
+			// command_output ask cannot stand alone: it always follows the
+			// command ask it resolves, so the last prefix pairs it with one.
+			const prefixes: ClineMessage[][] = [
+				[task, say("text", 2)],
+				[task, commandAsk(2)],
+				[task, commandAsk(2, true)],
+				[task, commandAsk(2), { type: "ask", ask: "command_output", ts: 3, text: "", partial: false }],
+			]
+			const tails: ClineMessage[] = [
+				say("command_output", 3),
+				say("command_output", 3, true),
+				say("text", 3),
+				say("error", 3),
+				say("api_req_started", 3),
+				commandAsk(3),
+				commandAsk(3, true),
+			]
+
+			for (const prefix of prefixes) {
+				for (const tail of tails) {
+					const messages = [...prefix, tail]
+					const { queryByText, getAllByTestId, unmount } = renderChatView()
+
+					await act(async () => {
+						hydrateState(messages)
+					})
+					await settle(getAllByTestId)
+
+					const expected = deriveRunButton(messages)
+					// The presence check waits, so a slow render cannot make a
+					// true shape read as false. The absence check runs after the
+					// settle step, so it cannot read a false shape as true.
+					if (expected) {
+						await waitFor(() => expect(queryByText(RUN_BUTTON_LABEL)).toBeInTheDocument(), {
+							timeout: 5000,
+						})
+					} else {
+						expect(queryByText(RUN_BUTTON_LABEL)).not.toBeInTheDocument()
+					}
+					unmount()
+				}
+			}
+		}, 60000)
+	})
+
 	describe("approval feedback segments", () => {
 		const typed = async (input: HTMLElement) => {
 			fireEvent.input(input, { target: { value: "use @/ok" } })

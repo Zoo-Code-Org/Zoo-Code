@@ -1,4 +1,5 @@
 import { Task } from "../Task"
+import type { ClineMessage } from "@roo-code/types"
 import { setAbortLatch } from "../../../test-utils/run-state"
 
 // When the backend auto-resolves an interactive ask, isAnswered:true is stamped
@@ -140,5 +141,76 @@ describe("Task.ask auto-approval stamping", () => {
 		const addCall = (task as any).addToClineMessages.mock.calls[0][0]
 		expect(addCall.isAnswered).toBeFalsy()
 		expect(postMessageToWebview).not.toHaveBeenCalledWith({ type: "clearApprovalButtons" })
+	})
+})
+
+describe("manual command-ask marking (#998)", () => {
+	// A full-state snapshot can mask an unanswered command ask behind a say
+	// (webview reload). The webview re-derives the buttons from the latest
+	// unanswered ask, so a manual click must stamp isAnswered on it. Without
+	// the stamp, a reload re-shows Run/Deny for a settled ask.
+	type MarkingStub = {
+		updateClineMessage: ReturnType<typeof vi.fn>
+		saveClineMessages: ReturnType<typeof vi.fn>
+	}
+
+	const buildMarkingTask = () => {
+		const task = buildTask(undefined)
+		const older: ClineMessage = {
+			ts: Date.now() - 2,
+			type: "ask",
+			ask: "command",
+			text: "git status --porcelain",
+			partial: false,
+		}
+		const latest: ClineMessage = {
+			ts: Date.now() - 1,
+			type: "ask",
+			ask: "command",
+			text: "git ls-files -u",
+			partial: false,
+		}
+		task.clineMessages.push(older, latest)
+		return { task, older, latest }
+	}
+
+	it("marks the latest unanswered command ask when the user approves", () => {
+		const { task, older, latest } = buildMarkingTask()
+
+		task.handleWebviewAskResponse("yesButtonClicked")
+
+		expect(latest.isAnswered).toBe(true)
+		expect(older.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledWith(latest)
+		expect(stub.saveClineMessages).toHaveBeenCalled()
+	})
+
+	it("marks the latest unanswered command ask when the user denies", () => {
+		const { task, older, latest } = buildMarkingTask()
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		expect(latest.isAnswered).toBe(true)
+		expect(older.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledWith(latest)
+		expect(stub.saveClineMessages).toHaveBeenCalled()
+	})
+
+	it("leaves tool asks unmarked when the user denies", () => {
+		const task = buildTask(undefined)
+		const toolAsk: ClineMessage = {
+			ts: Date.now() - 1,
+			type: "ask",
+			ask: "tool",
+			text: "readFile",
+			partial: false,
+		}
+		task.clineMessages.push(toolAsk)
+
+		task.handleWebviewAskResponse("noButtonClicked")
+
+		expect(toolAsk.isAnswered).toBeUndefined()
 	})
 })
