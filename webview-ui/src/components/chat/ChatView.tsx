@@ -417,8 +417,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 							setSendingDisabled(isPartial)
 							setClineAsk("command")
 							setEnableButtons(!isPartial)
-							setPrimaryButtonKey("chat:runCommand.title")
-							setSecondaryButtonKey("chat:reject.title")
+							// No buttons while the call still streams. A partial ask has
+							// no answer to give, so draw none until the ask is live (#2232).
+							setPrimaryButtonKey(isPartial ? undefined : "chat:runCommand.title")
+							setSecondaryButtonKey(isPartial ? undefined : "chat:reject.title")
 							break
 						case "command_output":
 							setSendingDisabled(false)

@@ -12,6 +12,9 @@
 \* Not modeled: the answered ask (the effect breaks on isAnswered before it sets buttons; a unit test covers it),
 \* enableButtons (it only dims the pair; the failure is that the pair draws), other ask kinds, and the command text.
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
+\* Result: Old failed on NoButtonsWhilePartial (2 states, the leak replayed on unfixed code by 3 unit tests).
+\* NoLive failed on ButtonsWhenLive. Fixed passed (3 states) and all 7 unit tests held on the fixed code.
+\* Findings: no review round yet. Covered 0, added 0, gap 0.
 
 EXTENDS Naturals
 
