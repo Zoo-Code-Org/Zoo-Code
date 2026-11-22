@@ -432,4 +432,173 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			expect(cleaned).toEqual(messagesWithoutTags)
 		})
 	})
+
+	describe("condensation-aware truncation (issue 1823)", () => {
+		// A history after a condensation: every message before the summary carries
+		// condenseParent, so the API receives only the summary and the new turns.
+		const condensedHistory: ApiMessage[] = [
+			{ role: "user", content: "Dead 1", ts: 1000, condenseParent: "condense-1" },
+			{ role: "assistant", content: "Dead 2", ts: 1100, condenseParent: "condense-1" },
+			{ role: "user", content: "Dead 3", ts: 1200, condenseParent: "condense-1" },
+			{ role: "assistant", content: "Dead 4", ts: 1300, condenseParent: "condense-1" },
+			{ role: "user", content: "Dead 5", ts: 1400, condenseParent: "condense-1" },
+			{ role: "assistant", content: "Dead 6", ts: 1500, condenseParent: "condense-1" },
+			{
+				role: "assistant",
+				content: "Summary of the conversation",
+				ts: 1600,
+				isSummary: true,
+				condenseId: "condense-1",
+			},
+			{ role: "user", content: "Live 1", ts: 1700 },
+			{ role: "assistant", content: "Live 2", ts: 1800 },
+			{ role: "user", content: "Live 3", ts: 1900 },
+			{ role: "assistant", content: "Live 4", ts: 2000 },
+			{ role: "user", content: "Live 5", ts: 2100 },
+			{ role: "assistant", content: "Live 6", ts: 2200 },
+		]
+
+		it("should not count messages hidden by condensation as visible", () => {
+			const result = truncateConversation(condensedHistory, 0.5, "test-task-id")
+
+			// The visible set is the summary plus six live messages.
+			// raw = floor((7 - 1) * 0.5) = 3, rounded to even = 2.
+			expect(result.messagesRemoved).toBe(2)
+		})
+
+		it("should tag only live messages, never condensed ones or the summary", () => {
+			const result = truncateConversation(condensedHistory, 0.5, "test-task-id")
+
+			const tagged = result.messages.filter((msg) => msg.truncationParent === result.truncationId)
+			expect(tagged.length).toBe(2)
+
+			// The two live messages after the summary are the ones hidden.
+			expect(result.messages.find((m) => m.content === "Live 1")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Live 2")?.truncationParent).toBe(result.truncationId)
+
+			// Messages already hidden by condensation must not get a truncationParent.
+			for (const msg of result.messages) {
+				if (msg.condenseParent === "condense-1") {
+					expect(msg.truncationParent).toBeUndefined()
+				}
+			}
+
+			// The summary must stay visible.
+			const summary = result.messages.find((m) => m.content === "Summary of the conversation")
+			expect(summary?.truncationParent).toBeUndefined()
+		})
+
+		it("should shrink the live history that the API receives", () => {
+			const before = getEffectiveApiHistory(condensedHistory).filter((m) => !m.isTruncationMarker)
+			const result = truncateConversation(condensedHistory, 0.5, "test-task-id")
+			const after = getEffectiveApiHistory(result.messages).filter((m) => !m.isTruncationMarker)
+
+			// Before: summary + 6 live messages. After: summary + 4 live messages.
+			expect(before.length).toBe(7)
+			expect(after.length).toBe(5)
+		})
+	})
+
+	describe("property: a truncation removes exactly the live messages that it reports", () => {
+		// The sink rule of getEffectiveApiHistory for histories without orphaned tags:
+		// a message is live when no parent tag hides it and it is not a marker.
+		const liveMessages = (msgs: ApiMessage[]) => {
+			const summaryIds = new Set(
+				msgs.filter((m) => m.isSummary && m.condenseId).map((m) => m.condenseId as string),
+			)
+			const truncationIds = new Set(
+				msgs.filter((m) => m.isTruncationMarker && m.truncationId).map((m) => m.truncationId as string),
+			)
+			return msgs.filter(
+				(m) =>
+					!m.isTruncationMarker &&
+					!(m.truncationParent && truncationIds.has(m.truncationParent)) &&
+					!(m.condenseParent && summaryIds.has(m.condenseParent)),
+			)
+		}
+
+		const plain = (n: number, prefix: string, startTs: number) =>
+			Array.from({ length: n }, (_, i) => ({
+				role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+				content: `${prefix} ${i + 1}`,
+				ts: startTs + i * 100,
+			}))
+
+		const scenarios: ApiMessage[][] = [
+			// Plain history without tags.
+			plain(11, "Plain", 1000),
+			// One condensation, then new turns (issue 1823).
+			[
+				...plain(6, "Dead", 1000).map((m) => ({ ...m, condenseParent: "condense-1" })),
+				{
+					role: "assistant" as const,
+					content: "Summary one",
+					ts: 1700,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				...plain(6, "Live", 1800),
+			],
+			// A condensation and an earlier truncation, then new turns.
+			[
+				...plain(6, "Dead", 1000).map((m) => ({ ...m, condenseParent: "condense-1" })),
+				{
+					role: "assistant" as const,
+					content: "Summary one",
+					ts: 1700,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				...plain(4, "Trunc", 1800).map((m) => ({ ...m, truncationParent: "trunc-1" })),
+				{
+					role: "user" as const,
+					content: "[Sliding window truncation: 4 messages hidden]",
+					ts: 2250,
+					isTruncationMarker: true,
+					truncationId: "trunc-1",
+				},
+				...plain(5, "Live", 2300),
+			],
+			// Nested condensation: two summaries, all older messages tagged.
+			[
+				...plain(4, "Dead", 1000).map((m) => ({ ...m, condenseParent: "condense-1" })),
+				{
+					role: "assistant" as const,
+					content: "Summary one",
+					ts: 1500,
+					isSummary: true,
+					condenseId: "condense-1",
+				},
+				...plain(4, "Dead2", 1600).map((m) => ({ ...m, condenseParent: "condense-2" })),
+				{
+					role: "assistant" as const,
+					content: "Summary two",
+					ts: 2100,
+					isSummary: true,
+					condenseId: "condense-2",
+				},
+				...plain(5, "Live", 2200),
+			],
+		]
+
+		for (const scenario of scenarios) {
+			it(`removes only live messages (${scenario.length} messages)`, () => {
+				const liveBefore = liveMessages(scenario)
+				const result = truncateConversation(scenario, 0.5, "test-task-id")
+
+				// Every reported removal is a live message that became hidden.
+				const hiddenLive = liveBefore.filter(
+					(m) =>
+						result.messages.find((r) => r.content === m.content)?.truncationParent === result.truncationId,
+				)
+				expect(result.messagesRemoved).toBe(hiddenLive.length)
+
+				// When the code reports removals, the live history must shrink.
+				if (result.messagesRemoved > 0) {
+					const liveAfter = liveMessages(result.messages)
+					expect(liveAfter.length).toBeLessThan(liveBefore.length)
+				}
+			})
+		}
+	})
 })

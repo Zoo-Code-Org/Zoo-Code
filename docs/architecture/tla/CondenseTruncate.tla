@@ -23,6 +23,12 @@
 \* Result: CondenseTruncate.cfg (Fixed) holds. The UnfixedRemoved and UnfixedCount
 \* configs fail. They model the code before the fix, so the failures are the
 \* reproduction of issue 1823. The property tests replay both on the real code.
+\* Findings: covered 2, added 0, gap 1. The two failures of issue 1823 are the
+\* covered findings; no review round yet. The gap is the marker text below.
+\* Replay: the counterexample is AddMsg x4, Condense, Truncate. The truncation
+\* reported 2 removed messages and removed 0 live ones. The unit test
+\* "should not count messages hidden by condensation as visible" runs the same
+\* steps on the real code and fails the same way before the fix.
 
 EXTENDS Naturals, FiniteSets
 

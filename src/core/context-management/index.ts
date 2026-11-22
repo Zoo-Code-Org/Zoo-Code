@@ -95,11 +95,13 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 
 	const truncationId = crypto.randomUUID()
 
-	// Filter to only visible messages (those not already truncated)
+	// Filter to only visible messages (those not already truncated or condensed).
+	// Messages hidden by condensation (condenseParent) are already excluded from API
+	// requests, so truncating them cannot shrink the live context (issue 1823).
 	// We need to track original indices to correctly tag messages in the full array
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
-		if (!msg.truncationParent && !msg.isTruncationMarker) {
+		if (!msg.truncationParent && !msg.isTruncationMarker && !msg.condenseParent) {
 			visibleIndices.push(index)
 		}
 	})
@@ -383,10 +385,12 @@ export async function manageContext({
 	if (prevContextTokens > allowedTokens) {
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 
-		// Calculate new context tokens after truncation by counting non-truncated messages
-		// Messages with truncationParent are hidden, so we count only those without it
+		// Calculate new context tokens after truncation by counting the messages the
+		// API still receives: hidden by neither truncation nor condensation, and not
+		// the truncation marker itself (issue 1823: condenseParent messages are
+		// already excluded from API requests and must not inflate this count).
 		const effectiveMessages = truncationResult.messages.filter(
-			(msg) => !msg.truncationParent && !msg.isTruncationMarker,
+			(msg) => !msg.truncationParent && !msg.isTruncationMarker && !msg.condenseParent,
 		)
 
 		// Include system prompt tokens so this value matches what we send to the API.

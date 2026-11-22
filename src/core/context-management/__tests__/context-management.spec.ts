@@ -6,6 +6,8 @@ import type { ModelInfo } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { BaseProvider } from "../../../api/providers/base-provider"
+import type { ApiHandlerCreateMessageMetadata } from "../../../api"
+import type { ApiStream } from "../../../api/transform/stream"
 import { ApiMessage } from "../../task-persistence/apiMessages"
 import * as condenseModule from "../../condense"
 
@@ -1701,6 +1703,152 @@ describe("Context Management", () => {
 			// a significant fraction of prevContextTokens after 50% truncation
 			// With system prompt included, we expect roughly 50% of the messages remaining
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThan(0)
+		})
+	})
+
+	/**
+	 * Issue 1823: the fallback truncation runs on a history that a condensation
+	 * already tagged. The count after truncation must exclude those messages,
+	 * because the API never receives them.
+	 */
+	describe("newContextTokensAfterTruncation excludes condensed messages (issue 1823)", () => {
+		class DeterministicApiHandler extends BaseProvider {
+			override async *createMessage(
+				_systemPrompt: string,
+				_messages: Anthropic.Messages.MessageParam[],
+				_metadata?: ApiHandlerCreateMessageMetadata,
+			): ApiStream {
+				yield { type: "text", text: "Mock summary content" }
+				yield { type: "usage", inputTokens: 100, outputTokens: 50 }
+			}
+
+			getModel(): { id: string; info: ModelInfo } {
+				return {
+					id: "test-model",
+					info: {
+						contextWindow: 100000,
+						maxTokens: 50000,
+						supportsPromptCache: true,
+						supportsImages: false,
+						inputPrice: 0,
+						outputPrice: 0,
+						description: "Test model",
+					},
+				}
+			}
+
+			// One token per character. The test computes the expected count by hand.
+			override async countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number> {
+				return content.reduce((sum, block) => {
+					if ("text" in block && typeof block.text === "string") {
+						return sum + block.text.length
+					}
+					return sum
+				}, 0)
+			}
+		}
+
+		const handler = new DeterministicApiHandler()
+		const systemPrompt = "sys" // 3 tokens
+		const contextWindow = 40
+		const maxTokens = 8
+		const totalTokens = 30 // with the last message, this exceeds allowedTokens (36)
+
+		const runTruncation = (messages: ApiMessage[]) =>
+			manageContext({
+				messages,
+				totalTokens,
+				contextWindow,
+				maxTokens,
+				apiHandler: handler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt,
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+		it("excludes messages hidden by condensation from the count", async () => {
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "condensed one", condenseParent: "c-1" },
+				{ role: "assistant", content: "condensed two", condenseParent: "c-1" },
+				{ role: "assistant", content: "The summary text", isSummary: true, condenseId: "c-1" },
+				{ role: "user", content: "live message one" },
+				{ role: "assistant", content: "live message two" },
+				{ role: "user", content: "live three" },
+				{ role: "assistant", content: "live four" },
+				{ role: "user", content: "live five" },
+			]
+
+			const result = await runTruncation(messages)
+			expect(result.truncationId).toBeDefined()
+
+			// Truncation hides the two live messages after the summary (removed is even).
+			// The count covers the system prompt, the summary and the kept live messages.
+			const expected =
+				systemPrompt.length +
+				"The summary text".length +
+				"live three".length +
+				"live four".length +
+				"live five".length
+			expect(result.newContextTokensAfterTruncation).toBe(expected)
+
+			// The condensed messages and the summary keep their state.
+			for (const msg of result.messages) {
+				if (msg.condenseParent === "c-1") {
+					expect(msg.truncationParent).toBeUndefined()
+				}
+			}
+			const summary = result.messages.find((m) => m.isSummary)
+			expect(summary?.truncationParent).toBeUndefined()
+		})
+
+		it("equals the token count of the effective history (CountExact property)", async () => {
+			const plain = (n: number, prefix: string) =>
+				Array.from({ length: n }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `${prefix} message ${i + 1}`,
+				}))
+
+			const scenarios: ApiMessage[][] = [
+				// Plain history without tags.
+				plain(5, "Plain"),
+				// One condensation, then new turns (issue 1823).
+				[
+					...plain(2, "Condensed").map((m) => ({ ...m, condenseParent: "c-1" })),
+					{ role: "assistant" as const, content: "The summary text", isSummary: true, condenseId: "c-1" },
+					...plain(5, "Live"),
+				],
+				// A condensation and an earlier truncation, then new turns.
+				[
+					...plain(2, "Condensed").map((m) => ({ ...m, condenseParent: "c-1" })),
+					{ role: "assistant" as const, content: "The summary text", isSummary: true, condenseId: "c-1" },
+					...plain(4, "Truncated").map((m) => ({ ...m, truncationParent: "t-1" })),
+					{
+						role: "user" as const,
+						content: "[Sliding window truncation: 4 messages hidden]",
+						isTruncationMarker: true,
+						truncationId: "t-1",
+					},
+					...plain(5, "Live"),
+				],
+			]
+
+			for (const messages of scenarios) {
+				const result = await runTruncation(messages)
+				expect(result.truncationId).toBeDefined()
+
+				// The sink decides what the API receives. The reported count must
+				// match it, except for the marker text, which both leave out.
+				const effective = condenseModule
+					.getEffectiveApiHistory(result.messages)
+					.filter((m) => !m.isTruncationMarker)
+				const expected =
+					systemPrompt.length +
+					effective.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0)
+				expect(result.newContextTokensAfterTruncation).toBe(expected)
+			}
 		})
 	})
 
