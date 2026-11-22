@@ -76,16 +76,23 @@ vi.mock("fs/promises", async (importOriginal) => {
 	}
 })
 
-vi.mock("axios", () => ({
-	default: {
+vi.mock("axios", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("axios")>()
+	// Only get/post are replaced. Production branches on the real predicate
+	// (ClineProvider classifies the dev-server probe failure only for a genuine Axios
+	// error), so a mock that answers true for every rejection would let a plain Error
+	// prove a branch the extension host never takes.
+	return {
+		...actual,
+		default: {
+			...actual.default,
+			get: vi.fn().mockResolvedValue({ data: { data: [] } }),
+			post: vi.fn(),
+		},
 		get: vi.fn().mockResolvedValue({ data: { data: [] } }),
 		post: vi.fn(),
-		isAxiosError: vi.fn().mockReturnValue(true),
-	},
-	get: vi.fn().mockResolvedValue({ data: { data: [] } }),
-	post: vi.fn(),
-	isAxiosError: vi.fn().mockReturnValue(true),
-}))
+	}
+})
 
 vi.mock("../../../utils/safeWriteJson")
 
@@ -6183,6 +6190,91 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("should ignore a viewStateId that is not a string", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			// A crafted postMessage can carry any JSON value here even though the message type
+			// declares a string, so the candidates are cast rather than the guard being widened.
+			const candidates = [42, null, { viewStateId: "x" }] as unknown as string[]
+
+			for (const candidate of candidates) {
+				await provider["setViewStateId"](candidate)
+				expect(provider["viewStateId"]).toBe(provider.viewId)
+			}
+
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(expect.stringContaining("Ignoring a non-string viewStateId"))
+
+			await provider.dispose()
+		})
+
+		it("should reject a whitespace-only viewStateId", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			await provider["setViewStateId"]("   ")
+
+			// Normalizing strips the characters that are not id characters, so a blank id is what
+			// reaches the guard; installing it would key every write of this view to "".
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+
+			await provider.dispose()
+		})
+
+		it("should reject an oversized viewStateId, log it, and write nothing", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const logSpy = vi.spyOn(provider, "log")
+			const oversizedId = "v".repeat(ClineProvider["MAX_VIEW_STATE_ID_LENGTH"] + 1)
+
+			await provider["setViewStateId"](oversizedId)
+
+			// The webview generates a UUID, so a longer value is not a view id, and an unbounded
+			// key is unbounded growth in the shared viewStates map.
+			expect(provider["viewStateId"]).toBe(provider.viewId)
+			expect(mockContext.globalState.get("viewStates")).toBeUndefined()
+			expect(logSpy).toHaveBeenCalledWith(
+				expect.stringContaining(`Ignoring an oversized viewStateId (${oversizedId.length} chars)`),
+			)
+
+			await provider.dispose()
+		})
+
+		it("should accept a viewStateId exactly at the length limit", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			const maxId = "v".repeat(ClineProvider["MAX_VIEW_STATE_ID_LENGTH"])
+
+			await provider["setViewStateId"](maxId)
+
+			// The boundary is inclusive: a UUID-length id must not be dropped by an off-by-one.
+			expect(provider["viewStateId"]).toBe(maxId)
+
+			await provider.dispose()
+		})
+
 		it("restores the previous view id when the registration write fails so a later launch retries", async () => {
 			const contextProxy = new ContextProxy(mockContext)
 			const provider = new ClineProvider(
@@ -7241,6 +7333,31 @@ describe("ClineProvider", () => {
 		const storedViewStates = () =>
 			mockContext.globalState.get<NonNullable<RooCodeSettings["viewStates"]>>("viewStates")
 
+		it("should drop an invalid record instead of throwing while sorting for retention", async () => {
+			await mockContext.globalState.update("viewStates", {
+				...futureStampedStates(3),
+				"broken-record": null,
+			} as unknown as RooCodeSettings["viewStates"])
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+
+			// The retention sort dereferences each entry's timestamp, so a record the store kept
+			// as null would throw out of a save of this view's own selection and roll back the
+			// shared half of it. The invalid record is dropped with the write, not carried.
+			await provider["savePersistedViewState"]({ mode: "architect" })
+			const states = storedViewStates()
+
+			expect(states?.["broken-record"]).toBeUndefined()
+			expect(Object.keys(states ?? {})).toHaveLength(4)
+
+			await provider.dispose()
+		})
+
 		it("should keep the entry a save just wrote when its timestamp sorts below the retention limit", async () => {
 			const provider = new ClineProvider(
 				mockContext,
@@ -7297,6 +7414,15 @@ describe("ClineProvider", () => {
 			// Authored under this instance's temporary id and stamped with the current time.
 			await provider.saveViewState("mode", "architect")
 			const temporaryViewStateId = provider["viewStateId"]
+			// The save above already pruned the map back to the limit, so without a fresh entry
+			// the re-key's delete-then-insert leaves it exactly at the limit and the destination
+			// is never at risk of eviction: the assertions below would pass even if re-key stopped
+			// protecting it. Stamped below the retained window but above the entry being moved, so
+			// the destination is the one the retention has to save.
+			await mockContext.globalState.update("viewStates", {
+				...(storedViewStates() ?? {}),
+				"clock-skew-cutoff": { mode: "code", updatedAt: Date.now() + 59_999 },
+			})
 
 			await provider["rekeyPersistedViewStateEntry"]("clock-skew-stable-view")
 			const states = storedViewStates()
@@ -7304,6 +7430,7 @@ describe("ClineProvider", () => {
 			expect(Object.keys(states ?? {})).toHaveLength(50)
 			expect(states?.["clock-skew-stable-view"]).toMatchObject({ mode: "architect" })
 			expect(states?.[temporaryViewStateId]).toBeUndefined()
+			expect(states?.["clock-skew-cutoff"]).toBeUndefined()
 
 			await provider.dispose()
 		})
@@ -7716,7 +7843,8 @@ describe("ClineProvider", () => {
 				// The buffer is mutated in place, so record a snapshot of the payload rather
 				// than the object the mutation path hands over.
 				viewWrites.push({ ...values })
-				await mirrorWrite.call(provider, values)
+				// The landed flag has to pass through the wrapper: a caller reports the write from it.
+				return await mirrorWrite.call(provider, values)
 			}
 
 			// A save that activates: the shared stores and this view mirror must agree on B.

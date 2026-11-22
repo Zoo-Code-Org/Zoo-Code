@@ -763,7 +763,12 @@ export interface WebviewMessage {
 		| "diagnosticsResponse"
 	text?: string
 	viewStateId?: string
-	/** For `webviewDidLaunch`: the claim delivered for `viewStateId`, enforced by setViewStateId. */
+	/**
+	 * For `webviewDidLaunch`: the claim for `viewStateId` - the pair `setViewStateId` enforces
+	 * when a claim is presented. Delivery at launch is the follow-up unit (N5, #2237): the
+	 * webview does not send this field yet, so a launch today carries the id without a claim,
+	 * and the host mints one on first write.
+	 */
 	viewStateClaim?: string
 	taskId?: string
 	editedMessageContent?: string

@@ -892,7 +892,11 @@ export class ClineProvider
 		states: Record<string, PersistedViewState>,
 		protectedKey?: string,
 	): Record<string, PersistedViewState> {
-		const entries = Object.entries(states)
+		// The map is validated as a whole by getPersistedViewStates, but an entry is copied
+		// through unchanged: a record an older version or a hand-edited store left as null or
+		// a string would make the sort dereference it, and the throw would fail the write and
+		// roll back the shared half of the mutation for a record this view never owned.
+		const entries = Object.entries(states).filter(([, value]) => value !== null && typeof value === "object")
 		const retained = entries
 			.sort(([, a], [, b]) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
 			.slice(0, ClineProvider.MAX_PERSISTED_VIEW_STATES)
@@ -1176,9 +1180,13 @@ export class ClineProvider
 		key: K,
 		value: PersistedViewStateValues[K] | undefined,
 	): Promise<void> {
-		await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
+		const applied = await this._saveViewLocalStateFromMutation({ [key]: value } as ViewLocalStateValues)
 
-		this.log(`[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`)
+		this.log(
+			applied
+				? `[saveViewState] Saved ${String(key)} for viewId ${this.viewId}`
+				: `[saveViewState] Discarded ${String(key)} for viewId ${this.viewId}: a reset beat this write`,
+		)
 	}
 
 	/**
@@ -4765,14 +4773,15 @@ export class ClineProvider
 	/** Persist the durable subset first, then update the in-memory buffer. */
 	private async _saveViewLocalStateFromMutation(
 		values: Partial<RooCodeSettings> & Partial<ExtensionState>,
-	): Promise<void> {
+	): Promise<boolean> {
 		const landed = await this._persistViewLocalStateFromMutation(values)
 		if (!landed) {
 			// A reset that beat this write cleared the buffer; applying the value now would
 			// leave the view reporting a selection a reload drops.
-			return
+			return false
 		}
 		this._updateViewLocalStateFromMutation(values)
+		return true
 	}
 
 	/** Write the durable subset of a mutation into this view's viewStates entry. */
