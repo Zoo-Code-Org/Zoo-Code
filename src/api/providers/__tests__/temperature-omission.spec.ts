@@ -246,8 +246,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new FireworksHandler({ fireworksApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
@@ -266,13 +266,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new LiteLLMHandler({ litellmApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
-
-		it("I1: omits temperature when custom temperature is null", async () => {
-			await collectStream(make({ modelTemperature: null }).createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
@@ -286,11 +281,14 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make().completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("NativeOllamaHandler", () => {
@@ -302,8 +300,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				...options,
 			})
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockChat.mock.calls[0][0].options).toBe(false)
 		})
 
@@ -317,11 +315,14 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockChat.mock.calls[0][0].options.temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockChat.mockResolvedValueOnce({ message: { content: "ok" } })
-			await make().completePrompt("hello")
-			expect("temperature" in mockChat.mock.calls[0][0].options).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockChat.mockResolvedValueOnce({ message: { content: "ok" } })
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockChat.mock.calls[0][0].options).toBe(false)
+			},
+		)
 
 		it("I2 (completePrompt): sends an explicit custom temperature of 0", async () => {
 			mockChat.mockResolvedValueOnce({ message: { content: "ok" } })
@@ -339,8 +340,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				...options,
 			})
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			const model = handler.getModel()
 			const body = handler["buildRequestBody"](model, [], systemPrompt, undefined, undefined, {
 				taskId: "test-task",
@@ -366,13 +367,16 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(body.temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockResponsesCreate.mockResolvedValueOnce({
-				output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
-			})
-			await make().completePrompt("hello")
-			expect("temperature" in mockResponsesCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockResponsesCreate.mockResolvedValueOnce({
+					output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+				})
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockResponsesCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 
 		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
 			mockResponsesCreate.mockResolvedValueOnce({
@@ -387,8 +391,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new MistralHandler({ mistralApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockMistralStream.mock.calls[0][0]).toBe(false)
 		})
 
@@ -402,10 +406,13 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockMistralStream.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			await make().completePrompt("hello")
-			expect("temperature" in mockMistralComplete.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockMistralComplete.mock.calls[0][0]).toBe(false)
+			},
+		)
 
 		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
 			await make({ modelTemperature: 0.7 }).completePrompt("hello")
@@ -421,8 +428,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				...options,
 			})
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			vitest.spyOn(handler, "countTokens").mockResolvedValue(1)
 			await collectStream(handler.createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
@@ -442,11 +449,14 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make().completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("AwsBedrockHandler", () => {
@@ -472,8 +482,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new VercelAiGatewayHandler({ vercelAiGatewayApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			expect(handler.getModel().id).toBe(vercelAiGatewayDefaultModelId)
 			await collectStream(handler.createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
@@ -489,19 +499,22 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make().completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("ZooGatewayHandler", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new ZooGatewayHandler({ zooSessionToken: "zoo_ext_test_token", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			expect(handler.getModel().id).toBe(zooGatewayDefaultModelId)
 			await collectStream(handler.createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
@@ -517,19 +530,22 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make().completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("KenariHandler", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new KenariHandler({ kenariApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			expect(handler.getModel().id).toBe(kenariDefaultModelId)
 			await collectStream(handler.createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
@@ -545,24 +561,22 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make().completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("NanoGptHandler", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new NanoGptHandler({ nanoGptModelId: nanoGptDefaultModelId, ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
-
-		it("I1: omits temperature when custom temperature is null", async () => {
-			await collectStream(make({ modelTemperature: null }).createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
@@ -576,19 +590,22 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is null", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make({ modelTemperature: null }).completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("FriendliHandler", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new FriendliHandler({ friendliApiKey: "test-key", ...options })
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			await collectStream(make().createMessage("system", userMessage))
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			await collectStream(make({ modelTemperature }).createMessage("system", userMessage))
 			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 		})
 
@@ -607,20 +624,36 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 		const make = (options: Partial<ApiHandlerOptions> = {}) =>
 			new ZAiHandler({ zaiApiKey: "test-key", zaiApiLine: "international_coding", ...options })
 
-		it("I1: omits temperature when custom temperature is unset (non-thinking path)", async () => {
-			await collectStream(make().createMessage("system", userMessage))
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1: omits temperature when custom temperature is %s (non-thinking path)",
+			async (modelTemperature) => {
+				// glm-4.5 declares no supportsReasoningEffort, so the handler takes the
+				// plain delegation path; the glm-4.7 default would route to thinking.
+				const handler = make({ apiModelId: "glm-4.5", modelTemperature })
+				expect(handler.getModel().id).toBe("glm-4.5")
+				await collectStream(handler.createMessage("system", userMessage))
+				expect("thinking" in mockCreate.mock.calls[0][0]).toBe(false)
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 
 		it("I2: sends an explicit custom temperature of 0 (non-thinking path)", async () => {
-			await collectStream(make({ modelTemperature: 0 }).createMessage("system", userMessage))
+			const handler = make({ apiModelId: "glm-4.5", modelTemperature: 0 })
+			expect(handler.getModel().id).toBe("glm-4.5")
+			await collectStream(handler.createMessage("system", userMessage))
+			expect("thinking" in mockCreate.mock.calls[0][0]).toBe(false)
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0)
 		})
 
-		it("I1: omits temperature when custom temperature is unset (thinking path)", async () => {
-			await collectStream(make({ apiModelId: "glm-5.3" }).createMessage("system", userMessage))
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1: omits temperature when custom temperature is %s (thinking path)",
+			async (modelTemperature) => {
+				await collectStream(
+					make({ apiModelId: "glm-5.3", modelTemperature }).createMessage("system", userMessage),
+				)
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 
 		it("I3: sends a custom temperature unchanged (thinking path)", async () => {
 			await collectStream(
@@ -629,11 +662,14 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt, thinking path): omits temperature when custom temperature is unset", async () => {
-			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
-			await make({ apiModelId: "glm-5.3" }).completePrompt("hello")
-			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt, thinking path): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+				await make({ apiModelId: "glm-5.3", modelTemperature }).completePrompt("hello")
+				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+			},
+		)
 	})
 
 	describe("GeminiHandler", () => {
@@ -664,8 +700,8 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			return { mockGenerateContentStream, mockGenerateContent }
 		}
 
-		it("I1: omits temperature when custom temperature is unset", async () => {
-			const handler = make()
+		it.each([undefined, null])("I1: omits temperature when custom temperature is %s", async (modelTemperature) => {
+			const handler = make({ modelTemperature })
 			const { mockGenerateContentStream } = installClientMock(handler)
 			await collectStream(handler.createMessage("system", userMessage))
 			const call = mockGenerateContentStream.mock.calls[0][0]
@@ -688,13 +724,16 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			expect(call.config.temperature).toBe(0.7)
 		})
 
-		it("I1 (completePrompt): omits temperature when custom temperature is unset", async () => {
-			const handler = make()
-			const { mockGenerateContent } = installClientMock(handler)
-			await handler.completePrompt("hello")
-			const call = mockGenerateContent.mock.calls[0][0]
-			expect("temperature" in call.config).toBe(false)
-		})
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				const handler = make({ modelTemperature })
+				const { mockGenerateContent } = installClientMock(handler)
+				await handler.completePrompt("hello")
+				const call = mockGenerateContent.mock.calls[0][0]
+				expect("temperature" in call.config).toBe(false)
+			},
+		)
 
 		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
 			const handler = make({ modelTemperature: 0.7 })

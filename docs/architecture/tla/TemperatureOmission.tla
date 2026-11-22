@@ -3,11 +3,17 @@
 \* off (modelTemperature is nullish). A number, zero included, is a custom value.
 \* Sinks: createStream in BaseOpenAiCompatibleProvider; createMessage and
 \* completePrompt in LiteLlmHandler, NativeOllamaHandler, OpenAiNativeHandler,
-\* MistralHandler, LmStudioHandler, BedrockHandler, VercelAiGatewayHandler,
+\* MistralHandler, LmStudioHandler, VercelAiGatewayHandler,
 \* ZooGatewayHandler, KenariHandler, NanoGptHandler, FriendliHandler, ZaiHandler,
 \* GeminiHandler. Each writes (or omits) one temperature field in the request body.
 \* Exception: a reasoning format that requires temperature (DeepSeek reasoner in
 \* openai.ts PR 247, ollama useR1Format) sends its default when no custom value is set.
+\* Not covered: AwsBedrockHandler. Its constructor replaces a nullish setting with
+\* a retained default, and its non-adaptive request paths send that default. An
+\* explicit 0 is kept; nothing is omitted, so no omission invariant applies to it.
+\* Review ratchet: PR 2650 round 1 (comment 4658152524) removed Bedrock from the
+\* sink list. The first version claimed Bedrock as an omission sink; the omission
+\* invariant holds only for the providers that implement omission.
 \* Failure: the user turns custom temperature off and a provider still writes a
 \* temperature field (often 0), or overwrites an explicit 0, or writes null.
 \* Invariant: no temperature field when the value is nullish and the model is not a

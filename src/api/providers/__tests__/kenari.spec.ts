@@ -251,7 +251,13 @@ describe("KenariHandler", () => {
 				},
 			})
 
-			const handler = new KenariHandler({ kenariApiKey: "test-key", kenariModelId: "openai/o3-mini" })
+			// A custom value is set on purpose: with modelTemperature unset, these
+			// tests would pass even if the supportsTemperature gate were removed.
+			const handler = new KenariHandler({
+				kenariApiKey: "test-key",
+				kenariModelId: "openai/o3-mini",
+				modelTemperature: 0.7,
+			})
 			await collectStream(handler.createMessage("sys", [{ role: "user", content: "Hi" }]))
 
 			expect(mockCreate).toHaveBeenCalledWith(
@@ -364,7 +370,12 @@ describe("KenariHandler", () => {
 			})
 			mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
 
-			const handler = new KenariHandler({ kenariApiKey: "test-key", kenariModelId: "openai/o3-mini" })
+			// Custom value set on purpose (see the streaming counterpart above).
+			const handler = new KenariHandler({
+				kenariApiKey: "test-key",
+				kenariModelId: "openai/o3-mini",
+				modelTemperature: 0.7,
+			})
 			expect(await handler.completePrompt("ping")).toBe("ok")
 
 			const callArgs = mockCreate.mock.calls[0][0]
