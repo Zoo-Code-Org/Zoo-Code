@@ -4,7 +4,13 @@ import crypto from "crypto"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
-import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
+import {
+	MAX_CONDENSE_THRESHOLD,
+	MIN_CONDENSE_THRESHOLD,
+	summarizeConversation,
+	SummarizeResponse,
+	getExistingSummaryIds,
+} from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -96,12 +102,18 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 	const truncationId = crypto.randomUUID()
 
 	// Filter to only visible messages (those not already truncated or condensed).
-	// Messages hidden by condensation (condenseParent) are already excluded from API
-	// requests, so truncating them cannot shrink the live context (issue 1823).
+	// A condenseParent tag hides a message only when its summary still exists.
+	// Matched tags stay excluded (issue 1823). Orphaned tags after a rewind stay
+	// selectable, because the sink shows those messages again (issue 1823 review).
 	// We need to track original indices to correctly tag messages in the full array
+	const existingSummaryIds = getExistingSummaryIds(messages)
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
-		if (!msg.truncationParent && !msg.isTruncationMarker && !msg.condenseParent) {
+		if (
+			!msg.truncationParent &&
+			!msg.isTruncationMarker &&
+			!(msg.condenseParent && existingSummaryIds.has(msg.condenseParent))
+		) {
 			visibleIndices.push(index)
 		}
 	})
@@ -387,10 +399,15 @@ export async function manageContext({
 
 		// Calculate new context tokens after truncation by counting the messages the
 		// API still receives: hidden by neither truncation nor condensation, and not
-		// the truncation marker itself (issue 1823: condenseParent messages are
-		// already excluded from API requests and must not inflate this count).
+		// the truncation marker itself. A condenseParent tag hides a message only when
+		// its summary still exists. Matched tags stay excluded (issue 1823); orphaned
+		// tags after a rewind stay counted, matching the sink (issue 1823 review).
+		const existingSummaryIds = getExistingSummaryIds(truncationResult.messages)
 		const effectiveMessages = truncationResult.messages.filter(
-			(msg) => !msg.truncationParent && !msg.isTruncationMarker && !msg.condenseParent,
+			(msg) =>
+				!msg.truncationParent &&
+				!msg.isTruncationMarker &&
+				!(msg.condenseParent && existingSummaryIds.has(msg.condenseParent)),
 		)
 
 		// Include system prompt tokens so this value matches what we send to the API.

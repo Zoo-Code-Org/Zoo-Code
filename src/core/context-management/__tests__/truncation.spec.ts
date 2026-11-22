@@ -497,25 +497,42 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 			expect(before.length).toBe(7)
 			expect(after.length).toBe(5)
 		})
+
+		it("selects messages with orphaned condenseParent for truncation (rewind case)", () => {
+			// A rewind deleted the summary, so these tags match nothing that exists.
+			// The sink keeps such messages live, so truncation must be able to select them.
+			const history: ApiMessage[] = [
+				...Array.from({ length: 4 }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `Orphan ${i + 1}`,
+					ts: 1000 + i * 100,
+					condenseParent: "condense-gone",
+				})),
+				...Array.from({ length: 8 }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `Live ${i + 1}`,
+					ts: 1500 + i * 100,
+				})),
+			]
+
+			const result = truncateConversation(history, 0.5, "test-task-id")
+
+			// All 12 messages are live: raw = floor((12 - 1) * 0.5) = 5, rounded to even = 4.
+			expect(result.messagesRemoved).toBe(4)
+
+			// The first visible message stays untagged; the next orphans are selected,
+			// which proves that revived messages are selectable again.
+			expect(result.messages.find((m) => m.content === "Orphan 1")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "Orphan 2")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Orphan 3")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "Orphan 4")?.truncationParent).toBe(result.truncationId)
+		})
 	})
 
 	describe("property: a truncation removes exactly the live messages that it reports", () => {
-		// The sink rule of getEffectiveApiHistory for histories without orphaned tags:
-		// a message is live when no parent tag hides it and it is not a marker.
-		const liveMessages = (msgs: ApiMessage[]) => {
-			const summaryIds = new Set(
-				msgs.filter((m) => m.isSummary && m.condenseId).map((m) => m.condenseId as string),
-			)
-			const truncationIds = new Set(
-				msgs.filter((m) => m.isTruncationMarker && m.truncationId).map((m) => m.truncationId as string),
-			)
-			return msgs.filter(
-				(m) =>
-					!m.isTruncationMarker &&
-					!(m.truncationParent && truncationIds.has(m.truncationParent)) &&
-					!(m.condenseParent && summaryIds.has(m.condenseParent)),
-			)
-		}
+		// The sink (getEffectiveApiHistory) decides which messages the API receives.
+		// Use it as the oracle so this test cannot drift from the real rule.
+		const liveMessages = (msgs: ApiMessage[]) => getEffectiveApiHistory(msgs).filter((m) => !m.isTruncationMarker)
 
 		const plain = (n: number, prefix: string, startTs: number) =>
 			Array.from({ length: n }, (_, i) => ({
@@ -578,6 +595,11 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 					condenseId: "condense-2",
 				},
 				...plain(5, "Live", 2200),
+			],
+			// A rewind deleted the summary; its tagged messages are live again.
+			[
+				...plain(6, "Revived", 1000).map((m) => ({ ...m, condenseParent: "condense-gone" })),
+				...plain(6, "Live", 1700),
 			],
 		]
 
