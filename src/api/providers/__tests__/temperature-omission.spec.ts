@@ -97,6 +97,32 @@ const MODEL_CATALOG = vitest.hoisted(() => ({
 		supportsPromptCache: false,
 		description: "NanoGpt default",
 	},
+	// Capability-gate fixtures for the router providers (#242): a catalog model
+	// whose info disables temperature, and an id that RouterProvider's
+	// supportsTemperature rejects (the o3-mini prefix rule).
+	"openai/gpt-6.1-terra": {
+		maxTokens: 32768,
+		contextWindow: 400000,
+		supportsImages: false,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		description: "Temperature disabled in model info",
+	},
+	"openai/o3-mini-test": {
+		maxTokens: 4096,
+		contextWindow: 200000,
+		supportsImages: false,
+		supportsPromptCache: false,
+		description: "supportsTemperature(modelId) is false",
+	},
+	"litellm-no-temp": {
+		maxTokens: 8192,
+		contextWindow: 200000,
+		supportsImages: false,
+		supportsPromptCache: false,
+		supportsTemperature: false,
+		description: "LiteLLM model with temperature disabled in info",
+	},
 }))
 
 const MODEL_CATALOG_FETCH_TIMEOUT_MS = vitest.hoisted(() => 10_000)
@@ -310,6 +336,24 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
+
+		it("completePrompt omits temperature when the model info disables it", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ litellmModelId: "litellm-no-temp", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
+
+		it("completePrompt omits temperature when supportsTemperature(modelId) is false", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ litellmModelId: "openai/o3-mini-test", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("NativeOllamaHandler", () => {
@@ -406,6 +450,14 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 			await make({ modelTemperature: 0.7 }).completePrompt("hello")
 			expect(mockResponsesCreate.mock.calls[0][0].temperature).toBe(0.7)
 		})
+
+		it("completePrompt omits temperature when the model info disables it", async () => {
+			mockResponsesCreate.mockResolvedValueOnce({
+				output: [{ type: "message", content: [{ type: "output_text", text: "ok" }] }],
+			})
+			await make({ apiModelId: "gpt-6.1-terra", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockResponsesCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("MistralHandler", () => {
@@ -478,6 +530,12 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
 	})
 
 	describe("AwsBedrockHandler", () => {
@@ -594,6 +652,26 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
+
+		it("completePrompt omits temperature when the model info disables it", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ vercelAiGatewayModelId: "openai/gpt-6.1-terra", modelTemperature: 0.7 }).completePrompt(
+				"hello",
+			)
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
+
+		it("completePrompt omits temperature when supportsTemperature(modelId) is false", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ vercelAiGatewayModelId: "openai/o3-mini-test", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("ZooGatewayHandler", () => {
@@ -625,6 +703,18 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
+
+		it("completePrompt omits temperature when supportsTemperature(modelId) is false", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ zooGatewayModelId: "openai/o3-mini-test", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("KenariHandler", () => {
@@ -656,6 +746,18 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
+
+		it("completePrompt omits temperature when supportsTemperature(modelId) is false", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ kenariModelId: "openai/o3-mini-test", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("NanoGptHandler", () => {
@@ -685,6 +787,24 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
+
+		it("completePrompt omits temperature when the model info disables it", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ nanoGptModelId: "litellm-no-temp", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
+
+		it("completePrompt omits temperature when supportsTemperature(modelId) is false", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ nanoGptModelId: "openai/o3-mini-test", modelTemperature: 0.7 }).completePrompt("hello")
+			expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
+		})
 	})
 
 	describe("FriendliHandler", () => {
@@ -757,6 +877,12 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				expect("temperature" in mockCreate.mock.calls[0][0]).toBe(false)
 			},
 		)
+
+		it("I3 (completePrompt, thinking path): sends a custom temperature unchanged", async () => {
+			mockCreate.mockResolvedValueOnce(nonStreamingCompletion)
+			await make({ apiModelId: "glm-5.3", modelTemperature: 0.7 }).completePrompt("hello")
+			expect(mockCreate.mock.calls[0][0].temperature).toBe(0.7)
+		})
 	})
 
 	describe("GeminiHandler", () => {

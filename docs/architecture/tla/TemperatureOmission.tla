@@ -15,6 +15,15 @@
 \* constructor keeps a nullish setting nullish and both non-adaptive request
 \* paths omit the key. The adaptive-thinking paths omit unconditionally and stay
 \* outside this spec as a capability gate.
+\* Round 3 (inline 4658434316, codecov 7080405454, mutation report on
+\* f29c88b4e): three test-layer findings. The vertex completePrompt matchers
+\* accepted a config that still carried temperature. Nine changed lines in six
+\* sinks lacked focused completePrompt coverage. Fifteen mutants survived on the
+\* changed guards. Covered: the invariant above already models every sink, so
+\* the fixes land in the property-test file. The vertex exact-assertion fix and
+\* the positive and capability-gate completePrompt arms are those tests. The
+\* supportsTemperature gates stay a recorded gap (Not modeled below), pinned by
+\* direct unit tests.
 \* Failure: the user turns custom temperature off and a provider still writes a
 \* temperature field (often 0), or overwrites an explicit 0, or writes null.
 \* Invariant: no temperature field when the value is nullish and the model is not a

@@ -121,11 +121,15 @@ describe("VertexHandler", () => {
 				expect.objectContaining({
 					model: expect.any(String),
 					contents: [{ role: "user", parts: [{ text: "Test prompt" }] }],
-					// #242: temperature is omitted when no custom temperature is set,
-					// so the server default applies.
 					config: expect.objectContaining({}),
 				}),
 			)
+
+			// #242: objectContaining checks a subset, so a config that still
+			// carries a temperature key would pass the matcher above. Inspect
+			// the captured config and pin the exact contract.
+			const capturedConfig = vi.mocked(handler["client"].models.generateContent).mock.calls[0][0].config
+			expect(capturedConfig).not.toHaveProperty("temperature")
 		})
 
 		it("should handle API errors for Gemini", async () => {
@@ -161,10 +165,15 @@ describe("VertexHandler", () => {
 					config: expect.objectContaining({
 						abortSignal: controller.signal,
 						httpOptions: undefined,
-						// #242: temperature is omitted when no custom temperature is set.
 					}),
 				}),
 			)
+
+			// #242: the abort-signal subset matcher above would also accept a
+			// config that still carries a temperature key. Pin the exact
+			// contract on the captured config.
+			const capturedConfig = vi.mocked(handler["client"].models.generateContent).mock.calls[0][0].config
+			expect(capturedConfig).not.toHaveProperty("temperature")
 		})
 
 		it("should work without options (backward compatible)", async () => {
