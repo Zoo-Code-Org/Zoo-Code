@@ -14,16 +14,24 @@ import { flushMacrotasks } from "../../../test-utils/timers"
 const isSchemaNode = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
 const acceptsValue = (schema: unknown, value: unknown): boolean => {
+	if (schema === true) {
+		return true
+	}
 	if (!isSchemaNode(schema)) {
 		return false
 	}
+	// Draft 2020-12: sibling constraints apply together, and oneOf requires
+	// exactly one matching alternative (#547 review). Evaluate every
+	// applicable keyword instead of returning early on the first.
+	let accepts = true
 	if (Array.isArray(schema.anyOf)) {
-		return schema.anyOf.some((alternative) => acceptsValue(alternative, value))
+		accepts = accepts && schema.anyOf.some((alternative) => acceptsValue(alternative, value))
 	}
-	if (Array.isArray(schema.oneOf)) {
-		return schema.oneOf.some((alternative) => acceptsValue(alternative, value))
+	if (accepts && Array.isArray(schema.oneOf)) {
+		const matching = schema.oneOf.filter((alternative) => acceptsValue(alternative, value))
+		accepts = accepts && matching.length === 1
 	}
-	if (schema.type !== undefined) {
+	if (accepts && schema.type !== undefined) {
 		const types: unknown[] = Array.isArray(schema.type) ? schema.type : [schema.type]
 		const jsType =
 			value === null
@@ -34,13 +42,13 @@ const acceptsValue = (schema: unknown, value: unknown): boolean => {
 						: "number"
 					: typeof value
 		if (!types.includes(jsType)) {
-			return false
+			accepts = false
 		}
 	}
-	if (Array.isArray(schema.enum) && !schema.enum.includes(value)) {
-		return false
+	if (accepts && Array.isArray(schema.enum) && !schema.enum.includes(value)) {
+		accepts = false
 	}
-	return true
+	return accepts
 }
 
 // Create a concrete implementation for testing
@@ -465,6 +473,52 @@ describe("BaseProvider", () => {
 			expect(acceptsValue(target, true)).toBe(false)
 			expect(acceptsValue(mode, null)).toBe(true)
 			expect(acceptsValue(mode, "read")).toBe(true)
+		})
+
+		it("applies sibling constraints together when making composed optional properties nullable (mock, #547 review)", () => {
+			// Mock evidence only: no live API request. A combinator applies
+			// alongside a top-level type (Draft 2020-12 sibling constraints),
+			// and null acceptance is decided by evaluating null against each
+			// alternative, never by inspecting an alternative's type alone.
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					// Sibling constraints: the anyOf must also admit null.
+					label: { type: "string", anyOf: [{ type: "string" }] },
+					// The alternative's type admits null but its enum does
+					// not: null acceptance must not be inferred from the type.
+					access: { anyOf: [{ type: ["string", "null"], enum: ["read"] }] },
+					// Already null-accepting through the enum: no second null
+					// alternative may be appended (oneOf is exactly-one).
+					channel: { oneOf: [{ enum: ["read", null] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const label = result.properties.label
+			const access = result.properties.access
+			const channel = result.properties.channel
+
+			// label: the type widened AND the anyOf gained a null alternative,
+			// so both siblings accept null and string values still validate.
+			expect(label.type).toEqual(["string", "null"])
+			expect(label.anyOf).toEqual([{ type: "string" }, { type: "null" }])
+			expect(acceptsValue(label, null)).toBe(true)
+			expect(acceptsValue(label, "main")).toBe(true)
+
+			// access: the enum-rejecting alternative does not count as
+			// null-accepting, so exactly one null alternative is appended.
+			expect(access.anyOf).toEqual([{ type: ["string", "null"], enum: ["read"] }, { type: "null" }])
+			expect(acceptsValue(access, null)).toBe(true)
+			expect(acceptsValue(access, "read")).toBe(true)
+
+			// channel: the enum alternative already accepts null; appending
+			// another null alternative would make null match twice under oneOf.
+			expect(channel.oneOf).toEqual([{ enum: ["read", null] }])
+			expect(acceptsValue(channel, null)).toBe(true)
+			expect(acceptsValue(channel, "read")).toBe(true)
 		})
 
 		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {

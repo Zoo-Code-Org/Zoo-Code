@@ -79,6 +79,35 @@ export abstract class BaseProvider implements ApiHandler {
 	}
 
 	/**
+	 * Evaluates whether one combinator alternative (an anyOf/oneOf entry)
+	 * accepts null, applying the alternative's sibling constraints together
+	 * (Draft 2020-12): a type constraint must admit null AND an enum
+	 * constraint, when present, must include null (#547 review).
+	 */
+	private static schemaAlternativeAcceptsNull(alt: unknown): boolean {
+		if (alt === true) {
+			return true
+		}
+		if (typeof alt !== "object" || alt === null) {
+			return false
+		}
+		const alternative = alt as Record<string, unknown>
+
+		if (alternative.type !== undefined) {
+			const types = Array.isArray(alternative.type) ? alternative.type : [alternative.type]
+			if (!types.includes("null")) {
+				return false
+			}
+		}
+
+		if (Array.isArray(alternative.enum) && !alternative.enum.includes(null)) {
+			return false
+		}
+
+		return true
+	}
+
+	/**
 	 * Converts tool schemas to be compatible with OpenAI's strict mode by:
 	 * - Ensuring all properties are in the required array (strict mode requirement)
 	 * - Keeping parameters the schema did not declare required usable: they
@@ -135,29 +164,38 @@ export abstract class BaseProvider implements ApiHandler {
 							if (nonNullTypes.length > 0) {
 								normalizedProp.type = [...nonNullTypes, "null"]
 							}
-						} else if (
-							normalizedProp.type === undefined &&
-							(Array.isArray(normalizedProp.anyOf) || Array.isArray(normalizedProp.oneOf))
-						) {
-							// A composed schema with no top-level type: the type
-							// branches above cannot make it accept null. Add a
-							// null alternative and keep every original one (#547).
-							const combinator = Array.isArray(normalizedProp.anyOf) ? "anyOf" : "oneOf"
+						}
+						// A composed schema accepts null only when its
+						// combinator does — and a combinator applies
+						// alongside any top-level type, because sibling
+						// constraints apply together (Draft 2020-12, #547
+						// review). Decide by evaluating null against each
+						// alternative: an alternative accepts null when its
+						// type admits null AND its enum (if any) includes
+						// null. Inspecting an alternative's type alone gets
+						// both directions wrong: {type:["string","null"],
+						// enum:["read"]} rejects null via the enum, while
+						// {enum:["read",null]} accepts null with no type.
+						const combinator = Array.isArray(normalizedProp.anyOf)
+							? "anyOf"
+							: Array.isArray(normalizedProp.oneOf)
+								? "oneOf"
+								: undefined
+						if (combinator) {
 							const alternatives = normalizedProp[combinator] as unknown[]
-							const hasNullAlternative = alternatives.some((alt) => {
-								if (
-									alt === null ||
-									typeof alt !== "object" ||
-									!("type" in (alt as Record<string, unknown>))
-								) {
-									return false
-								}
-								const altType = (alt as Record<string, unknown>).type
-								return altType === "null" || (Array.isArray(altType) && altType.includes("null"))
-							})
-							if (!hasNullAlternative) {
+							const nullAccepting = alternatives.filter((alt) =>
+								BaseProvider.schemaAlternativeAcceptsNull(alt),
+							)
+							if (nullAccepting.length === 0) {
+								// No alternative admits null: append one. For
+								// oneOf the appended alternative is the only
+								// null match, so exactly-one semantics hold.
 								normalizedProp[combinator] = [...alternatives, { type: "null" }]
 							}
+							// When an alternative already accepts null, nothing
+							// is appended: for oneOf, a second null alternative
+							// would make null match twice and fail the
+							// exactly-one rule.
 						}
 						// An enum rejects every value outside its list, so a
 						// "null" type alone still rejects null. Include null in
