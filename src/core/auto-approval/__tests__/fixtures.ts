@@ -66,15 +66,13 @@ export function readFileAsk(
 ): { text: string; fileTargets: ApprovalFileTarget[] } {
 	// `process.platform` rather than `path` itself, so specs simulating Windows get Windows paths.
 	const nativePath = process.platform === "win32" ? path.win32 : path.posix
-	const files = [...(tool.path === undefined ? [] : [tool]), ...(tool.batchFiles ?? [])]
+	const files = tool.path === undefined ? (tool.batchFiles ?? []) : [{ ...tool, path: tool.path }]
 
 	return {
 		text: JSON.stringify(tool),
 		fileTargets: files.map((file) => ({
-			absolutePath: nativePath.isAbsolute(file.path ?? "")
-				? (file.path ?? "")
-				: nativePath.resolve(cwd ?? "", file.path ?? ""),
-			isOutsideWorkspace: file.isOutsideWorkspace ?? tool.isOutsideWorkspace ?? false,
+			absolutePath: nativePath.isAbsolute(file.path) ? file.path : nativePath.resolve(cwd ?? "", file.path),
+			isOutsideWorkspace: file.isOutsideWorkspace ?? false,
 		})),
 	}
 }

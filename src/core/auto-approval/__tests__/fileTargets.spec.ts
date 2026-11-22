@@ -103,12 +103,33 @@ describe("invalid or incomplete file targets ask the user", () => {
 		expect(await approval(message, permissive, fileTargets)).toEqual({ decision: "ask" })
 	})
 
-	it("asks for a target without a workspace verdict", async () => {
-		const fileTargets = [{ absolutePath: `${CWD}/docs/notes.md` }]
+	it.each([
+		{ name: "a workspace verdict", target: { absolutePath: `${CWD}/docs/notes.md` } },
+		{ name: "a path", target: { isOutsideWorkspace: false } },
+	])("asks for a target without $name", async ({ target }) => {
 		// Stands in for a malformed target from a caller outside the type system.
-		const malformed = fileTargets as unknown as ApprovalFileTarget[]
+		const malformed = [target] as unknown as ApprovalFileTarget[]
 
 		expect(await approval(message, permissive, malformed)).toEqual({ decision: "ask" })
+	})
+
+	it("asks when only some batch targets are invalid", async () => {
+		const batch: ClineSayTool = {
+			tool: "readFile",
+			batchFiles: [
+				{ path: "docs/a.md", lineSnippet: "", key: "a" },
+				{ path: "docs/b.md", lineSnippet: "", key: "b" },
+			],
+		}
+		const relative = { absolutePath: "docs/b.md", isOutsideWorkspace: false }
+
+		expect(await approval(batch, permissive, [inside("docs/a.md"), relative])).toEqual({ decision: "ask" })
+	})
+
+	it.skipIf(process.platform === "win32")("asks for a Windows drive path, which is relative on POSIX", async () => {
+		const drivePath = { absolutePath: "C:\\repo\\docs\\notes.md", isOutsideWorkspace: false }
+
+		expect(await approval(message, permissive, [drivePath])).toEqual({ decision: "ask" })
 	})
 
 	it("asks when the message names more files than the targets cover", async () => {

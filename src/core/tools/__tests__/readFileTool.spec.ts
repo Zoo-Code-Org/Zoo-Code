@@ -663,7 +663,7 @@ describe("ReadFileTool", () => {
 			const [, message] = mockTask.ask.mock.calls[0]
 			const { isOutsideWorkspace } = JSON.parse(message) as { isOutsideWorkspace: boolean }
 			expect(mockTask.ask).toHaveBeenCalledWith("tool", message, false, undefined, undefined, {
-				fileTargets: [{ absolutePath: "/test/workspace/test.ts", isOutsideWorkspace }],
+				fileTargets: [{ absolutePath: path.resolve("/test/workspace", "test.ts"), isOutsideWorkspace }],
 			})
 			expect(mockTask.didRejectTool).toBe(false)
 		})
@@ -866,16 +866,20 @@ describe("ReadFileTool", () => {
 
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file1 content"))
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file2 content"))
-			// One ask per file, each carrying the target that file is then read from.
-			expect(mockTask.ask.mock.calls.map(([, , , , , context]) => context)).toEqual(
-				["file1.ts", "file2.ts"].map((file) => ({
-					fileTargets: [{ absolutePath: `/test/workspace/${file}`, isOutsideWorkspace: expect.any(Boolean) }],
-				})),
+			// One complete ask per file, each carrying the target that file is then read from.
+			// The tool uses the default `path` export, which this spec's mock leaves real.
+			const targets = ["file1.ts", "file2.ts"].map((file) => path.resolve("/test/workspace", file))
+			expect(mockTask.ask.mock.calls).toEqual(
+				targets.map((absolutePath) => [
+					"tool",
+					expect.any(String),
+					false,
+					undefined,
+					undefined,
+					{ fileTargets: [{ absolutePath, isOutsideWorkspace: expect.any(Boolean) }] },
+				]),
 			)
-			expect(mockedFsReadFile.mock.calls.map(([target]) => target)).toEqual([
-				"/test/workspace/file1.ts",
-				"/test/workspace/file2.ts",
-			])
+			expect(mockedFsReadFile.mock.calls.map(([target]) => target)).toEqual(targets)
 		})
 
 		describe("batch approval denial", () => {
@@ -936,11 +940,11 @@ describe("ReadFileTool", () => {
 				const { mockTask } = await requestBatchApproval({ response: "yesButtonClicked" })
 
 				expect(mockTask.ask).toHaveBeenCalledTimes(1)
-				const [, message, , , , context] = mockTask.ask.mock.calls[0]
+				const [, message] = mockTask.ask.mock.calls[0]
 				const { batchFiles } = JSON.parse(message) as { batchFiles: { isOutsideWorkspace: boolean }[] }
-				expect(context).toEqual({
+				expect(mockTask.ask).toHaveBeenCalledWith("tool", message, false, undefined, undefined, {
 					fileTargets: ["file1.ts", "file2.ts"].map((file, index) => ({
-						absolutePath: `/test/workspace/${file}`,
+						absolutePath: path.resolve("/test/workspace", file),
 						isOutsideWorkspace: batchFiles[index].isOutsideWorkspace,
 					})),
 				})
