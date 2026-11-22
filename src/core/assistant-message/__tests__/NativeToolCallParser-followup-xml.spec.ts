@@ -181,6 +181,31 @@ describe("NativeToolCallParser - ask_followup_question legacy XML recovery", () 
 		expect(nativeArgs?.follow_up).toEqual([{ text: "A" }])
 	})
 
+	it("strips double-spaced legacy wrapper tags from the recovered question", () => {
+		// The cleanup must also remove wrapper tags whose attribute is
+		// separated from the tag name by more than one whitespace.
+		const question =
+			'<invoke  name="ask_followup_question"><parameter  name="question">Config or env?</parameter>' +
+			'<parameter  name="follow_up">[{"text": "A."}]</parameter></invoke>'
+		const nativeArgs = nativeArgsOf({ question })
+
+		expect(nativeArgs?.follow_up).toEqual([{ text: "A." }])
+		expect(nativeArgs?.question).toBe("Config or env?")
+		expect(String(nativeArgs?.question)).not.toMatch(/<[/]?(question|follow_up|invoke|parameter)/)
+	})
+
+	it("recovers follow_up when an escaped quote precedes an in-string closing tag", () => {
+		// The escaped quotes keep the JSON string open across the closing
+		// tag, so only the final closing candidate parses (review thread
+		// 4658157957).
+		const question = 'Q?<follow_up>[{"text":"Say \\"hi\\" </follow_up>"}]</follow_up>'
+		const nativeArgs = nativeArgsOf({ question })
+
+		expect(nativeArgs).not.toBeNull()
+		expect(nativeArgs?.follow_up).toEqual([{ text: 'Say "hi" </follow_up>' }])
+		expect(nativeArgs?.question).toBe("Q?")
+	})
+
 	it("rejects the tool call when the XML payload does not parse", () => {
 		const question = "Pick one:</question>\n<follow_up>not-json</follow_up>\n</invoke>"
 		const result = NativeToolCallParser.parseToolCall(makeToolCall({ question }))

@@ -395,38 +395,51 @@ export class NativeToolCallParser {
 	 */
 	private static recoverFollowUpFromLegacyXml(question: string): { followUp: unknown[]; question: string } | null {
 		const patterns = [
-			/<follow_up>([\s\S]*?)<\/follow_up>/,
-			/<parameter\s+name=["']follow_up["']>([\s\S]*?)<\/parameter>/,
+			{ open: /<follow_up>/, close: /<\/follow_up>/g },
+			{ open: /<parameter\s+name=["']follow_up["']>/, close: /<\/parameter>/g },
 		]
 
 		for (const pattern of patterns) {
-			const match = pattern.exec(question)
+			const openMatch = pattern.open.exec(question)
 
-			if (!match) {
+			if (!openMatch) {
 				continue
 			}
 
-			let parsed: unknown
+			// A closing tag inside a JSON string is payload content, not a
+			// boundary (review thread 4658157957). Try every closing-tag
+			// candidate until one yields a payload that parses to an array.
+			const payloadStart = openMatch.index + openMatch[0].length
+			const tail = question.slice(payloadStart)
+			let closeMatch: RegExpExecArray | null
 
-			try {
-				parsed = JSON.parse(match[1].trim())
-			} catch {
-				continue
+			while ((closeMatch = pattern.close.exec(tail)) !== null) {
+				let parsed: unknown
+
+				try {
+					parsed = JSON.parse(tail.slice(0, closeMatch.index).trim())
+				} catch {
+					continue
+				}
+
+				if (!Array.isArray(parsed)) {
+					continue
+				}
+
+				// Remove the XML block and the remaining legacy wrapper tags.
+				const matchedBlock = question.slice(
+					openMatch.index,
+					payloadStart + closeMatch.index + closeMatch[0].length,
+				)
+				const cleaned = question
+					.replace(matchedBlock, "")
+					.replace(/<\/?question>/g, "")
+					.replace(/<\/?invoke(?:\s+[^>]*)?>/g, "")
+					.replace(/<\/?parameter(?:\s+[^>]*)?>/g, "")
+					.trim()
+
+				return { followUp: parsed, question: cleaned }
 			}
-
-			if (!Array.isArray(parsed)) {
-				continue
-			}
-
-			// Remove the XML block and the remaining legacy wrapper tags.
-			const cleaned = question
-				.replace(match[0], "")
-				.replace(/<\/?question>/g, "")
-				.replace(/<\/?invoke(?:\s+[^>]*)?>/g, "")
-				.replace(/<\/?parameter(?:\s+[^>]*)?>/g, "")
-				.trim()
-
-			return { followUp: parsed, question: cleaned }
 		}
 
 		return null
