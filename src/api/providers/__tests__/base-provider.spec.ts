@@ -150,6 +150,7 @@ describe("BaseProvider", () => {
 		it("should convert nullable types to non-nullable", () => {
 			const schema = {
 				type: "object",
+				required: ["name"],
 				properties: {
 					name: { type: ["string", "null"] },
 				},
@@ -207,6 +208,7 @@ describe("BaseProvider", () => {
 	it("keeps a nullable type with more than one non-null type as an array", () => {
 		const schema = {
 			type: "object",
+			required: ["value"],
 			properties: {
 				value: { type: ["string", "null", "number"] },
 			},
@@ -275,6 +277,131 @@ describe("BaseProvider", () => {
 		// list to filter.
 		expect(result.properties.only.type).toBe("null")
 	})
+
+	describe("strict optional parameters (#547)", () => {
+		it("keeps an optional parameter nullable while a required one stays a value", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					offset: { type: "integer" },
+					limit: { type: "integer" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// Strict mode lists every key in required. A key the schema did not
+			// declare required must then accept null, or the model cannot omit
+			// it and the call fails with "Missing required parameter".
+			expect(result.required).toEqual(["path", "offset", "limit"])
+			expect(result.properties.path.type).toBe("string")
+			expect(result.properties.offset.type).toEqual(["integer", "null"])
+			expect(result.properties.limit.type).toEqual(["integer", "null"])
+		})
+
+		it("keeps a declared nullable optional parameter nullable", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					limit: { type: ["integer", "null"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.limit.type).toEqual(["integer", "null"])
+		})
+
+		it("keeps a declared required parameter non-nullable", () => {
+			const schema = {
+				type: "object",
+				required: ["regex"],
+				properties: {
+					regex: { type: ["string", "null"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.regex.type).toBe("string")
+		})
+
+		it("marks every parameter nullable when the schema declares no required", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					query: { type: "string" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// No declared required means every key is optional in JSON Schema,
+			// so every key must accept null under strict mode.
+			expect(result.properties.query.type).toEqual(["string", "null"])
+		})
+
+		it("normalizes the nested schema of a nullable optional object", () => {
+			const schema = {
+				type: "object",
+				required: ["path"],
+				properties: {
+					path: { type: "string" },
+					indentation: {
+						type: ["object", "null"],
+						properties: { anchor_line: { type: "integer" } },
+						required: [],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const indentation = result.properties.indentation
+
+			expect(indentation.type).toEqual(["object", "null"])
+			expect(indentation.additionalProperties).toBe(false)
+			expect(indentation.required).toEqual(["anchor_line"])
+			expect(indentation.properties.anchor_line.type).toEqual(["integer", "null"])
+		})
+
+		it("emits a strict schema a Draft 2020-12 endpoint accepts (mock, #547)", () => {
+			// Mock evidence only: no live DeepSeek request. The parameters copy
+			// the read_file shape from the issue report.
+			const tools = [
+				{
+					type: "function",
+					function: {
+						name: "read_file",
+						description: "Read a file",
+						parameters: {
+							type: "object",
+							required: ["path"],
+							properties: {
+								path: { type: "string" },
+								file_pattern: { type: "string", pattern: "[a-zA-Z0-9_]+$" },
+								limit: { type: "integer" },
+							},
+						},
+					},
+				},
+			]
+
+			const result = provider.testConvertToolsForOpenAI(tools)
+			const parameters = result?.[0].function.parameters
+
+			expect(result?.[0].function.strict).toBe(true)
+			expect(parameters.properties.path.type).toBe("string")
+			expect(parameters.properties.limit.type).toEqual(["integer", "null"])
+			expect(parameters.properties.file_pattern.type).toEqual(["string", "null"])
+			expect(parameters.properties.file_pattern.pattern).toBeUndefined()
+			expect(parameters.properties.file_pattern.description).toContain("pattern")
+		})
+	})
+
 	describe("convertToolsForOpenAI", () => {
 		it("should return undefined for undefined input", () => {
 			const result = provider.testConvertToolsForOpenAI(undefined)
@@ -407,10 +534,16 @@ describe("BaseProvider", () => {
 			const parameters = result?.[0].function.parameters
 
 			expect(parameters.properties.count).toEqual({
-				type: "number",
+				type: ["number", "null"],
 				description: 'Constraints: {"minimum":1,"maximum":9,"multipleOf":1}',
 			})
-			expect(parameters.properties.name).toMatchObject({ type: "string", pattern: "^a", format: "email" })
+			expect(parameters.properties.name).toMatchObject({ type: ["string", "null"], format: "email" })
+			expect(parameters.properties.name.pattern).toBeUndefined()
+			expect(parameters.properties.name.minLength).toBeUndefined()
+			expect(parameters.properties.name.maxLength).toBeUndefined()
+			expect(parameters.properties.name.description).toBe(
+				'Constraints: {"minLength":1,"maxLength":5,"pattern":"^a"}',
+			)
 			expect(parameters.properties.unsupportedFormat.format).toBeUndefined()
 			expect(parameters.properties.list.minItems).toBeUndefined()
 			expect(parameters.properties.list.uniqueItems).toBeUndefined()
@@ -553,9 +686,12 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolsForOpenAI(tools)
 			const options = result?.[0].function.parameters.properties.options
 
-			expect(options.type).toBe("object")
+			// The schema declares no required key, so the property stays
+			// nullable while its nested schema is still normalized (#547).
+			expect(options.type).toEqual(["object", "null"])
 			expect(options.required).toEqual(["limit"])
 			expect(options.additionalProperties).toBe(false)
+			expect(options.properties.limit.type).toEqual(["integer", "null"])
 			expect(options.properties.limit.minimum).toBeUndefined()
 		})
 

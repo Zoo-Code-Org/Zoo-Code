@@ -81,7 +81,10 @@ export abstract class BaseProvider implements ApiHandler {
 	/**
 	 * Converts tool schemas to be compatible with OpenAI's strict mode by:
 	 * - Ensuring all properties are in the required array (strict mode requirement)
-	 * - Converting nullable types (["type", "null"]) to non-nullable ("type")
+	 * - Keeping parameters the schema did not declare required usable: they
+	 *   accept null, so the model can still omit them (#547)
+	 * - Converting nullable types (["type", "null"]) of declared required
+	 *   parameters to non-nullable ("type")
 	 * - Adding additionalProperties: false to all object schemas (required by OpenAI Responses API)
 	 * - Recursively processing nested objects and arrays
 	 *
@@ -101,6 +104,9 @@ export abstract class BaseProvider implements ApiHandler {
 		}
 
 		if (result.properties) {
+			// The declared required set, read before the strict rewrite lists
+			// every key. A key outside it stays optional (#547).
+			const declaredRequired: unknown[] = Array.isArray(result.required) ? result.required : []
 			const allKeys = Object.keys(result.properties)
 			// OpenAI strict mode requires ALL properties to be in required array
 			result.required = allKeys
@@ -116,16 +122,42 @@ export abstract class BaseProvider implements ApiHandler {
 				if (prop && typeof prop === "object" && !Array.isArray(prop)) {
 					const normalizedProp = { ...prop }
 
-					// Handle nullable types by removing null
-					if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
+					// Strict mode lists every key in required. Keep a key the
+					// schema did not declare required usable by making it accept
+					// null (#547). A declared required key keeps a value type.
+					if (!declaredRequired.includes(key)) {
+						if (typeof normalizedProp.type === "string") {
+							if (normalizedProp.type !== "null") {
+								normalizedProp.type = [normalizedProp.type, "null"]
+							}
+						} else if (Array.isArray(normalizedProp.type)) {
+							const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
+							if (nonNullTypes.length > 0) {
+								normalizedProp.type = [...nonNullTypes, "null"]
+							}
+						}
+					} else if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
+						// Handle nullable types by removing null
 						const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
 						normalizedProp.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
 					}
 
-					// Recursively process nested objects
-					if (normalizedProp.type === "object") {
-						newProps[key] = this.convertToolSchemaForOpenAI(normalizedProp)
-					} else if (normalizedProp.type === "array" && normalizedProp.items?.type === "object") {
+					// Recursively process nested objects, including nullable ones.
+					// The effective type list drives the checks below so a nullable
+					// object or array still gets its nested schema normalized.
+					const effectiveTypes: unknown[] = Array.isArray(normalizedProp.type)
+						? normalizedProp.type
+						: typeof normalizedProp.type === "string"
+							? [normalizedProp.type]
+							: []
+					if (effectiveTypes.includes("object")) {
+						// Recurse through an object view of the property so the
+						// nested schema is normalized while the property keeps
+						// its (possibly nullable) declared type.
+						const converted = this.convertToolSchemaForOpenAI({ ...normalizedProp, type: "object" })
+						converted.type = normalizedProp.type
+						newProps[key] = converted
+					} else if (effectiveTypes.includes("array") && normalizedProp.items?.type === "object") {
 						newProps[key] = {
 							...normalizedProp,
 							items: this.convertToolSchemaForOpenAI(normalizedProp.items),

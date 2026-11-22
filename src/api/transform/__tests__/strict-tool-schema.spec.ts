@@ -28,6 +28,7 @@ describe("stripUnsupportedStrictKeywords", () => {
 		["maxContains", 3],
 		["minProperties", 1],
 		["maxProperties", 2],
+		["pattern", "[a-zA-Z0-9_]+$"],
 	])("removes %s and records it in the description", (keyword, value) => {
 		expect(strip({ type: "string", [keyword]: value })).toEqual({
 			type: "string",

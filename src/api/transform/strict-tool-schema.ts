@@ -1,4 +1,5 @@
 const UNSUPPORTED_STRICT_SCHEMA_KEYWORDS = new Set([
+	"pattern",
 	"minimum",
 	"maximum",
 	"exclusiveMinimum",
