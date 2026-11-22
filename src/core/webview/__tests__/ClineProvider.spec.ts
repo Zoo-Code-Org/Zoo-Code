@@ -7124,6 +7124,45 @@ describe("ClineProvider", () => {
 		await provider.dispose()
 	})
 
+	it("accepts a built-in mode when the custom-mode read fails", async () => {
+		const provider = new ClineProvider(
+			mockContext,
+			mockOutputChannel,
+			"sidebar",
+			new ContextProxy(mockContext),
+			new WebviewFocusTracker(),
+		)
+		// A settings directory that cannot be created or written makes the custom-mode read reject
+		// before it answers. That must not reject a settings batch over a built-in slug.
+		const getCustomModes = vi
+			.spyOn(provider.customModesManager, "getCustomModes")
+			.mockRejectedValue(new Error("settings directory unavailable"))
+		const logSpy = vi.spyOn(provider, "log")
+		// The file-level modes mock resolves every slug to a mode; narrow it to the slug under test
+		// so this row proves the built-in check rather than the mock's table.
+		const modesModule = vi.mocked(await import("../../../shared/modes"))
+		const originalMode = modesModule.getModeBySlug("code")
+		modesModule.getModeBySlug.mockImplementation(((slug: string) =>
+			slug === "code"
+				? { slug, name: "Code", roleDefinition: "r", groups: ["code"] }
+				: undefined) as typeof modesModule.getModeBySlug)
+		try {
+			// Mode validation is the only reader here, so a built-in slug must not touch the store at
+			// all: reverting the built-in check re-invokes the rejecting read and this row reddens.
+			getCustomModes.mockClear()
+			await provider.setValues({ mode: "code", writeDelayMs: 250 })
+			expect(getCustomModes).not.toHaveBeenCalled()
+			expect(mockContext.globalState.get("mode")).toBe("code")
+			expect(mockContext.globalState.get("writeDelayMs")).toBe(250)
+			expect(provider["viewLocalState"].mode).toBe("code")
+			expect(logSpy).not.toHaveBeenCalledWith(expect.stringContaining('Ignoring invalid mode "code"'))
+		} finally {
+			modesModule.getModeBySlug.mockReturnValue(originalMode)
+			getCustomModes.mockResolvedValue([])
+		}
+		await provider.dispose()
+	})
+
 	it("should build the buffered apiConfiguration from provider settings keys", async () => {
 		const provider = new ClineProvider(
 			mockContext,

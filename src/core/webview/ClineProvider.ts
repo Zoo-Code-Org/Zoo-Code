@@ -4488,9 +4488,16 @@ export class ClineProvider
 		if (sanitizedValues.mode !== undefined) {
 			// An unknown or non-string mode (e.g. from an API payload) must not be persisted:
 			// a new Task would read it from getState() and persist it into task history.
+			// The built-in registry answers first, without consulting the custom-mode store:
+			// getCustomModes() has to create the settings directory and file before it can answer
+			// (CustomModesManager.ts:312-317), and a read that rejects there must not reject the
+			// whole batch over a slug the built-in registry already defines.
+			const builtInMode =
+				typeof sanitizedValues.mode === "string" ? getModeBySlug(sanitizedValues.mode) : undefined
 			if (
-				typeof sanitizedValues.mode !== "string" ||
-				!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes())
+				!builtInMode &&
+				(typeof sanitizedValues.mode !== "string" ||
+					!getModeBySlug(sanitizedValues.mode, await this.customModesManager.getCustomModes()))
 			) {
 				this.log(`[ClineProvider#setValues] Ignoring invalid mode "${String(sanitizedValues.mode)}"`)
 				delete sanitizedValues.mode
