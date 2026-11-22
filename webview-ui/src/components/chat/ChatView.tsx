@@ -546,24 +546,26 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					// The newest ask is a live command ask when it is pending.
 					const maskedCommandAskPending =
 						maskedAsk !== undefined && isPendingCommandAsk(maskedAsk, answeredCommandAskTsRef.current)
-					if (clineAskRef.current === "command") {
-						// Reconcile a recovered command ask with the host state:
-						// the controls stay up only while that ask stays live.
-						// A newer ask must clear them, not leave them lingering (#998).
-						if (!maskedCommandAskPending) {
-							setSendingDisabled(true)
-							setClineAsk(undefined)
-							setEnableButtons(false)
-							setPrimaryButtonKey(undefined)
-							setSecondaryButtonKey(undefined)
-						}
-					} else if (maskedCommandAskPending) {
-						// Mirror the ask branch's command presentation.
+					if (maskedCommandAskPending) {
+						// Mirror the ask branch's command presentation. This also
+						// re-enables the controls when a partial command ask
+						// completes (#998 review): the partial ask disabled
+						// Run/Deny, and the completed ask must restore them even
+						// though clineAskRef.current is already "command".
 						setSendingDisabled(false)
 						setClineAsk("command")
 						setEnableButtons(true)
 						setPrimaryButtonKey("chat:runCommand.title")
 						setSecondaryButtonKey("chat:reject.title")
+					} else if (clineAskRef.current === "command") {
+						// Reconcile a recovered command ask with the host state:
+						// the controls stay up only while that ask stays live.
+						// A newer ask must clear them, not leave them lingering (#998).
+						setSendingDisabled(true)
+						setClineAsk(undefined)
+						setEnableButtons(false)
+						setPrimaryButtonKey(undefined)
+						setSecondaryButtonKey(undefined)
 					}
 					break
 			}
@@ -579,11 +581,16 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		if (clineAskRef.current !== "command") {
 			return
 		}
+		// Guard by the newest ask overall (#998 review): when a newer ask
+		// (for example a tool ask) is already scheduled, React has not yet
+		// flushed its setClineAsk, so clineAskRef still reads "command".
+		// The older answered command must not clear the newer ask's controls.
+		const newestAsk = findLast(messagesRef.current, (message: ClineMessage) => message.type === "ask")
 		const newestCommandAsk = findLast(
 			messagesRef.current,
 			(message: ClineMessage) => message.type === "ask" && message.ask === "command",
 		)
-		if (newestCommandAsk && newestCommandAsk.isAnswered) {
+		if (newestCommandAsk && newestCommandAsk.isAnswered && newestAsk === newestCommandAsk) {
 			setSendingDisabled(true)
 			setClineAsk(undefined)
 			setEnableButtons(false)
