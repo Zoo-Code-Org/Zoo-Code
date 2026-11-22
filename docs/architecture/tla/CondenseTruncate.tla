@@ -49,7 +49,7 @@
 \* a split pair. Added: the summary is the first candidate and skip-first keeps
 \* it untagged (VisMsg Fixed uses i >= LastSumIdx, SelectionMatchesLive simplified
 \* to the sink rule). The pair-integrity unit test replays it on the real code.
-\* Findings: covered 4, added 4, gap 2. The two failures of issue 1823 are covered
+\* Findings: covered 4, added 4, gap 3. The two failures of issue 1823 are covered
 \* findings. The round-2 review had two findings: the oracle duplication is covered, the
 \* orphan regression is added (Rewind action, Coarse mode, SelectionMatchesLive).
 \* The round-3 review had three findings: the missing boundary is added (boundary VisMsg,
@@ -64,6 +64,12 @@
 \* That guard is a gap here. The direct unit tests in src/core/condense/__tests__/
 \* index.spec.ts pin it on the real code (PR 2647 review thread, comment 4657908739).
 \* The other gap is the marker text below.
+\* Mutation round 2 (PR 2647, head a68ba75): four boundary mutants survived (the
+\* scan guard and the clamp, in the selection and the count). They are equivalent:
+\* the boundary is the sole consumer of the scan, and index >= boundary treats -1
+\* and 0 alike for array indices. The model derives LastSumIdx directly, so the
+\* scan and clamp guards are a gap here. The documented Stryker disables in the
+\* code pin them (PR 2647 mutation report, comment 7078205049).
 \* Replay: UnfixedRemoved and UnfixedCount keep the counterexample AddMsg x4, Condense,
 \* Truncate (2 removed reported, 0 live removed). CoarseSelection gives Condense, Rewind:
 \* one orphan is live but coarse-invisible. CoarseCount gives Condense, Rewind, AddMsg x5,

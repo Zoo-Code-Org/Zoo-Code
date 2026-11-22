@@ -104,12 +104,14 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 	// message stays a candidate, orphaned condenseParent tags included.
 	// We need to track original indices to correctly tag messages in the full array
 	let lastSummaryIndex = -1
+	// Stryker disable next-line EqualityOperator: equivalent mutant, the unscanned index 0 matters only when it holds the latest summary, and the clamp below then yields the same boundary 0 (boundary is the sole consumer)
 	for (let i = messages.length - 1; i >= 0; i--) {
 		if (messages[i].isSummary) {
 			lastSummaryIndex = i
 			break
 		}
 	}
+	// Stryker disable next-line ConditionalExpression: equivalent mutant, without a summary the fallback gives boundary -1, and the sole consumer (index >= boundary) treats -1 and 0 alike for non-negative indices
 	const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
@@ -405,12 +407,14 @@ export async function manageContext({
 		// orphaned condenseParent tags included (PR 2647 review thread).
 		const truncatedMessages = truncationResult.messages
 		let lastSummaryIndex = -1
+		// Stryker disable next-line EqualityOperator: equivalent mutant, the unscanned index 0 matters only when it holds the latest summary, and the clamp below then yields the same boundary 0 (boundary is the sole consumer)
 		for (let i = truncatedMessages.length - 1; i >= 0; i--) {
 			if (truncatedMessages[i].isSummary) {
 				lastSummaryIndex = i
 				break
 			}
 		}
+		// Stryker disable next-line ConditionalExpression: equivalent mutant, without a summary the fallback gives boundary -1, and the sole consumer (index >= boundary) treats -1 and 0 alike for non-negative indices
 		const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
 		const effectiveMessages = truncatedMessages.filter(
 			(msg, index) => index >= boundary && !msg.truncationParent && !msg.isTruncationMarker,
