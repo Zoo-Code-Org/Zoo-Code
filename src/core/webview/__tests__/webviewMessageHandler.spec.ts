@@ -1122,8 +1122,13 @@ describe("webviewMessageHandler - requestOllamaModels", () => {
 })
 
 describe("webviewMessageHandler - requestRouterModels", () => {
-	beforeEach(() => {
+	beforeEach(async () => {
 		vi.clearAllMocks()
+		// clearAllMocks keeps queued Once values, so a value that one test does not use would leak into the next.
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockReset().mockResolvedValue(false)
+		vi.mocked(getAuthScopedSessionGeneration).mockReset().mockReturnValue(0)
+		mockGetModels.mockReset()
 		mockClineProvider.getState = vi.fn().mockResolvedValue({
 			apiConfiguration: {
 				openRouterApiKey: "openrouter-key",
@@ -1228,7 +1233,89 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.find((message) => message.type === "routerModels")
 		expect(zooCalls).toBe(2)
 		expect(posted?.routerModels?.[providerIdentifiers.zooGateway]).toEqual(currentSessionModels)
-		mockGetModels.mockReset()
+	})
+
+	const zooFetchErrorMessages = () =>
+		vi
+			.mocked(mockClineProvider.postMessageToWebview)
+			.mock.calls.map(([message]) => message)
+			.filter(
+				(message) =>
+					message.type === "singleRouterModelFetchResponse" &&
+					message.values?.provider === providerIdentifiers.zooGateway,
+			)
+			.map((message) => message.error)
+
+	it("refetches a failed Zoo Gateway result when a new session signed in while other providers loaded", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValue(true)
+		vi.mocked(getAuthScopedSessionGeneration).mockReturnValueOnce(0).mockReturnValueOnce(1)
+
+		let releaseOtherProvider = () => {}
+		const otherProviderPending = new Promise<void>((resolve) => {
+			releaseOtherProvider = resolve
+		})
+		let zooCalls = 0
+		mockGetModels.mockImplementation(async (options) => {
+			if (options.provider !== providerIdentifiers.zooGateway) {
+				await otherProviderPending
+				return {}
+			}
+			zooCalls++
+			if (zooCalls === 1) {
+				releaseOtherProvider()
+				throw new Error("Zoo Gateway models request used a session that was replaced")
+			}
+			return currentSessionModels
+		})
+
+		await webviewMessageHandler(mockClineProvider, { type: "requestRouterModels" })
+
+		const posted = vi
+			.mocked(mockClineProvider.postMessageToWebview)
+			.mock.calls.map(([message]) => message)
+			.find((message) => message.type === "routerModels")
+		expect(zooCalls).toBe(2)
+		expect(posted?.routerModels?.[providerIdentifiers.zooGateway]).toEqual(currentSessionModels)
+		expect(zooFetchErrorMessages()).toEqual([])
+	})
+
+	it("keeps the Zoo Gateway error when the session changed because the user is signed out", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(true).mockResolvedValue(false)
+		vi.mocked(getAuthScopedSessionGeneration).mockReturnValueOnce(0).mockReturnValueOnce(1)
+		mockGetModels.mockRejectedValueOnce(new Error("Zoo Gateway session is no longer valid"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(zooFetchErrorMessages()).toEqual(["Zoo Gateway session is no longer valid"])
+		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
+			type: "routerModels",
+			routerModels: { [providerIdentifiers.zooGateway]: {} },
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+		expect(mockClineProvider.postStateToWebview).toHaveBeenCalledTimes(1)
+	})
+
+	it("posts the refetch error when a failed Zoo Gateway refetch for a new session also fails", async () => {
+		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValue(true)
+		vi.mocked(getAuthScopedSessionGeneration).mockReturnValueOnce(0).mockReturnValueOnce(1)
+		mockGetModels
+			.mockRejectedValueOnce(new Error("Zoo Gateway models request used a session that was replaced"))
+			.mockRejectedValueOnce(new Error("Zoo Gateway models request failed (status=503 code=unknown)"))
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "requestRouterModels",
+			values: { provider: providerIdentifiers.zooGateway },
+		})
+
+		expect(mockGetModels).toHaveBeenCalledTimes(2)
+		expect(zooFetchErrorMessages()).toEqual(["Zoo Gateway models request failed (status=503 code=unknown)"])
 	})
 
 	it("refreshes webview state when the sign-in state was unknown before and signed out after", async () => {
@@ -1248,7 +1335,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 	it("does not refresh webview state when the user was already signed out", async () => {
 		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
-		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(false).mockResolvedValueOnce(false)
+		vi.mocked(isZooCodeAuthenticated).mockResolvedValueOnce(false)
 		mockGetModels.mockResolvedValueOnce({})
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1261,7 +1348,7 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 
 	it("still posts models when the Zoo sign-in state cannot be read", async () => {
 		const { isZooCodeAuthenticated } = await import("../../../services/zoo-code-auth")
-		vi.mocked(isZooCodeAuthenticated).mockRejectedValueOnce(new Error("secret storage unavailable"))
+		vi.mocked(isZooCodeAuthenticated).mockRejectedValue(new Error("secret storage unavailable"))
 		const zooModels: ModelRecord = {
 			"zai/glm-5": { maxTokens: 4096, contextWindow: 8192, supportsPromptCache: false },
 		}
@@ -1723,12 +1810,13 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
 			.mockResolvedValueOnce(mockModels) // nanogpt
+			.mockResolvedValueOnce(mockModels) // friendli
 
 		await webviewMessageHandler(mockClineProvider, {
 			type: "requestRouterModels",
 		})
 
-		// Verify error messages were sent for failed providers (these come first)
+		// Verify error messages were sent for failed providers
 		expect(mockClineProvider.postMessageToWebview).toHaveBeenCalledWith({
 			type: "singleRouterModelFetchResponse",
 			success: false,

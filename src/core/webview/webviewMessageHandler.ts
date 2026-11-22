@@ -1485,6 +1485,9 @@ export const webviewMessageHandler = async (
 			)
 
 			const obsoleteResults = new Set<RouterName>()
+			// Errors are posted after the Zoo session check below, so a refetch for a new session
+			// can replace the error of the session that ended.
+			const fetchErrors = new Map<RouterName, string>()
 
 			results.forEach((result, index) => {
 				const routerName = modelFetchPromises[index].key
@@ -1497,18 +1500,11 @@ export const webviewMessageHandler = async (
 
 					// Ollama and LM Studio settings pages still need these events. They are not fetched here.
 				} else {
-					// Handle rejection: Post a specific error message for this provider.
 					const errorMessage = result.reason instanceof Error ? result.reason.message : String(result.reason)
 					console.error(`Error fetching models for ${routerName}:`, result.reason)
 
 					routerModels[routerName] = {} // Ensure it's an empty object in the main routerModels message.
-
-					void provider.postMessageToWebview({
-						type: RouterModelsMessageType.singleRouterModelFetchResponse,
-						success: false,
-						error: errorMessage,
-						values: { provider: routerName },
-					})
+					fetchErrors.set(routerName, errorMessage)
 				}
 			})
 
@@ -1518,11 +1514,20 @@ export const webviewMessageHandler = async (
 			const zooCandidate = modelFetchPromises.find(({ key }) => key === providerIdentifiers.zooGateway)
 			const zooIndex = zooCandidate ? modelFetchPromises.indexOf(zooCandidate) : -1
 			const zooSessionChanged =
-				zooIndex !== -1 &&
-				results[zooIndex].status === "fulfilled" &&
-				getAuthScopedSessionGeneration(providerIdentifiers.zooGateway) !== zooSessionAtStart
-			if (zooCandidate && (obsoleteResults.has(providerIdentifiers.zooGateway) || zooSessionChanged)) {
+				zooIndex !== -1 && getAuthScopedSessionGeneration(providerIdentifiers.zooGateway) !== zooSessionAtStart
+			// A failed request can also be replaced, but only by a session that is signed in now.
+			// After a sign-out (including the clear that a 401 causes) the error stays.
+			const refetchFailedZoo =
+				zooSessionChanged &&
+				fetchErrors.has(providerIdentifiers.zooGateway) &&
+				(await readZooAuthenticated()) === true
+			const refetchZoo =
+				obsoleteResults.has(providerIdentifiers.zooGateway) ||
+				(zooSessionChanged && results[zooIndex].status === "fulfilled") ||
+				refetchFailedZoo
+			if (zooCandidate && refetchZoo) {
 				obsoleteResults.delete(providerIdentifiers.zooGateway)
+				fetchErrors.delete(providerIdentifiers.zooGateway)
 				try {
 					routerModels[providerIdentifiers.zooGateway] = await safeGetModels(
 						zooCandidate.options,
@@ -1531,10 +1536,24 @@ export const webviewMessageHandler = async (
 				} catch (error) {
 					if (isObsoleteCatalogError(error)) {
 						obsoleteResults.add(providerIdentifiers.zooGateway)
+					} else {
+						fetchErrors.set(
+							providerIdentifiers.zooGateway,
+							error instanceof Error ? error.message : String(error),
+						)
 					}
 					routerModels[providerIdentifiers.zooGateway] = {}
 				}
 			}
+
+			fetchErrors.forEach((errorMessage, routerName) => {
+				void provider.postMessageToWebview({
+					type: RouterModelsMessageType.singleRouterModelFetchResponse,
+					success: false,
+					error: errorMessage,
+					values: { provider: routerName },
+				})
+			})
 
 			// If a single-provider result is still obsolete, send nothing. The waiting picker
 			// retries and gets the current session's catalog.
