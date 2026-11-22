@@ -26,6 +26,10 @@
 \* SinksAgree must fail here. The streaming label is part of the fix.
 \*
 \* Result: Raw fails SinksAgree at all five sites. This is the known bug.
+\* Review: PR 2645 round 1. One finding: the telemetry assertions shared
+\* captures between cases. Covered: TelemetryCanonical models the emission
+\* for every error site. The defect was in the test double. Fixed in the
+\* test file. Added 0. Gap 0.
 \* Replay: the test on main asserts "OpenRouter API Error 500" as the thrown
 \* message and providerIdentifiers.openrouter as the telemetry value for one
 \* event. Both spellings are real. See openrouter.spec.ts.

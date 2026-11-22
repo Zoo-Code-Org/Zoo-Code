@@ -770,6 +770,9 @@ describe("OpenRouterHandler", () => {
 				}
 				openAIPrototype.prototype.chat = { completions: { create: mockCreate } }
 
+				// Each case must emit its own telemetry capture.
+				mockCaptureException.mockClear()
+
 				let thrown: unknown
 				try {
 					const generator = handler.createMessage("test", [])
@@ -783,7 +786,8 @@ describe("OpenRouterHandler", () => {
 				expect(thrown, `${name}: expected the handler to throw`).toBeInstanceOf(Error)
 				expect((thrown as Error).message, name).toBe(expectedMessage)
 
-				const captured = mockCaptureException.mock.calls.at(-1)?.[0]
+				expect(mockCaptureException.mock.calls.length, name).toBe(1)
+				const captured = mockCaptureException.mock.calls[0]?.[0]
 				expect(captured, name).toBeInstanceOf(ApiProviderError)
 				const properties = extractApiProviderErrorProperties(captured as ApiProviderError)
 				expect(properties.provider, name).toBe("openrouter")
@@ -1251,6 +1255,9 @@ describe("OpenRouterHandler", () => {
 				}
 				openAIPrototype.prototype.chat = { completions: { create: mockCreate } }
 
+				// Each case must emit its own telemetry capture.
+				mockCaptureException.mockClear()
+
 				let thrown: unknown
 				try {
 					await handler.completePrompt("test prompt")
@@ -1263,7 +1270,8 @@ describe("OpenRouterHandler", () => {
 				expect(thrown, `${name}: expected the handler to throw`).toBeInstanceOf(Error)
 				expect((thrown as Error).message, name).toBe(expectedMessage)
 
-				const captured = mockCaptureException.mock.calls.at(-1)?.[0]
+				expect(mockCaptureException.mock.calls.length, name).toBe(1)
+				const captured = mockCaptureException.mock.calls[0]?.[0]
 				expect(captured, name).toBeInstanceOf(ApiProviderError)
 				const properties = extractApiProviderErrorProperties(captured as ApiProviderError)
 				expect(properties.provider, name).toBe("openrouter")
