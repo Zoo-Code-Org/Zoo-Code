@@ -731,12 +731,13 @@ describe("ProviderSettingsManager", () => {
 		)
 
 		it.each([true, false, undefined])(
-			"round-trips OpenAI-compatible reasoning settings through profile storage when enabled is %s",
+			"round-trips OpenAI-compatible reasoning and Responses settings through profile storage when enabled is %s",
 			async (enableReasoningEffort) => {
 				const configuration: ProviderSettings = {
 					apiProvider: providerIdentifiers.openai,
 					openAiModelId: "custom-model",
 					enableReasoningEffort,
+					openAiUseResponsesApi: enableReasoningEffort,
 					reasoningEffort: "low",
 					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
 				}
@@ -747,6 +748,7 @@ describe("ProviderSettingsManager", () => {
 				const reloadedManager = new ProviderSettingsManager(mockContext)
 				const profile = await reloadedManager.getProfile({ name: "compatible" })
 
+				expect(profile.openAiUseResponsesApi).toBe(enableReasoningEffort)
 				expect(profile.enableReasoningEffort).toBe(enableReasoningEffort)
 				expect(profile.reasoningEffort).toBe("low")
 				expect(profile.openAiCustomModelInfo).toEqual(configuration.openAiCustomModelInfo)

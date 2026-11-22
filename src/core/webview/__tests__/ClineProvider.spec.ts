@@ -4139,13 +4139,14 @@ describe("ClineProvider", () => {
 	})
 
 	test.each([true, false, undefined])(
-		"returns saved OpenAI-compatible reasoning settings to the webview when enabled is %s",
+		"returns saved OpenAI-compatible reasoning and Responses settings to the webview when enabled is %s",
 		async (enableReasoningEffort) => {
 			await provider.resolveWebviewView(mockWebviewView)
 			const configuration: ProviderSettings = {
 				apiProvider: providerIdentifiers.openai,
 				openAiModelId: "custom-model",
 				enableReasoningEffort,
+				openAiUseResponsesApi: enableReasoningEffort,
 				reasoningEffort: "low",
 				openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
 			}

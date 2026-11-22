@@ -523,6 +523,8 @@
 		"openAiBaseUrl": "Basis-URL",
 		"openAiStrictToolSchemas": "Strikte toolschemas (strict: true)",
 		"openAiStrictToolSchemasDescription": "Verstuurt strict: true met de toolschemas om strikte schema-naleving in te schakelen. Schakel uit voor niet-strikte tool calls.",
+		"openAiUseResponsesApi": "Responses API gebruiken",
+		"openAiUseResponsesApiDescription": "Verstuurt verzoeken naar /responses in plaats van /chat/completions. Vereist voor sommige redeneermodellen op OpenAI-compatibele eindpunten. Redeneren en tools blijven actief.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Naam van Azure-implementatie",
 		"azureOpenAiDeploymentNameDescription": "Voer de implementatienaam uit Azure AI Studio in, niet de naam van het onderliggende model.",

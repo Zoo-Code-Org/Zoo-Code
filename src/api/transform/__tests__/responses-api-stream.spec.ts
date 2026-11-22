@@ -1,20 +1,6 @@
 import { processResponsesApiStream, createUsageNormalizer } from "../responses-api-stream"
 
-// Helper to create an async iterable from events
-async function* mockStream(events: any[]) {
-	for (const event of events) {
-		yield event
-	}
-}
-
-// Helper to collect all chunks from a stream
-async function collectChunks(stream: AsyncGenerator<any>) {
-	const chunks = []
-	for await (const chunk of stream) {
-		chunks.push(chunk)
-	}
-	return chunks
-}
+import { asyncStreamFrom as mockStream, collectStream as collectChunks } from "../../../test-utils/stream"
 
 const noopUsage = () => undefined
 
@@ -145,7 +131,7 @@ describe("processResponsesApiStream", () => {
 
 			const chunks = await collectChunks(processResponsesApiStream(stream, noopUsage))
 
-			expect(chunks[0].arguments).toBe('{"key":"value"}')
+			expect(chunks[0]).toMatchObject({ type: "tool_call", arguments: '{"key":"value"}' })
 		})
 
 		it("should skip tool_call with missing call_id or name", async () => {
@@ -270,7 +256,7 @@ describe("processResponsesApiStream", () => {
 
 	describe("completion and usage", () => {
 		it("should yield usage from response.completed", async () => {
-			const mockNormalize = (usage: any) => ({
+			const mockNormalize = (usage: { input_tokens: number; output_tokens: number }) => ({
 				type: "usage" as const,
 				inputTokens: usage.input_tokens,
 				outputTokens: usage.output_tokens,
@@ -289,7 +275,7 @@ describe("processResponsesApiStream", () => {
 		})
 
 		it("should yield usage from response.done", async () => {
-			const mockNormalize = (usage: any) => ({
+			const mockNormalize = (usage: { input_tokens: number; output_tokens: number }) => ({
 				type: "usage" as const,
 				inputTokens: usage.input_tokens,
 				outputTokens: usage.output_tokens,
@@ -338,7 +324,7 @@ describe("processResponsesApiStream", () => {
 
 	describe("full conversation stream", () => {
 		it("should handle a complete stream with reasoning, text, and usage", async () => {
-			const mockNormalize = (usage: any) => ({
+			const mockNormalize = (usage: { input_tokens: number; output_tokens: number }) => ({
 				type: "usage" as const,
 				inputTokens: usage.input_tokens,
 				outputTokens: usage.output_tokens,
@@ -467,4 +453,69 @@ describe("createUsageNormalizer", () => {
 			}),
 		)
 	})
+})
+
+describe("Responses terminal failure contract", () => {
+	it.each([
+		{ type: "response.failed", response: { error: { message: "backend failed", code: "server_error" } } },
+		{ type: "response.incomplete", response: { incomplete_details: { reason: "content_filter" } } },
+		{ type: "response.cancelled", response: {} },
+		{ type: "error", code: "rate_limit_exceeded", message: "wire failed" },
+		{ type: "response.error", error: { message: "wire failed" } },
+		{ type: "response.completed", response: { status: "failed", error: { message: "failed completion" } } },
+	])("rejects $type before reporting successful usage", async (event) => {
+		const normalize = vi.fn()
+		const result = collectChunks(processResponsesApiStream(mockStream([event]), normalize))
+		await expect(result).rejects.toThrow()
+		if ("code" in event) await expect(result).rejects.toMatchObject({ code: event.code })
+		expect(normalize).not.toHaveBeenCalled()
+	})
+
+	it("preserves output-token-limit classification", async () => {
+		await expect(
+			collectChunks(
+				processResponsesApiStream(
+					mockStream([
+						{
+							type: "response.incomplete",
+							response: { incomplete_details: { reason: "max_output_tokens" } },
+						},
+					]),
+					noopUsage,
+				),
+			),
+		).rejects.toMatchObject({ name: "OutputTokenLimitError" })
+	})
+
+	it("reports output items on item and completion events", async () => {
+		const item = { type: "reasoning", id: "r1", encrypted_content: "opaque", summary: [] }
+		const capture = vi.fn()
+		await collectChunks(
+			processResponsesApiStream(
+				mockStream([
+					{ type: "response.output_item.done", item },
+					{ type: "response.completed", response: { status: "completed", output: [item] } },
+				]),
+				noopUsage,
+				{ onOutputItem: capture },
+			),
+		)
+		expect(capture.mock.calls).toEqual([[item], [item]])
+	})
+	it.each([undefined, null, [], [{ type: "reasoning", id: "r1" }]])(
+		"reports completion and its optional output snapshot once: %j",
+		async (output) => {
+			const completed = vi.fn()
+			const capture = vi.fn()
+			await collectChunks(
+				processResponsesApiStream(
+					mockStream([{ type: "response.completed", response: { status: "completed", output } }]),
+					noopUsage,
+					{ onCompleted: completed, onOutputItem: capture },
+				),
+			)
+			expect(completed.mock.calls).toEqual([[output ?? undefined]])
+			expect(capture).not.toHaveBeenCalled()
+		},
+	)
 })
