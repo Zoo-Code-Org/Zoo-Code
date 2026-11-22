@@ -386,6 +386,52 @@ export class NativeToolCallParser {
 		return finalToolUse
 	}
 
+	/**
+	 * Recover a follow_up array from legacy XML tool-call markup that some
+	 * models emit inside the question text (issue 1034). Two forms are read:
+	 * `<follow_up>[...]</follow_up>` and `<parameter name="follow_up">[...]
+	 * </parameter>`. Returns the recovered array and the question text with
+	 * the legacy markup removed, or null when no parseable array is found.
+	 */
+	private static recoverFollowUpFromLegacyXml(question: string): { followUp: unknown[]; question: string } | null {
+		const patterns = [
+			/<follow_up>([\s\S]*?)<\/follow_up>/,
+			/<parameter\s+name=["']follow_up["']>([\s\S]*?)<\/parameter>/,
+		]
+
+		for (const pattern of patterns) {
+			const match = pattern.exec(question)
+
+			if (!match) {
+				continue
+			}
+
+			let parsed: unknown
+
+			try {
+				parsed = JSON.parse(match[1].trim())
+			} catch {
+				continue
+			}
+
+			if (!Array.isArray(parsed)) {
+				continue
+			}
+
+			// Remove the XML block and the remaining legacy wrapper tags.
+			const cleaned = question
+				.replace(match[0], "")
+				.replace(/<\/?question>/g, "")
+				.replace(/<\/?invoke(?:\s+[^>]*)?>/g, "")
+				.replace(/<\/?parameter(?:\s+[^>]*)?>/g, "")
+				.trim()
+
+			return { followUp: parsed, question: cleaned }
+		}
+
+		return null
+	}
+
 	private static coerceOptionalNumber(value: unknown): number | undefined {
 		if (typeof value === "number" && Number.isFinite(value)) {
 			return value
@@ -893,20 +939,37 @@ export class NativeToolCallParser {
 					}
 					break
 
-				case "ask_followup_question":
+				case "ask_followup_question": {
+					// Some models trained on the removed XML tool-call format put the
+					// follow_up data as XML markup inside the question text and send no
+					// follow_up field (issue 1034). Recover it before the checks below.
+					let question = args.question as string | undefined
+					let followUp = args.follow_up as unknown
+
+					if (question !== undefined && (followUp === undefined || followUp === null)) {
+						const recovered = this.recoverFollowUpFromLegacyXml(question)
+
+						if (recovered) {
+							followUp = recovered.followUp
+							question = recovered.question
+							usedLegacyFormat = true
+						}
+					}
+
 					// Require a question and a present follow_up. When follow_up is
 					// present-but-not-an-array (e.g. an object/string/number produced by
 					// incremental JSON parsing), we still construct nativeArgs and forward
 					// the raw value so the tool can emit a precise "must be an array" error
 					// instead of the generic parser failure, which would surface as a
 					// misleading "Missing value for required parameter 'follow_up'" error.
-					if (args.question !== undefined && args.follow_up !== undefined) {
+					if (question !== undefined && followUp !== undefined) {
 						nativeArgs = {
-							question: args.question,
-							follow_up: args.follow_up,
+							question,
+							follow_up: followUp,
 						} as NativeArgsFor<TName>
 					}
 					break
+				}
 
 				case "codebase_search":
 					if (args.query !== undefined) {
