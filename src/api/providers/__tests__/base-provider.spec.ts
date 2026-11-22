@@ -494,8 +494,9 @@ describe("BaseProvider", () => {
 					// alternative may be appended (oneOf is exactly-one).
 					channel: { oneOf: [{ enum: ["read", null] }] },
 					// Both combinators present: each must accept null on its
-					// own, so both gain a null alternative.
-					format: { anyOf: [{ type: "string" }], oneOf: [{ type: "integer" }] },
+					// own, so both gain a null alternative. The fixture stays
+					// satisfiable — a value must satisfy both siblings.
+					format: { anyOf: [{ type: "string" }], oneOf: [{ type: "string" }, { type: "integer" }] },
 				},
 			}
 
@@ -525,10 +526,12 @@ describe("BaseProvider", () => {
 			expect(acceptsValue(channel, "read")).toBe(true)
 
 			// format: both combinators gain a null alternative — normalizing
-			// only anyOf would leave oneOf rejecting null (sibling AND).
+			// only anyOf would leave oneOf rejecting null (sibling AND). The
+			// fixture is satisfiable: strings satisfy both siblings.
 			expect(format.anyOf).toEqual([{ type: "string" }, { type: "null" }])
-			expect(format.oneOf).toEqual([{ type: "integer" }, { type: "null" }])
+			expect(format.oneOf).toEqual([{ type: "string" }, { type: "integer" }, { type: "null" }])
 			expect(acceptsValue(format, null)).toBe(true)
+			expect(acceptsValue(format, "docx")).toBe(true)
 		})
 
 		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {
