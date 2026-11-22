@@ -36,6 +36,7 @@ vitest.mock("delay", () => ({
 	default: vitest.fn(() => Promise.resolve()),
 }))
 
+import { ConverseCommand, ConverseStreamCommand } from "@aws-sdk/client-bedrock-runtime"
 import OpenAI from "openai"
 
 import {
@@ -140,6 +141,20 @@ vitest.mock("@mistralai/mistralai", () => ({
 	}),
 }))
 
+// AWS Bedrock SDK mock (mirrors bedrock.spec.ts). send resolves an empty
+// stream so createMessage/completePrompt finish without parsing real chunks.
+vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
+	const mockSend = vitest.fn().mockResolvedValue({ stream: [] })
+	const mockConverseStreamCommand = vitest.fn()
+	return {
+		BedrockRuntimeClient: vitest.fn().mockImplementation(function () {
+			return { send: mockSend }
+		}),
+		ConverseStreamCommand: mockConverseStreamCommand,
+		ConverseCommand: vitest.fn(),
+	}
+})
+
 // Ollama SDK mock (mirrors native-ollama.spec.ts).
 const mockChat = vitest.fn()
 const mockIsProxyEnabled = vi.hoisted(() => vitest.fn(() => false))
@@ -181,6 +196,10 @@ vitest.mock("../fetchers/ollama", async (importOriginal) => {
 
 const mockGetOllamaModels = vitest.mocked(getOllamaModels)
 
+// Bedrock command constructors (mocked module above).
+const mockConverseStream = vitest.mocked(ConverseStreamCommand)
+const mockConverse = vitest.mocked(ConverseCommand)
+
 const userMessage = [{ role: "user" as const, content: "Hello" }]
 
 // Standard streaming completion chunks for the OpenAI chat-completions shape.
@@ -208,6 +227,8 @@ const nonStreamingCompletion = { choices: [{ message: { content: "ok" } }] }
 
 beforeEach(() => {
 	mockCreate.mockClear()
+	mockConverseStream.mockClear()
+	mockConverse.mockClear()
 	// Return the stream synchronously: LiteLLM calls create(...).withResponse()
 	// directly on the returned value (the real SDK returns an APIPromise).
 	mockCreate.mockImplementation(() => makeCompletionStream())
@@ -469,11 +490,77 @@ describe("temperature omission (issue #242, TemperatureOmission.tla)", () => {
 				...options,
 			})
 
-		it("I2: keeps an explicit custom temperature of 0 (no constructor clobber)", () => {
+		it.each([undefined, null])(
+			"I1 (createMessage): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				const handler = make({ modelTemperature })
+				await collectStream(handler.createMessage("system", userMessage))
+				expect(mockConverseStream).toHaveBeenCalled()
+				const { inferenceConfig } = mockConverseStream.mock.calls[0][0]
+				expect("temperature" in (inferenceConfig ?? {})).toBe(false)
+			},
+		)
+
+		it("I2 (createMessage): sends an explicit custom temperature of 0", async () => {
+			const handler = make({ modelTemperature: 0 })
+			await collectStream(handler.createMessage("system", userMessage))
+			const { inferenceConfig } = mockConverseStream.mock.calls[0][0]
+			expect(inferenceConfig?.temperature).toBe(0)
+		})
+
+		it("I3 (createMessage): sends a custom temperature unchanged", async () => {
+			const handler = make({ modelTemperature: 0.7 })
+			await collectStream(handler.createMessage("system", userMessage))
+			const { inferenceConfig } = mockConverseStream.mock.calls[0][0]
+			expect(inferenceConfig?.temperature).toBe(0.7)
+		})
+
+		it.each([undefined, null])(
+			"I1 (completePrompt): omits temperature when custom temperature is %s",
+			async (modelTemperature) => {
+				const handler = make({ modelTemperature })
+				await handler.completePrompt("hello")
+				expect(mockConverse).toHaveBeenCalled()
+				const { inferenceConfig } = mockConverse.mock.calls[0][0]
+				expect("temperature" in (inferenceConfig ?? {})).toBe(false)
+			},
+		)
+
+		it("I2 (completePrompt): sends an explicit custom temperature of 0", async () => {
+			const handler = make({ modelTemperature: 0 })
+			await handler.completePrompt("hello")
+			const { inferenceConfig } = mockConverse.mock.calls[0][0]
+			expect(inferenceConfig?.temperature).toBe(0)
+		})
+
+		it("I3 (completePrompt): sends a custom temperature unchanged", async () => {
+			const handler = make({ modelTemperature: 0.7 })
+			await handler.completePrompt("hello")
+			const { inferenceConfig } = mockConverse.mock.calls[0][0]
+			expect(inferenceConfig?.temperature).toBe(0.7)
+		})
+
+		it("adaptive path (createMessage): omits temperature even when a custom value is set", async () => {
+			const handler = make({ apiModelId: "anthropic.claude-opus-4-8", modelTemperature: 0.7 })
+			await collectStream(handler.createMessage("system", userMessage))
+			const { inferenceConfig } = mockConverseStream.mock.calls[0][0]
+			expect("temperature" in (inferenceConfig ?? {})).toBe(false)
+		})
+
+		it("adaptive path (completePrompt): omits temperature even when a custom value is set", async () => {
+			const handler = make({ apiModelId: "anthropic.claude-opus-4-8", modelTemperature: 0.7 })
+			await handler.completePrompt("hello")
+			const { inferenceConfig } = mockConverse.mock.calls[0][0]
+			expect("temperature" in (inferenceConfig ?? {})).toBe(false)
+		})
+
+		it("I2 (getModel): keeps an explicit custom temperature of 0 (no constructor clobber)", () => {
 			expect(make({ modelTemperature: 0 }).getModel().temperature).toBe(0)
 		})
 
-		it("unset keeps the getModelParams default (out of scope for #242)", () => {
+		it("getModel keeps the service-default hint when unset; requests omit it (#242)", () => {
+			// getModel reports the Bedrock service default as a UI/cost hint;
+			// the request paths above omit the key when no custom value is set.
 			expect(make().getModel().temperature).toBe(BEDROCK_DEFAULT_TEMPERATURE)
 		})
 	})
