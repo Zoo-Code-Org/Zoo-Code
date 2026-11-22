@@ -19,6 +19,13 @@ vitest.mock("@src/components/modes/DeleteModeDialog", () => ({
 	DeleteModeDialog: () => null,
 }))
 
+// Echo interpolation options so assertions can check which server a message names
+vitest.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: (key: string, options?: Record<string, unknown>) => (options ? `${key} ${JSON.stringify(options)}` : key),
+	}),
+}))
+
 Element.prototype.scrollIntoView = vitest.fn()
 
 const baseModeConfig = {
@@ -117,7 +124,9 @@ describe("MCP Server Restriction UI", () => {
 		await enterToolsEditMode()
 
 		await waitFor(() => {
-			expect(screen.getByText(/missing-server/)).toBeInTheDocument()
+			expect(
+				screen.getByText('prompts:mcpServers.notConnected {"serverName":"missing-server"}'),
+			).toBeInTheDocument()
 		})
 	})
 

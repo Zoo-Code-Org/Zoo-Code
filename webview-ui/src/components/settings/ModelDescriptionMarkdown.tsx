@@ -3,6 +3,7 @@ import { memo, useEffect, useRef, useState } from "react"
 import { useRemark } from "react-remark"
 
 import { cn } from "@/lib/utils"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { Collapsible, CollapsibleTrigger } from "@/components/ui/collapsible"
 
 import { StyledMarkdown } from "./styles"
@@ -19,6 +20,7 @@ export const ModelDescriptionMarkdown = memo(
 		isExpanded: boolean
 		setIsExpanded: (isExpanded: boolean) => void
 	}) => {
+		const { t } = useAppTranslation()
 		const [content, setContent] = useRemark()
 		const [isExpandable, setIsExpandable] = useState(false)
 		const textContainerRef = useRef<HTMLDivElement>(null)
@@ -40,7 +42,9 @@ export const ModelDescriptionMarkdown = memo(
 					</div>
 				</div>
 				<CollapsibleTrigger asChild className={cn({ hidden: !isExpandable })}>
-					<VSCodeLink className="text-sm">{isExpanded ? "Less" : "More"}</VSCodeLink>
+					<VSCodeLink className="text-sm">
+						{isExpanded ? t("settings:modelInfo.showLess") : t("settings:modelInfo.showMore")}
+					</VSCodeLink>
 				</CollapsibleTrigger>
 			</Collapsible>
 		)

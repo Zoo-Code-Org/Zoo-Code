@@ -2,6 +2,7 @@ import * as path from "path"
 import * as os from "os"
 import * as fs from "fs/promises"
 import { readFileSync } from "fs"
+import { randomBytes } from "crypto"
 
 import { downloadAndUnzipVSCode, runTests } from "@vscode/test-electron"
 import { LLMock } from "@copilotkit/aimock"
@@ -88,6 +89,7 @@ async function main() {
 	const useMock = isRecord || !hasRealApiKey || process.env.USE_MOCK === "true"
 
 	let mock: InstanceType<typeof LLMock> | undefined
+	const mockApiKey = randomBytes(32).toString("hex")
 
 	// The folder containing the Extension Manifest package.json
 	// Passed to `--extensionDevelopmentPath`
@@ -113,6 +115,7 @@ async function main() {
 
 			mock = new LLMock({
 				port: 0, // random free port
+				auth: { apiKeys: [mockApiKey] },
 				...(isRecord && {
 					record: {
 						// OpenRouter is OpenAI-compatible; aimock proxies using the openai provider key.
@@ -120,10 +123,16 @@ async function main() {
 						// so including /v1 here would produce a doubled /v1/v1 upstream URL.
 						providers: {
 							openai: isDeepSeekTest ? "https://api.deepseek.com" : "https://openrouter.ai/api",
-							// aimock forwards the x-api-key header from the Anthropic SDK to the real API.
+							// Recording credentials are supplied separately through providerKeys.
 							anthropic: "https://api.anthropic.com",
-							// aimock forwards the x-goog-api-key header from the Google AI SDK.
+							// Google AI recording is enabled only for its targeted suite.
 							...(isGeminiTest && { gemini: "https://generativelanguage.googleapis.com" }),
+						},
+						// Authenticated aimock requests never forward inbound credentials.
+						providerKeys: {
+							openai: isDeepSeekTest ? process.env.DEEPSEEK_API_KEY : process.env.OPENROUTER_API_KEY,
+							anthropic: process.env.ANTHROPIC_API_KEY,
+							gemini: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
 						},
 						fixturePath: fixturesDir,
 					},
@@ -183,7 +192,7 @@ async function main() {
 			...process.env,
 			...(testGrep && { TEST_GREP: testGrep }),
 			...(testFile && { TEST_FILE: testFile }),
-			...(mock && { AIMOCK_URL: mock.url }),
+			...(mock && { AIMOCK_URL: mock.url, E2E_AIMOCK_API_KEY: mockApiKey }),
 			...(mock && { E2E_MOCK_MODEL_LIST_FALLBACK: "true" }),
 		}
 

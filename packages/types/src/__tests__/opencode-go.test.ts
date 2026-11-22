@@ -316,6 +316,7 @@ describe("opencode-go registry", () => {
 					supportsImages: true,
 					supportsPromptCache: true,
 					supportsMaxTokens: true,
+					supportsReasoningEffort: ["disable", "low", "medium", "high", "xhigh", "max"],
 					inputPrice: 0.3,
 					outputPrice: 1.2,
 					cacheReadsPrice: 0.006,

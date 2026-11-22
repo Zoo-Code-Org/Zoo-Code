@@ -16,6 +16,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { PendingActionSettlementError, Task } from "../Task"
+import { parseMentions } from "../../mentions"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ContextProxy } from "../../config/ContextProxy"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
@@ -31,7 +32,9 @@ type TaskPersistenceAccess = {
 	resumeTaskFromHistory: () => Promise<void>
 	resumePendingTaskAction: (action: PendingTaskAction) => Promise<void>
 	saveClineMessages: () => Promise<boolean>
-	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
+	initiateTaskLoop: (
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	) => Promise<void>
 }
 
 function getTaskPersistenceAccess(task: Task): TaskPersistenceAccess {
@@ -1257,7 +1260,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
-			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
 			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
 			// The synthetic tool_result must be recorded as an error so the history
 			// cannot be misread as a successful completion of the interrupted call.
@@ -1329,7 +1332,7 @@ describe("Task persistence", () => {
 			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
 
 			expect(initiateTaskLoopSpy).toHaveBeenCalledTimes(1)
-			const newUserContent = initiateTaskLoopSpy.mock.calls[0][0]
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
 			const toolResults = newUserContent.filter((block) => block.type === "tool_result")
 			// The pre-existing result is preserved untouched; the synthesized one
 			// for the unanswered tool call is marked as an error.
@@ -2203,7 +2206,10 @@ describe("Task persistence", () => {
 			const initiate = vi
 				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
 				.mockImplementation(async (content) => {
-					await getTaskPersistenceAccess(task).addToApiConversationHistory({ role: "user", content })
+					await getTaskPersistenceAccess(task).addToApiConversationHistory({
+						role: "user",
+						content: await content,
+					})
 				})
 
 			await getTaskPersistenceAccess(task).resumePendingTaskAction(lifecycleAction)
@@ -2216,6 +2222,195 @@ describe("Task persistence", () => {
 			expect(mockSaveApiMessages).toHaveBeenCalled()
 			expect(mockProvider.clearPendingTaskAction).toHaveBeenCalledWith("child-1", sanitizedActionId)
 			expect(persist.mock.invocationCallOrder[0]).toBeLessThan(initiate.mock.invocationCallOrder[0])
+		})
+	})
+
+	describe("resumeTaskFromHistory response mentions", () => {
+		const resumeWith = async (response: { text: string; segments?: unknown; images?: string[] }) => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resume-mentions",
+					number: 1,
+					ts: Date.now(),
+					task: "Resumed task",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiate = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", ...response } as never)
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: [{ type: "text", text: "Hi" }] }])
+			mockProvider.taskHistoryStore.get = vi
+				.fn()
+				.mockReturnValue({ id: "resume-mentions", status: "interrupted" })
+
+			vi.mocked(parseMentions).mockClear()
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			return {
+				processed: { content: await initiate.mock.calls[0][0] },
+				parsed: vi.mocked(parseMentions).mock.calls.map((call) => call[0]),
+			}
+		}
+
+		it("expands a user segment and keeps the wrapper", async () => {
+			const text = "read @/allowed please"
+			const { processed, parsed } = await resumeWith({ text, segments: [{ text, source: "user" }] })
+
+			expect(parsed).toEqual([text])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: `<user_message>\nprocessed: ${text}\n</user_message>`,
+			})
+		})
+
+		it("expands only the user segments of an interleaved answer", async () => {
+			const text = "@/a @/secret @/b"
+			const { processed, parsed } = await resumeWith({
+				text,
+				segments: [
+					{ text: "@/a ", source: "user" },
+					{ text: "@/secret ", source: "generated" },
+					{ text: "@/b", source: "user" },
+				],
+			})
+
+			expect(parsed).toEqual(["@/a ", "@/b"])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: "<user_message>\nprocessed: @/a @/secret processed: @/b\n</user_message>",
+			})
+		})
+
+		it.each([
+			{ label: "omitted", segments: undefined },
+			{ label: "not matching the text", segments: [{ text: "other", source: "user" }] },
+			{ label: "matching but generated only", segments: [{ text: "read @/secret", source: "generated" }] },
+			{ label: "matching but of an invalid source", segments: [{ text: "read @/secret", source: "system" }] },
+		])("expands nothing when the segments are $label", async ({ segments }) => {
+			const { processed, parsed } = await resumeWith({ text: "read @/secret", segments })
+
+			expect(parsed).toEqual([])
+			expect(processed.content).toContainEqual({
+				type: "text",
+				text: "<user_message>\nread @/secret\n</user_message>",
+			})
+		})
+
+		it("keeps the images of an empty-text response and expands nothing", async () => {
+			const { processed, parsed } = await resumeWith({ text: "", images: ["data:image/png;base64,AA"] })
+
+			expect(parsed).toEqual([])
+			expect(processed.content).toContainEqual({
+				type: "image",
+				source: { type: "base64", media_type: "image/png", data: "AA" },
+			})
+			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
+		})
+
+		it("writes the history only after the expansion ends, and not when it fails", async () => {
+			const text = "read @/allowed please"
+			const segments = [{ text, source: "user" }]
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "resume-order",
+					number: 1,
+					ts: Date.now(),
+					task: "t",
+					tokensIn: 1,
+					tokensOut: 1,
+					totalCost: 0,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiate = vi.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop").mockResolvedValue(undefined)
+			const overwrite = vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", text, segments } as never)
+			mockReadApiMessages.mockResolvedValue([{ role: "assistant", content: [{ type: "text", text: "Hi" }] }])
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({ id: "resume-order", status: "interrupted" })
+
+			let finish: (value: never[]) => void = () => {}
+			vi.spyOn(task, "userInputContent").mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			expect(overwrite).not.toHaveBeenCalled()
+			finish([])
+			await initiate.mock.calls[0][0]
+			expect(overwrite).toHaveBeenCalledTimes(1)
+
+			overwrite.mockClear()
+			vi.spyOn(task, "userInputContent").mockRejectedValueOnce(new Error("state"))
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+			await expect(initiate.mock.calls[1][0]).rejects.toThrow("state")
+			expect(overwrite).not.toHaveBeenCalled()
+		})
+
+		it.each(["cancel", "dispose", "generation", "abandon"] as const)(
+			"preserves newer history when pending preparation loses ownership through %s",
+			async (change) => {
+				const text = "read @/allowed please"
+				const segments = [{ text, source: "user" }]
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					historyItem: {
+						id: "resume-order",
+						number: 1,
+						ts: Date.now(),
+						task: "t",
+						tokensIn: 1,
+						tokensOut: 1,
+						totalCost: 0,
+					},
+					startTask: false,
+					initialStatus: "interrupted",
+				})
+				const initiate = vi
+					.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+					.mockResolvedValue(undefined)
+				const overwrite = vi.spyOn(task, "overwriteApiConversationHistory")
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "messageResponse", text, segments } as never)
+				mockReadApiMessages.mockResolvedValue([{ role: "user", content: [{ type: "text", text: "old turn" }] }])
+				mockProvider.taskHistoryStore.get = vi
+					.fn()
+					.mockReturnValue({ id: "resume-order", status: "interrupted" })
+
+				let finish: (value: Anthropic.Messages.TextBlockParam[]) => void = () => {}
+				vi.spyOn(task, "userInputContent").mockReturnValueOnce(new Promise((resolve) => (finish = resolve)))
+				await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+				const pending = Promise.resolve(initiate.mock.calls[0][0])
+				const rejected = expect(pending).rejects.toThrow(
+					`[Task#resumeTaskFromHistory] task ${task.taskId}.${task.instanceId} aborted`,
+				)
+				if (change === "cancel") task.requestAbort(false)
+				else if (change === "dispose") task.requestDispose()
+				else if (change === "abandon") task.requestAbandon()
+				else task.cancellationGeneration++
+
+				const newerHistory: typeof task.apiConversationHistory = [{ role: "user", content: "new continuation" }]
+				await task.overwriteApiConversationHistory(newerHistory)
+				overwrite.mockClear()
+				mockSaveApiMessages.mockClear()
+				finish([])
+				await rejected
+				expect(overwrite).not.toHaveBeenCalled()
+				expect(mockSaveApiMessages).not.toHaveBeenCalled()
+				expect(task.apiConversationHistory).toEqual(newerHistory)
+			},
+		)
+
+		it("pushes no response block for an empty response", async () => {
+			const { processed, parsed } = await resumeWith({ text: "" })
+
+			expect(parsed).toEqual([])
+			expect(JSON.stringify(processed.content)).not.toContain("<user_message>")
 		})
 	})
 

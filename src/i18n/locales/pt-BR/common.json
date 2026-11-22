@@ -10,7 +10,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Tem certeza de que deseja redefinir todo o estado e armazenamento secreto na extensão? Isso não pode ser desfeito.",
-		"delete_config_profile": "Tem certeza de que deseja excluir este perfil de configuração?"
+		"delete_config_profile": "Tem certeza de que deseja excluir este perfil de configuração?",
+		"requesty_deep_link": "Ativar credenciais do Requesty a partir de um link externo?",
+		"requesty_deep_link_detail": "Isso substituirá o provedor ativo. Solicitações subsequentes podem enviar o conteúdo da sua conversa e do workspace para:\n{{url}}\n\nContinue apenas se você solicitou essas credenciais e confia neste destino."
 	},
 	"errors": {
 		"invalid_data_uri": "Formato de URI de dados inválido",
@@ -154,7 +156,8 @@
 		}
 	},
 	"answers": {
-		"yes": "Sim"
+		"yes": "Sim",
+		"activate_requesty": "Ativar Requesty"
 	},
 	"buttons": {
 		"learn_more": "Saiba Mais"

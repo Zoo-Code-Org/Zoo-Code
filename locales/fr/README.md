@@ -47,13 +47,13 @@ Zoo Code s'appuie sur les fondations créées par Roo Code et continue de les en
 - **Des workflows de terminal et d'édition plus fiables** — correctifs pour les fins prématurées de commandes dans le terminal, les conditions de concurrence liées à l'état des tâches, la gestion du contexte, l'édition de diff et l'utilisation d'outils propres aux providers.
 - **Davantage de contrôle sur ton espace de travail** — gestion des règles, restrictions MCP par mode, contrôle des chemins multi-root, options de raisonnement des modèles et actions de vérification des modifications à la fin d'une tâche.
 
-## Nouveautés de la v3.98.0
+## Nouveautés de Zoo Code v3.98.1
 
-- 🎟️ Découvre le prochain abonnement Zoo Pass. 2 semaines d'accès gratuit ; places limitées
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Titres de tâches automatiques et contrôle plus précis des modèles :** Génère automatiquement des titres pour les nouvelles tâches racines et essaie le réglage expérimental d’effort de raisonnement dynamique.
-- 🔌 **Prise en charge étendue des modèles et fournisseurs :** Utilise GPT-6.1 Terra et récupère la liste de modèles Friendli la plus récente.
-- 🛡️ **Chats et modifications plus sûrs et réactifs :** Annule proprement les requêtes OpenAI Native et Requesty, évite l’approbation automatique accidentelle des diffs hors de l’espace de travail, change la langue de l’interface de façon cohérente et évite les restaurations ambiguës de sauvegardes JSON.
+- 💫Découvre Zoo Pass avec GLM-5.3-Flash illimité gratuitement jusqu'au 1er décembre avec n'importe quel solde sur ton compte Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modèles et raisonnement : Utilise GPT-6.2 Sol, GPT-6.2 Astra et Claude Sonnet 5.5. Règle l'effort de raisonnement pour chaque profil LiteLLM.
+- 🛡️ Sécurité : Amélioration du traitement des métadonnées des compétences et commandes, des mentions, des liens fournisseurs et des approbations CLI.
+- 🔧 Corrections : Coûts des niveaux de service OpenAI, reconnaissance des liens symboliques de l'espace de travail et davantage de textes traduits.
 
 ## Que peut faire Zoo Code pour VOUS ?
 

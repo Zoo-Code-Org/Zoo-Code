@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API-configuratie",
-		"select": "Selecteer welke API-configuratie voor deze modus gebruikt moet worden"
+		"select": "Selecteer welke API-configuratie voor deze modus gebruikt moet worden",
+		"pinnedGroupAriaLabel": "Vastgezette configuraties",
+		"allGroupAriaLabel": "Alle configuraties"
 	},
 	"tools": {
 		"title": "Beschikbare tools",
@@ -47,7 +49,8 @@
 		"title": "Modusspecifieke instructies (optioneel)",
 		"resetToDefault": "Terugzetten naar standaard",
 		"description": "Voeg gedragsrichtlijnen toe die specifiek zijn voor de modus {{modeName}}.",
-		"loadFromFile": "Aangepaste instructies specifiek voor de {{mode}} modus kunnen ook worden geladen vanuit de map <span>.roo/rules-{{slug}}/</span> in je werkruimte of vanuit de globale <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} en .clinerules-{{slug}} zijn verouderd en zullen binnenkort niet meer werken)."
+		"loadFromFile": "Aangepaste instructies specifiek voor de {{mode}} modus kunnen ook worden geladen vanuit de map <span>.roo/rules-{{slug}}/</span> in je werkruimte of vanuit de globale <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} en .clinerules-{{slug}} zijn verouderd en zullen binnenkort niet meer werken).",
+		"loadFromFileAriaLabel": "Meer informatie over globale aangepaste instructies voor modi"
 	},
 	"exportMode": {
 		"title": "Modus exporteren",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Aangepaste instructies voor alle modi",
 		"description": "Deze instructies gelden voor alle modi. Ze bieden een basisset aan gedragingen die kunnen worden uitgebreid met modusspecifieke instructies hieronder. <0>Meer informatie</0>",
-		"loadFromFile": "Instructies kunnen ook worden geladen vanuit de map <span>.roo/rules/</span> in je werkruimte of vanuit de globale <0>.roo/rules/</0> (.roorules en .clinerules zijn verouderd en zullen binnenkort niet meer werken)."
+		"loadFromFile": "Instructies kunnen ook worden geladen vanuit de map <span>.roo/rules/</span> in je werkruimte of vanuit de globale <0>.roo/rules/</0> (.roorules en .clinerules zijn verouderd en zullen binnenkort niet meer werken).",
+		"learnMoreAriaLabel": "Meer informatie over globale aangepaste instructies",
+		"loadFromFileAriaLabel": "Leer hoe je globale aangepaste instructies instelt"
 	},
 	"systemPrompt": {
 		"preview": "Systeemprompt bekijken",
@@ -199,5 +204,10 @@
 		"rulesFolder": "Deze modus heeft een regelmap op {{folderPath}} die ook wordt verwijderd.",
 		"confirm": "Verwijderen",
 		"cancel": "Annuleren"
+	},
+	"mcpServers": {
+		"restrict": "Beperken tot specifieke MCP-servers",
+		"noneConnected": "Geen MCP-servers verbonden",
+		"notConnected": "{{serverName}} (niet verbonden)"
 	}
 }

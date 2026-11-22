@@ -1,7 +1,8 @@
 {
 	"landing": {
 		"greeting": "Willkommen bei Zoo Code!",
-		"introduction": "Mit einer Reihe von integrierten und erweiterbaren Modi ermöglicht dir Zoo Code, zu planen, zu architektieren, zu coden, zu debuggen und deine Produktivität wie nie zuvor zu steigern."
+		"introduction": "Mit einer Reihe von integrierten und erweiterbaren Modi ermöglicht dir Zoo Code, zu planen, zu architektieren, zu coden, zu debuggen und deine Produktivität wie nie zuvor zu steigern.",
+		"logoAlt": "Roo-Logo"
 	},
 	"providerSignup": {
 		"heading": "Wähle deinen Anbieter",

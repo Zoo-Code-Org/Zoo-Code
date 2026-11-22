@@ -323,7 +323,10 @@ export function convertToOpenAiMessages(
 			return undefined
 		}
 
-		return details.map((detail: any) => {
+		// Raw Responses items are endpoint-scoped and cannot be sent through Chat Completions.
+		const filtered = details.filter((detail) => detail?.type !== "reasoning")
+		if (!filtered.length) return undefined
+		return filtered.map((detail) => {
 			// Strip `id` from openai-responses-v1 blocks because OpenAI's Responses API
 			// requires `store: true` to persist reasoning blocks. Since we manage
 			// conversation state client-side, we don't use `store: true`, and sending

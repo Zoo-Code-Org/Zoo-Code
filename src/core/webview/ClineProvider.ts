@@ -94,6 +94,7 @@ import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 import { Package } from "../../shared/package"
 import { findLast } from "../../shared/array"
 import { supportPrompt } from "../../shared/support-prompt"
+import { generatedSegments, joinSegments } from "../../shared/mentionSegments"
 import { GlobalFileNames } from "../../shared/globalFileNames"
 import { Mode, defaultModeSlug, getModeBySlug } from "../../shared/modes"
 import { experimentDefault } from "../../shared/experiments"
@@ -142,7 +143,7 @@ import { PendingActionSettlementError, Task } from "../task/Task"
 
 import { webviewMessageHandler } from "./webviewMessageHandler"
 import type { WebviewFocusTracker } from "./WebviewFocusTracker"
-import type { ClineMessage, TodoItem } from "@roo-code/types"
+import type { ClineMessage, MentionSegment, TodoItem } from "@roo-code/types"
 import {
 	type ApiMessage,
 	readApiMessages,
@@ -480,7 +481,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.98.0-titles-models-reliability" // v3.98.0 task titles, model support, and reliability
+	public readonly latestAnnouncementId = "nov-2026-v3.98.1-pass-models-security" // v3.98.1 Zoo Pass, model support, and security
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1650,19 +1651,22 @@ export class ClineProvider
 		const { customSupportPrompts } = await this.getState()
 
 		// TODO: Improve type safety for promptType.
-		const prompt = supportPrompt.create(promptType, params, customSupportPrompts)
+		// Only the typed input is a user segment. The template and its other params are generated.
+		const segments = supportPrompt.createSegments(promptType, params, customSupportPrompts)
+		const prompt = joinSegments(segments)
 
 		if (command === "addToContext") {
 			await this.postMessageToWebview({
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				segments: [...segments, ...generatedSegments("\n\n")],
 			})
 			await this.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
 		}
 
-		await this.createTask(prompt)
+		await this.createTask(prompt, undefined, undefined, { segments })
 	}
 
 	public static async handleTerminalAction(
@@ -1679,20 +1683,22 @@ export class ClineProvider
 		}
 
 		const { customSupportPrompts } = await visibleProvider.getState()
-		const prompt = supportPrompt.create(promptType, params, customSupportPrompts)
+		const segments = supportPrompt.createSegments(promptType, params, customSupportPrompts)
+		const prompt = joinSegments(segments)
 
 		if (command === "terminalAddToContext") {
 			await visibleProvider.postMessageToWebview({
 				type: "invoke",
 				invoke: "setChatBoxMessage",
 				text: `${prompt}\n\n`,
+				segments: [...segments, ...generatedSegments("\n\n")],
 			})
 			await visibleProvider.postMessageToWebview({ type: "action", action: "focusInput" })
 			return
 		}
 
 		try {
-			await visibleProvider.createTask(prompt)
+			await visibleProvider.createTask(prompt, undefined, undefined, { segments })
 		} catch (error) {
 			if (error instanceof OrganizationAllowListViolationError) {
 				// Errors from terminal commands seem to get swallowed / ignored.
@@ -5356,7 +5362,10 @@ export class ClineProvider
 		text?: string,
 		images?: string[],
 		parentTask?: Task,
-		options: CreateTaskOptions & { handoffExecutionContext?: DelegatedChildContext } = {},
+		options: CreateTaskOptions & {
+			handoffExecutionContext?: DelegatedChildContext
+			segments?: MentionSegment[]
+		} = {},
 		configuration: RooCodeSettings = {},
 	): Promise<Task> {
 		if (configuration) {
