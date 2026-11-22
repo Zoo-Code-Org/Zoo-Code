@@ -44,11 +44,14 @@ const opencodeGoModelsResponseSchema = z.object({
  *
  * Resolution order for a fully-populated {@link ModelInfo}:
  *   1. Use the native registry ({@link getOpencodeGoModelInfo}) when the model
- *      is curated, including its capabilities and pricing.
- *   2. Override static limits and image support with live `/models` values when
- *      present, keeping the gateway authoritative for volatile fields.
+ *      is curated, including its context window, capabilities and pricing.
+ *   2. Override max tokens and image support with live `/models` values when
+ *      present. The registry context window stays authoritative: the endpoint
+ *      reports a blanket `context_window` (200k) for every model, so a live
+ *      value would clobber curated windows (Zoo-Code-Org/Zoo-Code#723).
  *   3. Fall back to {@link opencodeGoDefaultModelInfo} for an unknown model,
  *      ensuring downstream consumers always receive a fully-populated object.
+ *      Unknown models still take the live context window when present.
  *
  * @param model - Validated model entry from the `/models` response.
  * @returns Normalised model metadata suitable for the model picker.
@@ -56,7 +59,8 @@ const opencodeGoModelsResponseSchema = z.object({
 export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	const native = getOpencodeGoModelInfo(model.id)
 
-	// Live endpoint values take precedence over the registry for volatile fields.
+	// Live endpoint values take precedence for max tokens and image support.
+	// The registry context window stays authoritative for curated models.
 	const liveContextWindow = model.context_window ?? model.context_length
 	const liveMaxTokens = model.max_output_tokens ?? model.max_tokens
 	const liveSupportsImages = model.supports_images
@@ -64,7 +68,6 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 	if (native) {
 		return {
 			...native,
-			...(liveContextWindow !== undefined && { contextWindow: liveContextWindow }),
 			...(liveMaxTokens !== undefined && { maxTokens: liveMaxTokens }),
 			...(liveSupportsImages !== undefined && { supportsImages: liveSupportsImages }),
 			description: model.description ?? model.name ?? native.description,

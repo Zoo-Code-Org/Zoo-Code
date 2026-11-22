@@ -39,17 +39,18 @@ describe("Opencode Go Fetchers", () => {
 			})
 
 			expect(Object.keys(models).sort()).toEqual(["deepseek-v4-pro", "glm-5.1"])
-			// Live endpoint values override the native registry for volatile fields,
-			// while capability flags and pricing come from the native registry.
+			// The registry context window stays authoritative for curated models:
+			// the endpoint reports a blanket context_window, so live limits only
+			// apply to max tokens while capability flags come from the registry.
 			expect(models["glm-5.1"]).toMatchObject({
-				contextWindow: 202752,
+				contextWindow: 204_800,
 				maxTokens: 32768,
 				supportsPromptCache: true,
 				supportsReasoningEffort: ["disable", "medium"],
 				preserveReasoning: true,
 				description: "Zhipu GLM 5.1",
 			})
-			expect(models["deepseek-v4-pro"].contextWindow).toBe(1048576)
+			expect(models["deepseek-v4-pro"].contextWindow).toBe(1_000_000)
 			expect(models["deepseek-v4-pro"].supportsReasoningEffort).toEqual([
 				"disable",
 				"low",
@@ -89,10 +90,11 @@ describe("Opencode Go Fetchers", () => {
 			const models = await getOpencodeGoModels("k")
 
 			// Live limits never override the curated temperature capability
-			// (Zoo-Code-Org/Zoo-Code#2055).
-			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 400_000, supportsTemperature: true })
+			// (Zoo-Code-Org/Zoo-Code#2055), and never override the curated
+			// context window (Zoo-Code-Org/Zoo-Code#723).
+			expect(models["grok-4.6"]).toMatchObject({ contextWindow: 500_000, supportsTemperature: true })
 			expect(models["muse-spark-1.2-contributor"]).toMatchObject({ maxTokens: 65_536, supportsTemperature: true })
-			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 900_000, supportsTemperature: false })
+			expect(models["gpt-5.6-luna"]).toMatchObject({ contextWindow: 1_050_000, supportsTemperature: false })
 		})
 
 		it("uses curated gpt-6-luna metadata when the live model omits metadata", async () => {
@@ -313,10 +315,11 @@ describe("Opencode Go Fetchers", () => {
 			}
 		})
 
-		it("merges live endpoint values over the native registry for a curated model", () => {
+		it("keeps the registry context window and merges live max tokens for a curated model", () => {
 			const info = parseOpencodeGoModel({ id: "glm-5.1", context_window: 150000, max_output_tokens: 8000 })
-			// Live values win for volatile fields.
-			expect(info.contextWindow).toBe(150000)
+			// The registry context window stays authoritative (Zoo-Code-Org/Zoo-Code#723).
+			expect(info.contextWindow).toBe(204_800)
+			// Live max-token values still win.
 			expect(info.maxTokens).toBe(8000)
 			// Capability flags and pricing come from the native registry.
 			expect(info.supportsPromptCache).toBe(true)
@@ -326,18 +329,54 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.inputPrice).toBe(1.4)
 		})
 
-		it("keeps gpt-6-luna live limits authoritative over its curated metadata", () => {
+		it("keeps the curated gpt-6-luna context window over a smaller live value", () => {
 			const info = parseOpencodeGoModel({
 				id: "gpt-6-luna",
 				context_window: 1_000_000,
 				max_output_tokens: 64_000,
 			})
 
-			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.contextWindow).toBe(1_050_000)
 			expect(info.maxTokens).toBe(64_000)
 			expect(info.supportsImages).toBe(true)
 			expect(info.inputPrice).toBe(0.1)
 			expect(info.cacheWritesPrice).toBe(0.125)
+		})
+
+		it("keeps the curated context window when the endpoint reports the blanket 200000 (#723)", () => {
+			// The Go /models endpoint reports context_window: 200000 for every
+			// model. deepseek-v4-flash is curated with a 1M window and must keep it.
+			const info = parseOpencodeGoModel({ id: "deepseek-v4-flash", context_window: 200_000 })
+			expect(info.contextWindow).toBe(1_000_000)
+			expect(info.maxTokens).toBe(384_000)
+			expect(info.supportsPromptCache).toBe(true)
+		})
+
+		it("the registry context window is authoritative for every curated model, whatever the live value", () => {
+			for (const [id, native] of Object.entries(opencodeGoModels)) {
+				const blanket = parseOpencodeGoModel({ id, context_window: 200_000 })
+				expect(blanket.contextWindow, id).toBe(native.contextWindow)
+
+				// A live value larger than the registry one must not win either.
+				const larger = parseOpencodeGoModel({ id, context_length: 2_000_000 })
+				expect(larger.contextWindow, id).toBe(native.contextWindow)
+			}
+		})
+
+		it("an unknown model keeps the live context value in both field forms", () => {
+			const window = parseOpencodeGoModel({ id: "x", context_window: 123_456 })
+			expect(window.contextWindow).toBe(123_456)
+
+			const length = parseOpencodeGoModel({ id: "x", context_length: 654_321 })
+			expect(length.contextWindow).toBe(654_321)
+		})
+
+		it("live max tokens still override the curated maxTokens in both field forms", () => {
+			const output = parseOpencodeGoModel({ id: "glm-5.1", max_output_tokens: 9_999 })
+			expect(output.maxTokens).toBe(9_999)
+
+			const max = parseOpencodeGoModel({ id: "glm-5.1", max_tokens: 8_888 })
+			expect(max.maxTokens).toBe(8_888)
 		})
 
 		it("uses native registry defaults when the live payload omits volatile fields", () => {
