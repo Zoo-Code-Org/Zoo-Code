@@ -6572,6 +6572,22 @@ describe("ClineProvider", () => {
 			expect(pruned["view-1"]).toEqual({ mode: "mode-1", updatedAt: 7 })
 			expect(pruned["view-54"]).toEqual({ mode: "mode-54", updatedAt: 48 })
 			expect(pruned["view-8"]).toBeUndefined()
+			// The three single-key checks above leave 47 entries unchecked on each side of the cut. The
+			// fixture's updatedAt is (index * 7) % 55, and 7 is coprime with 55, so the values are a
+			// permutation of 0..54 and the newest-50 cut must drop exactly the entries holding 0..4 -
+			// view-0, view-8, view-16, view-24 and view-32 (7^-1 mod 55 is 8, so value v sits at index
+			// 8v). Deriving the dropped set from the fixture and then asserting the whole retained key
+			// set closes the swap between an unchecked retained entry and an unchecked dropped one.
+			const droppedIds = Object.entries(states)
+				.filter(([, state]) => state.updatedAt < 5)
+				.map(([id]) => id)
+				.sort()
+			expect(droppedIds).toEqual(["view-0", "view-16", "view-24", "view-32", "view-8"])
+			expect(Object.keys(pruned).sort()).toEqual(
+				Object.keys(states)
+					.filter((id) => !droppedIds.includes(id))
+					.sort(),
+			)
 			await provider.dispose()
 		})
 
