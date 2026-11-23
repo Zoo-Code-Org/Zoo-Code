@@ -391,12 +391,6 @@
 		"getOpencodeGoApiKey": "Opencode Go API Anahtarı Al",
 		"kenariApiKey": "Kenari API Anahtarı",
 		"getKenariApiKey": "Kenari API Anahtarı Al",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence API Anahtarı",
-			"getApiKey": "IO Intelligence API Anahtarı Al",
-			"model": "Model"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Anahtarı",
@@ -529,6 +523,8 @@
 		"openAiBaseUrl": "Temel URL",
 		"openAiStrictToolSchemas": "Katı araç şemaları (strict: true)",
 		"openAiStrictToolSchemasDescription": "Şema uyumunu etkinleştirmek için araç şemalarıyla strict: true gönderir. Katı olmayan araç çağırmak için devre dışı bırakın.",
+		"openAiUseResponsesApi": "Responses API kullan",
+		"openAiUseResponsesApiDescription": "İstekleri /chat/completions yerine /responses adresine gönderir. OpenAI uyumlu uç noktalardaki bazı akıl yürütme modelleri için gereklidir. Akıl yürütme ve araçlar etkin kalır.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure dağıtım adı",
 		"azureOpenAiDeploymentNameDescription": "Temel model adı yerine Azure AI Studio'daki dağıtım adını girin.",
@@ -539,6 +535,13 @@
 		"codestralBaseUrlDesc": "Codestral modeli için alternatif URL ayarlayın.",
 		"xaiApiKey": "xAI API Anahtarı",
 		"getXaiApiKey": "xAI API Anahtarı Al",
+		"litellmPreserveReasoning": {
+			"label": "Akıl yürütmeyi modele geri gönder",
+			"auto": "Otomatik",
+			"on": "Açık",
+			"off": "Kapalı",
+			"description": "Önceki akıl yürütmeyi düz metin olarak modele geri gönderir. Otomatik, model algılamasını izler; Açık her zaman gönderir; Kapalı hiçbir zaman göndermez. Akıl yürütme üretimini etkinleştirmez veya sohbetteki akıl yürütmeyi gizlemez."
+		},
 		"litellmApiKey": "LiteLLM API Anahtarı",
 		"litellmBaseUrl": "LiteLLM Temel URL",
 		"awsCredentials": "AWS Kimlik Bilgileri",

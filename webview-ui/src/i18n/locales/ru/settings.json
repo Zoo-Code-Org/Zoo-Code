@@ -393,12 +393,6 @@
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"kenariApiKey": "Ключ API Kenari",
 		"getKenariApiKey": "Получить ключ API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "API-ключ IO Intelligence",
-			"getApiKey": "Получить API-ключ IO Intelligence",
-			"model": "Модель"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Ключ API NanoGPT",
@@ -531,6 +525,8 @@
 		"openAiBaseUrl": "Базовый URL",
 		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
 		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
+		"openAiUseResponsesApi": "Использовать API Responses",
+		"openAiUseResponsesApiDescription": "Отправляет запросы в /responses вместо /chat/completions. Требуется для некоторых моделей рассуждения на совместимых с OpenAI конечных точках. Рассуждение и инструменты остаются включены.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",
@@ -541,6 +537,13 @@
 		"codestralBaseUrlDesc": "Укажите альтернативный URL для модели Codestral.",
 		"xaiApiKey": "xAI API-ключ",
 		"getXaiApiKey": "Получить xAI API-ключ",
+		"litellmPreserveReasoning": {
+			"label": "Отправлять рассуждения обратно модели",
+			"auto": "Автоматически",
+			"on": "Включено",
+			"off": "Выключено",
+			"description": "Отправляет предыдущие рассуждения обратно модели в виде обычного текста. Автоматически учитывает определённые свойства модели; Включено отправляет всегда; Выключено не отправляет никогда. Не включает генерацию рассуждений и не скрывает их в чате."
+		},
 		"litellmApiKey": "API-ключ LiteLLM",
 		"litellmBaseUrl": "Базовый URL LiteLLM",
 		"awsCredentials": "AWS-учётные данные",

@@ -1,7 +1,7 @@
 import axios from "axios"
 
 import type { ModelRecord } from "@roo-code/types"
-import { isLiteLLMPreserveReasoningModel } from "@roo-code/types"
+import { isLiteLLMPreserveReasoningModel, isLiteLLMThoughtSignatureModel } from "@roo-code/types"
 
 import { DEFAULT_HEADERS } from "../constants"
 import { throwIfAborted } from "../utils/abort-signal"
@@ -52,6 +52,7 @@ export async function getLiteLLMModels(
 				// preserveReasoning from explicit model ids in either the alias or routed model name.
 				const preservesReasoning =
 					isLiteLLMPreserveReasoningModel(modelName) || isLiteLLMPreserveReasoningModel(litellmModelName)
+				const requiresThoughtSignatures = isLiteLLMThoughtSignatureModel(litellmModelName)
 
 				models[modelName] = {
 					maxTokens: modelInfo.max_output_tokens || modelInfo.max_tokens || 8192,
@@ -84,6 +85,7 @@ export async function getLiteLLMModels(
 						},
 					}),
 					...(preservesReasoning && { preserveReasoning: true }),
+					...(requiresThoughtSignatures && { requiresThoughtSignatures: true }),
 					description: `${modelName} via LiteLLM proxy`,
 				}
 			}

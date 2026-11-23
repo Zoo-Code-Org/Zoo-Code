@@ -390,12 +390,6 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Kunci API IO Intelligence",
-			"getApiKey": "Dapatkan Kunci API IO Intelligence",
-			"model": "Model"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
@@ -528,6 +522,8 @@
 		"openAiBaseUrl": "Base URL",
 		"openAiStrictToolSchemas": "Skema tool ketat (strict: true)",
 		"openAiStrictToolSchemasDescription": "Kirim strict: true bersama skema tool untuk mengaktifkan kepatuhan skema ketat. Nonaktifkan untuk menggunakan pemanggilan tool non-ketat.",
+		"openAiUseResponsesApi": "Gunakan API Responses",
+		"openAiUseResponsesApiDescription": "Kirim permintaan ke /responses, bukan /chat/completions. Diperlukan untuk beberapa model penalaran pada endpoint yang kompatibel dengan OpenAI. Penalaran dan alat tetap aktif.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nama deployment Azure",
 		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
@@ -538,6 +534,13 @@
 		"codestralBaseUrlDesc": "Atur URL alternatif untuk model Codestral.",
 		"xaiApiKey": "xAI API Key",
 		"getXaiApiKey": "Dapatkan xAI API Key",
+		"litellmPreserveReasoning": {
+			"label": "Kirim penalaran kembali ke model",
+			"auto": "Otomatis",
+			"on": "Aktif",
+			"off": "Nonaktif",
+			"description": "Kirim penalaran sebelumnya dalam teks biasa kembali ke model. Otomatis mengikuti deteksi model; Aktif selalu mengirim; Nonaktif tidak pernah mengirim. Tidak mengaktifkan pembuatan penalaran atau menyembunyikan penalaran di chat."
+		},
 		"litellmApiKey": "LiteLLM API Key",
 		"litellmBaseUrl": "LiteLLM Base URL",
 		"awsCredentials": "AWS Credentials",

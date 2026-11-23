@@ -152,6 +152,7 @@ export class RequestyHandler extends BaseProvider implements SingleCompletionHan
 			defaultTemperature: 0,
 		})
 		const reasoning = getAnthropicProviderReasoning({
+			modelId: id,
 			model: info,
 			reasoningBudget: params.reasoningBudget,
 			settings: this.options,

@@ -390,12 +390,6 @@
 		"getOpencodeGoApiKey": "Lấy khóa API Opencode Go",
 		"kenariApiKey": "Khóa API Kenari",
 		"getKenariApiKey": "Lấy khóa API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Khóa API IO Intelligence",
-			"getApiKey": "Lấy khóa API IO Intelligence",
-			"model": "Mô hình"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Khóa API NanoGPT",
@@ -528,6 +522,8 @@
 		"openAiBaseUrl": "URL cơ sở",
 		"openAiStrictToolSchemas": "Sơ đồ công cụ nghiêm ngặt (strict: true)",
 		"openAiStrictToolSchemasDescription": "Gửi strict: true cùng sơ đồ công cụ để bật sự tuân thủ sơ đồ nghiêm ngặt. Tắt để sử dụng gọi công cụ không nghiêm ngặt.",
+		"openAiUseResponsesApi": "Sử dụng API Responses",
+		"openAiUseResponsesApiDescription": "Gửi yêu cầu đến /responses thay vì /chat/completions. Cần thiết cho một số mô hình suy luận trên các điểm cuối tương thích với OpenAI. Suy luận và công cụ vẫn được bật.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Tên triển khai Azure",
 		"azureOpenAiDeploymentNameDescription": "Nhập tên triển khai trong Azure AI Studio, không phải tên mô hình cơ sở.",
@@ -538,6 +534,13 @@
 		"codestralBaseUrlDesc": "Đặt URL thay thế cho mô hình Codestral.",
 		"xaiApiKey": "Khóa API xAI",
 		"getXaiApiKey": "Lấy khóa API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Gửi lại suy luận cho mô hình",
+			"auto": "Tự động",
+			"on": "Bật",
+			"off": "Tắt",
+			"description": "Gửi lại suy luận trước đó cho mô hình dưới dạng văn bản thuần túy. Tự động tuân theo kết quả nhận diện mô hình; Bật luôn gửi; Tắt không bao giờ gửi. Không bật tính năng tạo suy luận hoặc ẩn suy luận trong cuộc trò chuyện."
+		},
 		"litellmApiKey": "Khóa API LiteLLM",
 		"litellmBaseUrl": "URL cơ sở LiteLLM",
 		"awsCredentials": "Thông tin xác thực AWS",

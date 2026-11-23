@@ -392,12 +392,6 @@
 		"getOpencodeGoApiKey": "Obtenir la clé API Opencode Go",
 		"kenariApiKey": "Clé API Kenari",
 		"getKenariApiKey": "Obtenir la clé API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Clé API IO Intelligence",
-			"getApiKey": "Obtenir une clé API IO Intelligence",
-			"model": "Modèle"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clé API NanoGPT",
@@ -530,6 +524,8 @@
 		"openAiBaseUrl": "URL de base",
 		"openAiStrictToolSchemas": "Schémas d'outils stricts (strict: true)",
 		"openAiStrictToolSchemasDescription": "Envoie strict: true avec les schémas d'outils pour activer le respect strict du schéma. Désactivez pour utiliser l'appel d'outils non strict.",
+		"openAiUseResponsesApi": "Utiliser l’API Responses",
+		"openAiUseResponsesApiDescription": "Envoie les requêtes à /responses au lieu de /chat/completions. Requis pour certains modèles de raisonnement sur les points de terminaison compatibles OpenAI. Le raisonnement et les outils restent activés.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom du déploiement Azure",
 		"azureOpenAiDeploymentNameDescription": "Saisissez le nom du déploiement défini dans Azure AI Studio, et non le nom du modèle sous-jacent.",
@@ -540,6 +536,13 @@
 		"codestralBaseUrlDesc": "Définir une URL alternative pour le modèle Codestral.",
 		"xaiApiKey": "Clé API xAI",
 		"getXaiApiKey": "Obtenir la clé API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Renvoyer le raisonnement au modèle",
+			"auto": "Automatique",
+			"on": "Activé",
+			"off": "Désactivé",
+			"description": "Renvoie au modèle le raisonnement précédent en texte brut. Automatique suit la détection du modèle ; Activé le renvoie toujours ; Désactivé ne le renvoie jamais. N'active pas la génération de raisonnement et ne masque pas le raisonnement dans le chat."
+		},
 		"litellmApiKey": "Clé API LiteLLM",
 		"litellmBaseUrl": "URL de base LiteLLM",
 		"awsCredentials": "Identifiants AWS",

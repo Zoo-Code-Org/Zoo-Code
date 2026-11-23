@@ -1,3 +1,4 @@
+import { VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS } from "@roo-code/types"
 // npx vitest run src/api/providers/fetchers/__tests__/vercel-ai-gateway.spec.ts
 
 import axios from "axios"
@@ -290,6 +291,23 @@ describe("Vercel AI Gateway Fetchers", () => {
 			})
 		})
 
+		// Property: exact members disable temperature. Other models keep the parser default.
+		it.each([
+			{ id: "anthropic/claude-fable-5.1", overridden: true },
+			{ id: "anthropic/claude-fable-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5", overridden: true },
+			{ id: "anthropic/claude-sonnet-5.5", overridden: true },
+			{ id: "anthropic/claude-opus-5", overridden: true },
+			{ id: "anthropic/claude-opus-5-5", overridden: true },
+			{ id: "anthropic/claude-haiku-5.5", overridden: true },
+			{ id: "anthropic/claude-sonnet-4", overridden: false },
+			{ id: "anthropic/claude-sonnet-5.50", overridden: false },
+			{ id: "anthropic/claude-sonnet-5-5", overridden: false },
+		])("preserves the temperature override for $id", ({ id, overridden }) => {
+			const result = parseVercelAiGatewayModel({ id, model: { ...baseModel, id } })
+			expect(result.supportsTemperature).toBe(overridden ? false : undefined)
+		})
+
 		it("marks Claude Fable 5 as not supporting temperature", () => {
 			const result = parseVercelAiGatewayModel({
 				id: "anthropic/claude-fable-5",
@@ -339,6 +357,26 @@ describe("Vercel AI Gateway Fetchers", () => {
 					max_tokens: 128000,
 				},
 			})
+
+			expect(result.maxTokens).toBe(128000)
+			expect(result.contextWindow).toBe(1000000)
+			expect(result.supportsTemperature).toBe(false)
+		})
+
+		it("marks Claude Sonnet 5.5 as not supporting temperature", () => {
+			const result = parseVercelAiGatewayModel({
+				id: "anthropic/claude-sonnet-5.5",
+				model: {
+					...baseModel,
+					tags: undefined,
+					id: "anthropic/claude-sonnet-5.5",
+					context_window: 1000000,
+					max_tokens: 128000,
+				},
+			})
+
+			expect(VERCEL_AI_GATEWAY_PROMPT_CACHING_MODELS.has("anthropic/claude-sonnet-5.5")).toBe(true)
+			expect(result.supportsImages).toBe(true)
 
 			expect(result.maxTokens).toBe(128000)
 			expect(result.contextWindow).toBe(1000000)

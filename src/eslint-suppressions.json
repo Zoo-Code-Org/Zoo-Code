@@ -81,7 +81,7 @@
 	},
 	"api/providers/__tests__/lite-llm.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 36
+			"count": 26
 		}
 	},
 	"api/providers/__tests__/mimo.spec.ts": {
@@ -271,7 +271,7 @@
 	},
 	"api/providers/lite-llm.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 6
 		}
 	},
 	"api/providers/mimo.ts": {
@@ -399,11 +399,6 @@
 			"count": 2
 		}
 	},
-	"api/transform/__tests__/responses-api-stream.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
-		}
-	},
 	"api/transform/__tests__/zai-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -436,7 +431,7 @@
 	},
 	"api/transform/openai-format.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 8
+			"count": 7
 		}
 	},
 	"api/transform/r1-format.ts": {

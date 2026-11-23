@@ -391,12 +391,6 @@
 		"getOpencodeGoApiKey": "Opencode Go API-Schlüssel erhalten",
 		"kenariApiKey": "Kenari API-Schlüssel",
 		"getKenariApiKey": "Kenari API-Schlüssel erhalten",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence API-Schlüssel",
-			"getApiKey": "IO Intelligence API-Schlüssel holen",
-			"model": "Modell"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API-Schlüssel",
@@ -529,6 +523,8 @@
 		"openAiBaseUrl": "Basis-URL",
 		"openAiStrictToolSchemas": "Strikte Tool-Schemas (strict: true)",
 		"openAiStrictToolSchemasDescription": "Sendet strict: true mit den Tool-Schemas, um die strikte Schema-Treue zu aktivieren. Deaktiviere, um nicht-striktes Tool-Calling zu nutzen.",
+		"openAiUseResponsesApi": "Responses API verwenden",
+		"openAiUseResponsesApiDescription": "Sendet Anfragen an /responses statt an /chat/completions. Erforderlich für einige Reasoning-Modelle an OpenAI-kompatiblen Endpunkten. Reasoning und Tools bleiben aktiviert.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure-Bereitstellungsname",
 		"azureOpenAiDeploymentNameDescription": "Gib den Bereitstellungsnamen aus Azure AI Studio ein, nicht den Namen des zugrunde liegenden Modells.",
@@ -539,6 +535,13 @@
 		"codestralBaseUrlDesc": "Legen Sie eine alternative URL für das Codestral-Modell fest.",
 		"xaiApiKey": "xAI API-Schlüssel",
 		"getXaiApiKey": "xAI API-Schlüssel erhalten",
+		"litellmPreserveReasoning": {
+			"label": "Denkprozess an das Modell zurücksenden",
+			"auto": "Automatisch",
+			"on": "Ein",
+			"off": "Aus",
+			"description": "Sendet frühere Denkprozesse als Klartext an das Modell zurück. Automatisch folgt der Modellerkennung; Ein sendet sie immer; Aus sendet sie nie. Aktiviert weder die Erzeugung von Denkprozessen noch blendet es sie im Chat aus."
+		},
 		"litellmApiKey": "LiteLLM API-Schlüssel",
 		"litellmBaseUrl": "LiteLLM Basis-URL",
 		"awsCredentials": "AWS Anmeldedaten",

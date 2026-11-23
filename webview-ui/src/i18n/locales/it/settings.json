@@ -392,12 +392,6 @@
 		"getOpencodeGoApiKey": "Ottieni chiave API Opencode Go",
 		"kenariApiKey": "Chiave API Kenari",
 		"getKenariApiKey": "Ottieni chiave API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Chiave API IO Intelligence",
-			"getApiKey": "Ottieni chiave API IO Intelligence",
-			"model": "Modello"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chiave API NanoGPT",
@@ -530,6 +524,8 @@
 		"openAiBaseUrl": "URL base",
 		"openAiStrictToolSchemas": "Schemi di strumenti strict (strict: true)",
 		"openAiStrictToolSchemasDescription": "Invia strict: true con gli schemi di strumenti per abilitare l'aderenza rigorosa allo schema. Disattiva per usare il tool calling non rigoroso.",
+		"openAiUseResponsesApi": "Usa l’API Responses",
+		"openAiUseResponsesApiDescription": "Invia le richieste a /responses anziché a /chat/completions. Necessario per alcuni modelli di ragionamento su endpoint compatibili con OpenAI. Il ragionamento e gli strumenti restano attivi.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome della distribuzione Azure",
 		"azureOpenAiDeploymentNameDescription": "Inserisci il nome della distribuzione configurato in Azure AI Studio, non il nome del modello sottostante.",
@@ -540,6 +536,13 @@
 		"codestralBaseUrlDesc": "Imposta un URL opzionale per i modelli Codestral.",
 		"xaiApiKey": "Chiave API xAI",
 		"getXaiApiKey": "Ottieni chiave API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Invia nuovamente il ragionamento al modello",
+			"auto": "Automatico",
+			"on": "Attivato",
+			"off": "Disattivato",
+			"description": "Invia nuovamente al modello il ragionamento precedente in testo semplice. Automatico segue il rilevamento del modello; Attivato lo invia sempre; Disattivato non lo invia mai. Non attiva la generazione del ragionamento né lo nasconde nella chat."
+		},
 		"litellmApiKey": "Chiave API LiteLLM",
 		"litellmBaseUrl": "URL base LiteLLM",
 		"awsCredentials": "Credenziali AWS",

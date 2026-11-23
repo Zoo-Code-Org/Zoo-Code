@@ -41,6 +41,7 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import { manageContext } from "../../context-management"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -270,6 +271,14 @@ vi.mock("../../condense", async (importOriginal) => {
 			cost: 0,
 			newContextTokens: 1,
 		}),
+	}
+})
+
+vi.mock("../../context-management", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../context-management")>()
+	return {
+		...actual,
+		manageContext: vi.fn(actual.manageContext),
 	}
 })
 
@@ -7353,6 +7362,55 @@ describe("Cline", () => {
 			expect(saySpy).toHaveBeenCalledOnce()
 			expect(saySpy).toHaveBeenCalledWith("text", "new task", undefined)
 			expect(initiateTaskLoopSpy).toHaveBeenCalledOnce()
+		})
+	})
+
+	describe("context management model metadata", () => {
+		it("passes the fetched context window to context management", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let modelInfo: ModelInfo = {
+				supportsImages: false,
+				supportsPromptCache: true,
+				contextWindow: 128_000,
+				maxTokens: 4096,
+			}
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: mockApiConfig.apiModelId!,
+				info: modelInfo,
+			}))
+			const ensureModelFetched = vi.fn().mockImplementation(async () => {
+				modelInfo = { ...modelInfo, contextWindow: 1_000_000 }
+			})
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			vi.mocked(manageContext).mockClear()
+			await task.attemptApiRequest(0).next()
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+			expect(manageContext).toHaveBeenCalledWith(expect.objectContaining({ contextWindow: 1_000_000 }))
 		})
 	})
 

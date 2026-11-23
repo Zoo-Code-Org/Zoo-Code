@@ -35,7 +35,6 @@ const expectedProviderIdentifiers = [
 	"opencode-go",
 	"kenari",
 	"nanogpt",
-	"io-intelligence",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
@@ -71,6 +70,7 @@ const expectedRetiredProviderIdentifiers = [
 	"featherless",
 	"groq",
 	"huggingface",
+	"io-intelligence",
 	"roo",
 ]
 /* eslint-enable zoo/no-raw-provider-identifiers */
@@ -112,7 +112,6 @@ describe("provider identifiers", () => {
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
 			providerIdentifiers.nanogpt,
-			providerIdentifiers.ioIntelligence,
 			providerIdentifiers.kimiCode,
 			providerIdentifiers.friendli,
 		])

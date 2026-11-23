@@ -417,12 +417,6 @@
 		"getOpencodeGoApiKey": "取得 Opencode Go API 金鑰",
 		"kenariApiKey": "Kenari API 金鑰",
 		"getKenariApiKey": "取得 Kenari API 金鑰",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence API 金鑰",
-			"getApiKey": "取得 IO Intelligence API 金鑰",
-			"model": "模型"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 金鑰",
@@ -555,6 +549,8 @@
 		"openAiBaseUrl": "基礎 URL",
 		"openAiStrictToolSchemas": "嚴格工具 schema（strict: true）",
 		"openAiStrictToolSchemasDescription": "向工具 schema 一併傳送 strict: true 以啟用嚴格的 schema 遵循。停用以使用非嚴格工具呼叫。",
+		"openAiUseResponsesApi": "使用 Responses API",
+		"openAiUseResponsesApiDescription": "將請求傳送至 /responses，而非 /chat/completions。部分 OpenAI 相容端點上的推理模型需要此選項。推理與工具皆保持啟用。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名稱",
 		"azureOpenAiDeploymentNameDescription": "請輸入 Azure AI Studio 中的部署名稱，而不是底層模型名稱。",
@@ -565,6 +561,13 @@
 		"codestralBaseUrlDesc": "設定 Codestral 模型的替代 URL。",
 		"xaiApiKey": "xAI API 金鑰",
 		"getXaiApiKey": "取得 xAI API 金鑰",
+		"litellmPreserveReasoning": {
+			"label": "將推理傳回模型",
+			"auto": "自動",
+			"on": "開啟",
+			"off": "關閉",
+			"description": "將先前的純文字推理傳回模型。自動遵循模型偵測結果；開啟時一律傳送；關閉時一律不傳送。此設定不會啟用推理生成，也不會隱藏聊天中的推理。"
+		},
 		"litellmApiKey": "LiteLLM API 金鑰",
 		"litellmBaseUrl": "LiteLLM 基礎 URL",
 		"awsCredentials": "AWS 認證",

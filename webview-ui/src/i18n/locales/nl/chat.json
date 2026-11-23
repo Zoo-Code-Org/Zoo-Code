@@ -301,12 +301,12 @@
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Wat is er nieuw in Zoo Code v3.98.0",
-			"highlight0": "🎟️ Bekijk een voorbeeld van het komende Zoo Pass-abonnement. 2 weken gratis toegang; beperkte plaatsen",
-			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "🏷️ Automatische taaktitels en fijnere modelregeling: Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.",
-			"highlight2": "🔌 Uitgebreidere ondersteuning voor modellen en providers: Gebruik GPT-6.1 Terra en haal de nieuwste Friendli-modellenlijst op.",
-			"highlight3": "🛡️ Veiligere, responsievere chats en bewerkingen: Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups."
+			"heading": "Nieuw in Zoo Code v3.98.1",
+			"highlight0": "💫Probeer Zoo Pass met onbeperkt GLM-5.3-Flash gratis tot 1 december met elk geldbedrag op je Zoo Gateway-account.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modellen en redeneren: Gebruik GPT-6.2 Sol, GPT-6.2 Astra en Claude Sonnet 5.5. Stel de redeneerinspanning voor elk LiteLLM-profiel in.",
+			"highlight2": "🛡️ Beveiliging: Betere verwerking van metadata van skills en opdrachten, vermeldingen, providerlinks en CLI-goedkeuringen.",
+			"highlight3": "🔧 Oplossingen: Correcte OpenAI-serviceniveaukosten, herkenning van symbolische werkruimtekoppelingen en meer vertaalde UI-teksten."
 		}
 	},
 	"reasoning": {

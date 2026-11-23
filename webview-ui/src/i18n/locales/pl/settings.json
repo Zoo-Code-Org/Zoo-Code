@@ -393,12 +393,6 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Klucz API IO Intelligence",
-			"getApiKey": "Uzyskaj klucz API IO Intelligence",
-			"model": "Model"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",
@@ -531,6 +525,8 @@
 		"openAiBaseUrl": "URL bazowy",
 		"openAiStrictToolSchemas": "Ścisłe schematy narzędzi (strict: true)",
 		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, aby włączyć ścisłe przestrzeganie schematu. Wyłącz, aby korzystać z nieścisłego wywoływania narzędzi.",
+		"openAiUseResponsesApi": "Używaj API Responses",
+		"openAiUseResponsesApiDescription": "Wysyła żądania do /responses zamiast /chat/completions. Wymagane dla niektórych modeli rozumowania w punktach końcowych zgodnych z OpenAI. Rozumowanie i narzędzia pozostają aktywne.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
 		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",
@@ -541,6 +537,13 @@
 		"codestralBaseUrlDesc": "Ustaw opcjonalny URL dla modeli Codestral.",
 		"xaiApiKey": "Klucz API xAI",
 		"getXaiApiKey": "Uzyskaj klucz API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Wysyłaj rozumowanie z powrotem do modelu",
+			"auto": "Automatycznie",
+			"on": "Włączone",
+			"off": "Wyłączone",
+			"description": "Wysyłaj wcześniejsze rozumowanie z powrotem do modelu jako zwykły tekst. Automatycznie korzysta z wykrytych właściwości modelu; Włączone zawsze wysyła; Wyłączone nigdy nie wysyła. Nie włącza generowania rozumowania ani nie ukrywa go na czacie."
+		},
 		"litellmApiKey": "Klucz API LiteLLM",
 		"litellmBaseUrl": "URL bazowy LiteLLM",
 		"awsCredentials": "Poświadczenia AWS",

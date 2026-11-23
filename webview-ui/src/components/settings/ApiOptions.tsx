@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import { convertHeadersToObject } from "./utils/headers"
 import { useDebounce } from "react-use"
-import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeLink, VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { ExternalLinkIcon } from "@radix-ui/react-icons"
 
 import {
@@ -86,7 +86,6 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
-	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -716,17 +715,6 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === providerIdentifiers.ioIntelligence && (
-						<IOIntelligence
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={setApiConfigurationField}
-							routerModels={routerModels}
-							organizationAllowList={organizationAllowList}
-							modelValidationError={modelValidationError}
-							simplifySettings={fromWelcomeView}
-						/>
-					)}
-
 					{selectedProvider === providerIdentifiers.nanogpt && (
 						<NanoGPT
 							apiConfiguration={apiConfiguration}
@@ -910,6 +898,28 @@ const ApiOptions = ({
 											{t("settings:providers.poeBaseUrl")}
 										</label>
 									</VSCodeTextField>
+								)}
+								{selectedProvider === providerIdentifiers.litellm && (
+									<div>
+										<label htmlFor="litellm-preserve-reasoning" className="block font-medium mb-1">
+											{t("settings:providers.litellmPreserveReasoning.label")}
+										</label>
+										<VSCodeDropdown
+											id="litellm-preserve-reasoning"
+											aria-label={t("settings:providers.litellmPreserveReasoning.label")}
+											value={apiConfiguration.litellmPreserveReasoning ?? "auto"}
+											onChange={handleInputChange("litellmPreserveReasoning")}
+											className="w-full">
+											{(["auto", "on", "off"] as const).map((value) => (
+												<VSCodeOption key={value} value={value}>
+													{t(`settings:providers.litellmPreserveReasoning.${value}`)}
+												</VSCodeOption>
+											))}
+										</VSCodeDropdown>
+										<div className="text-sm text-vscode-descriptionForeground mt-1">
+											{t("settings:providers.litellmPreserveReasoning.description")}
+										</div>
+									</div>
 								)}
 								{selectedProvider === providerIdentifiers.openrouter &&
 									openRouterModelProviders &&

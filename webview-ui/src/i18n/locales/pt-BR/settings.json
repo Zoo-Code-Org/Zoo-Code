@@ -392,12 +392,6 @@
 		"getOpencodeGoApiKey": "Obter chave API do Opencode Go",
 		"kenariApiKey": "Chave API do Kenari",
 		"getKenariApiKey": "Obter chave API do Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Chave de API do IO Intelligence",
-			"getApiKey": "Obter chave de API do IO Intelligence",
-			"model": "Modelo"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Chave API do NanoGPT",
@@ -530,6 +524,8 @@
 		"openAiBaseUrl": "URL Base",
 		"openAiStrictToolSchemas": "Schemas de ferramentas estritos (strict: true)",
 		"openAiStrictToolSchemasDescription": "Envia strict: true com os schemas de ferramentas para ativar a aderência estrita ao schema. Desative para usar chamada de ferramentas não estrita.",
+		"openAiUseResponsesApi": "Usar a API Responses",
+		"openAiUseResponsesApiDescription": "Envia solicitações para /responses em vez de /chat/completions. Necessário para alguns modelos de raciocínio em endpoints compatíveis com OpenAI. O raciocínio e as ferramentas permanecem ativos.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nome da implantação do Azure",
 		"azureOpenAiDeploymentNameDescription": "Insira o nome da implantação configurado no Azure AI Studio, não o nome do modelo subjacente.",
@@ -540,6 +536,13 @@
 		"codestralBaseUrlDesc": "Defina uma URL alternativa para o modelo Codestral.",
 		"xaiApiKey": "Chave de API xAI",
 		"getXaiApiKey": "Obter chave de API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Enviar o raciocínio de volta ao modelo",
+			"auto": "Automático",
+			"on": "Ativado",
+			"off": "Desativado",
+			"description": "Envia o raciocínio anterior de volta ao modelo como texto simples. Automático segue a detecção do modelo; Ativado sempre envia; Desativado nunca envia. Não ativa a geração de raciocínio nem oculta o raciocínio no chat."
+		},
 		"litellmApiKey": "Chave API LiteLLM",
 		"litellmBaseUrl": "URL base LiteLLM",
 		"awsCredentials": "Credenciais AWS",

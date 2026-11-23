@@ -390,12 +390,6 @@
 		"getOpencodeGoApiKey": "Opencode Go API 키 받기",
 		"kenariApiKey": "Kenari API 키",
 		"getKenariApiKey": "Kenari API 키 받기",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence API 키",
-			"getApiKey": "IO Intelligence API 키 받기",
-			"model": "모델"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 키",
@@ -528,6 +522,8 @@
 		"openAiBaseUrl": "기본 URL",
 		"openAiStrictToolSchemas": "엄격한 도구 스키마 (strict: true)",
 		"openAiStrictToolSchemasDescription": "스키마를 엄격하게 준수하도록 하려면 도구 스키마에 strict: true를 포함해 보냅니다. 비엄격 도구 호출을 사용하려면 비활성화하세요.",
+		"openAiUseResponsesApi": "Responses API 사용",
+		"openAiUseResponsesApiDescription": "/chat/completions 대신 /responses로 요청을 보냅니다. OpenAI 호환 엔드포인트의 일부 추론 모델에 필요합니다. 추론과 도구가 모두 활성화된 상태로 유지됩니다.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 배포 이름",
 		"azureOpenAiDeploymentNameDescription": "기반 모델 이름이 아닌 Azure AI Studio의 배포 이름을 입력하세요.",
@@ -538,6 +534,13 @@
 		"codestralBaseUrlDesc": "Codestral 모델의 대체 URL을 설정합니다.",
 		"xaiApiKey": "xAI API 키",
 		"getXaiApiKey": "xAI API 키 받기",
+		"litellmPreserveReasoning": {
+			"label": "추론을 모델에 다시 보내기",
+			"auto": "자동",
+			"on": "켜기",
+			"off": "끄기",
+			"description": "이전 추론을 일반 텍스트로 모델에 다시 보냅니다. 자동은 모델 감지 결과를 따르고, 켜기는 항상 보내며, 끄기는 보내지 않습니다. 추론 생성을 활성화하거나 채팅에서 추론을 숨기는 설정은 아닙니다."
+		},
 		"litellmApiKey": "LiteLLM API 키",
 		"litellmBaseUrl": "LiteLLM 기본 URL",
 		"awsCredentials": "AWS 자격 증명",
