@@ -32,41 +32,72 @@
 \* pnpm test --concurrency=2 passes all 14 tasks. The extension suite passes 15,537 tests.
 \* Null result: no further failure in the fixed bounded models. Timers delivering their deadline event remain an assumption.
 \* Cost: about 12 agent minutes. The new timeout tests use a controlled budget rather than waiting for the full provider timeout.
+\* Review ratchet: usage reporting is an auxiliary sink, separate from stream consumption.
+\* Thread: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4661256805
+\* Failure: a reporting failure retries a completed turn. Invariant: CompletedTurnNotRetried.
+\* Expect the coupled drain to fail after consumption succeeds and reporting rejects or stalls.
+\* Preserve failures and deadlines during consumption. A completed turn must not depend on reporting settlement.
+\* Result: all three reporting replays fail before the fix and pass after reporting is detached from consumption.
+\* Completed reporting may reject once, reject repeatedly or stall. History still saves the completed signature.
+\* A separate Task case keeps genuine consumption errors fatal. Existing drain deadlines still reject incomplete turns.
+\* Fixed holds (88 states). Reporting and ReportingWait fail independently, alongside all existing sabotage variants.
+\* This round: 0 covered, 1 added, 0 gap. PR totals: 2 covered, 11 added, 0 gap; two earlier findings concern spec files.
+\* Types, lint, formatting, both Knip checks and lifecycle checks pass. Suppression counts stay equal.
+\* pnpm test --concurrency=2 passes all 14 tasks. The extension suite passes 15,541 tests.
+\* Null result: no further failure in the fixed bounded model. Reporting delivery remains best effort.
+\* Cost: about 7 agent minutes. Consumption and reporting failures use separate paths and separate regression cases.
 EXTENDS Naturals
 
-VARIABLES phase, candidate, expected, saved, complete, current, expired
-vars == <<phase, candidate, expected, saved, complete, current, expired>>
+VARIABLES phase, candidate, expected, saved, complete, current, expired, reporting, retries
+vars == <<phase, candidate, expected, saved, complete, current, expired, reporting, retries>>
 WaitForDrain == TRUE
 UseUsageTimeout == FALSE
 BoundSignatureWait == TRUE
 UseProducingHandler == TRUE
+RetryOnReportingFailure == FALSE
+WaitForUsageReporting == FALSE
 Pending == [signature |-> "pending", origin |-> "pending"]
 Init == /\ phase = "reading" /\ candidate \in {"none", "encoded"}
         /\ expected \in (IF candidate = "encoded" THEN {"encoded", "explicit"} ELSE {"none", "encoded", "explicit"})
         /\ saved = Pending /\ complete = FALSE /\ current = "producer" /\ expired = FALSE
+        /\ reporting = "pending" /\ retries = 0
 Stop == /\ phase = "reading" /\ phase' = "stopped"
-        /\ UNCHANGED <<candidate, expected, saved, complete, current, expired>>
+        /\ UNCHANGED <<candidate, expected, saved, complete, current, expired, reporting, retries>>
 Replace == /\ current = "producer" /\ current' = "replacement"
-           /\ UNCHANGED <<phase, candidate, expected, saved, complete, expired>>
+           /\ UNCHANGED <<phase, candidate, expected, saved, complete, expired, reporting, retries>>
 Drain == /\ phase = "stopped" /\ phase' = "settled" /\ candidate' = expected /\ complete' = TRUE
-         /\ UNCHANGED <<expected, saved, current, expired>>
+         /\ UNCHANGED <<expected, saved, current, expired, reporting, retries>>
 UsageExpiry == /\ phase = "stopped" /\ UseUsageTimeout /\ phase' = "settled"
-               /\ UNCHANGED <<candidate, expected, saved, complete, current, expired>>
+               /\ UNCHANGED <<candidate, expected, saved, complete, current, expired, reporting, retries>>
 Deadline == /\ phase = "stopped" /\ ~expired /\ expired' = TRUE
             /\ phase' = IF BoundSignatureWait THEN "failed" ELSE "stopped"
-            /\ UNCHANGED <<candidate, expected, saved, complete, current>>
+            /\ retries' = IF BoundSignatureWait THEN 1 ELSE retries
+            /\ UNCHANGED <<candidate, expected, saved, complete, current, reporting>>
+StreamFailure == /\ phase = "stopped" /\ phase' = "failed" /\ retries' = 1
+                 /\ UNCHANGED <<candidate, expected, saved, complete, current, expired, reporting>>
+Report(result) == /\ complete /\ reporting = "pending" /\ reporting' = result
+                  /\ phase' = IF result = "failed" /\ RetryOnReportingFailure THEN "failed" ELSE phase
+                  /\ retries' = IF result = "failed" /\ RetryOnReportingFailure THEN 1 ELSE retries
+                  /\ UNCHANGED <<candidate, expected, saved, complete, current, expired>>
+ReportDeadline == /\ complete /\ reporting = "stalled" /\ WaitForUsageReporting
+                  /\ phase' = "failed" /\ retries' = 1
+                  /\ UNCHANGED <<candidate, expected, saved, complete, current, expired, reporting>>
 Save == /\ (phase = "settled" \/ (~WaitForDrain /\ phase = "stopped")) /\ saved = Pending
+        /\ (~WaitForUsageReporting \/ reporting \in {"ok", "failed"})
         /\ saved' = IF UseProducingHandler \/ current = "producer"
                     THEN [signature |-> candidate, origin |-> "producer"]
                     ELSE [signature |-> "replacement", origin |-> "replacement"]
-        /\ UNCHANGED <<phase, candidate, expected, complete, current, expired>>
-Next == Stop \/ Replace \/ Drain \/ UsageExpiry \/ Deadline \/ Save
+        /\ UNCHANGED <<phase, candidate, expected, complete, current, expired, reporting, retries>>
+Next == Stop \/ Replace \/ Drain \/ UsageExpiry \/ Deadline \/ StreamFailure
+        \/ (\E result \in {"ok", "failed", "stalled"} : Report(result)) \/ ReportDeadline \/ Save
 Spec == Init /\ [][Next]_vars
 TypeOK == /\ phase \in {"reading", "stopped", "settled", "failed"}
           /\ candidate \in {"none", "encoded", "explicit"} /\ expected \in {"none", "encoded", "explicit"}
           /\ saved \in {Pending} \cup [signature : {"none", "encoded", "explicit", "replacement"}, origin : {"producer", "replacement"}]
           /\ complete \in BOOLEAN /\ expired \in BOOLEAN /\ current \in {"producer", "replacement"}
+          /\ reporting \in {"pending", "ok", "failed", "stalled"} /\ retries \in 0..1
 SavedSignatureFinal == saved # Pending => complete /\ saved.signature = expected
 SavedFromProducingHandler == saved # Pending => saved.origin = "producer"
 NoExpiredSignatureWait == expired => phase # "stopped"
+CompletedTurnNotRetried == complete => retries = 0 /\ phase # "failed"
 ====

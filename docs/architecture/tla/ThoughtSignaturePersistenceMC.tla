@@ -5,4 +5,6 @@ SaveBeforeDrain == FALSE
 UsageBudgetOnly == TRUE
 UnboundedWait == FALSE
 CurrentHandler == FALSE
+CoupledReporting == TRUE
+CoupledUsageWait == TRUE
 ====

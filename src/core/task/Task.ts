@@ -4717,11 +4717,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							}
 						}
 
+						let usageFound = false
+						let chunkCount = 0
 						try {
-							// Continue processing the original stream from where the main loop left off
-							let usageFound = false
-							let chunkCount = 0
-
 							// Use the same iterator that the main loop was using
 							while (!item.done) {
 								// Check for timeout
@@ -4756,64 +4754,52 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgTotalCost = chunk.totalCost
 								}
 							}
-
-							if (
-								usageFound ||
-								bgInputTokens > 0 ||
-								bgOutputTokens > 0 ||
-								bgCacheWriteTokens > 0 ||
-								bgCacheReadTokens > 0
-							) {
-								// We have usage data either from a usage chunk or accumulated tokens
-								await captureUsageData(
-									{
-										input: bgInputTokens,
-										output: bgOutputTokens,
-										cacheWrite: bgCacheWriteTokens,
-										cacheWrite1h: bgCacheWrite1hTokens,
-										cacheWrite12h: bgCacheWrite12hTokens,
-										cacheRead: bgCacheReadTokens,
-										total: bgTotalCost,
-									},
-									lastApiReqIndex,
-									status,
-								)
-							} else {
-								console.warn(
-									`[Background Usage Collection] Suspicious: request ${apiReqIndex} is complete, but no usage info was found. Model: ${modelId}`,
-								)
-							}
 						} catch (error) {
 							console.error("Error draining stream for usage data:", error)
-							// Still try to capture whatever usage data we have collected so far
-							if (
-								bgInputTokens > 0 ||
-								bgOutputTokens > 0 ||
-								bgCacheWriteTokens > 0 ||
-								bgCacheReadTokens > 0
-							) {
-								await captureUsageData(
-									{
-										input: bgInputTokens,
-										output: bgOutputTokens,
-										cacheWrite: bgCacheWriteTokens,
-										cacheWrite1h: bgCacheWrite1hTokens,
-										cacheWrite12h: bgCacheWrite12hTokens,
-										cacheRead: bgCacheReadTokens,
-										total: bgTotalCost,
-									},
-									lastApiReqIndex,
-									status,
-								)
-							}
 							if (requestApi.requiresThoughtSignatureDrain) throw error
+						} finally {
+							// Only stream consumption controls history readiness. Usage reporting stays independent.
+							const reportUsage = async () => {
+								if (
+									!usageFound &&
+									bgInputTokens <= 0 &&
+									bgOutputTokens <= 0 &&
+									bgCacheWriteTokens <= 0 &&
+									bgCacheReadTokens <= 0
+								) {
+									console.warn(
+										`[Background Usage Collection] Suspicious: request ${apiReqIndex} is complete, but no usage info was found. Model: ${modelId}`,
+									)
+									return
+								}
+								const tokens = {
+									input: bgInputTokens,
+									output: bgOutputTokens,
+									cacheWrite: bgCacheWriteTokens,
+									cacheWrite1h: bgCacheWrite1hTokens,
+									cacheWrite12h: bgCacheWrite12hTokens,
+									cacheRead: bgCacheReadTokens,
+									total: bgTotalCost,
+								}
+								for (let attempt = 0; attempt < 2; attempt++) {
+									try {
+										await captureUsageData(tokens, lastApiReqIndex, status)
+										return
+									} catch (error) {
+										console.error("Error reporting stream usage:", error)
+									}
+								}
+							}
+							void reportUsage().catch((error) =>
+								console.error("Background usage reporting failed:", error),
+							)
 						}
 					}
 
 					// Start the background task and handle any errors
 					// Pass "cancelled" status if the task was aborted by the user
 					const requestAbortController = this.currentRequestAbortController
-					const usageDrain = drainStreamInBackgroundToFindAllUsage(
+					const streamDrain = drainStreamInBackgroundToFindAllUsage(
 						lastApiReqIndex,
 						this.abort ? "cancelled" : "completed",
 					).catch((error) => {
@@ -4822,7 +4808,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					})
 					// Proxy signatures can arrive after a tool stops the main loop. Save only after the drain settles.
 					if (requestApi.requiresThoughtSignatureDrain) {
-						await waitForThoughtSignatureDrain(usageDrain, {
+						await waitForThoughtSignatureDrain(streamDrain, {
 							timeoutMs: getApiRequestTimeout(),
 							signal: requestAbortController?.signal,
 							onTimeout: (error) => requestAbortController?.abort(error),

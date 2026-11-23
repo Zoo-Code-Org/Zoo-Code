@@ -2233,6 +2233,93 @@ describe("Cline", () => {
 				},
 			)
 
+			it.each(["once", "always", "stalled"] as const)(
+				"preserves a completed turn when usage reporting is %s",
+				async (reporting) => {
+					const task = await createTaskWithManualRetries()
+					task.apiConfiguration = { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" }
+					Object.assign(task.api, {
+						requiresThoughtSignatureDrain: true,
+						getThoughtSignature: () => "completed-signature",
+						getThoughtSignatureOrigin: () => "proxy",
+					})
+					let consumed = false
+					vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							yield { type: "text", text: "The request completed." }
+							yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+							consumed = true
+						},
+					)
+					const requests = realRequestsThenStop(task)
+					const error = new Error("Usage reporting failed")
+					let releaseReporting!: () => void
+					const reportingGate = new Promise<void>((resolve) => {
+						releaseReporting = resolve
+					})
+					let notifyReporting!: () => void
+					const reportingStarted = new Promise<void>((resolve) => {
+						notifyReporting = resolve
+					})
+					let attempts = 0
+					const update = task["updateClineMessage"].bind(task)
+					vi.spyOn(getTaskTestAccess(task), "updateClineMessage").mockImplementation(async (message) => {
+						if (consumed && message.say === "api_req_started") {
+							attempts++
+							notifyReporting()
+							if (reporting === "stalled") await reportingGate
+							if (reporting === "always" || (reporting === "once" && attempts === 1)) throw error
+						}
+						await update(message)
+					})
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					await reportingStarted
+					try {
+						await vi.waitFor(() =>
+							expect(
+								task.apiConversationHistory.filter((message) => message.role === "assistant"),
+							).toHaveLength(1),
+						)
+						await loop
+						expect(requests.mock.calls[1]?.[0]).toBe(0)
+						const saved = task.apiConversationHistory.find((message) => message.role === "assistant")
+						expect(saved?.content).toEqual(
+							expect.arrayContaining([
+								expect.objectContaining({
+									type: "thoughtSignature",
+									thoughtSignature: "completed-signature",
+									origin: "proxy",
+								}),
+							]),
+						)
+					} finally {
+						releaseReporting()
+						await loop
+					}
+				},
+			)
+
+			it("keeps a signature stream-consumption failure fatal", async () => {
+				const task = await createTaskWithManualRetries()
+				Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+				const error = new Error("Stream consumption failed")
+				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+					async function* () {
+						yield { type: "text", text: "partial" }
+						task.didRejectTool = true
+						yield { type: "text", text: "buffered" }
+						throw error
+					},
+				)
+				const requests = realRequestsThenStop(task)
+				vi.spyOn(console, "error").mockImplementation(() => {})
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+				expect(task.apiConversationHistory.filter((message) => message.role === "assistant")).toHaveLength(0)
+				expect(requests.mock.calls[1]?.[0]).toBe(1)
+			})
+
 			it("rejects a stalled signature drain without saving an incomplete assistant turn", async () => {
 				const task = await createTaskWithManualRetries()
 				Object.assign(task.api, { requiresThoughtSignatureDrain: true })
