@@ -2865,10 +2865,10 @@ Body.`
 			// the failure carries a string code, because a coded failure (EACCES, EIO, EPERM) means the
 			// target's mode could not be read. An error that carries no code at all is the missing-target
 			// case - there is no mode to preserve - so the publish has to take the new-target path this
-			// file already pins the constant for. Nothing here covered that second operand: with it
-			// narrowed to "ENOENT" only, every row in this file still passed, and a brand-new SKILL.md
-			// would then depend on the umask again exactly when a filesystem reported the missing target
-			// in some other shape.
+			// file already pins the constant for. Nothing here named that second operand: narrowing it
+			// to ENOENT only reddens 14 existing rows that drive stat with uncoded errors, so the
+			// case was load-bearing but unnamed - and a brand-new SKILL.md would then depend on the
+			// umask again whenever a filesystem reported the missing target in some other shape.
 			const uncodedStatError = new Error("stat failed without a filesystem code")
 			const skillMd = p(GLOBAL_ROO_DIR, "skills", "uncoded-stat", "SKILL.md")
 			mockDirectoryExists.mockResolvedValue(false)
