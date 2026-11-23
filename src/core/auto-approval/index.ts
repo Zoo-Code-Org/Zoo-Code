@@ -90,6 +90,8 @@ function validFileTargets(
 	const nativePath = process.platform === "win32" ? path.win32 : path.posix
 	const isValid = fileTargets.every(
 		(target) =>
+			typeof target === "object" &&
+			target !== null &&
 			typeof target.absolutePath === "string" &&
 			nativePath.isAbsolute(target.absolutePath) &&
 			typeof target.isOutsideWorkspace === "boolean",

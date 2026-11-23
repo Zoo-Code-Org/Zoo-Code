@@ -113,6 +113,13 @@ describe("invalid or incomplete file targets ask the user", () => {
 		expect(await approval(message, permissive, malformed)).toEqual({ decision: "ask" })
 	})
 
+	it.each([null, undefined])("asks for a %s target", async (target) => {
+		// Stands in for a malformed target from a caller outside the type system.
+		const malformed = [target] as unknown as ApprovalFileTarget[]
+
+		expect(await approval(message, permissive, malformed)).toEqual({ decision: "ask" })
+	})
+
 	it("asks when only some batch targets are invalid", async () => {
 		const batch: ClineSayTool = {
 			tool: "readFile",
