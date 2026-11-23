@@ -4058,6 +4058,136 @@ describe("OpenRouterHandler", () => {
 			expect(listenersLeftOnCallerSignal, "caller signal kept a listener after the request").toBe(0)
 		})
 
+		it("detaches the caller-signal listener when completePrompt fails with a non-abort error", async () => {
+			// The half of the ask with teeth: a `finally` is justified by the error exits, so the detach is
+			// proven on a failing request as well as on the successful pair the test above measures.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const failure = new Error("completion failed without an abort")
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.reject(failure)
+			})
+			stubCompletionsCreate(handler, create)
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				// `completePrompt` wraps a non-abort completion failure but keeps the cause text, so
+				// the assertion matches the message the way the other failure tests in this file do.
+				await expect(handler.completePrompt("test prompt", { abortSignal: controller.signal })).rejects.toThrow(
+					"completion failed without an abort",
+				)
+				// Read the record before restoring: `mockRestore` clears the calls these two lines depend on.
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			// Identity, not merely one removal: the detached listener must be the exact reference the bridge
+			// added, under the same event type. Removing a different listener would leave this one attached.
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed request").toBe(0)
+		})
+
+		it("detaches the caller-signal listener when createMessage fails at request creation", async () => {
+			// Same claim on the streaming entry point, failing before any chunk is produced.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const failure = new Error("create failed without an abort")
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.reject(failure)
+			})
+			stubCompletionsCreate(handler, create)
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				await expect(
+					collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)),
+				).rejects.toThrow("create failed without an abort")
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed request").toBe(0)
+		})
+
+		it("detaches the caller-signal listener when the SDK stream throws mid-iteration", async () => {
+			// The exit the success-path tests cannot reach: the request resolves, a chunk is delivered, and
+			// the iterator then throws, so only the `finally` can detach the listener.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const iteratorError = new Error("stream exploded mid-iteration")
+			const partialThenThrow = async function* () {
+				yield { id: "1", choices: [{ delta: { content: "partial" } }] }
+				throw iteratorError
+			}
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.resolve(partialThenThrow())
+			})
+			stubCompletionsCreate(handler, create)
+			const metadata = makeCreateMessageMetadata({ abortSignal: controller.signal })
+
+			const addedListeners = vitest.spyOn(controller.signal, "addEventListener")
+			const removedListeners = vitest.spyOn(controller.signal, "removeEventListener")
+			let attachedTypes: string[] = []
+			let attachedRefs: unknown[] = []
+			let detachCalls: { type: string; listener: unknown }[] = []
+			let listenersLeft = -1
+			try {
+				await expect(
+					collectStream(handler.createMessage("test", [{ role: "user" as const, content: "hi" }], metadata)),
+				).rejects.toBe(iteratorError)
+				attachedTypes = addedListeners.mock.calls.map((call) => String(call[0]))
+				attachedRefs = addedListeners.mock.calls.map((call) => call[1])
+				detachCalls = removedListeners.mock.calls.map((call) => ({ type: String(call[0]), listener: call[1] }))
+				listenersLeft = getEventListeners(controller.signal, "abort").length
+			} finally {
+				addedListeners.mockRestore()
+				removedListeners.mockRestore()
+			}
+
+			expect(attachedTypes, "expected the bridge to attach to the caller signal once").toEqual(["abort"])
+			expect(detachCalls.length, "expected exactly one detach call on the caller signal").toBe(1)
+			expect(detachCalls[0]?.type).toBe("abort")
+			expect(detachCalls[0]?.listener, "the removed listener must be the one the bridge added").toBe(
+				attachedRefs[0],
+			)
+			expect(listenersLeft, "caller signal kept a listener after a failed stream").toBe(0)
+		})
+
 		it("propagates a caller abort to the signal the SDK receives", async () => {
 			// The ordering half of the bridge: the caller's cancellation must still reach the SDK
 			// through the per-request signal, and it must do so while the request is in flight.
