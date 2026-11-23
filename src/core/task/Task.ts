@@ -2015,6 +2015,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					text,
 					isProtected,
 					dcgDecision: autoApprovalContext?.dcgDecision,
+					fileTargets: autoApprovalContext?.fileTargets,
 				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined

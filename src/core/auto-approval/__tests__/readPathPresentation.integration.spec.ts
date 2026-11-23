@@ -2,6 +2,7 @@ import * as fs from "fs/promises"
 import os from "os"
 import path from "path"
 import type { ClineSayTool } from "@roo-code/types"
+import type { ApprovalFileTarget } from "../../../shared/tools"
 import { getReadablePath } from "../../../utils/path"
 import { checkAutoApproval } from "../index"
 import { baseState } from "./fixtures"
@@ -31,40 +32,58 @@ async function createWorkspace(aliasName = "alias") {
 	return { cwd, canonicalRoot, inside, other }
 }
 
-function readMessage(cwd: string, targets: [string, ...string[]]): ClineSayTool {
+/** A read ask as `read_file` builds it: display paths for the chat, native targets for approval. */
+function readMessage(
+	cwd: string,
+	targets: [string, ...string[]],
+): { tool: ClineSayTool; fileTargets: ApprovalFileTarget[] } {
+	const fileTargets = targets.map((target) => ({ absolutePath: path.resolve(cwd, target), isOutsideWorkspace: true }))
+
 	if (targets.length === 1) {
 		return {
-			tool: "readFile",
-			path: getReadablePath(cwd, targets[0]),
-			content: path.resolve(cwd, targets[0]),
-			isOutsideWorkspace: true,
+			tool: {
+				tool: "readFile",
+				path: getReadablePath(cwd, targets[0]),
+				content: fileTargets[0].absolutePath,
+				isOutsideWorkspace: true,
+			},
+			fileTargets,
 		}
 	}
 
 	return {
-		tool: "readFile",
-		batchFiles: targets.map((target) => ({
-			path: getReadablePath(cwd, target),
-			content: path.resolve(cwd, target),
-			lineSnippet: "",
-			key: target,
-			isOutsideWorkspace: true,
-		})),
+		tool: {
+			tool: "readFile",
+			batchFiles: targets.map((target, index) => ({
+				path: getReadablePath(cwd, target),
+				content: fileTargets[index].absolutePath,
+				lineSnippet: "",
+				key: target,
+				isOutsideWorkspace: true,
+			})),
+		},
+		fileTargets,
 	}
 }
 
-function approval(cwd: string, tool: ClineSayTool, setting: (typeof SETTINGS)[number], patterns: string[]) {
+function approval(
+	cwd: string,
+	{ tool, fileTargets }: ReturnType<typeof readMessage>,
+	setting: (typeof SETTINGS)[number],
+	patterns: string[],
+) {
 	return checkAutoApproval({
 		cwd,
 		state: { ...baseState, [setting]: patterns },
 		ask: "tool",
 		text: JSON.stringify(tool),
+		fileTargets,
 	})
 }
 
 describe.each(SETTINGS)("read path presentation through %s", (setting) => {
 	it.skipIf(process.platform === "win32").each(SHAPES)(
-		"does not extend canonical grants through a lossy POSIX %s read path",
+		"decides a lossy POSIX %s read path on the file actually read",
 		async (shape) => {
 			const { cwd, canonicalRoot, inside } = await createWorkspace()
 			const outside = path.join(temp, "real\\repo", "docs", "secret.md")
@@ -74,19 +93,22 @@ describe.each(SETTINGS)("read path presentation through %s", (setting) => {
 			const displayPath = getReadablePath(cwd, outside)
 			expect(displayPath).toBe(path.join(canonicalRoot, "docs", "secret.md"))
 			expect(await fs.readFile(path.resolve(cwd, outside), "utf8")).toBe("outside workspace secret")
-			const tool = readMessage(cwd, shape === "single" ? [outside] : [inside, outside])
+			const message = readMessage(cwd, shape === "single" ? [outside] : [inside, outside])
 
-			expect(await approval(cwd, tool, setting, ["docs/**"])).toEqual({ decision: "ask" })
-			// Contain the new canonical grant without changing existing lexical grants.
-			expect(await approval(cwd, tool, setting, [`${canonicalRoot}/docs/**`])).toEqual({ decision: "approve" })
+			expect(await approval(cwd, message, setting, ["docs/**"])).toEqual({ decision: "ask" })
+			// The display path matches this grant, but the file read is outside it.
+			expect(await approval(cwd, message, setting, [`${canonicalRoot}/docs/**`])).toEqual({ decision: "ask" })
+			// A backslash escapes in patterns, so the literal one in `real\repo` is doubled.
+			const outsideGrant = `${path.dirname(outside).replace(/\\/g, "\\\\")}/**`
+			expect(await approval(cwd, message, setting, [outsideGrant, "docs/**"])).toEqual({ decision: "approve" })
 		},
 	)
 
 	it.each(SHAPES)("preserves ordinary canonical %s reads with native targets", async (shape) => {
 		const { cwd, inside, other } = await createWorkspace()
 		if (process.platform === "win32") expect(inside).toContain("\\")
-		const tool = readMessage(cwd, shape === "single" ? [inside] : [inside, other])
-		expect(await approval(cwd, tool, setting, ["docs/**"])).toEqual({ decision: "approve" })
+		const message = readMessage(cwd, shape === "single" ? [inside] : [inside, other])
+		expect(await approval(cwd, message, setting, ["docs/**"])).toEqual({ decision: "approve" })
 	})
 
 	it.skipIf(process.platform === "win32")(
@@ -94,10 +116,12 @@ describe.each(SETTINGS)("read path presentation through %s", (setting) => {
 		async () => {
 			const { cwd, canonicalRoot } = await createWorkspace("alias\\name")
 			const target = path.join(cwd, "docs", "notes.md")
-			const tool = readMessage(cwd, [target])
-			expect(tool.path).toBe("docs/notes.md")
-			expect(tool.content).toContain("\\")
-			expect(await approval(cwd, tool, setting, [`${canonicalRoot}/docs/**`])).toEqual({ decision: "approve" })
+			const message = readMessage(cwd, [target])
+			expect(message.tool.path).toBe("docs/notes.md")
+			expect(message.tool.content).toContain("\\")
+			expect(await approval(cwd, message, setting, [`${canonicalRoot}/docs/**`])).toEqual({
+				decision: "approve",
+			})
 		},
 	)
 })

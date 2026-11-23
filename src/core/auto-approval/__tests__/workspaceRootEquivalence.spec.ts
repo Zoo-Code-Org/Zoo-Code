@@ -2,7 +2,7 @@ import * as fs from "fs/promises"
 import type { ClineSayTool } from "@roo-code/types"
 import { checkAutoApproval } from "../index"
 import { isFileMatchedByPatterns } from "../filePatterns"
-import { baseState, type State } from "./fixtures"
+import { baseState, readFileAsk, type State } from "./fixtures"
 
 vi.mock("fs/promises", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("fs/promises")>()
@@ -17,11 +17,13 @@ function matches(filePath: string, patterns: string[]) {
 }
 
 function approval(tool: ClineSayTool, state: Partial<State>, cwd: string | undefined = CWD, isProtected = false) {
+	const { text, fileTargets } = readFileAsk(tool, cwd)
 	return checkAutoApproval({
 		state: { ...baseState, ...state },
 		cwd,
 		ask: "tool",
-		text: JSON.stringify(tool),
+		text,
+		fileTargets: tool.tool === "readFile" ? fileTargets : undefined,
 		isProtected,
 	})
 }
@@ -186,20 +188,24 @@ describe("read-only root equivalence approval", () => {
 
 	it.each([undefined, ""])("does not resolve workspace-relative grants without a task root: %s", async (cwd) => {
 		const errorLog = vi.spyOn(console, "error").mockImplementation(() => {})
-		const text = JSON.stringify({
-			tool: "readFile",
-			path: `${CANONICAL_CWD}/docs/notes.md`,
-			isOutsideWorkspace: true,
-		})
+		const readAsk = readFileAsk(
+			{ tool: "readFile", path: `${CANONICAL_CWD}/docs/notes.md`, isOutsideWorkspace: true },
+			cwd,
+		)
 		expect(
-			await checkAutoApproval({ state: { ...baseState, allowedReadFiles: ["docs/**"] }, cwd, ask: "tool", text }),
+			await checkAutoApproval({
+				state: { ...baseState, allowedReadFiles: ["docs/**"] },
+				cwd,
+				ask: "tool",
+				...readAsk,
+			}),
 		).toEqual({ decision: "ask" })
 		expect(
 			await checkAutoApproval({
 				state: { ...baseState, allowedReadFiles: [`${CANONICAL_CWD}/docs/**`] },
 				cwd,
 				ask: "tool",
-				text,
+				...readAsk,
 			}),
 		).toEqual({ decision: "approve" })
 		expect(fs.realpath).not.toHaveBeenCalled()
