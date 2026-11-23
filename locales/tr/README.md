@@ -47,13 +47,13 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## Zoo Code v3.98.1'deki yenilikler
+## Zoo Code v3.98.2'deki yenilikler
 
 - 💫Zoo Gateway hesabındaki herhangi bir tutarla 1 Aralık'a kadar sınırsız GLM-5.3-Flash sunan Zoo Pass'i ücretsiz dene.
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 Modeller ve akıl yürütme: GPT-6.2 Sol, GPT-6.2 Astra ve Claude Sonnet 5.5 kullan. Her LiteLLM profili için akıl yürütme düzeyini ayarla.
-- 🛡️ Güvenlik: Beceri ve komut meta verilerinin ayrıştırılması, bahsetmeler, sağlayıcı bağlantıları ve CLI onay denetimleri iyileştirildi.
-- 🔧 Düzeltmeler: OpenAI hizmet katmanı maliyetleri, çalışma alanı sembolik bağlantılarının tanınması ve daha fazla arayüz çevirisi.
+- 🔌 Modeller: Gemini 3.8 Flash ve yeni Gemini 4 Carbon, Hydrogen ve Neon modellerini kullan. Gemini için xhigh düşünme düzeylerini ayarla.
+- 🌐 Responses API: OpenAI Compatible sağlayıcılar için Responses API desteğini aç. Araç kullanımıyla akıl yürütme, bu API'yi gerektiren uç noktalarda çalışır.
+- 🔧 Düzeltmeler: Vertex Gemini istekleri artık bir model turuyla bitmiyor. Gemini düşünme imzaları LiteLLM üzerinden bozulmadan kalıyor. Ollama görevleri yapılandırılan bağlam sınırında yoğunlaşıyor.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

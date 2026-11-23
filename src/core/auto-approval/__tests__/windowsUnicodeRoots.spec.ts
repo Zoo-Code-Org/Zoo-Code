@@ -1,5 +1,5 @@
 import * as fs from "fs/promises"
-import { baseState } from "./fixtures"
+import { baseState, readFileAsk } from "./fixtures"
 import { matcherForPlatform } from "./matcherForPlatform"
 
 vi.mock("fs/promises", async (importOriginal) => {
@@ -69,7 +69,7 @@ describe("Windows Unicode workspace-root identity", () => {
 					cwd,
 					state: { ...baseState, allowedReadFiles: ["D:/storage/**"] },
 					ask: "tool",
-					text: JSON.stringify({ tool: "readFile", path, isOutsideWorkspace: true }),
+					...readFileAsk({ tool: "readFile", path, isOutsideWorkspace: true }, cwd),
 				})
 
 			expect(await approve(`C:/aliases/${sibling}/docs/private.md`)).toEqual({ decision: "ask" })
@@ -100,7 +100,7 @@ describe("Windows Unicode workspace-root identity", () => {
 				cwd,
 				state: { ...baseState, allowedReadFiles },
 				ask: "tool",
-				text: JSON.stringify({ tool: "readFile", path }),
+				...readFileAsk({ tool: "readFile", path }, cwd),
 			})
 
 		expect(await approve(["C:/aliases/**", `!${CANONICAL_CWD}/Docs/private.md`])).toEqual({ decision: "ask" })

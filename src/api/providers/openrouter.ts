@@ -149,7 +149,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	private client: OpenAI
 	protected models: ModelRecord = {}
 	protected endpoints: ModelRecord = {}
-	private readonly providerName = "OpenRouter"
 	private currentReasoningDetails: any[] = []
 	// Monotonic id for model lookups. Overlapping lookups (two requests, or an
 	// abandoned lookup whose request was cancelled) can settle in any order, and
@@ -230,7 +229,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 		TelemetryService.instance.captureException(apiError)
 
-		throw new Error(`OpenRouter API Error ${error?.code}: ${rawErrorMessage}`)
+		throw new Error(`${providerIdentifiers.openrouter} API Error ${error?.code}: ${rawErrorMessage}`)
 	}
 
 	override async *createMessage(
@@ -257,13 +256,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		try {
 			// The request was already aborted before we started: fail fast without calling the API.
 			if (requestSignal.aborted) {
-				throw createAbortError("OpenRouter")
+				throw createAbortError(providerIdentifiers.openrouter)
 			}
 
 			// Model discovery is not signal-aware: race it against the per-request signal so an
 			// abort during the lookup rejects with AbortError instead of calling the API with an
 			// already-aborted signal.
-			const model = await rejectOnAbort(this.fetchModel(), requestSignal, this.providerName)
+			const model = await rejectOnAbort(this.fetchModel(), requestSignal, providerIdentifiers.openrouter)
 
 			let { id: modelId, maxTokens, temperature, topP, reasoning } = model
 
@@ -408,7 +407,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				stream = await settleOnAbort(
 					this.client.chat.completions.create(completionParams, requestOptions),
 					requestSignal,
-					this.providerName,
+					providerIdentifiers.openrouter,
 				)
 			} catch (error) {
 				// Aborted requests are user-initiated: surface them as AbortError instead of
@@ -416,7 +415,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// cancellations (APIUserAbortError / "Request was aborted.") that the merged signal never
 				// saw, so recognize those too (precedent: requesty.ts, zoo-gateway.ts).
 				if (isRequestAborted(error, requestSignal)) {
-					throw createAbortError("OpenRouter")
+					throw createAbortError(providerIdentifiers.openrouter)
 				}
 				// Try to parse as OpenRouter error structure using Zod
 				const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
@@ -442,7 +441,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					)
 
 					TelemetryService.instance.captureException(apiError)
-					throw handleOpenAIError(error, this.providerName)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
 				} else {
 					// Fallback for non-OpenRouter errors
 					const errorMessage = error instanceof Error ? error.message : String(error)
@@ -453,7 +452,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 						"createMessage",
 					)
 					TelemetryService.instance.captureException(apiError)
-					throw handleOpenAIError(error, this.providerName)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
 				}
 			}
 
@@ -492,7 +491,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					// events, so every yield below is guarded, not just the loop entry.
 					const abortIfSignalled = () => {
 						if (requestSignal.aborted) {
-							throw createAbortError("OpenRouter")
+							throw createAbortError(providerIdentifiers.openrouter)
 						}
 					}
 					abortIfSignalled()
@@ -633,7 +632,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// normally instead of throwing, so the catch below would never run: without this
 				// check, createMessage completes silently after yielding partial output.
 				if (requestSignal.aborted) {
-					throw createAbortError("OpenRouter")
+					throw createAbortError(providerIdentifiers.openrouter)
 				}
 
 				// After streaming completes, consolidate and store reasoning_details from the API.
@@ -658,7 +657,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				// DOM-standard AbortError so callers can detect the aborted request, including the abort
 				// shapes the SDK reports on its own without our signal firing.
 				if (isRequestAborted(error, requestSignal)) {
-					throw createAbortError("OpenRouter")
+					throw createAbortError(providerIdentifiers.openrouter)
 				}
 				throw error
 			}
@@ -783,13 +782,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// as well.
 		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
 		if (requestAbortSignal?.aborted) {
-			throw createAbortError(this.providerName)
+			throw createAbortError(providerIdentifiers.openrouter)
 		}
 
 		let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
 		try {
 			model = requestAbortSignal
-				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, this.providerName)
+				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, providerIdentifiers.openrouter)
 				: await this.fetchModel()
 		} catch (error) {
 			// Only our own merged signal marks this as a cancellation. An
@@ -797,7 +796,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			// discovery failure, not a caller cancellation, so it propagates with
 			// its original identity.
 			if (requestAbortSignal?.aborted) {
-				throw createAbortError(this.providerName)
+				throw createAbortError(providerIdentifiers.openrouter)
 			}
 			throw error
 		}
@@ -853,14 +852,14 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 			response = await settleOnAbort(
 				this.client.chat.completions.create(completionParams, requestOptions),
 				requestAbortSignal,
-				this.providerName,
+				providerIdentifiers.openrouter,
 			)
 		} catch (error) {
 			// Aborted requests are user-initiated: surface them as AbortError (this also covers
 			// timeouts, which abort the same signal) instead of a completion error. SDK-reported
 			// abort shapes are normalized as well (see the createMessage catch).
 			if (isRequestAborted(error, requestAbortSignal)) {
-				throw createAbortError("OpenRouter")
+				throw createAbortError(providerIdentifiers.openrouter)
 			}
 			// Try to parse as OpenRouter error structure using Zod
 			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
@@ -886,7 +885,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				)
 
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			} else {
 				// Fallback for non-OpenRouter errors
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -897,13 +896,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					"completePrompt",
 				)
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			}
 		}
 
 		if (requestAbortSignal?.aborted) {
 			// The response resolved after the request was aborted: do not return the late result.
-			throw createAbortError("OpenRouter")
+			throw createAbortError(providerIdentifiers.openrouter)
 		}
 
 		if ("error" in response) {

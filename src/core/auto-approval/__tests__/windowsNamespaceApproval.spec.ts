@@ -1,7 +1,6 @@
 import * as fs from "fs/promises"
 import os from "os"
-import type { ClineSayTool } from "@roo-code/types"
-import { baseState, type State } from "./fixtures"
+import { baseState, readFileAsk, type State } from "./fixtures"
 import { matcherForPlatform } from "./matcherForPlatform"
 
 vi.mock("fs/promises", async (importOriginal) => {
@@ -34,11 +33,13 @@ async function approval(
 	isProtected = false,
 ) {
 	const { checkAutoApproval } = await import("../index")
+	const { text, fileTargets } = readFileAsk({ tool, path, isOutsideWorkspace: true }, cwd)
 	return checkAutoApproval({
 		state: { ...baseState, ...state },
 		cwd,
 		ask: "tool",
-		text: JSON.stringify({ tool, path, isOutsideWorkspace: true } satisfies ClineSayTool),
+		text,
+		fileTargets: tool === "readFile" ? fileTargets : undefined,
 		isProtected,
 	})
 }

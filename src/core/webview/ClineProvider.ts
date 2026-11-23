@@ -421,7 +421,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.98.1-pass-models-security" // v3.98.1 Zoo Pass, model support, and security
+	public readonly latestAnnouncementId = "nov-2026-v3.98.2-pass-gemini-responses-fixes" // v3.98.2 Zoo Pass, Gemini models, Responses API, and provider fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 

@@ -47,13 +47,13 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades do Zoo Code v3.98.1
+## Novidades do Zoo Code v3.98.2
 
 - 💫Experimente o Zoo Pass com GLM-5.3-Flash ilimitado grátis até 1º de dezembro com qualquer saldo na sua conta do Zoo Gateway.
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 Modelos e raciocínio: Use GPT-6.2 Sol, GPT-6.2 Astra e Claude Sonnet 5.5. Defina o esforço de raciocínio para cada perfil do LiteLLM.
-- 🛡️ Segurança: Melhorias na análise de metadados de habilidades e comandos, menções, links de provedores e verificações de aprovação da CLI.
-- 🔧 Correções: Custos dos níveis de serviço da OpenAI, reconhecimento de links simbólicos do espaço de trabalho e mais textos traduzidos.
+- 🔌 Modelos: Use Gemini 3.8 Flash e os novos modelos Gemini 4 Carbon, Hydrogen e Neon. Defina os níveis de pensamento xhigh no Gemini.
+- 🌐 API Responses: Ative o suporte à API Responses para provedores compatíveis com OpenAI. O raciocínio com uso de ferramentas funciona em endpoints que a exigem.
+- 🔧 Correções: Solicitações do Gemini no Vertex não terminam mais com uma resposta do modelo. Assinaturas de pensamento do Gemini permanecem intactas através do LiteLLM. Tarefas do Ollama são condensadas no limite de contexto configurado.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 
