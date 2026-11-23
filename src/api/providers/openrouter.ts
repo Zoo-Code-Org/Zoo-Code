@@ -139,7 +139,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	private client: OpenAI
 	protected models: ModelRecord = {}
 	protected endpoints: ModelRecord = {}
-	private readonly providerName = "OpenRouter"
 	private currentReasoningDetails: any[] = []
 
 	constructor(options: ApiHandlerOptions) {
@@ -208,7 +207,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 
 		TelemetryService.instance.captureException(apiError)
 
-		throw new Error(`OpenRouter API Error ${error?.code}: ${rawErrorMessage}`)
+		throw new Error(`${providerIdentifiers.openrouter} API Error ${error?.code}: ${rawErrorMessage}`)
 	}
 
 	override async *createMessage(
@@ -372,7 +371,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				)
 
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			} else {
 				// Fallback for non-OpenRouter errors
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -383,7 +382,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					"createMessage",
 				)
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			}
 		}
 
@@ -655,7 +654,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				)
 
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			} else {
 				// Fallback for non-OpenRouter errors
 				const errorMessage = error instanceof Error ? error.message : String(error)
@@ -666,7 +665,7 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 					"completePrompt",
 				)
 				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, this.providerName)
+				throw handleOpenAIError(error, providerIdentifiers.openrouter)
 			}
 		}
 
