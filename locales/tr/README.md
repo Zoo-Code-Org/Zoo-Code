@@ -47,13 +47,13 @@ Zoo Code, Roo Code'un oluşturduğu temel üzerine inşa ediliyor ve bu temeli �
 - **Daha güvenilir terminal ve düzenleme iş akışları** — terminalin erken tamamlanması, görev durumu yarış koşulları, bağlam yönetimi, diff düzenleme ve sağlayıcıya özel araç kullanımı için düzeltmeler.
 - **Çalışma alanın üzerinde daha fazla kontrol** — kural yönetimi, mod başına MCP kısıtlamaları, çok köklü yol denetimleri, model reasoning seçenekleri ve tamamlanan değişiklikleri inceleme eylemleri.
 
-## v3.98.0'daki Yenilikler
+## Zoo Code v3.98.1'deki yenilikler
 
-- 🎟️ Yakında sunulacak Zoo Pass aboneliğini önizle. 2 hafta ücretsiz erişim; sınırlı yer
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Otomatik görev başlıkları ve daha hassas model kontrolü:** Yeni kök görevler için başlıkları otomatik oluştur ve deneysel dinamik düşünme çabası ayarını dene.
-- 🔌 **Genişletilmiş model ve sağlayıcı desteği:** GPT-6.1 Terra'yı kullan ve en güncel Friendli model listesini getir.
-- 🛡️ **Daha güvenli ve duyarlı sohbetler ile düzenlemeler:** OpenAI Native ve Requesty isteklerini düzgün şekilde iptal et, çalışma alanı dışındaki diff'lerin yanlışlıkla otomatik onaylanmasını önle, UI dillerini tutarlı biçimde değiştir ve belirsiz JSON yedek kurtarmalarından kaçın.
+- 💫Zoo Gateway hesabındaki herhangi bir tutarla 1 Aralık'a kadar sınırsız GLM-5.3-Flash sunan Zoo Pass'i ücretsiz dene.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modeller ve akıl yürütme: GPT-6.2 Sol, GPT-6.2 Astra ve Claude Sonnet 5.5 kullan. Her LiteLLM profili için akıl yürütme düzeyini ayarla.
+- 🛡️ Güvenlik: Beceri ve komut meta verilerinin ayrıştırılması, bahsetmeler, sağlayıcı bağlantıları ve CLI onay denetimleri iyileştirildi.
+- 🔧 Düzeltmeler: OpenAI hizmet katmanı maliyetleri, çalışma alanı sembolik bağlantılarının tanınması ve daha fazla arayüz çevirisi.
 
 ## Zoo Code SİZİN İçin Ne Yapabilir?
 

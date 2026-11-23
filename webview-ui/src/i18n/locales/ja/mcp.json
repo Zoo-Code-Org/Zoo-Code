@@ -55,5 +55,10 @@
 		"running": "実行中",
 		"completed": "完了",
 		"error": "エラー"
-	}
+	},
+	"resource": {
+		"returns": "戻り値",
+		"unknownMimeType": "不明"
+	},
+	"toggleServerAriaLabel": "{{serverName}} サーバーのオン/オフを切り替え"
 }

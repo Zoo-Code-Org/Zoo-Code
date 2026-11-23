@@ -43,6 +43,7 @@ export class KimiCodeHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
+			openAiUseResponsesApi: false,
 			openAiBaseUrl: KIMI_CODE_BASE_URL,
 			openAiApiKey: options.kimiCodeApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? kimiCodeDefaultModelId,

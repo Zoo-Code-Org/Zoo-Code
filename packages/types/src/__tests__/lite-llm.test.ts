@@ -1,4 +1,8 @@
-import { isLiteLLMPreserveReasoningModel, LITELLM_PRESERVE_REASONING_MODEL_IDS } from "../providers/lite-llm.js"
+import {
+	isLiteLLMPreserveReasoningModel,
+	isLiteLLMThoughtSignatureModel,
+	LITELLM_PRESERVE_REASONING_MODEL_IDS,
+} from "../providers/lite-llm.js"
 
 describe("LiteLLM preserveReasoning model detection", () => {
 	it("matches every explicitly listed model id", () => {
@@ -47,4 +51,29 @@ describe("LiteLLM preserveReasoning model detection", () => {
 		expect(isLiteLLMPreserveReasoningModel("")).toBe(false)
 		expect(isLiteLLMPreserveReasoningModel(undefined)).toBe(false)
 	})
+})
+
+describe("LiteLLM thought signature model detection", () => {
+	it.each([
+		"gemini-3-pro",
+		"gemini-3-flash",
+		"gemini-3.1-pro-preview",
+		"gemini-2.5-pro",
+		"gemini-4-pro",
+		"Gemini 3 Pro",
+		"gemini 2.5 flash",
+		"google/gemini-3-pro",
+		"vertex_ai/gemini-2.5-pro",
+		"vertex_ai/gemini 2.5 pro",
+		"gemini/gemini-4-flash",
+	])("matches %s", (modelName) => {
+		expect(isLiteLLMThoughtSignatureModel(modelName)).toBe(true)
+	})
+
+	it.each(["gpt-4", "claude-3-opus", "gemini-1.5-pro", "gemini-2.0-flash", "team-model", "", undefined])(
+		"does not match %s",
+		(modelName) => {
+			expect(isLiteLLMThoughtSignatureModel(modelName)).toBe(false)
+		},
+	)
 })

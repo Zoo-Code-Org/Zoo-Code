@@ -55,5 +55,10 @@
 		"running": "चल रहा है",
 		"completed": "पूरा हुआ",
 		"error": "त्रुटि"
-	}
+	},
+	"resource": {
+		"returns": "लौटाता है",
+		"unknownMimeType": "अज्ञात"
+	},
+	"toggleServerAriaLabel": "{{serverName}} सर्वर चालू/बंद करें"
 }

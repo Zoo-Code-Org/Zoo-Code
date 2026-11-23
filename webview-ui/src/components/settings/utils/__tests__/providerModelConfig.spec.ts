@@ -2,7 +2,6 @@ import {
 	type RouterModels,
 	anthropicDefaultModelId,
 	friendliModels,
-	ioIntelligenceDefaultModelId,
 	mainlandZAiDefaultModelId,
 	nanoGptDefaultModelId,
 	providerIdentifiers,
@@ -185,13 +184,6 @@ describe("providerModelConfig", () => {
 			expect(getProviderModelConfig(providerIdentifiers.nanogpt)).toEqual({
 				field: "nanoGptModelId",
 				default: nanoGptDefaultModelId,
-			})
-		})
-
-		it("returns IO Intelligence's dynamic model field and fallback", () => {
-			expect(getProviderModelConfig(providerIdentifiers.ioIntelligence)).toEqual({
-				field: "ioIntelligenceModelId",
-				default: ioIntelligenceDefaultModelId,
 			})
 		})
 	})

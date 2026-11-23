@@ -70,7 +70,8 @@
 		"goToModes": "Modlar Ayarlarına Git",
 		"moreInfoMcp": "{{name}} MCP belgelerini görüntüle",
 		"validationRequired": "Lütfen {{paramName}} için bir değer sağlayın",
-		"prerequisites": "Ön koşullar"
+		"prerequisites": "Ön koşullar",
+		"optional": "(isteğe bağlı)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Bir marketplace öğesi ile ilgili sorun bulduğun veya yeni öğeler için önerilerin var mı? <0>GitHub'da issue aç</0> ve bize bildir!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modlar"
 	}
 }

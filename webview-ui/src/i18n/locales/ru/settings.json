@@ -7,6 +7,7 @@
 		"select": "Выбрать",
 		"add": "Добавить заголовок",
 		"remove": "Удалить",
+		"milliseconds": "{{value}} мс",
 		"reset": "Сбросить"
 	},
 	"search": {
@@ -83,7 +84,9 @@
 			"detailTasksImported_other": "Импортировано историй задач: {{count}} из {{total}}.",
 			"detailPreparing": "Подготовка импорта истории Roo Code.",
 			"progressAriaLabel": "Ход импорта истории Roo Code"
-		}
+		},
+		"version": "Версия: {{version}}",
+		"versionWithCommit": "Версия: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Управляйте своими слэш-командами для быстрого выполнения пользовательских рабочих процессов и действий. <DocsLink>Узнать больше</DocsLink>",
@@ -411,12 +414,6 @@
 		"getOpencodeGoApiKey": "Получить ключ API Opencode Go",
 		"kenariApiKey": "Ключ API Kenari",
 		"getKenariApiKey": "Получить ключ API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "API-ключ IO Intelligence",
-			"getApiKey": "Получить API-ключ IO Intelligence",
-			"model": "Модель"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Ключ API NanoGPT",
@@ -550,6 +547,8 @@
 		"openAiBaseUrl": "Базовый URL",
 		"openAiStrictToolSchemas": "Строгие схемы инструментов (strict: true)",
 		"openAiStrictToolSchemasDescription": "Отправляет strict: true вместе со схемами инструментов, чтобы включить строгое соблюдение схемы. Отключите, чтобы использовать нестрогий вызов инструментов.",
+		"openAiUseResponsesApi": "Использовать API Responses",
+		"openAiUseResponsesApiDescription": "Отправляет запросы в /responses вместо /chat/completions. Требуется для некоторых моделей рассуждения на совместимых с OpenAI конечных точках. Рассуждение и инструменты остаются включены.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Имя развёртывания Azure",
 		"azureOpenAiDeploymentNameDescription": "Введите имя развёртывания из Azure AI Studio, а не имя базовой модели.",
@@ -560,6 +559,13 @@
 		"codestralBaseUrlDesc": "Укажите альтернативный URL для модели Codestral.",
 		"xaiApiKey": "xAI API-ключ",
 		"getXaiApiKey": "Получить xAI API-ключ",
+		"litellmPreserveReasoning": {
+			"label": "Отправлять рассуждения обратно модели",
+			"auto": "Автоматически",
+			"on": "Включено",
+			"off": "Выключено",
+			"description": "Отправляет предыдущие рассуждения обратно модели в виде обычного текста. Автоматически учитывает определённые свойства модели; Включено отправляет всегда; Выключено не отправляет никогда. Не включает генерацию рассуждений и не скрывает их в чате."
+		},
 		"litellmApiKey": "API-ключ LiteLLM",
 		"litellmBaseUrl": "Базовый URL LiteLLM",
 		"awsCredentials": "AWS-учётные данные",
@@ -718,6 +724,18 @@
 			"authenticated": "Аутентифицирован",
 			"authenticatedAs": "Аутентифицирован как {{name}}"
 		},
+		"awsAuthMethod": "Способ аутентификации",
+		"qwenCode": {
+			"oauthPathLabel": "Путь к учётным данным OAuth",
+			"oauthPathDescription": "Путь к файлу учётных данных Qwen OAuth. Если оставить поле пустым, используется {{defaultPath}}.",
+			"description": "Qwen Code — это API на основе OAuth, которому нужна аутентификация через официальный клиент Qwen. Сначала настройте учётные данные OAuth.",
+			"gettingStarted": "Чтобы начать:",
+			"step1": "1. Установите официальный клиент Qwen",
+			"step2": "2. Войдите в свою учётную запись",
+			"step3": "3. Учётные данные OAuth сохранятся автоматически",
+			"setupInstructions": "Инструкция по настройке"
+		},
+		"ioIntelligence": {},
 		"providerDocumentation": "Документация {{provider}}",
 		"model": "Модель",
 		"useHostHeader": "Использовать пользовательский Host-заголовок",
@@ -1015,7 +1033,8 @@
 			"refreshing": "Обновление...",
 			"refreshSuccess": "Инструменты успешно обновлены",
 			"refreshError": "Не удалось обновить инструменты",
-			"toolParameters": "Параметры"
+			"toolParameters": "Параметры",
+			"required": "обязательный"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Динамическое усилие размышления",
@@ -1056,7 +1075,14 @@
 			"freeRequests_other": "* Бесплатно до {{count}} запроса в минуту. Далее тарификация зависит от размера подсказки.",
 			"pricingDetails": "Подробнее о ценах.",
 			"billingEstimate": "* Счёт — приблизительный, точная стоимость зависит от размера подсказки."
-		}
+		},
+		"tokensValue_one": "{{count, number}} токен",
+		"tokensValue_few": "{{count, number}} токена",
+		"tokensValue_many": "{{count, number}} токенов",
+		"tokensValue_other": "{{count, number}} токена",
+		"pricePerMillionTokens": "{{price}} / 1 млн токенов",
+		"showMore": "Ещё",
+		"showLess": "Свернуть"
 	},
 	"modelPicker": {
 		"automaticFetch": "Расширение автоматически получает актуальный список моделей на <serviceLink>{{serviceName}}</serviceLink>. Если не уверены, что выбрать, Zoo Code лучше всего работает с <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Также попробуйте поискать \"free\" для бесплатных вариантов.",
@@ -1123,6 +1149,7 @@
 			"outputPrice": "например, 0.0002",
 			"cacheWritePrice": "например, 0.00005"
 		},
+		"defaultValue": "По умолчанию: {{value}}",
 		"modelId": {
 			"lmStudio": "например, meta-llama-3.1-8b-instruct",
 			"lmStudioDraft": "например, lmstudio-community/llama-3.2-1b-instruct",
@@ -1158,7 +1185,7 @@
 			"cacheReads": "Чтения из кэша"
 		},
 		"label": "Уровень обслуживания",
-		"tooltip": "Для более быстрой обработки запросов API попробуйте уровень обслуживания с приоритетной обработкой. Для более низких цен с более высокой задержкой попробуйте уровень гибкой обработки."
+		"tooltip": "Для более быстрой обработки API-запросов попробуйте уровень обслуживания с приоритетной обработкой. Чтобы платить меньше ценой большей задержки, попробуйте уровень гибкой обработки (Flex)."
 	},
 	"ui": {
 		"collapseThinking": {

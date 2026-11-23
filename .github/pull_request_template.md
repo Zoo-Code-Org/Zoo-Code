@@ -36,6 +36,7 @@ Write the steps that test your changes. This helps reviewers check your work.
 <!-- Complete this checklist before you mark your PR as ready for review. -->
 
 - [ ] **Issue Linked**: This PR is linked to an approved GitHub Issue (see "Related GitHub Issue" above).
+- [ ] **Listing Discussion** (new provider or MCP server only): I opened a GitHub Discussion for this listing and linked it in the PR description.
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
 - [ ] **Self-Review**: I reviewed my own code with care.
 - [ ] **Writing Style**: The PR title and description use Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions.

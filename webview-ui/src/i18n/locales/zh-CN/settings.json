@@ -7,6 +7,7 @@
 		"select": "选择",
 		"add": "添加标头",
 		"remove": "移除",
+		"milliseconds": "{{value}} 毫秒",
 		"reset": "恢复默认设置"
 	},
 	"search": {
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "已导入 {{total}} 个任务历史记录中的 {{count}} 个。",
 			"detailPreparing": "正在准备导入 Roo Code 历史记录。",
 			"progressAriaLabel": "Roo Code 历史记录导入进度"
-		}
+		},
+		"version": "版本：{{version}}",
+		"versionWithCommit": "版本：{{version}}（{{commit}}）"
 	},
 	"slashCommands": {
 		"description": "管理您的斜杠命令，以快速执行自定义工作流和操作。 <DocsLink>了解更多</DocsLink>",
@@ -408,12 +411,6 @@
 		"getOpencodeGoApiKey": "获取 Opencode Go API 密钥",
 		"kenariApiKey": "Kenari API 密钥",
 		"getKenariApiKey": "获取 Kenari API 密钥",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence API 密钥",
-			"getApiKey": "获取 IO Intelligence API 密钥",
-			"model": "模型"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API 密钥",
@@ -547,6 +544,8 @@
 		"openAiBaseUrl": "OpenAI 基础 URL",
 		"openAiStrictToolSchemas": "严格工具 schema（strict: true）",
 		"openAiStrictToolSchemasDescription": "向工具 schema 一并发送 strict: true 以启用严格的 schema 遵循。关闭以使用非严格工具调用。",
+		"openAiUseResponsesApi": "使用 Responses API",
+		"openAiUseResponsesApiDescription": "将请求发送到 /responses 而不是 /chat/completions。某些 OpenAI 兼容端点上的推理模型需要此选项。推理和工具均保持启用。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure 部署名称",
 		"azureOpenAiDeploymentNameDescription": "请输入 Azure AI Studio 中的部署名称，而不是底层模型名称。",
@@ -557,6 +556,13 @@
 		"codestralBaseUrlDesc": "为 Codestral 模型设置替代 URL。",
 		"xaiApiKey": "xAI API 密钥",
 		"getXaiApiKey": "获取 xAI API 密钥",
+		"litellmPreserveReasoning": {
+			"label": "将推理发送回模型",
+			"auto": "自动",
+			"on": "开启",
+			"off": "关闭",
+			"description": "将之前的纯文本推理发送回模型。自动遵循模型检测结果；开启时始终发送；关闭时从不发送。此设置不会启用推理生成，也不会隐藏聊天中的推理。"
+		},
 		"litellmApiKey": "LiteLLM API 密钥",
 		"litellmBaseUrl": "LiteLLM 基础 URL",
 		"awsCredentials": "AWS 凭证",
@@ -715,6 +721,18 @@
 			"authenticated": "已认证",
 			"authenticatedAs": "已认证为 {{name}}"
 		},
+		"awsAuthMethod": "身份验证方式",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 凭据路径",
+			"oauthPathDescription": "Qwen OAuth 凭据文件的路径。留空时默认使用 {{defaultPath}}。",
+			"description": "Qwen Code 是基于 OAuth 的 API，需要通过官方 Qwen 客户端进行身份验证。请先设置 OAuth 凭据。",
+			"gettingStarted": "开始使用：",
+			"step1": "1. 安装官方 Qwen 客户端",
+			"step2": "2. 使用你的账号进行身份验证",
+			"step3": "3. OAuth 凭据将自动保存",
+			"setupInstructions": "设置说明"
+		},
+		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} 文档",
 		"model": "模型",
 		"useHostHeader": "使用自定义 Host 标头",
@@ -1012,7 +1030,8 @@
 			"refreshing": "正在刷新...",
 			"refreshSuccess": "工具刷新成功",
 			"refreshError": "工具刷新失败",
-			"toolParameters": "参数"
+			"toolParameters": "参数",
+			"required": "必填"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "动态思考强度",
@@ -1050,7 +1069,11 @@
 			"freeRequests_other": "* 每分钟免费 {{count}} 个请求。之后，计费取决于提示大小。",
 			"pricingDetails": "有关更多信息，请参阅定价详情。",
 			"billingEstimate": "* 计费为估计值 - 具体费用取决于提示大小。"
-		}
+		},
+		"tokensValue_other": "{{count, number}} Token",
+		"pricePerMillionTokens": "{{price}} / 百万 Token",
+		"showMore": "展开",
+		"showLess": "收起"
 	},
 	"modelPicker": {
 		"automaticFetch": "自动获取 <serviceLink>{{serviceName}}</serviceLink> 上可用的最新模型列表。如果您不确定选择哪个模型，Zoo Code 与 <defaultModelLink>{{defaultModelId}}</defaultModelLink> 配合最佳。您还可以搜索\"free\"以查找当前可用的免费选项。",
@@ -1117,6 +1140,7 @@
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
 		},
+		"defaultValue": "默认：{{value}}",
 		"modelId": {
 			"lmStudio": "例：meta-llama-3.1-8b-instruct",
 			"lmStudioDraft": "例：lmstudio-community/llama-3.2-1b-instruct",
@@ -1152,7 +1176,7 @@
 			"cacheReads": "缓存读取"
 		},
 		"label": "服务等级",
-		"tooltip": "为加快API请求处理速度，请尝试优先处理服务等级。为获得更低价格但延迟较高，请尝试灵活处理等级。"
+		"tooltip": "如需更快地处理 API 请求，请尝试优先处理服务等级。如需以更高延迟换取更低价格，请尝试灵活处理等级。"
 	},
 	"ui": {
 		"collapseThinking": {

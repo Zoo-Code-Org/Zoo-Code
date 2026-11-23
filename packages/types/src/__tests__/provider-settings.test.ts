@@ -33,6 +33,24 @@ describe("provider settings discriminated union", () => {
 	})
 })
 
+describe("LiteLLM reasoning preservation settings", () => {
+	it("includes reasoning preservation in the profile settings keys", () => {
+		expect(PROVIDER_SETTINGS_KEYS).toContain("litellmPreserveReasoning")
+	})
+
+	it.each([undefined, "auto", "on", "off"])("round trips %s through both profile schemas", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.parse(settings)).toEqual(settings)
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+	})
+
+	it.each([true, false, "invalid", null])("rejects invalid preservation value %s", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.safeParse(settings).success).toBe(false)
+		expect(providerSettingsSchemaDiscriminated.safeParse(settings).success).toBe(false)
+	})
+})
+
 describe("OpenAI-compatible extra body settings", () => {
 	it("accepts a JSON object with provider-specific nested fields", () => {
 		const settings = {

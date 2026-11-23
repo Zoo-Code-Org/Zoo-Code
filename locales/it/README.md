@@ -47,13 +47,13 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.98.0
+## Novità di Zoo Code v3.98.1
 
-- 🎟️ Prova il prossimo abbonamento Zoo Pass. 2 settimane di accesso gratuito; posti limitati
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Titoli delle attività automatici e controllo dei modelli più preciso:** Genera automaticamente titoli per le nuove attività radice e prova l’impostazione sperimentale per lo sforzo di ragionamento dinamico.
-- 🔌 **Supporto ampliato per modelli e provider:** Usa GPT-6.1 Terra e recupera l’elenco più recente dei modelli Friendli.
-- 🛡️ **Chat e modifiche più sicure e reattive:** Annulla correttamente le richieste OpenAI Native e Requesty, evita l’approvazione automatica accidentale dei diff esterni al workspace, cambia lingua all’interfaccia in modo coerente ed evita recuperi ambigui dei backup JSON.
+- 💫Prova Zoo Pass con GLM-5.3-Flash illimitato gratis fino al 1° dicembre con qualsiasi saldo sul tuo account Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modelli e ragionamento: Usa GPT-6.2 Sol, GPT-6.2 Astra e Claude Sonnet 5.5. Imposta lo sforzo di ragionamento per ogni profilo LiteLLM.
+- 🛡️ Sicurezza: Miglioramenti nell'analisi dei metadati di abilità e comandi, nelle menzioni, nei link dei provider e nelle approvazioni CLI.
+- 🔧 Correzioni: Costi dei livelli di servizio OpenAI, riconoscimento dei link simbolici dell'area di lavoro e più testi tradotti.
 
 ## Cosa può fare Zoo Code per TE?
 

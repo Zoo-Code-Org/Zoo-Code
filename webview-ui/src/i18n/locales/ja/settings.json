@@ -7,6 +7,7 @@
 		"select": "選択",
 		"add": "ヘッダーを追加",
 		"remove": "削除",
+		"milliseconds": "{{value}}ミリ秒",
 		"reset": "リセット"
 	},
 	"search": {
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "{{total}} 件中 {{count}} 件のタスク履歴をインポートしました。",
 			"detailPreparing": "Roo Code の履歴インポートを準備中です。",
 			"progressAriaLabel": "Roo Code の履歴インポートの進行状況"
-		}
+		},
+		"version": "バージョン: {{version}}",
+		"versionWithCommit": "バージョン: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "スラッシュコマンドを管理して、カスタムワークフローやアクションを素早く実行します。<DocsLink>詳細はこちら</DocsLink>",
@@ -408,12 +411,6 @@
 		"getOpencodeGoApiKey": "Opencode Go APIキーを取得",
 		"kenariApiKey": "Kenari APIキー",
 		"getKenariApiKey": "Kenari APIキーを取得",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "IO Intelligence APIキー",
-			"getApiKey": "IO Intelligence APIキーを取得",
-			"model": "モデル"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT APIキー",
@@ -547,6 +544,8 @@
 		"openAiBaseUrl": "ベースURL",
 		"openAiStrictToolSchemas": "厳格なツールスキーマ（strict: true）",
 		"openAiStrictToolSchemasDescription": "スキーマの厳密な準拠を有効にするため、ツールスキーマに strict: true を付与して送信します。非厳密なツール呼び出しを使う場合は無効にしてください。",
+		"openAiUseResponsesApi": "Responses API を使用",
+		"openAiUseResponsesApiDescription": "/chat/completions の代わりに /responses にリクエストを送信します。OpenAI 互換エンドポイントの一部の推論モデルで必要です。推論とツールの両方が有効なままになります。",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Azure デプロイ名",
 		"azureOpenAiDeploymentNameDescription": "基盤モデル名ではなく、Azure AI Studio のデプロイ名を入力してください。",
@@ -557,6 +556,13 @@
 		"codestralBaseUrlDesc": "Codestralモデルの代替URLを設定します。",
 		"xaiApiKey": "xAI APIキー",
 		"getXaiApiKey": "xAI APIキーを取得",
+		"litellmPreserveReasoning": {
+			"label": "推論をモデルに送り返す",
+			"auto": "自動",
+			"on": "オン",
+			"off": "オフ",
+			"description": "以前の推論をプレーンテキストでモデルに送り返します。自動はモデルの検出結果に従い、オンは常に送信し、オフは送信しません。推論の生成を有効にしたり、チャット内の推論を非表示にしたりする設定ではありません。"
+		},
 		"litellmApiKey": "LiteLLM APIキー",
 		"litellmBaseUrl": "LiteLLM ベースURL",
 		"awsCredentials": "AWS認証情報",
@@ -715,6 +721,18 @@
 			"authenticated": "認証済み",
 			"authenticatedAs": "{{name}} として認証済み"
 		},
+		"awsAuthMethod": "認証方法",
+		"qwenCode": {
+			"oauthPathLabel": "OAuth 認証情報のパス",
+			"oauthPathDescription": "Qwen OAuth 認証情報ファイルのパス。空欄の場合は {{defaultPath}} が使われます。",
+			"description": "Qwen Code は OAuth ベースの API で、公式 Qwen クライアントでの認証が必要です。先に OAuth 認証情報を設定してください。",
+			"gettingStarted": "はじめに:",
+			"step1": "1. 公式 Qwen クライアントをインストール",
+			"step2": "2. アカウントで認証",
+			"step3": "3. OAuth 認証情報は自動的に保存されます",
+			"setupInstructions": "セットアップ手順"
+		},
+		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}}のドキュメント",
 		"model": "モデル",
 		"useHostHeader": "カスタムHostヘッダーを使用",
@@ -1012,7 +1030,8 @@
 			"refreshing": "更新中...",
 			"refreshSuccess": "ツールが正常に更新されました",
 			"refreshError": "ツールの更新に失敗しました",
-			"toolParameters": "パラメーター"
+			"toolParameters": "パラメーター",
+			"required": "必須"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "ダイナミック思考強度",
@@ -1050,7 +1069,11 @@
 			"freeRequests_other": "* 1分間あたり{{count}}リクエストまで無料。それ以降は、プロンプトサイズに応じて課金されます。",
 			"pricingDetails": "詳細は価格情報をご覧ください。",
 			"billingEstimate": "* 課金は見積もりです - 正確な費用はプロンプトのサイズによって異なります。"
-		}
+		},
+		"tokensValue_other": "{{count, number}} トークン",
+		"pricePerMillionTokens": "{{price}} / 100万トークン",
+		"showMore": "もっと見る",
+		"showLess": "閉じる"
 	},
 	"modelPicker": {
 		"automaticFetch": "拡張機能は<serviceLink>{{serviceName}}</serviceLink>で利用可能な最新のモデルリストを自動的に取得します。どのモデルを選ぶべきか迷っている場合、Zoo Codeは<defaultModelLink>{{defaultModelId}}</defaultModelLink>で最適に動作します。また、「free」で検索すると、現在利用可能な無料オプションを見つけることができます。",
@@ -1117,6 +1140,7 @@
 			"outputPrice": "例：0.0002",
 			"cacheWritePrice": "例：0.00005"
 		},
+		"defaultValue": "デフォルト: {{value}}",
 		"modelId": {
 			"lmStudio": "例：meta-llama-3.1-8b-instruct",
 			"lmStudioDraft": "例：lmstudio-community/llama-3.2-1b-instruct",
@@ -1152,7 +1176,7 @@
 			"cacheReads": "キャッシュ読み取り"
 		},
 		"label": "サービスティア",
-		"tooltip": "APIリクエストをより速く処理するには、優先処理サービスティアをお試しください。低価格でレイテンシが高い場合は、フレックス処理ティアをお試しください。"
+		"tooltip": "API リクエストをより速く処理したい場合は、優先処理（Priority）のサービスティアを試してください。レイテンシーが高くても価格を抑えたい場合は、Flex 処理ティアを試してください。"
 	},
 	"ui": {
 		"collapseThinking": {

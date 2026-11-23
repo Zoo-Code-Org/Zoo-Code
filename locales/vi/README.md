@@ -46,13 +46,13 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.98.0
+## Điểm mới trong Zoo Code v3.98.1
 
-- 🎟️ Xem trước gói đăng ký Zoo Pass sắp ra mắt. 2 tuần truy cập miễn phí; số chỗ có hạn
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Tiêu đề tác vụ tự động và kiểm soát mô hình chi tiết hơn:** Tự động tạo tiêu đề cho tác vụ gốc mới và thử cài đặt thử nghiệm về mức nỗ lực suy luận động.
-- 🔌 **Hỗ trợ mô hình và nhà cung cấp mở rộng:** Sử dụng GPT-6.1 Terra và lấy danh sách mô hình Friendli mới nhất.
-- 🛡️ **Trò chuyện và chỉnh sửa an toàn, phản hồi nhanh hơn:** Hủy yêu cầu OpenAI Native và Requesty gọn gàng, bảo vệ diff bên ngoài workspace khỏi việc tự động phê duyệt ngoài ý muốn, chuyển đổi ngôn ngữ UI nhất quán và tránh khôi phục bản sao lưu JSON mơ hồ.
+- 💫Trải nghiệm Zoo Pass với GLM-5.3-Flash không giới hạn miễn phí đến ngày 1 tháng 12 khi tài khoản Zoo Gateway của bạn có số dư bất kỳ.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Mô hình và suy luận: Dùng GPT-6.2 Sol, GPT-6.2 Astra và Claude Sonnet 5.5. Đặt mức suy luận cho từng hồ sơ LiteLLM.
+- 🛡️ Bảo mật: Cải thiện phân tích siêu dữ liệu kỹ năng và lệnh, xử lý đề cập, liên kết nhà cung cấp và kiểm tra phê duyệt CLI.
+- 🔧 Sửa lỗi: Chi phí cấp dịch vụ OpenAI, nhận diện liên kết tượng trưng trong không gian làm việc và thêm bản dịch giao diện.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

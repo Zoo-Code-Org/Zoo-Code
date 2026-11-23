@@ -11,7 +11,6 @@ import type { ApiHandler, ModelCacheScope } from "../../index"
 
 const fetchers = vi.hoisted(() => ({
 	getDeepSeekModels: vi.fn(),
-	getIOIntelligenceModels: vi.fn(),
 	getKenariModels: vi.fn(),
 	getKimiCodeModels: vi.fn(),
 	getLiteLLMModels: vi.fn(),
@@ -45,10 +44,6 @@ vi.mock("../fetchers/modelCache", async (importOriginal) => ({
 vi.mock("../fetchers/deepseek", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/deepseek")>()),
 	getDeepSeekModels: fetchers.getDeepSeekModels,
-}))
-vi.mock("../fetchers/io-intelligence", async (importOriginal) => ({
-	...(await importOriginal<typeof import("../fetchers/io-intelligence")>()),
-	getIOIntelligenceModels: fetchers.getIOIntelligenceModels,
 }))
 vi.mock("../fetchers/kenari", async (importOriginal) => ({
 	...(await importOriginal<typeof import("../fetchers/kenari")>()),
@@ -109,7 +104,6 @@ vi.mock("../fetchers/zoo-gateway", async (importOriginal) => ({
 
 import { AnthropicHandler } from "../anthropic"
 import { DeepSeekHandler } from "../deepseek"
-import { IOIntelligenceHandler } from "../io-intelligence"
 import { KenariHandler } from "../kenari"
 import { KimiCodeHandler } from "../kimi-code"
 import { LiteLLMHandler } from "../lite-llm"
@@ -152,15 +146,6 @@ const cases: AdapterCase[] = [
 		fetcher: "getDeepSeekModels",
 		scope: { urlScoped: true, keyScoped: false, authScoped: false },
 		expectedArgs: [BASE_URL, API_KEY],
-		forwardsSignal: true,
-		prewarms: false,
-	},
-	{
-		name: "IO Intelligence",
-		create: () => new IOIntelligenceHandler({ ioIntelligenceApiKey: API_KEY }),
-		fetcher: "getIOIntelligenceModels",
-		scope: { urlScoped: false, keyScoped: true, authScoped: false },
-		expectedArgs: [API_KEY],
 		forwardsSignal: true,
 		prewarms: false,
 	},

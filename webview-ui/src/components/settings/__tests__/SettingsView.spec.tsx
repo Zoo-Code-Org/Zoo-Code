@@ -34,6 +34,16 @@ vi.mock("../ApiOptions", () => ({
 				data-testid="set-other-field"
 				onClick={() => setApiConfigurationField("openAiBaseUrl", "https://example.test")}
 			/>
+			<span data-testid="received-responses">{String(apiConfiguration?.openAiUseResponsesApi)}</span>
+			<button
+				data-testid="set-responses-true"
+				onClick={() => setApiConfigurationField("openAiUseResponsesApi", true)}
+			/>
+			<button
+				data-testid="set-responses-false"
+				onClick={() => setApiConfigurationField("openAiUseResponsesApi", false)}
+			/>
+
 			<span data-testid="received-ttl">{String(apiConfiguration?.promptCacheTtl)}</span>
 			<button data-testid="set-ttl-1h" onClick={() => setApiConfigurationField("promptCacheTtl", "1h")} />
 			<button
@@ -1283,5 +1293,32 @@ describe("SettingsView - promptCacheTtl save round trip", () => {
 		fireEvent.click(screen.getByTestId("save-button"))
 
 		expect(posted()?.apiConfiguration?.promptCacheTtl).toBe("1h")
+	})
+})
+
+describe("SettingsView - Responses API save round trip", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	it.each([true, false, undefined])("loads the saved Responses setting %s", (value) => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="providers" />, {
+			state: { currentApiConfigName: "test-config", apiConfiguration: { openAiUseResponsesApi: value } },
+		})
+		expect(screen.getByTestId("received-responses")).toHaveTextContent(String(value))
+	})
+
+	it.each([true, false])("buffers Responses=%s until Save", (value) => {
+		renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="providers" />, {
+			state: { currentApiConfigName: "test-config", apiConfiguration: { openAiUseResponsesApi: !value } },
+		})
+		fireEvent.click(screen.getByTestId(`set-responses-${value}`))
+		expect(screen.getByTestId("received-responses")).toHaveTextContent(String(value))
+		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "upsertApiConfiguration" }))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(vscode.postMessage).toHaveBeenCalledWith(
+			expect.objectContaining({
+				type: "upsertApiConfiguration",
+				apiConfiguration: expect.objectContaining({ openAiUseResponsesApi: value }),
+			}),
+		)
 	})
 })

@@ -7,6 +7,7 @@
 		"select": "Sélectionner",
 		"add": "Ajouter un en-tête",
 		"remove": "Supprimer",
+		"milliseconds": "{{value}} ms",
 		"reset": "Réinitialiser"
 	},
 	"search": {
@@ -82,7 +83,9 @@
 			"detailTasksImported_other": "{{count}} sur {{total}} historiques de tâches importés.",
 			"detailPreparing": "Préparation de l'importation de l'historique Roo Code.",
 			"progressAriaLabel": "Progression de l'importation de l'historique Roo Code"
-		}
+		},
+		"version": "Version : {{version}}",
+		"versionWithCommit": "Version : {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Gérez vos commandes slash pour exécuter rapidement des flux de travail et des actions personnalisées. <DocsLink>En savoir plus</DocsLink>",
@@ -410,12 +413,6 @@
 		"getOpencodeGoApiKey": "Obtenir la clé API Opencode Go",
 		"kenariApiKey": "Clé API Kenari",
 		"getKenariApiKey": "Obtenir la clé API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Clé API IO Intelligence",
-			"getApiKey": "Obtenir une clé API IO Intelligence",
-			"model": "Modèle"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Clé API NanoGPT",
@@ -549,6 +546,8 @@
 		"openAiBaseUrl": "URL de base",
 		"openAiStrictToolSchemas": "Schémas d'outils stricts (strict: true)",
 		"openAiStrictToolSchemasDescription": "Envoie strict: true avec les schémas d'outils pour activer le respect strict du schéma. Désactivez pour utiliser l'appel d'outils non strict.",
+		"openAiUseResponsesApi": "Utiliser l’API Responses",
+		"openAiUseResponsesApiDescription": "Envoie les requêtes à /responses au lieu de /chat/completions. Requis pour certains modèles de raisonnement sur les points de terminaison compatibles OpenAI. Le raisonnement et les outils restent activés.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nom du déploiement Azure",
 		"azureOpenAiDeploymentNameDescription": "Saisissez le nom du déploiement défini dans Azure AI Studio, et non le nom du modèle sous-jacent.",
@@ -559,6 +558,13 @@
 		"codestralBaseUrlDesc": "Définir une URL alternative pour le modèle Codestral.",
 		"xaiApiKey": "Clé API xAI",
 		"getXaiApiKey": "Obtenir la clé API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Renvoyer le raisonnement au modèle",
+			"auto": "Automatique",
+			"on": "Activé",
+			"off": "Désactivé",
+			"description": "Renvoie au modèle le raisonnement précédent en texte brut. Automatique suit la détection du modèle ; Activé le renvoie toujours ; Désactivé ne le renvoie jamais. N'active pas la génération de raisonnement et ne masque pas le raisonnement dans le chat."
+		},
 		"litellmApiKey": "Clé API LiteLLM",
 		"litellmBaseUrl": "URL de base LiteLLM",
 		"awsCredentials": "Identifiants AWS",
@@ -717,6 +723,18 @@
 			"authenticated": "Authentifié",
 			"authenticatedAs": "Authentifié en tant que {{name}}"
 		},
+		"awsAuthMethod": "Méthode d'authentification",
+		"qwenCode": {
+			"oauthPathLabel": "Chemin des identifiants OAuth",
+			"oauthPathDescription": "Chemin vers ton fichier d'identifiants OAuth Qwen. Si tu le laisses vide, {{defaultPath}} est utilisé.",
+			"description": "Qwen Code est une API basée sur OAuth qui nécessite une authentification via le client officiel Qwen. Tu dois d'abord configurer les identifiants OAuth.",
+			"gettingStarted": "Pour commencer :",
+			"step1": "1. Installe le client officiel Qwen",
+			"step2": "2. Authentifie-toi avec ton compte",
+			"step3": "3. Les identifiants OAuth seront enregistrés automatiquement",
+			"setupInstructions": "Instructions de configuration"
+		},
+		"ioIntelligence": {},
 		"providerDocumentation": "Documentation {{provider}}",
 		"model": "Modèle",
 		"useHostHeader": "Utiliser un en-tête Host personnalisé",
@@ -1014,7 +1032,8 @@
 			"refreshing": "Actualisation...",
 			"refreshSuccess": "Outils actualisés avec succès",
 			"refreshError": "Échec de l'actualisation des outils",
-			"toolParameters": "Paramètres"
+			"toolParameters": "Paramètres",
+			"required": "requis"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Effort de réflexion dynamique",
@@ -1054,7 +1073,13 @@
 			"freeRequests_other": "* Gratuit jusqu'à {{count}} requêtes par minute. Après cela, la facturation dépend de la taille du prompt.",
 			"pricingDetails": "Pour plus d'informations, voir les détails de tarification.",
 			"billingEstimate": "* La facturation est une estimation - le coût exact dépend de la taille du prompt."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_many": "{{count, number}} de tokens",
+		"tokensValue_other": "{{count, number}} tokens",
+		"pricePerMillionTokens": "{{price}} / 1M de tokens",
+		"showMore": "Plus",
+		"showLess": "Moins"
 	},
 	"modelPicker": {
 		"automaticFetch": "L'extension récupère automatiquement la liste la plus récente des modèles disponibles sur <serviceLink>{{serviceName}}</serviceLink>. Si vous ne savez pas quel modèle choisir, Zoo Code fonctionne mieux avec <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Vous pouvez également rechercher \"free\" pour les options gratuites actuellement disponibles.",
@@ -1121,6 +1146,7 @@
 			"outputPrice": "ex. 0.0002",
 			"cacheWritePrice": "ex. 0.00005"
 		},
+		"defaultValue": "Par défaut : {{value}}",
 		"modelId": {
 			"lmStudio": "ex. meta-llama-3.1-8b-instruct",
 			"lmStudioDraft": "ex. lmstudio-community/llama-3.2-1b-instruct",
@@ -1156,7 +1182,7 @@
 			"cacheReads": "Lectures du cache"
 		},
 		"label": "Niveau de service",
-		"tooltip": "Pour un traitement plus rapide des demandes d'API, essayez le niveau de service de traitement prioritaire. Pour des prix plus bas avec une latence plus élevée, essayez le niveau de traitement flexible."
+		"tooltip": "Pour un traitement plus rapide des requêtes API, essaie le niveau de service à traitement prioritaire. Pour des prix plus bas avec une latence plus élevée, essaie le niveau de traitement flex."
 	},
 	"ui": {
 		"collapseThinking": {

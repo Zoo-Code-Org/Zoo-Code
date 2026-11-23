@@ -7,6 +7,7 @@
 		"select": "Pilih",
 		"add": "Tambah Header",
 		"remove": "Hapus",
+		"milliseconds": "{{value}} md",
 		"reset": "Reset"
 	},
 	"search": {
@@ -80,7 +81,9 @@
 			"detailTasksImported_other": "{{count}} dari {{total}} riwayat tugas diimpor.",
 			"detailPreparing": "Mempersiapkan impor riwayat Roo Code.",
 			"progressAriaLabel": "Progres impor riwayat Roo Code"
-		}
+		},
+		"version": "Versi: {{version}}",
+		"versionWithCommit": "Versi: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Kelola perintah slash kamu untuk mengeksekusi alur kerja dan tindakan kustom dengan cepat. <DocsLink>Pelajari lebih lanjut</DocsLink>",
@@ -408,12 +411,6 @@
 		"getOpencodeGoApiKey": "Dapatkan Opencode Go API Key",
 		"kenariApiKey": "Kenari API Key",
 		"getKenariApiKey": "Dapatkan Kenari API Key",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Kunci API IO Intelligence",
-			"getApiKey": "Dapatkan Kunci API IO Intelligence",
-			"model": "Model"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "NanoGPT API Key",
@@ -547,6 +544,8 @@
 		"openAiBaseUrl": "Base URL",
 		"openAiStrictToolSchemas": "Skema tool ketat (strict: true)",
 		"openAiStrictToolSchemasDescription": "Kirim strict: true bersama skema tool untuk mengaktifkan kepatuhan skema ketat. Nonaktifkan untuk menggunakan pemanggilan tool non-ketat.",
+		"openAiUseResponsesApi": "Gunakan API Responses",
+		"openAiUseResponsesApiDescription": "Kirim permintaan ke /responses, bukan /chat/completions. Diperlukan untuk beberapa model penalaran pada endpoint yang kompatibel dengan OpenAI. Penalaran dan alat tetap aktif.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nama deployment Azure",
 		"azureOpenAiDeploymentNameDescription": "Masukkan nama deployment dari Azure AI Studio, bukan nama model dasarnya.",
@@ -557,6 +556,13 @@
 		"codestralBaseUrlDesc": "Atur URL alternatif untuk model Codestral.",
 		"xaiApiKey": "xAI API Key",
 		"getXaiApiKey": "Dapatkan xAI API Key",
+		"litellmPreserveReasoning": {
+			"label": "Kirim penalaran kembali ke model",
+			"auto": "Otomatis",
+			"on": "Aktif",
+			"off": "Nonaktif",
+			"description": "Kirim penalaran sebelumnya dalam teks biasa kembali ke model. Otomatis mengikuti deteksi model; Aktif selalu mengirim; Nonaktif tidak pernah mengirim. Tidak mengaktifkan pembuatan penalaran atau menyembunyikan penalaran di chat."
+		},
 		"litellmApiKey": "LiteLLM API Key",
 		"litellmBaseUrl": "LiteLLM Base URL",
 		"awsCredentials": "AWS Credentials",
@@ -715,6 +721,18 @@
 			"authenticated": "Terautentikasi",
 			"authenticatedAs": "Terautentikasi sebagai {{name}}"
 		},
+		"awsAuthMethod": "Metode autentikasi",
+		"qwenCode": {
+			"oauthPathLabel": "Path kredensial OAuth",
+			"oauthPathDescription": "Path ke file kredensial OAuth Qwen milikmu. Jika dibiarkan kosong, {{defaultPath}} akan digunakan.",
+			"description": "Qwen Code adalah API berbasis OAuth yang memerlukan autentikasi melalui klien resmi Qwen. Kamu perlu menyiapkan kredensial OAuth terlebih dahulu.",
+			"gettingStarted": "Untuk memulai:",
+			"step1": "1. Instal klien resmi Qwen",
+			"step2": "2. Autentikasi menggunakan akunmu",
+			"step3": "3. Kredensial OAuth akan disimpan secara otomatis",
+			"setupInstructions": "Petunjuk penyiapan"
+		},
+		"ioIntelligence": {},
 		"providerDocumentation": "Dokumentasi {{provider}}",
 		"model": "Model",
 		"useHostHeader": "Gunakan Host header kustom",
@@ -1012,7 +1030,8 @@
 			"refreshing": "Merefresh...",
 			"refreshSuccess": "Tool berhasil direfresh",
 			"refreshError": "Gagal merefresh tool",
-			"toolParameters": "Parameter"
+			"toolParameters": "Parameter",
+			"required": "wajib"
 		},
 		"DYNAMIC_THINKING_EFFORT": {
 			"name": "Usaha berpikir dinamis",
@@ -1050,7 +1069,11 @@
 			"freeRequests_other": "* Gratis hingga {{count}} permintaan per menit. Setelah itu, penagihan tergantung pada ukuran prompt.",
 			"pricingDetails": "Untuk info lebih lanjut, lihat detail harga.",
 			"billingEstimate": "* Penagihan adalah estimasi - biaya sebenarnya tergantung pada ukuran prompt."
-		}
+		},
+		"tokensValue_other": "{{count, number}} token",
+		"pricePerMillionTokens": "{{price}} / 1 juta token",
+		"showMore": "Selengkapnya",
+		"showLess": "Lebih sedikit"
 	},
 	"modelPicker": {
 		"automaticFetch": "Ekstensi secara otomatis mengambil daftar model terbaru yang tersedia di <serviceLink>{{serviceName}}</serviceLink>. Jika kamu tidak yakin model mana yang harus dipilih, Zoo Code bekerja terbaik dengan <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Kamu juga dapat mencoba mencari \"free\" untuk opsi tanpa biaya yang saat ini tersedia.",
@@ -1117,6 +1140,7 @@
 			"outputPrice": "misalnya 0.0002",
 			"cacheWritePrice": "misalnya 0.00005"
 		},
+		"defaultValue": "Default: {{value}}",
 		"modelId": {
 			"lmStudio": "misalnya meta-llama-3.1-8b-instruct",
 			"lmStudioDraft": "misalnya lmstudio-community/llama-3.2-1b-instruct",
@@ -1152,7 +1176,7 @@
 			"cacheReads": "Pembacaan cache"
 		},
 		"label": "Tingkat layanan",
-		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih rendah dengan latensi lebih tinggi, coba tingkat pemrosesan fleksibel."
+		"tooltip": "Untuk pemrosesan permintaan API yang lebih cepat, coba tingkat layanan pemrosesan prioritas. Untuk harga lebih murah dengan latensi lebih tinggi, coba tingkat pemrosesan flex."
 	},
 	"ui": {
 		"collapseThinking": {
