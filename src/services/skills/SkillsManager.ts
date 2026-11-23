@@ -790,7 +790,9 @@ export class SkillsManager {
 			try {
 				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Exclusive creation: a pre-created symlink at the generated name cannot be followed.
-				await fs.writeFile(temporaryPath, payload, { encoding: "utf-8", flag: "wx" })
+				// The payload is staged 0600 because no mode has been decided at this point: left to the
+				// process default the half-written SKILL.md is world-readable until the rename below.
+				await fs.writeFile(temporaryPath, payload, { encoding: "utf-8", flag: "wx", mode: 0o600 })
 				ownsTemporaryPath = true
 				if (this.isDisposed) throw new Error("SkillsManager is disposed")
 				// Re-validate the final target immediately before the rename: the target (or an
@@ -800,17 +802,18 @@ export class SkillsManager {
 				// rename replaces the target's inode, so the replacement must carry the target's
 				// permission bits: a user-restricted SKILL.md (e.g. 0600) would otherwise come back
 				// with the process default mode and become readable by other local users. A target
-				// that does not exist yet (createSkill) has no mode to preserve and keeps the default.
-				// Only a missing target is allowed to fall through to the default mode: any other stat
-				// failure means the mode could not be read, and renaming anyway would replace a
-				// restricted SKILL.md with a file carrying the process default mode.
+				// that does not exist yet (createSkill) gets the publish mode named below, chosen here
+				// rather than inherited from the umask.
+				// Only a missing target is allowed to take that named mode: any other stat failure
+				// means the target's mode could not be read, and renaming anyway would publish the
+				// sidecar's staging mode (0600) over a restricted SKILL.md, so it fails closed.
 				const existingTarget = await fs.stat(filePath).catch((error: unknown) => {
 					const code =
 						typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
 					// A missing target (or an error that carries no filesystem code at all) has no mode to
-					// preserve. Any coded failure - EACCES, EIO, EPERM - means the mode could not be read,
-					// and renaming anyway would replace a restricted SKILL.md with a file that carries the
-					// process default mode, so it fails closed.
+					// preserve. Any coded failure - EACCES, EIO, EPERM - means the target's mode could not
+					// be read, and renaming anyway would replace a restricted SKILL.md with a file that
+					// carries the staging mode, so it fails closed.
 					if (code === "ENOENT" || typeof code !== "string") {
 						return undefined
 					}
@@ -818,6 +821,11 @@ export class SkillsManager {
 				})
 				if (existingTarget && typeof existingTarget.mode === "number") {
 					await fs.chmod(temporaryPath, existingTarget.mode & 0o777)
+				} else if (!existingTarget) {
+					// 0600 is the staging mode, not the mode a published skill should carry: a second
+					// uid in a shared checkout has to be able to read the file. Naming 0644 here keeps that
+					// true under a private umask instead of leaving the sidecar's 0600 in place.
+					await fs.chmod(temporaryPath, 0o644)
 				}
 				await fs.rename(temporaryPath, filePath)
 			} catch (error) {

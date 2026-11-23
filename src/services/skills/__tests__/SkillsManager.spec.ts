@@ -2691,6 +2691,52 @@ Body.`
 			expect(mockRename).toHaveBeenCalledWith(temporaryPath, skillMd)
 		})
 
+		it("stages the SKILL.md sidecar private before the publish mode is decided", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+			mockStat.mockRejectedValue(enoent())
+			mockRename.mockResolvedValue(undefined)
+
+			await skillsManager.createSkill("private-sidecar", "global", "Private sidecar")
+
+			// Nothing has been decided about the target's mode when the payload lands, so the staging
+			// call itself has to carry a private mode; left to the process default the half-written
+			// SKILL.md is world-readable until the rename.
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			expect(mockWriteFile.mock.calls[0][2]).toMatchObject({ encoding: "utf-8", flag: "wx", mode: 0o600 })
+		})
+
+		it("publishes a brand-new SKILL.md with 0644 rather than the staging mode", async () => {
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(undefined)
+			mockWriteFile.mockResolvedValue(undefined)
+			mockStat.mockRejectedValue(enoent())
+			mockRename.mockResolvedValue(undefined)
+
+			const createdPath = await skillsManager.createSkill("new-skill-mode", "global", "New skill mode")
+			const staged = String(mockWriteFile.mock.calls[0][0])
+
+			expect(mockChmod).toHaveBeenCalledTimes(1)
+			if (process.platform !== "win32") {
+				// The mode argument and chmod are both inert on win32 (measured: fs.writeFile reports
+				// 0o666 with and without a mode, and chmod does not move what stat reports), so the mode
+				// value is asserted only where the platform gives it meaning. The call itself and its
+				// position relative to the rename are asserted on every platform.
+				expect(mockChmod).toHaveBeenCalledWith(staged, 0o644)
+			}
+			// The same bug class the preserved-bits row exists to prevent: the mode has to be in place
+			// before the rename publishes the file.
+			expect(mockChmod.mock.invocationCallOrder[0]).toBeLessThan(mockRename.mock.invocationCallOrder[0])
+			expect(mockRename).toHaveBeenCalledWith(staged, createdPath)
+		})
+
 		it("propagates a realpath failure instead of writing through the unresolved path", async () => {
 			const skillDir = p(globalSkillsDir, "unresolvable-skill")
 			const skillMd = p(skillDir, "SKILL.md")
