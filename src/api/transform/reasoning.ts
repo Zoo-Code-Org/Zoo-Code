@@ -34,7 +34,7 @@ export type AnthropicProviderReasoningParams =
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
 // Valid Gemini thinking levels for effort-based reasoning
-const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
+const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const
 
 export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number]
 
@@ -187,14 +187,19 @@ export const getGeminiReasoning = ({
 		return { thinkingBudget: reasoningBudget!, includeThoughts: true }
 	}
 
+	// Stored effort selections must not reach models without effort support.
+	if (!model.supportsReasoningEffort) {
+		return undefined
+	}
+
 	// For effort-based Gemini models, rely directly on the selected effort value.
 	// We intentionally ignore enableReasoningEffort here so that explicitly chosen
 	// efforts in the UI (e.g. "High" for gemini-3-pro-preview) always translate
 	// into a thinkingConfig, regardless of legacy boolean flags.
 	const selectedEffort = settings.reasoningEffort ?? model.reasoningEffort
 
-	// Respect "off" / unset semantics from the effort selector itself.
-	if (!selectedEffort || selectedEffort === "disable") {
+	// Omit unset, disabled, and unknown selections.
+	if (!isGeminiThinkingLevel(selectedEffort)) {
 		return undefined
 	}
 
@@ -202,14 +207,12 @@ export const getGeminiReasoning = ({
 	// e.g. gemini-3-pro-preview only supports ["low", "high"] — sending
 	// "medium" (carried over from a different model's settings) causes errors.
 	const effortToUse =
-		Array.isArray(model.supportsReasoningEffort) &&
-		isGeminiThinkingLevel(selectedEffort) &&
-		!model.supportsReasoningEffort.includes(selectedEffort)
+		Array.isArray(model.supportsReasoningEffort) && !model.supportsReasoningEffort.includes(selectedEffort)
 			? model.reasoningEffort
 			: selectedEffort
 
-	// Effort-based models on Google GenAI support minimal/low/medium/high levels.
-	if (!effortToUse || !isGeminiThinkingLevel(effortToUse)) {
+	// Accept only known Google GenAI thinking levels.
+	if (!isGeminiThinkingLevel(effortToUse)) {
 		return undefined
 	}
 
