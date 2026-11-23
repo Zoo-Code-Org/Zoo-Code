@@ -14,8 +14,11 @@ const SHARED_DIR = process.platform === "win32" ? "C:\\shared\\skills" : "/share
 const p = (...segments: string[]) => path.join(...segments)
 // A real not-found error, as fs throws for a missing path or broken symlink
 const enoent = () => Object.assign(new Error("ENOENT: no such file or directory"), { code: "ENOENT" })
+// A real coded permission failure: fs.stat throwing this means the target exists but its
+// mode could not be read, which is the shape the fail-closed publish branch keys on.
+const eacces = () => Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
 // Global roo directory - computed once
 const GLOBAL_ROO_DIR = p(HOME_DIR, ".roo")
 const GLOBAL_AGENTS_DIR = p(HOME_DIR, ".agents")
 
-export { enoent, GLOBAL_AGENTS_DIR, GLOBAL_ROO_DIR, HOME_DIR, p, PROJECT_DIR, SHARED_DIR }
+export { eacces, enoent, GLOBAL_AGENTS_DIR, GLOBAL_ROO_DIR, HOME_DIR, p, PROJECT_DIR, SHARED_DIR }

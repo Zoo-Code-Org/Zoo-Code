@@ -42,7 +42,16 @@ const {
 	mockChmod: vi.fn(),
 }))
 
-import { enoent, GLOBAL_AGENTS_DIR, GLOBAL_ROO_DIR, HOME_DIR, p, PROJECT_DIR, SHARED_DIR } from "./skillsTestHarness"
+import {
+	eacces,
+	enoent,
+	GLOBAL_AGENTS_DIR,
+	GLOBAL_ROO_DIR,
+	HOME_DIR,
+	p,
+	PROJECT_DIR,
+	SHARED_DIR,
+} from "./skillsTestHarness"
 // Make fs.lstat report the given paths as symlinks
 const mockSymlinks = (...paths: string[]) =>
 	mockLstat.mockImplementation(async (pathArg: string) => ({ isSymbolicLink: () => paths.includes(pathArg) }))
@@ -2811,6 +2820,42 @@ Body.`
 				realFs.rmSync(directory, { recursive: true, force: true })
 			}
 		})
+		it("refuses to publish over a SKILL.md whose mode could not be read", async () => {
+			// A coded stat failure means the target exists but its permission bits are unreadable, so no
+			// publish mode can be derived from it. Falling back to the new-target mode would rename the
+			// sidecar over a SKILL.md its owner had deliberately restricted, so the publish has to stop
+			// here and take the staged sidecar with it.
+			const statError = eacces()
+			const skillMd = p(GLOBAL_ROO_DIR, "skills", "unreadable-mode", "SKILL.md")
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills", "unreadable-mode"))
+			mockWriteFile.mockResolvedValue(undefined)
+			mockChmod.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+			mockUnlink.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillMd) {
+					throw statError
+				}
+				throw enoent()
+			})
+
+			await expect(skillsManager.createSkill("unreadable-mode", "global", "Unreadable mode")).rejects.toBe(
+				statError,
+			)
+
+			const staged = String(mockWriteFile.mock.calls[0][0])
+			// Nothing was published: no mode was applied and the sidecar never reached the target.
+			expect(mockChmod).not.toHaveBeenCalled()
+			expect(mockRename).not.toHaveBeenCalled()
+			expect(mockUnlink).toHaveBeenCalledWith(staged)
+			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
 		it("propagates a realpath failure instead of writing through the unresolved path", async () => {
 			const skillDir = p(globalSkillsDir, "unresolvable-skill")
 			const skillMd = p(skillDir, "SKILL.md")
