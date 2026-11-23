@@ -303,6 +303,10 @@
 		"thinking": "Pensant",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "No s'han pogut tornar a carregar algunes instruccions",
+		"description": "Continuant amb les instruccions que s'han pogut carregar. Fonts afectades:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {

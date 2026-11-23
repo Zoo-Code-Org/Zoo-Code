@@ -56,6 +56,8 @@
 		"mistake_limit_guidance": "Isso pode indicar uma falha no processo de pensamento do modelo ou incapacidade de usar uma ferramenta adequadamente, o que pode ser mitigado com orientação do usuário (ex. \"Tente dividir a tarefa em etapas menores\").",
 		"violated_organization_allowlist": "Falha ao executar a tarefa: o perfil atual não é compatível com as configurações da sua organização",
 		"condense_failed": "Falha ao condensar o contexto",
+		"condense_failed_with_reason": "Falha ao condensar o contexto: {{reason}}",
+		"condense_task_unavailable": "A tarefa selecionada não está mais disponível",
 		"condense_not_enough_messages": "Não há mensagens suficientes para condensar o contexto",
 		"condensed_recently": "O contexto foi condensado recentemente; pulando esta tentativa",
 		"condense_handler_invalid": "O manipulador de API para condensar o contexto é inválido",

@@ -303,6 +303,10 @@
 		"thinking": "Pensando",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "No se pudieron volver a cargar algunas instrucciones",
+		"description": "Continuando con las instrucciones que se pudieron cargar. Fuentes afectadas:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {

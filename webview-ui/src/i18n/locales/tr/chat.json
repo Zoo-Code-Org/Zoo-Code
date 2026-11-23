@@ -302,6 +302,10 @@
 		"thinking": "Düşünüyor",
 		"seconds": "{{count}}sn"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Bazı talimatlar yeniden yüklenemedi",
+		"description": "Yüklenebilen talimatlarla devam ediliyor. Etkilenen kaynaklar:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {

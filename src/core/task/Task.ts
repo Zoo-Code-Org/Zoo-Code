@@ -100,6 +100,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import type { InstructionFailureCollector } from "../prompts/sections/custom-instructions"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
@@ -415,6 +416,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	metadataFetchAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
+	// Set when a condensation installs a summary; the next ordinary request collects instruction read failures.
+	private pendingInstructionRefresh = false
 
 	// TaskStatus
 	idleAsk?: ClineMessage
@@ -2832,6 +2835,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				{ isNonInteractive: true } /* options */,
 			)
 			return
+		}
+		if (summary) {
+			this.pendingInstructionRefresh = true
 		}
 		await this.overwriteApiConversationHistory(messages)
 
@@ -5412,6 +5418,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async getSystemPrompt(
 		requestState: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
 		requestModelInfo?: ModelInfo,
+		failures?: InstructionFailureCollector,
 	): Promise<string> {
 		const { mcpEnabled } = requestState ?? {}
 		let mcpHub: McpHub | undefined
@@ -5483,6 +5490,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				provider.getSkillsManager(),
 				requestState?.disabledTools,
 				modelInfo,
+				failures,
 			)
 		})()
 	}
@@ -5708,6 +5716,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				useAvailableInputForContextPercent,
 			})
 
+			if (truncateResult.summary) {
+				this.pendingInstructionRefresh = true
+			}
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
@@ -5828,7 +5839,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			customModes: state?.customModes,
 			modelInfo: requestModelInfo,
 		}
-		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+		let instructionFailures: InstructionFailureCollector = []
+		let systemPrompt = await this.getSystemPrompt(
+			state,
+			requestModelInfo,
+			this.pendingInstructionRefresh ? instructionFailures : undefined,
+		)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata
 		// wait, or the MCP wait inside getSystemPrompt must stop this request before any
@@ -5965,10 +5981,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				if (truncateResult.summary) {
+					this.pendingInstructionRefresh = true
+				}
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
 				await this.reportContextManagementResult(truncateResult)
+				if (truncateResult.summary) {
+					// Same request-state snapshot keeps prompt and tools consistent; files are re-read.
+					instructionFailures = []
+					systemPrompt = await this.getSystemPrompt(state, requestModelInfo, instructionFailures)
+				}
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show
@@ -5979,6 +6003,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
 				}
 			}
+		}
+
+		// The rebuild above adds another MCP wait; cancellation must not reach the warning or model call.
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
 		}
 
 		// Get the effective API history by filtering out condensed messages
@@ -6071,6 +6102,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
+
+		if (this.pendingInstructionRefresh) {
+			this.pendingInstructionRefresh = false
+			if (instructionFailures.length > 0) {
+				await this.say(
+					"instruction_refresh_warning",
+					instructionFailures.map(({ sourcePath, code }) => `${sourcePath} (${code})`).join("\n"),
+					undefined /* images */,
+					false /* partial */,
+					undefined /* checkpoint */,
+					undefined /* progressStatus */,
+					{ isNonInteractive: true } /* options */,
+				)
+			}
+		}
 
 		// The provider accepts reasoning items alongside standard messages; cast to the expected parameter type.
 		const stream = this.api.createMessage(

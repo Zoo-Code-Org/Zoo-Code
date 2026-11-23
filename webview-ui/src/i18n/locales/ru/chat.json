@@ -318,6 +318,10 @@
 		"thinking": "Обдумывание",
 		"seconds": "{{count}}с"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Не удалось повторно загрузить некоторые инструкции",
+		"description": "Продолжаем с инструкциями, которые удалось загрузить. Источники, которых коснулась проблема:"
+	},
 	"contextManagement": {
 		"tokens": "токены",
 		"condensation": {

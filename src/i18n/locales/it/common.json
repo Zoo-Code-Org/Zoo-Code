@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "Questo può indicare un fallimento nel processo di pensiero del modello o l'incapacità di utilizzare correttamente uno strumento, che può essere mitigato con la guida dell'utente (ad es. \"Prova a suddividere l'attività in passaggi più piccoli\").",
 		"violated_organization_allowlist": "Impossibile eseguire l'attività: il profilo corrente non è compatibile con le impostazioni della tua organizzazione",
 		"condense_failed": "Impossibile condensare il contesto",
+		"condense_failed_with_reason": "Impossibile condensare il contesto: {{reason}}",
+		"condense_task_unavailable": "L’attività selezionata non è più disponibile",
 		"condense_not_enough_messages": "Non ci sono abbastanza messaggi per condensare il contesto",
 		"condensed_recently": "Il contesto è stato condensato di recente; questo tentativo viene saltato",
 		"condense_handler_invalid": "Il gestore API per condensare il contesto non è valido",

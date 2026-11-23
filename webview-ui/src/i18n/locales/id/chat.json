@@ -211,6 +211,10 @@
 		},
 		"current": "Saat Ini"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Beberapa instruksi tidak dapat dimuat ulang",
+		"description": "Melanjutkan dengan instruksi yang berhasil dimuat. Sumber yang terdampak:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {

@@ -303,6 +303,10 @@
 		"thinking": "Sto pensando",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Non è stato possibile ricaricare alcune istruzioni",
+		"description": "Si prosegue con le istruzioni che è stato possibile caricare. Fonti interessate:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {

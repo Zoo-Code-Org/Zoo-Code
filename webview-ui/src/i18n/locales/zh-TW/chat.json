@@ -208,6 +208,10 @@
 		},
 		"current": "目前"
 	},
+	"instructionRefresh": {
+		"warningHeader": "部分指令無法重新載入",
+		"description": "將使用已成功載入的指令繼續。受影響的來源："
+	},
 	"contextManagement": {
 		"tokens": "Token",
 		"condensation": {

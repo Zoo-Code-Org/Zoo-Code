@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "Bu, modelin düşünce sürecindeki bir başarısızlığı veya bir aracı düzgün kullanamama durumunu gösterebilir, bu da kullanıcı rehberliği ile hafifletilebilir (örn. \"Görevi daha küçük adımlara bölmeyi deneyin\").",
 		"violated_organization_allowlist": "Görev yürütülemedi: Geçerli profil kuruluşunuzun ayarlarıyla uyumlu değil",
 		"condense_failed": "Bağlam sıkıştırılamadı",
+		"condense_failed_with_reason": "Bağlam sıkıştırılamadı: {{reason}}",
+		"condense_task_unavailable": "Seçilen görev artık kullanılamıyor",
 		"condense_not_enough_messages": "Bağlamı sıkıştırmak için yeterli mesaj yok",
 		"condensed_recently": "Bağlam yakın zamanda sıkıştırıldı; bu deneme atlanıyor",
 		"condense_handler_invalid": "Bağlamı sıkıştırmak için API işleyicisi geçersiz",

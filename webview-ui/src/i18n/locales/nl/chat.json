@@ -313,6 +313,10 @@
 		"thinking": "Denkt na",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Sommige instructies konden niet opnieuw worden geladen",
+		"description": "We gaan verder met de instructies die konden worden geladen. Betrokken bronnen:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {
