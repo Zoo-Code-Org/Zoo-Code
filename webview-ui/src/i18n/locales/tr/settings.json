@@ -733,7 +733,6 @@
 			"step3": "3. OAuth kimlik bilgileri otomatik olarak kaydedilir",
 			"setupInstructions": "Kurulum talimatları"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} Dokümantasyonu",
 		"model": "Model",
 		"useHostHeader": "Özel Host başlığı kullan",

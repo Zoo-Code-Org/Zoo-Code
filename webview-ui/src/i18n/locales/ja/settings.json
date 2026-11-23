@@ -732,7 +732,6 @@
 			"step3": "3. OAuth 認証情報は自動的に保存されます",
 			"setupInstructions": "セットアップ手順"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}}のドキュメント",
 		"model": "モデル",
 		"useHostHeader": "カスタムHostヘッダーを使用",

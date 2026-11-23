@@ -735,7 +735,6 @@
 			"step3": "3. Poświadczenia OAuth zostaną zapisane automatycznie",
 			"setupInstructions": "Instrukcja konfiguracji"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Dokumentacja {{provider}}",
 		"model": "Model",
 		"useHostHeader": "Użyj niestandardowego nagłówka Host",

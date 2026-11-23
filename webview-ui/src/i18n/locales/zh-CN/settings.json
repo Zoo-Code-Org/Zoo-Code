@@ -732,7 +732,6 @@
 			"step3": "3. OAuth 凭据将自动保存",
 			"setupInstructions": "设置说明"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} 文档",
 		"model": "模型",
 		"useHostHeader": "使用自定义 Host 标头",

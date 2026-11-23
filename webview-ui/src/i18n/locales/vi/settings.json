@@ -732,7 +732,6 @@
 			"step3": "3. Thông tin xác thực OAuth sẽ được lưu tự động",
 			"setupInstructions": "Hướng dẫn thiết lập"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Tài liệu {{provider}}",
 		"model": "Mẫu",
 		"useHostHeader": "Sử dụng tiêu đề Host tùy chỉnh",

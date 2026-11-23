@@ -732,7 +732,6 @@
 			"step3": "3. OAuth 자격 증명이 자동으로 저장됩니다",
 			"setupInstructions": "설정 안내"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} 문서",
 		"model": "모델",
 		"useHostHeader": "사용자 정의 Host 헤더 사용",

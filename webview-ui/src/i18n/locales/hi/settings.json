@@ -733,7 +733,6 @@
 			"step3": "3. OAuth क्रेडेंशियल्स अपने आप सेव हो जाएँगे",
 			"setupInstructions": "सेटअप निर्देश"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} दस्तावेज़ीकरण",
 		"model": "मॉडल",
 		"useHostHeader": "कस्टम होस्ट हेडर का उपयोग करें",

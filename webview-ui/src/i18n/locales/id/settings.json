@@ -732,7 +732,6 @@
 			"step3": "3. Kredensial OAuth akan disimpan secara otomatis",
 			"setupInstructions": "Petunjuk penyiapan"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Dokumentasi {{provider}}",
 		"model": "Model",
 		"useHostHeader": "Gunakan Host header kustom",

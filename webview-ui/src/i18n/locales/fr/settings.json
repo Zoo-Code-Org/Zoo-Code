@@ -734,7 +734,6 @@
 			"step3": "3. Les identifiants OAuth seront enregistrés automatiquement",
 			"setupInstructions": "Instructions de configuration"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Documentation {{provider}}",
 		"model": "Modèle",
 		"useHostHeader": "Utiliser un en-tête Host personnalisé",

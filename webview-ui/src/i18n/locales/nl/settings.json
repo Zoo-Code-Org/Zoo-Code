@@ -733,7 +733,6 @@
 			"step3": "3. OAuth-referenties worden automatisch opgeslagen",
 			"setupInstructions": "Installatie-instructies"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} documentatie",
 		"model": "Model",
 		"useHostHeader": "Aangepaste Host-header gebruiken",

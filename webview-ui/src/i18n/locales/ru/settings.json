@@ -735,7 +735,6 @@
 			"step3": "3. Учётные данные OAuth сохранятся автоматически",
 			"setupInstructions": "Инструкция по настройке"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Документация {{provider}}",
 		"model": "Модель",
 		"useHostHeader": "Использовать пользовательский Host-заголовок",

@@ -734,7 +734,6 @@
 			"step3": "3. Le credenziali OAuth verranno salvate automaticamente",
 			"setupInstructions": "Istruzioni di configurazione"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Documentazione {{provider}}",
 		"model": "Modello",
 		"useHostHeader": "Usa intestazione Host personalizzata",

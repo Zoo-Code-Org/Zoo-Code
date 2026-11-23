@@ -819,7 +819,6 @@
 		},
 		"providerDocumentation": "{{provider}} documentation",
 		"model": "Model",
-		"ioIntelligence": {},
 		"useHostHeader": "Use custom Host header",
 		"awsServiceTierStandardDesc": "Balanced performance and cost",
 		"awsServiceTierFlexDesc": "Lower cost, higher latency for non-critical tasks",

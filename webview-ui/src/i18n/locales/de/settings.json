@@ -733,7 +733,6 @@
 			"step3": "3. Die OAuth-Anmeldedaten werden automatisch gespeichert",
 			"setupInstructions": "Einrichtungsanleitung"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}}-Dokumentation",
 		"model": "Modell",
 		"useHostHeader": "Benutzerdefinierten Host-Header verwenden",

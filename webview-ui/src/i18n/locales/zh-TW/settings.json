@@ -759,7 +759,6 @@
 			"step3": "3. OAuth 憑證將自動儲存",
 			"setupInstructions": "設定說明"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "{{provider}} 說明文件",
 		"model": "模型",
 		"useHostHeader": "使用自訂 Host 標頭",

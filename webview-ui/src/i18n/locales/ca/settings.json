@@ -734,7 +734,6 @@
 			"step3": "3. Les credencials OAuth es desaran automàticament",
 			"setupInstructions": "Instruccions de configuració"
 		},
-		"ioIntelligence": {},
 		"providerDocumentation": "Documentació de {{provider}}",
 		"model": "Model",
 		"useHostHeader": "Utilitzar capçalera Host personalitzada",
