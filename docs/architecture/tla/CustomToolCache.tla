@@ -12,15 +12,15 @@ Compiler, path results, and filesystem checks are oracles. MC sets the bounds. *
 The reviews preceded the new invariants. The blind step was missed. *)
 (* Findings: Replays confirm the reported bugs. No new bug or false alarm found.
 The model does not prove the code. A stopped process can leave a pending file. *)
-(* TLC: Fixed passes all six invariants (49 states, depth 11).
+(* TLC: Fixed passes all eight invariants (49 states, depth 11).
 Direct fails VisibleIsReady after Start (2 states). RawPath fails at the start. *)
 (* MixedPath fails CleanupSelectsRoot. NoCleanupGuard fails UnsafeRootIsUntouched.
 Latest runs took under 1s each. Round 3 runs took 27 to 42s. *)
 (* Replay: Old publication fails 3 of 4 cases. Raw ownership matching fails aliases.
 Old cleanup fails 4 of 7 cases. Guard sabotage deletes all 3 unsafe sentinels. *)
-(* Validation: Fixed code passes 40 integration and 21 unit tests.
+(* Validation: Fixed code passes 41 integration and 25 unit tests.
 Both type checks and focused lint pass. Suppression counts do not increase. *)
-(* Review ratchet, PR #2485: Added 5, covered 0, gap 4 across five rounds.
+(* Review ratchet, PR #2485: Added 6, covered 0, gap 5 across six rounds.
 Gaps cover test routing, defaults, module placement, and PR metadata. *)
 (* Round 1: Threads PRRT_kwDOSK-bwM64vzgN, PRRT_kwDOSK-bwM64vzgR, PRRT_kwDOSK-bwM64vzgV. Added 1, gap 2.
 Publication became an invariant. Test routing and defaults use direct tests. *)
@@ -32,12 +32,25 @@ Writer bounds moved to MC. A state invariant cannot check module placement. *)
 Cleanup gained two invariants. PR metadata is outside the model. *)
 (* Round 5: CodeRabbit review of 2026-11-21, outside-diff finding on clearCache. Added 1.
 ProbeSeesRoot: the existsSync probe uses the normalized root. RawProbe fails it. *)
+(* Round 6: Thread PRRT_kwDOSK-bwM66ZGcG. Added 1: ExplicitWindowsRootIsRejected.
+SupportedRootsAreAccepted checks the accept path. ExplicitWindows fails the reject invariant. *)
+(* Thread PRRT_kwDOSK-bwM66ZGcC. Gap 1: State invariants cannot check the shell runner's module choice.
+Replay: The old documented command reports six unknown results. The fixed command checks all seven configs. *)
+(* Expectation for round 6: Reject explicit Windows roots before import or cleanup. Keep supported roots usable.
+Replay: Without the constructor guard, three reject tests fail and five accept tests pass. No new bug found. *)
+(* The runner also handles TLC's constant-invariant FALSE result. This is an invariant failure, not a parse failure.
+The fixed config passes. All six sabotage configs fail their intended invariants. *)
+(* Shared runner validation: check.sh all reports the expected result for all 60 configs.
+The model checks the constructor policy. It does not check Windows ACLs or prove the implementation. *)
 (* Cost: One agent, no delegates. Rounds 1/2/3/4 took about 6/3/4/6 minutes.
 Header cleanup took about 2 minutes. These are work estimates. *)
-(* Gate: Run all six configs against CustomToolCacheMC and the property tables.
+(* Round 6 cost: One agent, about 10 minutes including checks. No delegates.
+The first invariants preceded this round. The new invariants follow the review ratchet. *)
+(* Gate: Run check.sh CustomToolCache and the property tables. The runner selects CustomToolCacheMC.
 Use -metadir outside the repo. TLC needs a local socket. Run file tests on the host. *)
 EXTENDS Naturals, TLC
 CONSTANTS AtomicPublish, CanonicalMatch, Writers, NormalizeCache, GuardCleanup, ProbeNormalized, CleanupCases
+CONSTANT RejectExplicitWindows
 VARIABLES phase, published, pending
 vars == <<phase, published, pending>>
 Init == /\ phase = [w \in Writers |-> "idle"]
@@ -81,4 +94,10 @@ CleanupSelectsRoot == \A c \in CleanupCases : CleanupTarget(c) = c.root
 ProbeSeesRoot == \A c \in CleanupCases : IF ProbeNormalized THEN TRUE ELSE c.rawProbe
 MayClear(safe) == IF GuardCleanup THEN safe ELSE TRUE
 UnsafeRootIsUntouched == \A safe \in BOOLEAN : ~safe => ~MayClear(safe)
+(* PR #2485, thread PRRT_kwDOSK-bwM66ZGcG: Reject unverified explicit Windows roots before construction.
+Source: RegistryOptions.cacheDir. Sinks: import and clearCache require a constructed registry. *)
+CanConstruct(windows, explicit) == ~(RejectExplicitWindows /\ windows /\ explicit)
+ExplicitWindowsRootIsRejected == ~CanConstruct(TRUE, TRUE)
+SupportedRootsAreAccepted == \A windows, explicit \in BOOLEAN :
+    ~(windows /\ explicit) => CanConstruct(windows, explicit)
 =============================================================================

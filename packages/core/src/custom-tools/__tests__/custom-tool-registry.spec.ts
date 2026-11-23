@@ -18,6 +18,7 @@ describe("CustomToolRegistry", () => {
 		afterEach(() => vi.unstubAllGlobals())
 
 		it.each([
+			{ platform: "win32", uid: undefined, options: undefined, base: os.homedir(), suffix: "user" },
 			{ platform: "linux", uid: 1234, options: undefined, base: os.tmpdir(), suffix: "1234" },
 			{ platform: "win32", uid: undefined, options: {}, base: os.homedir(), suffix: "user" },
 			{ platform: "linux", uid: 0, options: {}, base: os.tmpdir(), suffix: "0" },
@@ -27,6 +28,13 @@ describe("CustomToolRegistry", () => {
 			const instance = new CustomToolRegistry(options)
 			expect(instance["cacheDir"]).toBe(
 				path.resolve(options?.cacheDir ?? path.join(base, `dynamic-tools-cache-${suffix}`)),
+			)
+		})
+
+		it.each(["custom/cache", "", os.homedir()])("rejects an explicit Windows cache root: %s", (cacheDir) => {
+			vi.stubGlobal("process", { ...process, platform: "win32", getuid: undefined })
+			expect(() => new CustomToolRegistry({ cacheDir })).toThrow(
+				"Explicit custom tool cache paths are not supported on Windows",
 			)
 		})
 	})

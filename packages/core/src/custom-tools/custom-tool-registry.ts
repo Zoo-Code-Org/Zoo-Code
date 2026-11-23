@@ -20,7 +20,7 @@ import { serializeCustomTool } from "./serialize.js"
 import { runEsbuild, NODE_BUILTIN_MODULES, COMMONJS_REQUIRE_BANNER } from "./esbuild-runner.js"
 
 export interface RegistryOptions {
-	/** Directory for caching compiled TypeScript files. */
+	/** Directory for caching compiled TypeScript files. Explicit paths are not supported on Windows. */
 	cacheDir?: string
 	/** Additional paths for resolving node modules (useful for tools outside node_modules). */
 	nodePaths?: string[]
@@ -37,6 +37,10 @@ export class CustomToolRegistry {
 	private lastLoaded: Map<string, number> = new Map()
 
 	constructor(options?: RegistryOptions) {
+		// This check cannot verify Windows ACLs. Reject explicit roots before disk access.
+		if (process.platform === "win32" && options?.cacheDir !== undefined) {
+			throw new Error("Explicit custom tool cache paths are not supported on Windows")
+		}
 		// Resolve once so every reader and the cleanup use the same root.
 		this.cacheDir = path.resolve(
 			options?.cacheDir ??
