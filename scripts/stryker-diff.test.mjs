@@ -310,6 +310,86 @@ describe("buildManifest", () => {
 		)
 	})
 
+	it("prints the billed per-file breakdown before the changed-line cap throws", () => {
+		const overCap = Array.from({ length: MAX_CHANGED_LINES + 1 }, (_, index) => `call(${index})`).join("\n")
+		const underCap = Array.from({ length: 120 }, (_, index) => `call(${index})`).join("\n")
+		const total = MAX_CHANGED_LINES + 1 + 120
+		const chunks = []
+		const write = process.stdout.write
+		process.stdout.write = (chunk) => {
+			chunks.push(String(chunk))
+			return true
+		}
+		let failure
+		try {
+			buildManifest(
+				[
+					{ status: "A", path: "packages/telemetry/src/large.ts" },
+					{ status: "A", path: "packages/telemetry/src/small.ts" },
+				],
+				(filePath) => (filePath.endsWith("large.ts") ? overCap : underCap),
+				() => "",
+			)
+			throw new Error("buildManifest accepted a package over the changed-line cap")
+		} catch (error) {
+			failure = error
+		} finally {
+			process.stdout.write = write
+		}
+
+		const printed = chunks.join("")
+		const largeLine = `${MAX_CHANGED_LINES + 1}\tpackages/telemetry/src/large.ts`
+		const smallLine = `120\tpackages/telemetry/src/small.ts`
+		assert.ok(
+			printed.includes(
+				`telemetry bills ${total} changed executable lines in 2 file(s), over the ${MAX_CHANGED_LINES}-line limit:`,
+			),
+			`no breakdown was printed before the throw: ${printed}`,
+		)
+		assert.ok(printed.includes(largeLine), `missing the over-cap file in the breakdown: ${printed}`)
+		assert.ok(printed.includes(smallLine), `missing the second file in the breakdown: ${printed}`)
+		assert.ok(
+			printed.indexOf(largeLine) < printed.indexOf(smallLine),
+			"the largest contributor must be listed first",
+		)
+		assert.ok(
+			failure.message.includes(`telemetry has ${total} changed executable lines (limit ${MAX_CHANGED_LINES}).`),
+			`the failure sentence lost the count: ${failure.message}`,
+		)
+		assert.ok(
+			failure.message.includes(`packages/telemetry/src/large.ts (${MAX_CHANGED_LINES + 1})`),
+			`the failure sentence does not name the largest contributor: ${failure.message}`,
+		)
+		assert.ok(
+			failure.message.indexOf("large.ts") < failure.message.indexOf("small.ts"),
+			"the failure sentence must name the contributors in the order they cost",
+		)
+		assert.match(failure.message, /split the PR or obtain a maintainer-reviewed narrow exclusion/i)
+	})
+
+	it("prints no breakdown while a billed package stays under the changed-line cap", () => {
+		const source = Array.from({ length: 40 }, (_, index) => `call(${index})`).join("\n")
+		const chunks = []
+		const write = process.stdout.write
+		process.stdout.write = (chunk) => {
+			chunks.push(String(chunk))
+			return true
+		}
+		let manifest
+		try {
+			manifest = buildManifest(
+				[{ status: "A", path: "packages/telemetry/src/value.ts" }],
+				() => source,
+				() => "",
+			)
+		} finally {
+			process.stdout.write = write
+		}
+
+		assert.equal(manifest.packages[0].changedExecutableLines, 40)
+		assert.equal(chunks.join(""), "")
+	})
+
 	it("reports invalid mutation exclusions without bypassing executable-line accounting", () => {
 		const manifest = buildManifest(
 			[{ status: "A", path: "packages/core/src/value.ts" }],

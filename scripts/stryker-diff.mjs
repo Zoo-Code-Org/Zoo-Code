@@ -262,12 +262,33 @@ export function buildManifest(entries, readSource, diffForPath) {
 	}
 
 	for (const packageEntry of packages.values()) {
-		if (packageEntry.changedExecutableLines > MAX_CHANGED_LINES) {
-			throw new Error(
-				`${packageEntry.id} has ${packageEntry.changedExecutableLines} changed executable lines (limit ${MAX_CHANGED_LINES}). ` +
-					"Split the PR or obtain a maintainer-reviewed narrow exclusion.",
+		if (packageEntry.changedExecutableLines <= MAX_CHANGED_LINES) continue
+
+		const billedFiles = packageEntry.files
+			.map((file) => ({ path: file.path, lines: file.executableLines.length }))
+			.filter((file) => file.lines > 0)
+			.sort(
+				(left, right) =>
+					right.lines - left.lines || (left.path < right.path ? -1 : left.path > right.path ? 1 : 0),
 			)
-		}
+		const largest = billedFiles
+			.slice(0, 3)
+			.map((file) => `${file.path} (${file.lines})`)
+			.join(", ")
+
+		// The over-cap head prints no file list otherwise: this throw aborts before main() reaches the
+		// per-package line and before runManifest reaches a reporter, so the breakdown a contributor needs
+		// to decide a split has to be emitted here, largest file first, and named in the failure sentence.
+		console.log(
+			`${packageEntry.id} bills ${packageEntry.changedExecutableLines} changed executable lines in ` +
+				`${billedFiles.length} file(s), over the ${MAX_CHANGED_LINES}-line limit:`,
+		)
+		for (const file of billedFiles) console.log(`\t${file.lines}\t${file.path}`)
+
+		throw new Error(
+			`${packageEntry.id} has ${packageEntry.changedExecutableLines} changed executable lines (limit ${MAX_CHANGED_LINES}). ` +
+				`Largest contributors: ${largest}. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
+		)
 	}
 
 	return { packages: [...packages.values()], advisories }
