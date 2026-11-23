@@ -7445,6 +7445,60 @@ describe("ClineProvider", () => {
 			await provider.dispose()
 		})
 
+		it("keeps a pinned view on its own settings and on the store's endpoint when its profile carries none", async () => {
+			const activating = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// View A carries a profile whose settings include an endpoint override. The override lands in
+			// the shared store and in A's own buffer, then A pins that profile.
+			await activating.setValues({
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "profile-a-key",
+				openRouterBaseUrl: "https://profile-a.example",
+			})
+			await activating.saveViewState("currentApiConfigName", "profile-a")
+			const pinned = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"editor",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			// B starts after A's write. initialize() is the only path in this repo that copies the
+			// Memento into a proxy cache (ContextProxy.ts:99-107); a proxy that never wrote a key reads
+			// the default for it, which is why B has to load the store the way a started view does.
+			await pinned.contextProxy.initialize()
+			// B pins a profile of its own whose settings carry no endpoint override.
+			await pinned.saveViewState("currentApiConfigName", "profile-b")
+			await pinned.saveViewState("apiConfiguration", {
+				apiProvider: providerIdentifiers.openrouter,
+				openRouterApiKey: "profile-b-key",
+			})
+			const activatingState = await activating.getState({ includeTaskHistory: false })
+			const pinnedState = await pinned.getState({ includeTaskHistory: false })
+			// Each view resolves the pair it pins, and neither adopts the other's.
+			expect(activating.pinnedProfileName).toBe("profile-a")
+			expect(pinned.pinnedProfileName).toBe("profile-b")
+			expect(activatingState.currentApiConfigName).toBe("profile-a")
+			expect(pinnedState.currentApiConfigName).toBe("profile-b")
+			expect(activatingState.apiConfiguration.openRouterApiKey).toBe("profile-a-key")
+			expect(pinnedState.apiConfiguration.openRouterApiKey).toBe("profile-b-key")
+			// A shows its own endpoint. B shows A's: getState layers this view's buffer over the store
+			// (ClineProvider.ts:4346) and the buffer records values, not key presence, so "the profile I
+			// pin sets no endpoint" and "this view never carried one" are one state. That is the leak the
+			// finding names, and this row records today's semantics instead of fixing them: making a
+			// complete pinned profile authoritative for absent optional fields needs the presence-keyed
+			// overlay (residual R2), which would make B's line below read undefined on purpose.
+			expect(activatingState.apiConfiguration.openRouterBaseUrl).toBe("https://profile-a.example")
+			expect(pinnedState.apiConfiguration.openRouterBaseUrl).toBe("https://profile-a.example")
+			await activating.dispose()
+			await pinned.dispose()
+		})
+
 		it("should apply setValue mutations to global state and keep or clear the right buffer fields", async () => {
 			const provider = new ClineProvider(
 				mockContext,
