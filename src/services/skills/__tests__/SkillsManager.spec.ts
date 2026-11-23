@@ -3100,15 +3100,27 @@ Body.`
 				resolveFirstRead = resolve
 			})
 			let reads = 0
+			let publishedWhileQueued: ReturnType<typeof skillsManager.getSkillDiagnostics> = []
 			mockReadFile.mockImplementation(async () => {
 				reads += 1
+				if (reads === 2) {
+					// The pass that queued behind the stale one sees whatever the stale pass
+					// already published; serialisation is what makes it the stale diagnostics.
+					publishedWhileQueued = skillsManager.getSkillDiagnostics()
+				}
 				return reads === 1 ? firstRead : goodContent
 			})
 
 			const first = skillsManager.discoverSkills()
 			const second = skillsManager.discoverSkills()
+			// Hold the first read until it is genuinely in flight. Resolving it in the same
+			// tick as the two calls above lets the stale pass finish without ever having a
+			// pass queued behind it, which is not the overlap this row is about.
+			await vi.waitFor(() => expect(mockReadFile.mock.calls.length).toBe(1))
 			resolveFirstRead(staleContent)
 			await Promise.all([first, second])
+
+			expect(publishedWhileQueued).toEqual([expect.objectContaining({ path: skillPath, source: "global" })])
 
 			expect(skillsManager.getSkillsMetadata()).toEqual([
 				expect.objectContaining({ name: "flaky-skill", description: "Healthy after repair" }),
