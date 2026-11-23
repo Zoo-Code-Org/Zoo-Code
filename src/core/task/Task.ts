@@ -4840,6 +4840,18 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// A cancel can land during abortStream after cancelReason was computed; setAbortReason keeps the first reason.
 							this.setAbortReason("user_cancelled")
 							await this.abortTask()
+						} else if (
+							this.assistantMessageContent.some(
+								(block) =>
+									(block.type === "tool_use" || block.type === "mcp_tool_use") && !block.partial,
+							)
+						) {
+							// Tool execution can overlap consumption. A failed stream does not make replay safe.
+							await this.say(
+								"error",
+								"Automatic retry stopped because a tool may have already run. Check the tool results before you continue.",
+							)
+							return true
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.

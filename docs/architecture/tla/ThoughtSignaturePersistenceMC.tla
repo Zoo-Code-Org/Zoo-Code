@@ -5,6 +5,8 @@ SaveBeforeDrain == FALSE
 UsageBudgetOnly == TRUE
 UnboundedWait == FALSE
 CurrentHandler == FALSE
+UnsafeToolRetry == TRUE
+ExtraReportAttempt == 3
 CoupledReporting == TRUE
 CoupledUsageWait == TRUE
 ====
