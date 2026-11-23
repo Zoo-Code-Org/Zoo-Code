@@ -1,5 +1,18 @@
 # Zoo Code Changelog
 
+## [3.98.2]
+
+### Models and Provider Controls
+
+- Add Gemini 3.8 Flash and the Gemini 4 Carbon, Hydrogen, and Neon models to the Gemini catalog, with image support, thinking levels, prices, and `xhigh` reasoning support (#2067 by @mzakharocsc, PR #2640 by @edelauna)
+- Add opt-in Responses API support for OpenAI Compatible providers, so reasoning with tool use works on endpoints that require the Responses API (#1579 by @kostia-ivashchenko, #2040 by @jeannotdamoiseaux, PR #2498 by @zoomote)
+
+### Security and Reliability
+
+- Fix: Prevent Vertex Gemini requests from ending with a model turn (#1287 by @gh311, PR #2641 by @edelauna)
+- Fix: Keep Gemini thought signatures intact when LiteLLM truncates tool call ids (#2064 by @TGDone, PR #2119 by @PierrunoYT)
+- Fix: Fetch Ollama model metadata before context management, so tasks condense at the configured context limit (#1151 by @pmltn, PR #2520 by @zoomote)
+
 ## [3.98.1]
 
 ### Models and Provider Controls
