@@ -48,6 +48,8 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 
 ## What is new in Zoo Code v3.98.2
 
+- 💫Preview the Zoo Pass with unlimited GLM-5.3-Flash free until Dec 1 with any amount of money on your Zoo Gateway account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
 - 🔌 Models: Use Gemini 3.8 Flash and the new Gemini 4 Carbon, Hydrogen, and Neon models, with `xhigh` thinking levels on Gemini.
 - 🔧 Fixes and provider support: Stop Vertex Gemini requests that end with a model turn, keep Gemini thought signatures intact through LiteLLM, condense Ollama tasks at the configured context limit, and turn on Responses API support for OpenAI Compatible providers.
 
