@@ -2860,6 +2860,46 @@ Body.`
 			expect(skillsManager["activeTempFiles"].size).toBe(0)
 		})
 
+		it("publishes the named mode when the target stat error carries no filesystem code", async () => {
+			// The fail-closed guard reads the error's code: SkillsManager.ts:817 stops the publish only when
+			// the failure carries a string code, because a coded failure (EACCES, EIO, EPERM) means the
+			// target's mode could not be read. An error that carries no code at all is the missing-target
+			// case - there is no mode to preserve - so the publish has to take the new-target path this
+			// file already pins the constant for. Nothing here covered that second operand: with it
+			// narrowed to "ENOENT" only, every row in this file still passed, and a brand-new SKILL.md
+			// would then depend on the umask again exactly when a filesystem reported the missing target
+			// in some other shape.
+			const uncodedStatError = new Error("stat failed without a filesystem code")
+			const skillMd = p(GLOBAL_ROO_DIR, "skills", "uncoded-stat", "SKILL.md")
+			mockDirectoryExists.mockResolvedValue(false)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockResolvedValue([])
+			mockFileExists.mockResolvedValue(false)
+			mockMkdir.mockResolvedValue(p(GLOBAL_ROO_DIR, "skills", "uncoded-stat"))
+			mockWriteFile.mockResolvedValue(undefined)
+			mockChmod.mockResolvedValue(undefined)
+			mockRename.mockResolvedValue(undefined)
+			mockUnlink.mockResolvedValue(undefined)
+			mockRmdir.mockResolvedValue(undefined)
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillMd) {
+					throw uncodedStatError
+				}
+				throw enoent()
+			})
+			const createdPath = await skillsManager.createSkill("uncoded-stat", "global", "Uncoded stat")
+			const staged = String(mockWriteFile.mock.calls[0][0])
+
+			// The publish completed rather than failing closed: the named mode was applied to the
+			// sidecar before the rename, the same way it is for a target that is genuinely absent.
+			expect(mockChmod).toHaveBeenCalledTimes(1)
+			expect(mockChmod).toHaveBeenCalledWith(staged, 0o600)
+			expect(mockChmod.mock.invocationCallOrder[0]).toBeLessThan(mockRename.mock.invocationCallOrder[0])
+			expect(mockRename).toHaveBeenCalledWith(staged, createdPath)
+			expect(mockUnlink).not.toHaveBeenCalled()
+			expect(skillsManager["activeTempFiles"].size).toBe(0)
+		})
+
 		it("propagates a realpath failure instead of writing through the unresolved path", async () => {
 			const skillDir = p(globalSkillsDir, "unresolvable-skill")
 			const skillMd = p(skillDir, "SKILL.md")
