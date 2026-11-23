@@ -3091,10 +3091,14 @@ Body.`
 			mockStat.mockResolvedValue({ isDirectory: () => true })
 			mockFileExists.mockImplementation(async (file: string) => file === skillPath)
 
-			// The first scan's read is delayed (as when a watcher fires while the
-			// file is still being written) and observes malformed content. A second
-			// scan started before that read resolves must run afterwards, and its
-			// result must win.
+			// What this row proves is queue-ordered publication: passes run in the order they
+			// were requested, so a pass requested while an earlier pass is still reading runs
+			// after that pass published, and the later pass' result is the one that survives.
+			// The first read is parked to hold the earlier pass mid-request. Nothing about the
+			// later pass is observable before the earlier one publishes - discoverSkills queues
+			// a pass before it issues any filesystem call - so the queue at SkillsManager.ts:212
+			// is what this row guards: removing it reddens the row, while running the two scans
+			// one after the other leaves it green.
 			let resolveFirstRead!: (content: string) => void
 			const firstRead = new Promise<string>((resolve) => {
 				resolveFirstRead = resolve
@@ -3113,9 +3117,9 @@ Body.`
 
 			const first = skillsManager.discoverSkills()
 			const second = skillsManager.discoverSkills()
-			// Hold the first read until it is genuinely in flight. Resolving it in the same
-			// tick as the two calls above lets the stale pass finish without ever having a
-			// pass queued behind it, which is not the overlap this row is about.
+			// Release the parked read only once it is observably in flight, so a pass really is
+			// queued behind it when it resolves; releasing it in the same tick as the two calls
+			// above leaves nothing queued and the ordering asserted below was never contested.
 			await vi.waitFor(() => expect(mockReadFile.mock.calls.length).toBe(1))
 			resolveFirstRead(staleContent)
 			await Promise.all([first, second])
