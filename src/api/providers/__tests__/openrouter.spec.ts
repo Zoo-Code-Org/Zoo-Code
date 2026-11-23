@@ -3160,8 +3160,12 @@ describe("OpenRouterHandler", () => {
 			const generator = handler.createMessage("system", [{ role: "user" as const, content: "hi" }], metadata)
 
 			const nextPromise = generator.next()
-			// Abort only once create() has actually started.
-			await createStarted
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			nextPromise.catch(() => {})
+			// Abort only once create() has actually started, bounded so that a create() which
+			// never starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
 			controller.abort()
 
 			await expect(nextPromise).rejects.toMatchObject({
@@ -4238,7 +4242,11 @@ describe("OpenRouterHandler", () => {
 			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			await createStarted
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Bounded readiness: a create() that never starts fails here instead of hanging.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
 			controller.abort()
 			resolveCreate({ choices: [{ message: { content: "late result" } }] })
 
@@ -4278,7 +4286,12 @@ describe("OpenRouterHandler", () => {
 			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			await createStarted
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Bounded readiness, the same helper the neighbouring tests use: a create() that never
+			// starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
 			resolveCreate({ choices: [{ message: { content: "late result" } }] })
 			queueMicrotask(() => {
 				controller.abort()
@@ -4397,7 +4410,10 @@ describe("OpenRouterHandler", () => {
 			})
 
 			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			await createStarted
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({
@@ -4483,8 +4499,12 @@ describe("OpenRouterHandler", () => {
 				abortSignal: controller.signal,
 				timeoutMs: 100_000,
 			})
-			// Abort only once create() has actually started (after model lookup).
-			await createStarted
+			// Observe from creation so an early model-discovery rejection cannot surface as an
+			// unhandled rejection while this test waits for readiness; the assertion below reports it.
+			promise.catch(() => {})
+			// Abort only once create() has actually started (after model lookup), bounded so a
+			// create() that never starts fails here instead of hanging until the runner times out.
+			await settlesWithin(createStarted, ABORT_SETTLE_MS)
 			controller.abort()
 
 			await expect(promise).rejects.toMatchObject({
