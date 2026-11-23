@@ -23,7 +23,8 @@
 	"unpin": "Lepas Pin",
 	"pin": "Pin",
 	"fileChangesInConversation": {
-		"header": "{{count}} file diubah dalam percakapan ini"
+		"header_other": "{{count}} file diubah dalam percakapan ini",
+		"lineStatsAriaLabel": "Baris ditambahkan: {{added}}, baris dihapus: {{removed}}"
 	},
 	"retry": {
 		"title": "Coba Lagi",
@@ -220,7 +221,6 @@
 		"truncation": {
 			"title": "Konteks Dipotong",
 			"inProgress": "Memotong konteks...",
-			"messagesRemoved": "{{count}} pesan dihapus",
 			"messagesRemoved_other": "{{count}} pesan dihapus",
 			"description": "Pesan lama telah dihapus dari percakapan untuk tetap dalam batas jendela konteks. Ini adalah pendekatan yang cepat tetapi kurang mempertahankan konteks dibandingkan dengan kondensasi."
 		}
@@ -268,9 +268,9 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo ingin mencari codebase untuk <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo ingin mencari codebase untuk <code>{{query}}</code> di <code>{{path}}</code>",
-		"didSearch_one": "Ditemukan 1 hasil",
 		"didSearch_other": "Ditemukan {{count}} hasil",
-		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)"
+		"resultTooltip": "Skor kemiripan: {{score}} (klik untuk membuka file)",
+		"displayError": "Gagal menampilkan hasil pencarian."
 	},
 	"commandExecution": {
 		"abort": "Batalkan",
@@ -282,7 +282,9 @@
 		"addToAllowed": "Tambahkan ke daftar yang diizinkan",
 		"removeFromAllowed": "Hapus dari daftar yang diizinkan",
 		"addToDenied": "Tambahkan ke daftar yang ditolak",
-		"removeFromDenied": "Hapus dari daftar yang ditolak"
+		"removeFromDenied": "Hapus dari daftar yang ditolak",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Klik untuk menyunting pola"
 	},
 	"text": {
 		"rooSaid": "Zoo berkata"
@@ -343,18 +345,21 @@
 		"triggerLabelOff": "Persetujuan otomatis mati",
 		"triggerLabelOffShort": "Mati",
 		"triggerLabel_zero": "0 disetujui otomatis",
-		"triggerLabel_one": "1 disetujui otomatis",
 		"triggerLabel_other": "{{count}} disetujui otomatis",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Aktif",
+		"toggleAriaLabel": "Alihkan persetujuan otomatis"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Apa yang baru di Zoo Code v3.96.0",
-			"highlight1": "✨ Setelan obrolan dan diagnostik baru: Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.",
-			"highlight2": "💸 Biaya dan cache penyedia yang lebih akurat: Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.",
-			"highlight3": "🧭 Obrolan yang lebih andal dan cepat: Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan."
+			"heading": "Yang baru di Zoo Code v3.98.2",
+			"highlight0": "💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Model: Gunakan Gemini 3.8 Flash dan model baru Gemini 4 Carbon, Hydrogen, dan Neon. Atur tingkat berpikir xhigh di Gemini.",
+			"highlight2": "🌐 API Responses: Aktifkan dukungan API Responses untuk penyedia yang kompatibel dengan OpenAI. Penalaran dengan penggunaan tool berfungsi di endpoint yang memerlukannya.",
+			"highlight3": "🔧 Perbaikan: Permintaan Gemini di Vertex tidak lagi berakhir pada giliran model. Signature berpikir Gemini tetap utuh melalui LiteLLM. Tugas Ollama memadat pada batas konteks yang dikonfigurasi."
 		}
 	},
 	"reasoning": {
@@ -386,7 +391,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Batas Permintaan yang Disetujui Otomatis Tercapai",
-			"description": "Zoo telah mencapai batas {{count}} permintaan API yang disetujui otomatis. Apakah Anda ingin mengatur ulang hitungan dan melanjutkan tugas?",
+			"description_other": "Zoo telah mencapai batas {{count}} permintaan API yang disetujui otomatis. Apakah Anda ingin mengatur ulang hitungan dan melanjutkan tugas?",
 			"button": "Setel Ulang dan Lanjutkan"
 		},
 		"autoApprovedCostLimitReached": {
@@ -421,7 +426,17 @@
 		"noResults": "Tidak ada hasil",
 		"problems": "Masalah",
 		"terminal": "Terminal",
-		"url": "Tempel URL untuk mengambil konten"
+		"url": "Tempel URL untuk mengambil konten",
+		"gitCommits": "Commit Git",
+		"gitCommitsDescription": "Cari riwayat repositori",
+		"workingChanges": "Perubahan kerja",
+		"workingChangesDescription": "Perubahan saat ini yang belum di-commit",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash commit Git",
+		"addFile": "Tambah file",
+		"addFolder": "Tambah folder",
+		"commands": "Perintah",
+		"modes": "Mode"
 	},
 	"queuedMessages": {
 		"title": "Pesan Antrian",
@@ -434,13 +449,32 @@
 	"todo": {
 		"partial": "{{completed}} dari {{total}} to-do selesai",
 		"complete": "{{total}} to-do selesai",
-		"updated": "Memperbarui daftar to-do"
+		"updated": "Memperbarui daftar to-do",
+		"listUpdated": "Daftar tugas diperbarui",
+		"userEdit": "Suntingan pengguna",
+		"userEdits": "Suntingan pengguna",
+		"edit": "Sunting",
+		"done": "Selesai",
+		"itemPlaceholder": "Masukkan item tugas",
+		"newItemPlaceholder": "Masukkan item tugas, tekan Enter untuk menambahkan",
+		"remove": "Hapus",
+		"add": "Tambah",
+		"cancel": "Batal",
+		"addTodo": "+ Tambah tugas",
+		"status": {
+			"notStarted": "Belum dimulai",
+			"inProgress": "Sedang dikerjakan",
+			"completed": "Selesai"
+		},
+		"deleteDialog": {
+			"title": "Hapus item tugas",
+			"description": "Yakin ingin menghapus item tugas ini?",
+			"confirm": "Hapus"
+		}
 	},
 	"tooManyTools": {
 		"title": "Terlalu banyak alat diaktifkan",
-		"toolsPart_one": "{{count}} alat",
 		"toolsPart_other": "{{count}} alat",
-		"serversPart_one": "{{count}} server MCP",
 		"serversPart_other": "{{count}} server MCP",
 		"messageTemplate": "Anda memiliki {{tools}} diaktifkan melalui {{servers}}. Jumlah yang begitu besar dapat membingungkan model dan menyebabkan kesalahan. Cobalah untuk menjaganya di bawah {{threshold}}.",
 		"openMcpSettings": "Buka Pengaturan MCP"
@@ -456,5 +490,24 @@
 		"title": "Penyedia tidak lagi didukung",
 		"message": "Penyedia ini sudah tidak tersedia. Pilih penyedia yang didukung untuk melanjutkan.",
 		"openSettings": "Buka Pengaturan"
+	},
+	"zooCodeAuth": {
+		"signIn": "Masuk ke Zoo Code",
+		"goToDashboard": "Buka Dasbor",
+		"signOut": "Keluar",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Terhubung"
+	},
+	"arguments": "Argumen:",
+	"copyAsMarkdown": "Salin sebagai Markdown",
+	"openInPreview": "Buka di pratinjau",
+	"codeAccordion": {
+		"userEdits": "Suntingan pengguna",
+		"consoleLogs": "Log konsol",
+		"openFileAriaLabel": "Buka file: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "{{count}} baris tersembunyi"
 	}
 }

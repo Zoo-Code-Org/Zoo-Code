@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Konfiguracja API",
-		"select": "Wybierz, której konfiguracji API użyć dla tego trybu"
+		"select": "Wybierz, której konfiguracji API użyć dla tego trybu",
+		"pinnedGroupAriaLabel": "Przypięte konfiguracje",
+		"allGroupAriaLabel": "Wszystkie konfiguracje"
 	},
 	"tools": {
 		"title": "Dostępne narzędzia",
@@ -47,7 +49,8 @@
 		"title": "Niestandardowe instrukcje dla trybu (opcjonalne)",
 		"resetToDefault": "Przywróć domyślne",
 		"description": "Dodaj wytyczne dotyczące zachowania specyficzne dla trybu {{modeName}}.",
-		"loadFromFile": "Niestandardowe instrukcje specyficzne dla trybu {{mode}} można również załadować z folderu <span>.roo/rules-{{slug}}/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} są przestarzałe i wkrótce przestaną działać)."
+		"loadFromFile": "Niestandardowe instrukcje specyficzne dla trybu {{mode}} można również załadować z folderu <span>.roo/rules-{{slug}}/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} i .clinerules-{{slug}} są przestarzałe i wkrótce przestaną działać).",
+		"loadFromFileAriaLabel": "Dowiedz się o globalnych instrukcjach niestandardowych dla trybów"
 	},
 	"exportMode": {
 		"title": "Eksportuj tryb",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Niestandardowe instrukcje dla wszystkich trybów",
 		"description": "Te instrukcje dotyczą wszystkich trybów. Zapewniają podstawowy zestaw zachowań, które mogą być rozszerzone przez instrukcje specyficzne dla trybów poniżej. <0>Dowiedz się więcej</0>",
-		"loadFromFile": "Instrukcje można również załadować z folderu <span>.roo/rules/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules/</0> (.roorules i .clinerules są przestarzałe i wkrótce przestaną działać)."
+		"loadFromFile": "Instrukcje można również załadować z folderu <span>.roo/rules/</span> w twoim obszarze roboczym lub z globalnego <0>.roo/rules/</0> (.roorules i .clinerules są przestarzałe i wkrótce przestaną działać).",
+		"learnMoreAriaLabel": "Dowiedz się więcej o globalnych instrukcjach niestandardowych",
+		"loadFromFileAriaLabel": "Dowiedz się, jak skonfigurować globalne instrukcje niestandardowe"
 	},
 	"systemPrompt": {
 		"preview": "Podgląd podpowiedzi systemowej",
@@ -88,6 +93,13 @@
 			"testEnhancement": "Testuj ulepszenie",
 			"includeTaskHistory": "Uwzględnij historię zadań jako kontekst",
 			"includeTaskHistoryDescription": "Gdy włączone, ostatnie 10 wiadomości z bieżącej rozmowy zostanie uwzględnione jako kontekst podczas ulepszania podpowiedzi, pomagając generować bardziej trafne i świadome kontekstu sugestie."
+		},
+		"taskTitle": {
+			"enabled": "Automatycznie generuj tytuły zadań",
+			"enabledDescription": "W tle streszcza pierwszy monit każdego nowego zadania do krótkiego tytułu. Żądania tytułów nie są wliczane do kosztu zadania. Profile GitHub Copilot i VS Code LM zużywają Twój limit.",
+			"apiConfiguration": "Konfiguracja API",
+			"useTaskConfig": "Użyj konfiguracji API zadania",
+			"apiConfigDescription": "Zalecany jest lekki profil bez rozumowania. Jeśli wybierzesz inny profil, początek monitu zostanie wysłany do tego dostawcy."
 		},
 		"types": {
 			"ENHANCE": {
@@ -129,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Rozpocznij nowe zadanie",
 				"description": "Rozpocznij nowe zadanie z wprowadzonymi danymi. Dostępne w palecie poleceń."
+			},
+			"TASK_TITLE": {
+				"label": "Tytuł zadania",
+				"description": "Generuje w tle krótki tytuł nowych zadań. Jest widoczny w historii i w nagłówku zadania. Skonfiguruj poniżej."
 			}
 		}
 	},
@@ -188,5 +204,10 @@
 		"rulesFolder": "Ten tryb ma folder z regułami w {{folderPath}}, który również zostanie usunięty.",
 		"confirm": "Usuń",
 		"cancel": "Anuluj"
+	},
+	"mcpServers": {
+		"restrict": "Ogranicz do wybranych serwerów MCP",
+		"noneConnected": "Brak połączonych serwerów MCP",
+		"notConnected": "{{serverName}} (niepołączony)"
 	}
 }

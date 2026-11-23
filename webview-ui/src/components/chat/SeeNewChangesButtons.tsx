@@ -1,11 +1,11 @@
 import { useCallback, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { VSCodeButton } from "@vscode/webview-ui-toolkit/react"
 
 import { vscode } from "@src/utils/vscode"
 
 export const SeeNewChangesButtons = () => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [restoringChanges, setRestoringChanges] = useState(false)
 
 	const seeNewChangesCallback = useCallback(() => {

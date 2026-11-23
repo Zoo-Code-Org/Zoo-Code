@@ -1,5 +1,5 @@
 import { memo, useEffect, useMemo, useState, useCallback, useRef } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ChevronDown, ChevronRight, FileDiff } from "lucide-react"
 import { createTwoFilesPatch } from "diff"
 
@@ -22,7 +22,7 @@ interface FileChangesPanelProps {
 const originalKey = (entry: { messageId?: string; ts: number }) => entry.messageId ?? `ts:${entry.ts}`
 
 const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChangesPanelProps) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [panelExpanded, setPanelExpanded] = useState(false)
 	const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set())
 	const [finalContentByPath, setFinalContentByPath] = useState<Record<string, string | null>>({})
@@ -165,7 +165,10 @@ const FileChangesPanel = memo(({ clineMessages, taskId, className }: FileChanges
 				{totalStats.added > 0 || totalStats.removed > 0 ? (
 					<div
 						className="flex items-center gap-2 ml-auto shrink-0"
-						aria-label={`${totalStats.added} lines added, ${totalStats.removed} lines removed`}>
+						aria-label={t("chat:fileChangesInConversation.lineStatsAriaLabel", {
+							added: totalStats.added,
+							removed: totalStats.removed,
+						})}>
 						<span className="text-xs font-medium text-vscode-charts-green" data-testid="total-added">
 							+{totalStats.added}
 						</span>

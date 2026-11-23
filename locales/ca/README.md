@@ -47,11 +47,13 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.96.0
+## Novetats de Zoo Code v3.98.2
 
-- ✨ **Nous ajustos de xat i diagnòstics:** Mostra marques de temps als missatges amb formats d'hora i data configurables, ajusta el TTL de la cau de prompts per als perfils d'Anthropic i genera informes de diagnòstic que preserven la privacitat.
-- 💸 **Costos i cau dels proveïdors més precisos:** Manté intactes els resultats d'eines d'Anthropic, adopta els tokens de sortida acumulatius en els costos d'Anthropic i MiniMax, llegeix els comptadors de cau de prompts de DeepSeek, apunta a la cau de Responses de xAI i factura les lectures de cau de Mistral a 0,1x.
-- 🧭 **Xats més fiables i ràpids:** Repren les tasques completades després d'un reinici, restaura checkpoints quan falta el commit desat, recarrega automàticament un renderitzador de webview mort, regula les actualitzacions de streaming i carrega els idiomes sota demanda.
+- 💫Prova Zoo Pass amb GLM-5.3-Flash il·limitat de franc fins a l'1 de desembre amb qualsevol saldo al teu compte de Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Models: Utilitza Gemini 3.8 Flash i els nous models Gemini 4 Carbon, Hydrogen i Neon. Configura els nivells de pensament xhigh a Gemini.
+- 🌐 API de Responses: Activa la compatibilitat amb l'API de Responses per a proveïdors compatibles amb OpenAI. El raonament amb ús d'eines funciona en punts finals que la requereixen.
+- 🔧 Correccions: Les peticions de Gemini a Vertex ja no acaben amb un torn del model. Les signatures de pensament de Gemini es mantenen intactes amb LiteLLM. Les tasques d'Ollama es condensen al límit de context configurat.
 
 ## Què pot fer Zoo Code per TU?
 

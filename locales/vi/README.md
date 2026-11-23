@@ -46,11 +46,13 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong v3.96.0
+## Điểm mới trong Zoo Code v3.98.2
 
-- ✨ **Cài đặt trò chuyện và chẩn đoán mới:** Hiển thị dấu thời gian của tin nhắn với định dạng giờ và ngày có thể cấu hình, điều chỉnh TTL prompt-cache cho hồ sơ Anthropic và tạo báo cáo chẩn đoán tôn trọng quyền riêng tư.
-- 💸 **Chi phí và bộ nhớ đệm của nhà cung cấp chính xác hơn:** Giữ nguyên kết quả công cụ của Anthropic, áp dụng token đầu ra tích lũy trong chi phí Anthropic và MiniMax, đọc bộ đếm prompt-cache của DeepSeek, nhắm tới bộ nhớ đệm Responses của xAI và tính phí đọc bộ nhớ đệm Mistral ở mức 0,1x.
-- 🧭 **Trò chuyện đáng tin cậy và nhanh hơn:** Tiếp tục tác vụ đã hoàn thành sau khi khởi động lại, khôi phục checkpoint khi commit đã lưu bị thiếu, tự động tải lại renderer webview đã treo, điều tiết các bản cập nhật trực tuyến và tải ngôn ngữ theo yêu cầu.
+- 💫Trải nghiệm Zoo Pass với GLM-5.3-Flash không giới hạn miễn phí đến ngày 1 tháng 12 khi tài khoản Zoo Gateway của bạn có số dư bất kỳ.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Mô hình: Dùng Gemini 3.8 Flash và các mô hình mới Gemini 4 Carbon, Hydrogen và Neon. Đặt mức suy nghĩ xhigh cho Gemini.
+- 🌐 Responses API: Bật hỗ trợ Responses API cho nhà cung cấp tương thích OpenAI. Suy luận có dùng công cụ hoạt động trên các điểm cuối yêu cầu nó.
+- 🔧 Sửa lỗi: Yêu cầu Gemini trên Vertex không còn kết thúc bằng lượt của mô hình. Chữ ký suy nghĩ của Gemini vẫn nguyên vẹn qua LiteLLM. Tác vụ Ollama nén tại giới hạn ngữ cảnh đã cấu hình.
 
 ## Zoo Code có thể làm gì cho BẠN?
 

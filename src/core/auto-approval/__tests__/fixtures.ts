@@ -5,8 +5,11 @@
 // approve anything. Keeping one copy of it prevents the drift that comes from
 // maintaining near-identical literals side by side.
 
-import type { ExtensionState } from "@roo-code/types"
+import path from "path"
 
+import type { ClineSayTool, ExtensionState } from "@roo-code/types"
+
+import type { ApprovalFileTarget } from "../../../shared/tools"
 import type { AutoApprovalState, AutoApprovalStateOptions } from ".."
 
 export type State = Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
@@ -48,4 +51,28 @@ export const baseState: State = {
 	alwaysDenyUnapprovedCommands: false,
 	allowedCommands: [],
 	deniedCommands: [],
+}
+
+/**
+ * A `readFile` ask as `read_file` sends it: the message for the chat, plus one
+ * file target per named file, resolved against `cwd` by the platform's rules.
+ *
+ * Only for messages whose paths already name the files read. A spec about a
+ * display path that differs from the file read must build its targets itself.
+ */
+export function readFileAsk(
+	tool: ClineSayTool,
+	cwd: string | undefined,
+): { text: string; fileTargets: ApprovalFileTarget[] } {
+	// `process.platform` rather than `path` itself, so specs simulating Windows get Windows paths.
+	const nativePath = process.platform === "win32" ? path.win32 : path.posix
+	const files = tool.path === undefined ? (tool.batchFiles ?? []) : [{ ...tool, path: tool.path }]
+
+	return {
+		text: JSON.stringify(tool),
+		fileTargets: files.map((file) => ({
+			absolutePath: nativePath.isAbsolute(file.path) ? file.path : nativePath.resolve(cwd ?? "", file.path),
+			isOutsideWorkspace: file.isOutsideWorkspace ?? false,
+		})),
+	}
 }

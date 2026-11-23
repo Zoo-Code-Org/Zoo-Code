@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "Filtrar per etiquetes:",
 			"clear": "Netejar etiquetes",
+			"removeFromFilter": "Fes clic per treure '{{tag}}' dels filtres",
 			"placeholder": "Escriu per cercar i seleccionar etiquetes...",
 			"noResults": "No s'han trobat etiquetes coincidents",
 			"selected": "Mostrant elements amb qualsevol de les etiquetes seleccionades",
@@ -71,7 +72,8 @@
 		"goToModes": "Anar a la configuració de Modes",
 		"moreInfoMcp": "Veure documentació MCP de {{name}}",
 		"validationRequired": "Si us plau, proporciona un valor per a {{paramName}}",
-		"prerequisites": "Prerequisits"
+		"prerequisites": "Prerequisits",
+		"optional": "(opcional)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -88,5 +90,9 @@
 	},
 	"footer": {
 		"issueText": "Has trobat un problema amb un element del marketplace o tens suggeriments per a nous elements? <0>Obre una incidència de GitHub</0> per fer-nos-ho saber!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modes"
 	}
 }

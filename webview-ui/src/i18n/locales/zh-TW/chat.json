@@ -20,7 +20,8 @@
 	"unpin": "取消釘選",
 	"pin": "釘選",
 	"fileChangesInConversation": {
-		"header": "此對話中已變更 {{count}} 個檔案"
+		"header_other": "此對話中已變更 {{count}} 個檔案",
+		"lineStatsAriaLabel": "新增行數：{{added}}，刪除行數：{{removed}}"
 	},
 	"retry": {
 		"title": "重試",
@@ -217,7 +218,6 @@
 		"truncation": {
 			"title": "上下文已截斷",
 			"inProgress": "正在截斷上下文...",
-			"messagesRemoved": "已移除 {{count}} 則訊息",
 			"messagesRemoved_other": "已移除 {{count}} 則訊息",
 			"description": "為保持在上下文視窗限制內，已從對話中移除較舊的訊息。與壓縮相比，這是一種快速但上下文保留較少的方法。"
 		}
@@ -263,9 +263,9 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo 想要在程式碼庫中搜尋 <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo 想要在 <code>{{path}}</code> 中搜尋程式碼庫 <code>{{query}}</code>",
-		"didSearch_one": "找到 1 個結果",
 		"didSearch_other": "找到 {{count}} 個結果",
-		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）"
+		"resultTooltip": "相似度評分：{{score}}（點選以開啟檔案）",
+		"displayError": "顯示搜尋結果時發生錯誤。"
 	},
 	"commandExecution": {
 		"abort": "中止",
@@ -277,7 +277,9 @@
 		"addToAllowed": "新增至允許清單",
 		"removeFromAllowed": "從允許清單中移除",
 		"addToDenied": "新增至拒絕清單",
-		"removeFromDenied": "從拒絕清單中移除"
+		"removeFromDenied": "從拒絕清單中移除",
+		"pid": "（PID：{{pid}}）",
+		"clickToEditPattern": "點擊以編輯模式"
 	},
 	"text": {
 		"rooSaid": "Zoo 說"
@@ -336,18 +338,21 @@
 		"triggerLabelOff": "自動核准已關閉",
 		"triggerLabelOffShort": "關閉",
 		"triggerLabel_zero": "0 個自動核准",
-		"triggerLabel_one": "1 個自動核准",
 		"triggerLabel_other": "{{count}} 個自動核准",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "已啟用",
+		"toggleAriaLabel": "切換自動核准"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} 已發布",
 		"support": "請在 <githubLink>GitHub</githubLink> 上為 Zoo Code 加星支持我們。",
 		"release": {
-			"heading": "Zoo Code v3.96.0 新功能",
-			"highlight1": "✨ 全新聊天設定與診斷: 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。",
-			"highlight2": "💸 更精準的供應商計費與快取: 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。",
-			"highlight3": "🧭 更可靠、更快速的對話: 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。"
+			"heading": "Zoo Code v3.98.2 新功能",
+			"highlight0": "💫預覽 Zoo Pass：只要你的 Zoo Gateway 帳戶中有任意金額的餘額，即可在 12 月 1 日前免費無限使用 GLM-5.3-Flash。",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 模型：支援 Gemini 3.8 Flash 和新的 Gemini 4 Carbon、Hydrogen、Neon 模型。可為 Gemini 設定 xhigh 思考層級。",
+			"highlight2": "🌐 Responses API：可為 OpenAI Compatible 供應商啟用 Responses API 支援。在需要該 API 的端點上，含工具使用的推理也能正常運作。",
+			"highlight3": "🔧 修正：Vertex 的 Gemini 請求不再以模型輪次結尾；LiteLLM 下的 Gemini 思考簽章保持完整；Ollama 工作會在設定的上下文限制處壓縮。"
 		}
 	},
 	"reasoning": {
@@ -379,7 +384,7 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "已達自動核准請求上限",
-			"description": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
+			"description_other": "Zoo 已達到 {{count}} 次 API 請求的自動核准上限。您想重設計數並繼續工作嗎？",
 			"button": "重設並繼續"
 		},
 		"autoApprovedCostLimitReached": {
@@ -414,18 +419,47 @@
 		"noResults": "找不到結果",
 		"problems": "問題",
 		"terminal": "終端機",
-		"url": "貼上 URL 以擷取內容"
+		"url": "貼上 URL 以擷取內容",
+		"gitCommits": "Git 提交",
+		"gitCommitsDescription": "搜尋儲存庫歷史",
+		"workingChanges": "工作區變更",
+		"workingChangesDescription": "目前尚未提交的變更",
+		"commit": "提交 {{hash}}",
+		"commitHashDescription": "Git 提交雜湊",
+		"addFile": "新增檔案",
+		"addFolder": "新增資料夾",
+		"commands": "命令",
+		"modes": "模式"
 	},
 	"todo": {
 		"partial": "已完成 {{completed}}／{{total}} 個待辦事項",
 		"complete": "已完成 {{total}} 個待辦事項",
-		"updated": "已更新待辦事項清單"
+		"updated": "已更新待辦事項清單",
+		"listUpdated": "待辦清單已更新",
+		"userEdit": "使用者編輯",
+		"userEdits": "使用者編輯",
+		"edit": "編輯",
+		"done": "完成",
+		"itemPlaceholder": "輸入待辦事項",
+		"newItemPlaceholder": "輸入待辦事項，按 Enter 新增",
+		"remove": "移除",
+		"add": "新增",
+		"cancel": "取消",
+		"addTodo": "+ 新增待辦",
+		"status": {
+			"notStarted": "未開始",
+			"inProgress": "進行中",
+			"completed": "已完成"
+		},
+		"deleteDialog": {
+			"title": "刪除待辦事項",
+			"description": "確定要刪除此待辦事項嗎？",
+			"confirm": "刪除"
+		}
 	},
 	"tooManyTools": {
 		"title": "啟用的工具過多",
-		"toolsPart_one": "{{count}} 個工具",
 		"toolsPart_other": "{{count}} 個工具",
-		"serversPart_one": "{{count}} 個 MCP 伺服器",
 		"serversPart_other": "{{count}} 個 MCP 伺服器",
 		"messageTemplate": "您已啟用 {{tools}}（透過 {{servers}}）。這麼多的工具可能會混淆模型並導致錯誤。請嘗試保持在 {{threshold}} 以下。",
 		"openMcpSettings": "開啟 MCP 設定"
@@ -441,5 +475,24 @@
 		"title": "供應商不再受支援",
 		"message": "此供應商已不可用。請選擇受支援的供應商以繼續。",
 		"openSettings": "開啟設定"
+	},
+	"zooCodeAuth": {
+		"signIn": "登入 Zoo Code",
+		"goToDashboard": "前往儀表板",
+		"signOut": "登出",
+		"avatarAlt": "大頭貼",
+		"accountTitle": "Zoo Code：{{account}}",
+		"connected": "已連線"
+	},
+	"arguments": "參數：",
+	"copyAsMarkdown": "複製為 Markdown",
+	"openInPreview": "在預覽中開啟",
+	"codeAccordion": {
+		"userEdits": "使用者編輯",
+		"consoleLogs": "主控台記錄",
+		"openFileAriaLabel": "開啟檔案：{{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "已隱藏 {{count}} 行"
 	}
 }

@@ -713,13 +713,31 @@ describe("ProviderSettingsManager", () => {
 			},
 		)
 
+		it.each([undefined, "auto", "on", "off"] as const)(
+			"round-trips LiteLLM reasoning preservation %s through profile storage",
+			async (litellmPreserveReasoning) => {
+				const configuration: ProviderSettings = {
+					apiProvider: providerIdentifiers.litellm,
+					litellmModelId: "custom-alias",
+					litellmPreserveReasoning,
+				}
+				await providerSettingsManager.saveConfig("litellm", configuration)
+				const serializedProfiles: string = mockSecrets.store.mock.calls.at(-1)![1]
+				mockSecrets.get.mockResolvedValue(serializedProfiles)
+				const reloaded = new ProviderSettingsManager(mockContext)
+				const profile = await reloaded.getProfile({ name: "litellm" })
+				expect(profile.litellmPreserveReasoning).toBe(litellmPreserveReasoning)
+			},
+		)
+
 		it.each([true, false, undefined])(
-			"round-trips OpenAI-compatible reasoning settings through profile storage when enabled is %s",
+			"round-trips OpenAI-compatible reasoning and Responses settings through profile storage when enabled is %s",
 			async (enableReasoningEffort) => {
 				const configuration: ProviderSettings = {
 					apiProvider: providerIdentifiers.openai,
 					openAiModelId: "custom-model",
 					enableReasoningEffort,
+					openAiUseResponsesApi: enableReasoningEffort,
 					reasoningEffort: "low",
 					openAiCustomModelInfo: { ...openAiModelInfoSaneDefaults, reasoningEffort: "max" },
 				}
@@ -730,6 +748,7 @@ describe("ProviderSettingsManager", () => {
 				const reloadedManager = new ProviderSettingsManager(mockContext)
 				const profile = await reloadedManager.getProfile({ name: "compatible" })
 
+				expect(profile.openAiUseResponsesApi).toBe(enableReasoningEffort)
 				expect(profile.enableReasoningEffort).toBe(enableReasoningEffort)
 				expect(profile.reasoningEffort).toBe("low")
 				expect(profile.openAiCustomModelInfo).toEqual(configuration.openAiCustomModelInfo)
@@ -1349,6 +1368,41 @@ describe("ProviderSettingsManager", () => {
 
 			// Should have called delete with the correct config key
 			expect(mockSecrets.delete).toHaveBeenCalledWith("roo_cline_config_api_config")
+		})
+	})
+
+	describe("GetModeConfigIds", () => {
+		const profilesWithModes = (modeApiConfigs?: Record<string, string>) =>
+			JSON.stringify({
+				currentApiConfigName: "default",
+				apiConfigs: { default: { id: "default" } },
+				modeApiConfigs,
+				migrations: { rateLimitSecondsMigrated: true },
+			})
+
+		it("returns a copy of the stored mode map", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes({ code: "code-id", architect: "architect-id" }))
+
+			const ids = await providerSettingsManager.getModeConfigIds()
+			ids.code = "changed"
+
+			expect(ids).toEqual({ code: "changed", architect: "architect-id" })
+			await expect(providerSettingsManager.getModeConfigIds()).resolves.toEqual({
+				code: "code-id",
+				architect: "architect-id",
+			})
+		})
+
+		it("returns an empty map when none is stored", async () => {
+			mockSecrets.get.mockResolvedValue(profilesWithModes(undefined))
+
+			await expect(providerSettingsManager.getModeConfigIds()).resolves.toEqual({})
+		})
+
+		it("should throw error if secrets storage fails", async () => {
+			mockSecrets.get.mockRejectedValue(new Error("Storage failed"))
+
+			await expect(providerSettingsManager.getModeConfigIds()).rejects.toThrow("Failed to get mode configs")
 		})
 	})
 

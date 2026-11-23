@@ -22,6 +22,49 @@ describe("Command loading with frontmatter", () => {
 		vi.clearAllMocks()
 	})
 
+	describe.each(["lookup", "discovery"] as const)("%s engine restrictions", (entryPoint) => {
+		async function load(content: string) {
+			mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+			mockFs.readFile = vi.fn().mockResolvedValue(content)
+			mockFs.readdir = vi.fn().mockResolvedValue([{ name: "test.md", isFile: () => true }])
+			return entryPoint === "lookup"
+				? getCommand("/test/cwd", "test")
+				: (await getCommands("/test/cwd")).find((command) => command.name === "test")
+		}
+
+		it.each(["js", "javascript", "JavaScript", " js", "javascript\r", "python"])(
+			"treats %s frontmatter as text without executing it",
+			async (language) => {
+				const executed = vi.fn()
+				vi.stubGlobal("__commandFrontmatterExecuted", executed)
+				try {
+					// Include a BOM to exercise gray-matter's input normalization.
+					const content = `\uFEFF---${language}\n(globalThis.__commandFrontmatterExecuted(), {description: "unsafe"})\n---\nBody`
+					const command = await load(content)
+					expect(executed).not.toHaveBeenCalled()
+					expect(command).toMatchObject({ content: content.trim() })
+					expect(command?.description).toBeUndefined()
+				} finally {
+					vi.unstubAllGlobals()
+				}
+			},
+		)
+
+		it.each(["", "yaml", "yml", "json"])("accepts data-only %s frontmatter", async (language) => {
+			const metadata =
+				language === "json"
+					? '{"description":"Safe", "argument-hint":"input", "mode":"code"}'
+					: "description: Safe\nargument-hint: input\nmode: code"
+			const command = await load(`---${language}\n${metadata}\n---\nBody`)
+			expect(command).toMatchObject({
+				content: "Body",
+				description: "Safe",
+				argumentHint: "input",
+				mode: "code",
+			})
+		})
+	})
+
 	describe("getCommand with frontmatter", () => {
 		it("should load command with description from frontmatter", async () => {
 			const commandContent = `---
@@ -469,6 +512,57 @@ Deploy the app.`
 					}),
 				]),
 			)
+		})
+	})
+})
+
+// Invariant NoExecutableEngine (docs/architecture/tla/Frontmatter.tla): no header runs code.
+// Exercise the real parser through both public loading paths.
+describe.each(["discovery", "individual"])("%s frontmatter security", (entryPoint) => {
+	async function load(content: string) {
+		mockFs.stat = vi.fn().mockResolvedValue({ isDirectory: () => true })
+		mockFs.readdir = vi.fn().mockResolvedValue([{ name: "security-probe.md", isFile: () => true }])
+		mockFs.readFile = vi.fn().mockResolvedValue(content)
+		return entryPoint === "discovery"
+			? (await getCommands("/test/cwd")).find((command) => command.name === "security-probe")
+			: await getCommand("/test/cwd", "security-probe")
+	}
+
+	it.each(["javascript", "js", "JS", "JavaScript", " javascript ", "\uFEFF---js", "\uFEFF\uFEFF---javascript"])(
+		"does not execute %s frontmatter",
+		async (header) => {
+			const execute = vi.fn(() => ({ description: "Executed" }))
+			vi.stubGlobal("__commandFrontmatterProbe", execute)
+			try {
+				const opening = header.startsWith("\uFEFF") ? header : `---${header}`
+				const content = `${opening}\n(globalThis.__commandFrontmatterProbe())\n---\nCommand body`
+				const result = await load(content)
+				expect(execute).not.toHaveBeenCalled()
+				expect(result?.description).toBeUndefined()
+				expect(result?.content).toBe(content.trim())
+			} finally {
+				vi.unstubAllGlobals()
+			}
+		},
+	)
+
+	it.each(["toml", "coffee", "constructor", "__proto__"])("keeps unsupported %s as text", async (header) => {
+		const content = `---${header}\ndescription: Test\n---\nCommand body`
+		const result = await load(content)
+		expect(result?.content).toBe(content)
+		expect(result?.description).toBeUndefined()
+	})
+
+	it.each(["", "yaml", "yml", "json"])("accepts data frontmatter %s", async (header) => {
+		const data = { description: "Test", "argument-hint": "value", mode: "code" }
+		const metadata =
+			header === "json" ? JSON.stringify(data) : "description: Test\nargument-hint: value\nmode: code"
+		const result = await load(`---${header}\r\n${metadata}\r\n---\r\nCommand body`)
+		expect(result).toMatchObject({
+			description: "Test",
+			argumentHint: "value",
+			mode: "code",
+			content: "Command body",
 		})
 	})
 })

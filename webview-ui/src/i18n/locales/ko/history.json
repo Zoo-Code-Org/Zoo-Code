@@ -26,9 +26,9 @@
 	"clearSelection": "선택 초기화",
 	"deleteSelected": "선택 항목 삭제",
 	"deleteTasks": "작업 삭제",
-	"confirmDeleteTasks": "{{count}}개의 작업을 삭제하시겠습니까?",
+	"confirmDeleteTasks_other": "{{count}}개의 작업을 삭제하시겠습니까?",
 	"deleteTasksWarning": "삭제된 작업은 복구할 수 없습니다. 계속 진행하시겠습니까?",
-	"deleteItems": "{{count}}개 항목 삭제",
+	"deleteItems_other": "{{count}}개 항목 삭제",
 	"workspace": {
 		"prefix": "워크스페이스:",
 		"current": "현재",
@@ -43,10 +43,9 @@
 		"mostRelevant": "관련성 높은순"
 	},
 	"viewAllHistory": "모두 보기",
-	"subtasks_one": "{{count}} 부분작업",
 	"subtasks_other": "{{count}} 부분작업",
 	"subtaskTag": "부분작업",
-	"deleteWithSubtasks": "이는 {{count}} 부분작업도 삭제합니다. 확실하십니까?",
+	"deleteWithSubtasks_other": "이는 {{count}} 부분작업도 삭제합니다. 확실하십니까?",
 	"expandSubtasks": "부분작업 확장",
 	"collapseSubtasks": "부분작업 축소",
 	"delegatedTag": "하위 작업 대기 중",

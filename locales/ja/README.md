@@ -46,11 +46,13 @@ Zoo Code は Roo Code が築いた基盤を引き継ぎ、次の機能で拡張�
 - **より信頼性の高いターミナルと編集ワークフロー** — ターミナルの早期完了、タスク状態の競合、コンテキスト管理、diff 編集、プロバイダー固有のツール利用に関する問題を修正。
 - **ワークスペースをより細かく制御** — ルール管理、モードごとの MCP 制限、マルチルートのパス制御、モデルの reasoning オプション、完了時の変更レビュー操作を追加。
 
-## v3.96.0 の新機能
+## Zoo Code v3.98.2 の新機能
 
-- ✨ **チャット設定と診断の新機能:** 設定可能な時刻・日付形式でメッセージのタイムスタンプを表示し、Anthropic プロファイルの prompt-cache TTL を調整し、プライバシーに配慮した診断レポートを生成できます。
-- 💸 **より正確なプロバイダーコストとキャッシュ:** Anthropic のツール結果を壊さずそのまま維持し、Anthropic と MiniMax のコストに累積 output token を採用し、DeepSeek の prompt-cache カウンターを読み取り、xAI Responses のキャッシュをターゲットにし、Mistral のキャッシュ読み取りを 0.1 倍で計上します。
-- 🧭 **より信頼性が高く高速なチャット:** 再起動後に完了済みタスクを再開し、保存された commit がない場合でも checkpoint を復元し、応答しなくなった webview レンダラーを自動リロードし、ストリーミング更新を間引き、ロケールを必要なときに読み込みます。
+- 💫Zoo Gateway アカウントに任意の金額の残高があれば、12月1日まで GLM-5.3-Flash を無制限で利用できる Zoo Pass を無料でプレビューできます。
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 モデル：Gemini 3.8 Flash と新モデルの Gemini 4 Carbon、Hydrogen、Neon を利用できます。Gemini で xhigh の思考レベルを設定できます。
+- 🌐 Responses API：OpenAI Compatible プロバイダーで Responses API のサポートを有効にできます。ツール使用を伴う推論が、それを必須とするエンドポイントでも動作します。
+- 🔧 修正：Vertex の Gemini リクエストがモデルターンで終わらなくなりました。LiteLLM 経由でも Gemini の thought_signature は壊れません。Ollama のタスクは設定されたコンテキスト上限で圧縮されます。
 
 ## Zoo Codeがあなたのためにできること
 

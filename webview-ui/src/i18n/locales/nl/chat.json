@@ -20,7 +20,9 @@
 	"unpin": "Losmaken",
 	"pin": "Vastmaken",
 	"fileChangesInConversation": {
-		"header": "{{count}} bestand(en) gewijzigd in dit gesprek"
+		"header_one": "{{count}} bestand gewijzigd in dit gesprek",
+		"header_other": "{{count}} bestanden gewijzigd in dit gesprek",
+		"lineStatsAriaLabel": "Regels toegevoegd: {{added}}, regels verwijderd: {{removed}}"
 	},
 	"retry": {
 		"title": "Opnieuw proberen",
@@ -226,7 +228,9 @@
 		"addToAllowed": "Toevoegen aan toegestane lijst",
 		"removeFromAllowed": "Verwijderen van toegestane lijst",
 		"addToDenied": "Toevoegen aan geweigerde lijst",
-		"removeFromDenied": "Verwijderen van geweigerde lijst"
+		"removeFromDenied": "Verwijderen van geweigerde lijst",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Klik om het patroon te bewerken"
 	},
 	"text": {
 		"rooSaid": "Zoo zei"
@@ -287,18 +291,22 @@
 		"triggerLabelOff": "Automatisch goedkeuren uit",
 		"triggerLabelOffShort": "Uit",
 		"triggerLabel_zero": "0 automatisch goedgekeurd",
-		"triggerLabel_one": "1 automatisch goedgekeurd",
+		"triggerLabel_one": "{{count}} automatisch goedgekeurd",
 		"triggerLabel_other": "{{count}} automatisch goedgekeurd",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Ingeschakeld",
+		"toggleAriaLabel": "Automatisch goedkeuren in- of uitschakelen"
 	},
 	"announcement": {
 		"title": "Zoo Code {{version}} uitgebracht",
 		"support": "Steun Zoo Code door ons een ster te geven op <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Wat is er nieuw in Zoo Code v3.96.0",
-			"highlight1": "✨ Nieuwe chatinstellingen en diagnostiek: Toon tijdstempels bij berichten met instelbare tijd- en datumformaten, stel de prompt-cache-TTL voor Anthropic-profielen af en genereer privacyvriendelijke diagnostiekrapporten.",
-			"highlight2": "💸 Nauwkeurigere providerkosten en caching: Houdt Anthropic-toolresultaten intact, neemt cumulatieve outputtokens mee in Anthropic- en MiniMax-kosten, leest DeepSeek-prompt-cache-tellers, richt zich op de xAI Responses-cache en factureert Mistral-cache-leesacties tegen 0,1x.",
-			"highlight3": "🧭 Betrouwbaardere en snellere chats: Hervat voltooide taken na een herstart, herstel checkpoints wanneer de opgeslagen commit ontbreekt, herlaad een dode webview-renderer automatisch, beperk streamingupdates en laad talen op verzoek."
+			"heading": "Nieuw in Zoo Code v3.98.2",
+			"highlight0": "💫Probeer Zoo Pass met onbeperkt GLM-5.3-Flash gratis tot 1 december met elk geldbedrag op je Zoo Gateway-account.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modellen: Gebruik Gemini 3.8 Flash en de nieuwe modellen Gemini 4 Carbon, Hydrogen en Neon. Stel xhigh-denkniveaus in voor Gemini.",
+			"highlight2": "🌐 Responses API: Zet Responses API-ondersteuning aan voor OpenAI Compatible-providers. Redeneren met toolgebruik werkt op endpoints die dit vereisen.",
+			"highlight3": "🔧 Oplossingen: Vertex Gemini-verzoeken eindigen niet langer op een modelbeurt. Gemini-thought-signatures blijven via LiteLLM intact. Ollama-taken condenseren op de ingestelde contextlimiet."
 		}
 	},
 	"reasoning": {
@@ -315,7 +323,7 @@
 		"truncation": {
 			"title": "Context ingekort",
 			"inProgress": "Context aan het inkorten...",
-			"messagesRemoved": "{{count}} bericht verwijderd",
+			"messagesRemoved_one": "{{count}} bericht verwijderd",
 			"messagesRemoved_other": "{{count}} berichten verwijderd",
 			"description": "Oudere berichten zijn uit het gesprek verwijderd om binnen de limiet van het contextvenster te blijven. Dit is een snelle maar minder contextbehoudende aanpak in vergelijking met samenvoeging."
 		}
@@ -349,7 +357,8 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Limiet voor automatisch goedgekeurde verzoeken bereikt",
-			"description": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoek(en) bereikt. Wil je de teller resetten en doorgaan met de taak?",
+			"description_one": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoek bereikt. Wil je de teller resetten en doorgaan met de taak?",
+			"description_other": "Zoo heeft de automatisch goedgekeurde limiet van {{count}} API-verzoeken bereikt. Wil je de teller resetten en doorgaan met de taak?",
 			"button": "Resetten en doorgaan"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,9 +370,10 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo wil de codebase doorzoeken op <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo wil de codebase doorzoeken op <code>{{query}}</code> in <code>{{path}}</code>",
-		"didSearch_one": "1 resultaat gevonden",
+		"didSearch_one": "{{count}} resultaat gevonden",
 		"didSearch_other": "{{count}} resultaten gevonden",
-		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)"
+		"resultTooltip": "Gelijkenisscore: {{score}} (klik om bestand te openen)",
+		"displayError": "Fout bij het weergeven van zoekresultaten."
 	},
 	"read-batch": {
 		"approve": {
@@ -415,7 +425,17 @@
 		"noResults": "Geen resultaten",
 		"problems": "Problemen",
 		"terminal": "Terminal",
-		"url": "Plak URL om inhoud op te halen"
+		"url": "Plak URL om inhoud op te halen",
+		"gitCommits": "Git-commits",
+		"gitCommitsDescription": "Doorzoek de repositorygeschiedenis",
+		"workingChanges": "Werkwijzigingen",
+		"workingChangesDescription": "Huidige niet-gecommitte wijzigingen",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Git-commithash",
+		"addFile": "Bestand toevoegen",
+		"addFolder": "Map toevoegen",
+		"commands": "Opdrachten",
+		"modes": "Modi"
 	},
 	"queuedMessages": {
 		"title": "Berichten in wachtrij",
@@ -428,7 +448,28 @@
 	"todo": {
 		"partial": "{{completed}} van {{total}} to-do's voltooid",
 		"complete": "{{total}} to-do's voltooid",
-		"updated": "De to-do-lijst is bijgewerkt"
+		"updated": "De to-do-lijst is bijgewerkt",
+		"listUpdated": "Takenlijst bijgewerkt",
+		"userEdit": "Gebruikersbewerking",
+		"userEdits": "Gebruikersbewerkingen",
+		"edit": "Bewerken",
+		"done": "Klaar",
+		"itemPlaceholder": "Voer een taak in",
+		"newItemPlaceholder": "Voer een taak in, druk op Enter om toe te voegen",
+		"remove": "Verwijderen",
+		"add": "Toevoegen",
+		"cancel": "Annuleren",
+		"addTodo": "+ Taak toevoegen",
+		"status": {
+			"notStarted": "Niet gestart",
+			"inProgress": "Bezig",
+			"completed": "Voltooid"
+		},
+		"deleteDialog": {
+			"title": "Taak verwijderen",
+			"description": "Weet je zeker dat je deze taak wilt verwijderen?",
+			"confirm": "Verwijderen"
+		}
 	},
 	"tooManyTools": {
 		"title": "Te veel tools ingeschakeld",
@@ -450,5 +491,25 @@
 		"title": "Provider wordt niet meer ondersteund",
 		"message": "Deze provider is niet meer beschikbaar. Selecteer een ondersteunde provider om door te gaan.",
 		"openSettings": "Instellingen openen"
+	},
+	"zooCodeAuth": {
+		"signIn": "Inloggen bij Zoo Code",
+		"goToDashboard": "Naar dashboard",
+		"signOut": "Uitloggen",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Verbonden"
+	},
+	"arguments": "Argumenten:",
+	"copyAsMarkdown": "Kopiëren als Markdown",
+	"openInPreview": "Openen in voorbeeld",
+	"codeAccordion": {
+		"userEdits": "Gebruikersbewerkingen",
+		"consoleLogs": "Consolelogs",
+		"openFileAriaLabel": "Bestand openen: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} verborgen regel",
+		"hiddenLines_other": "{{count}} verborgen regels"
 	}
 }

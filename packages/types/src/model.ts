@@ -146,6 +146,8 @@ export const modelInfoSchema = z.object({
 		.optional(),
 	requiredReasoningEffort: z.boolean().optional(),
 	preserveReasoning: z.boolean().optional(),
+	// The model behind a gateway alias validates Gemini thought signatures on function calls.
+	requiresThoughtSignatures: z.boolean().optional(),
 	// Some OpenAI-compatible gateways require a Responses-backed route for tool calls.
 	requiresResponsesApi: z.boolean().optional(),
 	supportedParameters: z.array(modelParametersSchema).optional(),

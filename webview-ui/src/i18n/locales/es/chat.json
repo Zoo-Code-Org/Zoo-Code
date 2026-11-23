@@ -20,7 +20,10 @@
 	"unpin": "Desfijar",
 	"pin": "Fijar",
 	"fileChangesInConversation": {
-		"header": "{{count}} archivo(s) modificado(s) en esta conversación"
+		"header_one": "{{count}} archivo modificado en esta conversación",
+		"header_many": "{{count}} archivos modificados en esta conversación",
+		"header_other": "{{count}} archivos modificados en esta conversación",
+		"lineStatsAriaLabel": "Líneas añadidas: {{added}}, líneas eliminadas: {{removed}}"
 	},
 	"retry": {
 		"title": "Reintentar",
@@ -231,7 +234,9 @@
 		"addToAllowed": "Agregar a la lista de permitidos",
 		"removeFromAllowed": "Eliminar de la lista de permitidos",
 		"addToDenied": "Agregar a la lista de denegados",
-		"removeFromDenied": "Eliminar de la lista de denegados"
+		"removeFromDenied": "Eliminar de la lista de denegados",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "Haz clic para editar el patrón"
 	},
 	"text": {
 		"rooSaid": "Zoo ha dicho"
@@ -287,9 +292,12 @@
 		"triggerLabelOff": "Aprobación automática desactivada",
 		"triggerLabelOffShort": "Desactivado",
 		"triggerLabel_zero": "0 aprobaciones automáticas",
-		"triggerLabel_one": "1 aprobación automática",
+		"triggerLabel_one": "{{count}} aprobación automática",
+		"triggerLabel_many": "{{count}} aprobaciones automáticas",
 		"triggerLabel_other": "{{count}} aprobaciones automáticas",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "Activado",
+		"toggleAriaLabel": "Alternar aprobación automática"
 	},
 	"reasoning": {
 		"thinking": "Pensando",
@@ -305,7 +313,8 @@
 		"truncation": {
 			"title": "Contexto truncado",
 			"inProgress": "Truncando contexto...",
-			"messagesRemoved": "{{count}} mensaje eliminado",
+			"messagesRemoved_one": "{{count}} mensaje eliminado",
+			"messagesRemoved_many": "{{count}} mensajes eliminados",
 			"messagesRemoved_other": "{{count}} mensajes eliminados",
 			"description": "Se eliminaron mensajes más antiguos de la conversación para mantenerse dentro del límite de la ventana de contexto. Este es un enfoque rápido pero menos conservador del contexto en comparación con la condensación."
 		}
@@ -322,10 +331,12 @@
 		"title": "Zoo Code {{version}} publicado",
 		"support": "Apoya a Zoo Code dándonos una estrella en <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novedades de Zoo Code v3.96.0",
-			"highlight1": "✨ Nuevos ajustos de chat y diagnósticos: Muestra marcas de tiempo en los mensajes con formatos de hora y fecha configurables, ajusta el TTL de la caché de prompts para los perfiles de Anthropic y genera informes de diagnóstico que respetan la privacidad.",
-			"highlight2": "💸 Costes y caché de proveedores más precisos: Mantiene intactos los resultados de herramientas de Anthropic, adopta los tokens de salida acumulativos en los costes de Anthropic y MiniMax, lee los contadores de caché de prompts de DeepSeek, apunta a la caché de Responses de xAI y factura las lecturas de caché de Mistral a 0,1x.",
-			"highlight3": "🧭 Chats más fiables y rápidos: Reanuda tareas completadas tras un reinicio, restaura checkpoints cuando falta el commit guardado, recarga automáticamente un renderizador de webview muerto, limita las actualizaciones de streaming y carga los idiomas bajo demanda."
+			"heading": "Novedades de Zoo Code v3.98.2",
+			"highlight0": "💫Prueba Zoo Pass con GLM-5.3-Flash ilimitado gratis hasta el 1 de diciembre con cualquier saldo en tu cuenta de Zoo Gateway.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 Modelos: Usa Gemini 3.8 Flash y los nuevos modelos Gemini 4 Carbon, Hydrogen y Neon. Configura los niveles de pensamiento xhigh en Gemini.",
+			"highlight2": "🌐 API de Responses: Activa la compatibilidad con la API de Responses para proveedores compatibles con OpenAI. El razonamiento con uso de herramientas funciona en puntos finales que la requieren.",
+			"highlight3": "🔧 Correcciones: Las solicitudes de Gemini en Vertex ya no terminan con un turno del modelo. Las firmas de pensamiento de Gemini se mantienen intactas con LiteLLM. Las tareas de Ollama se condensan en el límite de contexto configurado."
 		}
 	},
 	"costs": {
@@ -349,7 +360,9 @@
 	"ask": {
 		"autoApprovedRequestLimitReached": {
 			"title": "Límite de Solicitudes Auto-aprobadas Alcanzado",
-			"description": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitud(es) API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_one": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitud API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_many": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitudes API. ¿Deseas reiniciar el contador y continuar con la tarea?",
+			"description_other": "Zoo ha alcanzado el límite auto-aprobado de {{count}} solicitudes API. ¿Deseas reiniciar el contador y continuar con la tarea?",
 			"button": "Reiniciar y Continuar"
 		},
 		"autoApprovedCostLimitReached": {
@@ -361,9 +374,11 @@
 	"codebaseSearch": {
 		"wantsToSearch": "Zoo quiere buscar en la base de código <code>{{query}}</code>",
 		"wantsToSearchWithPath": "Zoo quiere buscar en la base de código <code>{{query}}</code> en <code>{{path}}</code>",
-		"didSearch_one": "Se encontró 1 resultado",
+		"didSearch_one": "Se encontró {{count}} resultado",
+		"didSearch_many": "Se encontraron {{count}} resultados",
 		"didSearch_other": "Se encontraron {{count}} resultados",
-		"resultTooltip": "Puntuación de similitud: {{score}} (haz clic para abrir el archivo)"
+		"resultTooltip": "Puntuación de similitud: {{score}} (haz clic para abrir el archivo)",
+		"displayError": "Error al mostrar los resultados de búsqueda."
 	},
 	"read-batch": {
 		"approve": {
@@ -415,7 +430,17 @@
 		"noResults": "No hay resultados",
 		"problems": "Problemas",
 		"terminal": "Terminal",
-		"url": "Pega la URL para obtener el contenido"
+		"url": "Pega la URL para obtener el contenido",
+		"gitCommits": "Commits de Git",
+		"gitCommitsDescription": "Buscar en el historial del repositorio",
+		"workingChanges": "Cambios en curso",
+		"workingChangesDescription": "Cambios actuales sin confirmar",
+		"commit": "Commit {{hash}}",
+		"commitHashDescription": "Hash del commit de Git",
+		"addFile": "Añadir archivo",
+		"addFolder": "Añadir carpeta",
+		"commands": "Comandos",
+		"modes": "Modos"
 	},
 	"queuedMessages": {
 		"title": "Mensajes en cola",
@@ -428,13 +453,36 @@
 	"todo": {
 		"partial": "{{completed}} de {{total}} tareas pendientes realizadas",
 		"complete": "{{total}} tareas pendientes realizadas",
-		"updated": "Se actualizó la lista de tareas pendientes"
+		"updated": "Se actualizó la lista de tareas pendientes",
+		"listUpdated": "Lista de tareas actualizada",
+		"userEdit": "Edición del usuario",
+		"userEdits": "Ediciones del usuario",
+		"edit": "Editar",
+		"done": "Listo",
+		"itemPlaceholder": "Escribe una tarea",
+		"newItemPlaceholder": "Escribe una tarea y pulsa Enter para añadirla",
+		"remove": "Quitar",
+		"add": "Añadir",
+		"cancel": "Cancelar",
+		"addTodo": "+ Añadir tarea",
+		"status": {
+			"notStarted": "Sin empezar",
+			"inProgress": "En curso",
+			"completed": "Completada"
+		},
+		"deleteDialog": {
+			"title": "Eliminar tarea",
+			"description": "¿Seguro que quieres eliminar esta tarea?",
+			"confirm": "Eliminar"
+		}
 	},
 	"tooManyTools": {
 		"title": "Demasiadas herramientas habilitadas",
 		"toolsPart_one": "{{count}} herramienta",
+		"toolsPart_many": "{{count}} herramientas",
 		"toolsPart_other": "{{count}} herramientas",
 		"serversPart_one": "{{count}} servidor MCP",
+		"serversPart_many": "{{count}} servidores MCP",
 		"serversPart_other": "{{count}} servidores MCP",
 		"messageTemplate": "Tienes {{tools}} habilitadas a través de {{servers}}. Un número tan alto puede confundir al modelo y llevar a errores. Intenta mantenerlo por debajo de {{threshold}}.",
 		"openMcpSettings": "Abrir configuración de MCP"
@@ -450,5 +498,26 @@
 		"title": "Proveedor ya no compatible",
 		"message": "Este proveedor ya no está disponible. Selecciona un proveedor compatible para continuar.",
 		"openSettings": "Abrir configuración"
+	},
+	"zooCodeAuth": {
+		"signIn": "Inicia sesión en Zoo Code",
+		"goToDashboard": "Ir al panel",
+		"signOut": "Cerrar sesión",
+		"avatarAlt": "Avatar",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "Conectado"
+	},
+	"arguments": "Argumentos:",
+	"copyAsMarkdown": "Copiar como Markdown",
+	"openInPreview": "Abrir en vista previa",
+	"codeAccordion": {
+		"userEdits": "Ediciones del usuario",
+		"consoleLogs": "Registros de la consola",
+		"openFileAriaLabel": "Abrir archivo: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} línea oculta",
+		"hiddenLines_many": "{{count}} de líneas ocultas",
+		"hiddenLines_other": "{{count}} líneas ocultas"
 	}
 }

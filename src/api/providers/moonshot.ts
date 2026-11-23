@@ -19,6 +19,7 @@ export class MoonshotHandler extends OpenAiHandler {
 		// OpenAI Node SDK path as the generic "OpenAI Compatible" provider.
 		super({
 			...options,
+			openAiUseResponsesApi: false,
 			openAiApiKey: options.moonshotApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? moonshotDefaultModelId,
 			openAiBaseUrl: options.moonshotBaseUrl || "https://api.moonshot.ai/v1",

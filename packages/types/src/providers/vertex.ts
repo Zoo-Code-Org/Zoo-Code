@@ -15,6 +15,78 @@ export type VertexModelId = keyof typeof vertexModels
 export const vertexDefaultModelId: VertexModelId = "claude-sonnet-4-5@20250929"
 
 export const vertexModels = {
+	// Use thinking levels. Google does not support budgets or custom temperature for these models.
+	// Flash, Carbon, and Hydrogen prices come from the Gemini API. Neon uses verified Vertex global prices.
+	// Flash works in Express mode and rejects xhigh.
+	// Carbon and Hydrogen work with locations/global. Both return 404 with locations/us-central1.
+	// Carbon rejects xhigh. Hydrogen accepts xhigh.
+	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start/get-started-with-gemini-4
+	// https://aistudio.google.com/docs/models/gemini-3.8-flash
+	"gemini-3.8-flash": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
+		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
+		// TODO (2027-01-01): Set input to $1.50, output to $7.50, and cache reads to $0.15 per million tokens.
+		// Google lists cache storage per hour, not a separate cache write price.
+		inputPrice: 0.75,
+		outputPrice: 3.75,
+		cacheReadsPrice: 0.075,
+	},
+	// https://aistudio.google.com/docs/models/gemini-4-carbon
+	"gemini-4-carbon": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high"],
+		reasoningEffort: "medium",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
+		// Track price updates: https://github.com/Zoo-Code-Org/Zoo-Code/issues/2642
+		// TODO (2026-12-01): Set input to $4, output to $20, and cache reads to $0.20 per million tokens.
+		inputPrice: 2,
+		outputPrice: 10,
+		cacheReadsPrice: 0.1,
+	},
+	// https://aistudio.google.com/docs/models/gemini-4-hydrogen
+	"gemini-4-hydrogen": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
+		inputPrice: 1.5,
+		outputPrice: 7.5,
+		cacheReadsPrice: 0.075,
+	},
+	// https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-neon
+	// Available in global, us, and eu. Prices use the standard global tier, verified 2026-11-22.
+	// https://cloud.google.com/gemini-enterprise-agent-platform/generative-ai/pricing
+	"gemini-4-neon": {
+		maxTokens: 65_536,
+		contextWindow: 1_048_576,
+		supportsImages: true,
+		supportsPromptCache: true,
+		// Only implicit caching is supported.
+		supportsReasoningEffort: ["low", "medium", "high", "xhigh"],
+		reasoningEffort: "high",
+		supportsReasoningBudget: false,
+		supportsTemperature: false,
+		inputPrice: 3,
+		outputPrice: 15,
+		cacheReadsPrice: 0.15,
+	},
 	// https://cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon
 	// Available in the global, us, and eu locations.
 	"gemini-4-argon": {
@@ -426,6 +498,20 @@ export const vertexModels = {
 		supportsTemperature: false,
 		description:
 			"Claude Sonnet 5 is the best combination of speed and intelligence, optimized for coding, tool use, and agentic workflows.",
+	},
+	"claude-sonnet-5-5": {
+		maxTokens: 128_000,
+		contextWindow: 1_000_000,
+		supportsImages: true,
+		supportsPromptCache: true,
+		inputPrice: 2.0,
+		outputPrice: 10.0,
+		cacheWritesPrice: 2.5,
+		cacheReadsPrice: 0.1,
+		supportsReasoningBudget: true,
+		supportsReasoningBinary: true,
+		supportsTemperature: false,
+		description: "Claude Sonnet 5.5 is the best combination of speed and intelligence for everyday tasks.",
 	},
 	"claude-haiku-4-5@20251001": {
 		maxTokens: 8192,

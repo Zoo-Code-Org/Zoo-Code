@@ -47,11 +47,13 @@ Zoo Code parte dalle fondamenta create da Roo Code e continua ad ampliarle con:
 - **Workflow di terminale e modifica più affidabili** — correzioni per il completamento prematuro del terminale, le race condition dello stato delle attività, la gestione del contesto, la modifica dei diff e l'uso di strumenti specifici dei provider.
 - **Più controllo sul tuo workspace** — gestione delle regole, restrizioni MCP per modalità, controlli dei percorsi multi-root, opzioni di reasoning dei modelli e azioni per esaminare le modifiche al completamento.
 
-## Novità in v3.96.0
+## Novità di Zoo Code v3.98.2
 
-- ✨ **Nuove impostazioni della chat e diagnostica:** Mostra i timestamp dei messaggi con formati di data e ora configurabili, regola il TTL della prompt-cache per i profili Anthropic e genera report diagnostici rispettosi della privacy.
-- 💸 **Costi dei provider e caching più precisi:** Mantiene intatti i risultati dei tool Anthropic, adotta i token di output cumulativi nei costi Anthropic e MiniMax, legge i contatori della prompt-cache di DeepSeek, punta alla cache Responses di xAI e fattura le letture della cache di Mistral a 0,1x.
-- 🧭 **Chat più affidabili e veloci:** Riprendi le attività completate dopo un riavvio, ripristina i checkpoint quando manca il commit salvato, ricarica automaticamente un renderer webview morto, limita gli aggiornamenti in streaming e carica le lingue su richiesta.
+- 💫Prova Zoo Pass con GLM-5.3-Flash illimitato gratis fino al 1° dicembre con qualsiasi saldo sul tuo account Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modelli: Usa Gemini 3.8 Flash e i nuovi modelli Gemini 4 Carbon, Hydrogen e Neon. Imposta i livelli di pensiero xhigh su Gemini.
+- 🌐 API Responses: Attiva il supporto dell'API Responses per i provider compatibili con OpenAI. Il ragionamento con uso di strumenti funziona sugli endpoint che lo richiedono.
+- 🔧 Correzioni: Le richieste Gemini su Vertex non terminano più con un turno del modello. Le firme di pensiero di Gemini restano intatte tramite LiteLLM. Le attività Ollama si condensano al limite di contesto configurato.
 
 ## Cosa può fare Zoo Code per TE?
 

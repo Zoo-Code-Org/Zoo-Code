@@ -28,7 +28,6 @@ import {
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
 	kenariDefaultModelId,
-	ioIntelligenceDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
 	getZAiModels,
@@ -144,10 +143,6 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	},
 	[providerIdentifiers.opencodeGo]: { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
 	[providerIdentifiers.kenari]: { field: "kenariModelId", default: kenariDefaultModelId },
-	[providerIdentifiers.ioIntelligence]: {
-		field: "ioIntelligenceModelId",
-		default: ioIntelligenceDefaultModelId,
-	},
 	[providerIdentifiers.nanogpt]: { field: "nanoGptModelId", default: nanoGptDefaultModelId },
 	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 	[providerIdentifiers.openai]: { field: "openAiModelId" },

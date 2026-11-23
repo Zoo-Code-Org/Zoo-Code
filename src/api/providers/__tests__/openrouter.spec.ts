@@ -19,6 +19,7 @@ import OpenAI from "openai"
 
 import { OPENROUTER_DEFAULT_PROVIDER_NAME, openRouterDefaultModelInfo, providerIdentifiers } from "@roo-code/types"
 import type { ModelInfo } from "@roo-code/types"
+import { ApiProviderError, extractApiProviderErrorProperties } from "@roo-code/types"
 
 import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 
@@ -604,7 +605,7 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			const generator = handler.createMessage("test", [])
-			await expect(generator.next()).rejects.toThrow("OpenRouter API Error 500: API Error")
+			await expect(generator.next()).rejects.toThrow("openrouter API Error 500: API Error")
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -616,6 +617,25 @@ describe("OpenRouterHandler", () => {
 					status: 500,
 				}),
 			)
+		})
+
+		it("emits the canonical error event for a null error-value chunk (#1302)", async () => {
+			// The '"error" in chunk' guard admits a null error value (PR 2645
+			// mutation report): the handler must emit the canonical error event, not a TypeError.
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockStream = asyncStreamFrom([{ error: null }])
+
+			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
+			const proto = OpenAI.prototype as unknown as { chat: { completions: { create: unknown } } }
+			proto.chat = { completions: { create: mockCreate } }
+
+			const generator = handler.createMessage("test", [])
+			await expect(generator.next()).rejects.toThrow("openrouter API Error undefined: Unknown error")
+
+			expect(mockCaptureException.mock.calls.length).toBe(1)
+			const captured = mockCaptureException.mock.calls[0]?.[0]
+			expect(captured).toBeInstanceOf(ApiProviderError)
+			expect(extractApiProviderErrorProperties(captured as ApiProviderError).provider).toBe("openrouter")
 		})
 
 		it("captures telemetry when createMessage throws an exception", async () => {
@@ -713,7 +733,7 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			const generator = handler.createMessage("test", [])
-			await expect(generator.next()).rejects.toThrow("OpenRouter API Error 429: Rate limit exceeded")
+			await expect(generator.next()).rejects.toThrow("openrouter API Error 429: Rate limit exceeded")
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -725,6 +745,76 @@ describe("OpenRouterHandler", () => {
 					status: 429,
 				}),
 			)
+		})
+
+		it("pins error casing at both sinks for every createMessage failure path (#1302)", async () => {
+			const cases = [
+				{
+					name: "streaming error chunk",
+					setup: () => ({
+						mockCreate: vitest
+							.fn()
+							.mockResolvedValue(asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])),
+						expectedMessage: "openrouter API Error 500: API Error",
+					}),
+				},
+				{
+					name: "parsed OpenRouter error body",
+					setup: () => {
+						const sdkError = new Error("sdk failure") as Error & {
+							error: { message: string; code: number }
+						}
+						sdkError.error = { message: "Upstream failed", code: 502 }
+						return {
+							mockCreate: vitest.fn().mockRejectedValue(sdkError),
+							expectedMessage: "openrouter completion error: sdk failure",
+						}
+					},
+				},
+				{
+					name: "fallback error",
+					setup: () => ({
+						mockCreate: vitest.fn().mockRejectedValue(new Error("Connection failed")),
+						expectedMessage: "openrouter completion error: Connection failed",
+					}),
+				},
+			]
+
+			for (const { name, setup } of cases) {
+				const handler = new OpenRouterHandler(mockOptions)
+				const { mockCreate, expectedMessage } = setup()
+				// Structural double: the handler only calls chat.completions.create.
+				const openAIPrototype = OpenAI as unknown as {
+					prototype: { chat: { completions: { create: typeof mockCreate } } }
+				}
+				openAIPrototype.prototype.chat = { completions: { create: mockCreate } }
+
+				// Each case must emit its own telemetry capture.
+				mockCaptureException.mockClear()
+
+				let thrown: unknown
+				try {
+					const generator = handler.createMessage("test", [])
+					await generator.next()
+				} catch (error) {
+					thrown = error
+				}
+
+				// The literals are pinned on purpose: an assertion through
+				// providerIdentifiers.openrouter on both sides cannot catch drift.
+				expect(thrown, `${name}: expected the handler to throw`).toBeInstanceOf(Error)
+				expect((thrown as Error).message, name).toBe(expectedMessage)
+
+				expect(mockCaptureException.mock.calls.length, name).toBe(1)
+				const captured = mockCaptureException.mock.calls[0]?.[0]
+				expect(captured, name).toBeInstanceOf(ApiProviderError)
+				const properties = extractApiProviderErrorProperties(captured as ApiProviderError)
+				expect(properties.provider, name).toBe("openrouter")
+
+				// Sinks agree: the message label uses the telemetry spelling.
+				expect((thrown as Error).message.startsWith("openrouter"), name).toBe(true)
+				expect((thrown as Error).message, name).not.toContain("OpenRouter")
+			}
 		})
 
 		it("yields tool_call_end events when finish_reason is tool_calls", async () => {
@@ -1013,7 +1103,7 @@ describe("OpenRouterHandler", () => {
 				completions: { create: mockCreate },
 			} as any
 
-			await expect(handler.completePrompt("test prompt")).rejects.toThrow("OpenRouter API Error 500: API Error")
+			await expect(handler.completePrompt("test prompt")).rejects.toThrow("openrouter API Error 500: API Error")
 
 			// Verify telemetry was captured
 			expect(mockCaptureException).toHaveBeenCalledWith(
@@ -1128,7 +1218,7 @@ describe("OpenRouterHandler", () => {
 			} as any
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow(
-				"OpenRouter API Error 429: Rate limit exceeded",
+				"openrouter API Error 429: Rate limit exceeded",
 			)
 
 			// captureException is called, but PostHogTelemetryClient filters out 429 errors internally
@@ -1142,6 +1232,73 @@ describe("OpenRouterHandler", () => {
 					status: 429,
 				}),
 			)
+		})
+
+		it("pins error casing at both sinks for every completePrompt failure path (#1302)", async () => {
+			const cases = [
+				{
+					name: "error body in the response",
+					setup: () => ({
+						mockCreate: vitest.fn().mockResolvedValue({ error: { message: "API Error", code: 500 } }),
+						expectedMessage: "openrouter API Error 500: API Error",
+					}),
+				},
+				{
+					name: "parsed OpenRouter error from the SDK",
+					setup: () => {
+						const sdkError = new Error("sdk failure") as Error & {
+							error: { message: string; code: number }
+						}
+						sdkError.error = { message: "Upstream failed", code: 502 }
+						return {
+							mockCreate: vitest.fn().mockRejectedValue(sdkError),
+							expectedMessage: "openrouter completion error: sdk failure",
+						}
+					},
+				},
+				{
+					name: "fallback error",
+					setup: () => ({
+						mockCreate: vitest.fn().mockRejectedValue(new Error("Unexpected error")),
+						expectedMessage: "openrouter completion error: Unexpected error",
+					}),
+				},
+			]
+
+			for (const { name, setup } of cases) {
+				const handler = new OpenRouterHandler(mockOptions)
+				const { mockCreate, expectedMessage } = setup()
+				// Structural double: the handler only calls chat.completions.create.
+				const openAIPrototype = OpenAI as unknown as {
+					prototype: { chat: { completions: { create: typeof mockCreate } } }
+				}
+				openAIPrototype.prototype.chat = { completions: { create: mockCreate } }
+
+				// Each case must emit its own telemetry capture.
+				mockCaptureException.mockClear()
+
+				let thrown: unknown
+				try {
+					await handler.completePrompt("test prompt")
+				} catch (error) {
+					thrown = error
+				}
+
+				// The literals are pinned on purpose: an assertion through
+				// providerIdentifiers.openrouter on both sides cannot catch drift.
+				expect(thrown, `${name}: expected the handler to throw`).toBeInstanceOf(Error)
+				expect((thrown as Error).message, name).toBe(expectedMessage)
+
+				expect(mockCaptureException.mock.calls.length, name).toBe(1)
+				const captured = mockCaptureException.mock.calls[0]?.[0]
+				expect(captured, name).toBeInstanceOf(ApiProviderError)
+				const properties = extractApiProviderErrorProperties(captured as ApiProviderError)
+				expect(properties.provider, name).toBe("openrouter")
+
+				// Sinks agree: the message label uses the telemetry spelling.
+				expect((thrown as Error).message.startsWith("openrouter"), name).toBe(true)
+				expect((thrown as Error).message, name).not.toContain("OpenRouter")
+			}
 		})
 	})
 

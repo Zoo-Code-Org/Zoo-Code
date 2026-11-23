@@ -119,7 +119,7 @@ describe("Task dispose method", () => {
 		expect(disposalComplete).toBe(true)
 	})
 
-	test("owns a per-Task observation registry", () => {
+	test("owns a per-Task observation registry", async () => {
 		// ReadFileTool and the guarded-write path reach the registry only through the Task,
 		// so a Task that never built one - or shared one across Tasks - would silently drop
 		// read observations. The registry's own tests only exercise standalone instances, and
@@ -142,7 +142,7 @@ describe("Task dispose method", () => {
 			expect(task.observationRegistry.has("/workspace/a.ts")).toBe(false)
 			expect(task.observationRegistry.size).toBe(0)
 		} finally {
-			void other.dispose().catch(() => {})
+			await other.dispose()
 		}
 	})
 

@@ -222,8 +222,8 @@ vi.mock("../common/TelemetryBanner", () => ({
 }))
 
 // Mock i18n
-vi.mock("react-i18next", () => ({
-	useTranslation: () => ({
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
 		t: (key: string, options?: any) => {
 			if (key === "chat:versionIndicator.ariaLabel" && options?.version) {
 				return `Version ${options.version}`
@@ -231,10 +231,9 @@ vi.mock("react-i18next", () => ({
 			return key
 		},
 	}),
-	initReactI18next: {
-		type: "3rdParty",
-		init: () => {},
-	},
+}))
+
+vi.mock("react-i18next", () => ({
 	Trans: ({ i18nKey, children }: { i18nKey: string; children?: React.ReactNode }) => {
 		return <>{children || i18nKey}</>
 	},
@@ -1243,6 +1242,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "follow-up question during spinner",
 				images: [],
+				segments: [{ text: "follow-up question during spinner", source: "user" }],
 			})
 		})
 
@@ -1314,6 +1314,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				askResponse: "messageResponse",
 				text: "follow-up after completion",
 				images: [],
+				segments: [{ text: "follow-up after completion", source: "user" }],
 			})
 		})
 
@@ -1373,6 +1374,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during queue drain",
 				images: [],
+				segments: [{ text: "message during queue drain", source: "user" }],
 			})
 		})
 
@@ -1436,6 +1438,7 @@ describe("ChatView - Message Queueing Tests", () => {
 				type: "queueMessage",
 				text: "message during command execution",
 				images: [],
+				segments: [{ text: "message during command execution", source: "user" }],
 			})
 		})
 
@@ -1556,6 +1559,52 @@ describe("ChatView - Follow-up Suggestions", () => {
 			askResponse: "messageResponse",
 			text: "Use code mode",
 			images: [],
+			segments: [{ text: "Use code mode", source: "generated" }],
+		})
+	})
+
+	it("keeps a shift-clicked suggestion generated and the typed draft user text", async () => {
+		const { getByRole, getByTestId } = renderChatView()
+
+		mockPostMessage({
+			mode: "ask",
+			customModes: [],
+			clineMessages: [
+				{ type: "say", say: "task", ts: Date.now() - 1000, text: "Initial task" },
+				{
+					type: "ask",
+					ask: "followup",
+					ts: Date.now(),
+					text: JSON.stringify({ question: "Next?", suggest: [{ answer: "Use @/secret" }] }),
+					partial: false,
+				},
+			],
+		})
+
+		const suggestion = await waitFor(() => getByRole("button", { name: "Use @/secret" }))
+		const input = getByTestId("chat-textarea").querySelector("input")! as HTMLInputElement
+		await act(async () => {
+			fireEvent.change(input, { target: { value: "mine" } })
+		})
+		vscodePostMessageMock.cleanup()
+
+		await act(async () => {
+			fireEvent.click(suggestion, { shiftKey: true })
+		})
+		await act(async () => {
+			fireEvent.keyDown(input, { key: "Enter", code: "Enter" })
+		})
+
+		await waitFor(() => {
+			expect(vscode.postMessage).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "askResponse",
+					segments: [
+						{ text: "mine", source: "user" },
+						{ text: " \nUse @/secret", source: "generated" },
+					],
+				}),
+			)
 		})
 	})
 
@@ -1596,6 +1645,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Use invalid mode",
 				images: [],
+				segments: [{ text: "Use invalid mode", source: "generated" }],
 			})
 		})
 		expect(vscode.postMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "mode" }))
@@ -1656,6 +1706,7 @@ describe("ChatView - Follow-up Suggestions", () => {
 				askResponse: "messageResponse",
 				text: "Valid answer",
 				images: [],
+				segments: [{ text: "Valid answer", source: "generated" }],
 			})
 		})
 	})

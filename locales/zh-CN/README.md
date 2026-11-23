@@ -43,11 +43,13 @@ Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
 - **更可靠的终端和编辑工作流** — 修复终端过早完成、任务状态竞争、上下文管理、差异更新编辑和提供商专用工具调用等问题。
 - **更全面的工作区控制** — 支持规则管理、按模式限制 MCP、多根工作区路径控制、模型推理选项和完成后的变更审查操作。
 
-## v3.96.0 新增内容
+## Zoo Code v3.98.2 新增内容
 
-- ✨ **全新聊天设置与诊断:** 以可配置的时间与日期格式显示消息时间戳，为 Anthropic 配置文件调整 prompt-cache TTL，并生成注重隐私的诊断报告。
-- 💸 **更精准的供应商计费与缓存:** 保持 Anthropic 工具结果完整无损，在 Anthropic 和 MiniMax 成本中采用累计输出 token，读取 DeepSeek 的 prompt-cache 计数器，命中 xAI Responses 缓存，并按 0.1x 计收 Mistral 缓存读取费用。
-- 🧭 **更可靠、更快速的对话:** 重启后恢复已完成的任务，在已保存的 commit 缺失时仍能还原 checkpoint，自动重载无响应的 webview 渲染器，节流流式更新，并按需加载语言包。
+- 💫预览 Zoo Pass：只要你的 Zoo Gateway 账户中有任意金额的余额，即可在 12 月 1 日前免费无限使用 GLM-5.3-Flash。
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 模型：支持 Gemini 3.8 Flash 和新的 Gemini 4 Carbon、Hydrogen、Neon 模型。可为 Gemini 设置 xhigh 思考级别。
+- 🌐 Responses API：可为 OpenAI Compatible 提供商启用 Responses API 支持。在需要该 API 的端点上，带工具使用的推理也能正常工作。
+- 🔧 修复：Vertex 的 Gemini 请求不再以模型轮次结尾；LiteLLM 下的 Gemini 思考签名保持完整；Ollama 任务会在配置的上下文限制处压缩。
 
 ## Zoo Code 能为您做什么？
 

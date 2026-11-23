@@ -4,9 +4,10 @@ import { render, screen, within } from "@/utils/test-utils"
 
 import { ModelInfoView } from "../ModelInfoView"
 
+// The token-count key echoes its options so assertions can check what reaches the translator
 vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
-		t: (key: string) =>
+		t: (key: string, options?: Record<string, unknown>) =>
 			({
 				"settings:modelInfo.imageSupportUnknown": "Image support not reported",
 				"settings:modelInfo.supportsImages": "Supports images",
@@ -24,7 +25,10 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 				"settings:serviceTier.standard": "Standard",
 				"settings:serviceTier.flex": "Flex",
 				"settings:serviceTier.priority": "Priority",
-			})[key] ?? key,
+			})[key] ??
+			(key === "settings:modelInfo.tokensValue" || key === "settings:modelInfo.pricePerMillionTokens"
+				? `${key} ${JSON.stringify(options)}`
+				: key),
 	}),
 }))
 
@@ -51,6 +55,23 @@ const getPricingRowValues = (tier: string) => {
 }
 
 describe("ModelInfoView service tier pricing", () => {
+	it("passes token counts so the translation picks the plural form and formats the number", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				modelInfo={{ ...baseModelInfo, maxTokens: 4_096 }}
+				hidePricing
+			/>,
+		)
+		expect(
+			screen.getByText(`settings:modelInfo.tokensValue ${JSON.stringify({ count: 128_000 })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.tokensValue ${JSON.stringify({ count: 4_096 })}`),
+		).toBeInTheDocument()
+	})
+
 	it("reports prompt caching as unsupported for other providers when the model says nothing about it", () => {
 		render(
 			<ModelInfoView
@@ -287,5 +308,31 @@ describe("ModelInfoView service tier pricing", () => {
 
 		expect(getPricingRowValues("Flex")).toEqual(["Flex", "—", "—", "—"])
 		expect(getPricingRowValues("Priority")).toEqual(["Priority", "—", "—", "—"])
+	})
+
+	it("renders per-million-token prices for input, output, cache reads, and cache writes", () => {
+		render(
+			<ModelInfoView
+				{...defaultProps}
+				apiProvider={providerIdentifiers.openai}
+				modelInfo={{
+					...baseModelInfo,
+					cacheWritesPrice: 5,
+				}}
+			/>,
+		)
+
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$10.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$20.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$3.00" })}`),
+		).toBeInTheDocument()
+		expect(
+			screen.getByText(`settings:modelInfo.pricePerMillionTokens ${JSON.stringify({ price: "$5.00" })}`),
+		).toBeInTheDocument()
 	})
 })

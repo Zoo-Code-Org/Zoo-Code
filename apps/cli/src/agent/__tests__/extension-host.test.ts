@@ -519,6 +519,47 @@ describe("ExtensionHost", () => {
 	})
 
 	describe("runTask", () => {
+		it.each([
+			{ nonInteractive: false, autoApprovalEnabled: true, expected: false },
+			{ nonInteractive: false, autoApprovalEnabled: false, expected: false },
+			{ nonInteractive: undefined, autoApprovalEnabled: true, expected: false },
+			{ nonInteractive: true, autoApprovalEnabled: true, expected: true },
+			{ nonInteractive: true, autoApprovalEnabled: false, expected: false },
+			// Spec: docs/architecture/tla/CliApprovalPolicy.tla. A missing key must not stay open on a manual host.
+			{ nonInteractive: false, autoApprovalEnabled: undefined, expected: false },
+			{ nonInteractive: true, autoApprovalEnabled: undefined, expected: undefined },
+		])("enforces host approval policy for %j", async ({ nonInteractive, autoApprovalEnabled, expected }) => {
+			const host = createTestHost({ nonInteractive })
+			host.markWebviewReady()
+			const emitSpy = vi.spyOn(host, "emit")
+			const configuration = { alwaysAllowExecute: true, allowedCommands: ["*"], mode: "code" }
+			if (autoApprovalEnabled !== undefined) Object.assign(configuration, { autoApprovalEnabled })
+			const before = structuredClone(configuration)
+
+			const taskPromise = host.runTask("test prompt", "task-123", configuration)
+			host["client"].getEmitter().emit("taskCompleted", {
+				success: true,
+				stateInfo: {
+					state: AgentLoopState.IDLE,
+					isWaitingForInput: false,
+					isRunning: false,
+					isStreaming: false,
+					requiredAction: "start_task",
+					description: "Task completed",
+				},
+			})
+			await taskPromise
+
+			expect(emitSpy).toHaveBeenCalledWith("webviewMessage", {
+				type: "newTask",
+				text: "test prompt",
+				taskId: "task-123",
+				taskConfiguration:
+					expected === undefined ? configuration : { ...configuration, autoApprovalEnabled: expected },
+			})
+			expect(configuration).toEqual(before)
+		})
+
 		it("should send newTask message when called", async () => {
 			const host = createTestHost()
 			host.markWebviewReady()

@@ -74,8 +74,12 @@ jobs:
               uses: ./.github/actions/setup-node-pnpm
               with:
                   install-args: "--frozen-lockfile"
+            - name: Test translation check scripts
+              run: pnpm test:translations-check
             - name: Verify all translations are complete
               run: node scripts/find-missing-translations.js
+            - name: Verify plural forms follow CLDR
+              run: node scripts/validate-plural-forms.js
             - name: Verify t() calls pass every interpolation variable
               run: node scripts/check-i18n-interpolation.js
 
@@ -110,6 +114,8 @@ jobs:
               run: pnpm lint
             - name: Check types
               run: pnpm check-types
+            - name: Test mock authentication
+              run: pnpm --dir apps/vscode-e2e test:mock-auth
             - name: Validate Code QA workflow
               run: pnpm test:code-qa-ci
             - name: Validate Solheim provider smoke workflow

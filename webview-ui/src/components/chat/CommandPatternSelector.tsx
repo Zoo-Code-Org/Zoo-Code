@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from "react"
 import { Check, CheckCheck, ChevronUp, X } from "lucide-react"
 import { cn } from "../../lib/utils"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { StandardTooltip } from "../ui/standard-tooltip"
 
 interface CommandPattern {
@@ -24,7 +24,7 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 	onAllowPatternChange,
 	onDenyPatternChange,
 }) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const [isExpanded, setIsExpanded] = useState(false)
 	const [editingStates, setEditingStates] = useState<Record<string, { isEditing: boolean; value: string }>>({})
 
@@ -116,7 +116,7 @@ export const CommandPatternSelector: React.FC<CommandPatternSelectorProps> = ({
 										<div
 											onClick={() => setEditState(item.pattern, true)}
 											className="font-mono text-xs text-vscode-foreground cursor-pointer hover:bg-vscode-list-hoverBackground px-2 py-1.5 rounded transition-colors border border-transparent break-all"
-											title="Click to edit pattern">
+											title={t("chat:commandExecution.clickToEditPattern")}>
 											<span className="break-all">{editState.value}</span>
 											{item.description && (
 												<span className="text-vscode-descriptionForeground ml-2">

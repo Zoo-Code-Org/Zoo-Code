@@ -2,7 +2,7 @@ import * as React from "react"
 import { CaretUpIcon } from "@radix-ui/react-icons"
 import { Check, X } from "lucide-react"
 import { Fzf } from "fzf"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { cn } from "@/lib/utils"
 import { useRooPortal } from "./hooks/useRooPortal"
@@ -62,7 +62,7 @@ export const SelectDropdown = React.memo(
 			},
 			ref,
 		) => {
-			const { t } = useTranslation()
+			const { t } = useAppTranslation()
 			const [open, setOpen] = React.useState(false)
 			const [searchValue, setSearchValue] = React.useState("")
 			const searchInputRef = React.useRef<HTMLInputElement>(null)
@@ -216,7 +216,6 @@ export const SelectDropdown = React.memo(
 							{!disableSearch && (
 								<div className="relative p-2 border-b border-vscode-dropdown-border">
 									<input
-										aria-label="Search"
 										ref={searchInputRef}
 										value={searchValue}
 										onChange={(e) => setSearchValue(e.target.value)}
@@ -237,7 +236,9 @@ export const SelectDropdown = React.memo(
 							{/* Dropdown items - Use windowing for large lists */}
 							<div className="max-h-[300px] overflow-y-auto">
 								{groupedOptions.length === 0 && searchValue ? (
-									<div className="py-2 px-3 text-sm text-vscode-foreground/70">No results found</div>
+									<div className="py-2 px-3 text-sm text-vscode-foreground/70">
+										{t("common:ui.no_results")}
+									</div>
 								) : (
 									<div className="py-1">
 										{groupedOptions.map((option, index) => {

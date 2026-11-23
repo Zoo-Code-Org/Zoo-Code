@@ -1,3 +1,5 @@
+import type { MentionSegment } from "@roo-code/types"
+
 // Support prompts
 type PromptDiagnostic = {
 	source?: string
@@ -50,6 +52,7 @@ type SupportPromptType =
 	| "TERMINAL_FIX"
 	| "TERMINAL_EXPLAIN"
 	| "NEW_TASK"
+	| "TASK_TITLE"
 
 const supportPromptConfigs: Record<SupportPromptType, SupportPromptConfig> = {
 	ENHANCE: {
@@ -246,6 +249,12 @@ Please provide:
 	NEW_TASK: {
 		template: `\${userInput}`,
 	},
+	TASK_TITLE: {
+		template: `Write a short title (5-10 words) for the task described in the user prompt below. Use the same language as the user prompt. Reply with only the title - no quotes, no trailing punctuation, no explanations.
+
+User prompt:
+\${userInput}`,
+	},
 } as const
 
 export const supportPrompt = {
@@ -260,6 +269,26 @@ export const supportPrompt = {
 	): string => {
 		const template = supportPrompt.get(customSupportPrompts, type)
 		return createPrompt(template, params)
+	},
+	/**
+	 * Builds the prompt as segments. Only the `userInput` parameter is `user`.
+	 * Every other part of the template and its parameters is `generated`.
+	 */
+	createSegments: (
+		type: SupportPromptType,
+		params: PromptParams,
+		customSupportPrompts?: Record<string, string | undefined>,
+	): MentionSegment[] => {
+		const template = supportPrompt.get(customSupportPrompts, type)
+		const mark = `\u0000${globalThis.crypto.randomUUID()}\u0000`
+		const userInput = typeof params["userInput"] === "string" ? params["userInput"] : ""
+		const parts = createPrompt(template, { ...params, userInput: mark }).split(mark)
+		const segments: MentionSegment[] = []
+		parts.forEach((part, index) => {
+			if (part) segments.push({ text: part, source: "generated" })
+			if (index < parts.length - 1 && userInput) segments.push({ text: userInput, source: "user" })
+		})
+		return segments
 	},
 } as const
 

@@ -17,5 +17,6 @@ export const litellmProviderDefinition = createProviderDefinition({
 		litellmApiKey: z.string().optional(),
 		[LITELLM_MODEL_ID_FIELD]: z.string().optional(),
 		litellmUsePromptCache: z.boolean().optional(),
+		litellmPreserveReasoning: z.enum(["auto", "on", "off"]).optional(),
 	},
 })

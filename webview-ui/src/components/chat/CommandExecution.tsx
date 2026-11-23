@@ -1,6 +1,6 @@
 import { useCallback, useState, memo, useMemo } from "react"
 import { useEvent } from "react-use"
-import { t } from "i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { ChevronDown, OctagonX } from "lucide-react"
 
 import {
@@ -45,6 +45,7 @@ interface CommandExecutionProps {
 }
 
 export const CommandExecution = ({ executionId, text, icon, title, isDenied = false }: CommandExecutionProps) => {
+	const { t } = useAppTranslation()
 	const {
 		terminalShellIntegrationDisabled = false,
 		collapseCommandOutputByDefault = DEFAULT_COLLAPSE_COMMAND_OUTPUT_BY_DEFAULT,
@@ -219,7 +220,11 @@ export const CommandExecution = ({ executionId, text, icon, title, isDenied = fa
 					<div className="flex flex-row items-center gap-1">
 						{status?.status === "started" && (
 							<div className="flex flex-row items-center gap-2 font-mono text-xs">
-								{status.pid && <div className="whitespace-nowrap">(PID: {status.pid})</div>}
+								{status.pid && (
+									<div className="whitespace-nowrap">
+										{t("chat:commandExecution.pid", { pid: status.pid })}
+									</div>
+								)}
 								<StandardTooltip content={t("chat:commandExecution.abort")}>
 									<Button
 										variant="ghost"

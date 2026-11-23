@@ -1,4 +1,5 @@
 import { Fzf } from "fzf"
+import type { TFunction } from "i18next"
 
 import type { ModeConfig, Command } from "@roo-code/types"
 
@@ -121,7 +122,22 @@ export interface ContextMenuQueryItem {
 	argumentHint?: string
 }
 
+/**
+ * Whether a lowercased query matches a top-level option: a prefix of its mention token, or of any
+ * word of its translated label, so "comm" finds "Commits de Git".
+ */
+function matchesTopLevelOption(lowerQuery: string, label: string, token: string): boolean {
+	return (
+		token.startsWith(lowerQuery) ||
+		label
+			.toLowerCase()
+			.split(/\s+/)
+			.some((word) => word.startsWith(lowerQuery))
+	)
+}
+
 export function getContextMenuOptions(
+	t: TFunction,
 	query: string,
 	selectedType: ContextMenuOptionType | null = null,
 	queryItems: ContextMenuQueryItem[],
@@ -168,7 +184,7 @@ export function getContextMenuOptions(
 			if (matchingCommands.length > 0) {
 				results.push({
 					type: ContextMenuOptionType.SectionHeader,
-					label: "Commands",
+					label: t("chat:contextMenu.commands"),
 				})
 				results.push(...matchingCommands)
 			}
@@ -205,7 +221,7 @@ export function getContextMenuOptions(
 			if (matchingModes.length > 0) {
 				results.push({
 					type: ContextMenuOptionType.SectionHeader,
-					label: "Modes",
+					label: t("chat:contextMenu.modes"),
 				})
 				results.push(...matchingModes)
 			}
@@ -217,8 +233,8 @@ export function getContextMenuOptions(
 	const workingChanges: ContextMenuQueryItem = {
 		type: ContextMenuOptionType.Git,
 		value: "git-changes",
-		label: "Working changes",
-		description: "Current uncommitted changes",
+		label: t("chat:contextMenu.workingChanges"),
+		description: t("chat:contextMenu.workingChangesDescription"),
 		icon: "$(git-commit)",
 	}
 
@@ -262,21 +278,29 @@ export function getContextMenuOptions(
 	const suggestions: ContextMenuQueryItem[] = []
 
 	// Check for top-level option matches
-	if ("git".startsWith(lowerQuery)) {
+	const gitCommitsLabel = t("chat:contextMenu.gitCommits")
+	if (matchesTopLevelOption(lowerQuery, gitCommitsLabel, "git")) {
 		suggestions.push({
 			type: ContextMenuOptionType.Git,
-			label: "Git Commits",
-			description: "Search repository history",
+			label: gitCommitsLabel,
+			description: t("chat:contextMenu.gitCommitsDescription"),
 			icon: "$(git-commit)",
 		})
-	} else if ("git-changes".startsWith(lowerQuery)) {
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.workingChanges"), "git-changes")) {
 		suggestions.push(workingChanges)
 	}
-	if ("problems".startsWith(lowerQuery)) {
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.problems"), "problems")) {
 		suggestions.push({ type: ContextMenuOptionType.Problems })
 	}
-	if ("terminal".startsWith(lowerQuery)) {
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.terminal"), "terminal")) {
 		suggestions.push({ type: ContextMenuOptionType.Terminal })
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.addFolder"), "folder")) {
+		suggestions.push({ type: ContextMenuOptionType.Folder })
+	}
+	if (matchesTopLevelOption(lowerQuery, t("chat:contextMenu.addFile"), "file")) {
+		suggestions.push({ type: ContextMenuOptionType.File })
 	}
 	if (query.startsWith("http")) {
 		suggestions.push({ type: ContextMenuOptionType.URL, value: query })
@@ -294,8 +318,8 @@ export function getContextMenuOptions(
 			suggestions.push({
 				type: ContextMenuOptionType.Git,
 				value: lowerQuery,
-				label: `Commit ${lowerQuery}`,
-				description: "Git commit hash",
+				label: t("chat:contextMenu.commit", { hash: lowerQuery }),
+				description: t("chat:contextMenu.commitHashDescription"),
 				icon: "$(git-commit)",
 			})
 		}
@@ -352,7 +376,8 @@ export function getContextMenuOptions(
 			item.type === ContextMenuOptionType.Folder ||
 			item.type === ContextMenuOptionType.OpenedFile
 		) {
-			key = normalizedValue!
+			// The valueless "Add Folder" / "Add File" options are keyed by type so both survive.
+			key = normalizedValue ?? item.type
 		} else {
 			key = `${item.type}-${normalizedValue}`
 		}

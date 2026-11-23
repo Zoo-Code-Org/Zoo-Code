@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react"
-import { useTranslation } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 
 import MarkdownBlock from "../common/MarkdownBlock"
@@ -15,7 +15,7 @@ interface ReasoningBlockProps {
 }
 
 export const ReasoningBlock = ({ content, isStreaming, isLast }: ReasoningBlockProps) => {
-	const { t } = useTranslation()
+	const { t } = useAppTranslation()
 	const { reasoningBlockCollapsed } = useExtensionState()
 
 	const [isCollapsed, setIsCollapsed] = useState(reasoningBlockCollapsed)

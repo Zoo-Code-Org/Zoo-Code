@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "Configuração de API",
-		"select": "Selecione qual configuração de API usar para este modo"
+		"select": "Selecione qual configuração de API usar para este modo",
+		"pinnedGroupAriaLabel": "Configurações fixadas",
+		"allGroupAriaLabel": "Todas as configurações"
 	},
 	"tools": {
 		"title": "Ferramentas disponíveis",
@@ -47,7 +49,8 @@
 		"title": "Instruções personalizadas específicas do modo (opcional)",
 		"resetToDefault": "Restaurar para padrão",
 		"description": "Adicione diretrizes comportamentais específicas para o modo {{modeName}}.",
-		"loadFromFile": "Instruções personalizadas específicas para o modo {{mode}} também podem ser carregadas da pasta <span>.roo/rules-{{slug}}/</span> no seu espaço de trabalho ou do global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} e .clinerules-{{slug}} estão obsoletos e deixarão de funcionar em breve)."
+		"loadFromFile": "Instruções personalizadas específicas para o modo {{mode}} também podem ser carregadas da pasta <span>.roo/rules-{{slug}}/</span> no seu espaço de trabalho ou do global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} e .clinerules-{{slug}} estão obsoletos e deixarão de funcionar em breve).",
+		"loadFromFileAriaLabel": "Saiba mais sobre as instruções personalizadas globais para modos"
 	},
 	"exportMode": {
 		"title": "Exportar modo",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Instruções personalizadas para todos os modos",
 		"description": "Estas instruções se aplicam a todos os modos. Elas fornecem um conjunto base de comportamentos que podem ser aprimorados por instruções específicas do modo abaixo. <0>Saiba mais</0>",
-		"loadFromFile": "Instruções também podem ser carregadas da pasta <span>.roo/rules/</span> no seu espaço de trabalho ou do global <0>.roo/rules/</0> (.roorules e .clinerules estão obsoletos e deixarão de funcionar em breve)."
+		"loadFromFile": "Instruções também podem ser carregadas da pasta <span>.roo/rules/</span> no seu espaço de trabalho ou do global <0>.roo/rules/</0> (.roorules e .clinerules estão obsoletos e deixarão de funcionar em breve).",
+		"learnMoreAriaLabel": "Saiba mais sobre as instruções personalizadas globais",
+		"loadFromFileAriaLabel": "Saiba como configurar instruções personalizadas globais"
 	},
 	"systemPrompt": {
 		"preview": "Visualizar prompt do sistema",
@@ -88,6 +93,13 @@
 			"testEnhancement": "Testar aprimoramento",
 			"includeTaskHistory": "Incluir histórico de tarefas como contexto",
 			"includeTaskHistoryDescription": "Quando habilitado, as últimas 10 mensagens da conversa atual serão incluídas como contexto ao aprimorar prompts, ajudando a gerar sugestões mais relevantes e conscientes do contexto."
+		},
+		"taskTitle": {
+			"enabled": "Gerar títulos de tarefa automaticamente",
+			"enabledDescription": "Resume em segundo plano o primeiro prompt de cada nova tarefa em um título curto. As solicitações de título não são incluídas no custo da tarefa. Perfis do GitHub Copilot e do VS Code LM consomem sua cota.",
+			"apiConfiguration": "Configuração de API",
+			"useTaskConfig": "Usar a configuração de API da tarefa",
+			"apiConfigDescription": "Recomenda-se um perfil leve, sem raciocínio. Se você escolher outro perfil, o início do seu prompt será enviado a esse provedor."
 		},
 		"types": {
 			"ENHANCE": {
@@ -129,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Iniciar Nova Tarefa",
 				"description": "Inicie uma nova tarefa com a entrada fornecida. Disponível na paleta de comandos."
+			},
+			"TASK_TITLE": {
+				"label": "Título da tarefa",
+				"description": "Gera em segundo plano um título curto para novas tarefas. Ele aparece no histórico e no cabeçalho da tarefa. Configure abaixo."
 			}
 		}
 	},
@@ -188,5 +204,10 @@
 		"rulesFolder": "Este modo tem uma pasta de regras em {{folderPath}} que também será excluída.",
 		"confirm": "Excluir",
 		"cancel": "Cancelar"
+	},
+	"mcpServers": {
+		"restrict": "Restringir a servidores MCP específicos",
+		"noneConnected": "Nenhum servidor MCP conectado",
+		"notConnected": "{{serverName}} (não conectado)"
 	}
 }

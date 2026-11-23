@@ -47,11 +47,13 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.96.0
+## Nieuw in Zoo Code v3.98.2
 
-- ✨ **Nieuwe chatinstellingen en diagnostiek:** Toon tijdstempels bij berichten met instelbare tijd- en datumformaten, stel de prompt-cache-TTL voor Anthropic-profielen af en genereer privacyvriendelijke diagnostiekrapporten.
-- 💸 **Nauwkeurigere providerkosten en caching:** Houdt Anthropic-toolresultaten intact, neemt cumulatieve outputtokens mee in Anthropic- en MiniMax-kosten, leest DeepSeek-prompt-cache-tellers, richt zich op de xAI Responses-cache en factureert Mistral-cache-leesacties tegen 0,1x.
-- 🧭 **Betrouwbaardere en snellere chats:** Hervat voltooide taken na een herstart, herstel checkpoints wanneer de opgeslagen commit ontbreekt, herlaad een dode webview-renderer automatisch, beperk streamingupdates en laad talen op verzoek.
+- 💫Probeer Zoo Pass met onbeperkt GLM-5.3-Flash gratis tot 1 december met elk geldbedrag op je Zoo Gateway-account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modellen: Gebruik Gemini 3.8 Flash en de nieuwe modellen Gemini 4 Carbon, Hydrogen en Neon. Stel xhigh-denkniveaus in voor Gemini.
+- 🌐 Responses API: Zet Responses API-ondersteuning aan voor OpenAI Compatible-providers. Redeneren met toolgebruik werkt op endpoints die dit vereisen.
+- 🔧 Oplossingen: Vertex Gemini-verzoeken eindigen niet langer op een modelbeurt. Gemini-thought-signatures blijven via LiteLLM intact. Ollama-taken condenseren op de ingestelde contextlimiet.
 
 ## Wat kan Zoo Code voor JOU doen?
 

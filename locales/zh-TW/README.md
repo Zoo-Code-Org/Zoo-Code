@@ -43,11 +43,13 @@ Zoo Code 以 Roo Code 建立的基礎持續擴充，新增了：
 - **更可靠的終端機與編輯工作流程** — 修正終端機過早完成、工作狀態競爭、上下文管理、差異更新編輯和供應商專用工具使用等問題。
 - **更完整的工作區控制** — 支援規則管理、依模式限制 MCP、多根工作區路徑控制、模型推理選項，以及完成後的變更檢閱操作。
 
-## v3.96.0 新功能
+## Zoo Code v3.98.2 新功能
 
-- ✨ **全新聊天設定與診斷:** 以可設定的時間與日期格式顯示訊息時間戳記，為 Anthropic 設定檔調整 prompt-cache TTL，並產生注重隱私的診斷報告。
-- 💸 **更精準的供應商計費與快取:** 保持 Anthropic 工具結果完整無損，在 Anthropic 和 MiniMax 成本中採用累計輸出 token，讀取 DeepSeek 的 prompt-cache 計數器，命中 xAI Responses 快取，並以 0.1x 計收 Mistral 快取讀取費用。
-- 🧭 **更可靠、更快速的對話:** 重新啟動後續跑已完成的任務，在已儲存的 commit 遺失時仍能還原 checkpoint，自動重新載入無回應的 webview 轉譯器，節流串流更新，並視需要載入語言包。
+- 💫預覽 Zoo Pass：只要你的 Zoo Gateway 帳戶中有任意金額的餘額，即可在 12 月 1 日前免費無限使用 GLM-5.3-Flash。
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 模型：支援 Gemini 3.8 Flash 和新的 Gemini 4 Carbon、Hydrogen、Neon 模型。可為 Gemini 設定 xhigh 思考層級。
+- 🌐 Responses API：可為 OpenAI Compatible 供應商啟用 Responses API 支援。在需要該 API 的端點上，含工具使用的推理也能正常運作。
+- 🔧 修正：Vertex 的 Gemini 請求不再以模型輪次結尾；LiteLLM 下的 Gemini 思考簽章保持完整；Ollama 工作會在設定的上下文限制處壓縮。
 
 ## Zoo Code 能為您做什麼？
 

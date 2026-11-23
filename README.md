@@ -46,11 +46,12 @@ Zoo Code builds on the foundation created by Roo Code and continues to expand it
 - **More dependable terminal and editing workflows** — fixes for premature terminal completion, task-state races, context management, diff editing, and provider-specific tool use.
 - **More control over your workspace** — rules management, per-mode MCP restrictions, multi-root path controls, model reasoning options, and completion change review actions.
 
-## What's New in v3.96.0
+## What is new in Zoo Code v3.98.2
 
-- ✨ **New chat settings and diagnostics:** Show message timestamps with configurable time and date formats, tune the prompt-cache TTL for Anthropic profiles, and generate privacy-safe diagnostics reports.
-- 💸 **More accurate provider costs and caching:** Keep Anthropic tool results intact, adopt cumulative output tokens in Anthropic and MiniMax costs, read DeepSeek prompt-cache counters, target the xAI Responses cache, and bill Mistral cache reads at 0.1x.
-- 🧭 **More reliable and faster chats:** Resume completed tasks after a restart, restore checkpoints when the saved commit is missing, auto-reload a dead webview renderer, throttle streaming updates, and load locales on demand.
+- 💫Preview the Zoo Pass with unlimited GLM-5.3-Flash free until Dec 1 with any amount of money on your Zoo Gateway account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Models: Use Gemini 3.8 Flash and the new Gemini 4 Carbon, Hydrogen, and Neon models, with `xhigh` thinking levels on Gemini.
+- 🔧 Fixes and provider support: Stop Vertex Gemini requests that end with a model turn, keep Gemini thought signatures intact through LiteLLM, condense Ollama tasks at the configured context limit, and turn on Responses API support for OpenAI Compatible providers.
 
 <details>
   <summary>🌐 Available languages</summary>

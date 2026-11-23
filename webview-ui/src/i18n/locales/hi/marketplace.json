@@ -18,6 +18,7 @@
 		"tags": {
 			"label": "टैग के अनुसार फ़िल्टर करें:",
 			"clear": "टैग साफ़ करें",
+			"removeFromFilter": "फ़िल्टर से '{{tag}}' हटाने के लिए क्लिक करें",
 			"placeholder": "टैग खोजने और चुनने के लिए टाइप करें...",
 			"noResults": "कोई मिलान टैग नहीं मिला",
 			"selected": "चयनित टैग में से किसी एक के साथ आइटम दिखाएं",
@@ -69,7 +70,8 @@
 		"goToModes": "मोड सेटिंग्स पर जाएं",
 		"moreInfoMcp": "{{name}} MCP दस्तावेज़ देखें",
 		"validationRequired": "कृपया {{paramName}} के लिए एक मान प्रदान करें",
-		"prerequisites": "आवश्यकताएं"
+		"prerequisites": "आवश्यकताएं",
+		"optional": "(वैकल्पिक)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -86,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "कोई marketplace आइटम के साथ समस्या है या नए आइटम के लिए सुझाव हैं? <0>GitHub issue खोलें</0> हमें बताने के लिए!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "मोड"
 	}
 }
