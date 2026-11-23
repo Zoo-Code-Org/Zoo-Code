@@ -156,7 +156,6 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		throwIfAborted(metadata?.abortSignal)
 		const signal = metadata?.abortSignal
 
 		const modelId = this.options.openAiModelId ?? ""
@@ -165,9 +164,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// `reasoning_effort` combined with function tools on /chat/completions and
 		// require /responses instead.
 		if (this.options.openAiUseResponsesApi) {
+			// The Responses route hands the caller's signal to the SDK at request construction,
+			// where it is bridged, so the SDK rejects it there. Throwing before the handoff would
+			// skip the request entirely and drop the signal the caller passed.
 			yield* this.handleResponsesApiMessage(systemPrompt, messages, metadata)
 			return
 		}
+
+		// The routes below build and issue the request locally, so a signal that is already
+		// aborted fails before any of that work happens.
+		throwIfAborted(signal)
 
 		const { info: modelInfo, reasoning } = this.getModel()
 		const modelUrl = this.options.openAiBaseUrl ?? ""
@@ -626,10 +632,16 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			return response.choices?.[0]?.message.content || ""
 		} catch (error) {
 			if (error instanceof OutputTokenLimitError) throw error
-			if (isRequestAborted(error, options?.abortSignal)) throw createAbortError(this.providerName)
 			if (error instanceof Error && (error.name === "AbortError" || error.name === "TimeoutError")) {
-				// Preserve the normalized abort or timeout error (name + message contract) as-is.
+				// The request-site handler already turned this into the contract error and chained
+				// the underlying failure as its cause. Re-wrapping it here would drop that cause, so
+				// name, message and cause are preserved exactly as they arrive.
 				throw error
+			}
+			// A raw SDK abort (name APIUserAbortError) or a signal that aborted mid-flight still
+			// needs the contract error, with the failure that triggered it kept as the cause.
+			if (isRequestAborted(error, options?.abortSignal)) {
+				throw createAbortError(this.providerName, error)
 			}
 
 			if (error instanceof Error) {
