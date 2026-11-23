@@ -331,12 +331,12 @@
 		"title": "Zoo Code {{version}} est disponible",
 		"support": "Soutiens Zoo Code en nous donnant une étoile sur <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nouveautés de Zoo Code v3.98.1",
+			"heading": "Nouveautés de Zoo Code v3.98.2",
 			"highlight0": "💫Découvre Zoo Pass avec GLM-5.3-Flash illimité gratuitement jusqu'au 1er décembre avec n'importe quel solde sur ton compte Zoo Gateway.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Modèles et raisonnement : Utilise GPT-6.2 Sol, GPT-6.2 Astra et Claude Sonnet 5.5. Règle l'effort de raisonnement pour chaque profil LiteLLM.",
-			"highlight2": "🛡️ Sécurité : Amélioration du traitement des métadonnées des compétences et commandes, des mentions, des liens fournisseurs et des approbations CLI.",
-			"highlight3": "🔧 Corrections : Coûts des niveaux de service OpenAI, reconnaissance des liens symboliques de l'espace de travail et davantage de textes traduits."
+			"highlight1": "🔌 Modèles : Utilise Gemini 3.8 Flash et les nouveaux modèles Gemini 4 Carbon, Hydrogen et Neon. Définis le niveau de pensée xhigh sur Gemini.",
+			"highlight2": "🌐 API Responses : Active la prise en charge de l'API Responses pour les fournisseurs compatibles OpenAI. Le raisonnement avec utilisation d'outils fonctionne sur les points de terminaison qui l'exigent.",
+			"highlight3": "🔧 Corrections : Les requêtes Gemini sur Vertex ne se terminent plus par un tour du modèle. Les signatures de pensée Gemini restent intactes via LiteLLM. Les tâches Ollama se condensent à la limite de contexte configurée."
 		}
 	},
 	"costs": {

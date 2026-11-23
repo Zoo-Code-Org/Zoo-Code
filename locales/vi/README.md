@@ -46,13 +46,13 @@ Zoo Code phát triển trên nền tảng do Roo Code tạo ra và tiếp tục 
 - **Workflow terminal và chỉnh sửa đáng tin cậy hơn** — sửa lỗi terminal hoàn tất quá sớm, xung đột trạng thái tác vụ, quản lý ngữ cảnh, chỉnh sửa diff và sử dụng công cụ riêng của từng provider.
 - **Kiểm soát workspace tốt hơn** — quản lý quy tắc, giới hạn MCP theo từng chế độ, kiểm soát đường dẫn multi-root, tùy chọn reasoning của model và thao tác xem lại thay đổi khi hoàn tất.
 
-## Điểm mới trong Zoo Code v3.98.1
+## Điểm mới trong Zoo Code v3.98.2
 
 - 💫Trải nghiệm Zoo Pass với GLM-5.3-Flash không giới hạn miễn phí đến ngày 1 tháng 12 khi tài khoản Zoo Gateway của bạn có số dư bất kỳ.
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 Mô hình và suy luận: Dùng GPT-6.2 Sol, GPT-6.2 Astra và Claude Sonnet 5.5. Đặt mức suy luận cho từng hồ sơ LiteLLM.
-- 🛡️ Bảo mật: Cải thiện phân tích siêu dữ liệu kỹ năng và lệnh, xử lý đề cập, liên kết nhà cung cấp và kiểm tra phê duyệt CLI.
-- 🔧 Sửa lỗi: Chi phí cấp dịch vụ OpenAI, nhận diện liên kết tượng trưng trong không gian làm việc và thêm bản dịch giao diện.
+- 🔌 Mô hình: Dùng Gemini 3.8 Flash và các mô hình mới Gemini 4 Carbon, Hydrogen và Neon. Đặt mức suy nghĩ xhigh cho Gemini.
+- 🌐 Responses API: Bật hỗ trợ Responses API cho nhà cung cấp tương thích OpenAI. Suy luận có dùng công cụ hoạt động trên các điểm cuối yêu cầu nó.
+- 🔧 Sửa lỗi: Yêu cầu Gemini trên Vertex không còn kết thúc bằng lượt của mô hình. Chữ ký suy nghĩ của Gemini vẫn nguyên vẹn qua LiteLLM. Tác vụ Ollama nén tại giới hạn ngữ cảnh đã cấu hình.
 
 ## Zoo Code có thể làm gì cho BẠN?
 
