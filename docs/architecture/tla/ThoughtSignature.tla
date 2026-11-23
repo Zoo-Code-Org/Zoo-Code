@@ -35,7 +35,7 @@
 \* | ThoughtSignature.ModelOnly.cfg    | origin ignores litellmBaseUrl              | fails after 1 turn  |
 \* | ThoughtSignature.NoOrigin.cfg     | no origin check                            | fails after 1 turn  |
 \* | ThoughtSignature.AllCalls.cfg     | signature on every parallel call           | fails after 1 turn  |
-\* | ThoughtSignature.NoMarker.cfg     | bypass on the model name only              | fails after 1 turn  |
+\* | ThoughtSignature.NoMarker.cfg     | bypass on the model name only              | retired: IDs stripped |
 \* | ThoughtSignature.NoReset.cfg      | lastThoughtSignature kept across requests  | fails after 2 turns |
 \* | ThoughtSignature.NativeLeak.cfg   | native Gemini reads a LiteLLM signature    | fails after 1 turn  |
 \* | ThoughtSignature.DropStored.cfg   | stored signature never sent (bypass only)  | fails after 1 turn  |
@@ -122,6 +122,23 @@
 \* Review totals for PR 2643: 1 covered, 1 added, 0 gap. Null result: no further failure in this input domain.
 \* Cost: about 5 agent minutes. The model does not check fragmented signature bytes or gateway behavior.
 
+\* PR 2643 review ratchet: encoded-ID isolation and request ownership need new invariants.
+\* Threads: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4660769100
+\* https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4660769109
+\* Failure: a foreign backend receives signature bytes in an ID. Invariant: NoForeignEncodedSignature.
+\* Failure: an old drain changes the current request's signature. Invariant: RequestSignatureOwned.
+\* Expect KeepForeignEncodedIds and SharedLast to fail. Replay endpoint changes and two overlapping streams.
+\* Request ownership is checked in ThoughtSignatureRequests. It reuses the stream source rules.
+\* NoMarker now passes: stripped foreign IDs cannot trigger corrupt-ID decoding. Retire that obsolete variant.
+\* This does not prove every unlisted alias accepts unsigned calls. The existing Unlisted limit remains.
+\* Result: both old models fail. Handler replays reproduce 11 stale-drain failures and 4 foreign-ID failures.
+\* Fixed models hold: 507 history states and 51 request states. All active sabotage variants fail as expected.
+\* Properties: 48 origin-isolation cases and 16 handler ownership cases. History signatures are checked through preparation.
+\* Encoded-ID code sabotage fails 24 property cases. The restored code passes all 1,074 tests in four suites.
+\* Types, lint, formatting and both Knip checks pass. Suppression counts stay equal.
+\* Review totals for PR 2643: 1 covered, 3 added, 0 gap. No further failure in the checked domains.
+\* Cost: about 8 agent minutes. Hash collisions and history saves after a newer request starts are outside the models.
+
 EXTENDS Naturals, Sequences, ThoughtSignatureStream
 
 VARIABLE history   \* One assistant message per turn. Each message has the fields of Message.
@@ -201,9 +218,24 @@ Sent(t, listed, k, i) ==
             ELSE None
        ELSE IF Real(m.sig) /\ NativeUses(m) THEN m.sig ELSE Bypass
 
+\* applyThoughtSignatures must remove foreign signature bytes from IDs as well as explicit fields.
+KeepForeignEncodedIds == FALSE
+EncodedIdSent(t, k) ==
+    LiteLlm(t) /\ history[k].marker /\ (OriginMatches(history[k], t) \/ KeepForeignEncodedIds)
+NoForeignEncodedSignature ==
+    \A t \in Backends, k \in 1..Len(history) :
+        ~OriginMatches(history[k], t) => ~EncodedIdSent(t, k)
+
+\* Both sides of a tool exchange use the same ID mapping. ID normalization stays an oracle.
+RewriteToolResultIds == TRUE
+ToolResultIdsMatch ==
+    \A t \in Backends, k \in 1..Len(history) :
+        LiteLlm(t) => (EncodedIdSent(t, k) =
+            (IF RewriteToolResultIds THEN EncodedIdSent(t, k) ELSE history[k].marker))
+
 \* LiteLLM decodes the sanitized __thought__ id of a call that has no field.
 DecodesCorruptId(t, listed, k, i) ==
-    RunsGemini(t) /\ LiteLlm(t) /\ Sent(t, listed, k, i) = None /\ history[k].marker /\ i = 1
+    RunsGemini(t) /\ LiteLlm(t) /\ Sent(t, listed, k, i) = None /\ EncodedIdSent(t, k) /\ i = 1
 
 \* The sink oracle. A backend that does not run Gemini rejects every call with the field.
 Rejected(t, listed, k, i) ==

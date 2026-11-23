@@ -39,12 +39,7 @@ import { DEFAULT_HEADERS, NOT_PROVIDED } from "./constants"
 import { BaseProvider } from "./base-provider"
 import type { SingleCompletionHandler, ApiHandlerCreateMessageMetadata, CompletePromptOptions } from "../index"
 import { handleOpenAIError } from "./utils/error-handler"
-import {
-	applyThoughtSignatures,
-	readThoughtSignature,
-	thoughtSignatureOrigin,
-	ThoughtSignatureReader,
-} from "./utils/thought-signature"
+import { applyThoughtSignatures, thoughtSignatureOrigin, ThoughtSignatureReader } from "./utils/thought-signature"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
 import {
 	bridgeExternalAbortSignal,
@@ -80,7 +75,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	protected options: ApiHandlerOptions
 	protected client: OpenAI
 	private readonly providerName = "OpenAI"
-	private lastThoughtSignature: string | undefined
+	private thoughtSignatureReader: ThoughtSignatureReader | undefined
 	private signatureOrigin: string | undefined
 	private readonly extraBody: Record<string, unknown>
 	private responsesReasoning: OpenAI.Responses.ResponseReasoningItem[] = []
@@ -152,7 +147,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		messages: Anthropic.Messages.MessageParam[],
 		metadata?: ApiHandlerCreateMessageMetadata,
 	): ApiStream {
-		this.lastThoughtSignature = undefined
+		// Each generator owns its reader. An older usage drain cannot change the current signature.
+		const signatureReader = new ThoughtSignatureReader()
+		this.thoughtSignatureReader = signatureReader
 		this.signatureOrigin = thoughtSignatureOrigin(
 			this.options.openAiBaseUrl || "https://api.openai.com/v1",
 			this.options.openAiModelId ?? "",
@@ -284,12 +281,11 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 
 			let lastUsage
 			const activeToolCallIds = new Set<string>()
-			const signatureReader = new ThoughtSignatureReader()
 
 			for await (const chunk of stream) {
 				const delta = chunk.choices?.[0]?.delta ?? {}
 				const finishReason = chunk.choices?.[0]?.finish_reason
-				this.lastThoughtSignature = signatureReader.read(delta.tool_calls)
+				signatureReader.update(delta.tool_calls)
 
 				const reasoningText = extractReasoningFromDelta(delta)
 				if (reasoningText) {
@@ -347,7 +343,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			}
 
 			const message = response.choices?.[0]?.message
-			this.lastThoughtSignature = readThoughtSignature(message?.tool_calls)
+			signatureReader.update(message?.tool_calls)
 
 			if (message?.tool_calls) {
 				for (const toolCall of message.tool_calls) {
@@ -464,7 +460,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 	}
 
 	getThoughtSignature(): string | undefined {
-		return this.lastThoughtSignature
+		return this.thoughtSignatureReader?.signature
 	}
 
 	getThoughtSignatureOrigin(): string | undefined {

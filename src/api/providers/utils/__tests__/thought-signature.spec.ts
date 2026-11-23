@@ -6,12 +6,7 @@ import { sanitizeToolUseId } from "../../../../utils/tool-id"
 import { toolResultsMessage } from "../../../../test-utils/thought-signature"
 import { sanitizeOpenAiCallId } from "../../../../utils/tool-id"
 import { signedAssistantMessage, TEST_THOUGHT_SIGNATURE as signature } from "../../../../test-utils/thought-signature"
-import {
-	applyThoughtSignatures,
-	readThoughtSignature,
-	thoughtSignatureOrigin,
-	ThoughtSignatureReader,
-} from "../thought-signature"
+import { applyThoughtSignatures, thoughtSignatureOrigin, ThoughtSignatureReader } from "../thought-signature"
 
 const origin = "litellm|http://localhost:4000|gemini-3-pro"
 const bypass = "bypass"
@@ -26,6 +21,12 @@ function signed(id: string, value: string) {
 
 function assistantWith(...ids: string[]): OpenAI.Chat.ChatCompletionMessageParam {
 	return { role: "assistant", content: null, tool_calls: ids.map(toolCall) }
+}
+
+function readThoughtSignature(toolCalls: readonly unknown[] | null | undefined): string | undefined {
+	const reader = new ThoughtSignatureReader()
+	reader.update(toolCalls)
+	return reader.signature
 }
 
 describe("readThoughtSignature", () => {
@@ -96,14 +97,17 @@ describe("ThoughtSignatureReader stream priority property", () => {
 
 	it.each(streams)("selects by source priority for $sources", ({ sources }) => {
 		const reader = new ThoughtSignatureReader()
-		expect(reader.read(undefined)).toBeUndefined()
+		reader.update(undefined)
+		expect(reader.signature).toBeUndefined()
 		for (let count = 1; count <= sources.length; count++) {
 			const prefix = sources.slice(0, count)
 			const expected =
 				prefix.find((candidate) => candidate.source === "explicit")?.value ??
 				prefix.find((candidate) => candidate.source === "encoded")?.value
-			expect(reader.read([sources[count - 1].call])).toBe(expected)
-			expect(reader.read(null)).toBe(expected)
+			reader.update([sources[count - 1].call])
+			expect(reader.signature).toBe(expected)
+			reader.update(null)
+			expect(reader.signature).toBe(expected)
 		}
 	})
 })
@@ -270,4 +274,57 @@ describe("proxy signature round trip property", () => {
 		}
 		expect(applyThoughtSignatures([], [message], { origin })).toEqual([message])
 	})
+})
+
+// NoForeignEncodedSignature: foreign signature bytes must leave neither through fields nor through IDs.
+describe("origin isolation property", () => {
+	const cases = [undefined, origin, "foreign"].flatMap((storedOrigin) =>
+		[1, 100].flatMap((prefixLength) =>
+			[false, true].flatMap((truncate) =>
+				[false, true].flatMap((r1) =>
+					[false, true].map((useFallback) => ({ storedOrigin, prefixLength, truncate, r1, useFallback })),
+				),
+			),
+		),
+	)
+	it.each(cases)(
+		"isolates $storedOrigin with prefix=$prefixLength truncate=$truncate r1=$r1 fallback=$useFallback",
+		({ storedOrigin, prefixLength, truncate, r1, useFallback }) => {
+			const prefix = "call_" + "x".repeat(prefixLength)
+			const ids = [signature, signature + "second"].map((value) =>
+				sanitizeToolUseId(`${prefix}__thought__${value}`),
+			)
+			const history = [signedAssistantMessage(ids, { origin: storedOrigin }), toolResultsMessage(ids)]
+			const normalizeToolCallId = truncate ? sanitizeOpenAiCallId : (id: string) => id
+			const converted = r1
+				? convertToR1Format(history, { normalizeToolCallId })
+				: convertToOpenAiMessages(history, { normalizeToolCallId })
+			const before = structuredClone(converted)
+			const result = applyThoughtSignatures(history, converted, {
+				origin,
+				normalizeToolCallId,
+				fallback: useFallback ? () => bypass : undefined,
+			})
+			const assistant = result.find((message) => message.role === "assistant")
+			const calls = assistant?.role === "assistant" ? (assistant.tool_calls ?? []) : []
+			expect(calls).toHaveLength(2)
+			expect(new Set(calls.map((call) => call.id)).size).toBe(2)
+			expect(result.filter((message) => message.role === "tool").map((message) => message.tool_call_id)).toEqual(
+				calls.map((call) => call.id),
+			)
+			if (storedOrigin === origin) {
+				expect(calls.map((call) => call.id)).toEqual(ids.map((id) => normalizeToolCallId(id)))
+				expect(calls[0]).toMatchObject({ provider_specific_fields: { thought_signature: signature } })
+			} else {
+				expect(JSON.stringify(result)).not.toContain("__thought__")
+				expect(JSON.stringify(result)).not.toContain(signature)
+				for (const call of calls) {
+					if (useFallback)
+						expect(call).toMatchObject({ provider_specific_fields: { thought_signature: bypass } })
+					else expect(call).not.toHaveProperty("provider_specific_fields")
+				}
+			}
+			expect(converted).toEqual(before)
+		},
+	)
 })

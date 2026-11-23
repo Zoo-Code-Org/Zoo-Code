@@ -12,6 +12,12 @@ EchoUnsigned == TRUE
 \* Streaming sabotage: keep the first signature, including an ID fallback.
 KeepFirstCaptured(previous, chunk) == IF previous # StreamNone THEN previous ELSE chunk
 
+\* Sabotage: origin checks omit the explicit field but keep the encoded signature in the ID.
+KeepEncodedIds == TRUE
+
+\* Sabotage: rewrite assistant call IDs but keep encoded tool-result IDs.
+KeepResultIds == FALSE
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 
@@ -27,7 +33,7 @@ ModelOrigin(b) == ModelOf(b)
 AnyOrigin(m, t) == TRUE
 \* AllCalls: a signature on every parallel call.
 EveryCall(i) == TRUE
-\* NoMarker and Legacy: no __thought__ fallback.
+\* Legacy: no __thought__ fallback. The separate NoMarker variant is retired after ID stripping.
 NoMarkerFallback(m, listed, i) == FALSE
 \* MarkerAlways: the round 2 code. The __thought__ fallback also applies to a listed model.
 MarkerAlways(m, listed, i) == m.marker /\ i = 1

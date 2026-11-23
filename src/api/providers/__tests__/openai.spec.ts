@@ -159,6 +159,80 @@ describe("OpenAI Compatible proxy signatures", () => {
 		expect(handler.getThoughtSignature()).toBe(expected)
 	})
 
+	// RequestSignatureOwned: an older drain cannot change the current request's history signature.
+	it.each(
+		[undefined, "old"].flatMap((oldSignature) =>
+			[undefined, "new"].flatMap((newSignature) =>
+				[false, true].map((lateExplicit) => ({ oldSignature, newSignature, lateExplicit })),
+			),
+		),
+	)(
+		"keeps request signature ownership for $oldSignature/$newSignature (lateExplicit=$lateExplicit)",
+		async ({ oldSignature, newSignature, lateExplicit }) => {
+			const handler = new OpenAiHandler(
+				makeApiHandlerOptions({ openAiApiKey: "test", openAiModelId: "gemini-3-flash" }),
+			)
+			const firstChunk = (signature: string | undefined) => ({
+				choices: [
+					{
+						delta: {
+							tool_calls: [
+								{
+									index: 0,
+									id: "call_1",
+									function: { name: "read_file", arguments: "{}" },
+									...(signature
+										? { provider_specific_fields: { thought_signature: signature } }
+										: {}),
+								},
+							],
+						},
+					},
+				],
+			})
+			let chunks = [
+				firstChunk(oldSignature),
+				lateExplicit
+					? {
+							choices: [
+								{
+									delta: {
+										tool_calls: [
+											{ index: 0, provider_specific_fields: { thought_signature: "late-old" } },
+										],
+									},
+								},
+							],
+						}
+					: { choices: [{ delta: {} }] },
+			]
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom(chunks))
+			const older = handler.createMessage("system", [])
+			await older.next()
+			chunks = [firstChunk(newSignature)]
+			mockCreate.mockResolvedValueOnce(asyncStreamFrom(chunks))
+			await collectStream(handler.createMessage("system", []))
+			await collectStream(older)
+			expect(handler.getThoughtSignature()).toBe(newSignature)
+			const saved = prepareApiConversationMessage({
+				message: {
+					role: "assistant",
+					content: [{ type: "tool_use", id: "call_1", name: "read_file", input: {} }],
+				},
+				api: handler,
+				apiConfiguration: { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" },
+				apiConversationHistory: [],
+			})
+			expect(saved.content).toEqual(
+				newSignature
+					? expect.arrayContaining([
+							expect.objectContaining({ type: "thoughtSignature", thoughtSignature: newSignature }),
+						])
+					: [expect.objectContaining({ type: "tool_use" })],
+			)
+		},
+	)
+
 	it.each([true, false])("returns an ID-only signature with streaming=%s", async (streaming) => {
 		const handler = new OpenAiHandler(
 			makeApiHandlerOptions({
@@ -231,11 +305,12 @@ describe("OpenAI Compatible proxy signatures", () => {
 			expect(target.getThoughtSignatureOrigin()).not.toBe(source.getThoughtSignatureOrigin())
 			const request: OpenAI.Chat.ChatCompletionCreateParams = mockCreate.mock.calls.at(-1)![0]
 			const assistant = request.messages.find((message) => message.role === "assistant")
-			expect(assistant).toMatchObject({ tool_calls: [{ id: storedId }] })
+			expect(assistant).toMatchObject({ tool_calls: [{ id: expect.stringMatching(/^call_1_[a-f0-9]{16}$/) }] })
 			expect(assistant).not.toHaveProperty("tool_calls.0.provider_specific_fields.thought_signature")
 			expect(JSON.stringify(request.messages)).not.toContain(TEST_THOUGHT_SIGNATURE)
+			expect(JSON.stringify(request.messages)).not.toContain("__thought__")
 			expect(request.messages.find((message) => message.role === "tool")).toMatchObject({
-				tool_call_id: storedId,
+				tool_call_id: assistant?.role === "assistant" ? assistant.tool_calls?.[0].id : undefined,
 			})
 		},
 	)

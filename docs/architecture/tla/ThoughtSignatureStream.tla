@@ -5,6 +5,12 @@
 \* Expect the old first-value rule to fail for an encoded chunk followed by an explicit chunk.
 \* Candidate values are oracles. ID parsing and transport chunk boundaries are outside this model.
 \* Cost and results are recorded in ThoughtSignature.tla.
+\* API simplification expectation: update changes reader state; signature reads it without mutation.
+\* Keep source priority, request ownership and ID isolation unchanged. Expect no new model failure.
+\* The property tests now observe signature after each update. Keep every sabotage configuration.
+\* Result: both models pass (507 history states, 51 request states); all active sabotage variants fail as expected.
+\* All 1,074 tests, types, lint, formatting and both Knip checks pass. Suppression counts stay equal.
+\* Null result: no new failure or state change. Cost: about 1 agent minute.
 EXTENDS Naturals, Sequences
 
 StreamNone == [source |-> "none", value |-> ""]

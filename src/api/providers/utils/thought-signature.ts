@@ -30,11 +30,15 @@ export class ThoughtSignatureReader {
 	private explicit: string | undefined
 	private encoded: string | undefined
 
-	read(toolCalls: readonly unknown[] | null | undefined): string | undefined {
-		if (this.explicit !== undefined) return this.explicit
+	get signature(): string | undefined {
+		return this.explicit ?? this.encoded
+	}
+
+	update(toolCalls: readonly unknown[] | null | undefined): void {
+		if (this.explicit !== undefined) return
 		for (const call of toolCalls ?? []) {
 			this.explicit = signatureOf(call)
-			if (this.explicit !== undefined) return this.explicit
+			if (this.explicit !== undefined) return
 			// Keep looking for an explicit field after an ID fallback, including in later chunks.
 			if (this.encoded !== undefined) continue
 			if (typeof call !== "object" || call === null || !("id" in call) || typeof call.id !== "string") continue
@@ -43,40 +47,42 @@ export class ThoughtSignatureReader {
 			const signature = call.id.slice(marker + LITELLM_THOUGHT_SIGNATURE_ID_MARKER.length)
 			if (signature) this.encoded = signature
 		}
-		return this.encoded
 	}
 }
 
-/** Read proxy signatures before history sanitization changes the encoded ID. */
-export function readThoughtSignature(toolCalls: readonly unknown[] | null | undefined): string | undefined {
-	return new ThoughtSignatureReader().read(toolCalls)
-}
-
-function collectThoughtSignatures(
+function collectToolCallReplay(
 	history: Anthropic.Messages.MessageParam[],
 	origin: string,
 	normalizeToolCallId: (id: string) => string,
-): Map<string, string> {
-	const signatureByToolCallId = new Map<string, string>()
+): Map<string, { id: string; signature?: string }> {
+	const calls = new Map<string, { id: string; signature?: string }>()
 	for (const message of history) {
-		if (message.role !== "assistant" || !Array.isArray(message.content)) {
-			continue
-		}
+		if (message.role !== "assistant" || !Array.isArray(message.content)) continue
 		let signature: string | undefined
-		let firstToolUseId: string | undefined
+		const toolUseIds: string[] = []
 		const blocks: readonly ExtendedContentBlockParam[] = message.content
 		for (const block of blocks) {
 			if (isThoughtSignatureContentBlock(block)) {
 				signature = block.origin === origin ? block.thoughtSignature : undefined
 			} else if (block.type === "tool_use") {
-				firstToolUseId ??= block.id
+				toolUseIds.push(block.id)
 			}
 		}
-		if (signature && firstToolUseId) {
-			signatureByToolCallId.set(normalizeToolCallId(firstToolUseId), signature)
+		for (const [index, id] of toolUseIds.entries()) {
+			const marker = id.indexOf(LITELLM_THOUGHT_SIGNATURE_ID_MARKER)
+			// Remove foreign signature bytes before normalization can truncate or hash the ID.
+			// Keep calls with the same prefix distinct after removing their signature suffixes.
+			const outgoingId =
+				!signature && marker >= 0
+					? `${id.slice(0, marker) || "call"}_${createHash("sha256").update(id).digest("hex").slice(0, 16)}`
+					: id
+			calls.set(normalizeToolCallId(id), {
+				id: normalizeToolCallId(outgoingId),
+				...(index === 0 && signature ? { signature } : {}),
+			})
 		}
 	}
-	return signatureByToolCallId
+	return calls
 }
 
 interface ApplyThoughtSignaturesOptions {
@@ -98,17 +104,26 @@ export function applyThoughtSignatures(
 	openAiMessages: OpenAI.Chat.ChatCompletionMessageParam[],
 	{ origin, normalizeToolCallId = (id) => id, fallback }: ApplyThoughtSignaturesOptions,
 ): OpenAI.Chat.ChatCompletionMessageParam[] {
-	const storedSignatures = collectThoughtSignatures(history, origin, normalizeToolCallId)
+	const replayByToolCallId = collectToolCallReplay(history, origin, normalizeToolCallId)
 
 	return openAiMessages.map((message) => {
+		if (message.role === "tool") {
+			const id = replayByToolCallId.get(message.tool_call_id)?.id ?? message.tool_call_id
+			return id === message.tool_call_id ? message : { ...message, tool_call_id: id }
+		}
 		if (message.role !== "assistant" || !message.tool_calls?.length) {
 			return message
 		}
 		let signed = false
 		const toolCalls = message.tool_calls.map((toolCall) => {
-			const signature = storedSignatures.get(toolCall.id) ?? fallback?.(toolCall.id)
+			const stored = replayByToolCallId.get(toolCall.id)
+			const signature = stored?.signature ?? fallback?.(toolCall.id)
+			const id = stored?.id ?? toolCall.id
 			signed ||= Boolean(signature)
-			return signature ? { ...toolCall, provider_specific_fields: { thought_signature: signature } } : toolCall
+			if (signature) {
+				return { ...toolCall, id, provider_specific_fields: { thought_signature: signature } }
+			}
+			return id === toolCall.id ? toolCall : { ...toolCall, id }
 		})
 		const result: OpenAI.Chat.ChatCompletionAssistantMessageParam & { reasoning_content?: string } = {
 			...message,

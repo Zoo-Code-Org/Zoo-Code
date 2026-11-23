@@ -57,7 +57,7 @@ const LITELLM_DEFAULT_BASE_URL = "http://localhost:4000"
  * It follows the OpenAI API format for compatibility.
  */
 export class LiteLLMHandler extends RouterProvider implements SingleCompletionHandler {
-	private lastThoughtSignature: string | undefined
+	private thoughtSignatureReader: ThoughtSignatureReader | undefined
 	private thoughtSignatureOrigin: string | undefined
 
 	constructor(options: ApiHandlerOptions) {
@@ -120,7 +120,9 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		// already-aborted request fails with AbortError before provider model
 		// discovery (getModels/refreshModels) begins.
 		throwIfAborted(metadata?.abortSignal)
-		this.lastThoughtSignature = undefined
+		// Each generator owns its reader. An older usage drain cannot change the current signature.
+		const signatureReader = new ThoughtSignatureReader()
+		this.thoughtSignatureReader = signatureReader
 
 		// Model discovery is shared single-flight (RouterProvider.fetchModel):
 		// concurrent callers join one in-flight fetch, so the fetch itself
@@ -300,7 +302,6 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 				.withResponse()
 
 			let lastUsage
-			const signatureReader = new ThoughtSignatureReader()
 
 			for await (const chunk of completion) {
 				// Stop consuming buffered chunks once the request is aborted (the
@@ -327,7 +328,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 
 				// Handle tool calls in stream - emit partial chunks for NativeToolCallParser
 				if (delta?.tool_calls) {
-					this.lastThoughtSignature = signatureReader.read(delta.tool_calls)
+					signatureReader.update(delta.tool_calls)
 					for (const toolCall of delta.tool_calls) {
 						throwIfAborted(requestSignal)
 						yield {
@@ -397,7 +398,7 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 	}
 
 	getThoughtSignature(): string | undefined {
-		return this.lastThoughtSignature
+		return this.thoughtSignatureReader?.signature
 	}
 
 	getThoughtSignatureOrigin(): string | undefined {
