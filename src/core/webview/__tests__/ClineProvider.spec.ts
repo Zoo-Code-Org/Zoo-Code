@@ -7086,6 +7086,41 @@ describe("ClineProvider", () => {
 			mockContext.globalState.update = originalUpdate
 			await provider.dispose()
 		})
+
+		it("rolls the shared store back when a setValues batch commits one key and fails on the next", async () => {
+			const provider = new ClineProvider(
+				mockContext,
+				mockOutputChannel,
+				"sidebar",
+				new ContextProxy(mockContext),
+				new WebviewFocusTracker(),
+			)
+			await provider.contextProxy.setValues({ mode: "architect", currentApiConfigName: "old-profile" })
+			const originalUpdate = mockContext.globalState.update
+			// The batch's first key lands and the second one's store rejects. The real ContextProxy
+			// commits what it can, then throws a SettingsWriteError naming the key it stored.
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+				if (key === "currentApiConfigName") {
+					return Promise.reject(new Error("configuration write failed"))
+				}
+				return Promise.resolve()
+			})
+			try {
+				await expect(provider.setValues({ mode: "code", currentApiConfigName: "new-profile" })).rejects.toThrow(
+					"Could not store currentApiConfigName (stored: mode)",
+				)
+				// The committed half must not stay applied: with the batch rejected, the shared store
+				// and this view's record have to agree again about mode.
+				expect(provider.getValue("mode")).toBe("architect")
+				expect(mockContext.globalState.get("mode")).toBe("architect")
+				// And no per-view write may remain from a batch that never landed.
+				expect(provider["viewLocalState"]).not.toHaveProperty("mode")
+				expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
+			} finally {
+				mockContext.globalState.update = originalUpdate
+			}
+			await provider.dispose()
+		})
 	})
 
 	it("should persist known modes and reject unknown or non-string modes", async () => {

@@ -4513,13 +4513,19 @@ export class ClineProvider
 		const writeGenerations = Object.fromEntries(
 			Object.keys(sanitizedValues).map((key) => [key, this.contextProxy.beginStateWriteGeneration(key as never)]),
 		) as Record<string, number | undefined>
-		await this.contextProxy.setValues(sanitizedValues)
 		try {
+			// Either half can leave the shared store ahead of this view's record. The batch commits
+			// what it can and rejects on a later key - ContextProxy.setValues throws a
+			// SettingsWriteError naming the keys it stored (ContextProxy.ts:33-47) - and the per-view
+			// write can fail after the batch landed. Both cases roll back below, so a rejected batch
+			// is all-or-nothing for the view that issued it.
+			await this.contextProxy.setValues(sanitizedValues)
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {
-			// The per-view record did not land: restore the prior shared values so the two
-			// persistence layers cannot diverge, then surface the original failure. Only keys this
-			// batch still owns are restored.
+			// Restore the prior shared values so the two persistence layers cannot diverge, then
+			// surface the original failure. Only keys this batch still owns are restored: a key whose
+			// own write failed is already back at its stored value (ContextProxy reads it back into
+			// its cache), so the value check below skips it and the committed keys are what move.
 			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues, writeGenerations)
 			throw error
 		}
