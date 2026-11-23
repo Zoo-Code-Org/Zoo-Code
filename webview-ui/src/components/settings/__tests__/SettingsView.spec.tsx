@@ -9,6 +9,7 @@ import { experimentDefault } from "@roo/experiments"
 import type { ApiOptionsProps } from "../ApiOptions"
 
 import SettingsView from "../SettingsView"
+import { answerSave, lastSaveRequestId } from "./saveAcknowledgement"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
@@ -1320,5 +1321,84 @@ describe("SettingsView - Responses API save round trip", () => {
 				apiConfiguration: expect.objectContaining({ openAiUseResponsesApi: value }),
 			}),
 		)
+	})
+})
+
+describe("SettingsView - untouched settings follow the host", () => {
+	beforeEach(() => vi.clearAllMocks())
+
+	// Plays a state push from the host, for example after another settings view saved. The dispatch is synchronous,
+	// so the new state is on the screen when the call returns.
+	const pushHostState = (state: Record<string, unknown>) =>
+		act(() => {
+			window.dispatchEvent(
+				new MessageEvent("message", {
+					data: { type: "state", state: { version: "1.0.0", clineMessages: [], taskHistory: [], ...state } },
+				}),
+			)
+		})
+
+	const lastSavedSettings = () =>
+		vi
+			.mocked(vscode.postMessage)
+			.mock.calls.map((call) => call[0])
+			.filter((message) => message.type === "updateSettings")
+			.at(-1)?.updatedSettings
+
+	it.each(["alwaysAllowExecute", "alwaysAllowWrite", "alwaysAllowMcp"] as const)(
+		"an unrelated save does not write back %s after another view turned it off",
+		(setting) => {
+			const { activateTab, getSettingsContent } = renderSettingsView()
+			pushHostState({ [setting]: true })
+			activateTab("notifications")
+
+			// Another settings view turns the permission off.
+			pushHostState({ [setting]: false })
+
+			fireEvent.click(within(getSettingsContent()).getByTestId("tts-enabled-checkbox"))
+			fireEvent.click(screen.getByTestId("save-button"))
+
+			expect(lastSavedSettings()).toMatchObject({ ttsEnabled: true, [setting]: false })
+		},
+	)
+
+	it("keeps an edited field's value through a host push until Save, while other fields follow the host", () => {
+		const { activateTab, getSettingsContent } = renderSettingsView()
+		pushHostState({ ttsEnabled: false, soundEnabled: false })
+		activateTab("notifications")
+		const content = getSettingsContent()
+
+		fireEvent.click(within(content).getByTestId("tts-enabled-checkbox"))
+		pushHostState({ ttsEnabled: false, soundEnabled: true })
+
+		expect(within(content).getByTestId("tts-enabled-checkbox")).toBeChecked()
+		expect(within(content).getByTestId("sound-enabled-checkbox")).toBeChecked()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastSavedSettings()).toMatchObject({ ttsEnabled: true, soundEnabled: true })
+	})
+
+	it("keeps the edit of a failed time or date save through a host push, and a retry sends it again", async () => {
+		const { activateTab } = renderSettingsView()
+		pushHostState({ showRelativeTimes: true })
+		activateTab("language")
+
+		fireEvent.click(screen.getByTestId("relative-times-checkbox"))
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastSavedSettings()).toMatchObject({ showRelativeTimes: false })
+
+		// The host did not store the value: it posts its state with the old value, then reports the failure.
+		pushHostState({ showRelativeTimes: true })
+		answerSave(lastSaveRequestId(vi.mocked(vscode.postMessage)), { success: false, error: "storage unavailable" })
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		expect(screen.getByTestId("relative-times-checkbox")).not.toBeChecked()
+
+		// A host push after the failure does not revert the edit either.
+		pushHostState({ showRelativeTimes: true, soundEnabled: true })
+		expect(screen.getByTestId("relative-times-checkbox")).not.toBeChecked()
+
+		fireEvent.click(screen.getByTestId("save-button"))
+		expect(lastSavedSettings()).toMatchObject({ showRelativeTimes: false })
 	})
 })
