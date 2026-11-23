@@ -14,6 +14,8 @@ vitest.mock("../utils/timeout-config", () => ({
 
 const MOCK_TIMEOUT_MS = 300_000
 
+import { getEventListeners } from "node:events"
+
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
@@ -4002,8 +4004,80 @@ describe("OpenRouterHandler", () => {
 			await handler.completePrompt("test prompt", { abortSignal: controller.signal })
 			expect(mockCreate).toHaveBeenCalledWith(
 				expect.objectContaining({ model: expect.any(String) }),
-				expect.objectContaining({ signal: controller.signal }),
+				expect.objectContaining({ signal: expect.any(AbortSignal) }),
 			)
+			// What the SDK is handed is the per-request bridge output, not the caller's own signal:
+			// the SDK attaches its abort listener to whatever signal it receives and leaves it attached
+			// once the request ends, so forwarding the caller's long-lived signal would retain one
+			// listener on it for every completed request. That the caller's cancellation still reaches
+			// the SDK through the bridge is a separate claim, pinned by its own test below.
+			const createOptions = mockCreate.mock.calls[0]?.[1]
+			expect(createOptions?.signal).toBeDefined()
+			expect(createOptions?.signal).not.toBe(controller.signal)
+		})
+
+		it("detaches its abort listener from the caller signal when the request finishes without a timeout", async () => {
+			// The leak: openai@5.23.2 client.mjs:350-351 attaches an abort listener to whichever signal
+			// it is handed and never detaches it (client.js carries one addEventListener and no
+			// removeEventListener), so handing the SDK the caller's own long-lived signal retains one
+			// listener - and the SDK controller behind it - per completed request. The double below
+			// mirrors that behaviour so the pair, not just the bridge, is what the test measures.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				options?.signal?.addEventListener("abort", () => {})
+				return Promise.resolve({ choices: [{ message: { content: "response" } }] })
+			})
+			stubCompletionsCreate(handler, create)
+
+			const added = vitest.spyOn(controller.signal, "addEventListener")
+			const removed = vitest.spyOn(controller.signal, "removeEventListener")
+			let addedCount = 0
+			let removedCount = 0
+			let listenersLeftOnCallerSignal = -1
+			try {
+				// Two calls with no timeoutMs: the branch where the merge used to return the caller's
+				// signal unchanged, so each completed request left its listener behind.
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+				// Take the evidence before restoring: `mockRestore` clears the call log the two calls
+				// just filled, so asserting on the spies after the finally asserts on an emptied record.
+				addedCount = added.mock.calls.length
+				removedCount = removed.mock.calls.length
+				listenersLeftOnCallerSignal = getEventListeners(controller.signal, "abort").length
+			} finally {
+				added.mockRestore()
+				removed.mockRestore()
+			}
+
+			// The floor keeps the pair equality from being satisfied by an empty record: a double that
+			// never touched the signal at all would leave both counts at 0 and pass 0 === 0.
+			expect(addedCount, "expected the caller signal to be observed at least once").toBeGreaterThanOrEqual(1)
+			expect(removedCount).toBe(addedCount)
+			// The leak itself: nothing may stay attached to the caller's signal once the request ended.
+			expect(listenersLeftOnCallerSignal, "caller signal kept a listener after the request").toBe(0)
+		})
+
+		it("propagates a caller abort to the signal the SDK receives", async () => {
+			// The ordering half of the bridge: the caller's cancellation must still reach the SDK
+			// through the per-request signal, and it must do so while the request is in flight.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let abortedDuringRequest: boolean | undefined
+			const create = vitest.fn().mockImplementation((_params: unknown, options: { signal?: AbortSignal }) => {
+				controller.abort()
+				abortedDuringRequest = options?.signal?.aborted
+				return Promise.resolve({ choices: [{ message: { content: "late result" } }] })
+			})
+			stubCompletionsCreate(handler, create)
+
+			await expect(
+				handler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+			expect(abortedDuringRequest, "the signal handed to the SDK must abort with the caller's").toBe(true)
 		})
 
 		it("should pass timeout through to client", async () => {

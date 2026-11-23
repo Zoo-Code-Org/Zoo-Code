@@ -776,141 +776,156 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	}
 
 	async completePrompt(prompt: string, options?: CompletePromptOptions) {
-		// Establish the cancellation scope before model lookup: a pre-aborted call, or
-		// one aborted while model metadata is loading, must reject promptly instead of
-		// waiting for the lookup to settle. The configured timeoutMs covers the lookup
-		// as well.
-		const requestAbortSignal = mergeAbortSignalAndTimeout(options?.abortSignal, options?.timeoutMs)
-		if (requestAbortSignal?.aborted) {
-			throw createAbortError(providerIdentifiers.openrouter)
-		}
-
-		let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
+		// Bridge the caller's signal before anything else: the OpenAI SDK attaches its abort
+		// listener to whichever signal it receives and leaves it attached once the request
+		// completes, and with no usable timeout `mergeAbortSignalAndTimeout` would hand it the
+		// caller's own long-lived signal - one retained listener and controller per completed
+		// request. The bridge gives the SDK a per-request signal and returns the handle that
+		// detaches it, which the `finally` below must run on every exit path.
+		//
+		// Establishing the cancellation scope here also covers model lookup: a pre-aborted call,
+		// or one aborted while model metadata is loading, must reject promptly instead of waiting
+		// for the lookup to settle. The configured timeoutMs covers the lookup as well.
+		const { signal: bridgedCallerSignal, dispose: removeExternalAbortListener } = bridgeExternalAbortSignal(
+			options?.abortSignal,
+		)
+		const requestAbortSignal = mergeAbortSignalAndTimeout(bridgedCallerSignal, options?.timeoutMs)
 		try {
-			model = requestAbortSignal
-				? await rejectOnAbort(this.fetchModel(), requestAbortSignal, providerIdentifiers.openrouter)
-				: await this.fetchModel()
-		} catch (error) {
-			// Only our own merged signal marks this as a cancellation. An
-			// abort-shaped failure from the model cache's internal timeout is a
-			// discovery failure, not a caller cancellation, so it propagates with
-			// its original identity.
 			if (requestAbortSignal?.aborted) {
 				throw createAbortError(providerIdentifiers.openrouter)
 			}
-			throw error
-		}
-		const { id: modelId, maxTokens, temperature, reasoning } = model
 
-		const completionParams: OpenRouterChatCompletionParams = {
-			model: modelId,
-			max_tokens: maxTokens,
-			temperature,
-			messages: [{ role: "user", content: prompt }],
-			stream: false,
-			// Only include provider if openRouterSpecificProvider is not "[default]".
-			...(this.options.openRouterSpecificProvider &&
-				this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
-					provider: {
-						order: [this.options.openRouterSpecificProvider],
-						only: [this.options.openRouterSpecificProvider],
-						allow_fallbacks: false,
-					},
-				}),
-			...(reasoning && { reasoning }),
-		}
-
-		// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
-		// and forward the caller's abort signal / per-request timeout to the SDK. The merged
-		// signal (established before model lookup, above) aborts when either the caller's signal
-		// or the timeout fires, so timeouts are normalized to AbortError in the catch below.
-		// The client-level timeout remains the default safety net; timeoutMs <= 0 disables the
-		// per-request timeout, and 0 is never passed to the SDK.
-		// The SDK validates a per-request timeout as a uint32: non-finite values
-		// must be dropped, fractional delays rounded up (they fail its integer
-		// validation) and delays above 2^31-1 ms capped (Node clamps them to 1 ms
-		// otherwise). Same policy as mergeAbortSignalAndTimeout, which owns the
-		// signal side of the same option.
-		const perRequestTimeoutMs =
-			typeof options?.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
-				? toSdkTimeoutMs(options.timeoutMs)
-				: undefined
-
-		const requestOptions: OpenAI.RequestOptions = {
-			...(modelId.startsWith("anthropic/")
-				? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
-				: undefined),
-			...(requestAbortSignal && { signal: requestAbortSignal }),
-			...(perRequestTimeoutMs !== undefined && { timeout: perRequestTimeoutMs }),
-		}
-
-		let response
-
-		try {
-			// The same retry-backoff window as createMessage: cut the wait so a cancellation that lands
-			// during the SDK's sleep settles as AbortError at once instead of after the backoff ends.
-			response = await settleOnAbort(
-				this.client.chat.completions.create(completionParams, requestOptions),
-				requestAbortSignal,
-				providerIdentifiers.openrouter,
-			)
-		} catch (error) {
-			// Aborted requests are user-initiated: surface them as AbortError (this also covers
-			// timeouts, which abort the same signal) instead of a completion error. SDK-reported
-			// abort shapes are normalized as well (see the createMessage catch).
-			if (isRequestAborted(error, requestAbortSignal)) {
-				throw createAbortError(providerIdentifiers.openrouter)
+			let model: Awaited<ReturnType<OpenRouterHandler["fetchModel"]>>
+			try {
+				model = requestAbortSignal
+					? await rejectOnAbort(this.fetchModel(), requestAbortSignal, providerIdentifiers.openrouter)
+					: await this.fetchModel()
+			} catch (error) {
+				// Only our own merged signal marks this as a cancellation. An
+				// abort-shaped failure from the model cache's internal timeout is a
+				// discovery failure, not a caller cancellation, so it propagates with
+				// its original identity.
+				if (requestAbortSignal?.aborted) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+				throw error
 			}
-			// Try to parse as OpenRouter error structure using Zod
-			const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
+			const { id: modelId, maxTokens, temperature, reasoning } = model
 
-			if (parseResult.success && parseResult.data.error) {
-				const openRouterError = parseResult.data
-				const rawString = openRouterError.error?.metadata?.raw
-				const parsedError = extractErrorFromMetadataRaw(rawString)
-				const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+			const completionParams: OpenRouterChatCompletionParams = {
+				model: modelId,
+				max_tokens: maxTokens,
+				temperature,
+				messages: [{ role: "user", content: prompt }],
+				stream: false,
+				// Only include provider if openRouterSpecificProvider is not "[default]".
+				...(this.options.openRouterSpecificProvider &&
+					this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
+						provider: {
+							order: [this.options.openRouterSpecificProvider],
+							only: [this.options.openRouterSpecificProvider],
+							allow_fallbacks: false,
+						},
+					}),
+				...(reasoning && { reasoning }),
+			}
 
-				const apiError = Object.assign(
-					new ApiProviderError(
-						rawErrorMessage,
+			// Add Anthropic beta header for fine-grained tool streaming when using Anthropic models
+			// and forward the caller's abort signal / per-request timeout to the SDK. The merged
+			// signal (established before model lookup, above) aborts when either the caller's signal
+			// or the timeout fires, so timeouts are normalized to AbortError in the catch below.
+			// The client-level timeout remains the default safety net; timeoutMs <= 0 disables the
+			// per-request timeout, and 0 is never passed to the SDK.
+			// The SDK validates a per-request timeout as a uint32: non-finite values
+			// must be dropped, fractional delays rounded up (they fail its integer
+			// validation) and delays above 2^31-1 ms capped (Node clamps them to 1 ms
+			// otherwise). Same policy as mergeAbortSignalAndTimeout, which owns the
+			// signal side of the same option.
+			const perRequestTimeoutMs =
+				typeof options?.timeoutMs === "number" && Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+					? toSdkTimeoutMs(options.timeoutMs)
+					: undefined
+
+			const requestOptions: OpenAI.RequestOptions = {
+				...(modelId.startsWith("anthropic/")
+					? { headers: { "x-anthropic-beta": "fine-grained-tool-streaming-2025-05-14" } }
+					: undefined),
+				...(requestAbortSignal && { signal: requestAbortSignal }),
+				...(perRequestTimeoutMs !== undefined && { timeout: perRequestTimeoutMs }),
+			}
+
+			let response
+
+			try {
+				// The same retry-backoff window as createMessage: cut the wait so a cancellation that lands
+				// during the SDK's sleep settles as AbortError at once instead of after the backoff ends.
+				response = await settleOnAbort(
+					this.client.chat.completions.create(completionParams, requestOptions),
+					requestAbortSignal,
+					providerIdentifiers.openrouter,
+				)
+			} catch (error) {
+				// Aborted requests are user-initiated: surface them as AbortError (this also covers
+				// timeouts, which abort the same signal) instead of a completion error. SDK-reported
+				// abort shapes are normalized as well (see the createMessage catch).
+				if (isRequestAborted(error, requestAbortSignal)) {
+					throw createAbortError(providerIdentifiers.openrouter)
+				}
+				// Try to parse as OpenRouter error structure using Zod
+				const parseResult = OpenRouterErrorResponseSchema.safeParse(error)
+
+				if (parseResult.success && parseResult.data.error) {
+					const openRouterError = parseResult.data
+					const rawString = openRouterError.error?.metadata?.raw
+					const parsedError = extractErrorFromMetadataRaw(rawString)
+					const rawErrorMessage = parsedError || openRouterError.error?.message || "Unknown error"
+
+					const apiError = Object.assign(
+						new ApiProviderError(
+							rawErrorMessage,
+							providerIdentifiers.openrouter,
+							modelId,
+							"completePrompt",
+							openRouterError.error?.code,
+						),
+						{
+							status: openRouterError.error?.code,
+							error: openRouterError.error,
+						},
+					)
+
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
+				} else {
+					// Fallback for non-OpenRouter errors
+					const errorMessage = error instanceof Error ? error.message : String(error)
+					const apiError = new ApiProviderError(
+						errorMessage,
 						providerIdentifiers.openrouter,
 						modelId,
 						"completePrompt",
-						openRouterError.error?.code,
-					),
-					{
-						status: openRouterError.error?.code,
-						error: openRouterError.error,
-					},
-				)
-
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
-			} else {
-				// Fallback for non-OpenRouter errors
-				const errorMessage = error instanceof Error ? error.message : String(error)
-				const apiError = new ApiProviderError(
-					errorMessage,
-					providerIdentifiers.openrouter,
-					modelId,
-					"completePrompt",
-				)
-				TelemetryService.instance.captureException(apiError)
-				throw handleOpenAIError(error, providerIdentifiers.openrouter)
+					)
+					TelemetryService.instance.captureException(apiError)
+					throw handleOpenAIError(error, providerIdentifiers.openrouter)
+				}
 			}
-		}
 
-		if (requestAbortSignal?.aborted) {
-			// The response resolved after the request was aborted: do not return the late result.
-			throw createAbortError(providerIdentifiers.openrouter)
-		}
+			if (requestAbortSignal?.aborted) {
+				// The response resolved after the request was aborted: do not return the late result.
+				throw createAbortError(providerIdentifiers.openrouter)
+			}
 
-		if ("error" in response) {
-			this.handleStreamingError(response.error as OpenRouterError, modelId, "completePrompt")
-		}
+			if ("error" in response) {
+				this.handleStreamingError(response.error as OpenRouterError, modelId, "completePrompt")
+			}
 
-		const completion = response as OpenAI.Chat.ChatCompletion
-		return completion.choices[0]?.message?.content || ""
+			const completion = response as OpenAI.Chat.ChatCompletion
+			return completion.choices[0]?.message?.content || ""
+		} finally {
+			// Detach on every exit path - completion, failure, abort, or a late result. The listener
+			// sits on the caller's long-lived signal and would outlive this request otherwise.
+			removeExternalAbortListener()
+		}
 	}
 
 	/**
