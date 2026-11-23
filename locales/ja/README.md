@@ -46,13 +46,13 @@ Zoo Code は Roo Code が築いた基盤を引き継ぎ、次の機能で拡張�
 - **より信頼性の高いターミナルと編集ワークフロー** — ターミナルの早期完了、タスク状態の競合、コンテキスト管理、diff 編集、プロバイダー固有のツール利用に関する問題を修正。
 - **ワークスペースをより細かく制御** — ルール管理、モードごとの MCP 制限、マルチルートのパス制御、モデルの reasoning オプション、完了時の変更レビュー操作を追加。
 
-## Zoo Code v3.98.1 の新機能
+## Zoo Code v3.98.2 の新機能
 
 - 💫Zoo Gateway アカウントに任意の金額の残高があれば、12月1日まで GLM-5.3-Flash を無制限で利用できる Zoo Pass を無料でプレビューできます。
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 モデルと推論：GPT-6.2 Sol、GPT-6.2 Astra、Claude Sonnet 5.5 に対応。LiteLLM の各プロファイルで推論の強度を設定できます。
-- 🛡️ セキュリティ：スキルとコマンドのメタデータ解析、メンション処理、プロバイダーリンク、CLI の承認チェックを改善。
-- 🔧 修正：OpenAI のサービス階層の料金計算を修正し、ワークスペースのシンボリックリンクを認識。UI の翻訳も追加。
+- 🔌 モデル：Gemini 3.8 Flash と新モデルの Gemini 4 Carbon、Hydrogen、Neon を利用できます。Gemini で xhigh の思考レベルを設定できます。
+- 🌐 Responses API：OpenAI Compatible プロバイダーで Responses API のサポートを有効にできます。ツール使用を伴う推論が、それを必須とするエンドポイントでも動作します。
+- 🔧 修正：Vertex の Gemini リクエストがモデルターンで終わらなくなりました。LiteLLM 経由でも Gemini の thought_signature は壊れません。Ollama のタスクは設定されたコンテキスト上限で圧縮されます。
 
 ## Zoo Codeがあなたのためにできること
 
