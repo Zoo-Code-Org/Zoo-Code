@@ -339,6 +339,41 @@ describe("OpenAiHandler", () => {
 			expect(textChunks).toEqual([{ type: "text", text: "tail" }])
 		})
 
+		it("yields a recorded usage chunk ahead of the abort verdict when the stream is cancelled after the usage chunk", async () => {
+			// The abort verdict must not swallow usage the stream already reported: Task.ts prices the task
+			// from usage events, and the tokens behind a chunk that carried usage are spent whether or not
+			// the caller stops before the stream ends. Buffered matcher content stays suppressed.
+			const controller = new AbortController()
+			mockCreate.mockImplementationOnce(async () =>
+				(async function* () {
+					yield {
+						choices: [{ delta: { content: "partial " }, index: 0 }],
+						usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 },
+					}
+					controller.abort()
+					yield { choices: [{ delta: {}, index: 0 }] }
+				})(),
+			)
+
+			const emitted: string[] = []
+			let failure: Error | undefined
+			const stream = handler.createMessage(
+				systemPrompt,
+				messages,
+				makeCreateMessageMetadata({ abortSignal: controller.signal }),
+			)
+			try {
+				for await (const chunk of stream) {
+					emitted.push(chunk.type)
+				}
+			} catch (error) {
+				failure = error instanceof Error ? error : new Error(String(error))
+			}
+
+			expect(emitted).toEqual(["text", "usage"])
+			expect(failure?.name).toBe("AbortError")
+			expect(failure?.message).toBe("The OpenAI request was aborted")
+		})
 		it("should treat a streaming chunk with an empty choices array as an empty delta", async () => {
 			mockCreate.mockImplementationOnce(async () =>
 				asyncStreamFrom([{ choices: [] }, { choices: [{ delta: { content: "tail" }, index: 0 }] }]),

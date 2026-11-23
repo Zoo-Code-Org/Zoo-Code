@@ -335,19 +335,22 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				throw handleOpenAIRequestError(error, this.providerName, metadata?.abortSignal)
 			}
 
+			// Usage before the verdict: a stream that recorded usage and then observed the cancellation
+			// still has to hand that usage record to the caller, or the cost of the tokens it already
+			// streamed disappears from the task's accounting exactly when the stream stops early.
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, modelInfo)
+			}
+
 			// Post-loop abort defense: a signal that aborted while the loop was running must
 			// surface the Task.ts abort contract instead of letting the stream end normally
-			// with the buffered matcher/usage content below.
+			// with the buffered matcher content below.
 			if (signal?.aborted) {
 				throw handleOpenAIRequestError(createAbortError(this.providerName), this.providerName, signal)
 			}
 
 			for (const chunk of matcher.final()) {
 				yield chunk
-			}
-
-			if (lastUsage) {
-				yield this.processUsageMetrics(lastUsage, modelInfo)
 			}
 		} else {
 			let requestOptions: OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming = {
