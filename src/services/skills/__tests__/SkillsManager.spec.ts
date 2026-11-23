@@ -2691,6 +2691,47 @@ Body.`
 			expect(mockRename).toHaveBeenCalledWith(temporaryPath, skillMd)
 		})
 
+		it("keeps group and other bits of an existing SKILL.md through the atomic rewrite", async () => {
+			// The mask is the line a later reader is tempted to simplify: & 0o777 is what makes a 0644
+			// target publish as 0644 rather than as 0600. The 0600 fixture above cannot tell the two
+			// masks apart (0o100600 & 0o700 is still 0o600), so this fixture carries distinguishing
+			// group and other bits.
+			const skillDir = p(globalSkillsDir, "mode-bits-skill")
+			const skillMd = p(skillDir, "SKILL.md")
+			const originalContent = `---
+name: mode-bits-skill
+description: 'Mode bits'
+---
+
+Body.`
+
+			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (value: string) => value)
+			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["mode-bits-skill"] : []))
+			mockStat.mockImplementation(async (pathArg: string) => {
+				if (pathArg === skillDir) {
+					return { isDirectory: () => true }
+				}
+				if (pathArg === skillMd) {
+					// 0644 regular file: group-readable, and the bits a narrower mask would drop.
+					return { isDirectory: () => false, mode: 0o100644 }
+				}
+				throw new Error("Not found")
+			})
+			mockFileExists.mockImplementation(async (file: string) => file === skillMd)
+			mockReadFile.mockResolvedValue(originalContent)
+			mockWriteFile.mockResolvedValue(undefined)
+			mockChmod.mockResolvedValue(undefined)
+
+			await skillsManager.discoverSkills()
+			expect(skillsManager.getAllSkills()).toHaveLength(1)
+			await skillsManager.updateSkillModes("mode-bits-skill", "global", ["code"])
+
+			const staged = String(mockWriteFile.mock.calls[0][0])
+			expect(mockChmod).toHaveBeenCalledTimes(1)
+			expect(mockChmod).toHaveBeenCalledWith(staged, 0o644)
+			expect(mockRename).toHaveBeenCalledWith(staged, skillMd)
+		})
 		it("stages the SKILL.md sidecar private before the publish mode is decided", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (value: string) => value)
