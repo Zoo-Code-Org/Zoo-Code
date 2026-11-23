@@ -804,9 +804,9 @@ export class SkillsManager {
 				// with the process default mode and become readable by other local users. A target
 				// that does not exist yet (createSkill) gets the publish mode named below, chosen here
 				// rather than inherited from the umask.
-				// Only a missing target is allowed to take that named mode: any other stat failure
-				// means the target's mode could not be read, and renaming anyway would publish the
-				// sidecar's staging mode (0600) over a restricted SKILL.md, so it fails closed.
+				// A missing target and a stat rejection that carries no filesystem code at all are the
+				// same case for the mode: neither has permission bits to preserve, so the publish takes
+				// the named mode below. A coded failure rethrows in the catch and fails closed there.
 				const existingTarget = await fs.stat(filePath).catch((error: unknown) => {
 					const code =
 						typeof error === "object" && error !== null ? (error as { code?: unknown }).code : undefined
