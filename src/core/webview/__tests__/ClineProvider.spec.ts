@@ -7114,19 +7114,29 @@ describe("ClineProvider", () => {
 			await provider.contextProxy.setValues({ mode: "architect", currentApiConfigName: "old-profile" })
 			const originalUpdate = mockContext.globalState.update
 			// The batch's first key lands and the second one's store rejects. The real ContextProxy
-			// commits what it can, then throws a SettingsWriteError naming the key it stored.
-			mockContext.globalState.update = vi.fn().mockImplementation((key: string) => {
+			// commits what it can, then throws a SettingsWriteError naming the key it stored. The mock
+			// forwards every write it accepts into the real backing store: resolving a write without
+			// storing it left the store holding "architect" before and after the rollback, so nothing
+			// below could tell a restored value from a value that never moved.
+			let modeWhenProfileNameWriteFailed: unknown
+			mockContext.globalState.update = vi.fn().mockImplementation((key: string, value: unknown) => {
 				if (key === "currentApiConfigName") {
+					modeWhenProfileNameWriteFailed = mockContext.globalState.get("mode")
 					return Promise.reject(new Error("configuration write failed"))
 				}
-				return Promise.resolve()
+				return originalUpdate(key, value)
 			})
 			try {
 				await expect(provider.setValues({ mode: "code", currentApiConfigName: "new-profile" })).rejects.toThrow(
 					"Could not store currentApiConfigName (stored: mode)",
 				)
+				// Storage really took the committed half: the snapshot is taken inside the store as the
+				// profile-name write rejects, so the rollback below has something to undo.
+				expect(modeWhenProfileNameWriteFailed).toBe("code")
 				// The committed half must not stay applied: with the batch rejected, the shared store
-				// and this view's record have to agree again about mode.
+				// and this view's record have to agree again about mode. Both layers now move from
+				// "code" back to "architect", so these two lines prove durable restoration rather than
+				// restating the seeded value.
 				expect(provider.getValue("mode")).toBe("architect")
 				expect(mockContext.globalState.get("mode")).toBe("architect")
 				// The key whose own write failed is the one the rollback helper deliberately skips: the
