@@ -4523,9 +4523,12 @@ export class ClineProvider
 			await this._saveViewLocalStateFromMutation(sanitizedValues)
 		} catch (error) {
 			// Restore the prior shared values so the two persistence layers cannot diverge, then
-			// surface the original failure. Only keys this batch still owns are restored: a key whose
-			// own write failed is already back at its stored value (ContextProxy reads it back into
-			// its cache), so the value check below skips it and the committed keys are what move.
+			// surface the original failure. Only keys this batch still owns are restored: after a
+			// rejected update ContextProxy reads the stored value back into its cache
+			// (ContextProxy.ts:443-450), so the value check below skips the key whose own write
+			// failed and the committed keys are what move. That read-back is best effort - a Memento
+			// can keep the attempted value after a rejected update (ContextProxy.ts:429-432) - so the
+			// skip is a bet on the store, not a guarantee.
 			await this._restoreSharedValuesAfterFailedViewWrite(previousSharedValues, sanitizedValues, writeGenerations)
 			throw error
 		}

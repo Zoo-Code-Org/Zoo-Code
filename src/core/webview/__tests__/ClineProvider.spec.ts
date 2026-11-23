@@ -7129,6 +7129,10 @@ describe("ClineProvider", () => {
 				// and this view's record have to agree again about mode.
 				expect(provider.getValue("mode")).toBe("architect")
 				expect(mockContext.globalState.get("mode")).toBe("architect")
+				// The key whose own write failed is the one the rollback helper deliberately skips: the
+				// store never took the attempted value, so both layers still read the seeded one.
+				expect(provider.getValue("currentApiConfigName")).toBe("old-profile")
+				expect(mockContext.globalState.get("currentApiConfigName")).toBe("old-profile")
 				// And no per-view write may remain from a batch that never landed.
 				expect(provider["viewLocalState"]).not.toHaveProperty("mode")
 				expect(provider["viewLocalState"]).not.toHaveProperty("currentApiConfigName")
