@@ -998,6 +998,98 @@ describe("ContextProxy", () => {
 			// Should reinitialize caches
 			expect(initializeSpy).toHaveBeenCalledTimes(1)
 		})
+
+		it("joins an overlapping reset and keeps the secret-write guard raised until the joined pass ends", async () => {
+			// Two resets can overlap: a second webview, or the same command twice. The join at
+			// ContextProxy.ts:778-779 hands the second caller the running pass instead of letting it
+			// start its own delete pass, whose end would lower `resetting` while the first was still
+			// deleting - and a secret saved in that gap would be erased by the pass still running.
+			// The fixture parks the delete phase on one key so 'the pass is still running' is a fact the
+			// row measures rather than a timing assumption.
+			const erases: { resolve: () => void; reject: (error: Error) => void }[] = []
+			mockSecrets.delete.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<void>((resolve, reject) => {
+						erases.push({ resolve, reject })
+					})
+				}
+				return Promise.resolve()
+			})
+			const eraseCallsForApiKey = () =>
+				mockSecrets.delete.mock.calls.filter((call: readonly unknown[]) => call[0] === "apiKey").length
+
+			const first = proxy.resetAllState()
+			// The reset yields before its delete pass, so let it get there before asking it to join.
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(erases.length).toBe(1)
+			const deletesBeforeJoin = eraseCallsForApiKey()
+
+			const second = proxy.resetAllState()
+			expect(second).toBe(first)
+
+			// A joined caller must not lower the guard: while the shared pass is inside its delete phase
+			// a secret write is still refused, and refused rather than deferred - a deferred write would
+			// re-store the value this pass is erasing.
+			const refused = await proxy.storeSecret("apiKey", "saved-while-joined").then(
+				() => undefined,
+				(error: unknown) => error,
+			)
+			expect(refused).toBeInstanceOf(SettingsWriteError)
+			expect(String((refused as Error).message)).toContain("secret writes are refused while state is being reset")
+			expect(proxy.getSecret("apiKey")).toBeUndefined()
+			expect(mockSecrets.store.mock.calls.filter((call: readonly unknown[]) => call[0] === "apiKey").length).toBe(
+				0,
+			)
+
+			erases.forEach((erase) => {
+				erase.reject(new Error("keychain locked"))
+			})
+			await expect(first).rejects.toThrow("keychain locked")
+			await expect(second).rejects.toThrow("keychain locked")
+			mockSecrets.delete.mockResolvedValue(undefined)
+
+			// The join is cleared with the pass, so a later reset is a new pass rather than the settled
+			// one handed back forever, and it really deletes again instead of resolving vacuously.
+			const third = proxy.resetAllState()
+			expect(third).not.toBe(first)
+			await third
+			expect(eraseCallsForApiKey()).toBe(deletesBeforeJoin + 1)
+		})
+
+		it("joins a reset issued while the shared pass is re-seeding its caches", async () => {
+			// The delete phase is not the only window: resetAllState re-seeds the caches inside
+			// initialize() once the deletes settle (ContextProxy.ts:806), and a caller that starts its
+			// own pass there clears caches the shared pass is half-way through rebuilding. The re-seed
+			// reads secrets through the Memento, so parking one key makes 'inside the re-seed' a fact
+			// the row measures rather than a timing guess.
+			const seeds: { resolve: (value: string) => void }[] = []
+			mockSecrets.get.mockImplementation((key: string) => {
+				if (key === "apiKey") {
+					return new Promise<string>((resolve) => {
+						seeds.push({ resolve })
+					})
+				}
+				return Promise.resolve("test-secret")
+			})
+
+			const first = proxy.resetAllState()
+			await new Promise<void>((resolve) => {
+				setTimeout(resolve, 10)
+			})
+			expect(seeds.length).toBe(1)
+
+			const joined = proxy.resetAllState()
+			expect(joined).toBe(first)
+
+			seeds.forEach((seed) => {
+				seed.resolve("reseeded-key")
+			})
+			await expect(first).resolves.toBeUndefined()
+			expect(proxy.getSecret("apiKey")).toBe("reseeded-key")
+			await expect(joined).resolves.toBeUndefined()
+		})
 	})
 
 	describe("invalid apiProvider migration", () => {
