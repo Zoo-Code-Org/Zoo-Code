@@ -4291,6 +4291,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// Yields only if the first chunk is successful, otherwise will
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
+				const requestApi = this.api
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
 					skipProviderRateLimit: true,
 					requestModelInfo: streamModelInfo,
@@ -4729,7 +4730,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								}
 
 								const chunk = item.value
-								item = await iterator.next()
+								item = await (requestApi.requiresThoughtSignatureDrain
+									? nextChunkWithAbort()
+									: iterator.next())
 								chunkCount++
 
 								if (chunk && chunk.type === "usage") {
@@ -4798,12 +4801,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 					// Start the background task and handle any errors
 					// Pass "cancelled" status if the task was aborted by the user
-					drainStreamInBackgroundToFindAllUsage(
+					const usageDrain = drainStreamInBackgroundToFindAllUsage(
 						lastApiReqIndex,
 						this.abort ? "cancelled" : "completed",
 					).catch((error) => {
 						console.error("Background usage collection failed:", error)
 					})
+					// Proxy signatures can arrive after a tool stops the main loop. Save only after the drain settles.
+					if (requestApi.requiresThoughtSignatureDrain) await usageDrain
 				} catch (error) {
 					// Close the request generator so its `finally` releases the API
 					// work it holds (a replaced handler is disposed once nothing uses

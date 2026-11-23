@@ -720,6 +720,7 @@ describe("LiteLLMHandler", () => {
 					}))
 					mockStream([...chunks, { choices: [{ delta: { tool_calls: [{ index: 0 }] } }] }])
 					await collectStream(handler.createMessage("system", [], metadata))
+					expect(handler.requiresThoughtSignatureDrain).toBe(true)
 					expect(handler.getThoughtSignature()).toBe(expected)
 				})
 

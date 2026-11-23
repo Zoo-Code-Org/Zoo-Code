@@ -156,6 +156,7 @@ describe("OpenAI Compatible proxy signatures", () => {
 			asyncStreamFrom([...chunks, { choices: [{ delta: { tool_calls: [{ index: 0 }] } }] }]),
 		)
 		await collectStream(handler.createMessage("system", []))
+		expect(handler.requiresThoughtSignatureDrain).toBe(true)
 		expect(handler.getThoughtSignature()).toBe(expected)
 	})
 

@@ -139,7 +139,9 @@
 \* Review totals for PR 2643: 1 covered, 3 added, 0 gap. No further failure in the checked domains.
 \* Cost: about 8 agent minutes. Hash collisions and history saves after a newer request starts are outside the models.
 
-EXTENDS Naturals, Sequences, ThoughtSignatureStream
+\* Latest review ratchet and checks: ThoughtSignatureOccurrences and ThoughtSignaturePersistence.
+
+EXTENDS Naturals, Sequences, ThoughtSignatureStream, ThoughtSignatureOccurrences
 
 VARIABLE history   \* One assistant message per turn. Each message has the fields of Message.
 
@@ -269,6 +271,8 @@ SelectedSignature(field, encoded) ==
 SignatureSourcePriority == Len(history) > 0 =>
     \A field, encoded \in {None, [by |-> "g1", step |-> 1], [by |-> "g2", step |-> 1]} :
         SelectedSignature(field, encoded) = (IF field # None THEN field ELSE encoded)
+
+OccurrenceReplayAfterTurn == Len(history) > 0 => OccurrenceSignaturesPreserved /\ ResultUsesLatestOccurrence
 
 StreamPriorityAfterTurn == Len(history) > 0 => StreamSignaturePriority
 

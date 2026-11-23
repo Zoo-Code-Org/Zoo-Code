@@ -18,6 +18,12 @@ KeepEncodedIds == TRUE
 \* Sabotage: rewrite assistant call IDs but keep encoded tool-result IDs.
 KeepResultIds == FALSE
 
+\* Sabotage: look up reused call IDs without their history occurrence.
+IdOnlyReplay == FALSE
+
+\* Sabotage: a result reads the next occurrence instead of the last consumed occurrence.
+NextResult == TRUE
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 

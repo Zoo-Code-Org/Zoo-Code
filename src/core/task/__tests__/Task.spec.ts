@@ -30,6 +30,9 @@ import { summarizeConversation } from "../../condense"
 import { getEnvironmentDetails } from "../../environment/getEnvironmentDetails"
 import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
+import { ThoughtSignatureReader, applyThoughtSignatures } from "../../../api/providers/utils/thought-signature"
+import { convertToOpenAiMessages } from "../../../api/transform/openai-format"
+import { toolResultsMessage } from "../../../test-utils/thought-signature"
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
 import { parseMentions } from "../../mentions"
@@ -2135,6 +2138,75 @@ describe("Cline", () => {
 				}
 				expect(oldDispose).toHaveBeenCalledOnce()
 			})
+
+			it.each([true, false])(
+				"settles late thought signatures before history save (explicit=%s)",
+				async (lateExplicit) => {
+					const task = await createTaskWithManualRetries()
+					task.apiConfiguration = { apiProvider: providerIdentifiers.openai, openAiModelId: "gemini-3-flash" }
+					const reader = new ThoughtSignatureReader()
+					Object.assign(task.api, {
+						requiresThoughtSignatureDrain: true,
+						getThoughtSignature: () => reader.signature,
+						getThoughtSignatureOrigin: () => "proxy",
+					})
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let notifyDraining!: () => void
+					const draining = new Promise<void>((resolve) => {
+						notifyDraining = resolve
+					})
+					vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							reader.update([{ id: "call_1__thought__encoded" }])
+							yield { type: "text", text: "Read the file." }
+							task.assistantMessageContent.push({
+								type: "tool_use",
+								id: "call_1",
+								name: "read_file",
+								params: { path: "a.ts" },
+								nativeArgs: { path: "a.ts" },
+								partial: false,
+							})
+							task.didRejectTool = true
+							yield { type: "text", text: "buffered" }
+							notifyDraining()
+							await gate
+							if (lateExplicit)
+								reader.update([{ provider_specific_fields: { thought_signature: "explicit" } }])
+							yield { type: "usage", inputTokens: 1, outputTokens: 1 }
+						},
+					)
+					realRequestsThenStop(task)
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					await draining
+					try {
+						await new Promise((resolve) => setTimeout(resolve, 250))
+						expect(
+							task.apiConversationHistory.filter((message) => message.role === "assistant"),
+						).toHaveLength(0)
+					} finally {
+						release()
+						await loop
+					}
+					const saved = task.apiConversationHistory.find((message) => message.role === "assistant")
+					expect(saved).toBeDefined()
+					if (!saved) throw new Error("Expected the saved assistant turn")
+					const history = [saved, toolResultsMessage(["call_1"])]
+					const replay = applyThoughtSignatures(history, convertToOpenAiMessages(history), {
+						origin: "proxy",
+					})
+					expect(replay[0]).toMatchObject({
+						tool_calls: [
+							{ provider_specific_fields: { thought_signature: lateExplicit ? "explicit" : "encoded" } },
+						],
+					})
+				},
+			)
 
 			it("keeps a replaced handler alive until the background usage drain finishes", async () => {
 				const task = await createTaskWithManualRetries()

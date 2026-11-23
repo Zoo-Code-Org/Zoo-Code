@@ -57,6 +57,7 @@ const LITELLM_DEFAULT_BASE_URL = "http://localhost:4000"
  * It follows the OpenAI API format for compatibility.
  */
 export class LiteLLMHandler extends RouterProvider implements SingleCompletionHandler {
+	readonly requiresThoughtSignatureDrain = true
 	private thoughtSignatureReader: ThoughtSignatureReader | undefined
 	private thoughtSignatureOrigin: string | undefined
 

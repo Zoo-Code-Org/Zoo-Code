@@ -74,6 +74,7 @@ type OpenAiUsage =
 export class OpenAiHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	protected client: OpenAI
+	readonly requiresThoughtSignatureDrain = true
 	private readonly providerName = "OpenAI"
 	private thoughtSignatureReader: ThoughtSignatureReader | undefined
 	private signatureOrigin: string | undefined

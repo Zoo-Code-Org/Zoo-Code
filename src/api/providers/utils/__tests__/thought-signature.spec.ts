@@ -278,6 +278,7 @@ describe("proxy signature round trip property", () => {
 
 // NoForeignEncodedSignature: foreign signature bytes must leave neither through fields nor through IDs.
 describe("origin isolation property", () => {
+	const encodedCanary = "EncodedSuffixCanaryA91Z"
 	const cases = [undefined, origin, "foreign"].flatMap((storedOrigin) =>
 		[1, 100].flatMap((prefixLength) =>
 			[false, true].flatMap((truncate) =>
@@ -291,7 +292,7 @@ describe("origin isolation property", () => {
 		"isolates $storedOrigin with prefix=$prefixLength truncate=$truncate r1=$r1 fallback=$useFallback",
 		({ storedOrigin, prefixLength, truncate, r1, useFallback }) => {
 			const prefix = "call_" + "x".repeat(prefixLength)
-			const ids = [signature, signature + "second"].map((value) =>
+			const ids = [encodedCanary, encodedCanary + "second"].map((value) =>
 				sanitizeToolUseId(`${prefix}__thought__${value}`),
 			)
 			const history = [signedAssistantMessage(ids, { origin: storedOrigin }), toolResultsMessage(ids)]
@@ -318,6 +319,11 @@ describe("origin isolation property", () => {
 			} else {
 				expect(JSON.stringify(result)).not.toContain("__thought__")
 				expect(JSON.stringify(result)).not.toContain(signature)
+				const outgoingIds = [
+					...calls.map((call) => call.id),
+					...result.filter((message) => message.role === "tool").map((message) => message.tool_call_id),
+				]
+				expect(outgoingIds).not.toContainEqual(expect.stringContaining(encodedCanary))
 				for (const call of calls) {
 					if (useFallback)
 						expect(call).toMatchObject({ provider_specific_fields: { thought_signature: bypass } })
@@ -325,6 +331,44 @@ describe("origin isolation property", () => {
 				}
 			}
 			expect(converted).toEqual(before)
+		},
+	)
+})
+
+// OccurrenceSignaturesPreserved: reused IDs must keep each turn's own signature and result mapping.
+describe("reused call ID property", () => {
+	const cases = [false, true].flatMap((r1) =>
+		[false, true].flatMap((encoded) =>
+			[undefined, "first"].flatMap((first) =>
+				[undefined, "second"].map((second) => ({ r1, encoded, first, second })),
+			),
+		),
+	)
+	it.each(cases)(
+		"keeps occurrences for r1=$r1 encoded=$encoded signatures=$first/$second",
+		({ r1, encoded, first, second }) => {
+			const id = encoded ? "call_1__thought__EncodedCanary" : "call_1"
+			const assistant = (value: string | undefined) =>
+				value
+					? signedAssistantMessage([id], { origin, signature: value })
+					: {
+							role: "assistant" as const,
+							content: [{ type: "tool_use" as const, id, name: "read_file", input: {} }],
+						}
+			const history = [assistant(first), toolResultsMessage([id]), assistant(second), toolResultsMessage([id])]
+			const converted = r1 ? convertToR1Format(history) : convertToOpenAiMessages(history)
+			const result = applyThoughtSignatures(history, converted, { origin })
+			const calls = result.flatMap((message) => (message.role === "assistant" ? (message.tool_calls ?? []) : []))
+			expect(calls).toHaveLength(2)
+			for (const [index, expected] of [first, second].entries()) {
+				if (expected)
+					expect(calls[index]).toMatchObject({ provider_specific_fields: { thought_signature: expected } })
+				else expect(calls[index]).not.toHaveProperty("provider_specific_fields")
+				if (encoded && !expected) expect(calls[index].id).not.toContain("EncodedCanary")
+			}
+			expect(result.filter((message) => message.role === "tool").map((message) => message.tool_call_id)).toEqual(
+				calls.map((call) => call.id),
+			)
 		},
 	)
 })
