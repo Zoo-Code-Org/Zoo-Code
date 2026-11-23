@@ -1454,6 +1454,26 @@ describe("OpenAiHandler", () => {
 			expect(result.cause).toBe(fetchAbort)
 		})
 
+		// The Responses route hands the caller's options straight to the SDK, so an
+		// APIUserAbortError raised after the signal is aborted reaches completePrompt's outer
+		// catch without going through the request-site handler. That is the one path that
+		// rebuilds the contract error, and the rebuild has to carry the failure that caused it.
+		it("keeps the SDK abort as the cause when the Responses route rejects it mid-flight", async () => {
+			const responsesHandler = new OpenAiHandler({ ...mockOptions, openAiUseResponsesApi: true })
+			const controller = new AbortController()
+			const sdkAbort = new APIUserAbortError()
+			mockResponsesCreate.mockImplementationOnce(() => {
+				controller.abort()
+				throw sdkAbort
+			})
+			const result = await captureError(
+				responsesHandler.completePrompt("test prompt", { abortSignal: controller.signal }),
+			)
+			expect(result.name).toBe("AbortError")
+			expect(result.message).toBe("The OpenAI request was aborted")
+			expect(result.cause).toBe(sdkAbort)
+		})
+
 		it("should normalize the SDK APIUserAbortError from the non-streaming createMessage path", async () => {
 			mockCreate.mockImplementationOnce(() => {
 				throw new APIUserAbortError()
