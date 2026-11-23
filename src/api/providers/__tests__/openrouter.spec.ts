@@ -1893,8 +1893,10 @@ describe("OpenRouterHandler", () => {
 			)
 			const next = settlesWithin(generator.next(), ABORT_SETTLE_MS)
 			// Only abort once the create call is in flight: model discovery has its own abort race, and
-			// aborting earlier would settle the generator there instead of at the create await.
-			await createAwaited
+			// aborting earlier would settle the generator there instead of at the create await. The readiness
+			// wait is bounded by the same helper that bounds the generator step, so a discovery that
+			// rejects fails this line instead of hanging it until the runner times out.
+			await settlesWithin(createAwaited, ABORT_SETTLE_MS)
 			controller.abort()
 
 			await expect(next).rejects.toMatchObject({
@@ -4246,6 +4248,48 @@ describe("OpenRouterHandler", () => {
 			})
 		})
 
+		it("rejects with AbortError when the SDK fulfils first and the abort is queued before the provider resumes", async () => {
+			// The abort-first case above cannot see the post-settlement signal check under the create
+			// await: settleOnAbort rejects there first, so the check survives its removal. Aborting
+			// synchronously after the fulfilment is no better - that is still inside settleOnAbort,
+			// whose own listener rejects and hides the check; both were measured. Queueing the
+			// cancellation is the ordering that reaches it: by the time this microtask runs the race
+			// is decided and the listener is detached, so the abort cannot reject the wait and can
+			// only flip the signal the check reads on the way back from the fulfilment.
+			const handler = new OpenRouterHandler(mockOptions)
+			const controller = new AbortController()
+			let notifyCreateStarted!: () => void
+			const createStarted = new Promise<void>((resolve) => {
+				notifyCreateStarted = resolve
+			})
+			let resolveCreate!: (value: unknown) => void
+			const mockCreate = vitest.fn().mockImplementation(() => {
+				notifyCreateStarted()
+				return new Promise((resolve) => {
+					resolveCreate = resolve
+				})
+			})
+			// The auto-mocked OpenAI client is injected via a structural type to avoid `any` casts.
+			const client = handler["client"] as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			Object.defineProperty(client, "chat", {
+				value: { completions: { create: mockCreate } },
+				configurable: true,
+				writable: true,
+			})
+
+			const promise = handler.completePrompt("test prompt", { abortSignal: controller.signal })
+			await createStarted
+			resolveCreate({ choices: [{ message: { content: "late result" } }] })
+			queueMicrotask(() => {
+				controller.abort()
+			})
+
+			await expect(promise).rejects.toMatchObject({
+				name: "AbortError",
+				message: "The openrouter request was aborted",
+			})
+		})
+
 		it("settles the completePrompt await as AbortError while the SDK is parked in a retry backoff", async () => {
 			// The same backoff window as createMessage: a create() asleep in its retry sleep never
 			// settles, so the race in settleOnAbort is what ends the wait on a caller cancellation.
@@ -4264,8 +4308,10 @@ describe("OpenRouterHandler", () => {
 			)
 
 			const completion = handler.completePrompt("test prompt", { abortSignal: controller.signal })
-			// Abort only after the create call is in flight so this pins the create await, not model discovery.
-			await createAwaited
+			// Abort only after the create call is in flight so this pins the create await, not model
+			// discovery. The readiness wait is bounded by the same helper the completion assertion
+			// uses, so a discovery that rejects fails here instead of hanging until the runner times out.
+			await settlesWithin(createAwaited, ABORT_SETTLE_MS)
 			controller.abort()
 
 			await expect(settlesWithin(completion, ABORT_SETTLE_MS)).rejects.toMatchObject({
