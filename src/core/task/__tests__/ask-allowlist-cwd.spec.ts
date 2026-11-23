@@ -5,8 +5,8 @@ import type { ExtensionState } from "@roo-code/types"
 import { Task } from "../Task"
 import { setAbortLatch } from "../../../test-utils/run-state"
 
-// Scriptable workspace stand-ins: the shared vscode mock resolves every lookup
-// to nothing, so a command ask could not be judged by a named folder otherwise.
+// Doubles for the workspace. The shared vscode mock resolves every lookup
+// to nothing, so a command ask could not name a folder.
 const workspaceState = vi.hoisted(() => ({
 	workspaceFolders: [] as { fsPath: string; uri: { fsPath: string } }[],
 	foldersByPath: new Map<string, { fsPath: string }>(),
@@ -152,10 +152,10 @@ describe("Task.ask resolves allowlists against the task's workspace", () => {
 	})
 })
 
-// Command asks are judged by the command's own cwd (commandCwd), not the task
-// folder: folder A's allow entry must not approve a command run in folder B.
-// The raw global layers are empty, so each decision comes from the command's
-// folder. The baked pair carries values no folder composes.
+// Command asks follow the command's own cwd (commandCwd), not the task
+// folder, so folder A's allow entry cannot approve a command in folder B. The
+// raw global layers are empty, so each decision comes from the command's
+// folder. The baked pair holds values that no folder composes.
 
 const FOLDER_A = "/mock/folder-a"
 const FOLDER_B = "/mock/folder-b"
@@ -256,8 +256,8 @@ describe("Task.ask judges command asks by the command's working directory", () =
 				.mockResolvedValueOnce(commandState({ alwaysAllowExecute: false, alwaysDenyUnapprovedCommands: false }))
 				.mockResolvedValue(commandState({ alwaysDenyUnapprovedCommands: true })),
 		}
-		// The task is in denying folder B; the command runs in allowing folder A.
-		// Falling back to the task folder would deny what folder A grants.
+		// The task is in denying folder B and the command runs in allowing folder A.
+		// A fallback to the task folder would deny what folder A grants.
 		const task = buildTask(provider, FOLDER_B)
 		await attachQueue(task)
 
@@ -274,8 +274,8 @@ describe("Task.ask judges command asks by the command's working directory", () =
 
 	it("re-checks a queued command drained at ask entry with no approval context", async () => {
 		openTwoFolders()
-		// A message is already queued and the claim gate is open: the entry
-		// drain performs the re-check, and folder A's entry approves.
+		// A message is already queued and the claim gate is open, so the entry drain
+		// performs the re-check. Folder A's entry approves.
 		const provider: ProviderStub = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
 			cwd: PROVIDER_CWD,
@@ -297,10 +297,9 @@ describe("Task.ask judges command asks by the command's working directory", () =
 	})
 
 	it("re-checks an entry-drained queued command against the task folder's policy once blanket deny engages", async () => {
-		// Same entry drain, but blanket deny is engaged on the drain read. The
-		// task's folder is now the second workspace folder: a fallback to the
-		// first folder (which denies "echo") would deny, so the approval names
-		// the task folder.
+		// Same entry drain, but blanket deny is engaged on the drain read. The task's
+		// folder is now the second workspace folder. A fallback to the first folder,
+		// which denies "echo", would deny, so the approval names the task folder.
 		openTwoFolders()
 		workspaceState.workspaceFolders = [
 			{ fsPath: FOLDER_B, uri: { fsPath: FOLDER_B } },
@@ -329,9 +328,9 @@ describe("Task.ask judges command asks by the command's working directory", () =
 	})
 
 	it("denies an entry-drained queued command whose task folder denies it, although the first workspace folder allows it", async () => {
-		// The paired reject path: the task is in denying folder B, which is not
-		// the first workspace folder. A fallback to the first folder (allow)
-		// would approve, so the denial names the task's folder.
+		// The paired reject path. The task is in denying folder B, which is not the
+		// first workspace folder. A fallback to the first folder would approve, so
+		// the denial names the task's folder.
 		openTwoFolders()
 		const provider: ProviderStub = {
 			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
@@ -361,7 +360,7 @@ describe("Task.ask judges command asks by the command's working directory", () =
 				.mockResolvedValueOnce(commandState({ alwaysAllowExecute: false, alwaysDenyUnapprovedCommands: false }))
 				.mockResolvedValue(commandState({ alwaysDenyUnapprovedCommands: true })),
 		}
-		// The task folder (A) allows; the command runs in B, which denies.
+		// The task folder (A) allows. The command runs in B, which denies.
 		const task = buildTask(provider, FOLDER_A)
 		await attachQueue(task)
 

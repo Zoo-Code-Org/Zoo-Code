@@ -399,7 +399,7 @@ export const importSettingsWithFeedback = async (
 						.getConfiguration(Package.name)
 						.update(key, imported, vscode.ConfigurationTarget.Global)
 				} catch (error) {
-					// The import itself succeeded; the lists work until a save rewrites both homes.
+					// The import succeeded. The lists work until a save rewrites both homes.
 					console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
 				}
 			}

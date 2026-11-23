@@ -422,10 +422,10 @@ export type ExtensionState = Pick<
 	cwd?: string // Current working directory
 
 	/**
-	 * User-scope command lists from extension global state, before workspace
-	 * composition. Auto-approval enforces these raw layers plus the task's
-	 * folder; the merged pair follows only the window's first folder. Runtime
-	 * state, not user settings: the provider writes it, never the dialog.
+	 * User-scope command lists from extension global state, before the workspace
+	 * layers compose. Auto-approval enforces these raw layers plus the task's
+	 * folder. The merged pair follows only the window's first folder. This is
+	 * runtime state, not a user setting: the provider writes it, never the dialog.
 	 */
 	globalAllowedCommands?: string[]
 	globalDeniedCommands?: string[]
@@ -856,18 +856,18 @@ export interface WebviewMessage {
 	}
 	updatedSettings?: RooCodeSettings
 	/**
-	 * The lists as the dialog last displayed them, sent with the save that rewrites
+	 * The lists as the dialog last showed them, sent with the save that rewrites
 	 * them. Without it the save cannot tell a file-side addition from a user
-	 * deletion: both look like "in the file, absent from the submission". Senders
-	 * that display no lists omit it.
+	 * deletion, because both look like "in the file, absent from the submission".
+	 * A sender that shows no lists omits it.
 	 */
 	commandListBaseline?: {
 		allowedCommands?: string[]
 		deniedCommands?: string[]
 		/**
-		 * The gate as the dialog last displayed it. A gate flip between display and
-		 * save hides workspace entries; this lets the save treat an already-shown
-		 * entry as known workspace knowledge, not a new promotion to global.
+		 * The gate as the dialog last showed it. A gate flip between display and save
+		 * hides workspace entries. This value lets the save treat an already-shown
+		 * entry as known state, not a new promotion to global.
 		 */
 		workspaceCommandListsEnabled?: boolean
 	}

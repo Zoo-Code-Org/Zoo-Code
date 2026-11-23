@@ -170,20 +170,20 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Initialize Zoo Code auth service for extension session token management.
 	await initZooCodeAuth(context)
 
-	// Seed before the terminal registry initializes: the host may skip
-	// `deactivate()` after a failed activation, and only it releases the
+	// Seed before the terminal registry initializes. The host may skip
+	// `deactivate()` after a failed activation, and only the host releases the
 	// registry's listeners.
-	// Each key has its own first-run guard, so a profile seeded by an earlier
+	// Each key has its own first-run guard, so a profile seeded by an older
 	// version still gets the deny-list migration.
 	try {
 		await seedCommandList(context.globalState, "allowedCommands")
 		await seedCommandList(context.globalState, "deniedCommands")
 	} catch (error) {
-		// The host may skip `deactivate()`, so this catch tears down before
-		// rethrowing: telemetry shutdown, then trace-sink clear, then channel
-		// dispose — reverse acquisition order, each step awaited. Teardown
-		// failures are logged or dropped, never rethrown. Telemetry shutdown
-		// is bounded, so a stuck client cannot hang activation here.
+		// The host may skip `deactivate()`, so this catch tears down before it
+		// rethrows. The order is reverse acquisition: telemetry shutdown, trace-sink
+		// clear, then channel dispose, each step awaited. A teardown failure is logged
+		// or dropped, never rethrown. Telemetry shutdown is bounded, so a stuck client
+		// cannot hang activation here.
 		try {
 			await telemetryService.shutdown()
 		} catch (shutdownError) {

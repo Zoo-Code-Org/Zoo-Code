@@ -156,21 +156,21 @@ export class ExecuteCommandTool extends BaseTool<"execute_command"> {
 				return
 			}
 			const provider = await task.providerRef.deref()
-			// Resolve one working directory before any approval decision: policy,
-			// DCG, and spawn all see the same directory, so a custom `cwd` cannot
-			// be approved against one folder and executed in another.
+			// Resolve one working directory before any approval decision. Policy, DCG, and
+			// spawn then see the same directory, so a custom `cwd` cannot be approved
+			// against one folder and run in another.
 			const lexicalWorkingDirectory = customCwd
 				? path.isAbsolute(customCwd)
 					? customCwd
 					: path.resolve(task.cwd, customCwd)
 				: task.cwd
-			// Folder command lists apply by containment. Canonicalizing here keeps
-			// both sides of that match physical, so a symlinked directory is judged
-			// where the process actually starts (`RooIgnoreController.validateAccess`
-			// sets the realpath-before-policy precedent). An unresolvable link names
-			// no judgeable directory: fail closed via the working-directory error,
-			// no lexical fallback. A link re-pointed before the spawn is an accepted
-			// race, like a settings flip during a pending prompt.
+			// Folder command lists apply by containment. Canonicalizing here keeps both
+			// sides of that match physical, so policy judges a symlinked directory where
+			// the process starts. `RooIgnoreController.validateAccess` sets the
+			// realpath-before-policy precedent. An unresolvable link names no directory to
+			// judge: fail closed through the working-directory error, with no lexical
+			// fallback. A link re-pointed before the spawn is an accepted race, like a
+			// settings change during a pending prompt.
 			let workingDirectory: string
 			try {
 				workingDirectory = await fs.realpath(lexicalWorkingDirectory)
@@ -427,10 +427,10 @@ export type ExecuteCommandOptions = {
 	command: string
 	customCwd?: string
 	/**
-	 * The directory the approval was judged against, resolved once by the
-	 * tool. The command spawns there directly, so execution cannot drift from
-	 * the approved directory. Without it, callers resolve `customCwd` against
-	 * the task `cwd` here.
+	 * The directory that the approval was judged against, resolved once by the
+	 * tool. The command spawns there directly, so execution cannot drift from the
+	 * approved directory. Without it, callers resolve `customCwd` against the task
+	 * `cwd` here.
 	 */
 	workingDirectory?: string
 	terminalShellIntegrationDisabled?: boolean

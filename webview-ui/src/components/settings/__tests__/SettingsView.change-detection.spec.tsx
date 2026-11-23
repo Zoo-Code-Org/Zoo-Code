@@ -829,8 +829,8 @@ describe("SettingsView - Change Detection Fix", () => {
 				await new Promise((resolve) => setTimeout(resolve, 0))
 			})
 
-			// The baseline must be the post-merge list, so the merge's entry counts
-			// as shown; the empty open-time list would make it look externally added.
+			// The baseline must be the post-merge list, so the merge's entry counts as
+			// shown. The empty open-time list would make it look externally added.
 			fireEvent.click(screen.getByTestId("save-button"))
 			expect(mockPostMessage).toHaveBeenCalledWith(
 				expect.objectContaining({
@@ -851,7 +851,7 @@ describe("SettingsView - Change Detection Fix", () => {
 			fireEvent.click(screen.getByTestId("set-provider-baseten"))
 			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-			// One post flips the gate and adds a deny entry: enabling the gate makes
+			// One post flips the gate and adds a deny entry. Enabling the gate makes
 			// workspace entries part of the displayed lists.
 			await act(async () => {
 				extensionState = createExtensionState({

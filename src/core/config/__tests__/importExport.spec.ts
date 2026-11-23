@@ -670,13 +670,13 @@ describe("importExport", () => {
 			showErrorMessageSpy.mockRestore()
 		})
 
-		// A save classifies a displayed command-list entry as externally
-		// removed unless a configuration layer holds it, so an import that
-		// carries command lists must write them into the global layer;
-		// an import that never runs or never carried a list must not write.
+		// A save treats a displayed entry as removed from outside unless a
+		// configuration layer holds it. An import that carries command lists must
+		// therefore write them into the global layer. An import that never runs, or
+		// carries no list, must write nothing.
 		function mockCommandListConfig() {
-			// The shared structurally complete double keeps the configuration
-			// type correct; update() records the mirror's calls.
+			// The shared structurally complete double keeps the configuration type
+			// correct. `update()` records the mirror's calls.
 			const config = makeWorkspaceConfiguration()
 			const update = vi.mocked(config.update)
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
@@ -731,9 +731,9 @@ describe("importExport", () => {
 			)
 			;(fs.access as Mock).mockResolvedValue(undefined)
 			stubValidProviderProfiles()
-			// The state copy holds the same lists after setValues: the mirror
-			// and a state-copy source agree here, so this test pins that the
-			// success path writes both keys at all.
+			// After setValues the state copy holds the same lists. The mirror and the
+			// state copy agree here, so this test pins that the success path writes both
+			// keys.
 			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
 				key === "allowedCommands" ? ["git", "imported"] : key === "deniedCommands" ? ["rm -rf"] : undefined,
 			)
@@ -753,9 +753,9 @@ describe("importExport", () => {
 		it("writes no command-list configuration when the file dialog is cancelled", async () => {
 			;(vscode.window.showOpenDialog as Mock).mockResolvedValue(undefined)
 			stubValidProviderProfiles()
-			// The state copy holds lists from an earlier session: a mirror that
-			// runs on the cancel path would write this stale state over the
-			// user's settings file for an import that never happened.
+			// The state copy holds lists from an earlier session. A mirror on the cancel
+			// path would write that stale state over the user's settings file, for an
+			// import that never happened.
 			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
 				key === "allowedCommands" ? ["git", "stale"] : key === "deniedCommands" ? ["rm -rf"] : undefined,
 			)
@@ -792,9 +792,8 @@ describe("importExport", () => {
 			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ mode: "code" }))
 			;(fs.access as Mock).mockResolvedValue(undefined)
 			stubValidProviderProfiles()
-			// The state copy holds command lists the file never carried: a
-			// mirror sourcing the state copy would write them over the user's
-			// settings file on an import that says nothing about them.
+			// The state copy holds command lists that the file never carried. A mirror
+			// that read the state copy would write them over the user's settings file.
 			vi.mocked(mockContextProxy.getValue).mockImplementation((key: string) =>
 				key === "allowedCommands" ? ["git", "stale"] : undefined,
 			)

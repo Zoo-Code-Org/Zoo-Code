@@ -818,8 +818,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("keeps an in-flight deny-list edit when an external list update arrives while the dialog is open", async () => {
-		// Drive the real setter through a stand-in section, so the buffered edit
-		// is indistinguishable from a user typing in the deny list.
+		// Drive the real setter through a double section, so the buffered edit looks
+		// like a user edit.
 		vi.mocked(AutoApproveSettings).mockImplementation(
 			({ setCachedStateField }: React.ComponentProps<typeof AutoApproveSettings>) => (
 				<button
@@ -836,7 +836,6 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(await screen.findByTestId("buffer-deny-edit"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		// The deny list changes in the extension host while the dialog is open.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -883,7 +882,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			queryClient,
 		})
 
-		// An edit outside the lists leaves them unowned: the external deny entry folds into the buffer.
+		// An edit outside the lists leaves them open, so the external deny entry enters the buffer.
 		fireEvent.click(await screen.findByTestId("edit-non-list-setting"))
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
@@ -907,8 +906,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("baselines the save on the pre-edit displayed lists when a state post lands during an in-flight list edit", async () => {
-		// The baseline must hold the lists displayed before the edit. Folding the
-		// post in would let the save erase a never-displayed entry as a deletion;
+		// The baseline must hold the lists displayed before the edit. Folding the post
+		// in would let the save erase a never-displayed entry as a deletion, and
 		// folding the buffer in would resurrect an in-flight deletion.
 		vi.mocked(AutoApproveSettings).mockImplementation(
 			({ setCachedStateField }: React.ComponentProps<typeof AutoApproveSettings>) => (
@@ -935,7 +934,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 
-		// The submit keeps the in-flight edit; the baseline stays at the pre-edit lists.
+		// The submit keeps the in-flight edit, and the baseline stays at the pre-edit lists.
 		expect(postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
@@ -946,9 +945,9 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("keeps a deleted displayed entry in the save baseline when a state post lands during the deletion", async () => {
-		// Deletion counterpart: a displayed, then deleted entry must stay in the
-		// baseline so the save applies the deletion. A buffer-folded baseline would
-		// re-admit it as an external addition.
+		// The reverse case: a displayed entry that the user then deleted must stay in
+		// the baseline so the save applies the deletion. A buffer-folded baseline
+		// would re-admit it as an external addition.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -967,7 +966,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(await screen.findByTestId("clear-deny-list"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		// A coincidental post adds a never-displayed entry; the held merge keeps the deletion.
+		// A coincidental post adds a never-displayed entry, and the held merge keeps the deletion.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf", "docker"],
@@ -976,8 +975,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 
-		// The baseline keeps the deleted entry so the save applies the deletion, and
-		// excludes the never-displayed "docker" so the save keeps it and warns.
+		// The baseline keeps the deleted entry so the save applies the deletion. It
+		// excludes the never-displayed "docker", so the save keeps it and warns.
 		expect(postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
@@ -1025,7 +1024,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		answerSave(saveId, { success: false, error: "storage unavailable" })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled()) // the failure keeps it dirty
 
-		// The host refreshes state after the rejected write; the edit the user is looking at wins.
+		// The host refreshes after the rejected write, and the edit the user is looking at wins.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1072,13 +1071,12 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 
-		// The list-only save posted the edit and asked for an answer.
 		expect(updateSettingsPosts()).toHaveLength(1)
 		const saveId = lastSaveRequestId(postMessage)
 		expect(saveId).toBeDefined()
 		expect(screen.getByTestId("save-button")).toBeDisabled() // waiting for the host's answer
 
-		// The host refreshes with the write unlanded - the submitted entry is absent - then reports failure.
+		// The host refreshes with the write unlanded, so the submitted entry is absent, then reports failure.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: [],
@@ -1086,14 +1084,14 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		answerSave(saveId, { success: false, error: "storage unavailable" })
 
-		// The failure keeps the edit on screen - still holding the refresh back - and leaves the form dirty.
+		// The failure keeps the edit on screen, still holds the refresh back, and leaves the form dirty.
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 		expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["git status"]))
 	})
 
 	it("clears the unsaved flag for a list-only save the host confirms, releasing the lists to updates", async () => {
-		// Success counterpart: the refresh shows the submitted list, so the settle
-		// releases the hold and the flag. A later change folds in without re-dirtying.
+		// The success case: the refresh shows the submitted list, so the settle releases the
+		// hold and the flag. A later change enters without setting the flag again.
 		vi.mocked(AutoApproveSettings).mockImplementation(
 			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
 				<div>
@@ -1126,7 +1124,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		answerSave(saveId, { success: true })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 
-		// The lists committed, so a later host update is no longer an in-flight edit being stomped.
+		// The lists committed, so a later host update cannot overwrite an in-flight edit.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1139,9 +1137,9 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("reconciles each list's retry baseline with that list's own write outcome after a failed save", async () => {
-		// A failed save reports one outcome, yet each list's write result comes from
-		// the refresh before the answer. A landed list keeps its advanced baseline;
-		// an unwritten one rolls back, so a deletion stays a user deletion on retry.
+		// A failed save reports one outcome, yet each list's write result comes from the refresh
+		// before the answer. A landed list keeps its advanced baseline, and an unwritten one
+		// rolls back, so a deletion stays a user deletion on retry.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			allowedCommands: ["echo"],
@@ -1183,8 +1181,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const saveId = lastSaveRequestId(postMessage)
 		expect(saveId).toBeDefined()
 
-		// The host wrote the allow list but not the deny list, then reported
-		// failure: the refresh carries only the allow list's new entry.
+		// The host wrote the allow list but not the deny list, then reported failure,
+		// so the refresh carries only the allow list's new entry.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			allowedCommands: ["echo", "ls"],
@@ -1235,8 +1233,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 		expect(lastSaveRequestId(postMessage)).toBeDefined() // this save waits for the host's answer
-		// The host writes the list before answering; observing the submitted entry
-		// in the refresh, not the answer alone, releases the hold.
+		// The host writes the list before answering. Observing the submitted entry in
+		// the refresh, not the answer alone, releases the hold.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["git status"],
@@ -1246,7 +1244,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		answerSave(lastSaveRequestId(postMessage), { success: true })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 
-		// The lists committed, so a later host update is no longer an in-flight edit being stomped.
+		// The lists committed, so a later host update cannot overwrite an in-flight edit.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1259,10 +1257,10 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 	it("keeps a silently rejected list write dirty and rolls back only its baseline when the host reports success", async () => {
 		// One answer covers the whole payload, so a rejected list write can arrive
-		// with success: true. Each list's own result comes from the refresh: the
-		// allow list carries the submitted entry and keeps its advanced baseline;
-		// the deny list comes back unchanged, so its deletion rolls back and the
-		// flag stays on instead of silently dropping the edit.
+		// with success set to true. Each list's own result comes from the refresh. The
+		// allow list carries the submitted entry and keeps its advanced baseline. The
+		// deny list comes back unchanged, so its deletion rolls back. The flag stays
+		// on.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			allowedCommands: ["echo"],
@@ -1328,7 +1326,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify([]))
 
 		// Retry classifies each list by its own result: the landed allow list keeps
-		// its advanced baseline; the rolled-back deny baseline keeps the deletion.
+		// its advanced baseline, and the rolled-back deny baseline keeps the deletion.
 		fireEvent.click(screen.getByTestId("save-button"))
 		const saves = updateSettingsPosts()
 		expect(saves).toHaveLength(2)
@@ -1342,10 +1340,10 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("releases the unsaved flag after a save when a refused external update changed nothing", async () => {
-		// A refused external post changes nothing, so the merge must leave the
-		// buffer object untouched: the save settles by comparing the live buffer
-		// against the exact object it submitted. Replacing it with an equal-valued
-		// copy would read as a mid-save edit and keep the flag on.
+		// A refused external post changes nothing, so the merge must leave the buffer
+		// object untouched. The save settles by comparing the live buffer against the
+		// exact object it submitted. An equal-valued copy would count as a mid-save
+		// edit and keep the flag on.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1367,8 +1365,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(await screen.findByTestId("clear-deny-list"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		// The display difference puts the save on the answered path; its lists
-		// restate what the dialog displayed, so the held merge refuses them.
+		// The display difference puts the save on the answered path. Its lists repeat
+		// what the dialog displayed, so the held merge rejects them.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1404,9 +1402,9 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("settles the save against the refreshed state posted just before the answer", async () => {
-		// The host posts the refresh before its answer, and the settle must observe
-		// that refresh: the submitted list seen there records the write as landed.
-		// Using the pre-refresh state would report a landed write as missing.
+		// The host posts the refresh before its answer, and the settle must see that
+		// refresh: the submitted list there records the write as landed. Using the
+		// pre-refresh state would report a landed write as missing.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1432,8 +1430,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		fireEvent.click(await screen.findByTestId("clear-deny-list"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		// A display difference routes this save through the answered path, without
-		// touching the buffered list.
+		// A display-setting difference routes this save through the answered path,
+		// without touching the buffered command lists.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1445,7 +1443,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		const saveId = lastSaveRequestId(postMessage)
 		expect(saveId).toBeDefined()
 
-		// The refresh (carrying the landed deletion) posts, and the success answer follows it immediately.
+		// The refresh posts with the landed deletion, and the success answer follows it immediately.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: [],
@@ -1475,8 +1473,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	it("keeps the submitted buffer when an equal-valued list restatement arrives during a later pending save", async () => {
 		// A post with value-equal lists must leave the buffer object untouched, even
 		// when it differs from the baseline in the gate slot. The save settles by
-		// comparing the buffer against the exact object it submitted; folding fresh
-		// equal-valued arrays in would read as a mid-save edit.
+		// comparing the buffer against the exact object it submitted, and fresh
+		// equal-valued arrays would count as a mid-save edit.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			deniedCommands: ["rm -rf"],
@@ -1499,7 +1497,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 			queryClient,
 		})
 
-		// An in-flight deletion, then an external gate flip: the flip lands in the
+		// An in-flight deletion, then an external gate flip. The flip enters the
 		// buffer while the held-back lists keep the baseline at the pre-flip gate.
 		fireEvent.click(await screen.findByTestId("clear-deny-list"))
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
@@ -1511,7 +1509,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 
-		// The display difference puts this save on the answered path; the refresh
+		// The display difference puts this save on the answered path. The refresh
 		// shows the deletion landed, so the answer releases the flag and the hold.
 		fireEvent.click(screen.getByTestId("save-button"))
 		const deleteSaveId = lastSaveRequestId(postMessage)
@@ -1526,9 +1524,9 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		answerSave(deleteSaveId, { success: true })
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 
-		// A second save: a non-list edit re-dirties the form. The host restates the
-		// file with fresh equal-valued arrays; the lists match the buffer, so the
-		// merge must fold nothing and the buffer must stay the submitted object.
+		// A second save follows: a non-list edit sets the flag again. The host restates
+		// the file with fresh equal-valued arrays, and the lists match the buffer. The
+		// merge therefore folds nothing, and the buffer stays the submitted object.
 		fireEvent.click(screen.getByTestId("edit-other-setting"))
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
 		fireEvent.click(screen.getByTestId("save-button"))
@@ -1547,8 +1545,8 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 	})
 
 	it("clears the unsaved flag and releases every list when the refresh shows all writes landed", async () => {
-		// Every edited list landed in the refresh, so the flag clears and the
-		// lists are released to external updates.
+		// Every edited list landed in the refresh, so the flag clears and the lists
+		// accept external updates again.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			allowedCommands: ["echo"],
@@ -1601,7 +1599,7 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 
 		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
 
-		// The lists committed, so a later host update is no longer an in-flight edit being stomped.
+		// The lists committed, so a later host update cannot overwrite an in-flight edit.
 		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
 			...defaultExtensionState,
 			allowedCommands: ["echo", "ls"],

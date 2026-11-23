@@ -3587,10 +3587,10 @@ export class ClineProvider
 			autoCondenseContext: stateValues.autoCondenseContext ?? true,
 			autoCondenseContextPercent: stateValues.autoCondenseContextPercent ?? 100,
 			taskHistory: includeTaskHistory ? this.taskHistoryStore.getAll() : [],
-			// Composed from the global and workspace layers, scoped to the
-			// window's first folder. Display shows exactly these values. A
-			// task in another folder is judged by that folder's lists:
-			// enforcement re-composes the pair from the raw global layers below.
+			// Composed from the global and workspace layers, scoped to the window's first
+			// folder. Display shows exactly these values. Enforcement re-composes the pair
+			// from the raw global layers below, so a task in another folder is judged by
+			// that folder's lists.
 			allowedCommands: effectiveCommandLists.allowed,
 			deniedCommands: effectiveCommandLists.denied,
 			workspaceCommandListsEnabled: gateEnabled,

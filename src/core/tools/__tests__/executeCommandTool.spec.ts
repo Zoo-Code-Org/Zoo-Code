@@ -83,9 +83,9 @@ const { executeCommandTool } = executeCommandModule
 // capturing inside a test can capture another test's leaked spy and recurse.
 const realCheckAutoApproval = autoApprovalModule.checkAutoApproval
 
-// A Windows directory symlink needs developer mode or elevation; a junction does
-// not, and `realpath` resolves it like a POSIX link. Try a symlink first, then a
-// junction. Skip the fixture where neither can be created.
+// A Windows directory symlink needs developer mode or elevation. A junction
+// needs neither, and `realpath` resolves it like a POSIX link. Try a symlink
+// first, then a junction. Skip the fixture where neither works.
 function createDirectoryLink(target: string, linkPath: string): void {
 	try {
 		symlinkSync(target, linkPath, "dir")
@@ -272,9 +272,8 @@ describe("executeCommandTool", () => {
 		})
 
 		it("reports a relative custom cwd resolved against the task's workspace", async () => {
-			// The policy lookup matches against workspace folders, which a
-			// relative path never names, so the approval must carry the
-			// resolved absolute path.
+			// The policy lookup matches against workspace folders, and a relative path
+			// names none. The approval must carry the resolved absolute path.
 			mockToolUse.params.command = "echo test"
 			mockToolUse.params.cwd = "sub/dir"
 			mockToolUse.nativeArgs = { command: "echo test", cwd: "sub/dir" }
@@ -300,8 +299,8 @@ describe("executeCommandTool", () => {
 
 	// The folder policy matches by string containment, so a link would be judged
 	// by its own folder while the process starts in the target. The tool
-	// canonicalizes the working directory before any approval decision, so
-	// every consumer (ask, DCG, re-checks, spawn) sees the physical directory.
+	// canonicalizes the working directory before any approval decision, so every
+	// consumer (ask, DCG, re-check, spawn) sees the physical directory.
 	describe("Working directory canonicalization", () => {
 		it("forwards the physical directory behind a symlinked custom cwd to the approval ask", async () => {
 			mockToolUse.params.command = "echo test"
@@ -354,7 +353,6 @@ describe("executeCommandTool", () => {
 				toolCallId: "test-tool-call-id",
 			})
 
-			// The failure reports through the working-directory error channel.
 			expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
 				"Working directory '/mock/broken-link' does not exist.",
 			)
@@ -380,9 +378,8 @@ describe("executeCommandTool", () => {
 					toolCallId: "test-tool-call-id",
 				})
 
-				// An unresolvable link names no judgeable directory, even when the
-				// lexical `stat` check passes. The message names the
-				// canonicalization failure whatever the rejection's shape.
+				// An unresolvable link names no directory that policy can judge, even when the
+				// lexical `stat` check passes. The message names the canonicalization failure.
 				expect(formatResponse.toolError).toHaveBeenCalledExactlyOnceWith(
 					expect.stringContaining("Unable to resolve working directory '/mock/loop': ELOOP"),
 				)
@@ -391,9 +388,8 @@ describe("executeCommandTool", () => {
 			},
 		)
 
-		// The scripted tests above pin the contract; this one uses a real link.
-		// The physical path reaching `commandCwd` makes a link judged by its
-		// target's folder.
+		// The scripted tests above pin the contract. This one uses a real link, so
+		// the physical path reaching `commandCwd` puts the link in its target's folder.
 		it.skipIf(!directoryLinksAvailable)(
 			"forwards the real target of a directory link created on disk",
 			async () => {
@@ -406,7 +402,7 @@ describe("executeCommandTool", () => {
 					const link = path.join(folderA, "link")
 					createDirectoryLink(folderB, link)
 					// Delegate to the real filesystem. Once-only: a leaked
-					// delegate would resolve later tests' fake paths for real.
+					// delegate would resolve later tests' non-existent mock paths for real.
 					vi.mocked(fs.realpath).mockImplementationOnce(async (target) => realpathSync(String(target)))
 
 					mockToolUse.params.cwd = link
@@ -873,8 +869,8 @@ describe("executeCommandTool", () => {
 			await setupProtectedDwellFlip()
 			mockToolUse.params.cwd = "/custom/path"
 			mockToolUse.nativeArgs = { command: "echo test", cwd: "/custom/path" }
-			// Delegate to the import-time real check; reading the module property
-			// here would capture this file's leaked spy and recurse.
+			// Delegate to the import-time real check. Reading the module property here
+			// would capture this file's leaked spy and recurse.
 			const recheckSpy = vitest
 				.spyOn(autoApprovalModule, "checkAutoApproval")
 				.mockImplementation((args) => realCheckAutoApproval(args))

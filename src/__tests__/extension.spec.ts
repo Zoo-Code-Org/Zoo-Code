@@ -561,8 +561,7 @@ describe("extension.ts", () => {
 						? { key, defaultValue: [], globalValue: deniedGlobalValue }
 						: {
 								key,
-								// The override test must show the package default stays
-								// unseeded, not merely absent.
+								// The override test must show the package default stays unseeded, not absent.
 								defaultValue: ["git log", "git diff", "git show"],
 								globalValue,
 								workspaceValue,
@@ -587,9 +586,8 @@ describe("extension.ts", () => {
 		})
 
 		test("seeds both command lists before initializing the terminal registry", async () => {
-			// A seed rejection must fail activation before the registry initializes:
-			// the host may skip deactivate(), and only it releases the registry's
-			// listeners.
+			// A seed rejection must fail activation before the registry initializes. The
+			// host may skip deactivate(), and only it releases the registry's listeners.
 			const order: string[] = []
 			const seedCommandList = vi.fn(async (_globalState: vscode.Memento, configKey: string): Promise<void> => {
 				order.push(`seed:${configKey}`)
@@ -629,9 +627,8 @@ describe("extension.ts", () => {
 		})
 
 		test("shuts down the telemetry service before propagating a seed rejection", async () => {
-			// The seed runs after telemetry registers, and the host may skip
-			// `deactivate()` after a failed activation, so the failure path must shut
-			// telemetry down itself.
+			// The seed runs after telemetry registers. The host may skip `deactivate()` on
+			// a failed activation, so this path must shut telemetry down itself.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
@@ -702,9 +699,9 @@ describe("extension.ts", () => {
 		})
 
 		test("disposes the output channel last when seeding rejects activation", async () => {
-			// The host may skip `deactivate()` after a failed activation, so the
-			// failure path must dispose the channel itself — last, because earlier
-			// teardown steps log through it.
+			// The host may skip `deactivate()` on a failed activation, so this path must
+			// dispose the channel itself. It goes last, because earlier teardown steps log
+			// through it.
 			vi.doMock("../utils/seedAllowedCommands", () => ({
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
@@ -717,8 +714,8 @@ describe("extension.ts", () => {
 			})
 			try {
 				const vscode = await import("vscode")
-				// Calling the fixed-object factory double now returns the same channel
-				// `activate` will create; arming dispose observes its disposal order.
+				// The fixed-object factory double returns the same channel that `activate`
+				// creates. Arming dispose then observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
 				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
 
@@ -743,8 +740,7 @@ describe("extension.ts", () => {
 				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
 			}))
 			const teardownOrder: string[] = []
-			// Clearing passes undefined (restore the default sink); that call marks
-			// the order assertion.
+			// Clearing passes undefined, which restores the default sink. That call marks the order assertion.
 			const setPersistenceTraceSink = vi.fn((sink?: unknown) => {
 				if (sink === undefined) {
 					teardownOrder.push("trace-sink-cleared")
@@ -762,16 +758,15 @@ describe("extension.ts", () => {
 			})
 			try {
 				const vscode = await import("vscode")
-				// Calling the fixed-object factory double now returns the same channel
-				// `activate` will create; arming dispose observes its disposal order.
+				// Same channel, same double: arming dispose observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
 				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
 
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-				// Reverse acquisition order: sink installed after the channel, so it
-				// clears after telemetry shutdown and before the channel.
+				// Reverse acquisition order: the sink goes in after the channel, so it clears
+				// after telemetry shutdown and before the channel.
 				expect(teardownOrder).toEqual(["telemetry-shutdown", "trace-sink-cleared", "channel-disposed"])
 				// The failure path clears the sink exactly once: install + clear.
 				expect(setPersistenceTraceSink).toHaveBeenCalledTimes(2)
@@ -797,8 +792,7 @@ describe("extension.ts", () => {
 		test("does not seed global state from an enforced workspace-scoped override", async () => {
 			const vscode = await import("vscode")
 			// Gate on: the workspace list replaces the default, so the seed must not
-			// re-grant what it removed. (Gate-off seeding is pinned in the seed
-			// module's own spec.)
+			// re-grant what it removed. The seed module's own spec covers gate-off.
 			setConfigScope(vscode, { workspaceValue: ["docker"], gate: true })
 
 			const { activate } = await import("../extension")

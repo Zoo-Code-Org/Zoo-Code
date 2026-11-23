@@ -4171,7 +4171,8 @@ describe("ClineProvider", () => {
 			Reflect.deleteProperty(vscode.workspace, "workspaceFolders")
 		})
 
-		// The doubles make `get` key-aware so only the gate key reports true.
+		// The configuration double makes `get` key-aware, so only the gate key
+		// reports true. The deny-side workspace layer must come from `inspect`.
 		test("getState enforces workspace-scope denied commands even when global state is empty", async () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),
@@ -4203,8 +4204,8 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getStateToPostToWebview()
 
-			// No global entry shadows the workspace entry, so display shows the
-			// global layer plus that entry — what getState() enforces.
+			// No global entry shadows the workspace entry, so display shows the global
+			// layer plus that entry, which is what getState() enforces.
 			expect(state.deniedCommands).toEqual(["git", "docker"])
 			expect(state.allowedCommands).toEqual([])
 		})
@@ -4223,10 +4224,9 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getState()
 
-			// Per-folder enforcement re-composes from the raw global layers, so
-			// they must differ from the window-composed pair. If the fields were
-			// dropped or composed, enforcement would silently use the
-			// first-folder lists.
+			// Per-folder enforcement re-composes from the raw global layers, so they must
+			// differ from the window-composed pair. A dropped or composed field would make
+			// enforcement use the first-folder lists.
 			expect(state.globalAllowedCommands).toEqual(["git"])
 			expect(state.globalDeniedCommands).toEqual(["curl"])
 			expect(state.allowedCommands).toEqual(["git", "docker"])
@@ -4248,16 +4248,15 @@ describe("ClineProvider", () => {
 
 			const state = await provider.getState()
 
-			// The folder value replaces the workspace value; it does not union.
-			// The effective get() value is ignored, so global entries cannot leak
-			// into the workspace layer.
+			// The folder value replaces the workspace value. It does not union. The
+			// effective get() value is ignored, so global entries cannot leak in.
 			expect(state.deniedCommands).toEqual(["pnpm docker"])
 		})
 
 		test("getState scopes its command-list lookups to the first workspace folder", async () => {
-			// Each folder gets its own configuration, chosen by the scope resource.
-			// An unscoped lookup reads the second folder, so the first folder's
-			// list can only come from a lookup scoped to its uri.
+			// Each folder gets its own configuration, chosen by the scope resource. An
+			// unscoped lookup reads the second folder, so only a lookup scoped to the
+			// first folder's uri returns its list.
 			const firstFolder = { uri: makeUri("/root/one"), name: "first", index: 0 }
 			const secondFolder = { uri: makeUri("/root/two"), name: "second", index: 1 }
 			// workspaceFolders is readonly-typed in the mock, so set it through
@@ -4291,11 +4290,10 @@ describe("ClineProvider", () => {
 			expect(state.workspaceCommandListsEnabled).toBe(true)
 		})
 
-		// The gate decides a workspace-only allow entry: enabled, it joins the
-		// effective lists; disabled, enforcement ignores it.
+		// The gate decides a workspace-only allow entry. Enabled, the entry joins the
+		// effective lists. Disabled, enforcement ignores it.
 		function mockGateConfiguration(enabled: boolean) {
-			// The gate reader reads its value through `get`; the `inspect`
-			// override supplies the allow-side workspace layer.
+			// The gate reader reads its value through `get`. The `inspect` override supplies the allow-side workspace layer.
 			const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: enabled })
 			const inspect = vi.fn()
 			inspect.mockImplementation((key: string) =>
@@ -4305,10 +4303,9 @@ describe("ClineProvider", () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
 		}
 
-		// For a profile that never set the gate: the configuration reports nothing,
-		// so the provider must apply the shared default. The workspace layer is
-		// present so the default direction (workspace entries stay inert) is
-		// observable.
+		// A profile that never set the gate reports nothing, so the provider must
+		// apply the shared default. The workspace layer is present, so the default
+		// direction (workspace entries stay inert) is visible.
 		function mockUnsetGateConfiguration() {
 			const config = makeWorkspaceConfiguration()
 			const inspect = vi.fn()

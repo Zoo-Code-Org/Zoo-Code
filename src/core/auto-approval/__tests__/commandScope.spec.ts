@@ -20,29 +20,24 @@ import { getSingleCommandDecision } from "../commands"
 import { checkAutoApproval } from "../index"
 import { baseState, type State } from "./fixtures"
 
-// Scriptable stand-in for `vscode.workspace.workspaceFolders`: the module
-// mock's getter reads through this object, so a test can change the open
-// folders without re-mocking the module. `foldersByPath` backs
-// `getWorkspaceFolder`: keys are folder paths, values the folder objects, so
-// a test controls which cwds resolve to a root. `throwsOnFoldersRead` makes
-// the getter itself fail once, standing in for a workspace that cannot answer
-// the lookup at all.
+// Double for `vscode.workspace.workspaceFolders`. The module mock reads
+// this object, so a test changes the open folders without a new mock.
+// `foldersByPath` backs `getWorkspaceFolder`, so a test controls which cwd
+// resolves to which root. `throwsOnFoldersRead` makes the getter fail once,
+// which stands for a workspace that cannot answer the lookup.
 const workspaceState = vi.hoisted(() => ({
 	workspaceFolders: undefined as { uri: unknown }[] | undefined,
 	foldersByPath: new Map<string, unknown>(),
 	throwsOnFoldersRead: false,
 }))
 
-// Scriptable stand-in for `fs.realpathSync`, which the root-side containment
-// fallback consults. Every other fs binding stays real — the manifest reads
-// and the real-filesystem tests run through `importOriginal` — and the double
-// resolves paths to themselves by default: the mock roots are fake paths that
-// exist on no filesystem, and an unresolvable root is compared by its
-// registered path, so identity reproduces exactly what the real call does to
-// them. Tests that need other behavior script it explicitly.
+// Double for `fs.realpathSync`. Only this binding is replaced. Every other fs
+// call stays real, and the manifest and real-filesystem tests use
+// `importOriginal`. The double resolves each path to itself: the mock roots
+// exist on no filesystem, and an unresolvable root compares by its
+// registered path. Tests that need other behavior script the double.
 const fsState = vi.hoisted(() => ({
-	// The unmocked implementation, captured by the module mock so a test can
-	// delegate through the double to real filesystem behavior.
+	// The real implementation, saved by the mock so a test can delegate to it.
 	realRealpathSync: null as null | ((target: string) => string),
 }))
 
@@ -50,9 +45,8 @@ vi.mock("fs", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("fs")>()
 	fsState.realRealpathSync = (target: string) => String(actual.realpathSync(target))
 	const realpathSync = vi.fn((target: string): string => String(target))
-	// Interop shape: production code reaches `realpathSync` through the
-	// default export and this spec through the named one; both must see the
-	// same double.
+	// Interop: production code imports the default export, this spec imports the
+	// named one. Both must see the same double.
 	const actualDefault = (actual as { default?: typeof import("fs") }).default ?? actual
 	return {
 		...actual,
@@ -83,22 +77,19 @@ vi.mock("vscode", () => ({
 	workspace: {
 		get workspaceFolders() {
 			if (workspaceState.throwsOnFoldersRead) {
-				// One-shot, like the throwing-lookup test it serves: a leaked
-				// throw would fail every later read, including the
-				// first-folder default reads the composition still performs.
+				// One throw only, like the test it serves. A second throw would fail every
+				// later read, including the first-folder default the composition performs.
 				workspaceState.throwsOnFoldersRead = false
 				throw new Error("workspace unavailable")
 			}
 			return workspaceState.workspaceFolders
 		},
 		getConfiguration: vi.fn(),
-		// Mirrors VS Code's lexical containment: a prefix test against the
-		// registered paths, with the platform separator as the guard between
-		// root and remainder. The folder lookup does not consult this double —
-		// it compares roots by their real paths — but the double stays
-		// faithful so a test can register an outer root that lexically
-		// contains a symlinked root's target, the containment that must not
-		// decide the folder match.
+		// Mirrors VS Code's lexical containment: a prefix test on the registered
+		// paths, guarded by the platform separator. The folder lookup does not use
+		// this double. It compares roots by real path. The double stays faithful, so
+		// a test can register an outer root that lexically contains a symlinked
+		// root's target. That outer root must not decide the folder match.
 		getWorkspaceFolder: vi.fn((resource?: { fsPath?: string }) => {
 			const fsPath = resource?.fsPath ?? ""
 			for (const [folderPath, uri] of workspaceState.foldersByPath) {
@@ -124,8 +115,7 @@ interface ConfigDouble {
 
 function mockConfiguration({ inspect, effective = [] }: ConfigDouble = {}) {
 	const config = makeWorkspaceConfiguration()
-	// The shared double is scripted after creation so the per-test fixture
-	// values need no type assertion at the construction site.
+	// The mock scripts the shared double after creation, so the fixture needs no type assertion.
 	vi.mocked(config.get).mockReturnValue(effective)
 	vi.mocked(config.inspect).mockReturnValue(inspect)
 	vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
@@ -161,9 +151,8 @@ describe("readCommandListScopes", () => {
 	})
 
 	it("ignores the effective get() value so global-scoped entries are not double-counted", () => {
-		// A real VS Code get() folds globalValue into the effective result, so
-		// reading the workspace layer from get() would leak "npm" (a
-		// user-settings-only entry) into the workspace layer.
+		// A real get() folds globalValue into the result. Reading the workspace
+		// layer from get() would leak the user-only entry "npm" into that layer.
 		mockConfiguration({
 			inspect: { key: "allowedCommands", globalValue: ["npm"], workspaceValue: ["docker"] },
 			effective: ["npm", "docker"],
@@ -228,9 +217,8 @@ describe("readCommandListScopes", () => {
 	})
 
 	it("takes the workspace layer from a caller-supplied snapshot without reading the configuration", () => {
-		// The save path threads one captured inspection through every
-		// derivation, so the snapshot is authoritative: the configuration's own
-		// value must never be consulted a second time.
+		// The save path passes one captured inspection to every derivation. The
+		// snapshot is authoritative, so the configuration must not be read again.
 		mockConfiguration({ inspect: { key: "deniedCommands", workspaceValue: ["stale"] } })
 
 		const scopes = readCommandListScopes("deniedCommands", [], { workspaceValue: ["docker"] })
@@ -243,8 +231,8 @@ describe("readCommandListScopes", () => {
 
 describe("splitCommandListScopes", () => {
 	it("keeps workspace entries in the workspace layer and routes new entries to global", () => {
-		// The issue #1939 leak: the dialog sends the merged list back, and the
-		// workspace-only entry "docker" must not end up in the global write.
+		// The dialog sends the merged list back. A workspace-only entry such as
+		// "docker" must not reach the global write.
 		const result = splitCommandListScopes(["docker", "aws"], ["docker"], [])
 
 		expect(result.workspaceWrite).toEqual(["docker"])
@@ -259,9 +247,8 @@ describe("splitCommandListScopes", () => {
 	})
 
 	it("keeps an entry present in both layers in both layers when retained", () => {
-		// Semantics: do not silently delete the user's global entry just
-		// because the current folder happens to define it too; the entry was
-		// deliberately authored in both scopes and the user kept it.
+		// Do not delete the user's global entry because the current folder also
+		// defines it. The user authored the entry in both scopes and kept it.
 		const result = splitCommandListScopes(["docker"], ["docker"], ["docker"])
 
 		expect(result.workspaceWrite).toEqual(["docker"])
@@ -269,8 +256,7 @@ describe("splitCommandListScopes", () => {
 	})
 
 	it("removes a deleted entry from the workspace layer without touching global", () => {
-		// The user kept "git" and deleted workspace-only "docker"; "git" must
-		// survive at its own (global) layer.
+		// The user kept "git" and deleted the workspace-only "docker". "git" survives at its own global layer.
 		const result = splitCommandListScopes(["git"], ["docker"], ["git"])
 
 		expect(result.workspaceWrite).toEqual([])
@@ -278,8 +264,7 @@ describe("splitCommandListScopes", () => {
 	})
 
 	it("removes a deleted entry from every layer that contained it", () => {
-		// "docker" lived in both layers and the user deleted it; kept "rm"
-		// stays at the workspace layer only.
+		// "docker" lived in both layers and the user deleted it. The kept "rm" stays at the workspace layer only.
 		const result = splitCommandListScopes(["rm"], ["docker", "rm"], ["docker"])
 
 		expect(result.workspaceWrite).toEqual(["rm"])
@@ -361,9 +346,9 @@ describe("resolveWorkspaceWriteTarget", () => {
 	})
 
 	it("resolves the target from a caller-supplied snapshot without reading the configuration", () => {
-		// The snapshot alone decides the target, so a folder value the live
-		// configuration does not report still selects the folder target —
-		// keeping split, write, and rollback on one captured state.
+		// The snapshot alone picks the target. A folder value the live configuration
+		// does not report still selects the folder target, so split, write, and
+		// rollback share one captured state.
 		mockConfiguration({ inspect: { key: "deniedCommands", workspaceValue: ["docker"] } })
 
 		expect(resolveWorkspaceWriteTarget("deniedCommands", { workspaceFolderValue: ["pnpm docker"] })).toBe(
@@ -391,8 +376,7 @@ describe("resolveWorkspaceWriteTarget", () => {
 			workspaceState.workspaceFolders = workspaceFolders
 			mockConfiguration({ inspect: { key: "deniedCommands", workspaceValue: ["docker"] } })
 
-			// With no resource to resolve against, no folder value can be
-			// reported, so the folder target stays unreachable.
+			// No resource means no folder value, so the folder target stays unreachable.
 			expect(resolveWorkspaceWriteTarget("deniedCommands")).toBe(vscode.ConfigurationTarget.Workspace)
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, undefined)
 		},
@@ -423,11 +407,10 @@ it("workspaceCommandListsEnabled: enables the workspace layers only when the gat
 
 it("workspaceCommandListsEnabled: is off when the gate is unset", () => {
 	vi.clearAllMocks()
-	// Unset is the state of every installation that has never opted in, so it
-	// must read as disabled: treating unset as enabled would widen
-	// auto-approval by default. The equality against the declared default also
-	// keeps this expectation attached to the constant that documents the
-	// shipped default, not to an independently hard-coded boolean.
+	// Unset is the state of every installation that never opted in, so unset
+	// must read as disabled. Treating unset as enabled would widen auto-approval
+	// by default. The comparison against the declared default also ties this
+	// expectation to the constant that documents the shipped default.
 	const config = mockGateConfiguration(undefined)
 
 	expect(workspaceCommandListsEnabled()).toBe(false)
@@ -447,8 +430,8 @@ it("workspaceCommandListsEnabled: keeps the workspace layers disabled when the g
 	expect(workspaceCommandListsEnabled()).toBe(false)
 })
 
-// The manifest declaration is what makes the gate workspace-unsettable;
-// VS Code itself refusing a workspace-layer value is platform behavior.
+// The manifest declaration makes the gate workspace-unsettable. VS Code refusing a
+// workspace-layer value is platform behavior.
 it("manifest: declares the gate as a default-off, application-scoped boolean", () => {
 	const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"))
 	const gate = manifest.contributes.configuration.properties["zoo-code.workspaceCommandListsEnabled"]
@@ -459,8 +442,7 @@ it("manifest: declares the gate as a default-off, application-scoped boolean", (
 })
 
 it("manifest: keeps the command-list keys workspace-settable so the gated layer can exist", () => {
-	// The gate scopes the workspace layers' effect; scoping the list keys
-	// themselves would remove the workspace layer entirely.
+	// The gate scopes the effect of the workspace layers. Scoping the list keys would remove the workspace layer entirely.
 	const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"))
 	const properties = manifest.contributes.configuration.properties
 
@@ -493,9 +475,8 @@ it("resolveEffectiveCommandLists: treats unshadowed workspace entries as the sol
 })
 
 it("resolveEffectiveCommandLists: lets a global allow entry decide a command a longer workspace deny entry also matches", () => {
-	// Cross-directional shadowing: the workspace deny entry cannot decide
-	// anything the global allow layer already covers, so it never reaches
-	// the matcher.
+	// Shadowing works in both directions. A workspace deny entry cannot decide anything the
+	// global allow layer covers, so it never reaches the matcher.
 	const effective = resolveEffectiveCommandLists(listScopes(["git"], []), listScopes([], ["git push"]), true)
 
 	expect(effective.allowed).toEqual(["git"])
@@ -532,15 +513,12 @@ it("resolveEffectiveCommandLists: shadows workspace entries case-insensitively, 
 	expect(effective.hiddenWorkspaceDeny).toEqual([])
 })
 
-// A user-level (global) entry decides every command it matches: a workspace
-// entry applies only where no global entry matches, so a project file can
-// fill gaps in the user's policy but never outrank it. Within a single layer
-// the conflict rule is specificity — the longest match wins — and when allow
-// and deny entries match with equal specificity, the deny decides: an
-// ambiguous case fails closed rather than silently widening auto-approval.
-// Letting an allow win a within-layer tie would approve commands a deny entry
-// in the same layer claims, so reversing it requires an explicit policy
-// decision, not a refactor that happens to flip the comparison's direction.
+// A global entry decides every command it matches. A workspace entry applies
+// only where no global entry matches, so a project file fills gaps in the
+// user's policy but never outranks it. Inside one layer the longest match
+// wins. Equal lengths deny, so an ambiguous case fails closed. It does not
+// silently widen auto-approval. An allow win would approve commands a deny
+// entry in the same layer claims. Reversing that needs a policy decision.
 it("getSingleCommandDecision: resolves an equally specific allow/deny match to the deny", () => {
 	// "*" matches every command but counts as length 1, so it ties the
 	// one-character allow entry on "git status".
@@ -549,36 +527,32 @@ it("getSingleCommandDecision: resolves an equally specific allow/deny match to t
 	expect(getSingleCommandDecision("git push", ["git push"], ["git push"])).toBe("auto_deny")
 })
 
-// Control for the tie: conflicts are decided by specificity, not by a
-// blanket deny preference — the longer entry wins whichever side it sits on.
+// Control for the tie: specificity decides the conflict, not a blanket deny preference.
+// The longer entry wins on either side.
 it("getSingleCommandDecision: lets the strictly more specific entry win on either side", () => {
 	expect(getSingleCommandDecision("git push origin", ["git push"], ["git"])).toBe("auto_approve")
 	expect(getSingleCommandDecision("git push origin", ["git"], ["git push"])).toBe("auto_deny")
 })
 
 it("resolveEffectiveCommandLists: keeps a workspace wildcard deny alive for the commands no global entry matches", () => {
-	// Composition drops a workspace entry only when a global entry covers
-	// every command it could match. "*" matches commands "g" cannot, so the
-	// deny survives into the effective pair. Deciding then follows the layer
-	// precedence: the global entry decides every command it matches, and the
-	// workspace deny applies exactly where the global layer is silent.
+	// Composition drops a workspace entry only when a global entry covers every
+	// command it could match. "*" matches commands "g" cannot, so the deny
+	// survives. The global entry then decides every command it matches, and the
+	// workspace deny applies where the global layer is silent.
 	const effective = resolveEffectiveCommandLists(listScopes(["g"], []), listScopes([], ["*"]), true)
 
 	expect(effective.allowed).toEqual(["g"])
 	expect(effective.denied).toEqual(["*"])
-	// Inside the global allow prefix the global layer decides: the user's own
-	// allow outranks a project wildcard deny.
+	// Inside the global allow prefix the global layer decides. The user's own allow outranks a project wildcard deny.
 	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_approve")
-	// Outside the global prefix the deny matches alone, so the workspace
-	// layer decides.
+	// Outside the global prefix the deny matches alone, so the workspace layer decides.
 	expect(getEffectiveCommandDecision("docker ps", effective)).toBe("auto_deny")
 })
 
 it("getEffectiveCommandDecision: lets a global deny decide a command a workspace wildcard allow also matches", () => {
-	// The precedence is symmetric: a user-level deny outranks a project's
-	// allow exactly as a user-level allow outranks a project's deny, while
-	// the workspace allow still decides the commands the user's layer is
-	// silent about.
+	// The precedence is symmetric: a user deny outranks a project allow, and a
+	// user allow outranks a project deny. The workspace allow still decides the
+	// commands the user's layer does not match.
 	const effective = resolveEffectiveCommandLists(listScopes([], ["*"]), listScopes(["g"], []), true)
 
 	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_deny")
@@ -586,10 +560,9 @@ it("getEffectiveCommandDecision: lets a global deny decide a command a workspace
 })
 
 it("getEffectiveCommandDecision: lets the workspace layer decide when no global entry matches", () => {
-	// The global layers say nothing about "rm": the kept workspace deny
-	// decides alone, while the global allow still decides the commands it
-	// matches. A global entry matching nothing leaves the workspace layer in
-	// full charge of the commands it covers.
+	// The global layers say nothing about "rm", so the kept workspace deny
+	// decides it. The global allow still decides the commands it matches. A
+	// global entry that matches nothing leaves the workspace layer in charge.
 	const effective = resolveEffectiveCommandLists(listScopes(["git"], []), listScopes([], ["rm"]), true)
 
 	expect(getEffectiveCommandDecision("git status", effective)).toBe("auto_approve")
@@ -607,11 +580,10 @@ it("getEffectiveCommandDecision: keeps within-layer conflict resolution in each 
 	expect(getEffectiveCommandDecision("git status", inGlobal)).toBe("auto_deny")
 })
 
-// Command-branch enforcement composes its allow/deny pair from the raw
-// global layers at the folder the task's cwd resolves to, so a task in
-// another root is judged by that root's lists rather than the window's
-// first folder. The window-scoped pair on the state stays what the dialog
-// displays.
+// Command-branch enforcement composes its allow/deny pair from the raw global
+// layers at the folder the task cwd resolves to. A task in another root is
+// judged by that root's lists, not the window's first folder. The
+// window-scoped pair on the state stays what the dialog displays.
 
 function openMultiRootWindow() {
 	const folderA = makeUri("/mock/folder-a")
@@ -639,10 +611,9 @@ function mockFolderConfigurations(scripts: Record<string, { gate?: boolean; deny
 	)
 }
 
-// Raw global layers empty: every enforcement decision then comes from the
-// folder layer, so a decision can only be right for one folder. The baked
-// pair on the state is set to values no folder composes, so a check that
-// consumed it instead of re-composing decides differently.
+// Raw global layers are empty, so every decision comes from the folder layer
+// and can only be right for one folder. The baked pair on the state holds
+// values no folder composes, so a check that consumes it decides differently.
 const taskFolderState = (bakedAllowed: string[]): State => ({
 	...baseState,
 	alwaysAllowExecute: true,
@@ -655,7 +626,7 @@ const taskFolderState = (bakedAllowed: string[]): State => ({
 it("checkAutoApproval command: enforces the deny entries of the folder the task's cwd resolves to", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// Folder A denies "echo", folder B denies "rm"; the task runs in B.
+	// Folder A denies "echo" and folder B denies "rm". The task runs in B.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
@@ -681,9 +652,8 @@ it("checkAutoApproval command: does not apply another root's deny entries to a t
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
 	})
 
-	// "echo" is denied only in the first folder; judging this B-rooted task
-	// there would auto-deny it. Nothing allows it either, so the correct
-	// multi-root decision is the plain user prompt.
+	// "echo" is denied only in the first folder, so judging this B-rooted task
+	// there would deny it. Nothing allows it, so the decision is the plain prompt.
 	const result = await checkAutoApproval({
 		state: taskFolderState(["echo"]),
 		cwd: folderB.fsPath,
@@ -697,12 +667,10 @@ it("checkAutoApproval command: does not apply another root's deny entries to a t
 it("checkAutoApproval command: does not apply the first folder's allow list to a cwd naming no workspace root", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// Folder A's layer allows "echo"; the cwd names a removed or relocated
-	// folder, so no folder's layer may decide the command. Consuming folder A's
-	// allow entry here would approve a command executing outside every
-	// workspace folder: a cwd naming no workspace root must not be approvable
-	// by any folder's allow list — the composition is judged by the (empty)
-	// global layers only.
+	// Folder A's layer allows "echo". The cwd names a removed or relocated
+	// folder, so no folder's layer may decide. Consuming folder A's allow entry
+	// would approve a command that runs outside every workspace folder. Only the
+	// empty global layers judge it.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
@@ -720,16 +688,13 @@ it("checkAutoApproval command: does not apply the first folder's allow list to a
 
 it("checkAutoApproval command: composes a command without a cwd from the global entries and the first folder's list when both raw layers are present", async () => {
 	vi.clearAllMocks()
-	// With both raw layers set, the command branch re-composes instead of
-	// consuming the baked pair. An absent cwd keeps the first-folder
-	// configuration, so two independent witnesses apply: the raw global allow
-	// entry decides "echo hi" (a check that consumed the baked pair instead
-	// would find no match and fall to the plain prompt), and folder A's deny
-	// entry — about a command the global layers say nothing of — decides
-	// "date -u" (a composition that ignored the folder's configuration would
-	// have only the raw global layers to enforce and would fall to the plain
-	// prompt). The scope assertions pin which folder's configuration the
-	// composition read.
+	// With both raw layers set, the command branch re-composes and ignores the
+	// baked pair. An absent cwd keeps the first-folder configuration, so two
+	// witnesses apply. The raw global allow entry decides "echo hi". A check that
+	// used the baked pair would find no match and fall to the prompt. Folder A's
+	// deny entry decides "date -u". A composition that skipped the folder
+	// configuration would fall to the prompt. The scope assertions pin which
+	// folder's configuration the composition read.
 	const { folderA, folderB } = openMultiRootWindow()
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: ["date"] },
@@ -745,24 +710,23 @@ it("checkAutoApproval command: composes a command without a cwd from the global 
 	const globalWitness = await checkAutoApproval({ state, ask: "command", text: "echo hi" })
 	expect(globalWitness).toEqual({ decision: "approve" })
 
-	// "date" is shadowed by neither global layer, so only folder A's list can
-	// deny it: the outcome names the folder whose configuration decided.
+	// Neither global layer shadows "date", so only folder A's list can deny it. The
+	// outcome names the folder whose configuration decided.
 	const folderWitness = await checkAutoApproval({ state, ask: "command", text: "date -u" })
 	expect(folderWitness).toEqual({
 		decision: "deny",
 		autoDeny: { kind: "denylist", command: "date -u", pattern: "date" },
 	})
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, folderA)
-	// Reading folder B instead would have judged the command against a folder
-	// the window never defaults to.
+	// Reading folder B instead would judge the command against a folder the window never defaults to.
 	expect(vscode.workspace.getConfiguration).not.toHaveBeenCalledWith(Package.name, folderB)
 })
 
 it("checkAutoApproval command: still lets a global deny entry veto a command whose cwd names no workspace root", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// The global-only composition keeps the global layers authoritative: the
-	// unmatched cwd drops only the workspace layer, never the global deny.
+	// The global-only composition keeps the global layers authoritative. An unmatched cwd
+	// drops only the workspace layer, never the global deny.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: ["rm"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
@@ -781,8 +745,7 @@ it("checkAutoApproval command: still lets a global deny entry veto a command who
 it("checkAutoApproval command: keeps the first-folder composition for a blank cwd", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// A blank cwd is the cwd-absent case, not the unmatched case: it stays on
-	// the first-folder configuration it used before per-folder scoping existed.
+	// A blank cwd means no cwd, not an unmatched cwd. It keeps the first-folder configuration.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
@@ -801,11 +764,10 @@ it("checkAutoApproval command: keeps the first-folder composition for a blank cw
 it("checkAutoApproval command: treats a throwing workspace-folder lookup as a cwd naming no folder", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// The lookup guard exists so a broken lookup cannot fail the decision; the
-	// degradation it produces must be the global-only composition, not a
-	// first-folder guess — the same fail-closed direction as an unmatched cwd.
-	// The stand-in throws exactly once, so a leak cannot change later tests'
-	// folder resolution.
+	// The lookup guard keeps a broken lookup from failing the decision. The
+	// degradation must be the global-only composition, not a first-folder guess,
+	// which matches the fail-closed direction of an unmatched cwd. The double
+	// throws once, so a leak cannot change later tests.
 	workspaceState.throwsOnFoldersRead = true
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
@@ -827,8 +789,8 @@ it("checkAutoApproval command: in a single-folder window reads exactly the same 
 	const { folderA } = openMultiRootWindow()
 	workspaceState.workspaceFolders = [{ uri: folderA }]
 	workspaceState.foldersByPath.delete(makeUri("/mock/folder-b").fsPath)
-	// The one open folder is both the task folder and the first folder, so
-	// the resolved scope and the no-arg default are the same resource.
+	// The one open folder is both the task folder and the first folder, so the resolved
+	// scope and the no-arg default name the same resource.
 	mockFolderConfigurations({ [folderA.fsPath]: { gate: true, deny: ["echo"] } })
 
 	const result = await checkAutoApproval({
@@ -844,10 +806,9 @@ it("checkAutoApproval command: in a single-folder window reads exactly the same 
 
 it("checkAutoApproval command: enforces the deny entries of a filesystem-root workspace folder", async () => {
 	vi.clearAllMocks()
-	// A window opened directly on the filesystem root ("/" or the Windows
-	// drive root) is a workspace folder whose children must still resolve to
-	// it: failing containment there would drop the root's deny entries
-	// silently — the exact fail-open the folder lookup must not have.
+	// A window opened on the filesystem root ("/" or the Windows drive root) is
+	// a workspace folder whose children must still resolve to it. Failed
+	// containment there would drop the root's deny entries without a warning.
 	const rootPath = path.parse(process.cwd()).root
 	const rootUri = makeUri(rootPath)
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
@@ -866,13 +827,12 @@ it("checkAutoApproval command: enforces the deny entries of a filesystem-root wo
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, rootUri)
 })
 
-// Enforcement decides commands through the layer split the composition
-// carries: wherever a global (user-level) entry matches, the global layer
-// decides, and the workspace layer decides only the commands no global entry
-// matches. A single-character global entry ties a workspace wildcard entry in
-// the merged pair's longest-prefix comparison, so a merged-pair matcher alone
-// could not reproduce that precedence; these cases pin it through the public
-// enforcement boundary.
+// Enforcement decides a command through the layer split the composition
+// carries. Where a global entry matches, the global layer decides. The
+// workspace layer decides only the commands no global entry matches. A
+// single-character global entry ties a workspace wildcard entry in the merged
+// pair, so a merged-pair matcher cannot reproduce that precedence. These
+// cases pin it through the public enforcement boundary.
 const layeredState = (globalAllow: string[], globalDeny: string[] = []): State => ({
 	...taskFolderState(["baked"]),
 	globalAllowedCommands: globalAllow,
@@ -894,8 +854,8 @@ it("checkAutoApproval command: lets a global allow entry decide a command a work
 		text: "git status",
 	})
 
-	// The project's wildcard deny matches "git status" too, but the user's own
-	// allow entry matches it, so the global layer decides: approve.
+	// The project wildcard deny matches "git status" too, but the user's allow entry
+	// matches it, so the global layer approves.
 	expect(result).toEqual({ decision: "approve" })
 })
 
@@ -914,9 +874,8 @@ it("checkAutoApproval command: lets the workspace wildcard deny decide the comma
 		text: "docker ps",
 	})
 
-	// "docker ps" matches no global entry, so the kept workspace deny decides
-	// it — the global allow of "g" fills no gap here, and the project fills its
-	// own.
+	// "docker ps" matches no global entry, so the kept workspace deny decides it. The
+	// global allow of "g" fills no gap here.
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
 })
 
@@ -933,8 +892,7 @@ it("checkAutoApproval command: lets a global deny entry veto a command a workspa
 	const denied = await checkAutoApproval({ state, cwd: folderB.fsPath, ask: "command", text: "git status" })
 	expect(denied).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "git status", pattern: "g" } })
 
-	// The precedence is symmetric: outside the global deny's prefix the
-	// project's wildcard allow still decides.
+	// The precedence is symmetric: outside the global deny's prefix the project wildcard allow still decides.
 	const allowed = await checkAutoApproval({ state, cwd: folderB.fsPath, ask: "command", text: "docker ps" })
 	expect(allowed).toEqual({ decision: "approve" })
 })
@@ -957,9 +915,8 @@ it("checkAutoApproval command: keeps the global-only degradation for a cwd namin
 	})
 	expect(globalWitness).toEqual({ decision: "approve" })
 
-	// Dropping the workspace layer for an unmatched cwd must not promote the
-	// command to an approval: with no global match either, the plain prompt
-	// stands, exactly as under the pre-composed pair.
+	// An unmatched cwd drops the workspace layer, which must not promote the
+	// command to an approval. With no global match, the plain prompt stands.
 	const unmatched = await checkAutoApproval({
 		state,
 		cwd: "/mock/removed-folder",
@@ -971,9 +928,8 @@ it("checkAutoApproval command: keeps the global-only degradation for a cwd namin
 
 it("checkAutoApproval command: decides a command in a filesystem-root workspace folder by both layers", async () => {
 	vi.clearAllMocks()
-	// The root folder's deny must still reach enforcement for a child cwd
-	// (containment keeps the layer), and the global layer must still outrank
-	// it where it matches — folder containment and layer precedence together.
+	// The root folder's deny must reach enforcement for a child cwd, because
+	// containment keeps the layer. The global layer still outranks it on a match.
 	const rootPath = path.parse(process.cwd()).root
 	const rootUri = makeUri(rootPath)
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
@@ -1009,11 +965,10 @@ it("checkAutoApproval command: decides each sub-command of a chain by its own ma
 		text: "git status && docker ps",
 	})
 
-	// Chain aggregation holds across layers — any denial denies the whole
-	// command — while each sub-command is decided by its own layer: "git
-	// status" is approved by the global allow while "docker ps" is denied by
-	// the workspace wildcard, and the denial names the denied sub-command, not
-	// the approved one.
+	// Chain aggregation holds across layers: any denial denies the whole command.
+	// Each sub-command is still decided by its own layer. The global allow
+	// approves "git status" and the workspace wildcard denies "docker ps", and
+	// the denial names the denied sub-command.
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "docker ps", pattern: "*" } })
 })
 
@@ -1027,7 +982,7 @@ it("checkAutoApproval command: denies a mixed allow/deny chain when one sub-comm
 		[folderB.fsPath]: { gate: true },
 	})
 
-	// One sub-command approved, one not: only that rule denies the chain. An
+	// One sub-command approved and one not, so only that rule denies the chain. An
 	// any-match rule would approve it on "git status".
 	const blanket = await checkAutoApproval({
 		state: { ...layeredState(["git"]), alwaysDenyUnapprovedCommands: true },
@@ -1037,7 +992,7 @@ it("checkAutoApproval command: denies a mixed allow/deny chain when one sub-comm
 	})
 	expect(blanket).toEqual({ decision: "deny", autoDeny: { kind: "not_allowlisted", command: "docker ps" } })
 
-	// Without blanket the same chain falls to the plain user prompt.
+	// Without blanket the same chain falls to the plain prompt.
 	const prompt = await checkAutoApproval({
 		state: layeredState(["git"]),
 		cwd: folderB.fsPath,
@@ -1050,15 +1005,15 @@ it("checkAutoApproval command: denies a mixed allow/deny chain when one sub-comm
 it("checkAutoApproval command: ignores a workspace allow entry while the gate is off", async () => {
 	vi.clearAllMocks()
 	const { folderA, folderB } = openMultiRootWindow()
-	// Gate off in both folders: the folder configuration is read, but its
-	// allow entry must never reach the effective lists.
+	// The gate is off in both folders. The folder configuration is read, but its allow
+	// entry must not reach the effective lists.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: false },
 		[folderB.fsPath]: { gate: false, allow: ["echo"] },
 	})
 
-	// The raw global layers keep the layered composition selected; it is
-	// empty, so the gated-off workspace entry is all that could allow "echo".
+	// The raw global layers keep the layered composition selected. They are empty, so the
+	// gated-off workspace entry is the only entry that could allow "echo".
 	const result = await checkAutoApproval({
 		state: layeredState([], []),
 		cwd: folderB.fsPath,
@@ -1070,17 +1025,15 @@ it("checkAutoApproval command: ignores a workspace allow entry while the gate is
 })
 
 // The layered aggregator also owns the chain parsing, redirect sanitization,
-// substitution veto, and deny reporting of the flat matcher — the enforcement
-// path selects it whenever both raw global lists are present, regardless of
-// the gate. These cases run through the public boundary with the raw lists
-// populated: a fixture without them exercises the pre-composed fallback
-// instead, and a regression in the layered copy would pass unnoticed.
+// substitution veto, and deny reporting of the flat matcher. Enforcement
+// selects it whenever both raw global lists are present, whatever the gate.
+// A fixture without them exercises the fallback, and a regression in the
+// layered copy would pass unnoticed.
 it("checkAutoApproval command: approves a blank command under the layered composition", async () => {
 	vi.clearAllMocks()
-	// A whitespace-only command parses to zero sub-commands and the layered
-	// aggregator returns approval for that before any chain logic; pinning it
-	// on the raw-lists path keeps the blanket branch from reclassifying an
-	// empty command as unapproved.
+	// A whitespace-only command parses to zero sub-commands, and the layered
+	// aggregator approves it before any chain logic. Pinning that on the
+	// raw-lists path keeps the blanket branch from marking it unapproved.
 	const state = layeredState([], [])
 
 	expect(await checkAutoApproval({ state, ask: "command", text: "   " })).toEqual({ decision: "approve" })
@@ -1095,9 +1048,8 @@ it("checkAutoApproval command: approves a blank command under the layered compos
 
 it("checkAutoApproval command: denies a malformed command under blanket and prompts without it", async () => {
 	vi.clearAllMocks()
-	// "sh" is allowlisted, so only the layered path's own syntax-error
-	// detection — not prefix matching — can keep an unterminated quote from
-	// being auto-approved.
+	// "sh" is allowlisted, so only the syntax-error detection of the layered path can
+	// stop an auto-approval of the unterminated quote.
 	const state = layeredState(["sh"])
 
 	expect(await checkAutoApproval({ state, ask: "command", text: "sh -c 'echo a" })).toEqual({ decision: "ask" })
@@ -1119,10 +1071,9 @@ it("checkAutoApproval command: denies a malformed command under blanket and prom
 
 it("checkAutoApproval command: matches a 2>&1 redirect sub-command on its sanitized form", async () => {
 	vi.clearAllMocks()
-	// The redirect token survives command splitting, so the aggregator strips
-	// it before deciding. The deny witness pins both halves: the verdict as
-	// if the redirect were absent, and the reported offending sub-command as
-	// the sanitized text rather than the raw token.
+	// The redirect token survives command splitting, so the aggregator strips it
+	// before deciding. The deny case pins both halves: the verdict as if the
+	// redirect were absent, and the sanitized text as the reported sub-command.
 	const allowed = await checkAutoApproval({
 		state: layeredState(["git"]),
 		ask: "command",
@@ -1140,9 +1091,8 @@ it("checkAutoApproval command: matches a 2>&1 redirect sub-command on its saniti
 
 it("checkAutoApproval command: never auto-approves an allowed command containing a command substitution", async () => {
 	vi.clearAllMocks()
-	// Here-string command substitution: every sub-command is allowlisted, so
-	// only the chain-wide substitution veto can keep this off the
-	// auto-approve side.
+	// Every sub-command is allowlisted, so only the chain-wide substitution veto can keep
+	// this command off the auto-approve side.
 	const state = layeredState(["cat"])
 
 	expect(await checkAutoApproval({ state, ask: "command", text: "cat <<<$(whoami)" })).toEqual({ decision: "ask" })
@@ -1160,9 +1110,8 @@ it("checkAutoApproval command: never auto-approves an allowed command containing
 
 it("checkAutoApproval command: reports the denied pattern in the case the user stored", async () => {
 	vi.clearAllMocks()
-	// Matching is case-insensitive, but the reported pattern must be the
-	// stored entry rather than the lower-cased match, so the denial names
-	// what the user's list actually contains.
+	// Matching ignores case. The reported pattern must be the stored entry, not
+	// the lower-cased match, so the denial names what the user's list holds.
 	const result = await checkAutoApproval({
 		state: layeredState([], ["RM"]),
 		ask: "command",
@@ -1174,9 +1123,8 @@ it("checkAutoApproval command: reports the denied pattern in the case the user s
 
 it("checkAutoApproval command: reports the denied sub-command of a chain in its sanitized form", async () => {
 	vi.clearAllMocks()
-	// The denied index selects the reported sub-command from the sanitized
-	// list: here that is both the second sub-command rather than the approved
-	// first one, and the redirect-stripped text rather than the raw token.
+	// The denied index selects the reported sub-command from the sanitized list.
+	// Here that is the second sub-command and the redirect-stripped text.
 	const result = await checkAutoApproval({
 		state: layeredState(["git"], ["RM"]),
 		ask: "command",
@@ -1186,11 +1134,10 @@ it("checkAutoApproval command: reports the denied sub-command of a chain in its 
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "Rm file", pattern: "RM" } })
 })
 
-// Creating a directory symlink on Windows needs developer mode or elevation; a
-// junction needs neither and is resolved by realpath like a POSIX link, so the
-// fixture tries a symlink first and falls back to a junction. Where neither can
-// be created the real-filesystem test is skipped; the scripted tests below pin
-// the same resolution logic on every platform.
+// A directory symlink on Windows needs developer mode or elevation. A junction
+// needs neither, and realpath resolves it like a POSIX link, so the fixture
+// tries a symlink first and then a junction. Where neither works, the
+// real-filesystem test is skipped and the scripted tests still pin the logic.
 function createDirectoryLink(target: string, linkPath: string): void {
 	try {
 		fs.symlinkSync(target, linkPath, "dir")
@@ -1214,12 +1161,10 @@ function canCreateDirectoryLink(): boolean {
 }
 const directoryLinksAvailable = canCreateDirectoryLink()
 
-// The root-side fallback runs after the registered paths matched nothing, so
-// these tests control resolution through the double (the mock header explains
-// the identity default) and keep the registry lists they expect to be read
-// independent of resolution. Resetting here also keeps the double's scripted
-// behavior from leaking into the manifest reads above and the file's other
-// lookup tests.
+// The root-side fallback runs after the registered paths match nothing. These
+// tests steer resolution through the double and keep the registry lists
+// independent of resolution. The reset here also stops the scripted behavior
+// from leaking into the manifest reads and the other lookup tests.
 afterEach(() => {
 	workspaceState.workspaceFolders = undefined
 	workspaceState.foldersByPath.clear()
@@ -1239,16 +1184,14 @@ it.skipIf(!directoryLinksAvailable)(
 			const link = path.join(baseDir, "link-to-root")
 			createDirectoryLink(realRoot, link)
 			const linkUri = makeUri(link)
-			// The registry holds the link: the folder was opened through it, so
-			// the registered paths match nothing for a cwd the filesystem has
-			// already resolved, and only the root's real path connects the two.
+			// The registry holds the link, because the folder was opened through it. The
+			// registered paths match nothing, so only the root's real path connects them.
 			workspaceState.workspaceFolders = [{ uri: linkUri }]
 			workspaceState.foldersByPath.set(link, linkUri)
 			// One delegate covers every call the lookup makes against this link.
 			vi.mocked(fs.realpathSync).mockImplementation((target) => realPath(String(target)))
-			// The configuration is scripted for the registry entry, not the
-			// real path: folder-scoped settings resolve against what VS Code
-			// opened.
+			// The configuration is scripted for the registry entry, not the real path.
+			// Folder-scoped settings resolve against what VS Code opened.
 			mockFolderConfigurations({ [link]: { gate: true, allow: ["echo"] } })
 
 			const result = await checkAutoApproval({
@@ -1272,9 +1215,8 @@ it("commandListFolderForResource: falls back to the registered path for a root w
 	vi.clearAllMocks()
 	const rootPath = path.join(path.sep + "mock", "broken-root")
 	const rootUri = makeUri(rootPath)
-	// A relocated or deleted root has no real path; comparing it by the path the
-	// registry holds keeps that folder's layer applied instead of silently
-	// dropping it.
+	// A relocated or deleted root has no real path. Comparing it by the registered path
+	// keeps that folder's layer applied instead of dropped.
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
 	vi.mocked(fs.realpathSync).mockImplementation((target) => {
 		if (String(target) === rootPath) {
@@ -1291,8 +1233,7 @@ it("commandListFolderForResource: a path inside no root stays unmatched after th
 	const rootPath = path.join(path.sep + "mock", "root")
 	workspaceState.workspaceFolders = [{ uri: makeUri(rootPath) }]
 
-	// The sibling "root-two" shares "root" as a string prefix; only the
-	// separator guard between root and remainder keeps it outside the root.
+	// The sibling "root-two" shares "root" as a string prefix. Only the separator guard keeps it outside the root.
 	expect(commandListFolderForResource(path.join(path.sep + "mock", "root-two", "x"))).toBeUndefined()
 	expect(commandListFolderForResource(path.join(path.sep + "mock", "elsewhere"))).toBeUndefined()
 })
@@ -1313,10 +1254,9 @@ it("commandListFolderForResource: matches a cwd equal to the root's real path", 
 
 it("commandListFolderForResource: matches a cwd inside a filesystem-root workspace folder", () => {
 	vi.clearAllMocks()
-	// A filesystem root — "/" on POSIX, "C:\" on Windows — is a legal
-	// workspace folder and already ends in a separator. Appending another
-	// separator would leave no child path able to match the root, dropping
-	// that folder's command-list layer out of enforcement silently.
+	// A filesystem root ("/" on POSIX, "C:\" on Windows) is a legal workspace
+	// folder and already ends in a separator. A second separator would stop every
+	// child path from matching, which drops that folder's command-list layer.
 	const rootPath = path.parse(process.cwd()).root
 	const rootUri = makeUri(rootPath)
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
@@ -1328,9 +1268,8 @@ it("commandListFolderForResource: matches a cwd inside a filesystem-root workspa
 
 it("commandListFolderForResource: matches a child of a folder registered with a trailing separator", () => {
 	vi.clearAllMocks()
-	// The real-path fallback passes a registered trailing separator through
-	// unresolved roots, so containment must treat an already-separated root
-	// as its own child prefix instead of doubling the separator.
+	// The real-path fallback passes a registered trailing separator through an unresolved
+	// root. Containment must then treat the separated root as its own child prefix.
 	const rootPath = path.join(path.sep + "mock", "root") + path.sep
 	const rootUri = makeUri(rootPath)
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
@@ -1349,9 +1288,8 @@ it("commandListFolderForResource: returns undefined when no workspace folder is 
 it("commandListFolderForResource: compares the cwd to the root's real path case-sensitively", () => {
 	vi.clearAllMocks()
 	workspaceState.workspaceFolders = [{ uri: makeUri(path.join(path.sep + "mock", "Root")) }]
-	// Both sides arrive canonical, so their case agrees wherever the
-	// comparison applies; folding case here could match a root the filesystem
-	// treats as distinct.
+	// Both sides arrive canonical, so their case agrees wherever the comparison applies.
+	// Folding case here could match a root the filesystem keeps distinct.
 	expect(commandListFolderForResource(path.join(path.sep + "mock", "root", "sub"))).toBeUndefined()
 })
 
@@ -1362,8 +1300,7 @@ it("commandListFolderForResource: returns the registry Uri of the deepest matchi
 	const innerReal = path.join(outerRoot, "inner")
 	const outerUri = makeUri(outerRoot)
 	const innerUri = makeUri(innerRegistered)
-	// Order matters: the outer root is seen first, so a lookup that returned
-	// the first match instead of the deepest one decides differently here.
+	// Order matters: the outer root is seen first, so a lookup that returns the first match decides differently.
 	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: innerUri }]
 	vi.mocked(fs.realpathSync).mockImplementation((target) =>
 		String(target) === innerRegistered ? innerReal : String(target),
@@ -1372,19 +1309,19 @@ it("commandListFolderForResource: returns the registry Uri of the deepest matchi
 	const result = commandListFolderForResource(path.join(innerReal, "sub"))
 
 	// Object identity against the registry entry pins both halves: the deepest
-	// root won, and the value returned is the registered Uri (folder-scoped
-	// configuration resolves against the registry, not the real path).
+	// root won, and the result is the registered Uri. Folder-scoped configuration
+	// resolves against the registry. The registered Uri is the one that must come
+	// back, not the canonicalized path.
 	expect(result).toBe(innerUri)
 	expect(result?.fsPath).toBe(innerRegistered)
 })
 
 it("commandListFolderForResource: returns the deepest matching root when it is registered before the shallower root", () => {
 	vi.clearAllMocks()
-	// The reverse registration order of the test above. The deepest-wins rule
-	// is a comparison, not a scan order, so it must hold whichever root the
-	// registry happens to list first; a lookup that simply kept the last
-	// candidate would return the outer root for this order while still
-	// passing a shallower-first fixture.
+	// The reverse registration order of the test above. The deepest-wins rule is
+	// a comparison, not a scan order, so it holds whichever root the registry
+	// lists first. A lookup that kept the last candidate would return the outer
+	// root here.
 	const outerRoot = path.sep + "mock"
 	const innerReal = path.join(outerRoot, "inner")
 	const outerUri = makeUri(outerRoot)
@@ -1396,11 +1333,10 @@ it("commandListFolderForResource: returns the deepest matching root when it is r
 
 it("checkAutoApproval command: judges a cwd inside a deeper root by that root's layer when the deeper root is registered first", async () => {
 	vi.clearAllMocks()
-	// The enforcement consequence of the order-independent deepest-wins rule,
-	// with the registration order the other symlinked-root test does not use:
-	// the deeper root comes first, so a lookup that returned the last match
-	// would enforce the outer folder's list here — the outer entry allows what
-	// the deeper entry denies, so the decision names the winning folder.
+	// The enforcement consequence of the deepest-wins rule, with the other
+	// registration order. The deeper root comes first, so a lookup that returns
+	// the last match would enforce the outer folder's list. The outer entry
+	// allows what the deeper entry denies, so the decision names the winner.
 	const outerRoot = path.sep + "mock"
 	const outerUri = makeUri(outerRoot)
 	const innerReal = path.join(outerRoot, "inner")
@@ -1431,20 +1367,18 @@ it("checkAutoApproval command: judges a cwd inside a symlinked root by that root
 	const linkPath = path.join(outerRoot, "link")
 	const innerReal = path.join(outerRoot, "inner")
 	const linkUri = makeUri(linkPath)
-	// The outer root is registered first, and the registry holds the inner
-	// folder as the link: the command's canonical cwd sits inside the link's
-	// target. The outer root is also a lexical prefix of the cwd, so
-	// VS Code-style lexical containment resolves it there — a lookup that
-	// trusted that first lexical hit would enforce the outer folder's list
-	// and never consult the folder the command physically runs in.
+	// The outer root is registered first, and the registry holds the inner folder
+	// as the link. The canonical cwd sits inside the link's target, and the outer
+	// root is also a lexical prefix of the cwd. A lookup that trusted the first
+	// lexical hit would enforce the outer folder's list and never read the folder
+	// the command runs in.
 	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: linkUri }]
 	workspaceState.foldersByPath.set(outerRoot, outerUri)
 	vi.mocked(fs.realpathSync).mockImplementation((target) =>
 		String(target) === linkPath ? innerReal : String(target),
 	)
-	// The two folders' lists are deliberately opposite on "echo": the outer
-	// root allows what the inner root denies, so the decision names the
-	// folder whose configuration enforcement read.
+	// The two folders hold opposite lists for "echo": the outer root allows what the inner
+	// root denies, so the decision names the folder enforcement read.
 	mockFolderConfigurations({
 		[outerRoot]: { gate: true, allow: ["echo"] },
 		[linkPath]: { gate: true, deny: ["echo"] },
@@ -1458,8 +1392,8 @@ it("checkAutoApproval command: judges a cwd inside a symlinked root by that root
 		text: "echo hi",
 	})
 
-	// The deepest canonical match wins over the shallower lexical containment,
-	// so the symlinked root's deny entry decides the command running inside it.
+	// The deepest canonical match wins over the shallower lexical containment, so the
+	// symlinked root's deny decides the command that runs inside it.
 	expect(result).toEqual({ decision: "deny", autoDeny: { kind: "denylist", command: "echo hi", pattern: "echo" } })
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, linkUri)
 })
@@ -1471,10 +1405,9 @@ it("realpathSync preserves the on-disk case of an existing directory", () => {
 		const dirName = "MixedCase-Dir"
 		const dir = path.join(baseDir, dirName)
 		fs.mkdirSync(dir)
-		// The comparison trusts realpath output case, so it is pinned against
-		// the real filesystem rather than assumed: the final component keeps
-		// the case it was created with, and a differently-cased spelling of the
-		// same directory does not sit inside it.
+		// The comparison trusts the case of the realpath output, so this pins it
+		// against the real filesystem. The final component keeps the case it was
+		// created with, and a differently-cased spelling does not sit inside it.
 		const realBase = realPath(baseDir)
 		expect(realPath(dir)).toBe(path.join(realBase, dirName))
 		expect(path.join(realBase, dirName.toLowerCase()).startsWith(`${realPath(dir)}${path.sep}`)).toBe(false)

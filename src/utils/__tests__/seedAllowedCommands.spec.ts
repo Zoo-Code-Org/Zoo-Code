@@ -41,8 +41,7 @@ function mockConfiguration({ inspect, effective = [], inspectThrows = false, gat
 	vi.mocked(vscode.workspace.getConfiguration).mockImplementation(
 		(_section?: string, scope?: vscode.ConfigurationScope | null) => {
 			const config = makeWorkspaceConfiguration()
-			// The gate reads independently of the lists: its default is off, so
-			// a test gets an enforced workspace layer only by asking.
+			// The gate reads on its own: its default is off, so a test must ask for an enforced layer.
 			vi.mocked(config.get).mockImplementation((section: string) =>
 				section === "workspaceCommandListsEnabled" ? gate : effective,
 			)
@@ -87,9 +86,9 @@ describe("seedCommandList", () => {
 	})
 
 	it("leaves global state unset when only a workspace-scoped value exists", async () => {
-		// The leak scenario: reading get() would seed the workspace override
-		// into global state. The override also replaced the declared default,
-		// so re-granting the default is forbidden too.
+		// Reading get() would seed the workspace override into global state. The
+		// override also replaced the declared default, so the default must not come
+		// back either.
 		mockConfiguration({
 			inspect: {
 				key: "allowedCommands",
@@ -110,9 +109,8 @@ describe("seedCommandList", () => {
 	})
 
 	it("leaves global state unset when only a workspace-folder-scoped value exists", async () => {
-		// A folder override is visible only to a resource-scoped lookup. An
-		// unscoped seed would see nothing here and re-grant the suppressed
-		// default — this test fails on that regression.
+		// A folder override is visible only to a resource-scoped lookup. An unscoped
+		// seed would see nothing and re-grant the suppressed default.
 		const folderA = makeUri("/mock/folder-a")
 		workspaceState.workspaceFolders = [{ uri: folderA }]
 		mockConfiguration({
@@ -214,8 +212,8 @@ describe("seedCommandList", () => {
 	})
 
 	it("seeds an explicitly empty global value instead of the populated default", async () => {
-		// An empty global list is a deliberate opt-out: persist [] so global
-		// state counts as seeded and the defaults are not re-granted.
+		// An empty global list is a deliberate opt-out. Persist [] so global state
+		// counts as seeded and the defaults stay out.
 		mockConfiguration({
 			inspect: {
 				key: "allowedCommands",
@@ -254,9 +252,9 @@ describe("seedCommandList", () => {
 	})
 
 	it("composes a later workspace override as a union with the seeded defaults", async () => {
-		// A fresh activation seeds the default; a later workspace override is
-		// never persisted (the guard early-returns). Enforcement composes the
-		// two layers as a set union; the matcher picks the governing entry.
+		// A fresh activation seeds the default. A later workspace override is never
+		// persisted, because the guard returns early. Enforcement unions the two
+		// layers and the matcher picks the governing entry.
 		const defaultValue = ["git log", "git diff", "git show"]
 		mockConfiguration({
 			inspect: { key: "allowedCommands", defaultValue },
@@ -277,8 +275,7 @@ describe("seedCommandList", () => {
 		expect(globalState.update).toHaveBeenCalledTimes(1)
 		expect(globalState.get("allowedCommands")).toEqual(defaultValue)
 
-		// The enforcement view keeps both layers: the override adds entries,
-		// it does not replace the seeded defaults.
+		// The override adds entries. It does not replace the seeded defaults.
 		const scopes = readCommandListScopes("allowedCommands", globalState.get("allowedCommands"))
 		expect(scopes.global).toEqual(defaultValue)
 		expect(scopes.workspace).toEqual(["docker ps"])
@@ -286,8 +283,8 @@ describe("seedCommandList", () => {
 	})
 
 	it("inspects the global value under the extension's own section key", async () => {
-		// The seed must read the extension's own section; a wrong key would
-		// silently find nothing. No folder open => unscoped (section, undefined).
+		// The seed must read the extension's own section. A wrong key would find
+		// nothing. No folder open means an unscoped (section, undefined) lookup.
 		mockConfiguration({ inspect: { key: "allowedCommands", globalValue: ["git"] } })
 		// Complete Memento double: no type assertion at the call site.
 		const globalState: vscode.Memento = {

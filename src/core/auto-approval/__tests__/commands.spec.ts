@@ -242,7 +242,7 @@ it("isShadowedByAnyEntry: compares case-insensitively, the way the matcher match
 })
 
 it("isShadowedByAnyEntry: compares entries as stored, the way the matcher compares them", () => {
-	// The matcher trims commands, never entries; shadowing must compare as stored.
+	// The matcher trims commands, never entries, so shadowing compares entries as stored.
 	expect(isShadowedByAnyEntry(" git push ", ["git"])).toBe(false)
 	expect(isShadowedByAnyEntry("git push", [" git "])).toBe(false)
 })
@@ -272,8 +272,8 @@ it("layered decisions: a padded global allow entry cannot erase a workspace allo
 })
 
 it("isShadowedByAnyEntry: never treats an empty entry as covered", () => {
-	// An empty entry prefix-matches everything; the guard keeps it from
-	// shadowing itself. Layers sanitize blanks first, so this pins the contract.
+	// An empty entry prefix-matches everything, so the guard stops it shadowing
+	// itself. Layers sanitize blanks first.
 	expect(isShadowedByAnyEntry("", [""])).toBe(false)
 	expect(isShadowedByAnyEntry("", ["git"])).toBe(false)
 })
