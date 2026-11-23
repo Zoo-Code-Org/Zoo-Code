@@ -2765,13 +2765,11 @@ Body.`
 			const staged = String(mockWriteFile.mock.calls[0][0])
 
 			expect(mockChmod).toHaveBeenCalledTimes(1)
-			if (process.platform !== "win32") {
-				// The mode argument and chmod are both inert on win32 (measured: fs.writeFile reports
-				// 0o666 with and without a mode, and chmod does not move what stat reports), so the mode
-				// value is asserted only where the platform gives it meaning. The call itself and its
-				// position relative to the rename are asserted on every platform.
-				expect(mockChmod).toHaveBeenCalledWith(staged, 0o644)
-			}
+			// fs/promises is mocked in this file, so mockChmod records the mode argument the production
+			// expression produced whatever the operating system would report. The argument is asserted
+			// unguarded, like the preserved-bits row above, because guarding it here would skip the only
+			// assertion that tells 0644 apart from the 0600 the sidecar was staged with.
+			expect(mockChmod).toHaveBeenCalledWith(staged, 0o644)
 			// The same bug class the preserved-bits row exists to prevent: the mode has to be in place
 			// before the rename publishes the file.
 			expect(mockChmod.mock.invocationCallOrder[0]).toBeLessThan(mockRename.mock.invocationCallOrder[0])
