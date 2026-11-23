@@ -2634,6 +2634,11 @@ Body here.`
 			expect(rewritten).not.toContain("> ")
 
 			// Clearing the restriction removes modeSlugs from the frontmatter.
+			// The rewrite re-reads the file, so the read mock has to serve what the previous
+			// rewrite actually staged; while it still returned the pre-edit content the
+			// assertion below passed even if production stopped deleting the key.
+			mockReadFile.mockResolvedValue(rewritten)
+
 			await skillsManager.updateSkillModes("modes-skill", "global", [])
 
 			const rewritten2 = String(mockWriteFile.mock.calls[1][1])
