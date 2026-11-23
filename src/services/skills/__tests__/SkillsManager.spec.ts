@@ -4678,7 +4678,14 @@ Instructions`)
 			const second = skillsManager["withDirectoryLock"](globalSkillsDir, async () => {
 				order.push("second")
 			})
-			await Promise.resolve()
+			// A timer turn, not one microtask. The waiting operation only reaches its body after its own
+			// realpath resolves, which is more than a single microtask tick away, so awaiting a resolved
+			// promise leaves this row reading ["first:start"] in both worlds: alias resolved onto the
+			// held queue, and alias never resolved with the second operation merely still queued. Measured
+			// here at a568f72c54 - swapping mockRealpath for an identity function (no alias resolution)
+			// left this row green on the microtask and reddens it on the timer turn below. Only that
+			// combination lets this assertion tell one shared directory queue from two independent ones.
+			await new Promise<void>((resolve) => setTimeout(resolve, 0))
 			// The alias resolves to the same real directory, so the second operation waits.
 			expect(order).toEqual(["first:start"])
 
