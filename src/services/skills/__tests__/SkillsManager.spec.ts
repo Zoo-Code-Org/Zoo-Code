@@ -2597,6 +2597,7 @@ Body here.`
 
 			// Initial discovery so the skill is registered.
 			mockDirectoryExists.mockImplementation(async (dir: string) => dir === globalSkillsDir)
+			mockRealpath.mockImplementation(async (value: string) => value)
 			mockReaddir.mockImplementation(async (dir: string) => (dir === globalSkillsDir ? ["modes-skill"] : []))
 			mockStat.mockImplementation(async (pathArg: string) => {
 				if (pathArg === skillDir) {
