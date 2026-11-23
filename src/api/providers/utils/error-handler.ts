@@ -184,10 +184,10 @@ export function handleOpenAIRequestError(
 	requestSignal?: AbortSignal,
 ): Error {
 	if (error instanceof APIUserAbortError && !abortSignal?.aborted && isTimeoutAbort(requestSignal)) {
-		// The abort came from the request timeout, not from the caller's signal, so a
-		// timeout must stay distinguishable from a user cancellation. The shared helper is
-		// what every other provider uses, so the name and message match across the family;
-		// the SDK abort is attached as the cause for debugging after the fact.
+		// The abort came from this merged signal's own deadline, not the caller's stop: a timeout
+		// must stay distinguishable from a user cancellation, so the shared helper's name and
+		// message are used and the SDK abort is attached as the cause. A caller that pressed stop
+		// never reaches here - error-handler.spec.ts:482-491 pins the abort for that interleaving.
 		const timeoutError = createTimeoutError(providerName, "completion request")
 		timeoutError.cause = error
 		return timeoutError
