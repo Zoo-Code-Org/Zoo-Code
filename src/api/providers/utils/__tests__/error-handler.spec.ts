@@ -7,6 +7,7 @@ import {
 	handleProviderError,
 	hasNumericHttpStatus,
 } from "../error-handler"
+import { isTimeoutAbort, mergeAbortSignals } from "../abort-signal"
 
 describe("handleProviderError", () => {
 	const providerName = "TestProvider"
@@ -485,6 +486,34 @@ describe("handleOpenAIRequestError (abort awareness)", () => {
 		const requestSignal = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
 
 		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", controller.signal, requestSignal)
+
+		expect(result.name).toBe("AbortError")
+		expect(result.message).toBe("The OpenAI request was aborted")
+	})
+	it("keeps the abort contract for a caller that stops after a real merged signal timed out", () => {
+		// The row above approximates this interleaving with a signal it builds by hand. This one merges the
+		// way the providers merge: mergeAbortSignals is AbortSignal.any([caller, timeout]) (abort-signal.ts:67),
+		// reached from mergeAbortSignalAndTimeout (abort-signal.ts:52) and from
+		// config-builder/request-config-builder.ts:94 - the composition that produces the requestSignal handed
+		// to the guard at base-openai-compatible-provider.ts:344 and openai.ts:617. The timeout signal is
+		// already aborted when the merge is built, so "the deadline fired first" is a property of the fixture
+		// and not a race; the caller then stops its own controller, and the aggregate keeps the TimeoutError
+		// reason. Only the !abortSignal?.aborted term at error-handler.ts:186 can route this call to the abort
+		// contract, so this row is what pins "the caller's stop wins" for a genuine merged signal.
+		const caller = new AbortController()
+		const timedOut = AbortSignal.abort(new DOMException("The operation was aborted", "TimeoutError"))
+		const requestSignal = mergeAbortSignals(caller.signal, timedOut)
+		caller.abort()
+
+		// These three assertions are the premise the classification rests on. A merged signal that stopped
+		// carrying a TimeoutError reason would make isTimeoutAbort false, and the fall-through at
+		// error-handler.ts:196-201 would then answer AbortError for the wrong reason - this row would stay
+		// green while the guard meant nothing.
+		expect(requestSignal.aborted, "the merge is already aborted by the timeout").toBe(true)
+		expect((requestSignal.reason as { name?: string } | undefined)?.name).toBe("TimeoutError")
+		expect(isTimeoutAbort(requestSignal), "the predicate the guard consults").toBe(true)
+
+		const result = handleOpenAIRequestError(new APIUserAbortError(), "OpenAI", caller.signal, requestSignal)
 
 		expect(result.name).toBe("AbortError")
 		expect(result.message).toBe("The OpenAI request was aborted")

@@ -187,7 +187,7 @@ export function handleOpenAIRequestError(
 		// The abort came from this merged signal's own deadline, not the caller's stop: a timeout
 		// must stay distinguishable from a user cancellation, so the shared helper's name and
 		// message are used and the SDK abort is attached as the cause. A caller that pressed stop
-		// never reaches here - error-handler.spec.ts:482-491 pins the abort for that interleaving.
+		// never reaches here - error-handler.spec.ts:483-492 pins the abort for that interleaving.
 		const timeoutError = createTimeoutError(providerName, "completion request")
 		timeoutError.cause = error
 		return timeoutError

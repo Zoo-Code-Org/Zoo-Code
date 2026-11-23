@@ -315,7 +315,7 @@ export function isTimeoutAbort(requestSignal: AbortSignal | undefined): boolean 
 	// Classify by the merged signal's retained abort reason: a deadline that fired first keeps the
 	// TimeoutError reason even if the caller stops later, so this answers only which signal fired
 	// first. handleOpenAIRequestError answers a caller that also pressed stop with the abort
-	// contract - error-handler.spec.ts:482-491 pins that answer for the interleaving.
+	// contract - error-handler.spec.ts:483-492 pins that answer for the interleaving.
 	return Boolean(
 		requestSignal?.aborted && (requestSignal.reason as { name?: string } | undefined)?.name === "TimeoutError",
 	)
