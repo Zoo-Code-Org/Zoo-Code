@@ -94,6 +94,7 @@ describe("presentAssistantMessage - Image Handling in Native Tool Calling", () =
 			},
 			say: vi.fn().mockResolvedValue(undefined),
 			ask: vi.fn().mockResolvedValue({ response: "yesButtonClicked" }),
+			finalizePartialToolAsk: vi.fn().mockResolvedValue(undefined),
 		}
 
 		// Bind the REAL Task.prototype method to this structural double: it only

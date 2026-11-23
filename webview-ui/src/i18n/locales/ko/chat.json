@@ -503,5 +503,9 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "숨겨진 줄 {{count}}개"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo가 웹 콘텐츠를 가져오려고 합니다",
+		"didFetch": "Zoo가 웹 콘텐츠를 가져왔습니다"
 	}
 }

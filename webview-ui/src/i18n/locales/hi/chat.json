@@ -511,5 +511,9 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} छिपी हुई पंक्ति",
 		"hiddenLines_other": "{{count}} छिपी हुई पंक्तियाँ"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo वेब सामग्री प्राप्त करना चाहता है",
+		"didFetch": "Zoo ने वेब सामग्री प्राप्त की"
 	}
 }

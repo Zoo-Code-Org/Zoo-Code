@@ -512,5 +512,9 @@
 	"diffView": {
 		"hiddenLines_one": "{{count}} gizli satır",
 		"hiddenLines_other": "{{count}} gizli satır"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo web içeriği getirmek istiyor",
+		"didFetch": "Zoo web içeriği getirdi"
 	}
 }

@@ -503,5 +503,9 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} 行が非表示"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zooがウェブコンテンツを取得しようとしています",
+		"didFetch": "Zooがウェブコンテンツを取得しました"
 	}
 }

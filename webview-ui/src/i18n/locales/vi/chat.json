@@ -504,5 +504,9 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "{{count}} dòng bị ẩn"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo muốn lấy nội dung web",
+		"didFetch": "Zoo đã lấy nội dung web"
 	}
 }

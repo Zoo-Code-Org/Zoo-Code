@@ -527,5 +527,9 @@
 		"hiddenLines_few": "{{count}} ukryte wiersze",
 		"hiddenLines_many": "{{count}} ukrytych wierszy",
 		"hiddenLines_other": "{{count}} ukrytego wiersza"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo chce pobrać treść z sieci",
+		"didFetch": "Zoo pobrał treść z sieci"
 	}
 }

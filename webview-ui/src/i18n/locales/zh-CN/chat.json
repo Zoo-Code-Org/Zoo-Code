@@ -504,5 +504,9 @@
 	},
 	"diffView": {
 		"hiddenLines_other": "已隐藏 {{count}} 行"
+	},
+	"webFetch": {
+		"wantsToFetch": "Zoo 想要获取网页内容",
+		"didFetch": "Zoo 已获取网页内容"
 	}
 }
