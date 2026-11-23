@@ -28,6 +28,7 @@ export class MimoHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
+			openAiUseResponsesApi: false,
 			openAiApiKey: options.mimoApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? mimoDefaultModelId,
 			openAiBaseUrl: options.mimoBaseUrl || "https://token-plan-sgp.xiaomimimo.com/v1",

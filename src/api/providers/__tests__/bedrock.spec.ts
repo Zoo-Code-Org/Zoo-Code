@@ -995,6 +995,43 @@ describe("AwsBedrockHandler", () => {
 			expect(model.id).toBe("global.anthropic.claude-sonnet-5")
 		})
 
+		it("should return Claude Sonnet 5.5 model info", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+			})
+
+			const model = handler.getModel()
+			expect(model.id).toBe("anthropic.claude-sonnet-5-5")
+			expect(model.info.maxTokens).toBe(128_000)
+			expect(model.info.contextWindow).toBe(1_000_000)
+			expect(model.info.inputPrice).toBe(2.0)
+			expect(model.info.outputPrice).toBe(10.0)
+			expect(model.info.cacheWritesPrice).toBe(2.5)
+			expect(model.info.cacheWritesPrice1h).toBe(4.0)
+			expect(model.info.cacheReadsPrice).toBe(0.1)
+			expect(model.info.minTokensPerCachePoint).toBe(512)
+			expect(model.info.supportsReasoningBinary).toBe(true)
+			expect(model.info.supportsReasoningBudget).toBe(true)
+			expect(model.info.supportsPromptCache).toBe(true)
+			expect(model.info.supportsTemperature).toBe(false)
+			expect(model.maxTokens).toBe(8192)
+		})
+
+		it("should apply global inference prefix for Claude Sonnet 5.5 when awsUseGlobalInference is true", () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5-5",
+				awsAccessKey: "test",
+				awsSecretKey: "test",
+				awsRegion: "us-east-1",
+				awsUseGlobalInference: true,
+			})
+
+			expect(handler.getModel().id).toBe("global.anthropic.claude-sonnet-5-5")
+		})
+
 		it("should return Claude Opus 5 model info", () => {
 			const handler = new AwsBedrockHandler({
 				apiModelId: "anthropic.claude-opus-5",
@@ -1854,6 +1891,27 @@ describe("AwsBedrockHandler", () => {
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
 
+		it("should send adaptive thinking with effort xhigh for Claude Sonnet 5.5", async () => {
+			const handler = new AwsBedrockHandler({
+				apiModelId: "anthropic.claude-sonnet-5-5",
+				awsAccessKey: "test-access-key",
+				awsSecretKey: "test-secret-key",
+				awsRegion: "us-east-1",
+				enableReasoningEffort: true,
+			})
+
+			await handler.createMessage("System prompt", messages).next()
+
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: { type: "adaptive", display: "summarized" },
+					output_config: { effort: "xhigh" },
+				}),
+			)
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
 		it("should send adaptive thinking with effort xhigh for Claude Opus 5 when reasoning is enabled", async () => {
 			// End-to-end regression guard for the Opus 5 handler branch. The
 			// isAdaptiveThinkingModel predicate is unit-covered, but a regression in
@@ -1941,6 +1999,23 @@ describe("AwsBedrockHandler", () => {
 			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 			expect(commandArg.additionalModelRequestFields).toEqual(
 				expect.objectContaining({ thinking: { type: "disabled" } }),
+			)
+			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
+		})
+
+		it.each([
+			"anthropic.claude-sonnet-5-5",
+			"global.anthropic.claude-sonnet-5-5",
+			"us.anthropic.claude-sonnet-5-5",
+		])("uses between_tools for %s when reasoning is off", async (apiModelId) => {
+			const provider = new AwsBedrockHandler({ apiModelId, enableReasoningEffort: false })
+			await collectStream(provider.createMessage("System prompt", messages))
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			expect(commandArg.additionalModelRequestFields).toEqual(
+				expect.objectContaining({
+					thinking: { type: "between_tools" },
+					output_config: { effort: "high" },
+				}),
 			)
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})

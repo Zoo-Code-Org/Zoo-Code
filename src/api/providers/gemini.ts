@@ -331,6 +331,12 @@ export class GeminiHandler extends BaseProvider implements SingleCompletionHandl
 			.map((message) => convertAnthropicMessageToGemini(message, { includeThoughtSignatures, toolIdToName }))
 			.flat()
 
+		// Gemini rejects requests that end with a model turn, including on Vertex.
+		// Keep the history and request a continuation with a nonempty user turn.
+		if (contents.at(-1)?.role === "model") {
+			contents.push({ role: "user", parts: [{ text: "Please continue." }] })
+		}
+
 		// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS).
 		// Google built-in tools (Grounding, URL Context) are mutually exclusive
 		// with function declarations in the Gemini API, so we always use

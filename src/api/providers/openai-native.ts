@@ -46,6 +46,15 @@ export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
  */
 const PROMPT_CACHE_KEY_MAX_LENGTH = 64
 
+function normalizeResponseServiceTier(tier: unknown): ServiceTier | undefined {
+	// Fast responses use the catalog's priority rates, including long-context pricing.
+	if (tier === "fast") return OpenAiServiceTier.Priority
+	if (tier === OpenAiServiceTier.Default || tier === OpenAiServiceTier.Flex || tier === OpenAiServiceTier.Priority) {
+		return tier
+	}
+	return undefined
+}
+
 export class OpenAiNativeHandler extends BaseProvider implements SingleCompletionHandler {
 	protected options: ApiHandlerOptions
 	private client: OpenAI
@@ -612,6 +621,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 				throw createAbortError(this.providerName)
 			}
 			// For errors, fallback to manual SSE via fetch
+			// The failed attempt's tier must not affect the fallback response's pricing.
+			this.lastServiceTier = undefined
 			yield* this.makeResponsesApiRequest(requestBody, model, metadata, systemPrompt, messages)
 		} finally {
 			// Detach the bridging listener so a late abort from this request cannot
@@ -968,19 +979,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 						try {
 							const parsed = JSON.parse(data)
 
-							// Capture resolved service tier if present
-							if (parsed.response?.[SERVICE_TIER_KEY]) {
-								this.lastServiceTier = parsed.response[SERVICE_TIER_KEY] as ServiceTier
-							}
-							// Capture complete output array (includes reasoning items with encrypted_content)
-							if (parsed.response?.output && Array.isArray(parsed.response.output)) {
-								this.lastResponseOutput = parsed.response.output
-							}
-							// Capture top-level response id
-							if (parsed.response?.id) {
-								this.lastResponseId = parsed.response.id as string
-							}
-
 							// Delegate standard event types to the shared processor to avoid duplication.
 							// This applies to both SDK and raw SSE fallback paths.
 							if (parsed?.type && this.coreHandledEventTypes.has(parsed.type)) {
@@ -999,6 +997,8 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 								}
 								continue
 							}
+
+							this.captureResponseMetadata(parsed.response)
 
 							// Check if this is a complete response (non-streaming format)
 							if (parsed.response && parsed.response.output && Array.isArray(parsed.response.output)) {
@@ -1279,15 +1279,6 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 									)
 								}
 							} else if (parsed.type === "response.completed" || parsed.type === "response.done") {
-								// Capture top-level response id
-								if (parsed.response?.id) {
-									this.lastResponseId = parsed.response.id as string
-								}
-								// Capture complete output array (includes reasoning items with encrypted_content)
-								if (parsed.response?.output && Array.isArray(parsed.response.output)) {
-									this.lastResponseOutput = parsed.response.output
-								}
-
 								// Check if the done event contains the complete output (as a fallback)
 								if (
 									!hasContent &&
@@ -1421,22 +1412,23 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		}
 	}
 
+	private captureResponseMetadata(response?: { service_tier?: unknown; output?: unknown; id?: unknown }): void {
+		if (response?.[SERVICE_TIER_KEY]) {
+			this.lastServiceTier = normalizeResponseServiceTier(response[SERVICE_TIER_KEY])
+		}
+		if (Array.isArray(response?.output)) {
+			this.lastResponseOutput = response.output
+		}
+		if (typeof response?.id === "string" && response.id) {
+			this.lastResponseId = response.id
+		}
+	}
+
 	/**
 	 * Shared processor for Responses API events.
 	 */
 	private async *processEvent(event: any, model: OpenAiNativeModel): ApiStream {
-		// Capture resolved service tier when available
-		if (event?.response?.[SERVICE_TIER_KEY]) {
-			this.lastServiceTier = event.response[SERVICE_TIER_KEY] as ServiceTier
-		}
-		// Capture complete output array (includes reasoning items with encrypted_content)
-		if (event?.response?.output && Array.isArray(event.response.output)) {
-			this.lastResponseOutput = event.response.output
-		}
-		// Capture top-level response id
-		if (event?.response?.id) {
-			this.lastResponseId = event.response.id as string
-		}
+		this.captureResponseMetadata(event?.response)
 
 		// Handle text deltas
 		if (event?.type === "response.text.delta" || event?.type === "response.output_text.delta") {

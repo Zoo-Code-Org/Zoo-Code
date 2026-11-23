@@ -200,6 +200,16 @@ export const OpenAICompatible = ({
 					{t("settings:providers.openAiStrictToolSchemasDescription")}
 				</div>
 			</div>
+			<div>
+				<Checkbox
+					checked={apiConfiguration.openAiUseResponsesApi ?? false}
+					onChange={handleInputChange("openAiUseResponsesApi", noTransform)}>
+					{t("settings:providers.openAiUseResponsesApi")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground ml-6">
+					{t("settings:providers.openAiUseResponsesApiDescription")}
+				</div>
+			</div>
 			<Checkbox
 				checked={apiConfiguration.openAiUseAzure ?? false}
 				onChange={handleInputChange("openAiUseAzure", noTransform)}>
@@ -221,7 +231,7 @@ export const OpenAICompatible = ({
 					<VSCodeTextField
 						value={apiConfiguration.azureApiVersion || ""}
 						onInput={handleInputChange("azureApiVersion")}
-						placeholder={`Default: ${azureOpenAiDefaultApiVersion}`}
+						placeholder={t("settings:placeholders.defaultValue", { value: azureOpenAiDefaultApiVersion })}
 						className="w-full mt-1"
 					/>
 				)}

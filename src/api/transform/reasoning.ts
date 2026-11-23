@@ -29,12 +29,12 @@ export type AnthropicReasoningParams = BetaThinkingConfigParam
  * full thinking tokens, not the summary).
  */
 export type AnthropicProviderReasoningParams =
-	AnthropicReasoningParams | { type: "adaptive"; display?: "summarized" | "omitted" }
+	AnthropicReasoningParams | { type: "adaptive"; display?: "summarized" | "omitted" } | { type: "between_tools" }
 
 export type OpenAiReasoningParams = { reasoning_effort: OpenAI.Chat.ChatCompletionCreateParams["reasoning_effort"] }
 
 // Valid Gemini thinking levels for effort-based reasoning
-const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high"] as const
+const GEMINI_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh"] as const
 
 export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVELS)[number]
 
@@ -127,12 +127,18 @@ export const getAnthropicReasoning = ({
 	shouldUseReasoningBudget({ model, settings }) ? { type: "enabled", budget_tokens: reasoningBudget! } : undefined
 
 export const getAnthropicProviderReasoning = ({
+	modelId,
 	model,
 	reasoningBudget,
 	settings,
-}: GetModelReasoningOptions): AnthropicProviderReasoningParams | undefined => {
+}: GetModelReasoningOptions & { modelId?: string }): AnthropicProviderReasoningParams | undefined => {
 	if (model.supportsReasoningBinary && settings.enableReasoningEffort) {
 		return { type: "adaptive", display: "summarized" }
+	}
+
+	// Sonnet 5.5 enables adaptive thinking when this field is absent.
+	if (modelId === "claude-sonnet-5-5" || modelId === "anthropic/claude-sonnet-5-5") {
+		return { type: "between_tools" }
 	}
 
 	return getAnthropicReasoning({ model, reasoningBudget, settings })
@@ -181,14 +187,19 @@ export const getGeminiReasoning = ({
 		return { thinkingBudget: reasoningBudget!, includeThoughts: true }
 	}
 
+	// Stored effort selections must not reach models without effort support.
+	if (!model.supportsReasoningEffort) {
+		return undefined
+	}
+
 	// For effort-based Gemini models, rely directly on the selected effort value.
 	// We intentionally ignore enableReasoningEffort here so that explicitly chosen
 	// efforts in the UI (e.g. "High" for gemini-3-pro-preview) always translate
 	// into a thinkingConfig, regardless of legacy boolean flags.
 	const selectedEffort = settings.reasoningEffort ?? model.reasoningEffort
 
-	// Respect "off" / unset semantics from the effort selector itself.
-	if (!selectedEffort || selectedEffort === "disable") {
+	// Omit unset, disabled, and unknown selections.
+	if (!isGeminiThinkingLevel(selectedEffort)) {
 		return undefined
 	}
 
@@ -196,14 +207,12 @@ export const getGeminiReasoning = ({
 	// e.g. gemini-3-pro-preview only supports ["low", "high"] — sending
 	// "medium" (carried over from a different model's settings) causes errors.
 	const effortToUse =
-		Array.isArray(model.supportsReasoningEffort) &&
-		isGeminiThinkingLevel(selectedEffort) &&
-		!model.supportsReasoningEffort.includes(selectedEffort)
+		Array.isArray(model.supportsReasoningEffort) && !model.supportsReasoningEffort.includes(selectedEffort)
 			? model.reasoningEffort
 			: selectedEffort
 
-	// Effort-based models on Google GenAI support minimal/low/medium/high levels.
-	if (!effortToUse || !isGeminiThinkingLevel(effortToUse)) {
+	// Accept only known Google GenAI thinking levels.
+	if (!isGeminiThinkingLevel(effortToUse)) {
 		return undefined
 	}
 

@@ -197,7 +197,7 @@ Do not submit AI-generated changes that you do not understand. Do not submit cha
 
 ### Writing Style
 
-Write issue titles, issue text, PR titles, PR descriptions, and commit messages in Simplified Technical English ([ASD-STE100](https://www.asd-ste100.org/)). The issue and PR templates give the same reminder.
+Write issue titles, issue text, PR titles, PR descriptions, commit messages, GitHub Discussion posts, and comments in Simplified Technical English ([ASD-STE100](https://www.asd-ste100.org/)). The issue and PR templates give the same reminder.
 
 - Use short sentences. Use 20 words or fewer for an instruction.
 - Use plain words. Write "use", not "utilize". Write "start", not "commence".
