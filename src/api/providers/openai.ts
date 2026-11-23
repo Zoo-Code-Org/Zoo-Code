@@ -171,8 +171,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			return
 		}
 
-		// The routes below build and issue the request locally, so a signal that is already
-		// aborted fails before any of that work happens.
+		// The routes below attach the caller's signal to the request they issue themselves, so a
+		// signal that is already aborted fails before any of that work happens. The Responses route
+		// above hands its own bridged signal to the SDK, and is guarded there rather than here.
 		throwIfAborted(signal)
 
 		const { info: modelInfo, reasoning } = this.getModel()
