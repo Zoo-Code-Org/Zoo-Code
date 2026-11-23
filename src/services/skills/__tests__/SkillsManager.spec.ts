@@ -2785,7 +2785,7 @@ Body.`
 			expect(mockRename).toHaveBeenCalledWith(staged, createdPath)
 		})
 
-		it.skipIf(process.platform === "win32")("publishes 0600 whatever the process umask is", async () => {
+		it.skipIf(process.platform === "win32")("publishes 0600 whatever the process umask is", async (context) => {
 			// Every other row here runs against a mocked fs/promises, so the operating system's own umask
 			// masking is invisible: the mock records the argument, not the mode the file ends up with.
 			// This row replays the three shipped publish lines - :795 stages with {flag: "wx", mode:
@@ -2795,6 +2795,10 @@ Body.`
 			// and 0o077 but 0400 at 0o277. It exists to be run by CI: on Windows a mode does not
 			// round-trip (writeFileSync with mode 0o600 reports 0o666), so no Windows row can separate
 			// 0644 from 0600 and the row is skipped there.
+			// A worker thread cannot set the umask, and Stryker runs its mutation tests inside one, so
+			// without the power to mask there is nothing to show: the row reports itself skipped there.
+			const { isMainThread } = await import("node:worker_threads")
+			if (!isMainThread) return context.skip()
 			const realFs = await import("node:fs")
 			// os is mocked for this file (its factory exports homedir only), so the temp root comes from the
 			// working directory; a unique mkdtemp name keeps concurrent workers out of each other's way.
