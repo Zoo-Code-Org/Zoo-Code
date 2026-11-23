@@ -45,13 +45,13 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## Zoo Code v3.98.1의 새로운 기능
+## Zoo Code v3.98.2의 새로운 기능
 
 - 💫Zoo Gateway 계정에 금액에 관계없이 잔액이 있으면 12월 1일까지 GLM-5.3-Flash를 무제한으로 사용하는 Zoo Pass를 무료로 체험할 수 있습니다.
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 모델과 추론: GPT-6.2 Sol, GPT-6.2 Astra, Claude Sonnet 5.5를 사용하세요. 각 LiteLLM 프로필의 추론 수준을 설정하세요.
-- 🛡️ 보안: 스킬 및 명령 메타데이터 분석, 멘션 처리, 제공업체 링크, CLI 승인 검사를 개선했습니다.
-- 🔧 수정: OpenAI 서비스 등급 비용을 수정하고 작업 공간의 심볼릭 링크를 인식하며 UI 번역을 추가했습니다.
+- 🔌 모델: Gemini 3.8 Flash와 새로운 Gemini 4 Carbon, Hydrogen, Neon 모델을 사용하세요. Gemini에서 xhigh 사고 수준을 설정할 수 있습니다.
+- 🌐 Responses API: OpenAI Compatible 제공업체에서 Responses API 지원을 사용할 수 있습니다. 도구 사용이 포함된 추론이 이를 요구하는 엔드포인트에서도 작동합니다.
+- 🔧 수정: Vertex Gemini 요청이 더 이상 모델 턴으로 끝나지 않습니다. LiteLLM을 통해서도 Gemini 사고 서명이 손상되지 않습니다. Ollama 작업이 설정된 컨텍스트 한도에서 압축됩니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 
