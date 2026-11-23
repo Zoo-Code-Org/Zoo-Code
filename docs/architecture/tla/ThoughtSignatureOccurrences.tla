@@ -22,21 +22,53 @@
 \* Next-occurrence code sabotage fails six reused-ID property cases. The restored utility passes all 262 tests.
 \* All 1,323 focused tests, types, lint, formatting and both Knip checks pass. Suppression counts stay equal.
 \* Null result: no new behavior failure. No speed gain was measured. Cost: about 2 agent minutes.
+\* Review ratchet: two spec findings added. The prior checks omitted the second output and unsigned results.
+\* Threads: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4661110427
+\* https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4661110431
+\* Expect a frozen cursor to repeat the first signature. Expect a retained result to hide an unsigned occurrence.
+\* Source and sink: replay consumes calls in order and derives each result from the updated per-ID cursor.
+\* Review result: the fold checks both outputs, advances each ID cursor, and derives results from the same cursor.
+\* The domain includes none, empty sequences and zero consumption. FrozenCursor and UnsignedResult fail as expected.
+\* Runtime sabotage: a frozen cursor fails 14 reused-ID property cases. Restore advancement before other checks.
+\* This round adds two findings on spec files. Earlier model checks did not cover these failures.
 EXTENDS Naturals, Sequences
 
 ReplayByOccurrence == TRUE
-ReplayedFirst(firstId, secondId, firstSignature, secondSignature) ==
-    IF ~ReplayByOccurrence /\ firstId = secondId THEN secondSignature ELSE firstSignature
-OccurrenceSignaturesPreserved ==
-    \A firstId, secondId \in {"call_1", "call_2"}, firstSignature, secondSignature \in {"none", "a", "b"} :
-        ReplayedFirst(firstId, secondId, firstSignature, secondSignature) = firstSignature
-\* The runtime cursor is the consumed count. Before the first call there is no active result mapping.
+AdvanceReplayCursor == TRUE
 ResultAtNext == FALSE
+RetainUnsignedResult == FALSE
+ReplayIds == {"call_1", "call_2"}
+ReplayValues == {"none", "a", "b"}
+ReplayInputs == UNION {[1..n -> [id : ReplayIds, signature : ReplayValues]] : n \in 0..2}
+InitialReplay == [next |-> [id \in ReplayIds |-> 0], calls |-> <<>>, results |-> <<>>]
+
+\* History supplies ordered occurrences. Parsing and normalization stay outside this fold.
+Occurrences(history, id) == SelectSeq(history, LAMBDA call : call.id = id)
 ResultSignature(values, consumed) ==
     LET position == IF ResultAtNext THEN consumed + 1 ELSE consumed
-    IN IF consumed = 0 \/ position > Len(values) THEN "none" ELSE values[position]
+    IN IF consumed = 0 \/ position > Len(values) THEN "none" ELSE values[position].signature
+
+Consume(history, state, call) ==
+    LET values == Occurrences(history, call.id)
+        position == IF ReplayByOccurrence THEN state.next[call.id] + 1 ELSE Len(values)
+        captured == values[position].signature
+        next == IF AdvanceReplayCursor THEN state.next[call.id] + 1 ELSE state.next[call.id]
+        current == ResultSignature(values, next)
+        result == IF RetainUnsignedResult /\ current = "none" /\ Len(state.results) > 0
+                  THEN state.results[Len(state.results)] ELSE current
+    IN [next |-> [state.next EXCEPT ![call.id] = next],
+        calls |-> Append(state.calls, captured), results |-> Append(state.results, result)]
+
+RECURSIVE ReplayFold(_, _)
+ReplayFold(history, count) ==
+    IF count = 0 THEN InitialReplay
+    ELSE Consume(history, ReplayFold(history, count - 1), history[count])
+ExpectedSignatures(history) == [i \in 1..Len(history) |-> history[i].signature]
+OccurrenceSignaturesPreserved ==
+    \A history \in ReplayInputs : ReplayFold(history, Len(history)).calls = ExpectedSignatures(history)
 ResultUsesLatestOccurrence ==
-    \A values \in UNION {[1..n -> {"a", "b"}] : n \in 0..2} :
-        \A consumed \in 0..Len(values) :
-            ResultSignature(values, consumed) = (IF consumed = 0 THEN "none" ELSE values[consumed])
+    \A history \in ReplayInputs : ReplayFold(history, Len(history)).results = ExpectedSignatures(history)
+\* Before any call is consumed, no result owns a future occurrence, including an unsigned occurrence.
+NoResultBeforeConsumption ==
+    \A history \in ReplayInputs, id \in ReplayIds : ResultSignature(Occurrences(history, id), 0) = "none"
 ====

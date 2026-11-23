@@ -24,6 +24,10 @@ IdOnlyReplay == FALSE
 \* Sabotage: a result reads the next occurrence instead of the last consumed occurrence.
 NextResult == TRUE
 
+\* Spec review sabotages: keep the cursor at zero, or keep the prior signed result for an unsigned call.
+FrozenCursor == FALSE
+KeepSignedResult == TRUE
+
 CONSTANT MaxTurns
 Bounded == Len(history) <= MaxTurns
 

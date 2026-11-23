@@ -272,7 +272,7 @@ SignatureSourcePriority == Len(history) > 0 =>
     \A field, encoded \in {None, [by |-> "g1", step |-> 1], [by |-> "g2", step |-> 1]} :
         SelectedSignature(field, encoded) = (IF field # None THEN field ELSE encoded)
 
-OccurrenceReplayAfterTurn == Len(history) > 0 => OccurrenceSignaturesPreserved /\ ResultUsesLatestOccurrence
+OccurrenceReplayAfterTurn == Len(history) > 0 => OccurrenceSignaturesPreserved /\ ResultUsesLatestOccurrence /\ NoResultBeforeConsumption
 
 StreamPriorityAfterTurn == Len(history) > 0 => StreamSignaturePriority
 

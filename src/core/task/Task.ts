@@ -145,6 +145,8 @@ import { MessageManager } from "../message-manager"
 import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
+import { waitForThoughtSignatureDrain } from "./thoughtSignatureDrain"
+import { getApiRequestTimeout } from "../../api/providers/utils/timeout-config"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
 import { abort, abortReason, initialRunState, type Ask, type RunEvent, type RunState } from "./run-state/runState"
@@ -1442,7 +1444,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(
+		message: Anthropic.MessageParam,
+		reasoning?: string,
+		source = { api: this.api, apiConfiguration: this.apiConfiguration },
+	): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1454,8 +1460,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			prepareApiConversationMessage({
 				message,
 				reasoning,
-				api: this.api,
-				apiConfiguration: this.apiConfiguration,
+				api: source.api,
+				apiConfiguration: source.apiConfiguration,
 				apiConversationHistory: this.apiConversationHistory,
 			}),
 		)
@@ -4292,6 +4298,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// allow the user to retry the request (most likely due to rate
 				// limit error, which gets thrown on the first chunk).
 				const requestApi = this.api
+				const requestApiConfiguration = { ...this.apiConfiguration }
 				const stream = this.attemptApiRequest(currentItem.retryAttempt ?? 0, {
 					skipProviderRateLimit: true,
 					requestModelInfo: streamModelInfo,
@@ -4718,7 +4725,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// Use the same iterator that the main loop was using
 							while (!item.done) {
 								// Check for timeout
-								if (performance.now() - startTime > timeoutMs) {
+								if (
+									!requestApi.requiresThoughtSignatureDrain &&
+									performance.now() - startTime > timeoutMs
+								) {
 									console.warn(
 										`[Background Usage Collection] Timed out after ${timeoutMs}ms for model: ${modelId}, processed ${chunkCount} chunks`,
 									)
@@ -4796,19 +4806,28 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									status,
 								)
 							}
+							if (requestApi.requiresThoughtSignatureDrain) throw error
 						}
 					}
 
 					// Start the background task and handle any errors
 					// Pass "cancelled" status if the task was aborted by the user
+					const requestAbortController = this.currentRequestAbortController
 					const usageDrain = drainStreamInBackgroundToFindAllUsage(
 						lastApiReqIndex,
 						this.abort ? "cancelled" : "completed",
 					).catch((error) => {
 						console.error("Background usage collection failed:", error)
+						if (requestApi.requiresThoughtSignatureDrain) throw error
 					})
 					// Proxy signatures can arrive after a tool stops the main loop. Save only after the drain settles.
-					if (requestApi.requiresThoughtSignatureDrain) await usageDrain
+					if (requestApi.requiresThoughtSignatureDrain) {
+						await waitForThoughtSignatureDrain(usageDrain, {
+							timeoutMs: getApiRequestTimeout(),
+							signal: requestAbortController?.signal,
+							onTimeout: (error) => requestAbortController?.abort(error),
+						})
+					}
 				} catch (error) {
 					// Close the request generator so its `finally` releases the API
 					// work it holds (a replaced handler is disposed once nothing uses
@@ -5181,6 +5200,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					await this.addToApiConversationHistory(
 						{ role: "assistant", content: assistantContent },
 						reasoningMessage || undefined,
+						{ api: requestApi, apiConfiguration: requestApiConfiguration },
 					)
 
 					this.messageCounts.assistant++
