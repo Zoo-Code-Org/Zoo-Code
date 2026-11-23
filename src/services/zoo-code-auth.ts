@@ -210,7 +210,10 @@ export async function clearZooCodeTokenIfCurrent(rejectedToken: string): Promise
 	if (!secretStorage) return false
 	const storage = secretStorage
 	return withTokenWriteLock(async () => {
-		if (_cachedToken !== undefined && _cachedToken !== rejectedToken) {
+		// With no cached token, another window can have stored a new session that this
+		// window's change listener has not applied yet. Compare with the stored secret.
+		const activeToken = _cachedToken ?? (await storage.get(ZOO_CODE_TOKEN_KEY))
+		if (activeToken !== undefined && activeToken !== rejectedToken) {
 			return false
 		}
 		await invalidateAndDeleteZooCodeToken(storage, rejectedToken)

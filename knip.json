@@ -12,7 +12,6 @@
 	"ignoreDependencies": ["lint-staged"],
 	"ignoreBinaries": ["dotenvx"],
 	"ignoreExportsUsedInFile": true,
-	"tags": ["-@knipignore"],
 	"playwright": false,
 	"playwright-ct": false,
 	"workspaces": {

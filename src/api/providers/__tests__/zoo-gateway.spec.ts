@@ -693,6 +693,19 @@ describe("ZooGatewayHandler", () => {
 			expect(mockCreate).not.toHaveBeenCalled()
 		})
 
+		it("stops the request when a refresh for a missing model belongs to a session that ended", async () => {
+			const modelCache = await import("../fetchers/modelCache")
+			const obsolete = new modelCache.AuthScopedCatalogObsoleteError()
+			vitest
+				.mocked(modelCache.getModels)
+				.mockResolvedValueOnce({ "other/model": DEFAULT_MODEL_CATALOG["anthropic/claude-sonnet-4"] })
+			vitest.mocked(modelCache.refreshModels).mockRejectedValueOnce(obsolete)
+			const handler = new ZooGatewayHandler(mockOptions)
+
+			await expect(handler.completePrompt("Test")).rejects.toBe(obsolete)
+			expect(mockCreate).not.toHaveBeenCalled()
+		})
+
 		it("stops the request when the model lookup belongs to a session that ended", async () => {
 			const modelCache = await import("../fetchers/modelCache")
 			const obsolete = new modelCache.AuthScopedCatalogObsoleteError()

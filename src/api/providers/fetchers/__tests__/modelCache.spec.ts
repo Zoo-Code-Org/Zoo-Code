@@ -1888,6 +1888,23 @@ describe("auth session cache", () => {
 		)
 	})
 
+	it("refreshModels lets a session that ended during the refresh through instead of returning an empty catalog", async () => {
+		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
+		let resolveFetch!: (value: ZooGatewayResult) => void
+		mockGetZooGatewayModels.mockReturnValueOnce(
+			new Promise<ZooGatewayResult>((resolve) => {
+				resolveFetch = resolve
+			}),
+		)
+		const options = { provider: providerIdentifiers.zooGateway, apiKey: "session-token" }
+
+		const refresh = refreshModels(options, zooGatewayHandler)
+		clearAuthSessionModelsForProvider(providerIdentifiers.zooGateway)
+		resolveFetch(zooGatewayOk({ "a/1": { maxTokens: 1, contextWindow: 1, supportsPromptCache: false } }))
+
+		await expect(refresh).rejects.toBeInstanceOf(AuthScopedCatalogObsoleteError)
+	})
+
 	it("refreshModels recovery uses the session that started the request, not the current one", async () => {
 		type ZooGatewayResult = Awaited<ReturnType<typeof getZooGatewayModels>>
 		const accountB: ModelRecord = { "b/1": { maxTokens: 2, contextWindow: 2, supportsPromptCache: false } }

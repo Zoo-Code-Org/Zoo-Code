@@ -753,13 +753,11 @@ export const refreshModels = async (options: GetModelsOptions, handler: ApiHandl
 			// Stryker disable next-line BlockStatement: emptying catch falls through into non-auth refresh; covered by error-message assertion in tests
 		} catch (error) {
 			console.error(`[refreshModels] Failed to refresh ${authCacheKey} models:`, error)
-			// A rejected session must stop the caller (for example an inference request that
-			// refreshes for a missing model) instead of degrading to an empty catalog.
-			if (error instanceof ZooGatewayModelsUnauthorizedError) {
+			// A rejected session, or one that ended during the refresh, must stop the caller (for
+			// example an inference request that refreshes for a missing model) instead of
+			// degrading to an empty catalog.
+			if (error instanceof ZooGatewayModelsUnauthorizedError || error instanceof AuthScopedCatalogObsoleteError) {
 				throw error
-			}
-			if (error instanceof AuthScopedCatalogObsoleteError) {
-				return {}
 			}
 			const existing = getAuthSessionEntry(authCacheKey)
 			// Stryker disable next-line ConditionalExpression,BlockStatement,EqualityOperator: resolveAuthScopedModels only throws when no usable session entry remains
@@ -951,8 +949,6 @@ export function getModelsFromCache(options: GetModelsOptions, handler: ApiHandle
 /**
  * Clears auth-session maps and the empty-response throttle for test isolation.
  * Prefer this over `vi.resetModules()` so mutation testing instruments the same module instance.
- *
- * @knipignore
  */
 export function resetModelCacheTransientStateForTests(): void {
 	// Stryker disable next-line CallExpression: test-only reset; per-mutant runs do not require cross-test isolation
@@ -969,8 +965,6 @@ export function resetModelCacheTransientStateForTests(): void {
 
 /**
  * Test-only: observe clear-generation map size (non-auth clears must not insert entries).
- *
- * @knipignore
  */
 export function authScopedClearGenerationSizeForTests(): number {
 	return authScopedClearGeneration.size

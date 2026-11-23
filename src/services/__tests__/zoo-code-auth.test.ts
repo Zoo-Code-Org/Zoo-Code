@@ -206,6 +206,32 @@ describe("zoo-code-auth", () => {
 			expect(mockSecrets.delete).not.toHaveBeenCalled()
 		})
 
+		it("clears again when a repeat rejection names the token that is already cleared", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			await clearZooCodeTokenIfCurrent("zoo_ext_a")
+			mockSecrets.delete.mockClear()
+
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).resolves.toBe(true)
+
+			expect(mockSecrets.delete).toHaveBeenCalledWith("zoo-code-session-token")
+			await expect(isZooCodeAuthenticated()).resolves.toBe(false)
+		})
+
+		it("keeps a newer session that another window stored before this window applied it", async () => {
+			await initZooCodeAuth(mockContext)
+			await setZooCodeToken("zoo_ext_a")
+			await clearZooCodeTokenIfCurrent("zoo_ext_a")
+			// The other window's sign-in, before this window's change listener runs.
+			await mockSecrets.store("zoo-code-session-token", "zoo_ext_b")
+			mockSecrets.delete.mockClear()
+
+			await expect(clearZooCodeTokenIfCurrent("zoo_ext_a")).resolves.toBe(false)
+
+			expect(mockSecrets.delete).not.toHaveBeenCalled()
+			await expect(mockSecrets.get("zoo-code-session-token")).resolves.toBe("zoo_ext_b")
+		})
+
 		it("does not let a check-then-clear for the old token remove a sign-in that started first", async () => {
 			await initZooCodeAuth(mockContext)
 			await setZooCodeToken("zoo_ext_a")
