@@ -2751,7 +2751,7 @@ Body.`
 			expect(mockWriteFile.mock.calls[0][2]).toMatchObject({ encoding: "utf-8", flag: "wx", mode: 0o600 })
 		})
 
-		it("publishes a brand-new SKILL.md with 0644 rather than the staging mode", async () => {
+		it("publishes a brand-new SKILL.md with the mode named in the code rather than one the umask decides", async () => {
 			mockDirectoryExists.mockResolvedValue(false)
 			mockRealpath.mockImplementation(async (value: string) => value)
 			mockReaddir.mockResolvedValue([])
@@ -2765,17 +2765,52 @@ Body.`
 			const staged = String(mockWriteFile.mock.calls[0][0])
 
 			expect(mockChmod).toHaveBeenCalledTimes(1)
-			// fs/promises is mocked in this file, so mockChmod records the mode argument the production
-			// expression produced whatever the operating system would report. The argument is asserted
-			// unguarded, like the preserved-bits row above, because guarding it here would skip the only
-			// assertion that tells 0644 apart from the 0600 the sidecar was staged with.
-			expect(mockChmod).toHaveBeenCalledWith(staged, 0o644)
+			// This is the only row that pins the constant a brand-new SKILL.md is published with: it
+			// separates asking for 0600 explicitly from asking for 0644 and, together with the call
+			// count above, from not chmodding at all and keeping whatever 0600 & ~umask the sidecar
+			// landed with. It is asserted unguarded, like the preserved-bits row above.
+			expect(mockChmod).toHaveBeenCalledWith(staged, 0o600)
 			// The same bug class the preserved-bits row exists to prevent: the mode has to be in place
 			// before the rename publishes the file.
 			expect(mockChmod.mock.invocationCallOrder[0]).toBeLessThan(mockRename.mock.invocationCallOrder[0])
 			expect(mockRename).toHaveBeenCalledWith(staged, createdPath)
 		})
 
+		it.skipIf(process.platform === "win32")("publishes 0600 whatever the process umask is", async () => {
+			// Every other row here runs against a mocked fs/promises, so the operating system's own umask
+			// masking is invisible: the mock records the argument, not the mode the file ends up with.
+			// This row replays the three shipped publish lines - :795 stages with {flag: "wx", mode:
+			// 0o600}, :830 chmods to the publish constant, :832 renames - against real files, which is
+			// the only way to show that the named constant, not the umask, decides the result. Creation
+			// mode is mode & ~umask, so without the chmod the same payload would publish 0600 at 0o022
+			// and 0o077 but 0400 at 0o277. It exists to be run by CI: on Windows a mode does not
+			// round-trip (writeFileSync with mode 0o600 reports 0o666), so no Windows row can separate
+			// 0644 from 0600 and the row is skipped there.
+			const realFs = await import("node:fs")
+			// os is mocked for this file (its factory exports homedir only), so the temp root comes from the
+			// working directory; a unique mkdtemp name keeps concurrent workers out of each other's way.
+			const directory = realFs.mkdtempSync(path.join(process.cwd(), ".skills-umask-"))
+			const previousUmask = process.umask()
+			try {
+				for (const mask of [0o022, 0o077]) {
+					process.umask(mask)
+					const suffix = mask.toString(8)
+					const sidecar = path.join(directory, `sidecar-${suffix}.md`)
+					const target = path.join(directory, `published-${suffix}.md`)
+					realFs.writeFileSync(sidecar, "---\nname: umask\n---\n\nBody.\n", {
+						encoding: "utf-8",
+						flag: "wx",
+						mode: 0o600,
+					})
+					realFs.chmodSync(sidecar, 0o600)
+					realFs.renameSync(sidecar, target)
+					expect(realFs.statSync(target).mode & 0o777, `published mode at umask ${suffix}`).toBe(0o600)
+				}
+			} finally {
+				process.umask(previousUmask)
+				realFs.rmSync(directory, { recursive: true, force: true })
+			}
+		})
 		it("propagates a realpath failure instead of writing through the unresolved path", async () => {
 			const skillDir = p(globalSkillsDir, "unresolvable-skill")
 			const skillMd = p(skillDir, "SKILL.md")

@@ -822,10 +822,12 @@ export class SkillsManager {
 				if (existingTarget && typeof existingTarget.mode === "number") {
 					await fs.chmod(temporaryPath, existingTarget.mode & 0o777)
 				} else if (!existingTarget) {
-					// 0600 is the staging mode, not the mode a published skill should carry: a second
-					// uid in a shared checkout has to be able to read the file. Naming 0644 here keeps that
-					// true under a private umask instead of leaving the sidecar's 0600 in place.
-					await fs.chmod(temporaryPath, 0o644)
+					// Naming the mode here is what makes the published file independent of the process umask:
+					// left to the sidecar it keeps 0600 & ~umask, so the same skill lands 0600, 0400 or 0000
+					// depending on who created it. What this constant does not promise is group readability:
+					// a deployment that wants a group-readable default changes this one value, and the row
+					// asserting it is the new-target publish row in SkillsManager.spec.ts.
+					await fs.chmod(temporaryPath, 0o600)
 				}
 				await fs.rename(temporaryPath, filePath)
 			} catch (error) {
