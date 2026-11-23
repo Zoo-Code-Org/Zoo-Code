@@ -299,14 +299,37 @@ describe("buildManifest", () => {
 
 	it("fails rather than skipping a package over the changed-line cap", () => {
 		const source = Array.from({ length: MAX_CHANGED_LINES + 1 }, (_, index) => `call(${index})`).join("\n")
-		assert.throws(
-			() =>
-				buildManifest(
-					[{ status: "A", path: "packages/telemetry/src/large.ts" }],
-					() => source,
-					() => "",
-				),
-			/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
+		// Captured because this fixture is itself an over-cap head: the breakdown buildManifest prints here
+		// would otherwise land in the test report as a bare "# telemetry bills 501 changed executable lines ..."
+		// line, which reads like a billing finding on a run that billed nothing.
+		const chunks = []
+		const stdoutWrite = process.stdout.write
+		const stderrWrite = process.stderr.write
+		const capture = (chunk) => {
+			chunks.push(String(chunk))
+			return true
+		}
+		process.stdout.write = capture
+		process.stderr.write = capture
+		try {
+			assert.throws(
+				() =>
+					buildManifest(
+						[{ status: "A", path: "packages/telemetry/src/large.ts" }],
+						() => source,
+						() => "",
+					),
+				/split the PR or obtain a maintainer-reviewed narrow exclusion/i,
+			)
+		} finally {
+			process.stdout.write = stdoutWrite
+			process.stderr.write = stderrWrite
+		}
+
+		const captured = chunks.join("")
+		assert.ok(
+			captured.includes("telemetry bills 501 changed executable lines in 1 file(s)"),
+			"the over-cap print should have been produced and captured: " + captured,
 		)
 	})
 
@@ -314,10 +337,16 @@ describe("buildManifest", () => {
 		const overCap = Array.from({ length: MAX_CHANGED_LINES + 1 }, (_, index) => `call(${index})`).join("\n")
 		const underCap = Array.from({ length: 120 }, (_, index) => `call(${index})`).join("\n")
 		const total = MAX_CHANGED_LINES + 1 + 120
-		const chunks = []
-		const write = process.stdout.write
+		const stderrChunks = []
+		const stdoutChunks = []
+		const stderrWrite = process.stderr.write
+		const stdoutWrite = process.stdout.write
+		process.stderr.write = (chunk) => {
+			stderrChunks.push(String(chunk))
+			return true
+		}
 		process.stdout.write = (chunk) => {
-			chunks.push(String(chunk))
+			stdoutChunks.push(String(chunk))
 			return true
 		}
 		let failure
@@ -334,10 +363,11 @@ describe("buildManifest", () => {
 		} catch (error) {
 			failure = error
 		} finally {
-			process.stdout.write = write
+			process.stderr.write = stderrWrite
+			process.stdout.write = stdoutWrite
 		}
 
-		const printed = chunks.join("")
+		const printed = stderrChunks.join("")
 		const largeLine = `${MAX_CHANGED_LINES + 1}\tpackages/telemetry/src/large.ts`
 		const smallLine = `120\tpackages/telemetry/src/small.ts`
 		assert.ok(
@@ -365,16 +395,33 @@ describe("buildManifest", () => {
 			"the failure sentence must name the contributors in the order they cost",
 		)
 		assert.match(failure.message, /split the PR or obtain a maintainer-reviewed narrow exclusion/i)
+		assert.ok(
+			!failure.message.includes("file(s) billed in total"),
+			"the file count belongs on the breakdown's first line, not repeated inside the sentence: " +
+				failure.message,
+		)
+		assert.equal(stdoutChunks.join(""), "", "the breakdown belongs on stderr, not on stdout")
+		assert.deepEqual(
+			failure.billedFiles.map((file) => [file.path, file.lines]),
+			[
+				["packages/telemetry/src/large.ts", MAX_CHANGED_LINES + 1],
+				["packages/telemetry/src/small.ts", 120],
+			],
+			"the structured list on the error must match the printed one",
+		)
 	})
 
 	it("prints no breakdown while a billed package stays under the changed-line cap", () => {
 		const source = Array.from({ length: 40 }, (_, index) => `call(${index})`).join("\n")
 		const chunks = []
-		const write = process.stdout.write
-		process.stdout.write = (chunk) => {
+		const stdoutWrite = process.stdout.write
+		const stderrWrite = process.stderr.write
+		const capture = (chunk) => {
 			chunks.push(String(chunk))
 			return true
 		}
+		process.stdout.write = capture
+		process.stderr.write = capture
 		let manifest
 		try {
 			manifest = buildManifest(
@@ -383,7 +430,8 @@ describe("buildManifest", () => {
 				() => "",
 			)
 		} finally {
-			process.stdout.write = write
+			process.stdout.write = stdoutWrite
+			process.stderr.write = stderrWrite
 		}
 
 		assert.equal(manifest.packages[0].changedExecutableLines, 40)

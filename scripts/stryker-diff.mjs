@@ -278,17 +278,24 @@ export function buildManifest(entries, readSource, diffForPath) {
 
 		// The over-cap head prints no file list otherwise: this throw aborts before main() reaches the
 		// per-package line and before runManifest reaches a reporter, so the breakdown a contributor needs
-		// to decide a split has to be emitted here, largest file first, and named in the failure sentence.
-		console.log(
+		// to decide a split has to be emitted here, largest file first. It goes to stderr because the
+		// failure sentence is reported through console.error, and stdout/stderr ordering in a CI log is
+		// not guaranteed - on separate streams the list could land far from the line that explains it.
+		// The same list also rides on the error object so a caller that imports buildManifest never has to
+		// parse the print.
+		console.error(
 			`${packageEntry.id} bills ${packageEntry.changedExecutableLines} changed executable lines in ` +
 				`${billedFiles.length} file(s), over the ${MAX_CHANGED_LINES}-line limit:`,
 		)
-		for (const file of billedFiles) console.log(`\t${file.lines}\t${file.path}`)
+		for (const file of billedFiles) console.error(`\t${file.lines}\t${file.path}`)
 
-		throw new Error(
+		const failure = new Error(
 			`${packageEntry.id} has ${packageEntry.changedExecutableLines} changed executable lines (limit ${MAX_CHANGED_LINES}). ` +
-				`Largest contributors: ${largest}. Split the PR or obtain a maintainer-reviewed narrow exclusion.`,
+				`Largest contributors: ${largest}. ` +
+				"Split the PR or obtain a maintainer-reviewed narrow exclusion.",
 		)
+		failure.billedFiles = billedFiles
+		throw failure
 	}
 
 	return { packages: [...packages.values()], advisories }
