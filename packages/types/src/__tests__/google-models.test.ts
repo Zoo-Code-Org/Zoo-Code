@@ -1,3 +1,5 @@
+import type { ModelInfo } from "../model.js"
+import { VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS } from "../providers/vercel-ai-gateway.js"
 import { geminiModels } from "../providers/gemini.js"
 import { vertexModels } from "../providers/vertex.js"
 
@@ -73,4 +75,60 @@ it("exposes the documented thinking levels and pricing for Gemini 3.1 Flash Lite
 	expect(model.outputPrice).toBe(1.5)
 	expect(model.cacheReadsPrice).toBe(0.025)
 	expect(model.cacheWritesPrice).toBe(1.0)
+})
+
+const newGeminiModels = [
+	{
+		id: "gemini-3.8-flash",
+		levels: ["low", "medium", "high"],
+		price: [0.75, 3.75, 0.075],
+		defaultLevel: "medium",
+	},
+	{
+		id: "gemini-4-carbon",
+		levels: ["low", "medium", "high"],
+		price: [2, 10, 0.1],
+		defaultLevel: "medium",
+	},
+	{
+		id: "gemini-4-hydrogen",
+		levels: ["low", "medium", "high", "xhigh"],
+		price: [1.5, 7.5, 0.075],
+		defaultLevel: "high",
+	},
+	{
+		id: "gemini-4-neon",
+		levels: ["low", "medium", "high", "xhigh"],
+		price: [3, 15, 0.15],
+		defaultLevel: "high",
+	},
+]
+
+describe.each([
+	["Gemini API", geminiModels],
+	["Vertex AI", vertexModels],
+])("new Gemini models on %s", (_provider, catalog: Record<string, ModelInfo>) => {
+	it.each(newGeminiModels)("registers available model $id", ({ id, levels, price, defaultLevel }) => {
+		expect(catalog).toHaveProperty(id)
+		const model = catalog[id]
+		expect(model).toMatchObject({
+			maxTokens: 65_536,
+			contextWindow: 1_048_576,
+			supportsImages: true,
+			supportsPromptCache: true,
+			supportsReasoningEffort: levels,
+			reasoningEffort: defaultLevel,
+			supportsReasoningBudget: false,
+			supportsTemperature: false,
+			inputPrice: price[0],
+			outputPrice: price[1],
+			cacheReadsPrice: price[2],
+		})
+		expect(model).not.toHaveProperty("cacheWritesPrice")
+	})
+})
+
+// Public catalog: https://ai-gateway.vercel.sh/v1/models
+it.each(newGeminiModels)("keeps image and tool support for Gateway model $id", ({ id }) => {
+	expect(VERCEL_AI_GATEWAY_VISION_AND_TOOLS_MODELS.has(`google/${id}`)).toBe(true)
 })
