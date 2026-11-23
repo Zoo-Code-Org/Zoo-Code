@@ -245,11 +245,16 @@ describe("SkillsManager", () => {
 			expect(skillsManager.getSkillsMetadata().map((skill) => skill.name)).toEqual(["example"])
 			expect((await skillsManager.getSkillContent("example"))?.instructions).toBe("Instructions")
 			await skillsManager.updateSkillModes("example", "project", ["code"])
-			expect(mockWriteFile).toHaveBeenCalledWith(
-				p(projectSkillsDir, "example", "SKILL.md"),
-				expect.stringContaining("modeSlugs:"),
-				"utf-8",
-			)
+			// The publish is atomic: the payload is staged as .SKILL.md.<time>.<rand>.tmp in the
+			// skill's own directory and renamed over SKILL.md. The write assertion names the staged
+			// file, the rename assertion names the target, and the content assertion is kept because
+			// the modes are the point of the call.
+			expect(mockWriteFile).toHaveBeenCalledTimes(1)
+			const staged = String(mockWriteFile.mock.calls[0][0])
+			expect(staged).toMatch(/\.SKILL\.md\.[^/\\]+\.tmp$/)
+			expect(mockWriteFile.mock.calls[0][2]).toMatchObject({ encoding: "utf-8", flag: "wx" })
+			expect(String(mockWriteFile.mock.calls[0][1])).toContain("modeSlugs:")
+			expect(mockRename).toHaveBeenCalledWith(staged, p(projectSkillsDir, "example", "SKILL.md"))
 		},
 	)
 
