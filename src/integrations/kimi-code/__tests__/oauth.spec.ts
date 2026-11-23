@@ -782,7 +782,7 @@ describe("KimiCodeOAuthManager", () => {
 		const signingOut = manager.clearCredentials()
 		await new Promise((resolve) => setImmediate(resolve))
 		// The sign-out is held inside its own delete, which is the window the row asks about.
-		expect(manager["clearingCredentials"], "sign-out holds its fence across the parked delete").toBe(true)
+		expect(manager["clearFenceCount"], "sign-out holds its fence across the parked delete").toBe(1)
 		expect(order).toEqual(["delete:start"])
 
 		// A full sign-in - device authorization plus the token poll - completes inside the park.
@@ -830,9 +830,57 @@ describe("KimiCodeOAuthManager", () => {
 		expect(values.has(key)).toBe(false)
 		expect(manager["credentials"]).toBeNull()
 		expect(manager.getState()).toEqual({ status: "idle" })
-		expect(manager["clearingCredentials"]).toBe(false)
+		expect(manager["clearFenceCount"]).toBe(0)
 	})
 
+	it("holds the sign-out fence until the last of two overlapping sign-outs finishes", async () => {
+		// One boolean fence cannot serve two sign-outs. The first one's finally lowers it while the
+		// second is still inside its own delete, and the only startRefresh() call site -
+		// getAccessToken(), downstream of the fence check - is open again in that window: a refresh
+		// started there captures the generation the second sign-out already bumped, so its save
+		// passes isCurrent() and re-installs what that delete removes. The depth counter keeps the
+		// fence held until every sign-out in flight has finished its own finally.
+		const { context, values } = createContext()
+		const key = "kimi-code-oauth-credentials"
+		values.set(
+			key,
+			JSON.stringify({
+				type: "kimi-code",
+				accessToken: "old",
+				refreshToken: "refresh",
+				expiresAt: 0,
+				tokenType: "Bearer",
+			}),
+		)
+		const manager = new KimiCodeOAuthManager()
+		manager.initialize(context)
+		const releases: Array<() => void> = []
+		const remove = vi.mocked(context.secrets.delete)
+		remove.mockImplementation(
+			(k: string) =>
+				new Promise<void>((resolve) => {
+					releases.push(() => {
+						values.delete(k)
+						resolve()
+					})
+				}),
+		)
+		const first = manager.clearCredentials()
+		await new Promise((resolve) => setImmediate(resolve))
+		const second = manager.clearCredentials()
+		await new Promise((resolve) => setImmediate(resolve))
+		expect(releases.length, "both sign-outs reached their own delete").toBe(2)
+
+		releases[0]?.()
+		await first
+		expect(manager["clearFenceCount"], "the second sign-out still holds the fence").toBe(1)
+
+		releases[1]?.()
+		await second
+		expect(manager["clearFenceCount"], "the last sign-out releases the fence").toBe(0)
+		expect(values.has(key)).toBe(false)
+		expect(await manager.getAccessToken()).toBeNull()
+	})
 	it("a sign-out that lands while a sign-in is storing rejects that write instead of installing it", async () => {
 		const { context, values } = createContext()
 		const key = "kimi-code-oauth-credentials"
@@ -914,7 +962,7 @@ describe("KimiCodeOAuthManager", () => {
 		expect(values.has(key)).toBe(false)
 		// Once for the sign-out and once for the stale write's own cleanup.
 		expect(deletes.length).toBe(2)
-		expect(manager["clearingCredentials"]).toBe(false)
+		expect(manager["clearFenceCount"]).toBe(0)
 	})
 	it("a delayed invalid_grant from a stale refresh keeps credentials a newer sign-in saved", async () => {
 		const { context, values } = createContext()

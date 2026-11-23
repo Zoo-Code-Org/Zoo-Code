@@ -265,8 +265,10 @@ export class KimiCodeOAuthManager {
 	private refreshController: AbortController | null = null
 	private refreshWaiters: Set<{ signal?: AbortSignal }> | null = null
 	// Sign-out fence: while credentials are being cleared no new refresh may start, so the drain
-	// in clearCredentials() terminates and a caller cannot re-install what its delete removes.
-	private clearingCredentials = false
+	// in clearCredentials() terminates and a caller cannot re-install what its delete removes. The
+	// fence is a count rather than a flag because two sign-outs can overlap - the first one's
+	// finally must not open the gate while the second is still draining its own delete.
+	private clearFenceCount = 0
 	private pollingPromise: Promise<KimiCodeCredentials> | null = null
 	private pollingController: AbortController | null = null
 	private credentialsGeneration = 0
@@ -332,7 +334,8 @@ export class KimiCodeOAuthManager {
 		// re-polling for a refresh that cannot appear: the only startRefresh() call site is
 		// getAccessToken(), downstream of the fence check below, so while the fence is held no new
 		// refresh can begin and the entry-captured one is the only work the delete has to wait for.
-		this.clearingCredentials = true
+		// A second sign-out raises the count, so its own finally is the one that opens the gate.
+		this.clearFenceCount++
 		try {
 			const refreshPromise = this.refreshPromise
 			if (refreshPromise) {
@@ -342,7 +345,7 @@ export class KimiCodeOAuthManager {
 			this.credentials = null
 			this.state = { status: "idle" }
 		} finally {
-			this.clearingCredentials = false
+			this.clearFenceCount--
 		}
 	}
 
@@ -363,7 +366,7 @@ export class KimiCodeOAuthManager {
 		if (!forceRefresh && Date.now() < credentials.expiresAt - TOKEN_EXPIRY_BUFFER_MS) {
 			return credentials.accessToken
 		}
-		if (this.clearingCredentials) return null
+		if (this.clearFenceCount > 0) return null
 		// A pending refresh whose controller was already aborted can never settle successfully:
 		// start a replacement even if the old promise has not run its finally yet.
 		if (!this.refreshPromise || this.refreshController?.signal.aborted) {
