@@ -1,6 +1,8 @@
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
+import { getEventListeners } from "node:events"
+
 import { DispatchState } from "../dispatchState"
 import * as fsReal from "fs"
 import * as os from "os"
@@ -13,6 +15,7 @@ import type { Mock } from "vitest"
 import {
 	providerIdentifiers,
 	RooCodeEventName,
+	TaskStatus,
 	type ClineMessage,
 	type GlobalState,
 	type HistoryItem,
@@ -2064,6 +2067,56 @@ describe("Cline", () => {
 				})
 			}
 
+			it.each(["success", "failure", "cancel-before", "cancel-during"] as const)(
+				"cleans up stream-read listeners and preserves cancellation on %s",
+				async (outcome) => {
+					const task = await createTaskWithManualRetries()
+					const state = await mockProvider.getState()
+					vi.mocked(mockProvider.getState).mockResolvedValue({ ...state, autoApprovalEnabled: true })
+					Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+					const controller = new AbortController()
+					const reason = new Error("Request-specific cancellation reason")
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let notifyPending!: () => void
+					const pending = new Promise<void>((resolve) => {
+						notifyPending = resolve
+					})
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							task.currentRequestAbortController = controller
+							if (outcome === "cancel-before") controller.abort(reason)
+							yield { type: "text", text: "first" }
+							if (outcome === "success" || outcome === "failure") task.didRejectTool = true
+							yield { type: "text", text: "buffered" }
+							if (outcome === "cancel-during") {
+								notifyPending()
+								await gate
+							}
+							if (outcome === "failure") throw new Error("Read failed")
+						},
+					)
+					realRequestsThenStop(task)
+					const backoff = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = task.recursivelyMakeClineRequests([{ type: "text", text: "go" }])
+					try {
+						if (outcome === "cancel-during") {
+							await pending
+							controller.abort(reason)
+						}
+						await loop
+						expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+						if (outcome.startsWith("cancel")) expect(backoff.mock.calls[0]?.[1]).toBe(reason)
+					} finally {
+						release()
+						await loop
+					}
+				},
+			)
+
 			it("closes a stream whose read failed, releasing the replaced handler (stream.return())", async () => {
 				const task = await createTaskWithManualRetries()
 				const oldDispose = disposableApi(task)
@@ -2316,62 +2369,151 @@ describe("Cline", () => {
 				},
 			)
 
-			it.each(["failure", "deadline"] as const)("stops after tool execution on a drain %s", async (failure) => {
-				const task = await createTaskWithManualRetries()
-				const state = await mockProvider.getState()
-				vi.mocked(mockProvider.getState).mockResolvedValue({ ...state, autoApprovalEnabled: true })
-				Object.assign(task.api, { requiresThoughtSignatureDrain: true })
-				vi.spyOn(timeoutConfig, "getApiRequestTimeout").mockReturnValue(25)
-				vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
-				const executeTool = vi
-					.spyOn(writeToFileTool, "handle")
-					.mockImplementation(async (_task, _block, callbacks) => {
-						callbacks.pushToolResult("Written")
+			it.each([
+				{ failure: "failure", pending: false, reply: "message" },
+				{ failure: "deadline", pending: false, reply: "message" },
+				{ failure: "failure", pending: true, reply: "message" },
+				{ failure: "deadline", pending: true, reply: "message" },
+				{ failure: "failure", pending: false, reply: "button" },
+				{ failure: "failure", pending: false, reply: "decline" },
+			])(
+				"offers recovery after $failure, pending tool: $pending, reply: $reply",
+				async ({ failure, pending, reply }) => {
+					const task = await createTaskWithManualRetries()
+					const state = await mockProvider.getState()
+					vi.mocked(mockProvider.getState).mockResolvedValue({ ...state, autoApprovalEnabled: true })
+					Object.assign(task.api, { requiresThoughtSignatureDrain: true })
+					vi.spyOn(timeoutConfig, "getApiRequestTimeout").mockReturnValue(25)
+					vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+					let finishTool!: () => void
+					const toolGate = new Promise<void>((resolve) => {
+						finishTool = resolve
 					})
-				let release!: () => void
-				const gate = new Promise<void>((resolve) => {
-					release = resolve
-				})
-				vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
-					async function* () {
-						getTaskTestAccess(task).requestPolicySnapshot = {
-							disabledTools: [],
-							customModes: [],
-							modelInfo: stubModelInfo,
-						}
-						yield {
-							type: "tool_call",
-							id: "call_write",
-							name: "write_to_file",
-							arguments: '{"path":"result.md","content":"done"}',
-						}
-						yield { type: "text", text: "buffered" }
-						await vi.waitFor(() => expect(executeTool).toHaveBeenCalledOnce())
-						// User feedback interrupts a response after its first tool has completed.
-						task.didRejectTool = true
-						yield { type: "text", text: "interrupted" }
-						if (failure === "deadline") await gate
-						throw new Error("Stream consumption failed")
-					},
-				)
-				const requests = realRequestsThenStop(task)
-				vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
-				const say = vi.spyOn(task, "say")
-				vi.spyOn(console, "error").mockImplementation(() => {})
-				try {
-					await task.recursivelyMakeClineRequests([{ type: "text", text: "write the file" }])
-					expect(executeTool).toHaveBeenCalledOnce()
-					expect(requests).toHaveBeenCalledOnce()
-					expect(task.userMessageContent).toEqual(
-						expect.arrayContaining([
-							expect.objectContaining({ type: "tool_result", tool_use_id: "call_write" }),
-						]),
+					const executeTool = vi
+						.spyOn(writeToFileTool, "handle")
+						.mockClear()
+						.mockImplementation(async (_task, _block, callbacks) => {
+							if (pending) await toolGate
+							callbacks.pushToolResult("Written")
+						})
+					let release!: () => void
+					const gate = new Promise<void>((resolve) => {
+						release = resolve
+					})
+					let turns = 0
+					const { default: realPWaitFor } = await vi.importActual<typeof import("p-wait-for")>("p-wait-for")
+					vi.mocked(pWaitFor).mockImplementation(realPWaitFor)
+					vi.spyOn(getTaskTestAccess(task), "attemptApiRequestWithActiveApi").mockImplementation(
+						async function* () {
+							if (turns++ > 0) {
+								yield { type: "text", text: "Recovery continued." }
+								return
+							}
+							getTaskTestAccess(task).requestPolicySnapshot = {
+								disabledTools: [],
+								customModes: [],
+								modelInfo: stubModelInfo,
+							}
+							yield {
+								type: "tool_call",
+								id: "call_write",
+								name: "write_to_file",
+								arguments: '{"path":"result.md","content":"done"}',
+							}
+							yield { type: "text", text: "buffered" }
+							await vi.waitFor(() => expect(executeTool).toHaveBeenCalledOnce())
+							// User feedback can interrupt the stream while the tool is still running.
+							task.didRejectTool = true
+							if (reply === "button")
+								task.messageQueueService.addMessage("A request queued before recovery.")
+							yield { type: "text", text: "interrupted" }
+							if (failure === "deadline") await gate
+							throw new Error("Stream consumption failed")
+						},
 					)
-					expect(say).toHaveBeenCalledWith("error", expect.stringContaining("Automatic retry stopped"))
-				} finally {
-					release()
-				}
-			})
+					const requests = realRequestsThenStop(task, 2)
+					vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+					const say = vi.spyOn(task, "say")
+					vi.spyOn(console, "error").mockImplementation(() => {})
+					const loop = getTaskTestAccess(task).initiateTaskLoop([{ type: "text", text: "write the file" }])
+					try {
+						await vi.waitFor(() => expect(task.taskStatus).toBe(TaskStatus.Resumable), { timeout: 4_000 })
+						expect(task.taskAsk?.ask).toBe("resume_task")
+						expect(task.taskAsk?.isProtected).toBe(true)
+						expect(task.isStreaming).toBe(false)
+						expect(executeTool).toHaveBeenCalledOnce()
+						expect(requests).toHaveBeenCalledOnce()
+						if (!pending)
+							expect(task.userMessageContent).toEqual(
+								expect.arrayContaining([
+									expect.objectContaining({ type: "tool_result", tool_use_id: "call_write" }),
+								]),
+							)
+						expect(say).toHaveBeenCalledWith("error", expect.stringContaining("Automatic retry stopped"))
+						if (reply === "decline") {
+							task.handleWebviewAskResponse("noButtonClicked")
+							await loop
+							expect(task.abort).toBe(true)
+							expect(turns).toBe(1)
+							expect(requests).toHaveBeenCalledOnce()
+							return
+						}
+						if (reply === "button") {
+							expect(task.queuedMessages).toHaveLength(1)
+							task.handleWebviewAskResponse("yesButtonClicked")
+						} else {
+							await task.submitUserMessage("The write is verified. Continue with a read-only check.")
+						}
+						if (pending) {
+							await vi.waitFor(() => expect(task.taskAsk).toBeUndefined())
+							expect(turns).toBe(1)
+							expect(task.dispatchState).toBe(DispatchState.SERIAL)
+							finishTool()
+						}
+						await loop
+						expect(turns).toBe(2)
+						expect(executeTool).toHaveBeenCalledOnce()
+						expect(requests.mock.calls[1]?.[0]).toBe(0)
+						const recovery = task.apiConversationHistory.find(
+							(message) => message.role === "user" && JSON.stringify(message.content).includes("Written"),
+						)
+						expect(recovery?.content).toEqual(
+							expect.arrayContaining([
+								expect.objectContaining({
+									type: "text",
+									text: expect.stringContaining("write_to_file"),
+								}),
+								expect.objectContaining({
+									type: "text",
+									text:
+										reply === "button"
+											? "Continue from the verified tool results."
+											: "The write is verified. Continue with a read-only check.",
+								}),
+							]),
+						)
+						expect(
+							task.apiConversationHistory
+								.flatMap((message) => (Array.isArray(message.content) ? message.content : []))
+								.some((block) => block.type === "tool_use" || block.type === "tool_result"),
+						).toBe(false)
+						expect(
+							task.apiConversationHistory.some(
+								(message) =>
+									message.role === "assistant" &&
+									JSON.stringify(message.content).includes("Recovery continued."),
+							),
+						).toBe(true)
+					} finally {
+						finishTool()
+						release()
+						task.requestAbort(false)
+						await loop
+						executeTool.mockRestore()
+						vi.mocked(pWaitFor).mockImplementation(async () => {})
+					}
+				},
+			)
 
 			it("keeps a signature stream-consumption failure fatal", async () => {
 				const task = await createTaskWithManualRetries()

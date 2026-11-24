@@ -64,6 +64,9 @@
 \* The first full run hit an extension-activation timeout. That suite passes alone and on the full rerun.
 \* Types, lint, formatting, both Knip checks and lifecycle checks pass. Suppression counts stay equal.
 \* Cost: about 12 agent minutes. The runtime change adds one conservative stop before the retry branch.
+\* Review: https://github.com/Zoo-Code-Org/Zoo-Code/pull/2643#discussion_r4673468489
+\* Added ThoughtSignatureRecovery for the ask-to-request boundary. Signature values do not change recovery decisions.
+\* The separate bounded model avoids multiplying independent signature and recovery states.
 EXTENDS Naturals
 
 VARIABLES phase, candidate, expected, saved, complete, current, expired, reporting, retries, toolObserved, reportAttempts

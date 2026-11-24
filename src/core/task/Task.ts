@@ -146,6 +146,7 @@ import { validateAndFixToolResultIds } from "./validateToolResultIds"
 import { mergeConsecutiveApiMessages } from "./mergeConsecutiveApiMessages"
 import { prepareApiConversationMessage } from "./apiConversationHistory"
 import { waitForThoughtSignatureDrain } from "./thoughtSignatureDrain"
+import { detachOnAbort } from "../../api/providers/utils/abort-signal"
 import { getApiRequestTimeout } from "../../api/providers/utils/timeout-config"
 import { shouldAddUserMessageToHistory } from "./messageCounting"
 import { type TaskExecutionContext } from "./providerHandoff"
@@ -4311,31 +4312,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				try {
 					const iterator = stream[Symbol.asyncIterator]()
 
-					// Helper to race iterator.next() with abort signal
-					const nextChunkWithAbort = async () => {
-						const nextPromise = iterator.next()
-
-						// If we have an abort controller, race it with the next chunk
-						if (this.currentRequestAbortController) {
-							const abortPromise = new Promise<never>((_, reject) => {
-								const signal = this.currentRequestAbortController!.signal
-								if (signal.aborted) {
-									reject(new Error("Request cancelled by user"))
-								} else {
-									signal.addEventListener(
-										"abort",
-										() => {
-											reject(new Error("Request cancelled by user"))
-										},
-										{ once: true },
-									)
-								}
-							})
-							return await Promise.race([nextPromise, abortPromise])
-						}
-
-						// No abort controller, just return the next chunk normally
-						return await nextPromise
+					const nextChunkWithAbort = () => {
+						const pending = iterator.next()
+						const signal = this.currentRequestAbortController?.signal
+						return signal ? detachOnAbort(pending, signal) : pending
 					}
 
 					let item = await nextChunkWithAbort()
@@ -4754,9 +4734,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									bgTotalCost = chunk.totalCost
 								}
 							}
-						} catch (error) {
-							console.error("Error draining stream for usage data:", error)
-							if (requestApi.requiresThoughtSignatureDrain) throw error
 						} finally {
 							// Only stream consumption controls history readiness. Usage reporting stays independent.
 							const reportUsage = async () => {
@@ -4796,7 +4773,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						}
 					}
 
-					// Start the background task and handle any errors
+					// One boundary handles drain failures. Usage reporting has its own detached boundary.
 					// Pass "cancelled" status if the task was aborted by the user
 					const requestAbortController = this.currentRequestAbortController
 					const streamDrain = drainStreamInBackgroundToFindAllUsage(
@@ -4851,7 +4828,62 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								"error",
 								"Automatic retry stopped because a tool may have already run. Check the tool results before you continue.",
 							)
-							return true
+							this.isStreaming = false
+							// A protected ask requires a fresh reply, even when messages are queued.
+							const recovery = await this.ask("resume_task", undefined, false, undefined, true)
+							if (recovery.response !== "yesButtonClicked" && recovery.response !== "messageResponse") {
+								await this.abortTask()
+								return true
+							}
+
+							// A tool can finish after its stream. Snapshot results only after the presenter releases its lock.
+							await pWaitFor(
+								() => this.dispatchState === DispatchState.IDLE || this.abort || this.abandoned,
+								{
+									interval: 100,
+								},
+							)
+							if (this.abort || this.abandoned) return true
+							const interruptedTools = this.assistantMessageContent.flatMap((block) => {
+								if ((block.type !== "tool_use" && block.type !== "mcp_tool_use") || block.partial)
+									return []
+								const result = this.userMessageContent.find(
+									(result): result is Anthropic.ToolResultBlockParam =>
+										result.type === "tool_result" &&
+										block.id !== undefined &&
+										result.tool_use_id === sanitizeToolUseId(block.id),
+								)
+								return [
+									{
+										tool: block.name,
+										parameters:
+											block.type === "mcp_tool_use"
+												? block.arguments
+												: (block.nativeArgs ?? block.params),
+										result:
+											result?.content ??
+											"No result was recorded. Check the current state before further actions.",
+									},
+								]
+							})
+							if (recovery.text || recovery.images?.length) {
+								await this.say("user_feedback", recovery.text, recovery.images)
+							}
+							// Use a fresh text context. The incomplete assistant turn and its protocol tool calls cannot be replayed.
+							stack.push({
+								userContent: [
+									{
+										type: "text",
+										text: `The previous response failed after these tool calls may have run. Do not repeat them. Check their results before further actions.\n${JSON.stringify(interruptedTools)}`,
+									},
+									...this.userMessageContent.filter((block) => block.type !== "tool_result"),
+									{ type: "text", text: recovery.text || "Continue from the verified tool results." },
+									...formatResponse.imageBlocks(recovery.images),
+								],
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else if (error instanceof OutputTokenLimitError) {
 							// Truncation repeats on an identical request, so never auto-retry it
 							// (even with auto-approval); let the user decide once.
