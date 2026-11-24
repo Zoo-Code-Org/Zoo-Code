@@ -6,10 +6,10 @@
 \* Failure: a post-load refresh joins a pre-load flight and returns stale context.
 \* Failure: a failed preview clears metadata, or cleanup clears another operation's controller.
 \* Expect: Code holds. JoinOld, PreviewClear, NoAbort and ClearReplacement must fail.
-\* Review: PR 2170 summary supplied in chat. 0 covered, 3 added, 6 gap.
-\* Added: findings 4, 5 and 6. One invariant covers both parts of controller cleanup.
-\* Gaps: 1 needs file-path data absent from REST. 2 needs discovery before and after a load.
-\* Gaps: 3 retry timing, 7 log levels, 8 warning frequency and 9 prose need tests or review.
+\* Review: PR 2170 summary supplied in chat. 0 covered, 3 added, 8 gap.
+\* Added: S1, M1 and M2. One invariant covers both parts of controller cleanup.
+\* Gaps: H1 needs file-path data absent from REST. P1 needs discovery before and after a load.
+\* Gaps: P2/P3 use LmStudioRetry. O1/O2 log levels, O3 warning frequency and DOC1 prose use tests or review.
 \* Not modeled: shared-flight cancellation and refresh tickets. LmStudioLoad models those rules.
 \* The old request's result is an oracle. Both loaded and stale context are valid responses.
 \* Replay tests: modelCache.spec.ts, lmstudio.test.ts and ClineProvider.spec.ts.

@@ -605,22 +605,46 @@ describe("LM Studio review regressions", () => {
 		expect(getLMStudioModelAlias("smollm2-135m-instruct", baseUrl)).toEqual(alias)
 	})
 
-	it("limits repeated preparation for a missing model until retry or catalog refresh", async () => {
+	// LmStudioRetry: delay only completed attempts, accept the deadline, and reset on catalog commit.
+	it.each([
+		{ result: "missing", elapsed: 29_999, requests: 1 },
+		{ result: "missing", elapsed: 30_000, requests: 2 },
+		{ result: "incomplete", elapsed: 29_999, requests: 1 },
+		{ result: "incomplete", elapsed: 30_000, requests: 2 },
+		{ result: "failure", elapsed: 29_999, requests: 2 },
+	])("preparation retry: $result after $elapsed ms", async ({ result, elapsed, requests }) => {
 		const now = vi.spyOn(Date, "now").mockReturnValue(100_000)
 		try {
-			get.mockResolvedValue({ data: { models: [] } })
-			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
-			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
-			expect(get).toHaveBeenCalledTimes(1)
-			now.mockReturnValue(130_001)
-			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
-			expect(get).toHaveBeenCalledTimes(2)
+			get.mockResolvedValue(
+				result === "missing"
+					? { data: { models: [] } }
+					: { data: { models: [{ ...nativeModel(), loaded_instances: [{ id: modelKey, config: {} }] }] } },
+			)
+			if (result === "failure") get.mockRejectedValueOnce(new Error("discovery failed"))
+			await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+			now.mockReturnValue(100_000 + elapsed)
+			await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+			expect(get).toHaveBeenCalledTimes(requests)
 			await getLMStudioModels(baseUrl)
-			await forceFullModelDetailsLoad(baseUrl, "missing-model", handler)
-			expect(get).toHaveBeenCalledTimes(4)
+			await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+			expect(get).toHaveBeenCalledTimes(requests + 2)
 		} finally {
 			now.mockRestore()
 		}
+	})
+
+	it("skips preparation on a known legacy server and detects an upgrade on refresh", async () => {
+		get.mockRejectedValueOnce(httpError(404)).mockResolvedValueOnce({ data: { data: [] } })
+		await getLMStudioModels(baseUrl)
+		get.mockClear()
+		await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+		expect(get).not.toHaveBeenCalled()
+		get.mockResolvedValue(nativeResponse([]))
+		await getLMStudioModels(baseUrl)
+		expect(get).toHaveBeenLastCalledWith(`${baseUrl}/api/v1/models`, expect.anything())
+		post.mockResolvedValue({ data: {} })
+		await forceFullModelDetailsLoad(baseUrl, modelKey, handler)
+		expect(post).toHaveBeenCalledOnce()
 	})
 
 	it("does not commit a successful response that arrives after cancellation", async () => {
@@ -693,6 +717,7 @@ describe("LM Studio review regressions", () => {
 	})
 
 	it("forwards cancellation to explicit loading", async () => {
+		vi.mocked(console.error).mockClear()
 		const controller = new AbortController()
 		get.mockResolvedValueOnce(nativeResponse([]))
 		let loadSignal: GenericAbortSignal | undefined
@@ -709,6 +734,7 @@ describe("LM Studio review regressions", () => {
 		await pending
 		expect(loadSignal?.aborted).toBe(true)
 		expect(mockFlushModels).not.toHaveBeenCalled()
+		expect(console.error).not.toHaveBeenCalled()
 	})
 })
 
