@@ -18,7 +18,5 @@ export function resolveOpenAiCompatibleMaxTokens(
 	if (!(options.includeMaxTokens ?? DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS)) {
 		return undefined
 	}
-	return [options.modelMaxTokens, modelInfo.maxTokens].find(
-		(value): value is number => typeof value === "number" && value > 0,
-	)
+	return [options.modelMaxTokens, modelInfo.maxTokens].find((value): value is number => (value ?? 0) > 0)
 }
