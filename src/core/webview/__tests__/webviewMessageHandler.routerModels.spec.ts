@@ -340,7 +340,11 @@ describe("webviewMessageHandler - requestRouterModels provider filter", () => {
 
 	it.each([
 		["uses Infer", { apiProvider: providerIdentifiers.infer, inferApiKey: "stored-infer-key" }, true],
-		["uses another provider", { apiProvider: providerIdentifiers.anthropic }, false],
+		[
+			"uses another provider",
+			{ apiProvider: providerIdentifiers.anthropic, inferApiKey: "stored-infer-key" },
+			false,
+		],
 	] as const)(
 		"fetches Infer's catalog in an aggregate request only when the profile %s",
 		async (_label, apiConfiguration, fetched) => {

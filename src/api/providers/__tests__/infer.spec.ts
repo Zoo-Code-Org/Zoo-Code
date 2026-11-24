@@ -49,6 +49,14 @@ describe("InferHandler", () => {
 		expect(buildApiHandler({ apiProvider: providerIdentifiers.infer })).toBeInstanceOf(InferHandler)
 	})
 
+	it("shares one model cache across URLs, keys and auth, because the catalog is public", () => {
+		expect(new InferHandler({ inferApiKey: "test-key" }).getModelCacheScope()).toEqual({
+			urlScoped: false,
+			keyScoped: false,
+			authScoped: false,
+		})
+	})
+
 	it("sends requests to the fixed Infer endpoint with the configured key", () => {
 		new InferHandler({ inferApiKey: "test-key" })
 		expect(vi.mocked(OpenAI)).toHaveBeenCalledWith(
@@ -185,6 +193,21 @@ describe("InferHandler", () => {
 		expect(
 			await collectStream(new InferHandler({ inferModelId: MODEL_ID }).createMessage("sys", messages)),
 		).toEqual([{ type: "usage", inputTokens: 20, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 }])
+	})
+
+	it("reports a settled charge of zero as a total cost of zero", async () => {
+		mockCreate.mockResolvedValue(
+			asyncStreamFrom([
+				{
+					choices: [],
+					usage: { prompt_tokens: 20, completion_tokens: 10 },
+					relay: { customer_cost_usd: 0 },
+				},
+			]),
+		)
+		expect(
+			await collectStream(new InferHandler({ inferModelId: MODEL_ID }).createMessage("sys", messages)),
+		).toEqual([{ type: "usage", inputTokens: 20, outputTokens: 10, totalCost: 0 }])
 	})
 
 	it.each(["0.0042", Number.POSITIVE_INFINITY, null])(
