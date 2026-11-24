@@ -8,12 +8,13 @@
 \* Failure F3: an api_req_started after the ask supersedes it. The Run button must not show.
 \* Failure F4: a settled ask keeps the Run button after the host stamps it answered (thread 4658203877).
 \* Failure F5: a locally answered ask restores the Run button when a say streams (thread 4658203868).
-\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5).
-\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4.
-\* Kinds: ca ask command, ou ask command_output, cu say command_output, tx say text, os other say, rq say api_req_started.
+\* Failure F6: the host stamps a partial ask on a text reply. The completed ask then waits with no Run/Deny (thread 4680322903).
+\* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6).
+\* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4. NoPartialGuard fails F6.
+\* Kinds: ca ask command, cp partial ask command, ou ask command_output, cu say command_output, tx say text, os other say, rq say api_req_started.
 \* A message is [kind, answered]. Only ca carries answered true. The host stamps it when the ask is settled.
 \* Variables: in the snapshot, shown the Run button state, loc the ask index that the user answered locally.
-\* Not modeled: partial asks, the Proceed/Kill buttons of ou, response routing of a click, terminal rows.
+\* Not modeled: the Proceed/Kill buttons of ou, response routing of a click, terminal rows.
 \* Gap: thread 4658203883 (Deny must answer the command, not cancel the stream). The sink here is button state, not the posted response. Vitest pins the routing.
 \* Cost and result lines were written after the TLC runs. See Result below.
 
@@ -24,8 +25,8 @@ CONSTANTS Inputs, Variant
 
 VARIABLES in, shown, loc
 
-Kinds == {"ca", "ou", "cu", "tx", "os", "rq"}
-IsAsk(m) == m.kind \in {"ca", "ou"}
+Kinds == {"ca", "ou", "cu", "tx", "os", "rq", "cp"}
+IsAsk(m) == m.kind \in {"ca", "cp", "ou"}
 IsCa(m) == m.kind = "ca"
 
 \* The scan depth of the say branch. TailOnly reads only the last two messages.
@@ -55,6 +56,16 @@ NewestCa(s) ==
 \* The newest command ask that still waits. The host stamps that one.
 PendingCaIx(s, l) ==
 	LET C == {i \in 1..Len(s) : IsCa(s[i]) /\ s[i].answered = FALSE /\ i # l}
+	IN IF C = {} THEN 0 ELSE Max(C)
+
+\* The newest command ask record, complete or partial. 0 when there is none.
+NewestAnyCaIx(s, l) ==
+	LET C == {i \in 1..Len(s) : s[i].kind \in {"ca", "cp"} /\ s[i].answered = FALSE /\ i # l}
+	IN IF C = {} THEN 0 ELSE Max(C)
+
+\* The newest partial command ask. 0 when there is none. The stream completes it.
+NewestPartialCaIx(s) ==
+	LET C == {i \in 1..Len(s) : s[i].kind = "cp"}
 	IN IF C = {} THEN 0 ELSE Max(C)
 
 SupersededByReq(s, i) == \E j \in (i+1)..Len(s) : s[j].kind = "rq"
@@ -118,17 +129,29 @@ LocalRespond == /\ shown
 	/\ shown' = FALSE
 	/\ UNCHANGED in
 
-\* The host stamps the newest pending command ask answered.
+\* The host stamps the newest pending command ask.
 \* NoReconcile models the code that keeps the button state (thread 4658203877).
-HostStamp == /\ PendingCaIx(in, loc) > 0
-	/\ in' = [in EXCEPT ![PendingCaIx(in, loc)] =
-		[in[PendingCaIx(in, loc)] EXCEPT !.answered = TRUE]]
+\* NoPartialGuard models the predicate that also matches a partial record (thread 4680322903).
+HostStamp ==
+	LET ix == IF Variant = "NoPartialGuard" THEN NewestAnyCaIx(in, loc) ELSE PendingCaIx(in, loc)
+	IN /\ ix > 0
+	   /\ in' = [in EXCEPT ![ix] = [in[ix] EXCEPT !.answered = TRUE]]
+	   /\ loc' = loc
+	   /\ shown' = IF Variant = "NoReconcile" THEN shown ELSE FALSE
+
+\* The stream completes the newest partial command ask. It keeps the answered
+\* flag, so a stamp that landed while partial stays on the completed record.
+Complete ==
+	/\ NewestPartialCaIx(in) > 0
+	/\ in' = [in EXCEPT ![NewestPartialCaIx(in)] =
+		[in[NewestPartialCaIx(in)] EXCEPT !.kind = "ca"]]
 	/\ loc' = loc
-	/\ shown' = IF Variant = "NoReconcile" THEN shown ELSE FALSE
+	/\ shown' = Derives(in', loc)
 
 Next == \/ Present
 	\/ LocalRespond
 	\/ HostStamp
+	\/ Complete
 
 Spec == Init /\ [][Next]_<<in, shown, loc>>
 
@@ -144,17 +167,28 @@ ReqSupersedes == (Len(in) > 0 /\ Last(in).kind = "rq") => ~shown
 \* Safety F4 and F5: a settled ask can neither keep nor restore the Run button.
 NoSettledKeptOrRestored == Settled(in, loc) => ~shown
 
-\* Result, MaxLen 3: base passes, 490 states. Old fails NoMaskedPendingAsk on [ca, cu].
+\* Safety F6: the host never stamps a partial command ask (thread 4680322903).
+\* A stamp on a partial record survives completion. The completed ask then
+\* waits forever with no Run/Deny. Vitest replays the text-reply trace.
+NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = FALSE
+
+\* Result, MaxLen 3: base passes, 694 states. Old fails NoMaskedPendingAsk on [ca, cu].
 \* Result: NoAnsweredGuard fails NoStaleRunButton on [ca answered, cu].
 \* Result: NoReqGuard fails NoStaleRunButton on [ca, rq, cu]. TailOnly fails NoMaskedPendingAsk on [ca, cu, cu].
 \* Result: NoReconcile fails NoSettledKeptOrRestored on [ca, cu] Present then HostStamp (thread 4658203877).
+\* Result: NoPartialGuard fails NoStampOnPartial on [cp] HostStamp (thread 4680322903). TypeOK also fails there: no legal input holds a stamped cp.
 \* Replay: issue 998 comment 5 rendered [ask command, say command_output] and saw no Run button.
 \* Replay: the same shape fails the ChatView unit test before the fix and passes after it.
 \* Replay: thread 4658203877 -- a recovered ask stays up after the dwell timeout stamps it. The warm-state Vitest case pins it.
+\* Replay: thread 4680322903 -- a text reply between partial creation and completion must not stamp. The Task Vitest case pins it.
 \* Findings: the first version found only the issue failure. The event model found the keep-and-restore gap of thread 4658203877.
+\* Findings round 8: the Complete event found no new leak in the fixed model. The NoPartialGuard sabotage is not vacuous.
 \* Review round 1 (review 6012391736): covered 1, added 3, gap 1.
 \* Covered: thread 4658203864 -- the answered guard and the newest-ask scan were in the first version. The fix lands in the test file.
 \* Added: threads 4658203868 and 4658203877 and the review body on event order -- Present, LocalRespond, HostStamp, NoSettledKeptOrRestored.
 \* Gap: thread 4658203883 -- response routing is not button state. Vitest pins it.
+\* Review round 8 (review 6039613196): covered 1, added 1, gap 0.
+\* Added: thread 4680322903 -- the host must not stamp a partial ask. New kind cp, the Complete event, the NoStampOnPartial invariant, and the NoPartialGuard variant.
+\* Covered: thread 4680322926 -- LocalRespond already records the local answer before Present and HostStamp. NoSettledKeptOrRestored pins the say-after-local-answer shape. The handler that answers is routing, the gap of thread 4658203883. Vitest pins it.
 
 ====

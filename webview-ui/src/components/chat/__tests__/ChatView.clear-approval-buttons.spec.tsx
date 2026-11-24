@@ -897,6 +897,48 @@ describe("warm-state reconciliation of recovered command asks (#998 review)", ()
 		expect(queryByText(DENY_BUTTON_LABEL)).not.toBeInTheDocument()
 	})
 
+	it("a direct text reply keeps a trailing say from restoring Run/Deny before the host stamp (#998 review)", async () => {
+		const { getByRole } = renderChatView()
+
+		await act(async () => {
+			hydrateState([task, commandAsk(2)])
+		})
+		await waitFor(() => expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeEnabled(), { timeout: 5000 })
+
+		// The user answers the command ask with a direct text reply, not a
+		// Run or Deny click. The webview must record the answered ts before
+		// it dispatches the reply (thread 4680322926).
+		await act(async () => {
+			fireEvent.input(getByRole("textbox"), { target: { value: "use flags, not rm" } })
+		})
+		await act(async () => {
+			fireEvent.click(getByRole("button", { name: "chat:pressToSend" }))
+		})
+
+		expect(asked("messageResponse")).toBe(true)
+		// The chat reset disables the controls until the host state lands.
+		expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeDisabled()
+
+		// A snapshot that ends in a say lands before the host stamps
+		// isAnswered. It must not restore the answered ask's controls.
+		await act(async () => {
+			hydrateState([task, commandAsk(2), say("command_output", 3)])
+		})
+		await waitFor(() => expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeDisabled())
+		expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeDisabled()
+
+		// The host stamp then settles the ask. Still no restored controls.
+		await act(async () => {
+			hydrateState([task, commandAsk(2, true), say("command_output", 3)])
+		})
+		await act(async () => {
+			await Promise.resolve()
+		})
+
+		expect(getByRole("button", { name: RUN_BUTTON_LABEL })).toBeDisabled()
+		expect(getByRole("button", { name: DENY_BUTTON_LABEL })).toBeDisabled()
+	})
+
 	it("Deny cancels the stream when a tool ask streams and no command ask waits", async () => {
 		const { getByRole, getAllByTestId } = renderChatView()
 

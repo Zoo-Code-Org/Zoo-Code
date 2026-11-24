@@ -2554,6 +2554,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// the webview restore block match the unstamped ask and re-show Run/Deny.
 		// The webview keeps the ask's Run/Deny buttons only while the ask is
 		// unanswered, so the stamp stops a later snapshot from re-showing them.
+		// A partial ask is still streaming in (thread 4680322903): stamping it
+		// would leave the completed ask waiting forever with no Run/Deny.
 		if (
 			askResponse === "messageResponse" ||
 			askResponse === "yesButtonClicked" ||
@@ -2561,7 +2563,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		) {
 			const lastCommandAskIndex = findLastIndex(
 				this.clineMessages,
-				(msg) => msg.type === "ask" && msg.ask === "command" && !msg.isAnswered,
+				(msg) => msg.type === "ask" && msg.ask === "command" && !msg.isAnswered && msg.partial !== true,
 			)
 			if (lastCommandAskIndex !== -1) {
 				this.clineMessages[lastCommandAskIndex].isAnswered = true

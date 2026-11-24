@@ -824,13 +824,30 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "resume_task":
 						case "resume_completed_task":
 						case "mistake_limit_reached":
-							vscode.postMessage({
-								type: "askResponse",
-								askResponse: "messageResponse",
-								text,
-								images,
-								segments,
-							})
+							// (#998 review, thread 4680322926) A direct text reply
+							// answers a pending command ask. Record its ts before the
+							// dispatch so a say that arrives before the host stamps
+							// isAnswered cannot restore the Run/Deny buttons. This
+							// mirrors the Run and Deny handlers. A block scopes the
+							// declaration for the shared switch clause.
+							{
+								const answeredCommandAsk =
+									clineAskRef.current === "command"
+										? messagesRef.current.findLast((message: ClineMessage) =>
+												isPendingCommandAsk(message, answeredCommandAskTsRef.current),
+											)
+										: undefined
+								if (answeredCommandAsk) {
+									answeredCommandAskTsRef.current = answeredCommandAsk.ts
+								}
+								vscode.postMessage({
+									type: "askResponse",
+									askResponse: "messageResponse",
+									text,
+									images,
+									segments,
+								})
+							}
 							break
 						// There is no other case that a textfield should be enabled.
 					}

@@ -180,6 +180,58 @@ describe("Task.ask auto-approval stamping", () => {
 		expect(commandAskCount()).toBe(3)
 	})
 
+	it("keeps a partial command ask answerable when a text reply lands before its completion (#998 review)", async () => {
+		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
+		const provider: ProviderStub = {
+			postMessageToWebview,
+			getState: async () => ({
+				autoApprovalEnabled: false,
+				alwaysAllowExecute: false,
+				allowedCommands: [],
+				deniedCommands: [],
+			}),
+		}
+
+		const task = buildTask(provider)
+		await attachQueue(task)
+
+		// The real flow records the partial ask in the history. The default
+		// harness stub does not push, so give this task a recording stub.
+		;(task as unknown as { addToClineMessages: ReturnType<typeof vi.fn> }).addToClineMessages = vi.fn(
+			async (message: ClineMessage) => {
+				task.clineMessages.push(message)
+			},
+		)
+
+		// True when the promise settles on its own within the window.
+		const settledWithoutResponse = (p: Promise<unknown>) =>
+			Promise.race([p.then(() => true), new Promise<boolean>((resolve) => setTimeout(() => resolve(false), 250))])
+
+		// The stream opens a partial command ask. It throws by design: the
+		// complete ask has not arrived yet, so nothing waits for a response.
+		await expect(task.ask("command", "git push", true)).rejects.toThrow()
+		const partialAsk = task.clineMessages.at(-1)
+		expect(partialAsk?.partial).toBe(true)
+
+		// A text reply lands while the partial ask is still streaming in. It
+		// must not stamp the partial ask: the completed ask has to stay
+		// answerable, or it waits forever with no Run/Deny to answer it.
+		task.handleWebviewAskResponse("messageResponse", "hold on")
+		expect(partialAsk?.isAnswered).toBeUndefined()
+
+		// The stream completes the same message. The ask must stay pending
+		// and answerable: no stamp, and a manual approval resolves it.
+		const askPromise = task.ask("command", "git push", false)
+		expect(await settledWithoutResponse(askPromise)).toBe(false)
+		const completedAsk = task.clineMessages.at(-1)
+		expect(completedAsk?.isAnswered).toBeUndefined()
+		task.approveAsk()
+		expect((await askPromise).response).toBe("yesButtonClicked")
+		// The manual approval stamps the completed ask, as every complete
+		// command ask still must be stamped.
+		expect(completedAsk?.isAnswered).toBe(true)
+	})
+
 	it("does not stamp isAnswered for the followup timeout branch", async () => {
 		const postMessageToWebview = vi.fn().mockResolvedValue(undefined)
 		const provider: ProviderStub = {
@@ -473,5 +525,48 @@ describe("command-ask marking guards (#998 review)", () => {
 		const stub = task as unknown as MarkingStub
 		expect(stub.updateClineMessage).not.toHaveBeenCalled()
 		expect(stub.saveClineMessages).not.toHaveBeenCalled()
+	})
+
+	it("does not stamp a partial command ask on a text reply (#998 review)", () => {
+		const task = buildTask(undefined)
+		const partial: ClineMessage = {
+			ts: 2,
+			type: "ask",
+			ask: "command",
+			text: "git push",
+			partial: true,
+		}
+		task.clineMessages.push(say(1, "Initial task"), partial)
+
+		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
+
+		// The ask is still streaming in. A stamp would leave the completed
+		// ask waiting forever with no Run/Deny to answer it.
+		expect(partial.isAnswered).toBeUndefined()
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).not.toHaveBeenCalled()
+		expect(stub.saveClineMessages).not.toHaveBeenCalled()
+	})
+
+	it("still stamps a complete command ask on a text reply after a partial one completed (#998 review)", () => {
+		const task = buildTask(undefined)
+		const partial: ClineMessage = {
+			ts: 2,
+			type: "ask",
+			ask: "command",
+			text: "git push",
+			partial: true,
+		}
+		task.clineMessages.push(say(1, "Initial task"), partial)
+
+		// The stream completes the same message, then a text reply settles
+		// the completed ask. It must be stamped like every complete ask.
+		partial.partial = false
+		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
+
+		expect(partial.isAnswered).toBe(true)
+		const stub = task as unknown as MarkingStub
+		expect(stub.updateClineMessage).toHaveBeenCalledWith(partial)
+		expect(stub.saveClineMessages).toHaveBeenCalled()
 	})
 })
