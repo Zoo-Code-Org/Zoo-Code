@@ -355,6 +355,36 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 }
 
 /**
+ * Writes the command lists an import carried into the user settings file.
+ *
+ * An import stores the lists only in extension state. A later save reads the
+ * user settings file and treats an entry that no configuration layer holds as
+ * removed there. That save then drops the entry. This write gives the imported
+ * entries a layer, so the save keeps them.
+ *
+ * A key the import did not carry is skipped, so the state copy never becomes
+ * the source. A failed write is logged and not raised, because the import
+ * itself succeeded.
+ *
+ * @param globalSettings - The global settings an import produced, or `undefined`.
+ */
+export async function mirrorImportedCommandLists(globalSettings: GlobalSettings | undefined): Promise<void> {
+	for (const key of ["allowedCommands", "deniedCommands"] as const) {
+		const imported = globalSettings?.[key]
+		if (Array.isArray(imported)) {
+			try {
+				await vscode.workspace
+					.getConfiguration(Package.name)
+					.update(key, imported, vscode.ConfigurationTarget.Global)
+			} catch (error) {
+				// The import succeeded. The lists work until a save rewrites both homes.
+				console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
+			}
+		}
+	}
+}
+
+/**
  * Import settings with complete UI feedback and provider state updates
  * @param options - Import options with provider instance
  * @param filePath - Optional file path to import from. If not provided, a file dialog will be shown.
@@ -387,23 +417,7 @@ export const importSettingsWithFeedback = async (
 	}
 
 	if (result.success) {
-		// Import writes the command lists only to the extension-state
-		// copy. A save classifies a displayed entry as externally
-		// removed unless a configuration layer holds it. Mirror each
-		// imported list into the global layer so the next save keeps it.
-		for (const key of ["allowedCommands", "deniedCommands"] as const) {
-			const imported = result.globalSettings?.[key]
-			if (Array.isArray(imported)) {
-				try {
-					await vscode.workspace
-						.getConfiguration(Package.name)
-						.update(key, imported, vscode.ConfigurationTarget.Global)
-				} catch (error) {
-					// The import succeeded. The lists work until a save rewrites both homes.
-					console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
-				}
-			}
-		}
+		await mirrorImportedCommandLists(result.globalSettings)
 
 		provider.settingsImportedAt = Date.now()
 		await provider.postStateToWebview()
