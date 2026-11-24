@@ -308,6 +308,9 @@ export async function checkAutoApproval({
 	 * is the command's own working directory, when the caller forwards
 	 * `commandCwd`. It is not the provider's `state.cwd`, which follows the window,
 	 * so a resumed or child task could be judged by another root's patterns.
+	 * Read approval of a tool's file targets also awaits `realpath` on this root, as
+	 * `canonicalCwd`, and matches both spellings. A pattern written against either
+	 * spelling then still matches. An unresolvable root adds no second spelling.
 	 */
 	cwd?: string
 	ask: ClineAsk
