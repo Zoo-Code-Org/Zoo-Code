@@ -249,14 +249,13 @@ export class TelemetryService {
 		this.recentExceptionFingerprints.delete(fingerprint)
 		this.recentExceptionFingerprints.set(fingerprint, now)
 
-		while (this.recentExceptionFingerprints.size > EXCEPTION_DEDUPE_CACHE_LIMIT) {
+		// Each call adds at most one key to a bounded cache, so one eviction is sufficient.
+		if (this.recentExceptionFingerprints.size > EXCEPTION_DEDUPE_CACHE_LIMIT) {
 			const oldest = this.recentExceptionFingerprints.keys().next().value
 
-			if (oldest === undefined) {
-				break
+			if (oldest !== undefined) {
+				this.recentExceptionFingerprints.delete(oldest)
 			}
-
-			this.recentExceptionFingerprints.delete(oldest)
 		}
 
 		if (lastSeenAt !== undefined && now - lastSeenAt < EXCEPTION_DEDUPE_WINDOW_MS) {

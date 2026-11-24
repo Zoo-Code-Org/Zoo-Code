@@ -594,6 +594,30 @@ describe("OpenRouterHandler", () => {
 			})
 		})
 
+		it.each([
+			{ code: 500, message: "failure", expected: "openrouter API Error 500: failure" },
+			{ code: 429, message: "quota exceeded", expected: "openrouter API Error 429: quota exceeded" },
+			{ code: undefined, message: "429 quota exceeded", expected: "429 quota exceeded" },
+			{ code: undefined, message: "failure", expected: "failure" },
+		])("throws the captured instance for $code and $message", async ({ code, message, expected }) => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(asyncStreamFrom([{ error: { code, message } }]))
+			// The SDK double supplies only chat.completions.create.
+			const prototype = OpenAI.prototype as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			prototype.chat = { completions: { create: mockCreate } }
+
+			let thrown: unknown
+			try {
+				await handler.createMessage("test", []).next()
+			} catch (error) {
+				thrown = error
+			}
+			expect(thrown).toBeInstanceOf(ApiProviderError)
+			expect(thrown).toMatchObject({ name: "ApiProviderError", message: expected, status: code })
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(thrown).toBe(mockCaptureException.mock.calls[0]?.[0])
+		})
+
 		it("handles API errors and captures telemetry", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
@@ -631,7 +655,7 @@ describe("OpenRouterHandler", () => {
 			proto.chat = { completions: { create: mockCreate } }
 
 			const generator = handler.createMessage("test", [])
-			await expect(generator.next()).rejects.toThrow("openrouter API Error undefined: Unknown error")
+			await expect(generator.next()).rejects.toThrow("Unknown error")
 
 			expect(mockCaptureException.mock.calls.length).toBe(1)
 			const captured = mockCaptureException.mock.calls[0]?.[0]
