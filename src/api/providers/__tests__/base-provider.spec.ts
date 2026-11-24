@@ -363,6 +363,30 @@ describe("BaseProvider", () => {
 			expect(acceptsValue(prop, "docx")).toBe(true)
 		})
 
+		it("appends a null alternative when a nested oneOf matches null twice (#2653 review 4675120035)", () => {
+			// The nested oneOf rejects null under exactly-one semantics (both
+			// inner alternatives match), so the wrapper must NOT report
+			// acceptance and the outer anyOf must gain a null alternative.
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			expect(prop.anyOf).toEqual([
+				{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				{ type: "null" },
+			])
+			expect(acceptsValue(prop, null)).toBe(true)
+			// Valid non-null values are unchanged.
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
 		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {
 			// null matches TWO inner alternatives; appending nothing leaves
 			// oneOf rejecting null (exactly-one), so the property must be

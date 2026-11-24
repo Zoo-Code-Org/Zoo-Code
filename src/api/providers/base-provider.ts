@@ -119,15 +119,20 @@ export abstract class BaseProvider implements ApiHandler {
 			accepts = false
 		}
 
-		const nestedCombinator = Array.isArray(alternative.anyOf)
-			? alternative.anyOf
-			: Array.isArray(alternative.oneOf)
-				? alternative.oneOf
-				: undefined
-		if (nestedCombinator) {
-			accepts =
-				accepts &&
-				(nestedCombinator as unknown[]).some((nested) => BaseProvider.schemaAlternativeAcceptsNull(nested))
+		// A nested combinator is evaluated with its own semantics (a sibling
+		// constraint applies under its own combining rule): anyOf accepts
+		// null when ANY nested alternative accepts it, while oneOf requires
+		// EXACTLY ONE — two nested null-accepting alternatives make the
+		// nested oneOf reject null, and reporting acceptance there would
+		// leave the emitted schema rejecting null (#2653 review 4675120035).
+		for (const combinator of ["anyOf", "oneOf"] as const) {
+			if (!Array.isArray(alternative[combinator])) {
+				continue
+			}
+			const acceptingCount = (alternative[combinator] as unknown[]).filter((nested) =>
+				BaseProvider.schemaAlternativeAcceptsNull(nested),
+			).length
+			accepts = accepts && (combinator === "oneOf" ? acceptingCount === 1 : acceptingCount > 0)
 		}
 
 		return accepts
