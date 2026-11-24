@@ -202,3 +202,27 @@ it("matches the sliding-window invariant over every four-call trace", () => {
 		vi.useRealTimers()
 	}
 })
+
+// FieldsDistinct: changing one fingerprint field must permit a new capture.
+it.each([
+	["code", new ApiProviderError("failure", "provider", "model", "operation", 429)],
+	["missing code", new ApiProviderError("failure", "provider", "model", "operation")],
+	["provider", new ApiProviderError("failure", "other", "model", "operation", 500)],
+	["model", new ApiProviderError("failure", "provider", "other", "operation", 500)],
+	["operation", new ApiProviderError("failure", "provider", "model", "other", 500)],
+	["message", new ApiProviderError("other", "provider", "model", "operation", 500)],
+])("keeps a distinct %s", (_field, different) => {
+	const client = makeRecordingClient()
+	const service = new TelemetryService([client])
+	service.captureException(new ApiProviderError("failure", "provider", "model", "operation", 500))
+	service.captureException(different)
+	expect(client.captureException).toHaveBeenCalledTimes(2)
+})
+
+it("keeps different plain error names with the same message", () => {
+	const client = makeRecordingClient()
+	const service = new TelemetryService([client])
+	service.captureException(new TypeError("failure"))
+	service.captureException(new RangeError("failure"))
+	expect(client.captureException).toHaveBeenCalledTimes(2)
+})

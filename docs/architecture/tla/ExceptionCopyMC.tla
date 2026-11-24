@@ -6,10 +6,13 @@ MCNames == {"Error", "TypeError", "RangeError", "AggregateError"}
 MCMessages == {"wrapped", "raw"}
 MCInputs == { [proto |-> kind,
                own |-> [message |-> message, stack |-> "source stack", cause |-> "cause reference",
-                        children |-> IF kind = "AggregateError" THEN <<"child reference">> ELSE <<>>]] :
-               kind \in MCNames, message \in MCMessages }
+                        writable |-> writable, children |-> IF kind = "AggregateError" THEN <<"child reference">> ELSE <<>>]] :
+               kind \in MCNames, message \in MCMessages, writable \in BOOLEAN }
 Normalized(error, message) == [error EXCEPT !.own.message = message]
-Detached(error, message) == [caller |-> error, payload |-> Normalized(error, message)]
-Mutating(error, message) == [caller |-> Normalized(error, message), payload |-> Normalized(error, message)]
-PlainCopy(error, message) == [caller |-> error, payload |-> [Normalized(error, message) EXCEPT !.proto = "Error"]]
+Detached(error, message) == [sent |-> TRUE, caller |-> error, payload |-> Normalized(error, message)]
+Mutating(error, message) == [sent |-> TRUE, caller |-> Normalized(error, message), payload |-> Normalized(error, message)]
+PlainCopy(error, message) == [sent |-> TRUE, caller |-> error, payload |-> [Normalized(error, message) EXCEPT !.proto = "Error"]]
+
+\* Review PR 2330 item 6: assignment to a frozen message drops the payload.
+Assignment(error, message) == [Detached(error, message) EXCEPT !.sent = error.own.writable]
 ====

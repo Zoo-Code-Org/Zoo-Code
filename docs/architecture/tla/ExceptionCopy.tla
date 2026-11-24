@@ -1,4 +1,11 @@
 ---- MODULE ExceptionCopy ----
+\* Review ratchet, PR 2330 summary item 6: added frozen message inputs and the Delivery invariant.
+\* Current round: 0 covered, 1 added, 0 gap. writable abstracts the message descriptor, not the full object.
+\* Expected: assignment to a frozen message prevents delivery. The fixed descriptor transform must deliver.
+\* Replay: all 12 frozen cases failed on the unfixed client. The descriptor fix passes the same cases.
+\* Result: fixed model holds in 64 states. Assignment fails Delivery; the two prior sabotages still fail.
+\* Cost: shared with ExceptionCapture. No new bug beyond the frozen-error failure in the review.
+\* attempted distinguishes a dropped delivery from a call that has not started.
 \* Source: PostHogTelemetryClient.captureException(error). Sink: PostHog.captureException(payload).
 \* Failures: normalization changes the caller error, loses error type or children, or sends the wrong message.
 \* Rules: CallerMessage, SourceShape, and NormalizedMessage compare source and delivered records directly.
@@ -13,7 +20,7 @@
 \* proto represents the inherited error type. Only an AggregateError exposes children to the sink.
 \* Fields stand for data or references. This model does not copy JavaScript descriptors or PostHog parsing.
 \* Historical cost: about 2 minutes for the prototype-loss spec, replay, fix, and checks.
-\* Result: ExceptionCopyMC holds in 32 states. Mutating fails CallerMessage; PlainCopy fails SourceShape.
+\* Previous result: ExceptionCopyMC holds in 32 states. Mutating fails CallerMessage; PlainCopy fails SourceShape.
 \* Cost: included in ExceptionCapture. Each TLC run takes less than 2 seconds. No new production bug was found.
 \* Removed caller and shape success flags. The invariants now inspect the actual transform output.
 \* Guidance: https://lamport.azurewebsites.net/tla/book-02-02-27.pdf (Chapter 7).
@@ -21,20 +28,22 @@
 
 EXTENDS Naturals, Sequences
 CONSTANTS Inputs, Messages, Transform(_, _)
-VARIABLES source, raw, caller, delivered
-vars == <<source, raw, caller, delivered>>
+VARIABLES source, raw, caller, delivered, attempted
+vars == <<source, raw, caller, delivered, attempted>>
 
 Children(error) == IF error.proto = "AggregateError" THEN error.own.children ELSE <<>>
 Init == /\ source \in Inputs /\ raw \in Messages
-        /\ caller = source /\ delivered = <<>>
+        /\ caller = source /\ delivered = <<>> /\ attempted = FALSE
 Capture ==
     LET output == Transform(source, raw)
-    IN /\ Len(delivered) = 0
-       /\ caller' = output.caller /\ delivered' = <<output.payload>>
+    IN /\ ~attempted /\ attempted' = TRUE
+       /\ caller' = output.caller /\ delivered' = IF output.sent THEN <<output.payload>> ELSE <<>>
        /\ UNCHANGED <<source, raw>>
 Spec == Init /\ [][Capture]_vars
+Delivery == attempted => Len(delivered) = 1
 
-TypeOK == /\ source \in Inputs /\ raw \in Messages /\ caller \in Inputs
+TypeOK == /\ attempted \in BOOLEAN
+          /\ source \in Inputs /\ raw \in Messages /\ caller \in Inputs
           /\ delivered \in Seq([proto : {error.proto : error \in Inputs}, own : {error.own : error \in Inputs}])
           /\ Len(delivered) <= 1
 CallerMessage == caller = source

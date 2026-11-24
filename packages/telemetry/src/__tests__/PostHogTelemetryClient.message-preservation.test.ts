@@ -56,37 +56,55 @@ const errorKinds = [
 
 // SourceShape: normalization preserves the source type, stack, cause, and aggregate children.
 describe.each(errorKinds)("$name", ({ create }) => {
-	it.each(["upstream failure", "provider|failure", "error\nwith details"])(
-		"preserves the error shape while normalizing %s",
-		async (raw) => {
-			const client = new PostHogTelemetryClient()
-			client.updateTelemetryState(true)
-			const message = `Provider API Error 500: ${raw}`
-			const cause = new Error("original cause")
-			const error = Object.assign(create(message), {
-				cause,
-				status: 500,
-				error: { metadata: { raw } },
-			})
-			const stack = error.stack
+	it.each(
+		["upstream failure", "provider|failure", "error\nwith details"].flatMap((raw) =>
+			[false, true].map((frozen) => ({ raw, frozen })),
+		),
+	)("preserves the error shape for $raw with frozen=$frozen", async ({ raw, frozen }) => {
+		const client = new PostHogTelemetryClient()
+		client.updateTelemetryState(true)
+		const message = `Provider API Error 500: ${raw}`
+		const cause = new Error("original cause")
+		const error = Object.assign(create(message), {
+			cause,
+			status: 500,
+			error: { metadata: { raw } },
+		})
+		if (frozen) Object.freeze(error)
+		const stack = error.stack
 
-			await client.captureException(error)
+		await client.captureException(error)
 
-			expect(error.message).toBe(message)
-			expect(error.stack).toBe(stack)
-			expect(captureException).toHaveBeenCalledTimes(1)
-			const sent = captureException.mock.calls[0][0]
-			expect(sent).not.toBe(error)
-			expect(Object.getPrototypeOf(sent)).toBe(Object.getPrototypeOf(error))
-			expect(sent.name).toBe(error.name)
-			expect(sent.message).toBe(raw)
-			expect(sent.stack).toBe(stack)
-			expect(sent.cause).toBe(cause)
-			if (error instanceof AggregateError) {
-				expect(sent).toBeInstanceOf(AggregateError)
-				if (!(sent instanceof AggregateError)) throw new Error("AggregateError prototype was lost")
-				expect(sent.errors).toBe(error.errors)
-			}
-		},
-	)
+		expect(error.message).toBe(message)
+		expect(error.stack).toBe(stack)
+		expect(captureException).toHaveBeenCalledTimes(1)
+		const sent = captureException.mock.calls[0][0]
+		expect(sent).not.toBe(error)
+		expect(Object.getPrototypeOf(sent)).toBe(Object.getPrototypeOf(error))
+		expect(sent.name).toBe(error.name)
+		expect(sent.message).toBe(raw)
+		expect(sent.stack).toBe(stack)
+		expect(sent.cause).toBe(cause)
+		if (error instanceof AggregateError) {
+			expect(sent).toBeInstanceOf(AggregateError)
+			if (!(sent instanceof AggregateError)) throw new Error("AggregateError prototype was lost")
+			expect(sent.errors).toBe(error.errors)
+		}
+	})
+})
+
+// UncodedMessage: the client must still filter a leading 429 without a numeric status.
+it.each([
+	{ message: "429 quota exceeded", calls: 0 },
+	{ message: "upstream failure", calls: 1 },
+])("applies message filtering without a status for $message", async ({ message, calls }) => {
+	const client = new PostHogTelemetryClient()
+	client.updateTelemetryState(true)
+	const error = Object.assign(new ApiProviderError(message, "openrouter", "model", "createMessage"), {
+		status: undefined,
+		error: { message },
+	})
+	await client.captureException(error)
+	expect(captureException).toHaveBeenCalledTimes(calls)
+	expect(error.message).toBe(message)
 })

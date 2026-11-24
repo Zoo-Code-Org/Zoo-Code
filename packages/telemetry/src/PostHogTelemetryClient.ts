@@ -120,9 +120,12 @@ export class PostHogTelemetryClient extends BaseTelemetryClient {
 		const stack = error.stack
 		const telemetryError = new Error()
 		Object.setPrototypeOf(telemetryError, Object.getPrototypeOf(error))
-		Object.defineProperties(telemetryError, Object.getOwnPropertyDescriptors(error))
-		telemetryError.stack = stack
-		telemetryError.message = errorMessage
+		Object.defineProperties(telemetryError, {
+			...Object.getOwnPropertyDescriptors(error),
+			// Set normalized fields before a frozen source can make them read-only.
+			stack: { value: stack, writable: true, configurable: true },
+			message: { value: errorMessage, writable: true, configurable: true },
+		})
 
 		const provider = this.providerRef?.deref()
 		let telemetryProperties: TelemetryProperties | undefined = undefined
