@@ -191,6 +191,15 @@ export interface ApiHandler {
 	 * Defaults to all-false in BaseProvider.
 	 */
 	getModelCacheScope(): ModelCacheScope
+
+	/**
+	 * Optional revision token appended to this provider's cache key. Bump it
+	 * when the SHAPE of the provider's cached records changes: old cache
+	 * files become unreachable and the next fetch re-populates fresh
+	 * records (e.g. LiteLLM adding requiresMaxCompletionTokens to its
+	 * catalog records).
+	 */
+	getModelCacheKeyRevision?(): string | undefined
 }
 
 export { disposeApiHandler } from "./dispose-api-handler"

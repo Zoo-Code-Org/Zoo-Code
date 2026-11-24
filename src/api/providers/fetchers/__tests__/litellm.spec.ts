@@ -225,7 +225,6 @@ describe("getLiteLLMModels", () => {
 				contextWindow: 128000,
 				supportsImages: false,
 				supportsPromptCache: false,
-				requiresMaxCompletionTokens: true,
 				inputPrice: 10,
 				outputPrice: 30,
 				cacheWritesPrice: undefined,
@@ -255,8 +254,16 @@ describe("getLiteLLMModels", () => {
 		// custom_openai routes — require the modern parameter name.
 		expect((await fetch("openai/gpt-6-sol"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
 		expect((await fetch("openai/gpt-5.1"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+		expect((await fetch("openai/o3-mini"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
 		expect((await fetch("gpt-5"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
 		expect((await fetch("o3-mini"))["alias"]?.requiresMaxCompletionTokens).toBe(true)
+
+		// The openai/ prefix alone routes ANY OpenAI-compatible endpoint
+		// (local servers, custom api_base backends) where LiteLLM forwards
+		// max_tokens unchanged — the routed model name must be an OpenAI
+		// reasoning-era family (review 4674944438).
+		expect((await fetch("openai/mistral"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
+		expect((await fetch("openai/gpt-4-turbo"))["alias"]?.requiresMaxCompletionTokens).toBeUndefined()
 
 		// Non-OpenAI routed backends keep max_tokens: the parameter name is
 		// provider-specific and LiteLLM passes it through untranslated.
@@ -597,7 +604,6 @@ describe("getLiteLLMModels", () => {
 			contextWindow: 128000,
 			supportsImages: false,
 			supportsPromptCache: false,
-			requiresMaxCompletionTokens: true,
 			inputPrice: undefined,
 			outputPrice: undefined,
 			cacheWritesPrice: undefined,

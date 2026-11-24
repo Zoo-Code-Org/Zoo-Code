@@ -51,11 +51,19 @@ export async function getLiteLLMModels(
 				// A custom alias routed to an OpenAI-family backend must use
 				// max_completion_tokens: OpenAI rejects the deprecated
 				// max_tokens on newer models, and the alias name alone
-				// cannot reveal the routed backend (issue 1865). The routed
-				// name carries the provider prefix (openai/...) or, for
-				// custom_openai routes, a bare gpt-5+/o-series id.
+				// cannot reveal the routed backend (issue 1865). The
+				// `openai/` prefix alone is NOT enough — LiteLLM routes any
+				// OpenAI-compatible endpoint through it (local servers,
+				// custom api_base backends) and forwards max_tokens
+				// unchanged there (review 4674944438) — so the routed MODEL
+				// name must itself be an OpenAI reasoning-era family, with
+				// or without the provider prefix (bare names come from
+				// custom_openai routes).
+				const openAiFamilyModel = /^(gpt-[5-9]|o[1345])($|[-_.])/i
 				const routedToOpenAi =
-					/^openai\//.test(litellmModelName) || /^(gpt-[5-9]|o[1345])($|[-_.])/i.test(litellmModelName)
+					openAiFamilyModel.test(litellmModelName) ||
+					(/^openai\//.test(litellmModelName) &&
+						openAiFamilyModel.test(litellmModelName.slice("openai/".length)))
 
 				// LiteLLM's /v1/model/info never reports reasoning capability flags, so infer
 				// preserveReasoning from explicit model ids in either the alias or routed model name.

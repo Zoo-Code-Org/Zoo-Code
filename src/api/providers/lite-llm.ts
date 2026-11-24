@@ -76,6 +76,13 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 		return { urlScoped: true, keyScoped: true, authScoped: false }
 	}
 
+	override getModelCacheKeyRevision(): string {
+		// The LiteLLM catalog records gained requiresMaxCompletionTokens;
+		// pre-revision cached catalogs would keep serving records without
+		// the flag and keep sending max_tokens (review 4674944449).
+		return "v2-requires-max-completion-tokens"
+	}
+
 	override getModel(): { id: string; info: ModelInfo } {
 		const model = super.getModel()
 		const preserveReasoningSetting = this.options.litellmPreserveReasoning

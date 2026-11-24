@@ -22,12 +22,10 @@ Init == req \in Inputs
 Next == UNCHANGED req
 Spec == Init /\ [][Next]_req
 
-\* Sabotage variants (check.sh expects each to fail one invariant):
-\* NoRouted drops the routed-backend branch — exactly the issue 1865 bug.
-\* InvertRouted sends the modern parameter for NON-OpenAI routings instead.
+\* The selection contract. The fixed rule is the fixed decomposition; the
+\* sabotage variants (NoRouted, InvertRouted) live in
+\* LiteLLMMaxTokenParamMC.tla, which holds the model-checking settings.
 Rule == req.namedGpt5 \/ req.responsesApi \/ req.routedOpenAi
-NoRoutedRule == req.namedGpt5 \/ req.responsesApi
-InvertRoutedRule == req.namedGpt5 \/ req.responsesApi \/ ~req.routedOpenAi
 FixedRule == Rule
 
 \* SendsCompletion == the request carries max_completion_tokens.

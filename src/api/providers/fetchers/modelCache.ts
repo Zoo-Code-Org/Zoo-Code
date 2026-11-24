@@ -146,10 +146,14 @@ function getCacheKey(options: GetModelsOptions, handler: ApiHandler): string {
 	const urlPart = isUrlScoped && options.baseUrl ? options.baseUrl.replace(/\/+$/, "") : undefined
 	const keyPart = isKeyScoped && options.apiKey ? deriveApiKeyDiscriminator(options.apiKey) : undefined
 
-	if (urlPart && keyPart) return `${provider}:${urlPart}:${keyPart}`
-	if (urlPart) return `${provider}:${urlPart}`
-	if (keyPart) return `${provider}:${keyPart}`
-	return provider
+	// A record-shape revision makes pre-revision cache files unreachable,
+	// forcing one re-fetch (stale catalogs would otherwise keep serving
+	// records that lack newly derived fields).
+	const revision = handler.getModelCacheKeyRevision?.()
+	const revisionPart = revision ? `@${revision}` : undefined
+
+	const parts = [provider, urlPart, keyPart, revisionPart].filter((part) => part !== undefined)
+	return parts.join(":")
 }
 
 /**
