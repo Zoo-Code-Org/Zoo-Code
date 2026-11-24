@@ -13,6 +13,22 @@ import { flushMacrotasks } from "../../../test-utils/timers"
 // Mock evidence only: no live API request.
 const isSchemaNode = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null
 
+// The JSON Schema type of a value: an array is "array", not the typeof
+// "object" (#2653 review 4680624688), an integer is distinct from other
+// numbers, and null is its own type.
+const schemaTypeOf = (value: unknown): string => {
+	if (value === null) {
+		return "null"
+	}
+	if (Array.isArray(value)) {
+		return "array"
+	}
+	if (typeof value === "number") {
+		return Number.isInteger(value) ? "integer" : "number"
+	}
+	return typeof value
+}
+
 const acceptsValue = (schema: unknown, value: unknown): boolean => {
 	if (schema === true) {
 		return true
@@ -33,14 +49,7 @@ const acceptsValue = (schema: unknown, value: unknown): boolean => {
 	}
 	if (accepts && schema.type !== undefined) {
 		const types: unknown[] = Array.isArray(schema.type) ? schema.type : [schema.type]
-		const jsType =
-			value === null
-				? "null"
-				: typeof value === "number"
-					? Number.isInteger(value)
-						? "integer"
-						: "number"
-					: typeof value
+		const jsType = schemaTypeOf(value)
 		if (!types.includes(jsType)) {
 			accepts = false
 		}
@@ -449,6 +458,225 @@ describe("BaseProvider", () => {
 			// Null stays accepted through the outer alternative only.
 			expect(prop.anyOf[1]).toEqual({ type: "null" })
 			expect(acceptsValue(prop, null)).toBe(true)
+			// Non-null arrays still validate against the wrapped original:
+			// its array type and inner oneOf admit them (#2653 review
+			// 4680624688). The array-aware oracle classifies [] as
+			// "array", not "object".
+			expect(acceptsValue(prop, [])).toBe(true)
+			expect(acceptsValue(prop, [{ limit: 1 }])).toBe(true)
+			// A non-array, non-null value matches only the inner string
+			// alternative, and the original's array type rejects it.
+			expect(acceptsValue(prop, "read")).toBe(false)
+		})
+
+		it.each([
+			{
+				// The boolean `true` schema accepts every value, null
+				// included (JSON Schema core, appendix A).
+				name: "a boolean true alternative accepts null",
+				prop: { oneOf: [true, { type: "string" }] },
+				expected: { oneOf: [true, { type: "string" }] },
+			},
+			{
+				// The boolean `false` schema accepts nothing, so only the
+				// string alternative matches null.
+				name: "a boolean false alternative rejects null",
+				prop: { oneOf: [false, { type: ["string", "null"] }] },
+				expected: { oneOf: [false, { type: ["string", "null"] }] },
+			},
+			{
+				// A null entry is not a schema: it must not be counted as
+				// a null-accepting alternative, and it must not crash the
+				// converter.
+				name: "a null alternative entry rejects null",
+				prop: { oneOf: [null, { type: ["string", "null"] }] },
+				expected: { oneOf: [null, { type: ["string", "null"] }] },
+			},
+		])(
+			"$name: exactly one alternative accepts null, so the combinator stays untouched (#2653 mutation round)",
+			({ prop, expected }) => {
+				const schema = { type: "object", properties: { value: prop } }
+				const result = provider.testConvertToolSchemaForOpenAI(schema)
+				const converted = result.properties.value
+				// Neither an appended null alternative nor an anyOf wrap.
+				expect(converted).toStrictEqual(expected)
+				expect(acceptsValue(converted, null)).toBe(true)
+			},
+		)
+
+		it.each([
+			{
+				// Nested anyOf: both inner alternatives accept null and
+				// anyOf needs only one match, so the wrapper accepts null
+				// and the outer combinator is left alone.
+				name: "nested anyOf accepts null through any inner match",
+				prop: { anyOf: [{ anyOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				outerLength: 1,
+			},
+			{
+				// Nested oneOf: both inner alternatives match null, so the
+				// exactly-one rule rejects the wrapper and the outer
+				// combinator gains a null alternative.
+				name: "nested oneOf rejects null when two inner alternatives match",
+				prop: { anyOf: [{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] }] },
+				outerLength: 2,
+			},
+		])("$name (#2653 mutation round)", ({ prop, outerLength }) => {
+			const schema = { type: "object", properties: { value: prop } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			const converted = result.properties.value
+			expect(converted.anyOf).toHaveLength(outerLength)
+			if (outerLength === 1) {
+				expect(converted.anyOf).toStrictEqual(prop.anyOf)
+			} else {
+				expect(converted.anyOf[1]).toStrictEqual({ type: "null" })
+			}
+		})
+
+		it("classifies every property as optional when the schema declares no required list (#2653 mutation round)", () => {
+			// The property name is the ArrayDeclaration mutant's
+			// replacement literal: a mutated declared-required fallback
+			// would treat THIS key as declared required and strip the
+			// null-accepting type optional keys must gain.
+			const schema = {
+				type: "object",
+				properties: {
+					"Stryker was here": { type: "integer" },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties["Stryker was here"].type).toStrictEqual(["integer", "null"])
+		})
+
+		it.each([
+			{
+				name: "an optional type list without null gains null",
+				type: ["integer"],
+				expected: ["integer", "null"],
+			},
+			{
+				name: "an optional type list of only null stays unchanged",
+				type: ["null"],
+				expected: ["null"],
+			},
+			{
+				name: "an empty optional type list stays empty",
+				type: [],
+				expected: [],
+			},
+		])("normalizes optional type lists: $name (#2653 mutation round)", ({ type, expected }) => {
+			const schema = { type: "object", properties: { value: { type } } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			expect(result.properties.value.type).toStrictEqual(expected)
+		})
+
+		it.each([
+			{
+				// One null match under anyOf semantics: nothing to do.
+				name: "a single null-accepting anyOf alternative",
+				prop: { anyOf: [{ type: ["string", "null"] }] },
+			},
+			{
+				// One null match under exactly-one semantics: appending a
+				// second null alternative would make null match twice.
+				name: "a single null-accepting oneOf alternative",
+				prop: { oneOf: [{ type: ["string", "null"] }, { type: "integer" }] },
+			},
+		])("leaves $name untouched: no append, no wrap (#2653 mutation round)", ({ prop }) => {
+			const schema = { type: "object", properties: { value: prop } }
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+			expect(result.properties.value).toStrictEqual(prop)
+		})
+
+		it("wraps an object-typed original without properties unchanged (#2653 mutation round)", () => {
+			// No properties: the wrapper's object branch must not fire, so
+			// the original is wrapped exactly as (already nullable) it
+			// was normalized.
+			const prop = {
+				type: "object",
+				oneOf: [{ type: ["object", "null"] }, { type: ["string", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			expect(result.properties.value.anyOf).toStrictEqual([
+				{ type: ["object", "null"], oneOf: prop.oneOf },
+				{ type: "null" },
+			])
+		})
+
+		it("wraps an array-typed original without items unchanged (#2653 mutation round)", () => {
+			const prop = {
+				type: "array",
+				oneOf: [{ type: ["array", "null"] }, { type: ["string", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// No items: the wrapper's array branch must not fire.
+			// toStrictEqual also rejects an `items: undefined` key that a
+			// mutated branch would add.
+			expect(result.properties.value.anyOf).toStrictEqual([
+				{ type: ["array", "null"], oneOf: prop.oneOf },
+				{ type: "null" },
+			])
+		})
+
+		it("converts items only for array-typed originals (#2653 mutation round)", () => {
+			// Object-typed items on an original with NO array type: the
+			// wrap keeps the original as declared instead of converting
+			// its items.
+			const prop = {
+				items: { type: "object", properties: { limit: { type: "integer" } } },
+				oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }],
+			}
+			const schema = { type: "object", properties: { value: prop } }
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const original = result.properties.value.anyOf[0]
+			expect(original.items).toStrictEqual(prop.items)
+		})
+
+		it("keeps a single-element non-null type list of a declared required property as a list (#2653 mutation round)", () => {
+			const schema = {
+				type: "object",
+				required: ["value"],
+				properties: {
+					value: { type: ["integer"] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			// Declared required with a type list that holds no "null":
+			// the nullable-strip branch must not fire, and the list is not
+			// collapsed to a bare type.
+			expect(result.properties.value.type).toStrictEqual(["integer"])
+		})
+
+		it("normalizes the nested schema of a declared required object property (#2653 mutation round)", () => {
+			const schema = {
+				type: "object",
+				required: ["value"],
+				properties: {
+					value: { type: "object", properties: { limit: { type: "integer" } } },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const value = result.properties.value
+			// The declared type is kept while the object recursion adds
+			// the strict constraints and nullable inner properties.
+			expect(value.type).toBe("object")
+			expect(value.additionalProperties).toBe(false)
+			expect(value.required).toStrictEqual(["limit"])
+			expect(value.properties.limit.type).toStrictEqual(["integer", "null"])
 		})
 
 		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {

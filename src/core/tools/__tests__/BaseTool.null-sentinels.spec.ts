@@ -64,4 +64,23 @@ describe("BaseTool null-sentinel normalization (#2653 review 4674816417)", () =>
 			mode: { nested: null },
 		})
 	})
+
+	it("passes a null nativeArgs block through untouched (#2653 mutation round)", async () => {
+		const tool = new TestTool()
+		const block = { partial: false, nativeArgs: null } as unknown as ToolUse<"apply_diff">
+		await tool.handle(task, block, callbacks)
+
+		// A null block is not an object to clean: it reaches execution
+		// unchanged instead of throwing on its entries.
+		expect(tool.lastParams).toBeNull()
+	})
+
+	it("returns the original params object when no sentinels are present (#2653 mutation round)", async () => {
+		const nativeArgs = { required_value: "a", optional_limit: 1024 }
+		const tool = await run(nativeArgs)
+
+		// No top-level nulls: the parameters object is passed through by
+		// reference, not rebuilt into a copy.
+		expect(tool.lastParams).toBe(nativeArgs)
+	})
 })

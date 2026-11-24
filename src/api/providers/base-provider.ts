@@ -93,13 +93,6 @@ export abstract class BaseProvider implements ApiHandler {
 		}
 		const alternative = alt as Record<string, unknown>
 
-		if (alternative.type !== undefined) {
-			const types = Array.isArray(alternative.type) ? alternative.type : [alternative.type]
-			if (!types.includes("null")) {
-				return false
-			}
-		}
-
 		// Sibling constraints apply together (Draft 2020-12): the alternative
 		// accepts null only when EVERY present constraint admits it — the
 		// type list, the enum, and a nested combinator wrapper, which
@@ -211,9 +204,6 @@ export abstract class BaseProvider implements ApiHandler {
 						// present, because each must accept null on its own.
 						let wrappedForOneOf = false
 						for (const combinator of ["anyOf", "oneOf"] as const) {
-							if (wrappedForOneOf) {
-								break
-							}
 							if (!Array.isArray(normalizedProp[combinator])) {
 								continue
 							}
@@ -243,7 +233,8 @@ export abstract class BaseProvider implements ApiHandler {
 								// nullable inner properties before the wrap.
 								const originalTypes: unknown[] = Array.isArray(original.type)
 									? original.type
-									: [original.type]
+									: // Stryker disable next-line ArrayDeclaration: equivalence - the wrap branch is reachable only for optional properties, whose string type was already widened to a type array above, so the fallback never holds "object"/"array" and only feeds those includes checks
+										[original.type]
 								if (originalTypes.includes("object") && original.properties) {
 									const converted = this.convertToolSchemaForOpenAI({ ...original, type: "object" })
 									// Keep the original's declared (possibly
@@ -275,6 +266,7 @@ export abstract class BaseProvider implements ApiHandler {
 								} else {
 									normalizedProp = { anyOf: [original, { type: "null" }] }
 								}
+								// Stryker disable next-line BooleanLiteral: after the wrap normalizedProp is a fresh anyOf wrapper without an enum, so the flag never changes the enum decision below
 								wrappedForOneOf = true
 							}
 							// When a single alternative already accepts null,
@@ -309,9 +301,11 @@ export abstract class BaseProvider implements ApiHandler {
 					// object or array still gets its nested schema normalized.
 					const effectiveTypes: unknown[] = Array.isArray(normalizedProp.type)
 						? normalizedProp.type
-						: typeof normalizedProp.type === "string"
+						: // Stryker disable next-line ConditionalExpression: only the true-arm mutant is equivalent - a non-array, non-string type never equals "object"/"array", so [value] and [] pick the same branch below; the false-arm is killed by the declared-required object test
+							typeof normalizedProp.type === "string"
 							? [normalizedProp.type]
-							: []
+							: // Stryker disable next-line ArrayDeclaration: the fallback only feeds the includes("object")/includes("array") checks, and no non-type string can flip either
+								[]
 					if (effectiveTypes.includes("object")) {
 						// Recurse through an object view of the property so the
 						// nested schema is normalized while the property keeps

@@ -102,6 +102,7 @@ export abstract class BaseTool<TName extends ToolName> {
 	 * untouched.
 	 */
 	protected normalizeNullSentinels(params: ToolParams<TName>): ToolParams<TName> {
+		// Stryker disable next-line ConditionalExpression: only the typeof-operand mutant is equivalent - a non-object, non-null params value cannot hold a top-level null, so both paths return it unchanged; the !params operand is killed by the null-block test
 		if (!params || typeof params !== "object") {
 			return params
 		}
