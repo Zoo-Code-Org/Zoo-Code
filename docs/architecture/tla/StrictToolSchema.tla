@@ -64,6 +64,16 @@
 \* WrappedInnerStrict, on the new wrappedInner input (none/object/array).
 \* 0 covered, 1 added, 0 gap; replays as a red-verified unit test in
 \* base-provider.spec.ts. Fixed gate: 480 states.
+\* Review round 7 (PR #2653, thread 4680624688 and the mutation-report
+\* comment 7079812310): the test oracle must classify a non-null array as
+\* "array" (4680624688), and 43 blocking mutants were reported on the
+\* converter and the null-sentinel guard. 0 covered, 0 added, 2 gap: both
+\* findings live in the unit-test harness, which this spec does not model.
+\* The converter contract behind the array finding is already
+\* WrappedInnerStrict (round 6); the mutation round killed 35 mutants with
+\* focused tests, documented 5 equivalent ones as narrow Stryker disables,
+\* and removed 3 dead-code lines (a duplicated type check, a dead break
+\* guard) with no behavior change, so no invariant changed.
 
 EXTENDS Naturals, TLC
 
