@@ -100,11 +100,37 @@ export abstract class BaseProvider implements ApiHandler {
 			}
 		}
 
-		if (Array.isArray(alternative.enum) && !alternative.enum.includes(null)) {
-			return false
+		// Sibling constraints apply together (Draft 2020-12): the alternative
+		// accepts null only when EVERY present constraint admits it — the
+		// type list, the enum, and a nested combinator wrapper, which
+		// recursively admits null exactly when one of its own alternatives
+		// does (#2653 review 4674816413: {anyOf:[{anyOf:[...]}]} must not
+		// report acceptance because the wrapper alone has no type/enum).
+		let accepts = true
+
+		if (alternative.type !== undefined) {
+			const types = Array.isArray(alternative.type) ? alternative.type : [alternative.type]
+			if (!types.includes("null")) {
+				accepts = false
+			}
 		}
 
-		return true
+		if (Array.isArray(alternative.enum) && !alternative.enum.includes(null)) {
+			accepts = false
+		}
+
+		const nestedCombinator = Array.isArray(alternative.anyOf)
+			? alternative.anyOf
+			: Array.isArray(alternative.oneOf)
+				? alternative.oneOf
+				: undefined
+		if (nestedCombinator) {
+			accepts =
+				accepts &&
+				(nestedCombinator as unknown[]).some((nested) => BaseProvider.schemaAlternativeAcceptsNull(nested))
+		}
+
+		return accepts
 	}
 
 	/**
@@ -149,7 +175,7 @@ export abstract class BaseProvider implements ApiHandler {
 				// mutates caller-owned tool metadata: a later request with strict
 				// disabled must still send the declared (nullable) schema.
 				if (prop && typeof prop === "object" && !Array.isArray(prop)) {
-					const normalizedProp = { ...prop }
+					let normalizedProp: Record<string, unknown> = { ...(prop as Record<string, unknown>) }
 
 					// Strict mode lists every key in required. Keep a key the
 					// schema did not declare required usable by making it accept
@@ -160,7 +186,7 @@ export abstract class BaseProvider implements ApiHandler {
 								normalizedProp.type = [normalizedProp.type, "null"]
 							}
 						} else if (Array.isArray(normalizedProp.type)) {
-							const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
+							const nonNullTypes = (normalizedProp.type as string[]).filter((t: string) => t !== "null")
 							if (nonNullTypes.length > 0) {
 								normalizedProp.type = [...nonNullTypes, "null"]
 							}
@@ -178,7 +204,11 @@ export abstract class BaseProvider implements ApiHandler {
 						// {enum:["read",null]} accepts null with no type.
 						// Both combinators are normalized when both are
 						// present, because each must accept null on its own.
+						let wrappedForOneOf = false
 						for (const combinator of ["anyOf", "oneOf"] as const) {
+							if (wrappedForOneOf) {
+								break
+							}
 							if (!Array.isArray(normalizedProp[combinator])) {
 								continue
 							}
@@ -191,25 +221,45 @@ export abstract class BaseProvider implements ApiHandler {
 								// oneOf the appended alternative is the only
 								// null match, so exactly-one semantics hold.
 								normalizedProp[combinator] = [...alternatives, { type: "null" }]
+							} else if (combinator === "oneOf" && nullAccepting.length > 1) {
+								// Multiple alternatives already accept null:
+								// strict oneOf would reject null (exactly-one).
+								// Wrap the whole property in an outer anyOf with
+								// a null alternative instead — valid non-null
+								// values still match the original exactly once,
+								// and null matches only the outer alternative
+								// (review 4674816421).
+								const original = normalizedProp
+								normalizedProp = { anyOf: [original, { type: "null" }] }
+								wrappedForOneOf = true
 							}
-							// When an alternative already accepts null, nothing
-							// is appended: for oneOf, a second null alternative
-							// would make null match twice and fail the
-							// exactly-one rule.
+							// When a single alternative already accepts null,
+							// nothing is appended: for oneOf, a second null
+							// alternative would make null match twice and fail
+							// the exactly-one rule.
 						}
 						// An enum rejects every value outside its list, so a
 						// "null" type alone still rejects null. Include null in
 						// the enum of an originally optional property; declared
-						// required enums stay unchanged (#547).
-						if (Array.isArray(normalizedProp.enum) && !normalizedProp.enum.includes(null)) {
+						// required enums stay unchanged (#547). A wrapped
+						// property skips this: the original keeps its declared
+						// enum and null is accepted through the outer
+						// alternative.
+						if (
+							!wrappedForOneOf &&
+							Array.isArray(normalizedProp.enum) &&
+							!normalizedProp.enum.includes(null)
+						) {
 							normalizedProp.enum = [...normalizedProp.enum, null]
 						}
-					} else if (Array.isArray(normalizedProp.type) && normalizedProp.type.includes("null")) {
+					} else if (
+						Array.isArray(normalizedProp.type) &&
+						(normalizedProp.type as string[]).includes("null")
+					) {
 						// Handle nullable types by removing null
-						const nonNullTypes = normalizedProp.type.filter((t: string) => t !== "null")
+						const nonNullTypes = (normalizedProp.type as string[]).filter((t: string) => t !== "null")
 						normalizedProp.type = nonNullTypes.length === 1 ? nonNullTypes[0] : nonNullTypes
 					}
-
 					// Recursively process nested objects, including nullable ones.
 					// The effective type list drives the checks below so a nullable
 					// object or array still gets its nested schema normalized.
@@ -225,10 +275,13 @@ export abstract class BaseProvider implements ApiHandler {
 						const converted = this.convertToolSchemaForOpenAI({ ...normalizedProp, type: "object" })
 						converted.type = normalizedProp.type
 						newProps[key] = converted
-					} else if (effectiveTypes.includes("array") && normalizedProp.items?.type === "object") {
+					} else if (
+						effectiveTypes.includes("array") &&
+						(normalizedProp as { items?: { type?: unknown } }).items?.type === "object"
+					) {
 						newProps[key] = {
 							...normalizedProp,
-							items: this.convertToolSchemaForOpenAI(normalizedProp.items),
+							items: this.convertToolSchemaForOpenAI((normalizedProp as { items?: unknown }).items),
 						}
 					} else {
 						newProps[key] = normalizedProp

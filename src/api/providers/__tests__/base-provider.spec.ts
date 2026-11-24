@@ -323,6 +323,71 @@ describe("BaseProvider", () => {
 	})
 
 	describe("strict optional parameters (#547)", () => {
+		it("recurses into nested combinator wrappers before appending a null alternative (#2653 review 4674816413)", () => {
+			// The outer alternative is a bare nested-anyOf wrapper: it has no
+			// type or enum of its own, so only recursion can see that neither
+			// inner alternative accepts null.
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ anyOf: [{ type: "string" }, { type: "integer" }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			// The nested wrapper rejected null, so the outer anyOf gains a
+			// null alternative — the only null match under exactly-one.
+			expect(prop.anyOf).toEqual([{ anyOf: [{ type: "string" }, { type: "integer" }] }, { type: "null" }])
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
+		it("does not add a null alternative when a nested combinator already accepts null (#2653 review 4674816413)", () => {
+			const schema = {
+				type: "object",
+				properties: {
+					format: { anyOf: [{ anyOf: [{ type: "string" }, { type: "null" }] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.format
+			// The inner alternative accepts null, so the outer wrapper does
+			// too — appending would make null match twice under exactly-one.
+			expect(prop.anyOf).toEqual([{ anyOf: [{ type: "string" }, { type: "null" }] }])
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+		})
+
+		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {
+			// null matches TWO inner alternatives; appending nothing leaves
+			// oneOf rejecting null (exactly-one), so the property must be
+			// wrapped instead.
+			const schema = {
+				type: "object",
+				properties: {
+					value: { oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toEqual([
+				{ oneOf: [{ type: ["string", "null"] }, { type: ["integer", "null"] }] },
+				{ type: "null" },
+			])
+			// null matches only the outer alternative; non-null values match
+			// only the original — exactly-one holds for every value.
+			expect(acceptsValue(prop, null)).toBe(true)
+			expect(acceptsValue(prop, "docx")).toBe(true)
+			expect(acceptsValue(prop, 7)).toBe(true)
+		})
+
 		it("keeps an optional parameter nullable while a required one stays a value", () => {
 			const schema = {
 				type: "object",
