@@ -84,7 +84,10 @@ describe("AskFollowupQuestionTool", () => {
 	})
 
 	it("should handle missing follow_up parameter (undefined)", async () => {
-		const params = { question: "What?", follow_up: undefined as any }
+		const params = {
+			question: "What?",
+			follow_up: undefined,
+		} as unknown as Parameters<typeof tool.execute>[0]
 
 		await tool.execute(params, mockTask, mockCallbacks)
 
@@ -92,7 +95,10 @@ describe("AskFollowupQuestionTool", () => {
 	})
 
 	it("should report a type error when follow_up is a string", async () => {
-		const params = { question: "What?", follow_up: "not-an-array" as any }
+		const params = {
+			question: "What?",
+			follow_up: "not-an-array",
+		} as unknown as Parameters<typeof tool.execute>[0]
 
 		await tool.execute(params, mockTask, mockCallbacks)
 
