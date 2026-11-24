@@ -44,19 +44,26 @@
 \* through before acceptance is reported (4674816413), and an optional oneOf
 \* whose alternatives ALL accept null must be wrapped in an outer anyOf,
 \* because strict exactly-one would otherwise reject null (4674816421). This
-\* round added the nestedWrapper/nestedAccepts/oneOfMultiNull inputs, the
+\* round added the nestedWrapper/nestedMatches/oneOfMultiNull inputs, the
 \* CombinatorAcceptsNull decision, and the still-nullable invariant. 0
 \* covered, 2 added, 0 gap; both replay as red-verified unit tests in
 \* base-provider.spec.ts. Third finding 4674816417 (null sentinels reaching
 \* execution) is an execution-layer contract, replayed by
 \* BaseTool.null-sentinels.spec.ts and outside this schema spec.
+\* Review round N+2 (4675120035, from the 2664 review): a NESTED oneOf is
+\* evaluated under its own exactly-one rule — two null-accepting nested
+\* alternatives make the nested oneOf reject null, and reporting acceptance
+\* there leaves the emitted schema rejecting null. The spec's evaluator hook
+\* RecursesIntoNested now reports the nested COMBINATOR truth, not just
+\* inner-alternative acceptance. 0 covered, 1 added, 0 gap; replays as a
+\* red-verified unit test in base-provider.spec.ts.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf
 
 Props == {q}
 Types == {"str", "null"}
@@ -74,7 +81,14 @@ EmittedKeepsPattern(declared) == FALSE
 \* Fixed code: a nested combinator wrapper is looked through — the wrapper
 \* accepts null exactly when one of its own alternatives does. The naive
 \* evaluator reports TRUE for any wrapper without type/enum (the sabotage).
-RecursesIntoNested(inner) == inner
+\* Fixed code: a nested anyOf accepts null when AT LEAST one nested
+\* alternative accepts it; a nested oneOf requires EXACTLY ONE — two
+\* accepting alternatives reject null under exactly-one semantics
+\* (review 4675120035). The hook reports the nested combinator truth.
+RecursesIntoNested(nm) ==
+    IF nm = 1 THEN TRUE
+    ELSE IF nm >= 2 THEN NestedIsOneOf = 0
+    ELSE FALSE
 \* Fixed code: an optional oneOf with MULTIPLE null-accepting alternatives is
 \* wrapped in an outer anyOf with a null alternative, so null matches exactly
 \* one outer alternative. Leaving it untouched rejects null (the sabotage).
@@ -114,8 +128,14 @@ EmittedPattern == EmittedKeepsPattern(declaredPat)
 \* a nested wrapper accepts null when an inner alternative does OR when the
 \* evaluator's report made it append an outer null alternative; a multi-match
 \* oneOf accepts null exactly when it was wrapped.
+\* The TRUE acceptance of the emitted schema, not the evaluator's report:
+\* a nested wrapper accepts null when its nested combinator truly does
+\* (anyOf: at least one accepting alternative; oneOf: exactly one) OR when
+\* the evaluator's report made it append an outer null alternative; a
+\* multi-match oneOf accepts null exactly when it was wrapped.
+NestedCombinatorTruth == IF NestedIsOneOf = 1 THEN nestedMatches = 1 ELSE nestedMatches >= 1
 CombinatorGroundTruth ==
-    IF nestedWrapper THEN nestedAccepts \/ ~RecursesIntoNested(nestedAccepts)
+    IF nestedWrapper THEN NestedCombinatorTruth \/ ~RecursesIntoNested(nestedMatches)
     ELSE IF oneOfMultiNull THEN WrapsMultiMatch(oneOfMultiNull)
     ELSE TRUE
 
@@ -132,8 +152,9 @@ TypeOK ==
     /\ declaredPat \in BOOLEAN
     /\ qEnum \in BOOLEAN
     /\ nestedWrapper \in BOOLEAN
-    /\ nestedAccepts \in BOOLEAN
+    /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
+    /\ NestedIsOneOf \in {0, 1}
     /\ ~(nestedWrapper /\ oneOfMultiNull)
 
 Init ==
@@ -142,13 +163,14 @@ Init ==
     /\ declaredPat \in BOOLEAN
     /\ qEnum \in BOOLEAN
     /\ nestedWrapper \in BOOLEAN
-    /\ nestedAccepts \in BOOLEAN
+    /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
+    /\ NestedIsOneOf \in {0, 1}
     /\ ~(nestedWrapper /\ oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
