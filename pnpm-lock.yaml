@@ -853,7 +853,7 @@ importers:
         version: 17.6.1(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       react-virtuoso:
         specifier: ^4.7.13
-        version: 4.18.19(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
+        version: 4.18.24(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
       rehype-katex:
         specifier: ^7.0.1
         version: 7.0.1
@@ -7599,8 +7599,8 @@ packages:
       react: '*'
       react-dom: '*'
 
-  react-virtuoso@4.18.19:
-    resolution: {integrity: sha512-dewyZisA5IiQTldh7eHM5KpI+qxi0nKRVYi2iM01XmPkNa5tjvVUKJKAIc6ted1hAK1/NFlXuhXpVYqGHHdcdQ==}
+  react-virtuoso@4.18.24:
+    resolution: {integrity: sha512-vZsE3qrSrDMkGCv/xoFR0HvkdAYP7WFlZHRH9+uELwtSDM4PLNrPefusgEW7MepcHmwYnrHCdMth2EuJXI/0KA==}
     peerDependencies:
       react: '>=16 || >=17 || >= 18 || >= 19'
       react-dom: '>=16 || >=17 || >= 18 || >=19'
@@ -16636,7 +16636,7 @@ snapshots:
       ts-easing: 0.2.0
       tslib: 2.9.1
 
-  react-virtuoso@4.18.19(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
+  react-virtuoso@4.18.24(react-dom@18.3.1(react@18.3.1))(react@18.3.1):
     dependencies:
       react: 18.3.1
       react-dom: 18.3.1(react@18.3.1)
