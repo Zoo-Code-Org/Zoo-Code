@@ -39,13 +39,24 @@
 \* the acceptance oracle for 1 finding (thread 4658277638). 0 covered, 1
 \* added, 0 gap. The other 3 findings were code fixes replayed by the unit
 \* tests.
+\* Review round N+1 (PR #2653, findings 4674816413/4674816421 relayed from the
+\* stacked 2664 review): a bare nested combinator wrapper must be looked
+\* through before acceptance is reported (4674816413), and an optional oneOf
+\* whose alternatives ALL accept null must be wrapped in an outer anyOf,
+\* because strict exactly-one would otherwise reject null (4674816421). This
+\* round added the nestedWrapper/nestedAccepts/oneOfMultiNull inputs, the
+\* CombinatorAcceptsNull decision, and the still-nullable invariant. 0
+\* covered, 2 added, 0 gap; both replay as red-verified unit tests in
+\* base-provider.spec.ts. Third finding 4674816417 (null sentinels reaching
+\* execution) is an execution-layer contract, replayed by
+\* BaseTool.null-sentinels.spec.ts and outside this schema spec.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull
 
 Props == {q}
 Types == {"str", "null"}
@@ -60,6 +71,16 @@ OptionalAsNullable(optional) == optional
 EnumAsNullable(optional) == optional
 \* Fixed code: the strip pass removes the pattern keyword.
 EmittedKeepsPattern(declared) == FALSE
+\* Fixed code: a nested combinator wrapper is looked through — the wrapper
+\* accepts null exactly when one of its own alternatives does. The naive
+\* evaluator reports TRUE for any wrapper without type/enum (the sabotage).
+RecursesIntoNested(inner) == inner
+\* Fixed code: an optional oneOf with MULTIPLE null-accepting alternatives is
+\* wrapped in an outer anyOf with a null alternative, so null matches exactly
+\* one outer alternative. Leaving it untouched rejects null (the sabotage).
+WrapsMultiMatch(multi) == multi => TRUE
+NaiveWrapperAccepts(inner) == TRUE
+NeverWrapped(multi) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -89,25 +110,45 @@ EmittedPattern == EmittedKeepsPattern(declaredPat)
 \* It checks type membership AND enum membership, as a Draft 2020-12
 \* validator does. A type-only oracle misses the enum half. The
 \* LegacyEnum sabotage fails only under this oracle.
+\* The TRUE acceptance of the emitted schema, not the evaluator's report:
+\* a nested wrapper accepts null when an inner alternative does OR when the
+\* evaluator's report made it append an outer null alternative; a multi-match
+\* oneOf accepts null exactly when it was wrapped.
+CombinatorGroundTruth ==
+    IF nestedWrapper THEN nestedAccepts \/ ~RecursesIntoNested(nestedAccepts)
+    ELSE IF oneOfMultiNull THEN WrapsMultiMatch(oneOfMultiNull)
+    ELSE TRUE
+
 AcceptsNull ==
     /\ "null" \in EmittedType
     /\ (qEnum => "null" \in EmittedEnum)
+    /\ ((nestedWrapper \/ oneOfMultiNull) => CombinatorGroundTruth)
 
+\* A nested wrapper and a multi-match oneOf are two shapes of the same
+\* property; the code normalizes at most one combinator route per property.
 TypeOK ==
     /\ declaredReq \in {Props, {}}
     /\ qNullable \in BOOLEAN
     /\ declaredPat \in BOOLEAN
     /\ qEnum \in BOOLEAN
+    /\ nestedWrapper \in BOOLEAN
+    /\ nestedAccepts \in BOOLEAN
+    /\ oneOfMultiNull \in BOOLEAN
+    /\ ~(nestedWrapper /\ oneOfMultiNull)
 
 Init ==
     /\ declaredReq \in {Props, {}}
     /\ qNullable \in BOOLEAN
     /\ declaredPat \in BOOLEAN
     /\ qEnum \in BOOLEAN
+    /\ nestedWrapper \in BOOLEAN
+    /\ nestedAccepts \in BOOLEAN
+    /\ oneOfMultiNull \in BOOLEAN
+    /\ ~(nestedWrapper /\ oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedAccepts, oneOfMultiNull>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -118,5 +159,10 @@ RequiredNotNull == (q \in declaredReq) => "null" \notin EmittedType
 
 \* No forbidden keyword reaches the endpoint.
 NoForbiddenKeyword == EmittedPattern = FALSE
+
+\* Review round N+1: a nested wrapper is looked through (4674816413) and a
+\* multi-null-match oneOf is wrapped (4674816421) — the optional property
+\* still accepts null in both shapes.
+NestedOrMultiStillNullable == ((q \notin declaredReq) /\ (nestedWrapper \/ oneOfMultiNull)) => AcceptsNull
 
 ====
