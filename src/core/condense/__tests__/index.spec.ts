@@ -1743,6 +1743,21 @@ describe("trimToolResultTextForCondensing", () => {
 		}
 	})
 
+	it.each(["head", "tail"])("never leaves a lone surrogate at the %s cut", (side) => {
+		const body = "A".repeat(5_000)
+		const emoji = "\u{1F600}"
+		// Place emoji pairs across the whole body so both cuts fall inside some pair.
+		const text = side === "head" ? emoji.repeat(2_500) + body : body + emoji.repeat(2_500)
+		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: [toolResultText(text)] }]
+		const overage = 3_001
+
+		const result = trimToolResultTextForCondensing(messages, overage)
+		const trimmed = (result[0].content as Anthropic.Messages.TextBlockParam[])[0].text
+
+		expect(trimmed).not.toMatch(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/)
+		expect(textSize(messages) - textSize(result)).toBeGreaterThanOrEqual(overage)
+	})
+
 	it("trims results below the preferred minimum, including results already smaller than it", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{ role: "user", content: [toolResultText("A".repeat(1_500)), toolResultText("B".repeat(3_000))] },

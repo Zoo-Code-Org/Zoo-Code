@@ -416,8 +416,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	metadataFetchAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
-	// Set when a condensation installs a summary; the next ordinary request collects instruction read failures.
+	// Set when a condensation installs a summary; requests collect instruction read failures until a first chunk arrives.
 	private pendingInstructionRefresh = false
+	private instructionRefreshWarned = false
+	// Lets a request's first chunk end only the refresh its own prompt served, not a newer one.
+	private instructionRefreshGeneration = 0
+
+	private armInstructionRefresh(): void {
+		this.pendingInstructionRefresh = true
+		this.instructionRefreshWarned = false
+		this.instructionRefreshGeneration++
+	}
 
 	// TaskStatus
 	idleAsk?: ClineMessage
@@ -2837,7 +2846,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			return
 		}
 		if (summary) {
-			this.pendingInstructionRefresh = true
+			this.armInstructionRefresh()
 		}
 		await this.overwriteApiConversationHistory(messages)
 
@@ -5702,7 +5711,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(state, modelInfo),
+				// Pending refresh: read errors are tolerated here too; the refresh request reports them.
+				systemPrompt: this.pendingInstructionRefresh
+					? await this.getSystemPrompt(state, modelInfo, [])
+					: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
 				// Recovery must summarize like the automatic path: same prompt and folded file context.
 				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
@@ -5717,7 +5729,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 
 			if (truncateResult.summary) {
-				this.pendingInstructionRefresh = true
+				this.armInstructionRefresh()
 			}
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -5840,6 +5852,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			modelInfo: requestModelInfo,
 		}
 		let instructionFailures: InstructionFailureCollector = []
+		let servedRefreshGeneration = this.instructionRefreshGeneration
 		let systemPrompt = await this.getSystemPrompt(
 			state,
 			requestModelInfo,
@@ -5982,7 +5995,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					useAvailableInputForContextPercent,
 				})
 				if (truncateResult.summary) {
-					this.pendingInstructionRefresh = true
+					this.armInstructionRefresh()
 				}
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
@@ -5991,6 +6004,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (truncateResult.summary) {
 					// Same request-state snapshot keeps prompt and tools consistent; files are re-read.
 					instructionFailures = []
+					servedRefreshGeneration = this.instructionRefreshGeneration
 					systemPrompt = await this.getSystemPrompt(state, requestModelInfo, instructionFailures)
 				}
 			} finally {
@@ -6103,9 +6117,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
-		if (this.pendingInstructionRefresh) {
-			this.pendingInstructionRefresh = false
+		if (this.pendingInstructionRefresh && !this.instructionRefreshWarned) {
 			if (instructionFailures.length > 0) {
+				this.instructionRefreshWarned = true
 				await this.say(
 					"instruction_refresh_warning",
 					instructionFailures.map(({ sourcePath, code }) => `${sourcePath} (${code})`).join("\n"),
@@ -6157,6 +6171,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 
 			const firstChunk = await Promise.race([firstChunkPromise, abortPromise])
+			// Retries after a first-chunk failure keep tolerance; it ends only here.
+			if (servedRefreshGeneration === this.instructionRefreshGeneration) {
+				this.pendingInstructionRefresh = false
+			}
 			yield firstChunk.value
 			this.isWaitingForFirstChunk = false
 		} catch (error) {

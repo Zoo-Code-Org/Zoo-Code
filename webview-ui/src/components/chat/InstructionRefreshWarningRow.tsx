@@ -4,7 +4,7 @@ export function InstructionRefreshWarningRow({ failureText }: { failureText?: st
 	const { t } = useAppTranslation()
 
 	return (
-		<div className="flex flex-col gap-1">
+		<div className="flex flex-col gap-1" role="status" aria-live="polite">
 			<div className="flex items-center gap-2">
 				<span className="codicon codicon-warning text-vscode-editorWarning-foreground" aria-hidden="true" />
 				<span className="font-bold text-vscode-foreground">{t("chat:instructionRefresh.warningHeader")}</span>

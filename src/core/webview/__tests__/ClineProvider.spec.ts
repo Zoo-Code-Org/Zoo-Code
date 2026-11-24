@@ -714,6 +714,20 @@ describe("ClineProvider", () => {
 			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
 		})
 
+		it("posts the response only after condensation settles", async () => {
+			const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			let settle: () => void = () => {}
+			registerTask(() => new Promise<void>((resolve) => (settle = resolve)))
+
+			const pending = provider.condenseTaskContext("selected-task")
+			await Promise.resolve()
+			expect(postMessage).not.toHaveBeenCalled()
+
+			settle()
+			await pending
+			expectResponse(postMessage, "selected-task")
+		})
+
 		it("does not reject when the final response cannot be posted", async () => {
 			vi.spyOn(provider, "postMessageToWebview").mockRejectedValue(new Error("webview disposed"))
 			registerTask(vi.fn().mockResolvedValue(undefined))

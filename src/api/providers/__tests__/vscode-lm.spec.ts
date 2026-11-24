@@ -6746,7 +6746,7 @@ describe("VsCodeLmHandler length-based token floor", () => {
 			{ type: "tool_result", tool_use_id: "t1", content: largeResult },
 		] as Anthropic.Messages.ContentBlockParam[])
 
-		expect(tokens).toBeGreaterThanOrEqual(10_000)
+		expect(tokens).toBe(10_000)
 	})
 
 	it("reports usage input tokens of at least the length estimate when the client undercounts", async () => {
@@ -6759,7 +6759,36 @@ describe("VsCodeLmHandler length-based token floor", () => {
 		const chunks = await collectStream(handler.createMessage("system", toolExchange, { taskId: "test-task" }))
 		const usage = chunks.find((chunk) => chunk.type === "usage") as { inputTokens: number }
 
-		expect(usage.inputTokens).toBeGreaterThanOrEqual(10_000)
+		expect(usage.inputTokens).toBe(10_009)
+	})
+
+	it("adds tool-schema characters to the usage floor", async () => {
+		mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+			stream: (async function* () {
+				yield new vscode.LanguageModelTextPart("ok")
+			})(),
+		})
+		const buildTools = (descriptionLength: number) => [
+			{
+				type: "function" as const,
+				function: {
+					name: "lookup",
+					description: "D".repeat(descriptionLength),
+					parameters: { type: "object" },
+				},
+			},
+		]
+		// The floor rounds up once over all characters; a schema length divisible by 3 keeps the sum exact.
+		let descriptionLength = 3_000
+		while (JSON.stringify(buildTools(descriptionLength)).length % 3 !== 0) descriptionLength++
+		const tools = buildTools(descriptionLength)
+
+		const chunks = await collectStream(
+			handler.createMessage("system", toolExchange, { taskId: "test-task", tools }),
+		)
+		const usage = chunks.find((chunk) => chunk.type === "usage") as { inputTokens: number }
+
+		expect(usage.inputTokens).toBe(10_009 + JSON.stringify(tools).length / 3)
 	})
 })
 
