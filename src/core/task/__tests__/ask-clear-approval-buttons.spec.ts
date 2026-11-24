@@ -138,14 +138,19 @@ describe("Task.ask auto-approval stamping", () => {
 		const harness = task as unknown as {
 			addToClineMessages: { mock: { calls: Array<[ClineMessage]> } }
 		}
-		const commandAskCount = () =>
+		const commandAsks = () =>
 			harness.addToClineMessages.mock.calls
 				.map(([message]) => message)
-				.filter((message) => message.type === "ask" && message.ask === "command").length
+				.filter((message) => message.type === "ask" && message.ask === "command")
+		const commandAskCount = () => commandAsks().length
 
 		// Command #1: prompts and waits for the user's approval.
 		const ask1 = task.ask("command", 'echo "cmd1"', false)
 		expect(await settledWithoutResponse(ask1)).toBe(false)
+		// The prompt recorded so far is exactly command #1, still unanswered.
+		const prompt1 = commandAsks()[0]
+		expect(prompt1.text).toBe('echo "cmd1"')
+		expect(prompt1.isAnswered).not.toBe(true)
 		expect(commandAskCount()).toBe(1)
 		task.approveAsk()
 		expect((await ask1).response).toBe("yesButtonClicked")
@@ -155,6 +160,9 @@ describe("Task.ask auto-approval stamping", () => {
 		// each approval.
 		const ask2 = task.ask("command", 'echo "cmd2"', false)
 		expect(await settledWithoutResponse(ask2)).toBe(false)
+		const prompt2 = commandAsks()[1]
+		expect(prompt2.text).toBe('echo "cmd2"')
+		expect(prompt2.isAnswered).not.toBe(true)
 		expect(commandAskCount()).toBe(2)
 		task.approveAsk()
 		expect((await ask2).response).toBe("yesButtonClicked")
@@ -162,6 +170,9 @@ describe("Task.ask auto-approval stamping", () => {
 		// Command #3: same — one prompt per command.
 		const ask3 = task.ask("command", 'echo "cmd3"', false)
 		expect(await settledWithoutResponse(ask3)).toBe(false)
+		const prompt3 = commandAsks()[2]
+		expect(prompt3.text).toBe('echo "cmd3"')
+		expect(prompt3.isAnswered).not.toBe(true)
 		expect(commandAskCount()).toBe(3)
 		task.approveAsk()
 		expect((await ask3).response).toBe("yesButtonClicked")
