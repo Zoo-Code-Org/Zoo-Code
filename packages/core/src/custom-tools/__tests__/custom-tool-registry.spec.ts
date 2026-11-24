@@ -1,5 +1,6 @@
 // pnpm --filter @roo-code/core test src/custom-tools/__tests__/custom-tool-registry.spec.ts
 
+import fs from "fs"
 import os from "os"
 import path from "path"
 
@@ -37,6 +38,53 @@ describe("CustomToolRegistry", () => {
 				"Explicit custom tool cache paths are not supported on Windows",
 			)
 		})
+	})
+
+	// Check the validator directly because mkdir also rejects files used as directories.
+	describe("cache path types", () => {
+		beforeEach(() => vi.stubGlobal("process", { ...process, getuid: () => 1234 }))
+		afterEach(() => {
+			vi.restoreAllMocks()
+			vi.unstubAllGlobals()
+		})
+
+		it.each([
+			{ mode: 0o600, accepted: true },
+			{ mode: 0o700, accepted: true },
+			{ mode: 0o640, accepted: false },
+			{ mode: 0o604, accepted: false },
+		])("checks private file mode $mode", ({ mode, accepted }) => {
+			const stat = fs.statSync(new URL(import.meta.url))
+			stat.uid = process.getuid?.() ?? 0
+			stat.mode = (stat.mode & ~0o777) | mode
+			stat.nlink = 1
+			vi.spyOn(fs, "lstatSync").mockReturnValue(stat)
+			const validate = () => registry["validateCachePath"]("synthetic-cache-path", false)
+			if (accepted) expect(validate).not.toThrow()
+			else expect(validate).toThrow("Unsafe custom tool cache path: synthetic-cache-path")
+		})
+
+		it.each([
+			{ directory: true, actualDirectory: true, actualFile: false, accepted: true },
+			{ directory: false, actualDirectory: false, actualFile: true, accepted: true },
+			{ directory: true, actualDirectory: false, actualFile: true, accepted: false },
+			{ directory: false, actualDirectory: true, actualFile: false, accepted: false },
+			{ directory: false, actualDirectory: false, actualFile: false, accepted: false },
+		])(
+			"validates filesystem type $directory/$actualDirectory/$actualFile",
+			({ directory, actualDirectory, actualFile, accepted }) => {
+				const stat = fs.statSync(new URL(import.meta.url))
+				stat.uid = process.getuid?.() ?? 0
+				stat.mode = 0o600
+				stat.nlink = 1
+				stat.isDirectory = () => actualDirectory
+				stat.isFile = () => actualFile
+				vi.spyOn(fs, "lstatSync").mockReturnValue(stat)
+				const validate = () => registry["validateCachePath"]("synthetic-cache-path", directory)
+				if (accepted) expect(validate).not.toThrow()
+				else expect(validate).toThrow("Unsafe custom tool cache path: synthetic-cache-path")
+			},
+		)
 	})
 
 	describe("validation", () => {

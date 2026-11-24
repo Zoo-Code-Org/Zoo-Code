@@ -18,9 +18,9 @@ Direct fails VisibleIsReady after Start (2 states). RawPath fails at the start. 
 Latest runs took under 1s each. Round 3 runs took 27 to 42s. *)
 (* Replay: Old publication fails 3 of 4 cases. Raw ownership matching fails aliases.
 Old cleanup fails 4 of 7 cases. Guard sabotage deletes all 3 unsafe sentinels. *)
-(* Validation: Fixed code passes 41 integration and 25 unit tests.
+(* Round 6 validation: Fixed code passes 41 integration and 25 unit tests.
 Both type checks and focused lint pass. Suppression counts do not increase. *)
-(* Review ratchet, PR #2485: Added 6, covered 0, gap 5 across six rounds.
+(* Review ratchet, PR #2485: Added 13, covered 1, gap 12 across eight rounds.
 Gaps cover test routing, defaults, module placement, and PR metadata. *)
 (* Round 1: Threads PRRT_kwDOSK-bwM64vzgN, PRRT_kwDOSK-bwM64vzgR, PRRT_kwDOSK-bwM64vzgV. Added 1, gap 2.
 Publication became an invariant. Test routing and defaults use direct tests. *)
@@ -46,6 +46,16 @@ The model checks the constructor policy. It does not check Windows ACLs or prove
 Header cleanup took about 2 minutes. These are work estimates. *)
 (* Round 6 cost: One agent, about 10 minutes including checks. No delegates.
 The first invariants preceded this round. The new invariants follow the review ratchet. *)
+(* Round 7: Retry, env publication, deletion, format upgrades, directory checks, and cleanup add recovery actions. Added 6.
+The split keeps publication interleavings separate from directory loading, format upgrades, and cleanup recovery. *)
+(* Round 7 gaps: Test completeness, test isolation, metadata, and comments use direct checks. Gap 4.
+The tests cover isolated mode bits, types, bundle swaps, ancestor checks, and temporary cache roots. *)
+(* Round 7 simplification: Remove the memory path map. Source path and mtime already determine the path.
+Use one validated disk lookup. Prepare env files before the bundle commit marker. *)
+(* Round 8: Repeated compilation of an unchanged broken source adds a recovery invariant. Added 1.
+The directory check already covers a loose directory after concurrent cleanup. Covered 1. *)
+(* Round 8 gaps: Spec prose, PR behavior text, and unverified Windows rename behavior need direct evidence. Gap 3.
+Headers now name behaviors. The PR body states that unreadable environment files fail a build. *)
 (* Gate: Run check.sh CustomToolCache and the property tables. The runner selects CustomToolCacheMC.
 Use -metadir outside the repo. TLC needs a local socket. Run file tests on the host. *)
 EXTENDS Naturals, TLC

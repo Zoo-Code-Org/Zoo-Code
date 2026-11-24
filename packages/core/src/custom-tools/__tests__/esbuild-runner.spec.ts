@@ -1,8 +1,11 @@
 import fs from "fs"
 import os from "os"
 import path from "path"
+import { execa } from "execa"
 
-import { getEsbuildScriptPath, NODE_BUILTIN_MODULES } from "../esbuild-runner.js"
+import { getEsbuildScriptPath, NODE_BUILTIN_MODULES, runEsbuild, EsbuildSourceError } from "../esbuild-runner.js"
+
+vi.mock("execa", () => ({ execa: vi.fn() }))
 
 describe("getEsbuildScriptPath", () => {
 	it("should find esbuild-wasm script in node_modules in development", () => {
@@ -56,5 +59,71 @@ describe("NODE_BUILTIN_MODULES", () => {
 	it("should be an array of strings", () => {
 		expect(Array.isArray(NODE_BUILTIN_MODULES)).toBe(true)
 		expect(NODE_BUILTIN_MODULES.every((moduleName) => typeof moduleName === "string")).toBe(true)
+	})
+})
+
+describe("runEsbuild error classification", () => {
+	const entryPoint = path.resolve("tools", "broken.ts")
+	const location = `\n    ${entryPoint}:1:16:`
+	afterEach(() => vi.clearAllMocks())
+
+	it.each([
+		{ name: "unexpected token", stderr: `[ERROR] Unexpected end of file${location}`, exitCode: 1, permanent: true },
+		{ name: "expected token", stderr: `[ERROR] Expected identifier${location}`, exitCode: 1, permanent: true },
+		{
+			name: "unterminated string",
+			stderr: `[ERROR] Unterminated string literal${location}`,
+			exitCode: 1,
+			permanent: true,
+		},
+		{ name: "syntax error", stderr: `[ERROR] Syntax error${location}`, exitCode: 1, permanent: true },
+		{
+			name: "relative source",
+			stderr: `[ERROR] Unexpected token\n    ${path.relative(process.cwd(), entryPoint)}:1:0:`,
+			exitCode: 1,
+			permanent: true,
+		},
+		{
+			name: "dependency syntax",
+			stderr: `[ERROR] Unexpected token\n    ${path.resolve("dependency.ts")}:1:0:`,
+			exitCode: 1,
+			permanent: false,
+		},
+		{
+			name: "output write",
+			stderr: "[ERROR] Failed to write to output file: permission denied",
+			exitCode: 1,
+			permanent: false,
+		},
+		{
+			name: "dependency resolution",
+			stderr: `[ERROR] Could not resolve missing-package${location}`,
+			exitCode: 1,
+			permanent: false,
+		},
+		{
+			name: "output with source note",
+			stderr: `[ERROR] Failed to write output${location}`,
+			exitCode: 1,
+			permanent: false,
+		},
+		{ name: "non-compiler exit", stderr: `[ERROR] Unexpected token${location}`, exitCode: 2, permanent: false },
+		{
+			name: "dependency with entry note",
+			stderr: `[ERROR] Unexpected token\n    ${path.resolve("dependency.ts")}:1:0:\nNote: imported here${location}`,
+			exitCode: 1,
+			permanent: false,
+		},
+		{ name: "process failure", stderr: "Could not start compiler", exitCode: undefined, permanent: false },
+	])("classifies $name", async ({ stderr, exitCode, permanent }) => {
+		vi.mocked(execa).mockRejectedValueOnce(Object.assign(new Error(stderr), { stderr, exitCode }))
+		const build = runEsbuild({ entryPoint, outfile: path.resolve("cache", "bundle.tmp.mjs") })
+		if (permanent) await expect(build).rejects.toBeInstanceOf(EsbuildSourceError)
+		else {
+			await expect(build).rejects.toBeInstanceOf(Error)
+			await expect(build).rejects.not.toBeInstanceOf(EsbuildSourceError)
+		}
+		expect(execa).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(execa).mock.calls[0]?.[1]).toContain("--color=false")
 	})
 })
