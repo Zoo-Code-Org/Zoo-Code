@@ -10,11 +10,15 @@ const OPENCODE_GO_BASE_URL = "https://opencode.ai/zen/go/v1"
 
 // The Opencode Go `/models` endpoint follows the OpenAI `/models` shape. The
 // `id` is the only guaranteed field; metadata is optional and best-effort, so
-// the schema is intentionally permissive. Pricing is intentionally NOT parsed:
-// the units returned by the endpoint aren't documented, and reporting a wrong
-// cost is worse than reporting "unknown" — so cost stays sourced from the
-// native registry (or undefined for unknown models) until the pricing shape is
-// confirmed against the live endpoint.
+// the schema is intentionally permissive. The current endpoint publishes
+// limits under `limit.context`/`limit.output`, image support under
+// `modalities.input`, and a `type` discriminator; the flat fields stay
+// parsed as a fallback for older responses (maintainer review, PR #2646).
+// Pricing is intentionally NOT parsed: the units returned by the endpoint
+// aren't documented, and reporting a wrong cost is worse than reporting
+// "unknown" — so cost stays sourced from the native registry (or undefined
+// for unknown models) until the pricing shape is confirmed against the live
+// endpoint.
 const opencodeGoModelSchema = z.object({
 	id: z.string(),
 	name: z.string().optional(),
@@ -24,6 +28,18 @@ const opencodeGoModelSchema = z.object({
 	max_tokens: z.number().optional(),
 	max_output_tokens: z.number().optional(),
 	supports_images: z.boolean().optional(),
+	limit: z
+		.object({
+			context: z.number().optional(),
+			output: z.number().optional(),
+		})
+		.optional(),
+	modalities: z
+		.object({
+			input: z.array(z.string()).optional(),
+		})
+		.optional(),
+	type: z.string().optional(),
 })
 
 export type OpencodeGoModel = z.infer<typeof opencodeGoModelSchema>
@@ -36,11 +52,13 @@ const opencodeGoModelsResponseSchema = z.object({
  * Maps a raw Opencode Go model entry to the internal {@link ModelInfo} shape.
  *
  * The Go `/models` endpoint only reliably returns `id` and (sometimes)
- * `context_window`/`max_tokens`. It does NOT advertise capability flags
- * (`supportsReasoningEffort`, `preserveReasoning`, `supportsMaxTokens`,
- * `supportsPromptCache`) or pricing, all of which the extension needs to drive
- * reasoning controls, interleaved-thinking tool calls, the max-output-tokens
- * slider, and accurate cost reporting.
+ * limits and image support — under `limit.context`/`limit.output` and
+ * `modalities.input` on the current deployment, or the flat
+ * `context_window`/`max_tokens` fields on older ones. It does NOT advertise
+ * capability flags (`supportsReasoningEffort`, `preserveReasoning`,
+ * `supportsMaxTokens`, `supportsPromptCache`) or pricing, all of which the
+ * extension needs to drive reasoning controls, interleaved-thinking tool
+ * calls, the max-output-tokens slider, and accurate cost reporting.
  *
  * Resolution order for a fully-populated {@link ModelInfo}:
  *   1. Use the native registry ({@link getOpencodeGoModelInfo}) when the model
@@ -61,9 +79,11 @@ export const parseOpencodeGoModel = (model: OpencodeGoModel): ModelInfo => {
 
 	// Live endpoint values take precedence for max tokens and image support.
 	// The registry context window stays authoritative for curated models.
-	const liveContextWindow = model.context_window ?? model.context_length
-	const liveMaxTokens = model.max_output_tokens ?? model.max_tokens
-	const liveSupportsImages = model.supports_images
+	// The nested limit/modalties objects are the documented shape; the flat
+	// fields stay as a fallback (maintainer review, PR #2646).
+	const liveContextWindow = model.limit?.context ?? model.context_window ?? model.context_length
+	const liveMaxTokens = model.limit?.output ?? model.max_output_tokens ?? model.max_tokens
+	const liveSupportsImages = model.modalities?.input?.includes("image") ?? model.supports_images
 
 	if (native) {
 		return {
@@ -121,6 +141,12 @@ export async function getOpencodeGoModels(
 			const parsed = opencodeGoModelSchema.safeParse(rawModel)
 			if (!parsed.success) {
 				console.warn(`Skipping invalid Opencode Go model entry: ${JSON.stringify(rawModel)}`)
+				continue
+			}
+			// Only chat models belong in the picker; an embedding or other
+			// type would surface as an unusable choice. Entries without a
+			// type stay listed for older responses (maintainer review).
+			if (parsed.data.type !== undefined && parsed.data.type !== "chat") {
 				continue
 			}
 			models[parsed.data.id] = parseOpencodeGoModel(parsed.data)

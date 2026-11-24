@@ -21,6 +21,14 @@ EXTENDS Integers
 \* place of a curated 1M window. The fix passes all. No false alarm.
 \* Review (PR 2646, thread 4656589514): one finding, added 1 (input rule:
 \* 0 is a live value; the sentinel -1 marks absence), covered 0, gap 0.
+\* Maintainer round (edelauna, review 6033833085): the endpoint publishes
+\* limit.context/limit.output and modalities.input with a `type`
+\* discriminator; unknown models must take the live values, and non-chat
+\* types must be skipped. Added the liveShape (absent/flat/nested) and
+\* modelType (chat/embedding/untyped) inputs, the Listed guard, and the
+\* OnlyChatListed invariant. NoNestedLimit fails the live-merge invariants
+\* on nested-only entries; NoTypeFilter fails OnlyChatListed. 0 covered,
+\* 1 added, 0 gap. Fixed gate grows 24 to 150 states.
 \* Cost: four TLC runs take about 4 seconds. Focused tests take about 5 seconds.
 \* Agent work: about 15 minutes, including tests.
 \* Not modeled: the parser, the field-name pair, capability flags, and pricing.
@@ -36,9 +44,14 @@ VARIABLE in
 \* 2000000 is a live value larger than the registry one.
 Nil == -1
 
-Inputs == [curated : BOOLEAN,
+\* The absent shape carries no values at all; a present shape may still
+\* omit either field individually (Nil marks that field's absence).
+Inputs == {i \in [curated : BOOLEAN,
            liveContextWindow : {Nil, 0, 200000, 2000000},
-           liveMaxTokens : {Nil, 0, 65536}]
+           liveMaxTokens : {Nil, 0, 65536},
+           liveShape : {"absent", "flat", "nested"},
+           modelType : {"chat", "embedding", "untyped"}] :
+           (i.liveShape = "absent" => i.liveContextWindow = Nil /\ i.liveMaxTokens = Nil)}
 
 \* Registry limits for one curated model, as deepseek-v4-flash.
 CuratedContextWindow == 1000000
@@ -48,35 +61,62 @@ DefaultContextWindow == 200000
 DefaultMaxTokens == 32768
 
 \* One value models the context_window and context_length pair.
+\* The parser reads the nested limit objects; the flat fields stay a
+\* fallback. A nested-only payload loses its live values when the nested
+\* read is sabotaged (NoNestedLimit).
+LiveContext(i) ==
+    IF i.liveShape = "absent" THEN Nil
+    ELSE IF i.liveShape = "nested" /\ Variant = "NoNestedLimit" THEN Nil
+    ELSE i.liveContextWindow
+
+LiveMaxTokens(i) ==
+    IF i.liveShape = "absent" THEN Nil
+    ELSE IF i.liveShape = "nested" /\ Variant = "NoNestedLimit" THEN Nil
+    ELSE i.liveMaxTokens
+
+\* Fixed code: an entry whose type is present and not "chat" is skipped
+\* from the catalog. Untyped entries stay listed for older responses.
+\* Sabotage NoTypeFilter lists every parsed entry.
+Listed(i) == ~(Variant # "NoTypeFilter" /\ i.modelType = "embedding")
+
 PublishedContextWindow(i) ==
     IF i.curated
-    THEN IF Variant = "LiveOverride" /\ i.liveContextWindow # Nil
-         THEN i.liveContextWindow
+    THEN IF Variant = "LiveOverride" /\ LiveContext(i) # Nil
+         THEN LiveContext(i)
          ELSE CuratedContextWindow
-    ELSE IF i.liveContextWindow = Nil \/ Variant = "UnknownIgnoresLive"
+    ELSE IF LiveContext(i) = Nil \/ Variant = "UnknownIgnoresLive"
          THEN DefaultContextWindow
-         ELSE i.liveContextWindow
+         ELSE LiveContext(i)
 
 PublishedMaxTokens(i) ==
     IF i.curated
-    THEN IF Variant = "NoLiveMaxTokens" \/ i.liveMaxTokens = Nil
+    THEN IF Variant = "NoLiveMaxTokens" \/ LiveMaxTokens(i) = Nil
          THEN CuratedMaxTokens
-         ELSE i.liveMaxTokens
-    ELSE IF i.liveMaxTokens = Nil
+         ELSE LiveMaxTokens(i)
+    ELSE IF LiveMaxTokens(i) = Nil
          THEN DefaultMaxTokens
-         ELSE i.liveMaxTokens
+         ELSE LiveMaxTokens(i)
 
 TypeOk == in \in Inputs
+\* A skipped entry never reaches the merge, so the merge contract applies
+\* only to listed entries. The EXPECTED side uses the raw payload value, not
+\* the read operator, so a dropped read (NoNestedLimit) cannot vacuously
+\* pass by flipping both sides.
 CuratedContextWindowFromRegistry ==
-    in.curated => PublishedContextWindow(in) = CuratedContextWindow
+    Listed(in) /\ in.curated => PublishedContextWindow(in) = CuratedContextWindow
 UnknownContextWindowCorrect ==
-    ~in.curated => PublishedContextWindow(in) =
-        IF in.liveContextWindow = Nil THEN DefaultContextWindow ELSE in.liveContextWindow
+    Listed(in) /\ ~in.curated => PublishedContextWindow(in) =
+        IF in.liveShape = "absent" \/ in.liveContextWindow = Nil THEN DefaultContextWindow ELSE in.liveContextWindow
 CuratedLiveMaxTokensMerged ==
-    in.curated /\ in.liveMaxTokens # Nil => PublishedMaxTokens(in) = in.liveMaxTokens
+    Listed(in) /\ in.curated /\ in.liveShape # "absent" /\ in.liveMaxTokens # Nil =>
+        PublishedMaxTokens(in) = in.liveMaxTokens
 UnknownMaxTokensCorrect ==
-    ~in.curated => PublishedMaxTokens(in) =
-        IF in.liveMaxTokens = Nil THEN DefaultMaxTokens ELSE in.liveMaxTokens
+    Listed(in) /\ ~in.curated => PublishedMaxTokens(in) =
+        IF in.liveShape = "absent" \/ in.liveMaxTokens = Nil THEN DefaultMaxTokens ELSE in.liveMaxTokens
+
+\* Maintainer round: an entry whose declared type is not "chat" is never
+\* published to the picker.
+OnlyChatListed == in.modelType = "embedding" => ~Listed(in)
 
 Init == in \in Inputs
 Next == UNCHANGED in

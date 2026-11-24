@@ -228,6 +228,23 @@ describe("Opencode Go Fetchers", () => {
 			warnSpy.mockRestore()
 		})
 
+		it("skips models whose type is not chat (maintainer review)", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{ id: "chat-model", type: "chat" },
+						{ id: "embed-model", type: "embedding" },
+						{ id: "untyped-model" },
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels()
+
+			// Untyped entries stay listed for older responses.
+			expect(Object.keys(models).sort()).toEqual(["chat-model", "untyped-model"])
+		})
+
 		it("forwards the caller's abort signal to the request", async () => {
 			mockedAxios.get.mockResolvedValue({ data: { data: [] } })
 			const controller = new AbortController()
@@ -487,6 +504,49 @@ describe("Opencode Go Fetchers", () => {
 				expect(info.supportsPromptCache).toBe(native.supportsPromptCache)
 				expect(info.description).toBeTruthy()
 			}
+		})
+
+		it("an unknown model takes its live values from limit and modalities (maintainer review)", () => {
+			const info = parseOpencodeGoModel({
+				id: "x",
+				type: "chat",
+				limit: { context: 123_456, output: 4_096 },
+				modalities: { input: ["text", "image"] },
+			})
+			expect(info.contextWindow).toBe(123_456)
+			expect(info.maxTokens).toBe(4_096)
+			expect(info.supportsImages).toBe(true)
+		})
+
+		it("nested limit values win over the flat fallback fields", () => {
+			const info = parseOpencodeGoModel({
+				id: "x",
+				limit: { context: 555_000, output: 5_555 },
+				context_window: 666_000,
+				max_output_tokens: 6_666,
+			})
+			expect(info.contextWindow).toBe(555_000)
+			expect(info.maxTokens).toBe(5_555)
+		})
+
+		it("keeps the first flat alias when both fields of a pair are set", () => {
+			const info = parseOpencodeGoModel({
+				id: "x",
+				context_window: 111_111,
+				context_length: 222_222,
+				max_output_tokens: 444_444,
+				max_tokens: 333_333,
+			})
+			expect(info.contextWindow).toBe(111_111)
+			expect(info.maxTokens).toBe(444_444)
+		})
+
+		it("modalities.input drives image support with the flat field as fallback", () => {
+			const fromModalities = parseOpencodeGoModel({ id: "x", modalities: { input: ["text"] } })
+			expect(fromModalities.supportsImages).toBe(false)
+
+			const fromFlat = parseOpencodeGoModel({ id: "x", supports_images: true })
+			expect(fromFlat.supportsImages).toBe(true)
 		})
 	})
 })
