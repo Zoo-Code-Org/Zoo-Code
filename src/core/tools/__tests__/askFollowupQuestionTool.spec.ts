@@ -132,6 +132,38 @@ describe("AskFollowupQuestionTool", () => {
 
 	// ===== Happy path tests =====
 
+	it("reports a validation error instead of a raw TypeError when a recovered element is null (review 4674666558)", async () => {
+		// A recovered follow_up array can contain malformed elements (e.g.
+		// a null element from XML recovery). Mapping it must not throw.
+		const params = {
+			question: "Proceed?",
+			follow_up: [null, { text: "Keep the guard" }],
+		} as unknown as Parameters<typeof tool.execute>[0]
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		expect(mockTask.consecutiveMistakeCount).toBe(1)
+		expect(mockTask.recordToolError).toHaveBeenCalledWith("ask_followup_question")
+		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+		const pushed = (mockCallbacks.pushToolResult as any).mock.calls[0][0]
+		expect(pushed).toContain("Every element needs a string 'text'")
+		// The question is never asked with malformed suggestions.
+		expect(mockTask.ask).not.toHaveBeenCalled()
+	})
+
+	it("reports a validation error when an element lacks a string text (review 4674666558)", async () => {
+		const params = {
+			question: "Proceed?",
+			follow_up: [{ mode: "a" }],
+		} as unknown as Parameters<typeof tool.execute>[0]
+
+		await tool.execute(params, mockTask, mockCallbacks)
+
+		const pushed = (mockCallbacks.pushToolResult as any).mock.calls[0][0]
+		expect(pushed).toContain("Every element needs a string 'text'")
+		expect(mockTask.ask).not.toHaveBeenCalled()
+	})
+
 	it("should ask the user a followup question with suggestions", async () => {
 		const params = {
 			question: "What would you like to do?",

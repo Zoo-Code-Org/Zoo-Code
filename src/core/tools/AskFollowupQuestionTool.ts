@@ -64,6 +64,22 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 				return
 			}
 
+			// Each element must be a non-null object with a string `text`:
+			// a recovered array can still contain a malformed element (e.g.
+			// null), and mapping it would throw a raw TypeError instead of a
+			// correctable message (review 4674666558). Same whole-call policy
+			// as the array-shape check above.
+			const elementsValid = follow_up.every(
+				(s) => typeof s === "object" && s !== null && typeof (s as { text?: unknown }).text === "string",
+			)
+			if (!elementsValid) {
+				await recordValidationError(
+					"The 'follow_up' parameter must be an array of suggestion objects, each shaped like { text: string, mode?: string }. " +
+						"Every element needs a string 'text'. Retry with well-formed suggestions.",
+				)
+				return
+			}
+
 			// Transform follow_up suggestions to the format expected by task.ask
 			const follow_up_json = {
 				question,
