@@ -27,7 +27,6 @@ export const providerIdentifiers = {
 	fireworks: "fireworks",
 	friendli: "friendli",
 	gemini: "gemini",
-	geminiCli: "gemini-cli",
 	mistral: "mistral",
 	moonshot: "moonshot",
 	kimiCode: "kimi-code",
@@ -46,6 +45,7 @@ export type ProviderIdentifier = (typeof providerIdentifiers)[keyof typeof provi
 
 /** Provider identifiers retained only for compatibility with existing settings. */
 export const retiredProviderIdentifiers = {
+	geminiCli: "gemini-cli",
 	cerebras: "cerebras",
 	chutes: "chutes",
 	deepinfra: "deepinfra",

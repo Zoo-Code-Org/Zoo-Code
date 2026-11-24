@@ -6,7 +6,6 @@ export * from "./fake-ai.js"
 export * from "./fireworks.js"
 export * from "./friendli.js"
 export * from "./gemini.js"
-export * from "./gemini-cli.js"
 export * from "./lite-llm.js"
 export * from "./litellm.js"
 export * from "./lm-studio.js"
@@ -47,7 +46,6 @@ import { fakeAiProviderDefinition } from "./fake-ai.js"
 import { fireworksProviderDefinition } from "./fireworks.js"
 import { friendliProviderDefinition } from "./friendli.js"
 import { geminiProviderDefinition } from "./gemini.js"
-import { geminiCliProviderDefinition } from "./gemini-cli.js"
 import { kenariProviderDefinition } from "./kenari.js"
 import { kimiCodeProviderDefinition } from "./kimi-code.js"
 import { litellmProviderDefinition } from "./litellm.js"
@@ -88,7 +86,6 @@ export const providerDefinitionList = [
 	githubCopilotProviderDefinition,
 	lmStudioProviderDefinition,
 	geminiProviderDefinition,
-	geminiCliProviderDefinition,
 	openAiCodexProviderDefinition,
 	openAiNativeProviderDefinition,
 	mistralProviderDefinition,

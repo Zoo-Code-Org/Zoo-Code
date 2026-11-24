@@ -1133,49 +1133,56 @@ describe("ProviderSettingsManager", () => {
 			expect(storedConfig.apiConfigs.unknownProvider.id).toBe("removed-id")
 		})
 
-		it("should preserve retired providers and their fields including legacy provider-specific keys during initialize", async () => {
-			const configWithRetiredProvider = {
-				currentApiConfigName: "retiredProvider",
-				apiConfigs: {
-					retiredProvider: {
-						id: "retired-id",
-						apiProvider: retiredProviderIdentifiers.groq,
-						apiKey: "legacy-key",
-						apiModelId: "legacy-model",
-						openAiBaseUrl: "https://legacy.example/v1",
-						modelMaxTokens: 1024,
-						// Legacy provider-specific field no longer in schema
-						groqApiKey: "legacy-groq-key",
+		it.each([retiredProviderIdentifiers.groq, retiredProviderIdentifiers.geminiCli])(
+			"preserves retired provider %s and its legacy fields during initialize",
+			async (apiProvider) => {
+				const configWithRetiredProvider = {
+					currentApiConfigName: "retiredProvider",
+					apiConfigs: {
+						retiredProvider: {
+							id: "retired-id",
+							apiProvider,
+							apiKey: "legacy-key",
+							apiModelId: "legacy-model",
+							openAiBaseUrl: "https://legacy.example/v1",
+							modelMaxTokens: 1024,
+							// Legacy provider-specific field no longer in schema
+							groqApiKey: "legacy-groq-key",
+							geminiCliOAuthPath: "/legacy/oauth_creds.json",
+							geminiCliProjectId: "legacy-project",
+						},
 					},
-				},
-				migrations: {
-					rateLimitSecondsMigrated: false,
-					openAiHeadersMigrated: true,
-					consecutiveMistakeLimitMigrated: true,
-					todoListEnabledMigrated: true,
-					claudeCodeLegacySettingsMigrated: true,
-				},
-			}
+					migrations: {
+						rateLimitSecondsMigrated: false,
+						openAiHeadersMigrated: true,
+						consecutiveMistakeLimitMigrated: true,
+						todoListEnabledMigrated: true,
+						claudeCodeLegacySettingsMigrated: true,
+					},
+				}
 
-			mockGlobalState.get.mockResolvedValue(0)
-			mockSecrets.get.mockResolvedValue(JSON.stringify(configWithRetiredProvider))
+				mockGlobalState.get.mockResolvedValue(0)
+				mockSecrets.get.mockResolvedValue(JSON.stringify(configWithRetiredProvider))
 
-			await providerSettingsManager.initialize()
+				await providerSettingsManager.initialize()
 
-			const storeCalls = mockSecrets.store.mock.calls
-			expect(storeCalls.length).toBeGreaterThan(0)
-			const finalStoredConfigJson = storeCalls[storeCalls.length - 1][1]
-			const storedConfig = JSON.parse(finalStoredConfigJson)
+				const storeCalls = mockSecrets.store.mock.calls
+				expect(storeCalls.length).toBeGreaterThan(0)
+				const finalStoredConfigJson = storeCalls[storeCalls.length - 1][1]
+				const storedConfig = JSON.parse(finalStoredConfigJson)
 
-			expect(storedConfig.apiConfigs.retiredProvider).toBeDefined()
-			expect(storedConfig.apiConfigs.retiredProvider.apiProvider).toBe("groq")
-			expect(storedConfig.apiConfigs.retiredProvider.apiKey).toBe("legacy-key")
-			expect(storedConfig.apiConfigs.retiredProvider.apiModelId).toBe("legacy-model")
-			expect(storedConfig.apiConfigs.retiredProvider.openAiBaseUrl).toBe("https://legacy.example/v1")
-			expect(storedConfig.apiConfigs.retiredProvider.modelMaxTokens).toBe(1024)
-			// Verify legacy provider-specific field is preserved via passthrough
-			expect(storedConfig.apiConfigs.retiredProvider.groqApiKey).toBe("legacy-groq-key")
-		})
+				expect(storedConfig.apiConfigs.retiredProvider).toBeDefined()
+				expect(storedConfig.apiConfigs.retiredProvider.apiProvider).toBe(apiProvider)
+				expect(storedConfig.apiConfigs.retiredProvider.apiKey).toBe("legacy-key")
+				expect(storedConfig.apiConfigs.retiredProvider.apiModelId).toBe("legacy-model")
+				expect(storedConfig.apiConfigs.retiredProvider.openAiBaseUrl).toBe("https://legacy.example/v1")
+				expect(storedConfig.apiConfigs.retiredProvider.modelMaxTokens).toBe(1024)
+				// Verify legacy provider-specific field is preserved via passthrough
+				expect(storedConfig.apiConfigs.retiredProvider.groqApiKey).toBe("legacy-groq-key")
+				expect(storedConfig.apiConfigs.retiredProvider.geminiCliOAuthPath).toBe("/legacy/oauth_creds.json")
+				expect(storedConfig.apiConfigs.retiredProvider.geminiCliProjectId).toBe("legacy-project")
+			},
+		)
 
 		it("should sanitize invalid providers and remove non-object profiles during load", async () => {
 			const invalidConfig = {
