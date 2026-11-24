@@ -758,7 +758,8 @@ describe("extension.ts", () => {
 			})
 			try {
 				const vscode = await import("vscode")
-				// Same channel, same double: arming dispose observes the disposal order.
+				// The same channel `activate` creates, from the same factory double.
+				// Arming dispose observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
 				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
 
