@@ -712,10 +712,12 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.max_completion_tokens).toBeUndefined()
 		})
 
-		it("should not include max_tokens when includeMaxTokens is undefined", async () => {
+		it("includes max_completion_tokens when includeMaxTokens is unset (UI default is checked) (#2230)", async () => {
 			const optionsWithUndefinedMaxTokens: ApiHandlerOptions = {
 				...mockOptions,
-				// includeMaxTokens is not set, should not include max_tokens
+				// includeMaxTokens is not set: the settings UI reads unset as
+				// checked (includeMaxTokens ?? true), so the request builder
+				// must agree and send the limit.
 				openAiCustomModelInfo: {
 					contextWindow: 128_000,
 					maxTokens: 4096,
@@ -726,10 +728,10 @@ describe("OpenAiHandler", () => {
 			const stream = handlerWithDefaultMaxTokens.createMessage(systemPrompt, messages)
 			// Consume the stream to trigger the API call
 			await collectStream(stream)
-			// Assert the mockCreate was called without max_tokens
+			// Assert the mockCreate was called with max_completion_tokens
 			expect(mockCreate).toHaveBeenCalled()
 			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.max_completion_tokens).toBeUndefined()
+			expect(callArgs.max_completion_tokens).toBe(4096)
 		})
 
 		it("should use user-configured modelMaxTokens instead of model default maxTokens", async () => {
