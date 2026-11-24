@@ -150,6 +150,10 @@ export const modelInfoSchema = z.object({
 	requiresThoughtSignatures: z.boolean().optional(),
 	// Some OpenAI-compatible gateways require a Responses-backed route for tool calls.
 	requiresResponsesApi: z.boolean().optional(),
+	// A gateway alias routed to an OpenAI-family backend (litellm_params.model)
+	// must send max_completion_tokens: the backend may reject the deprecated
+	// max_tokens parameter and the alias name alone cannot reveal the backend.
+	requiresMaxCompletionTokens: z.boolean().optional(),
 	supportedParameters: z.array(modelParametersSchema).optional(),
 	inputPrice: z.number().optional(),
 	outputPrice: z.number().optional(),

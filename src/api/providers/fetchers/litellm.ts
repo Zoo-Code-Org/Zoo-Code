@@ -48,6 +48,15 @@ export async function getLiteLLMModels(
 
 				const isGpt6Astra = litellmModelName === "openai/responses/gpt-6-astra"
 
+				// A custom alias routed to an OpenAI-family backend must use
+				// max_completion_tokens: OpenAI rejects the deprecated
+				// max_tokens on newer models, and the alias name alone
+				// cannot reveal the routed backend (issue 1865). The routed
+				// name carries the provider prefix (openai/...) or, for
+				// custom_openai routes, a bare gpt-5+/o-series id.
+				const routedToOpenAi =
+					/^openai\//.test(litellmModelName) || /^(gpt-[5-9]|o[1345])($|[-_.])/i.test(litellmModelName)
+
 				// LiteLLM's /v1/model/info never reports reasoning capability flags, so infer
 				// preserveReasoning from explicit model ids in either the alias or routed model name.
 				const preservesReasoning =
@@ -86,6 +95,7 @@ export async function getLiteLLMModels(
 					}),
 					...(preservesReasoning && { preserveReasoning: true }),
 					...(requiresThoughtSignatures && { requiresThoughtSignatures: true }),
+					...(routedToOpenAi && { requiresMaxCompletionTokens: true }),
 					description: `${modelName} via LiteLLM proxy`,
 				}
 			}
