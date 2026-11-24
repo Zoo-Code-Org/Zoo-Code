@@ -303,8 +303,18 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		}
 
 		// https://openrouter.ai/docs/features/prompt-caching
-		// TODO: Add a `promptCacheStratey` field to `ModelInfo`.
-		if (OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)) {
+		// Gate on the fetched capability for Anthropic- and Gemini-shaped
+		// models instead of the hand-maintained ID set alone (issue #2502):
+		// OpenRouter publishes cache prices for cache-capable models and the
+		// fetcher turns them into supportsPromptCache, so new IDs no longer
+		// wait for a set update. The set stays as a fallback for records
+		// that predate the price parse. OpenAI-family models are excluded:
+		// their OpenRouter caching is automatic and takes no cache_control
+		// markers.
+		const promptCacheEligible =
+			(model.info.supportsPromptCache && (modelId.startsWith("anthropic/") || modelId.startsWith("google/"))) ||
+			OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)
+		if (promptCacheEligible) {
 			if (modelId.startsWith("google")) {
 				// Gemini markers keep their default TTL: ADR-0006 scopes the knob to
 				// Anthropic-shaped markers only, and Gemini has no 1h class.
