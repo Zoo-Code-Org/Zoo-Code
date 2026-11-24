@@ -17,15 +17,52 @@ type OpenAIProps = {
 	simplifySettings?: boolean
 }
 
+// The checkbox follows a saved value that changes from outside, such as a profile switch.
+// The component adjusts state during render, as the React docs advise. Own writes do not move the checkbox.
+// Spec: docs/architecture/tla/OpenAiDeploymentNameUi.tla
+const useOptionalField = (
+	field: "openAiNativeBaseUrl" | "openAiNativeDeploymentName",
+	value: string | undefined,
+	setField: OpenAIProps["setApiConfigurationField"],
+) => {
+	const current = value ?? ""
+	const [selected, setSelected] = useState(!!current)
+	const [seen, setSeen] = useState(current)
+	const [written, setWritten] = useState(current)
+
+	if (current !== seen) {
+		setSeen(current)
+		setWritten(current)
+		if (current !== written) setSelected(!!current)
+	}
+
+	const write = (next: string) => {
+		setWritten(next)
+		setField(field, next)
+	}
+
+	return {
+		selected,
+		write,
+		toggle: (checked: boolean) => {
+			setSelected(checked)
+			if (!checked) write("")
+		},
+	}
+}
+
 export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedModelInfo }: OpenAIProps) => {
 	const { t } = useAppTranslation()
 
-	const [openAiNativeBaseUrlSelected, setOpenAiNativeBaseUrlSelected] = useState(
-		!!apiConfiguration.openAiNativeBaseUrl,
+	const baseUrl = useOptionalField(
+		"openAiNativeBaseUrl",
+		apiConfiguration.openAiNativeBaseUrl,
+		setApiConfigurationField,
 	)
-
-	const [openAiNativeDeploymentNameSelected, setOpenAiNativeDeploymentNameSelected] = useState(
-		!!apiConfiguration.openAiNativeDeploymentName,
+	const deploymentName = useOptionalField(
+		"openAiNativeDeploymentName",
+		apiConfiguration.openAiNativeDeploymentName,
+		setApiConfigurationField,
 	)
 
 	const handleInputChange = useCallback(
@@ -41,46 +78,30 @@ export const OpenAI = ({ apiConfiguration, setApiConfigurationField, selectedMod
 
 	return (
 		<>
-			<Checkbox
-				checked={openAiNativeBaseUrlSelected}
-				onChange={(checked: boolean) => {
-					setOpenAiNativeBaseUrlSelected(checked)
-
-					if (!checked) {
-						setApiConfigurationField("openAiNativeBaseUrl", "")
-					}
-				}}>
+			<Checkbox checked={baseUrl.selected} onChange={baseUrl.toggle}>
 				{t("settings:providers.useCustomBaseUrl")}
 			</Checkbox>
-			{openAiNativeBaseUrlSelected && (
+			{baseUrl.selected && (
 				<>
 					<VSCodeTextField
 						value={apiConfiguration.openAiNativeBaseUrl || ""}
 						type="url"
-						onInput={handleInputChange("openAiNativeBaseUrl")}
+						onInput={(event: unknown) => baseUrl.write(inputEventTransform(event))}
 						placeholder="https://api.openai.com/v1"
 						className="w-full mt-1"
 					/>
 				</>
 			)}
-			<Checkbox
-				checked={openAiNativeDeploymentNameSelected}
-				onChange={(checked: boolean) => {
-					setOpenAiNativeDeploymentNameSelected(checked)
-
-					if (!checked) {
-						setApiConfigurationField("openAiNativeDeploymentName", "")
-					}
-				}}>
+			<Checkbox checked={deploymentName.selected} onChange={deploymentName.toggle}>
 				{t("settings:providers.useCustomDeploymentName")}
 			</Checkbox>
-			{openAiNativeDeploymentNameSelected && (
+			{deploymentName.selected && (
 				<>
 					<VSCodeTextField
 						value={apiConfiguration.openAiNativeDeploymentName || ""}
 						type="text"
 						data-testid="openai-native-deployment-name-input"
-						onInput={handleInputChange("openAiNativeDeploymentName")}
+						onInput={(event: unknown) => deploymentName.write(inputEventTransform(event))}
 						placeholder={t("settings:providers.openAiNativeDeploymentNamePlaceholder")}
 						className="w-full mt-1">
 						<label className="block font-medium mb-1">

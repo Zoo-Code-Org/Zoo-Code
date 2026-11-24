@@ -328,6 +328,11 @@ export const stories: Record<string, Story> = {
 			await import("@/components/settings/providers/__tests__/OpenAICodex.visual.fixture")
 		return <OpenAICodexFixture />
 	},
+	"openai-native-deployment-name": async () => {
+		const { OpenAIDeploymentNameFixture } =
+			await import("@/components/settings/providers/__tests__/OpenAI.visual.fixture")
+		return <OpenAIDeploymentNameFixture />
+	},
 	"openai-compatible-azure": async () => {
 		const { OpenAICompatibleAzureFixture } =
 			await import("@/components/settings/providers/__tests__/OpenAICompatible.visual.fixture")
