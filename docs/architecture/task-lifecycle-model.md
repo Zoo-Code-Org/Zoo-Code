@@ -166,9 +166,11 @@ The production-backed lifecycle checker already models the current serial owners
 - delegated parent reopen success or failure after durable child history; and
 - emitting completion.
 
+The model cancel event also represents a failed stream that cancels only its current persistence generation. The task can recover with a new turn.
+
 The model abstracts restart visibility as the `durable` history phase. It allows an already-started write to finish after cancellation because the filesystem operation itself is not cancellable, but it forbids starting a retry write or emitting completion after cancellation. The retry bound is two write starts (the initial attempt plus one retry), which is sufficient to cover the ordering and cancellation state classes without mirroring the production retry count.
 
-Seven semantic landmarks keep the intended positive and negative paths reachable: delayed completion remains pending, failed completion remains pending, exhausted retries settle without completion, cancellation can win after retry delay but before persistence, delegated reopen failure emits no delegated completion, and both standalone and delegated tasks can complete after durable history. The checker explores all reachable states through depth 10 and fails rather than reporting a truncated pass if an unseen successor remains.
+Eight semantic landmarks keep the intended positive and negative paths reachable: a failed delegated turn cancels its persistence wait without completing or reopening its parent, delayed completion remains pending, failed completion remains pending, exhausted retries settle without completion, cancellation can win after retry delay but before persistence, delegated reopen failure emits no delegated completion, and both standalone and delegated tasks can complete after durable history. The checker explores all reachable states through depth 10 and fails rather than reporting a truncated pass if an unseen successor remains.
 
 ## Invariants
 

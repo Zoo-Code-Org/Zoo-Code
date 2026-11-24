@@ -2,4 +2,5 @@
 EXTENDS StreamReadCancellation
 LeakySettle == FALSE
 GenericReason == FALSE
+DroppedReason == TRUE
 ====

@@ -4823,27 +4823,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									(block.type === "tool_use" || block.type === "mcp_tool_use") && !block.partial,
 							)
 						) {
-							// Tool execution can overlap consumption. A failed stream does not make replay safe.
+							// Release completion and delegation waits before joining the presenter for this failed turn.
+							this.cancelAssistantMessagePersistence()
+							this.isStreaming = false
+							await pWaitFor(
+								() => this.dispatchState === DispatchState.IDLE || this.abort || this.abandoned,
+								{ interval: 100 },
+							)
+							if (this.abort || this.abandoned) return true
+
+							// All tool messages have settled. A protected ask requires a fresh reply.
 							await this.say(
 								"error",
 								"Automatic retry stopped because a tool may have already run. Check the tool results before you continue.",
 							)
-							this.isStreaming = false
-							// A protected ask requires a fresh reply, even when messages are queued.
 							const recovery = await this.ask("resume_task", undefined, false, undefined, true)
 							if (recovery.response !== "yesButtonClicked" && recovery.response !== "messageResponse") {
 								await this.abortTask()
 								return true
 							}
-
-							// A tool can finish after its stream. Snapshot results only after the presenter releases its lock.
-							await pWaitFor(
-								() => this.dispatchState === DispatchState.IDLE || this.abort || this.abandoned,
-								{
-									interval: 100,
-								},
-							)
-							if (this.abort || this.abandoned) return true
 							const interruptedTools = this.assistantMessageContent.flatMap((block) => {
 								if ((block.type !== "tool_use" && block.type !== "mcp_tool_use") || block.partial)
 									return []
