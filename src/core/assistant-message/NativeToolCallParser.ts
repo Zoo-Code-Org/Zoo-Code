@@ -411,7 +411,17 @@ export class NativeToolCallParser {
 			)
 			.sort((a, b) => a.open.index - b.open.index)
 
+		// Opening candidates nested inside a rejected enclosing payload are
+		// its string content, not recoverable wrappers (review thread
+		// 4661230351): a non-array payload excludes them, while standalone
+		// wrappers outside the rejected span still recover.
+		const rejectedSpans: Array<[number, number]> = []
+
 		for (const { pattern, open: openMatch } of candidates) {
+			if (rejectedSpans.some(([start, end]) => openMatch.index >= start && openMatch.index < end)) {
+				continue
+			}
+
 			// A closing tag inside a JSON string is payload content, not a
 			// boundary (review thread 4658157957). Try every closing-tag
 			// candidate until one yields a payload that parses to an array.
@@ -428,17 +438,21 @@ export class NativeToolCallParser {
 					continue
 				}
 
+				const matchedEnd = payloadStart + closeMatch.index + closeMatch[0].length
+
 				if (!Array.isArray(parsed)) {
-					continue
+					// A well-formed enclosing wrapper whose payload is valid
+					// JSON but not an array rejects its own recovery: tags
+					// nested inside that payload are its content, not
+					// wrappers (review thread 4661230351).
+					rejectedSpans.push([openMatch.index, matchedEnd])
+					break
 				}
 
 				// Remove the XML block and the remaining legacy wrapper tags.
 				// The `\s` (not `\s+`) before the attribute is enough: the
 				// `[^>]*` that follows absorbs any further whitespace.
-				const matchedBlock = question.slice(
-					openMatch.index,
-					payloadStart + closeMatch.index + closeMatch[0].length,
-				)
+				const matchedBlock = question.slice(openMatch.index, matchedEnd)
 				const cleaned = question
 					.replace(matchedBlock, "")
 					.replace(/<\/?question>/g, "")

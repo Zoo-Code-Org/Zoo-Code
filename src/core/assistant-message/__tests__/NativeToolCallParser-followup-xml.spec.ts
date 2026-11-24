@@ -260,6 +260,28 @@ describe("NativeToolCallParser - ask_followup_question legacy XML recovery", () 
 		expect(result).toBeNull()
 	})
 
+	it("rejects recovery when the enclosing payload is a non-array JSON object containing nested wrapper tags (review 4661230351)", () => {
+		const nativeArgs = nativeArgsOf({
+			question: 'Q?<parameter name="follow_up">{"text":"Use <follow_up>[]</follow_up>"}</parameter>',
+		})
+
+		// The nested <follow_up>[]</follow_up> is string content of the
+		// enclosing object payload — not a recoverable wrapper.
+		expect(nativeArgs).toBeNull()
+	})
+
+	it("recovers a standalone array wrapper that follows a rejected non-array payload (review 4661230351)", () => {
+		const nativeArgs = nativeArgsOf({
+			question:
+				'Q?<parameter name="follow_up">{"text":"nope"}</parameter> then <follow_up>[ { "text": "A" } ]</follow_up>',
+		})
+
+		// The standalone array wrapper lives outside the rejected span, so
+		// it still recovers.
+		expect(nativeArgs).not.toBeNull()
+		expect(nativeArgs?.follow_up).toEqual([{ text: "A" }])
+	})
+
 	// Property test from the spec invariant NoMissingFollowUpWhenRecoverable:
 	// every recoverable payload (XML block with a parseable JSON array) reaches
 	// the tool with a present follow_up, and the shown question holds no XML.
@@ -287,7 +309,9 @@ describe("NativeToolCallParser - ask_followup_question legacy XML recovery", () 
 					const nativeArgs = nativeArgsOf(args)
 
 					expect(nativeArgs).not.toBeNull()
-					expect(Array.isArray(nativeArgs?.follow_up)).toBe(true)
+					// Full-output check: the recovered array equals the payload
+					// exactly (review thread 4661230345) — no truncation or [].
+					expect(nativeArgs?.follow_up).toEqual(JSON.parse(payload))
 					expect(String(nativeArgs?.question)).not.toMatch(/<[/]?(question|follow_up|invoke|parameter)/)
 				}
 			}
