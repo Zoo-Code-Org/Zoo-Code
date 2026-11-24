@@ -6117,7 +6117,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
-		if (this.pendingInstructionRefresh && !this.instructionRefreshWarned) {
+		// Failures from a superseded refresh must not mark a newer refresh as warned.
+		if (
+			servedRefreshGeneration === this.instructionRefreshGeneration &&
+			this.pendingInstructionRefresh &&
+			!this.instructionRefreshWarned
+		) {
 			if (instructionFailures.length > 0) {
 				this.instructionRefreshWarned = true
 				await this.say(

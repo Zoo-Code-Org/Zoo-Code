@@ -2945,6 +2945,29 @@ describe("Cline", () => {
 			}
 		})
 
+		it("warns only for the refresh that is current when a newer one is armed during construction", async () => {
+			const { task, promptSpy, saySpy } = await armRefreshRequest([])
+			promptSpy
+				.mockImplementationOnce(async (_state, _modelInfo, collector) => {
+					collector?.push({ sourcePath: "/workspace/old.roorules", code: "EACCES" })
+					task["armInstructionRefresh"]()
+					return "superseded prompt"
+				})
+				.mockImplementation(async (_state, _modelInfo, collector) => {
+					collector?.push({ sourcePath: "/workspace/new.roorules", code: "EPERM" })
+					return "current prompt"
+				})
+
+			await task.attemptApiRequest(0).next()
+			expect(warningCalls(saySpy)).toHaveLength(0)
+			expect(task["pendingInstructionRefresh"]).toBe(true)
+			expect(task["instructionRefreshWarned"]).toBe(false)
+
+			await task.attemptApiRequest(0).next()
+			expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["/workspace/new.roorules (EPERM)"])
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+		})
+
 		it.each(["manual", "recovery", "automatic"] as const)(
 			"resets the warned marker through the real %s trigger (review 4)",
 			async (trigger) => {

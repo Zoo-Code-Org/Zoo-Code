@@ -290,6 +290,36 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"instruction-refresh-warning": async () => {
+		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/ChatRow"),
+		])
+		// Same text format Task emits, so the snapshot covers ChatRow's dispatch too.
+		const message: import("@roo-code/types").ClineMessage = {
+			type: "say",
+			say: "instruction_refresh_warning",
+			ts: 0,
+			text: "/workspace/.roorules (EACCES)\n/workspace/.roo/rules-code/style.md (EPERM)",
+		}
+		return (
+			<AppProviders>
+				<div className="w-full bg-vscode-editor-background px-[15px] py-[10px] text-vscode-foreground">
+					<ChatRowContent
+						message={message}
+						isExpanded={false}
+						isLast={false}
+						isStreaming={false}
+						onToggleExpand={() => undefined}
+						onSuggestionClick={() => undefined}
+						onBatchFileResponse={() => undefined}
+						onFollowUpUnmount={() => undefined}
+						isFollowUpAnswered={false}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">

@@ -1743,14 +1743,15 @@ describe("trimToolResultTextForCondensing", () => {
 		}
 	})
 
-	it.each(["head", "tail"])("never leaves a lone surrogate at the %s cut", (side) => {
+	// Each overage puts that side's cut inside a surrogate pair, so removing either safeguard fails.
+	it.each([
+		["head", 3_000],
+		["tail", 3_002],
+	])("never leaves a lone surrogate at the %s cut", (side, overage) => {
 		const body = "A".repeat(5_000)
 		const emoji = "\u{1F600}"
-		// Place emoji pairs across the whole body so both cuts fall inside some pair.
 		const text = side === "head" ? emoji.repeat(2_500) + body : body + emoji.repeat(2_500)
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: [toolResultText(text)] }]
-		const overage = 3_001
-
 		const result = trimToolResultTextForCondensing(messages, overage)
 		const trimmed = (result[0].content as Anthropic.Messages.TextBlockParam[])[0].text
 
