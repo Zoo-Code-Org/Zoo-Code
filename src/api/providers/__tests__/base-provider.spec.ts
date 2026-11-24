@@ -419,6 +419,38 @@ describe("BaseProvider", () => {
 			expect(acceptsValue(prop, null)).toBe(true)
 		})
 
+		it("normalizes array-item objects before wrapping a multi-match oneOf (#2653 review 4675584064)", () => {
+			// The wrapper leaves no effective type, so the recursion below
+			// never reaches the items object — it must be normalized before
+			// the wrap, while the declared (nullable) array type and the
+			// outer null alternative are preserved.
+			const schema = {
+				type: "object",
+				properties: {
+					value: {
+						type: "array",
+						items: { type: "object", properties: { limit: { type: "integer" } } },
+						oneOf: [{ type: ["array", "null"] }, { type: ["string", "null"] }],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toHaveLength(2)
+			const original = prop.anyOf[0]
+			// The array original keeps its declared (nullable) type.
+			expect(original.type).toEqual(["array", "null"])
+			// Its items object carries the strict constraints.
+			expect(original.items.additionalProperties).toBe(false)
+			expect(original.items.required).toEqual(["limit"])
+			expect(original.items.properties.limit.type).toEqual(["integer", "null"])
+			// Null stays accepted through the outer alternative only.
+			expect(prop.anyOf[1]).toEqual({ type: "null" })
+			expect(acceptsValue(prop, null)).toBe(true)
+		})
+
 		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {
 			// null matches TWO inner alternatives; appending nothing leaves
 			// oneOf rejecting null (exactly-one), so the property must be

@@ -57,13 +57,20 @@
 \* RecursesIntoNested now reports the nested COMBINATOR truth, not just
 \* inner-alternative acceptance. 0 covered, 1 added, 0 gap; replays as a
 \* red-verified unit test in base-provider.spec.ts.
+\* Review round 6 (PR #2653, thread 4675584064): a wrapped ARRAY-typed
+\* original must normalize its items object before the wrap, exactly as the
+\* object shape does. This round also closes the pending round-5 object
+\* ratchet (thread 4675158952): both shapes are one invariant,
+\* WrappedInnerStrict, on the new wrappedInner input (none/object/array).
+\* 0 covered, 1 added, 0 gap; replays as a red-verified unit test in
+\* base-provider.spec.ts. Fixed gate: 480 states.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner
 
 Props == {q}
 Types == {"str", "null"}
@@ -95,6 +102,14 @@ RecursesIntoNested(nm) ==
 WrapsMultiMatch(multi) == multi => TRUE
 NaiveWrapperAccepts(inner) == TRUE
 NeverWrapped(multi) == FALSE
+\* Fixed code: when a multi-match wrap hides the original's effective type,
+\* the original's own inner schema is normalized BEFORE the wrap — an
+\* object-typed original carries required/all-keys and additionalProperties:
+\* false (round 4675158952), and an array-typed original's items object
+\* carries them (round 4675584064).
+NormalizesWrappedInner(shape) == shape # "none"
+\* Sabotage: the wrap keeps the original's inner schema untouched.
+SkipsWrappedInner(shape) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -144,6 +159,11 @@ AcceptsNull ==
     /\ (qEnum => "null" \in EmittedEnum)
     /\ ((nestedWrapper \/ oneOfMultiNull) => CombinatorGroundTruth)
 
+\* The strict constraints the emitted wrapped original's inner schema
+\* carries. Object shape: the original itself. Array shape: its items
+\* object. None: no inner schema to normalize.
+EmittedInnerStrict == NormalizesWrappedInner(wrappedInner)
+
 \* A nested wrapper and a multi-match oneOf are two shapes of the same
 \* property; the code normalizes at most one combinator route per property.
 TypeOK ==
@@ -155,7 +175,9 @@ TypeOK ==
     /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
     /\ NestedIsOneOf \in {0, 1}
+    /\ wrappedInner \in {"none", "object", "array"}
     /\ ~(nestedWrapper /\ oneOfMultiNull)
+    /\ (wrappedInner # "none" => oneOfMultiNull)
 
 Init ==
     /\ declaredReq \in {Props, {}}
@@ -166,11 +188,13 @@ Init ==
     /\ nestedMatches \in 0..2
     /\ oneOfMultiNull \in BOOLEAN
     /\ NestedIsOneOf \in {0, 1}
+    /\ wrappedInner \in {"none", "object", "array"}
     /\ ~(nestedWrapper /\ oneOfMultiNull)
+    /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -186,5 +210,12 @@ NoForbiddenKeyword == EmittedPattern = FALSE
 \* multi-null-match oneOf is wrapped (4674816421) — the optional property
 \* still accepts null in both shapes.
 NestedOrMultiStillNullable == ((q \notin declaredReq) /\ (nestedWrapper \/ oneOfMultiNull)) => AcceptsNull
+
+\* Review round 6: a wrapped original's inner object schema keeps the strict
+\* constraints — required/all-keys and additionalProperties: false — either
+\* on the original (object shape, 4675158952) or on its items object (array
+\* shape, 4675584064). The merge-base converter normalized these; the
+\* stripping pass must not lose them.
+WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerStrict
 
 ====

@@ -250,6 +250,28 @@ export abstract class BaseProvider implements ApiHandler {
 									// nullable) type.
 									converted.type = original.type
 									normalizedProp = { anyOf: [converted, { type: "null" }] }
+								} else if (
+									originalTypes.includes("array") &&
+									(original as { items?: { type?: unknown } }).items?.type === "object"
+								) {
+									// The wrapper leaves no effective type for the
+									// recursion below, so the items object never
+									// reaches the array-item normalization — convert
+									// it here (review 4675584064). The declared
+									// (possibly nullable) array type is kept, and
+									// null stays accepted through the outer
+									// alternative.
+									normalizedProp = {
+										anyOf: [
+											{
+												...original,
+												items: this.convertToolSchemaForOpenAI(
+													(original as { items: unknown }).items,
+												),
+											},
+											{ type: "null" },
+										],
+									}
 								} else {
 									normalizedProp = { anyOf: [original, { type: "null" }] }
 								}
