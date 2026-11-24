@@ -43,13 +43,13 @@ Zoo Code 基于 Roo Code 打下的基础持续扩展，新增了：
 - **更可靠的终端和编辑工作流** — 修复终端过早完成、任务状态竞争、上下文管理、差异更新编辑和提供商专用工具调用等问题。
 - **更全面的工作区控制** — 支持规则管理、按模式限制 MCP、多根工作区路径控制、模型推理选项和完成后的变更审查操作。
 
-## v3.98.0 新增内容
+## Zoo Code v3.98.2 新增内容
 
-- 🎟️ 预览即将推出的 Zoo Pass 订阅。2 周免费使用；名额有限
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **自动任务标题与更精细的模型控制：** 自动为新的根任务生成标题，并尝试实验性的动态思考力度设置。
-- 🔌 **扩展的模型与供应商支持：** 使用 GPT-6.1 Terra 并获取最新的 Friendli 模型列表。
-- 🛡️ **更安全、响应更迅速的对话与编辑：** 正常取消 OpenAI Native 和 Requesty 请求，防止工作区外的 diff 被意外自动批准，一致地切换界面语言，并避免有歧义的 JSON 备份恢复。
+- 💫预览 Zoo Pass：只要你的 Zoo Gateway 账户中有任意金额的余额，即可在 12 月 1 日前免费无限使用 GLM-5.3-Flash。
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 模型：支持 Gemini 3.8 Flash 和新的 Gemini 4 Carbon、Hydrogen、Neon 模型。可为 Gemini 设置 xhigh 思考级别。
+- 🌐 Responses API：可为 OpenAI Compatible 提供商启用 Responses API 支持。在需要该 API 的端点上，带工具使用的推理也能正常工作。
+- 🔧 修复：Vertex 的 Gemini 请求不再以模型轮次结尾；LiteLLM 下的 Gemini 思考签名保持完整；Ollama 任务会在配置的上下文限制处压缩。
 
 ## Zoo Code 能为您做什么？
 

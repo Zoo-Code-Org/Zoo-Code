@@ -70,7 +70,8 @@
 		"goToModes": "모드 설정으로 이동",
 		"moreInfoMcp": "{{name}} MCP 문서 보기",
 		"validationRequired": "{{paramName}}에 대한 값을 입력해주세요",
-		"prerequisites": "전제 조건"
+		"prerequisites": "전제 조건",
+		"optional": "(선택 사항)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Marketplace 아이템에 문제가 있거나 새로운 아이템에 대한 제안이 있나요? <0>GitHub issue를 열어서</0> 알려주세요!"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "모드"
 	}
 }

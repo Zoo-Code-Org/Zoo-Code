@@ -527,6 +527,25 @@ export function getMessagesSinceLastSummary(messages: ApiMessage[]): ApiMessage[
 }
 
 /**
+ * Collects the condenseIds of every summary message that still exists in the history.
+ *
+ * A message's condenseParent tag hides it only when the tag matches one of these IDs.
+ * After a rewind deletes the summary, the tag no longer matches and the message is live again.
+ *
+ * @param messages - The full API conversation history
+ * @returns A Set of condenseIds belonging to summaries that currently exist
+ */
+export function getExistingSummaryIds(messages: ApiMessage[]): Set<string> {
+	const ids = new Set<string>()
+	for (const msg of messages) {
+		if (msg.isSummary && msg.condenseId) {
+			ids.add(msg.condenseId)
+		}
+	}
+	return ids
+}
+
+/**
  * Filters the API conversation history to get the "effective" messages to send to the API.
  *
  * Fresh Start Model:
@@ -609,14 +628,11 @@ export function getEffectiveApiHistory(messages: ApiMessage[]): ApiMessage[] {
 	// This handles the case of orphaned condenseParent tags (summary was deleted via rewind)
 
 	// Collect all condenseIds of summaries that exist in the current history
-	const existingSummaryIds = new Set<string>()
+	const existingSummaryIds = getExistingSummaryIds(messages)
 	// Collect all truncationIds of truncation markers that exist in the current history
 	const existingTruncationIds = new Set<string>()
 
 	for (const msg of messages) {
-		if (msg.isSummary && msg.condenseId) {
-			existingSummaryIds.add(msg.condenseId)
-		}
 		if (msg.isTruncationMarker && msg.truncationId) {
 			existingTruncationIds.add(msg.truncationId)
 		}
@@ -651,14 +667,11 @@ export function getEffectiveApiHistory(messages: ApiMessage[]): ApiMessage[] {
  */
 export function cleanupAfterTruncation(messages: ApiMessage[]): ApiMessage[] {
 	// Collect all condenseIds of summaries that still exist
-	const existingSummaryIds = new Set<string>()
+	const existingSummaryIds = getExistingSummaryIds(messages)
 	// Collect all truncationIds of truncation markers that still exist
 	const existingTruncationIds = new Set<string>()
 
 	for (const msg of messages) {
-		if (msg.isSummary && msg.condenseId) {
-			existingSummaryIds.add(msg.condenseId)
-		}
 		if (msg.isTruncationMarker && msg.truncationId) {
 			existingTruncationIds.add(msg.truncationId)
 		}

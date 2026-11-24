@@ -265,3 +265,27 @@ describe("Code Action Prompts", () => {
 		})
 	})
 })
+
+describe("createSegments", () => {
+	it("marks only the user input as a user segment and matches create()", () => {
+		const params = { filePath: "a.ts", selectedText: "code @/secret", userInput: "mine @/ok" }
+		const segments = supportPrompt.createSegments("EXPLAIN", params)
+
+		expect(segments.map((s) => s.text).join("")).toBe(supportPrompt.create("EXPLAIN", params))
+		expect(segments.filter((s) => s.source === "user")).toEqual([{ text: "mine @/ok", source: "user" }])
+		expect(segments.filter((s) => s.source === "generated").some((s) => s.text.includes("@/secret"))).toBe(true)
+	})
+
+	it("has no user segment without user input", () => {
+		const params = { filePath: "a.ts", selectedText: "code @/secret" }
+		const segments = supportPrompt.createSegments("EXPLAIN", params)
+
+		expect(segments.some((s) => s.source === "user")).toBe(false)
+		expect(segments.map((s) => s.text).join("")).toBe(supportPrompt.create("EXPLAIN", params))
+	})
+
+	it("does not treat a parameter that holds user-like text as a user segment", () => {
+		const segments = supportPrompt.createSegments("EXPLAIN", { selectedText: "@/secret", userInput: "" })
+		expect(segments.some((s) => s.source === "user")).toBe(false)
+	})
+})

@@ -47,13 +47,13 @@ Zoo Code bouwt voort op het fundament van Roo Code en breidt dit verder uit met:
 - **Betrouwbaardere terminal- en bewerkingsworkflows** — oplossingen voor voortijdige terminalvoltooiing, race conditions in taakstatussen, contextbeheer, diff-bewerking en providerspecifiek toolgebruik.
 - **Meer controle over je workspace** — regelbeheer, MCP-beperkingen per modus, padbeheer voor multi-root-workspaces, reasoning-opties voor modellen en acties om wijzigingen bij voltooiing te beoordelen.
 
-## Nieuw in v3.98.0
+## Nieuw in Zoo Code v3.98.2
 
-- 🎟️ Bekijk een voorbeeld van het komende Zoo Pass-abonnement. 2 weken gratis toegang; beperkte plaatsen
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Automatische taaktitels en fijnere modelregeling:** Genereer automatisch titels voor nieuwe root-taken en probeer de experimentele instelling voor dynamische denkinspanning.
-- 🔌 **Uitgebreidere ondersteuning voor modellen en providers:** Gebruik GPT-6.1 Terra en haal de nieuwste Friendli-modellenlijst op.
-- 🛡️ **Veiligere, responsievere chats en bewerkingen:** Annuleer OpenAI Native- en Requesty-verzoeken netjes, voorkom onbedoelde automatische goedkeuring van diffs buiten de workspace, schakel consistent tussen UI-talen en vermijd dubbelzinnig herstel van JSON-back-ups.
+- 💫Probeer Zoo Pass met onbeperkt GLM-5.3-Flash gratis tot 1 december met elk geldbedrag op je Zoo Gateway-account.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modellen: Gebruik Gemini 3.8 Flash en de nieuwe modellen Gemini 4 Carbon, Hydrogen en Neon. Stel xhigh-denkniveaus in voor Gemini.
+- 🌐 Responses API: Zet Responses API-ondersteuning aan voor OpenAI Compatible-providers. Redeneren met toolgebruik werkt op endpoints die dit vereisen.
+- 🔧 Oplossingen: Vertex Gemini-verzoeken eindigen niet langer op een modelbeurt. Gemini-thought-signatures blijven via LiteLLM intact. Ollama-taken condenseren op de ingestelde contextlimiet.
 
 ## Wat kan Zoo Code voor JOU doen?
 

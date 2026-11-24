@@ -9,7 +9,10 @@ import {
 } from "@roo-code/types"
 
 import type { DcgDecision } from "../../services/destructive-command-guard/runner"
+import { realpath } from "fs/promises"
+import path from "path"
 
+import type { ApprovalFileTarget } from "../../shared/tools"
 import { ClineAskResponse } from "../../shared/WebviewMessage"
 
 import { parseCommand } from "../../shared/parse-command"
@@ -83,12 +86,54 @@ function namedFiles(tool: ClineSayTool): { paths: string[]; hasUnnamedFiles: boo
 }
 
 /**
- * Whether every file named by a tool action is covered by `matchFun`.
+ * The tool's file targets, if they account for every file its message names.
  *
- * Returns `false` for an action naming no file at all, since patterns can only
- * grant access to files they name, and for one that carries unnamed files.
+ * Targets replace the display paths for every decision, so they must be
+ * complete: one valid, absolute target per named file, and no unnamed files.
+ * Returns `undefined` otherwise, and the caller must ask the user, since an
+ * incomplete list could leave a touched file unchecked.
  */
-function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string) => boolean): boolean {
+function validFileTargets(
+	tool: ClineSayTool,
+	fileTargets: readonly ApprovalFileTarget[],
+): readonly ApprovalFileTarget[] | undefined {
+	const { paths, hasUnnamedFiles } = namedFiles(tool)
+
+	if (hasUnnamedFiles || !fileTargets.length || fileTargets.length !== paths.length) {
+		return undefined
+	}
+
+	// Read the platform per call, as the pattern matcher does.
+	const nativePath = process.platform === "win32" ? path.win32 : path.posix
+	const isValid = fileTargets.every(
+		(target) =>
+			typeof target === "object" &&
+			target !== null &&
+			typeof target.absolutePath === "string" &&
+			nativePath.isAbsolute(target.absolutePath) &&
+			typeof target.isOutsideWorkspace === "boolean",
+	)
+
+	return isValid ? fileTargets : undefined
+}
+
+/**
+ * Whether every file of a tool action is covered by `matchFun`.
+ *
+ * Matches the tool's file targets when it supplied them, and otherwise the
+ * display paths its message names. Returns `false` for an action naming no file
+ * at all, since patterns can only grant access to files they name, and for one
+ * that carries unnamed files.
+ */
+function areAllFilesMatched(
+	tool: ClineSayTool,
+	targets: readonly ApprovalFileTarget[] | undefined,
+	matchFun: (filePath: string) => boolean,
+): boolean {
+	if (targets) {
+		return targets.every((target) => matchFun(target.absolutePath))
+	}
+
 	const { paths, hasUnnamedFiles } = namedFiles(tool)
 
 	if (hasUnnamedFiles) {
@@ -102,6 +147,19 @@ function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string
 	}
 
 	return paths.every((filePath) => matchFun(filePath))
+}
+
+async function resolveCanonicalWorkspaceRoot(cwd: string | undefined): Promise<string | undefined> {
+	if (!cwd) return undefined
+
+	try {
+		// Read tools resolve paths lexically before accessing the filesystem.
+		// Verify that same root: resolving symlink/.. first can identify a different directory.
+		return await realpath(path.resolve(cwd))
+	} catch (error) {
+		console.error(`[auto-approval] Failed to resolve workspace root ${cwd}:`, error)
+		return undefined
+	}
 }
 
 /**
@@ -122,20 +180,27 @@ function areAllNamedFilesMatched(tool: ClineSayTool, matchFun: (filePath: string
  * narrows the list it appears in. This also means that negating a read is
  * ineffective while a non-negated write pattern still matches the file.
  */
-function isReadAllowedByPatterns(
+async function isReadAllowedByPatterns(
 	tool: ClineSayTool,
+	targets: readonly ApprovalFileTarget[] | undefined,
 	cwd: string | undefined,
 	state: Pick<ExtensionState, "allowedReadFiles" | "allowedWriteFiles">,
-): boolean {
-	if (tool.tool !== "readFile") {
+): Promise<boolean> {
+	if (tool.tool !== "readFile" || (!state.allowedReadFiles?.length && !state.allowedWriteFiles?.length)) {
 		return false
 	}
 
-	return areAllNamedFilesMatched(
+	// Task-local root only, and only for native targets: a display path can name
+	// a different file than the one read, so it never gains the canonical root's
+	// reach. Never resolve individual file aliases here, since those can point
+	// outside the workspace.
+	const canonicalCwd = targets ? await resolveCanonicalWorkspaceRoot(cwd) : undefined
+	return areAllFilesMatched(
 		tool,
+		targets,
 		(filePath) =>
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedReadFiles }) ||
-			isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedWriteFiles }),
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedReadFiles }) ||
+			isFileMatchedByPatterns({ filePath, cwd, canonicalCwd, patterns: state.allowedWriteFiles }),
 	)
 }
 
@@ -147,10 +212,11 @@ function isReadAllowedByPatterns(
  */
 function isWriteAllowedByPatterns(
 	tool: ClineSayTool,
+	targets: readonly ApprovalFileTarget[] | undefined,
 	cwd: string | undefined,
 	state: Pick<ExtensionState, "allowedWriteFiles">,
 ): boolean {
-	return areAllNamedFilesMatched(tool, (filePath) =>
+	return areAllFilesMatched(tool, targets, (filePath) =>
 		isFileMatchedByPatterns({ filePath, cwd, patterns: state.allowedWriteFiles }),
 	)
 }
@@ -233,6 +299,7 @@ export async function checkAutoApproval({
 	text,
 	isProtected,
 	dcgDecision,
+	fileTargets,
 }: {
 	state?: Pick<ExtensionState, AutoApprovalState | AutoApprovalStateOptions>
 	/**
@@ -254,6 +321,8 @@ export async function checkAutoApproval({
 	 * error before this check, so a verdict here is authoritative.
 	 */
 	dcgDecision?: DcgDecision
+	/** See `AutoApprovalContext.fileTargets`. */
+	fileTargets?: readonly ApprovalFileTarget[]
 }): Promise<CheckAutoApprovalResult> {
 	if (isNonBlockingAsk(ask)) {
 		return { decision: "approve" }
@@ -476,14 +545,22 @@ export async function checkAutoApproval({
 			return state.alwaysAllowSubtasks === true ? { decision: "approve" } : { decision: "ask" }
 		}
 
-		const isOutsideWorkspace = !!tool.isOutsideWorkspace
+		const targets = fileTargets === undefined ? undefined : validFileTargets(tool, fileTargets)
+
+		if (fileTargets !== undefined && !targets) {
+			return { decision: "ask" }
+		}
+
+		const isOutsideWorkspace = targets
+			? targets.some((target) => target.isOutsideWorkspace)
+			: !!tool.isOutsideWorkspace
 
 		if (isReadOnlyToolAction(tool)) {
 			// A file listed in `allowedReadFiles` may be read without the blanket
 			// `alwaysAllowReadOnly` permission. Such a pattern names its
 			// location, including outside the workspace, so it also stands in for
 			// `alwaysAllowReadOnlyOutsideWorkspace`.
-			const isAllowedReadFile = isReadAllowedByPatterns(tool, cwd, state)
+			const isAllowedReadFile = await isReadAllowedByPatterns(tool, targets, cwd, state)
 
 			const isReadAllowed =
 				isAllowedReadFile ||
@@ -502,7 +579,7 @@ export async function checkAutoApproval({
 			// It deliberately does not stand in for `alwaysAllowWriteProtected`:
 			// a broad pattern such as `*.md` would otherwise silently cover
 			// protected files like `AGENTS.md`.
-			const isAllowedWriteFile = isWriteAllowedByPatterns(tool, cwd, state)
+			const isAllowedWriteFile = isWriteAllowedByPatterns(tool, targets, cwd, state)
 
 			const isWriteAllowed =
 				isAllowedWriteFile ||

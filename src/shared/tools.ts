@@ -7,6 +7,20 @@ import type { DcgDecision } from "../services/destructive-command-guard/runner"
 export type ToolResponse = string | Array<Anthropic.TextBlockParam | Anthropic.ImageBlockParam>
 
 /**
+ * A file a tool action will touch, as the filesystem sees it.
+ *
+ * The `path` in a tool's ask message is formatted for the chat and can lose
+ * information: on POSIX, `getReadablePath` rewrites a literal backslash in a
+ * filename into a directory separator. Permission checks must therefore use the
+ * same resolved path the tool hands to the filesystem, never the display path.
+ */
+export type ApprovalFileTarget = {
+	/** Absolute path in the platform's native spelling, exactly as the tool accesses it. */
+	absolutePath: string
+	isOutsideWorkspace: boolean
+}
+
+/**
  * Extra inputs that only some ask types consult when resolving auto-approval.
  * Carried from the tool through `askApproval` into `Task.ask` and onward to
  * `checkAutoApproval`. All fields are optional, so tools that pass nothing
@@ -25,6 +39,13 @@ export type AutoApprovalContext = {
 	 * follows that folder's policy, not the task folder's.
 	 */
 	commandCwd?: string
+	/**
+	 * Every file the tool action will access, one entry per file named in the
+	 * ask message (`tool` asks only). When present, auto-approval decides on
+	 * these targets instead of the message's display paths, and asks the user
+	 * if they are invalid or do not cover every named file.
+	 */
+	fileTargets?: readonly ApprovalFileTarget[]
 }
 
 export type AskApproval = (

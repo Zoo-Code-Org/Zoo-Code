@@ -47,13 +47,13 @@ Zoo Code baut auf dem von Roo Code geschaffenen Fundament auf und erweitert es f
 - **Zuverlässigere Terminal- und Bearbeitungsabläufe** — Korrekturen für vorzeitige Terminalabschlüsse, Race Conditions beim Aufgabenstatus, Kontextverwaltung, diff-Bearbeitung und anbieterspezifische Tool-Nutzung.
 - **Mehr Kontrolle über deinen Workspace** — Regelverwaltung, MCP-Beschränkungen pro Modus, Pfadsteuerung für Multi-Root-Workspaces, Reasoning-Optionen für Modelle und Aktionen zur Prüfung von Änderungen nach Abschluss.
 
-## Neu in v3.98.0
+## Neu in Zoo Code v3.98.2
 
-- 🎟️ Teste das kommende Zoo Pass-Abonnement. 2 Wochen kostenloser Zugang; begrenzte Plätze
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Automatische Aufgabentitel und feinere Modellsteuerung:** Erstelle Titel für neue Root-Aufgaben automatisch und probiere die experimentelle Einstellung für dynamischen Reasoning-Aufwand aus.
-- 🔌 **Erweiterte Modell- und Anbieterunterstützung:** Nutze GPT-6.1 Terra und rufe die aktuelle Friendli-Modellliste ab.
-- 🛡️ **Sicherere, reaktionsschnellere Chats und Bearbeitungen:** Breche OpenAI-Native- und Requesty-Anfragen sauber ab, schütze Diffs außerhalb des Workspace vor versehentlicher Auto-Genehmigung, wechsle UI-Sprachen konsistent und vermeide mehrdeutige JSON-Backup-Wiederherstellungen.
+- 💫Teste den Zoo Pass mit unbegrenztem GLM-5.3-Flash kostenlos bis zum 1. Dezember, wenn du einen beliebigen Geldbetrag auf deinem Zoo Gateway-Konto hast.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modelle: Nutze Gemini 3.8 Flash und die neuen Modelle Gemini 4 Carbon, Hydrogen und Neon. Stelle xhigh-Denkstufen für Gemini ein.
+- 🌐 Responses API: Aktiviere die Responses-API-Unterstützung für OpenAI-Compatible-Anbieter. Reasoning mit Tool-Nutzung funktioniert auf Endpunkten, die sie verlangen.
+- 🔧 Korrekturen: Vertex-Gemini-Anfragen enden nicht mehr mit einem Modellzug. Thought-Signaturen von Gemini bleiben über LiteLLM intakt. Ollama-Aufgaben kondensieren am konfigurierten Kontextlimit.
 
 ## Was kann Zoo Code für DICH tun?
 

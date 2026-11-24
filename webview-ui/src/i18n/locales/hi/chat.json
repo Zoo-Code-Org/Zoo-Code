@@ -21,7 +21,8 @@
 	"pin": "अवपिन करें",
 	"fileChangesInConversation": {
 		"header_one": "इस वार्तालाप में {{count}} फ़ाइल बदली गई",
-		"header_other": "इस वार्तालाप में {{count}} फ़ाइलें बदली गईं"
+		"header_other": "इस वार्तालाप में {{count}} फ़ाइलें बदली गईं",
+		"lineStatsAriaLabel": "जोड़ी गई पंक्तियाँ: {{added}}, हटाई गई पंक्तियाँ: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "उपलब्ध स्थान: {{amount}} tokens",
@@ -232,7 +233,9 @@
 		"addToAllowed": "अनुमत सूची में जोड़ें",
 		"removeFromAllowed": "अनुमत सूची से हटाएँ",
 		"addToDenied": "अस्वीकृत सूची में जोड़ें",
-		"removeFromDenied": "अस्वीकृत सूची से हटाएँ"
+		"removeFromDenied": "अस्वीकृत सूची से हटाएँ",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "पैटर्न संपादित करने के लिए क्लिक करें"
 	},
 	"text": {
 		"rooSaid": "Zoo ने कहा"
@@ -290,7 +293,9 @@
 		"triggerLabel_zero": "0 स्वतः-अनुमोदन",
 		"triggerLabel_one": "{{count}} स्वतः-अनुमोदित",
 		"triggerLabel_other": "{{count}} स्वतः-अनुमोदित",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "सक्षम",
+		"toggleAriaLabel": "स्वतः-अनुमोदन टॉगल करें"
 	},
 	"reasoning": {
 		"thinking": "विचार कर रहा है",
@@ -323,12 +328,12 @@
 		"title": "Zoo Code {{version}} रिलीज़ हो गया",
 		"support": "कृपया <githubLink>GitHub</githubLink> पर हमें स्टार देकर Zoo Code का समर्थन करें।",
 		"release": {
-			"heading": "Zoo Code v3.98.0 में नया क्या है",
-			"highlight0": "🎟️ आगामी Zoo Pass सब्सक्रिप्शन का प्रीव्यू देखें। 2 सप्ताह मुफ़्त एक्सेस; सीमित स्थान",
-			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "🏷️ अपने आप टास्क टाइटल और बेहतर मॉडल नियंत्रण: नए रूट टास्क के टाइटल अपने आप बनाएँ और डायनामिक थिंकिंग-एफर्ट की प्रायोगिक सेटिंग आज़माएँ।",
-			"highlight2": "🔌 ज़्यादा मॉडल और प्रोवाइडर सपोर्ट: GPT-6.1 Terra इस्तेमाल करें और Friendli की नवीनतम मॉडल सूची पाएँ।",
-			"highlight3": "🛡️ ज़्यादा सुरक्षित और तेज़ प्रतिक्रिया वाले चैट और एडिट: OpenAI Native और Requesty रिक्वेस्ट को साफ़ तरीके से रद्द करें, वर्कस्पेस के बाहर के diffs के अनजाने ऑटो-अप्रूवल से बचाएँ, UI भाषा बदलने पर एकरूपता बनाए रखें, और JSON बैकअप रिकवरी में अस्पष्टता से बचें।"
+			"heading": "Zoo Code v3.98.2 में नया क्या है",
+			"highlight0": "💫अपने Zoo Gateway खाते में किसी भी राशि के साथ 1 दिसंबर तक असीमित GLM-5.3-Flash के साथ Zoo Pass का मुफ़्त पूर्वावलोकन करें।",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 मॉडल: Gemini 3.8 Flash और नए Gemini 4 Carbon, Hydrogen और Neon मॉडल का उपयोग करें। Gemini पर xhigh थिंकिंग स्तर सेट करें।",
+			"highlight2": "🌐 Responses API: OpenAI Compatible प्रदाताओं के लिए Responses API समर्थन चालू करें। टूल उपयोग के साथ रीजनिंग उन एंडपॉइंट पर काम करता है जिन्हें इसकी आवश्यकता होती है।",
+			"highlight3": "🔧 सुधार: Vertex Gemini अनुरोध अब मॉडल टर्न पर समाप्त नहीं होते। LiteLLM के माध्यम से Gemini थॉट सिग्नेचर सुरक्षित रहते हैं। Ollama कार्य कॉन्फ़िगर की गई कॉन्टेक्स्ट सीमा पर संकुचित होते हैं।"
 		}
 	},
 	"costs": {
@@ -367,7 +372,8 @@
 		"wantsToSearchWithPath": "Zoo <code>{{path}}</code> में कोडबेस में <code>{{query}}</code> खोजना चाहता है",
 		"didSearch_one": "{{count}} परिणाम मिला",
 		"didSearch_other": "{{count}} परिणाम मिले",
-		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)"
+		"resultTooltip": "समानता स्कोर: {{score}} (फ़ाइल खोलने के लिए क्लिक करें)",
+		"displayError": "खोज परिणाम दिखाने में त्रुटि।"
 	},
 	"read-batch": {
 		"approve": {
@@ -419,7 +425,17 @@
 		"noResults": "कोई परिणाम नहीं",
 		"problems": "समस्याएँ",
 		"terminal": "टर्मिनल",
-		"url": "सामग्री लाने के लिए URL पेस्ट करें"
+		"url": "सामग्री लाने के लिए URL पेस्ट करें",
+		"gitCommits": "Git कमिट्स",
+		"gitCommitsDescription": "रिपॉज़िटरी इतिहास खोजें",
+		"workingChanges": "कार्यशील बदलाव",
+		"workingChangesDescription": "मौजूदा बिना कमिट किए बदलाव",
+		"commit": "कमिट {{hash}}",
+		"commitHashDescription": "Git कमिट हैश",
+		"addFile": "फ़ाइल जोड़ें",
+		"addFolder": "फ़ोल्डर जोड़ें",
+		"commands": "कमांड",
+		"modes": "मोड"
 	},
 	"queuedMessages": {
 		"title": "कतार में संदेश",
@@ -432,7 +448,28 @@
 	"todo": {
 		"partial": "{{total}} में से {{completed}} टू-डू हो गए",
 		"complete": "{{total}} टू-डू हो गए",
-		"updated": "टू-डू सूची अपडेट की गई"
+		"updated": "टू-डू सूची अपडेट की गई",
+		"listUpdated": "टू-डू सूची अपडेट की गई",
+		"userEdit": "उपयोगकर्ता का संपादन",
+		"userEdits": "उपयोगकर्ता के संपादन",
+		"edit": "संपादित करें",
+		"done": "हो गया",
+		"itemPlaceholder": "टू-डू आइटम दर्ज करें",
+		"newItemPlaceholder": "टू-डू आइटम दर्ज करें, जोड़ने के लिए Enter दबाएँ",
+		"remove": "हटाएँ",
+		"add": "जोड़ें",
+		"cancel": "रद्द करें",
+		"addTodo": "+ टू-डू जोड़ें",
+		"status": {
+			"notStarted": "शुरू नहीं हुआ",
+			"inProgress": "प्रगति में",
+			"completed": "पूर्ण"
+		},
+		"deleteDialog": {
+			"title": "टू-डू आइटम हटाएँ",
+			"description": "क्या तुम वाकई इस टू-डू आइटम को हटाना चाहते हो?",
+			"confirm": "हटाएँ"
+		}
 	},
 	"tooManyTools": {
 		"title": "बहुत सारे उपकरण सक्षम हैं",
@@ -454,5 +491,25 @@
 		"title": "प्रदाता अब समर्थित नहीं है",
 		"message": "यह प्रदाता अब उपलब्ध नहीं है। जारी रखने के लिए कोई समर्थित प्रदाता चुनें।",
 		"openSettings": "सेटिंग्स खोलें"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code में साइन इन करें",
+		"goToDashboard": "डैशबोर्ड पर जाएँ",
+		"signOut": "साइन आउट करें",
+		"avatarAlt": "अवतार",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "कनेक्टेड"
+	},
+	"arguments": "आर्ग्युमेंट्स:",
+	"copyAsMarkdown": "Markdown के रूप में कॉपी करें",
+	"openInPreview": "प्रीव्यू में खोलें",
+	"codeAccordion": {
+		"userEdits": "उपयोगकर्ता के संपादन",
+		"consoleLogs": "कंसोल लॉग",
+		"openFileAriaLabel": "फ़ाइल खोलें: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_one": "{{count}} छिपी हुई पंक्ति",
+		"hiddenLines_other": "{{count}} छिपी हुई पंक्तियाँ"
 	}
 }

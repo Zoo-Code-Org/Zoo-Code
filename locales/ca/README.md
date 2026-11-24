@@ -47,13 +47,13 @@ Zoo Code parteix de la base creada per Roo Code i continua ampliant-la amb:
 - **Fluxos de terminal i edició més fiables** — correccions per a la finalització prematura del terminal, les condicions de cursa en l'estat de les tasques, la gestió del context, l'edició de diff i l'ús d'eines específiques de cada proveïdor.
 - **Més control sobre el teu espai de treball** — gestió de regles, restriccions MCP per mode, controls de rutes multiarrel, opcions de raonament dels models i accions per revisar els canvis en completar una tasca.
 
-## Novetats a la v3.98.0
+## Novetats de Zoo Code v3.98.2
 
-- 🎟️ Prova la propera subscripció Zoo Pass. 2 setmanes d'accés gratuït; places limitades
-  [https://www.zoocode.dev/pass](https://www.zoocode.dev/pass)
-- 🏷️ **Títols de tasques automàtics i més control dels models:** Genera títols per a les noves tasques arrel automàticament i prova el paràmetre experimental d'esforç de raonament dinàmic.
-- 🔌 **Més compatibilitat amb models i proveïdors:** Utilitza GPT-6.1 Terra i obtén la llista més recent de models de Friendli.
-- 🛡️ **Xats i edicions més segurs i responsius:** Cancel·la netament les sol·licituds d'OpenAI Native i Requesty, evita l'aprovació automàtica accidental de diffs fora de l'espai de treball, canvia l'idioma de la interfície de manera coherent i evita recuperacions ambigües de còpies de seguretat JSON.
+- 💫Prova Zoo Pass amb GLM-5.3-Flash il·limitat de franc fins a l'1 de desembre amb qualsevol saldo al teu compte de Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Models: Utilitza Gemini 3.8 Flash i els nous models Gemini 4 Carbon, Hydrogen i Neon. Configura els nivells de pensament xhigh a Gemini.
+- 🌐 API de Responses: Activa la compatibilitat amb l'API de Responses per a proveïdors compatibles amb OpenAI. El raonament amb ús d'eines funciona en punts finals que la requereixen.
+- 🔧 Correccions: Les peticions de Gemini a Vertex ja no acaben amb un torn del model. Les signatures de pensament de Gemini es mantenen intactes amb LiteLLM. Les tasques d'Ollama es condensen al límit de context configurat.
 
 ## Què pot fer Zoo Code per TU?
 

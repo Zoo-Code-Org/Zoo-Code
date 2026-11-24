@@ -991,9 +991,13 @@ describe("webviewMessageHandler - image mentions", () => {
 		})
 
 		expect(vi.mocked(resolveImageMentions)).toHaveBeenCalled()
-		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith("messageResponse", "See @/img.png", [
-			"data:image/png;base64,from-mention",
-		])
+		// Omitted segments fail closed, so the text is all generated.
+		expect(mockHandleWebviewAskResponse).toHaveBeenCalledWith(
+			"messageResponse",
+			"See @/img.png",
+			["data:image/png;base64,from-mention"],
+			[{ text: "See @/img.png", source: "generated" }],
+		)
 	})
 })
 
@@ -1209,11 +1213,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			expect.objectContaining({ provider: providerIdentifiers.kenari }),
 			expect.anything(),
 		)
-		// IO Intelligence's /models catalog is public and may optionally be scoped by a key.
-		expect(mockGetModels).toHaveBeenCalledWith(
-			{ provider: providerIdentifiers.ioIntelligence, apiKey: undefined },
-			expect.anything(),
-		)
 		// NanoGPT's detailed catalog is public and may optionally be scoped by a key.
 		expect(mockGetModels).toHaveBeenCalledWith(
 			{ provider: providerIdentifiers.nanogpt, apiKey: undefined },
@@ -1237,7 +1236,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1537,7 +1535,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,
@@ -1566,7 +1563,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 			.mockRejectedValueOnce(new Error("LiteLLM connection failed")) // litellm
 			.mockResolvedValueOnce(mockModels) // opencode-go
 			.mockResolvedValueOnce(mockModels) // kenari
-			.mockResolvedValueOnce(mockModels) // io-intelligence
 			.mockResolvedValueOnce(mockModels) // nanogpt
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -1605,7 +1601,6 @@ describe("webviewMessageHandler - requestRouterModels", () => {
 				moonshot: {},
 				"opencode-go": mockModels,
 				kenari: mockModels,
-				"io-intelligence": mockModels,
 				nanogpt: mockModels,
 				"kimi-code": {},
 				friendli: mockModels,

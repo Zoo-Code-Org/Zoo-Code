@@ -20,7 +20,8 @@
 	"unpin": "고정 해제하기",
 	"pin": "고정하기",
 	"fileChangesInConversation": {
-		"header_other": "이 대화에서 {{count}}개 파일이 변경됨"
+		"header_other": "이 대화에서 {{count}}개 파일이 변경됨",
+		"lineStatsAriaLabel": "추가된 줄: {{added}}, 삭제된 줄: {{removed}}"
 	},
 	"tokenProgress": {
 		"availableSpace": "사용 가능한 공간: {{amount}} 토큰",
@@ -231,7 +232,9 @@
 		"addToAllowed": "허용 목록에 추가",
 		"removeFromAllowed": "허용 목록에서 제거",
 		"addToDenied": "거부 목록에 추가",
-		"removeFromDenied": "거부 목록에서 제거"
+		"removeFromDenied": "거부 목록에서 제거",
+		"pid": "(PID: {{pid}})",
+		"clickToEditPattern": "클릭하여 패턴 편집"
 	},
 	"text": {
 		"rooSaid": "루가 말했다"
@@ -288,7 +291,9 @@
 		"triggerLabelOffShort": "꺼짐",
 		"triggerLabel_zero": "0개 자동 승인됨",
 		"triggerLabel_other": "{{count}}개 자동 승인됨",
-		"triggerLabelAll": "BRRR"
+		"triggerLabelAll": "BRRR",
+		"enabled": "활성화됨",
+		"toggleAriaLabel": "자동 승인 전환"
 	},
 	"reasoning": {
 		"thinking": "생각 중",
@@ -320,12 +325,12 @@
 		"title": "Zoo Code {{version}} 출시",
 		"support": "<githubLink>GitHub</githubLink>에서 별표를 눌러 Zoo Code를 응원해 주세요.",
 		"release": {
-			"heading": "Zoo Code v3.98.0의 새로운 기능",
-			"highlight0": "🎟️ 곧 출시될 Zoo Pass 구독을 미리 체험해 보세요. 2주 묣료 이용; 한정된 자리",
-			"highlight0Url": "https://www.zoocode.dev/pass",
-			"highlight1": "🏷️ 자동 작업 제목과 세밀한 모델 제어: 새 루트 작업의 제목을 자동으로 생성하고 실험적인 동적 사고 노력 설정을 사용해 보세요.",
-			"highlight2": "🔌 확장된 모델 및 프로바이더 지원: GPT-6.1 Terra를 사용하고 Friendli의 최신 모델 목록을 가져오세요.",
-			"highlight3": "🛡️ 더 안전하고 반응이 빠른 채팅과 편집: OpenAI Native 및 Requesty 요청을 깔끔하게 취소하고 작업 공간 밖 diff의 실수 자동 승인을 방지하며 UI 언어를 일관되게 전환하고 모호한 JSON 백업 복구를 피하세요."
+			"heading": "Zoo Code v3.98.2의 새로운 기능",
+			"highlight0": "💫Zoo Gateway 계정에 금액에 관계없이 잔액이 있으면 12월 1일까지 GLM-5.3-Flash를 무제한으로 사용하는 Zoo Pass를 무료로 체험할 수 있습니다.",
+			"highlight0Url": "https://zoocode.dev/pass",
+			"highlight1": "🔌 모델: Gemini 3.8 Flash와 새로운 Gemini 4 Carbon, Hydrogen, Neon 모델을 사용하세요. Gemini에서 xhigh 사고 수준을 설정할 수 있습니다.",
+			"highlight2": "🌐 Responses API: OpenAI Compatible 제공업체에서 Responses API 지원을 사용할 수 있습니다. 도구 사용이 포함된 추론이 이를 요구하는 엔드포인트에서도 작동합니다.",
+			"highlight3": "🔧 수정: Vertex Gemini 요청이 더 이상 모델 턴으로 끝나지 않습니다. LiteLLM을 통해서도 Gemini 사고 서명이 손상되지 않습니다. Ollama 작업이 설정된 컨텍스트 한도에서 압축됩니다."
 		}
 	},
 	"costs": {
@@ -362,7 +367,8 @@
 		"wantsToSearch": "Zoo가 코드베이스에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"wantsToSearchWithPath": "Zoo가 <code>{{path}}</code>에서 <code>{{query}}</code>을(를) 검색하고 싶어합니다",
 		"didSearch_other": "{{count}}개의 결과를 찾았습니다",
-		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)"
+		"resultTooltip": "유사도 점수: {{score}} (클릭하여 파일 열기)",
+		"displayError": "검색 결과를 표시하는 중 오류가 발생했습니다."
 	},
 	"read-batch": {
 		"approve": {
@@ -414,7 +420,17 @@
 		"noResults": "결과 없음",
 		"problems": "문제",
 		"terminal": "터미널",
-		"url": "콘텐츠를 가져올 URL 붙여넣기"
+		"url": "콘텐츠를 가져올 URL 붙여넣기",
+		"gitCommits": "Git 커밋",
+		"gitCommitsDescription": "저장소 기록 검색",
+		"workingChanges": "작업 중인 변경 사항",
+		"workingChangesDescription": "커밋되지 않은 현재 변경 사항",
+		"commit": "커밋 {{hash}}",
+		"commitHashDescription": "Git 커밋 해시",
+		"addFile": "파일 추가",
+		"addFolder": "폴더 추가",
+		"commands": "명령",
+		"modes": "모드"
 	},
 	"queuedMessages": {
 		"title": "대기열 메시지",
@@ -427,7 +443,28 @@
 	"todo": {
 		"partial": "{{total}}개의 할 일 중 {{completed}}개 완료",
 		"complete": "{{total}}개의 할 일 완료",
-		"updated": "할 일 목록을 업데이트했습니다"
+		"updated": "할 일 목록을 업데이트했습니다",
+		"listUpdated": "할 일 목록 업데이트됨",
+		"userEdit": "사용자 편집",
+		"userEdits": "사용자 편집 내용",
+		"edit": "편집",
+		"done": "완료",
+		"itemPlaceholder": "할 일 입력",
+		"newItemPlaceholder": "할 일을 입력하고 Enter를 눌러 추가",
+		"remove": "제거",
+		"add": "추가",
+		"cancel": "취소",
+		"addTodo": "+ 할 일 추가",
+		"status": {
+			"notStarted": "시작 안 함",
+			"inProgress": "진행 중",
+			"completed": "완료됨"
+		},
+		"deleteDialog": {
+			"title": "할 일 삭제",
+			"description": "이 할 일을 삭제하시겠습니까?",
+			"confirm": "삭제"
+		}
 	},
 	"tooManyTools": {
 		"title": "활성화된 도구가 너무 많습니다",
@@ -447,5 +484,24 @@
 		"title": "공급자 지원 종료",
 		"message": "이 공급자는 더 이상 사용할 수 없습니다. 계속하려면 지원되는 공급자를 선택하세요.",
 		"openSettings": "설정 열기"
+	},
+	"zooCodeAuth": {
+		"signIn": "Zoo Code에 로그인",
+		"goToDashboard": "대시보드로 이동",
+		"signOut": "로그아웃",
+		"avatarAlt": "아바타",
+		"accountTitle": "Zoo Code: {{account}}",
+		"connected": "연결됨"
+	},
+	"arguments": "인수:",
+	"copyAsMarkdown": "Markdown으로 복사",
+	"openInPreview": "미리보기에서 열기",
+	"codeAccordion": {
+		"userEdits": "사용자 편집 내용",
+		"consoleLogs": "콘솔 로그",
+		"openFileAriaLabel": "파일 열기: {{path}}"
+	},
+	"diffView": {
+		"hiddenLines_other": "숨겨진 줄 {{count}}개"
 	}
 }

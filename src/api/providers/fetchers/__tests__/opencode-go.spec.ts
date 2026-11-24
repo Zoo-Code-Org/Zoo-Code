@@ -356,7 +356,7 @@ describe("Opencode Go Fetchers", () => {
 			expect(info.maxTokens).toBe(384_000)
 			expect(info.supportsPromptCache).toBe(true)
 			expect(info.supportsMaxTokens).toBe(true)
-			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh"])
+			expect(info.supportsReasoningEffort).toEqual(["disable", "low", "medium", "high", "xhigh", "max"])
 			expect(info.supportsImages).toBe(true)
 			expect(info.inputPrice).toBe(0.3)
 			expect(info.outputPrice).toBe(1.2)

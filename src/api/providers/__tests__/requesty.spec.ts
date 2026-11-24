@@ -100,6 +100,20 @@ vitest.mock("../fetchers/modelCache", () => ({
 				cacheReadsPrice: 0.3,
 				description: "Claude Sonnet 5",
 			},
+			"anthropic/claude-sonnet-5-5": {
+				maxTokens: 128000,
+				contextWindow: 1000000,
+				supportsImages: true,
+				supportsPromptCache: true,
+				supportsReasoningBudget: true,
+				supportsReasoningBinary: true,
+				supportsTemperature: false,
+				inputPrice: 3,
+				outputPrice: 15,
+				cacheWritesPrice: 3.75,
+				cacheReadsPrice: 0.3,
+				description: "Claude Sonnet 5.5",
+			},
 			"anthropic/claude-opus-5": {
 				maxTokens: 128000,
 				contextWindow: 1000000,
@@ -264,6 +278,25 @@ describe("RequestyHandler", () => {
 					stream: true,
 					stream_options: { include_usage: true },
 					temperature: 0,
+				}),
+			)
+		})
+
+		it.each([true, false, undefined])("maps Sonnet 5.5 reasoning enabled=%s into the request", async (enabled) => {
+			const handler = new RequestyHandler(
+				makeApiHandlerOptions({
+					requestyApiKey: "test-key",
+					requestyModelId: "anthropic/claude-sonnet-5-5",
+					enableReasoningEffort: enabled,
+				}),
+			)
+			mockCreate.mockResolvedValue(asyncStreamFrom([]))
+			await collectStream(handler.createMessage("test", [{ role: "user", content: "test" }]))
+			expect(mockCreate).toHaveBeenCalledWith(
+				expect.objectContaining({
+					model: "anthropic/claude-sonnet-5-5",
+					thinking: enabled ? { type: "adaptive", display: "summarized" } : { type: "between_tools" },
+					temperature: undefined,
 				}),
 			)
 		})

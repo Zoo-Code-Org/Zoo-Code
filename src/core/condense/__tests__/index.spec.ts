@@ -12,6 +12,7 @@ import {
 	summarizeConversation,
 	getMessagesSinceLastSummary,
 	getEffectiveApiHistory,
+	getExistingSummaryIds,
 	cleanupAfterTruncation,
 	extractCommandBlocks,
 	injectSyntheticToolResults,
@@ -584,6 +585,31 @@ describe("getEffectiveApiHistory", () => {
 		expect(userContent).toHaveLength(1)
 		expect(userContent[0].type).toBe("text")
 		expect(userContent[0].text).toBe("User added some text")
+	})
+})
+
+describe("getExistingSummaryIds", () => {
+	it("should collect only IDs from messages that are summaries and carry a condenseId", () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Tagged but not a summary", condenseId: "c1" },
+			{ role: "user", content: "Existing summary", isSummary: true, condenseId: "c2" },
+		]
+
+		const result = getExistingSummaryIds(messages)
+		// Only a summary that still exists may hide a tagged message.
+		expect(result.has("c2")).toBe(true)
+		expect(result.has("c1")).toBe(false)
+		expect(result.size).toBe(1)
+	})
+
+	it("should return an empty set when no message is a tagged summary", () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Plain message" },
+			{ role: "user", content: "Summary without a tag", isSummary: true },
+		]
+
+		const result = getExistingSummaryIds(messages)
+		expect(result.size).toBe(0)
 	})
 })
 

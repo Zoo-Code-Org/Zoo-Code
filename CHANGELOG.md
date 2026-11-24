@@ -1,5 +1,59 @@
 # Zoo Code Changelog
 
+## [3.98.2]
+
+### Models and Provider Controls
+
+- Add Gemini 3.8 Flash and the Gemini 4 Carbon, Hydrogen, and Neon models to the Gemini catalog, with image support, thinking levels, prices, and `xhigh` reasoning support (#2067 by @mzakharocsc, PR #2640 by @edelauna)
+- Add opt-in Responses API support for OpenAI Compatible providers, so reasoning with tool use works on endpoints that require the Responses API (#1579 by @kostia-ivashchenko, #2040 by @jeannotdamoiseaux, PR #2498 by @zoomote)
+
+### Security and Reliability
+
+- Fix: Prevent Vertex Gemini requests from ending with a model turn (#1287 by @gh311, PR #2641 by @edelauna)
+- Fix: Keep Gemini thought signatures intact when LiteLLM truncates tool call ids (#2064 by @TGDone, PR #2119 by @PierrunoYT)
+- Fix: Fetch Ollama model metadata before context management, so tasks condense at the configured context limit (#1151 by @pmltn, PR #2520 by @zoomote)
+
+## [3.98.1]
+
+### Models and Provider Controls
+
+- Add GPT-6.2 Sol and Astra to OpenAI Native and Codex, and correct service-tier cost handling (#2483 by @WebMad, PR #2484 by @WebMad)
+- Add Claude Sonnet 5.5 across supported providers (#2335 by @hideki-kanehashi, PR #2521 by @bigyao25)
+- Add a reasoning effort override for each LiteLLM profile (#2199 by @RytisLT, PR #2476 by @RytisLT)
+- Expose Max reasoning effort for DeepSeek V4.1 Flash on OpenCode Go (#2477 by @haalogen, PR #2478 by @haalogen)
+
+### Security and Reliability
+
+- Restrict mention expansion to authorized user input (#2461 by @edelauna, PR #2421 by @coderabbitai)
+- Prevent content security policy injection through OpenRouter URLs (#2460 by @edelauna, PR #2422 by @coderabbitai)
+- Require consent before Requesty deep links replace provider credentials (PR #2408 by @coderabbitai)
+- Prevent code execution when parsing skill and command metadata (PR #2456 by @coderabbitai)
+- Harden skill and command metadata parsing (PR #2457 by @coderabbitai)
+- Prevent code execution when reading and updating skill metadata (PR #2465 by @coderabbitai)
+- Enforce the CLI host approval policy for task configurations (PR #2472 by @coderabbitai)
+- Escape untrusted text in all CLI approval prompts (PR #2473 by @coderabbitai)
+- Match symbolic links to workspace roots during automatic approval (PR #2454 by @WebMad)
+- Secure command parsing and improve task titles, cancellation, observation tracking, profiles, recovery, translations, and CI (PR #2455 by @coderabbitai)
+
+### Tools and Interface
+
+- Tell the model which command syntax cmd.exe and PowerShell use (PR #2115 by @PierrunoYT)
+- Translate the remaining hardcoded UI labels (#2425 by @rrewll, PR #2458 by @rrewll)
+- Add a shared tool router and invalidate its MCP index when servers change (PR #2322 by @edelauna)
+- Remove 35 broken or unmaintained MCP listings and retire the IO Intelligence provider (#2624 by @edelauna, PR #2625 by @zoomote)
+
+### Testing and Maintenance
+
+- Require authentication for the VS Code E2E mock server (PR #2474 by @coderabbitai)
+- Move shared skill test fixtures into a named test helper (PR #2417 by @easonLiangWorldedtech)
+- Correct two mutation-testing exclusion directives (PR #2428 by @easonLiangWorldedtech)
+- Add discussion forms and a PR checklist item for new provider and MCP listings (PR #2517 by @zoomote)
+- Use Simplified Technical English in listing discussion templates and remove title prefixes (PR #2518 by @zoomote)
+
+### Previous Release Housekeeping
+
+- Merge the previous v3.98.0 release preparation after publication (PR #2451 by @zoomote)
+
 ## [3.98.0]
 
 - **Automatic task titles and finer model control:** Generate titles for new root tasks automatically and try the experimental dynamic thinking-effort setting.

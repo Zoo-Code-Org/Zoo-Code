@@ -70,7 +70,8 @@
 		"goToModes": "モード設定に移動",
 		"moreInfoMcp": "{{name}} MCPドキュメントを表示",
 		"validationRequired": "{{paramName}}の値を入力してください",
-		"prerequisites": "前提条件"
+		"prerequisites": "前提条件",
+		"optional": "（任意）"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -87,5 +88,9 @@
 	},
 	"footer": {
 		"issueText": "Marketplaceアイテムで問題を見つけた、または新しいアイテムの提案がありますか？<0>GitHub issueを開いて</0>お知らせください！"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "モード"
 	}
 }
