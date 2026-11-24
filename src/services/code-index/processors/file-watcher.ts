@@ -283,7 +283,7 @@ export class FileWatcher implements IFileWatcher {
 	}
 
 	private async _processFilesAndPrepareUpserts(
-		filesToUpsertDetails: Array<{ path: string; uri: vscode.Uri; originalType: "create" | "change" }>,
+		filesToUpsertDetails: ReadonlyArray<{ path: string; uri: vscode.Uri; originalType: "create" | "change" }>,
 		batchResults: FileProcessingResult[],
 		processedCountInBatch: number,
 		totalFilesInBatch: number,
@@ -297,10 +297,9 @@ export class FileWatcher implements IFileWatcher {
 		const pointsForBatchUpsert: PointStruct[] = []
 		const embeddingOutcomes: NonNullable<FileProcessingResult["embeddingOutcome"]>[] = []
 		const successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }> = []
-		const filesToProcessConcurrently = [...filesToUpsertDetails]
 
-		for (let i = 0; i < filesToProcessConcurrently.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
-			const chunkToProcess = filesToProcessConcurrently.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
+		for (let i = 0; i < filesToUpsertDetails.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
+			const chunkToProcess = filesToUpsertDetails.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
 
 			const chunkProcessingPromises = chunkToProcess.map(async (fileDetail) => {
 				this._onBatchProgressUpdate.fire({

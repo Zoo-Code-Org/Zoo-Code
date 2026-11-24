@@ -11,8 +11,8 @@
 \* Failure: recovery loses a live watcher. Invariant: RecoveryDisposes.
 \* Expect: recovery without disposal leaks after a trip. Overlapping work and cancellation remain outside scope.
 \* PR 2329, https://github.com/Zoo-Code-Org/Zoo-Code/pull/2329#discussion_r4638535661: added.
-\* Prior result: fixed passes (9 states). All nine sabotage configs fail. No additional failure was found.
-\* Variant states: SingleEmbedding 3, Local 3, Delete 4, Silent 8, StaleCount 8, Unreported 8, Leaked 10, Queued 10, Unguarded 10.
+\* Prior result: fixed passes (9 states). All eleven sabotage configs fail. No additional failure was found.
+\* Variant states: SingleEmbedding 3, Local 3, Delete 4, Silent 8, StaleCount 8, Unreported 8, Leaked 10, Queued 10, Unguarded 10, Idle 6, Skipped 4.
 \* Replay: watcher-boundary.property.spec.ts failed on 20 of 64 histories before the summary fix; all 64 now pass.
 \* Sabotage replay: silent summary, removed admission guards, and removed progress latch each fail test assertions.
 \* Prior recovery tests checked call counts. Review found that recovery could swallow their ordering assertion.
@@ -53,6 +53,20 @@
 \* Replay: local-as-embedding, every-to-some, and idle-reset runtime mutations each fail focused tests.
 \* Cost: two new configs and 3,471 more histories (4,160 total). No new state variable. Agent time is not measured.
 \* Incremental ratchet: added 2, gap 2. PR prose and the optional split are outside the runtime model.
+\* Review at 3b368b8d: PR 2329, user-supplied summary, no thread URL. Ratchet: covered 0, added 0, gap 4.
+\* Expect: a point error after embedding success must preserve that success in the returned local error.
+\* Failure: FilePreparation.prepareFile loses embeddingOutcome before FileWatcher.processBatch reads it.
+\* Invariant sentence: a later local error preserves the completed embedding outcome.
+\* Gap 1: file results are oracles here. The real-code property checks three point errors on both path platforms.
+\* Gap 2: the variant count is model metadata. The header now lists all eleven variants.
+\* Gaps 3 and 4: PR prose and the optional split are outside the runtime model. Keep one PR for issue 830.
+\* Result: fixed passes at 9 states; all eleven variants fail. The spread sabotage fails all six new test cases.
+\* Cost: six real-code cases and one header update. No new model state. No additional bug was found.
+\* Simplification: processBatch owns the file list; _processFilesAndPrepareUpserts reads it without a full copy.
+\* Expect: removing the copy preserves batch results. The caller finishes the list before awaiting processing.
+\* The parameter is ReadonlyArray. Array ownership is outside this model; no transition or invariant changes.
+\* Result: fixed passes at 9 states; all eleven variants fail. Focused runtime tests pass; no new bug was found.
+\* Cost: one runtime edit and this header entry. No new model state or tests.
 EXTENDS Naturals
 CONSTANTS Threshold, Guard, Visible, DisposeOnRecovery,
           CountLocal, CountDelete, ReportTrip, ClearQueue, ResetFailures, CountSingleEmbedding, IgnoreSkipped, ResetIdle

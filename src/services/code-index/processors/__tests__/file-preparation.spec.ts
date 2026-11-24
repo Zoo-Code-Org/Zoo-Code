@@ -321,6 +321,29 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 		},
 	)
 
+	it.each([Error, TypeError, RangeError])(
+		"preserves embedding success when point preparation throws %s",
+		async (ErrorType) => {
+			const dependencies = setup()
+			const error = new ErrorType("Point preparation failed")
+			dependencies.parser.parseFile.mockResolvedValue([
+				{
+					...block,
+					// Point preparation reads this path after the embedding request succeeds.
+					get file_path(): string {
+						throw error
+					},
+				},
+			])
+
+			const result = await new FilePreparation(dependencies).prepareFile(filePath)
+
+			expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledExactlyOnceWith([content])
+			expect(result).toEqual({ path: filePath, status: "local_error", error, embeddingOutcome: "success" })
+			expect(result.error).toBe(error)
+		},
+	)
+
 	it("does not wrap non-Error rejections", async () => {
 		const dependencies = setup()
 		dependencies.fileSystem.readFile.mockRejectedValue("read failed")
