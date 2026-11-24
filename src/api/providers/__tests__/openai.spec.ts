@@ -712,25 +712,42 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.max_completion_tokens).toBeUndefined()
 		})
 
-		it("should not include max_tokens when includeMaxTokens is undefined", async () => {
-			const optionsWithUndefinedMaxTokens: ApiHandlerOptions = {
-				...mockOptions,
-				// includeMaxTokens is not set, should not include max_tokens
-				openAiCustomModelInfo: {
-					contextWindow: 128_000,
-					maxTokens: 4096,
-					supportsPromptCache: false,
-				},
-			}
-			const handlerWithDefaultMaxTokens = new OpenAiHandler(optionsWithUndefinedMaxTokens)
-			const stream = handlerWithDefaultMaxTokens.createMessage(systemPrompt, messages)
-			// Consume the stream to trigger the API call
-			await collectStream(stream)
-			// Assert the mockCreate was called without max_tokens
-			expect(mockCreate).toHaveBeenCalled()
-			const callArgs = mockCreate.mock.calls[0][0]
-			expect(callArgs.max_completion_tokens).toBeUndefined()
-		})
+		it.each([
+			{ label: "unset (UI shows it checked)", includeMaxTokens: undefined, maxTokens: 4096, expected: 4096 },
+			{ label: "true", includeMaxTokens: true, maxTokens: 4096, expected: 4096 },
+			{ label: "false", includeMaxTokens: false, maxTokens: 4096, expected: undefined },
+			{
+				label: "unset with legacy maxTokens -1",
+				includeMaxTokens: undefined,
+				maxTokens: -1,
+				expected: undefined,
+			},
+		])(
+			"sends max_completion_tokens matching the checkbox when includeMaxTokens is $label",
+			async ({ includeMaxTokens, maxTokens, expected }) => {
+				const customModelInfo = { contextWindow: 128_000, maxTokens, supportsPromptCache: false }
+				const streamingHandler = new OpenAiHandler({
+					...mockOptions,
+					includeMaxTokens,
+					openAiCustomModelInfo: customModelInfo,
+				})
+				await collectStream(streamingHandler.createMessage(systemPrompt, messages))
+				const nonStreamingHandler = new OpenAiHandler({
+					...mockOptions,
+					includeMaxTokens,
+					openAiStreamingEnabled: false,
+					openAiCustomModelInfo: customModelInfo,
+				})
+				await collectStream(nonStreamingHandler.createMessage(systemPrompt, messages))
+				await nonStreamingHandler.completePrompt("Test prompt")
+
+				expect(mockCreate).toHaveBeenCalledTimes(3)
+				for (const [callArgs] of mockCreate.mock.calls) {
+					if (expected === undefined) expect(callArgs).not.toHaveProperty("max_completion_tokens")
+					else expect(callArgs.max_completion_tokens).toBe(expected)
+				}
+			},
+		)
 
 		it("should use user-configured modelMaxTokens instead of model default maxTokens", async () => {
 			const optionsWithUserMaxTokens: ApiHandlerOptions = {
@@ -2417,6 +2434,26 @@ describe("OpenAiHandler Responses API (openAiUseResponsesApi)", () => {
 		expect(mockResponsesCreate.mock.calls[0][0].temperature).toBe(supportsTemperature ? 0.4 : undefined)
 		expect(mockResponsesCreate.mock.calls[0][0].max_output_tokens).toBe(456)
 	})
+
+	it.each(["message", "completion"])(
+		"sends max_output_tokens from %s when includeMaxTokens is unset (UI shows it checked)",
+		async (entry) => {
+			const handler = new OpenAiHandler({
+				...baseOptions,
+				openAiStreamingEnabled: false,
+				modelMaxTokens: 456,
+				openAiCustomModelInfo: { contextWindow: 128_000, maxTokens: 1000, supportsPromptCache: false },
+			})
+			mockResponsesCreate.mockResolvedValueOnce({
+				status: "completed",
+				output: [{ type: "message", content: [{ type: "output_text", text: "Answer" }] }],
+				usage: { input_tokens: 10, output_tokens: 5 },
+			})
+			if (entry === "message") await collectStream(handler.createMessage(systemPrompt, messages))
+			else await handler.completePrompt("prompt")
+			expect(mockResponsesCreate.mock.calls[0][0].max_output_tokens).toBe(456)
+		},
+	)
 
 	it.each(["o1-mini", "o3-mini", "o4-mini"])(
 		"routes %s to Responses before model-family dispatch",
