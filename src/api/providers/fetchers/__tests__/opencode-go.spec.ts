@@ -271,6 +271,64 @@ describe("Opencode Go Fetchers", () => {
 
 			await expect(fetchPromise).rejects.toMatchObject({ name: "AbortError" })
 		})
+
+		it("nested limit and modalities win over conflicting flat fields through the fetcher path", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [
+						{
+							id: "glm-5.1",
+							type: "chat",
+							limit: { context: 999_000, output: 7_777 },
+							modalities: { input: ["text", "image"] },
+							// Conflicting flat values must lose to the nested shape.
+							context_window: 888_000,
+							max_tokens: 6_666,
+							supports_images: false,
+						},
+						{
+							id: "some-unknown-model",
+							type: "chat",
+							limit: { context: 123_456, output: 4_096 },
+							modalities: { input: ["text", "image"] },
+							context_window: 666_000,
+							max_tokens: 6_666,
+							supports_images: false,
+						},
+					],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// Curated: the registry context window stays authoritative, while the
+			// nested limit.output and modalities.input win over the flat fields.
+			expect(models["glm-5.1"]).toMatchObject({
+				contextWindow: 204_800,
+				maxTokens: 7_777,
+				supportsImages: true,
+			})
+			// Unknown: the nested limit.context drives the published window too.
+			expect(models["some-unknown-model"]).toMatchObject({
+				contextWindow: 123_456,
+				maxTokens: 4_096,
+				supportsImages: true,
+			})
+		})
+
+		it("falls back to flat supports_images when modalities omits input", async () => {
+			mockedAxios.get.mockResolvedValue({
+				data: {
+					data: [{ id: "another-unknown-model", type: "chat", modalities: {}, supports_images: true }],
+				},
+			})
+
+			const models = await getOpencodeGoModels("k")
+
+			// modalities.input is optional: the fetcher must fall back to the flat
+			// field instead of dereferencing the missing input array.
+			expect(models["another-unknown-model"].supportsImages).toBe(true)
+		})
 	})
 
 	describe("parseOpencodeGoModel", () => {

@@ -29,6 +29,22 @@ EXTENDS Integers
 \* OnlyChatListed invariant. NoNestedLimit fails the live-merge invariants
 \* on nested-only entries; NoTypeFilter fails OnlyChatListed. 0 covered,
 \* 1 added, 0 gap. Fixed gate grows 24 to 150 states.
+\* CodeRabbit round (review 6040141115, thread 4680745542, mutation
+\* report 7133201488): finding A — the nested-metadata tests called the
+\* parser directly and never exercised the endpoint schema or fetcher.
+\* The nested merge contract was already covered (liveShape "nested",
+\* the NoNestedLimit sabotage); added 2 fetcher-path tests at the real
+\* axios seam: curated + unknown entries carrying nested limit and
+\* modalities plus conflicting flat fields, and a modalities entry
+\* without input that must fall back to supports_images. The 3
+\* surviving mutants are killed, each apply/revert-verified on the
+\* focused spec: L32/L38 (a nested schema object emptied) fail the
+\* precedence test, L86 (dropped ?.) fails the missing-input test.
+\* Image support stays with the not-modeled list (L86 is killed at
+\* test level). Scope check (pre-merge "Out of Scope Changes"): the
+\* type filter stays — maintainer-requested (review 6033833085) — and
+\* is now linked as issue 2679 in the PR Scope section. covered 1,
+\* added 1, gap 0. Header-only .tla edit; the gate re-ran unchanged.
 \* Cost: four TLC runs take about 4 seconds. Focused tests take about 5 seconds.
 \* Agent work: about 15 minutes, including tests.
 \* Not modeled: the parser, the field-name pair, capability flags, and pricing.
