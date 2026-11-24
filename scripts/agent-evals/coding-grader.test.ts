@@ -91,6 +91,7 @@ describe("runGrader", () => {
 				},
 			}
 			const verdict = await runGrader({
+				visibleTests: [],
 				finalFiles: [{ path: "marker.txt", content: "x" }],
 				hiddenTests: [],
 				resources: { timeoutMs: 1_000, memoryMb: 256, cpus: 1, pidsLimit: 64, image: "node:22-bookworm" },
@@ -115,6 +116,7 @@ describe("runGrader", () => {
 			await fs.mkdir(path.join(scratch, "grading-copy"))
 			await fs.writeFile(path.join(scratch, "grading-copy", "owned"), "prior data")
 			const verdict = await runGrader({
+				visibleTests: [],
 				finalFiles: [{ path: "../escape.txt", content: "x" }],
 				hiddenTests: [],
 				resources: { timeoutMs: 1_000, memoryMb: 256, cpus: 1, pidsLimit: 64, image: "node:22-bookworm" },
@@ -143,6 +145,7 @@ describe("runGrader", () => {
 				},
 			}
 			const verdict = await runGrader({
+				visibleTests: [],
 				finalFiles: [{ path: "marker.txt", content: "x" }],
 				hiddenTests: [],
 				resources: { timeoutMs: 1_000, memoryMb: 256, cpus: 1, pidsLimit: 64, image: "node:22-bookworm" },

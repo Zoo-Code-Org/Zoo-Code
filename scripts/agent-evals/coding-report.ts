@@ -15,10 +15,11 @@ import {
 import { CODING_FIXTURE_BUNDLES } from "./coding-fixtures.ts"
 import { initialStateDigest } from "./coding-workspace.ts"
 import { CODING_SUITE_ID } from "./coding-suite.ts"
+import type { CodingRunRecord } from "./coding-run.ts"
 
 export interface SideResult {
 	pins: SidePins
-	runs: CodingRunMetrics[]
+	runs: CodingRunRecord[]
 }
 
 export interface FixtureComparisonRow {
@@ -39,6 +40,7 @@ export interface SideFixtureStats {
 
 export interface ComparisonReport {
 	reportVersion: 1
+	runRecords: (CodingRunRecord & { side: "baseline" | "candidate" })[]
 	generatedAt: string
 	suiteId: string
 	repetitions: number
@@ -62,11 +64,13 @@ const byRepIndex = (a: CodingRunMetrics, b: CodingRunMetrics) => a.repIndex - b.
 export function buildComparisonReport(inputs: ComparisonInputs): ComparisonReport {
 	const repetitions = inputs.repetitions ?? STATISTICAL_POLICY.repetitionsDefault
 	const compatibility = comparePins(inputs.baseline.pins, inputs.candidate.pins)
+	const baselineMetrics = inputs.baseline.runs.map((record) => record.metrics)
+	const candidateMetrics = inputs.candidate.runs.map((record) => record.metrics)
 	const rows: FixtureComparisonRow[] = []
 	for (const bundle of CODING_FIXTURE_BUNDLES) {
 		const name = bundle.fixture.identity.name
-		const baselineRuns = inputs.baseline.runs.filter((run) => run.fixtureName === name).sort(byRepIndex)
-		const candidateRuns = inputs.candidate.runs.filter((run) => run.fixtureName === name).sort(byRepIndex)
+		const baselineRuns = baselineMetrics.filter((run) => run.fixtureName === name).sort(byRepIndex)
+		const candidateRuns = candidateMetrics.filter((run) => run.fixtureName === name).sort(byRepIndex)
 		rows.push({
 			fixtureName: name,
 			fixtureVersion: bundle.fixture.identity.version,
@@ -99,6 +103,10 @@ export function buildComparisonReport(inputs: ComparisonInputs): ComparisonRepor
 	}
 	return {
 		reportVersion: 1,
+		runRecords: [
+			...inputs.baseline.runs.map((run) => ({ ...run, side: "baseline" as const })),
+			...inputs.candidate.runs.map((run) => ({ ...run, side: "candidate" as const })),
+		],
 		generatedAt: new Date().toISOString(),
 		suiteId: CODING_SUITE_ID,
 		repetitions,
@@ -108,12 +116,12 @@ export function buildComparisonReport(inputs: ComparisonInputs): ComparisonRepor
 		compatibility,
 		fixtures: rows,
 		costSummary: {
-			baseline: costPerSuccessfulTask(inputs.baseline.runs),
-			candidate: costPerSuccessfulTask(inputs.candidate.runs),
+			baseline: costPerSuccessfulTask(baselineMetrics),
+			candidate: costPerSuccessfulTask(candidateMetrics),
 		},
 		runs: [
-			...inputs.baseline.runs.map((run) => ({ ...run, side: "baseline" as const })),
-			...inputs.candidate.runs.map((run) => ({ ...run, side: "candidate" as const })),
+			...baselineMetrics.map((run) => ({ ...run, side: "baseline" as const })),
+			...candidateMetrics.map((run) => ({ ...run, side: "candidate" as const })),
 		],
 	}
 }

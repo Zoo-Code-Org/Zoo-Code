@@ -8,6 +8,7 @@ import { describe, it } from "node:test"
 import { buildComparisonReport, renderMarkdownReport, type SideResult } from "./coding-report.ts"
 import {
 	invalidateSideArtifacts,
+	type SideResultFile,
 	publishComparisonReport,
 	publishedComparisonGeneration,
 	readPublishedComparisonReport,
@@ -18,6 +19,7 @@ import {
 } from "./coding-compare.ts"
 import { writeFileAtomic, writeJsonAtomic } from "./fs-atomic.ts"
 import type { CodingRunMetrics } from "./coding-metrics.ts"
+import { identityUnavailable, type AgentTrace } from "./trace.ts"
 import type { SidePins } from "./coding-pins.ts"
 
 const pins = (side: "baseline" | "candidate", commit: string, overrides: Partial<SidePins> = {}): SidePins => ({
@@ -73,7 +75,13 @@ const sideResult = (
 	overrides?: Partial<SidePins>,
 ): SideResult => ({
 	pins: pins(side, commit, overrides),
-	runs,
+	runs: runs.map((metrics) => ({
+		fixtureName: metrics.fixtureName,
+		fixtureVersion: "1",
+		repIndex: metrics.repIndex,
+		outcome: metrics.outcome,
+		metrics,
+	})),
 })
 
 describe("comparison report", () => {
@@ -718,5 +726,111 @@ it("checks report availability across read boundaries", async (t) => {
 	} finally {
 		t.mock.restoreAll()
 		await fs.rm(dir, { recursive: true, force: true })
+	}
+})
+
+const retainedTrace: AgentTrace = {
+	traceSchemaVersion: 1,
+	kind: "agent-evals-trace",
+	run: {
+		runId: "retained-run",
+		fixture: { name: "clamp-range", version: "1" },
+		startedAt: "start",
+		finishedAt: "finish",
+		durationMs: 1,
+		identity: identityUnavailable(),
+	},
+	settings: { available: false, reason: "test" },
+	execution: {
+		code: "STOPPED",
+		stopReason: "adapterStop",
+		activated: true,
+		taskAccepted: true,
+		sessionLost: false,
+		completionMessageSeen: false,
+		timings: { totalMs: 1 },
+	},
+	eventFlow: {
+		observed: 0,
+		malformed: 0,
+		foreignTaskEvents: 0,
+		bufferedBeforeAck: 0,
+		replayedAfterAck: 0,
+		eventBufferLimit: 10,
+		bufferOverflow: false,
+		droppedByOverflow: 0,
+	},
+	accounting: {
+		requests: [],
+		requestCount: 0,
+		requestsMissingUsage: 0,
+		apiReqRetriedMarkers: 0,
+		usage: { available: false, snapshotsObserved: 0 },
+		toolSnapshot: {},
+		toolFailureEvents: 0,
+		toolFailuresByTool: {},
+		completeness: { status: "complete", reasons: [] },
+	},
+	teardown: {
+		status: "ok",
+		hostExited: true,
+		closeTaskSent: true,
+		escalatedSignals: [],
+		cleanup: "done",
+		failures: [],
+	},
+	notes: ["trace retained after scratch cleanup"],
+}
+
+// RecordsRetained: publication keeps each complete source record after cleanup.
+it("retains complete run records in published JSON after source cleanup", async () => {
+	const root = await fs.mkdtemp(path.join(os.tmpdir(), "retained-runs-"))
+	const scratch = path.join(root, "scratch")
+	const out = path.join(root, "out")
+	await fs.mkdir(scratch)
+	await fs.mkdir(out)
+	try {
+		for (const count of [0, 1, 3]) {
+			const sides = (["baseline", "candidate"] as const).map((side): SideResultFile => ({
+				pins: pins(side, side === "baseline" ? "a".repeat(40) : "b".repeat(40)),
+				runs: Array.from({ length: count }, (_, repIndex) => {
+					const runMetrics = metrics("clamp-range", repIndex, "incorrect", 0.1)
+					return {
+						fixtureName: "clamp-range",
+						fixtureVersion: "1",
+						repIndex,
+						trace: retainedTrace,
+						outcome: runMetrics.outcome,
+						executionCode: "STOPPED",
+						graderImageDigest: "sha256:pinned",
+						grading: {
+							kind: "failed",
+							failures: [{ name: "frozen requirement", file: "test/visible.test.js" }],
+						},
+						finalWorkspaceTruncated: false,
+						metrics: runMetrics,
+					}
+				}),
+			}))
+			await writeJsonAtomic(path.join(scratch, "side-results.json"), sides)
+			const report = buildComparisonReport({
+				baseline: sides[0]!,
+				candidate: sides[1]!,
+			})
+			await publishComparisonReport(out, report)
+			await fs.rm(path.join(scratch, "side-results.json"))
+			const published = await readPublishedComparisonReport(out)
+
+			assert.deepEqual(
+				published?.runs,
+				sides.flatMap((side) => side.runs.map((run) => ({ ...run.metrics, side: side.pins.side }))),
+			)
+			assert.deepEqual(
+				published?.runRecords,
+				sides.flatMap((side) => side.runs.map((run) => ({ ...run, side: side.pins.side }))),
+			)
+		}
+	} finally {
+		await fs.rm(root, { recursive: true, force: true })
 	}
 })

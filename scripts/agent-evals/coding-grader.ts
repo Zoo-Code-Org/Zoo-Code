@@ -11,7 +11,7 @@ import type { Measured } from "./trace.ts"
 
 // The grader version is a pinned comparison input. Any change to the driver,
 // the image, or the verdict rules must bump it.
-export const GRADER_VERSION = "coding-grader-v10"
+export const GRADER_VERSION = "coding-grader-v11"
 
 export interface GraderResources {
 	timeoutMs: number
@@ -75,6 +75,7 @@ export const driverFilePath = (): string => fileURLToPath(new URL("./grader-driv
 // - reports a hung, crashed, or over-limit grader as a grading failure.
 export async function runGrader(inputs: {
 	finalFiles: readonly AgentFixtureWorkspaceFile[]
+	visibleTests: readonly AgentFixtureWorkspaceFile[]
 	hiddenTests: readonly AgentFixtureWorkspaceFile[]
 	resources: GraderResources
 	runtime: GradingRuntime
@@ -91,7 +92,7 @@ export async function runGrader(inputs: {
 	const removeCopy = (): Promise<void> => fs.rm(gradingRoot, { recursive: true, force: true }).catch(() => {})
 	let verdict: GraderVerdict
 	try {
-		await buildGradingCopy(inputs.finalFiles, inputs.hiddenTests, gradingDir)
+		await buildGradingCopy(inputs.finalFiles, inputs.hiddenTests, gradingDir, inputs.visibleTests)
 	} catch {
 		await removeCopy()
 		return { kind: "grading-failure", isolation: inputs.runtime.isolation, reason: "gradingCopyFailed" }

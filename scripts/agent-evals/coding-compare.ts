@@ -8,7 +8,6 @@ import type { SidePins } from "./coding-pins.ts"
 import { buildComparisonReport, renderMarkdownReport, type ComparisonReport, type SideResult } from "./coding-report.ts"
 import { codingRepetitionPlan } from "./coding-suite.ts"
 import { DEFAULT_REPETITIONS } from "./coding-stats.ts"
-import type { CodingRunRecord } from "./coding-run.ts"
 import { buildSideEnvironment, buildWorktreeEnvironment } from "./coding-trust.ts"
 import { createSideProcessGuard, type SideProcessGuard } from "./side-process-guard.ts"
 import { acquireSideOutputLock, prepareOutputDirectory } from "./output-lock.ts"
@@ -333,8 +332,8 @@ const executeLockedComparisonFlow = async (wiring: ComparisonFlowWiring): Promis
 	try {
 		await removeComparisonReport(wiring.out)
 		const report = buildComparisonReport({
-			baseline: toSideResult(await wiring.runSide("baseline")),
-			candidate: toSideResult(await wiring.runSide("candidate")),
+			baseline: await wiring.runSide("baseline"),
+			candidate: await wiring.runSide("candidate"),
 			repetitions: wiring.reps,
 		})
 		// The reports are the comparison's publication point. The pair is
@@ -447,10 +446,7 @@ const execFileAsync = promisify(execFile)
 
 // Serializes a side result for artifact storage. Full run records travel so
 // each side's traces and grading verdicts stay inspectable.
-export interface SideResultFile {
-	pins: SidePins
-	runs: CodingRunRecord[]
-}
+export type SideResultFile = SideResult
 
 // Validates one side result file before the report builder consumes it. The
 // file is data, so its shape is checked, and it must record exactly the
@@ -522,12 +518,6 @@ export function validateSideResultFile(
 	if (expected.size) throw new Error("side result is missing expected repetitions")
 	return parsed as SideResultFile
 }
-
-// Reduces a side result file to the shape the report builder consumes.
-export const toSideResult = (file: SideResultFile): SideResult => ({
-	pins: file.pins,
-	runs: file.runs.map((record) => record.metrics),
-})
 
 // The one shared side result file name. The side writer and the comparison
 // reader must agree on it. The name carries no side label, because each side

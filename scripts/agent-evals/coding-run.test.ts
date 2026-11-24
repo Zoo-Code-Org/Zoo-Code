@@ -364,3 +364,31 @@ describe("coding run orchestration", () => {
 		assert.equal(record.trace?.execution.completionMessageSeen, false)
 	})
 })
+
+it("passes frozen fixture tests to the grading runtime after deletion", async () => {
+	const bundle = codingBundle("clamp-range")
+	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "frozen-run-"))
+	let graded = false
+	try {
+		await runCodingFixtureOnce({
+			fixtureName: bundle.fixture.identity.name,
+			repIndex: 0,
+			credential: "test-only",
+			runtime: syntheticRuntime({ finalFiles: [...bundle.grading.correctSolution], complete: true }).runtime,
+			gradingRuntime: {
+				isolation: "local-subprocess",
+				run: async (job) => {
+					graded = true
+					for (const file of bundle.fixture.workspace.files.filter((file) => file.path.startsWith("test/"))) {
+						assert.equal(await fs.readFile(path.join(job.gradingDir, file.path), "utf8"), file.content)
+					}
+					return { kind: "grading-failure", isolation: "local-subprocess", reason: "test-runtime" }
+				},
+			},
+			scratchDir: scratch,
+		})
+		assert.equal(graded, true)
+	} finally {
+		await fs.rm(scratch, { recursive: true, force: true })
+	}
+})

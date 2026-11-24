@@ -24,6 +24,7 @@ describe("coding graders against reference solutions", () => {
 				}
 				return await runGrader({
 					finalFiles: files,
+					visibleTests: bundle.fixture.workspace.files.filter((file) => file.path.startsWith("test/")),
 					hiddenTests: bundle.grading.hiddenTests,
 					resources: bundle.grading.resources,
 					runtime: createLocalSubprocessGradingRuntime(),
@@ -102,7 +103,7 @@ ${name === "deep-get" ? "module.exports = { get: () => undefined }" : file.conte
 	}
 
 	it("pins one grader version across the suite", () => {
-		assert.equal(GRADER_VERSION, "coding-grader-v10")
+		assert.equal(GRADER_VERSION, "coding-grader-v11")
 		assert.equal(CODING_GRADER_RESOURCES.image, "docker.io/library/node:22-bookworm")
 	})
 })

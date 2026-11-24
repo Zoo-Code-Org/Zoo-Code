@@ -91,7 +91,7 @@ describe("coding fixture suite", () => {
 		assert.throws(() => codingBundle("unknown-fixture"))
 		assert.ok(codingSuiteDigest().length === 64)
 		assert.equal(CODING_SUITE_ID, "coding-basic-v1")
-		assert.equal(GRADER_VERSION, "coding-grader-v10")
+		assert.equal(GRADER_VERSION, "coding-grader-v11")
 	})
 })
 

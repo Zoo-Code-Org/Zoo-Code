@@ -38,12 +38,13 @@ export async function writeContainedFile(root: string, file: AgentFixtureWorkspa
 }
 
 // Builds a fresh grading copy of a final workspace. Hidden acceptance tests
-// are added only to the copy, never to the workspace the agent used.
+// and frozen visible tests overwrite agent edits only in the copy.
 export async function buildGradingCopy(
 	finalFiles: readonly AgentFixtureWorkspaceFile[],
 	hiddenTests: readonly AgentFixtureWorkspaceFile[],
 	targetDir: string,
+	visibleTests: readonly AgentFixtureWorkspaceFile[],
 ): Promise<void> {
 	await fs.mkdir(targetDir, { recursive: false })
-	for (const file of [...finalFiles, ...hiddenTests]) await writeContainedFile(targetDir, file)
+	for (const file of [...finalFiles, ...visibleTests, ...hiddenTests]) await writeContainedFile(targetDir, file)
 }

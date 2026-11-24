@@ -5,13 +5,12 @@ import {
 	type AgentRunObservers,
 	type FinalWorkspaceSnapshot,
 } from "./runner.ts"
-import { getFixture } from "./registry.ts"
 import { ensureCodingSuiteRegistered, codingBundle } from "./coding-suite.ts"
 import { runGrader, type GraderVerdict, type GradingRuntime } from "./coding-grader.ts"
 import { classifyRunOutcome, type ClassifiedOutcome } from "./coding-outcomes.ts"
 import { buildRunMetrics, type CodingRunMetrics } from "./coding-metrics.ts"
 import { CODING_MODEL_ID } from "./coding-fixtures.ts"
-import { measured, type AgentTrace, type Measured, type MeasuredString } from "./trace.ts"
+import { measured, type AgentTrace, type MeasuredString } from "./trace.ts"
 
 export interface CodingRunRecord {
 	fixtureName: string
@@ -140,6 +139,7 @@ export async function runCodingFixtureOnce(inputs: CodingRunInputs): Promise<Cod
 	if ((code === "COMPLETED" || code === "STOPPED") && snapshot && !snapshot.truncated) {
 		grading = await runGrader({
 			finalFiles: snapshot.files,
+			visibleTests: bundle.fixture.workspace.files.filter((file) => file.path.startsWith("test/")),
 			hiddenTests: bundle.grading.hiddenTests,
 			resources: bundle.grading.resources,
 			runtime: {

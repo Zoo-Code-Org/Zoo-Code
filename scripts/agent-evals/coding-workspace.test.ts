@@ -77,7 +77,7 @@ describe("grading copy", () => {
 		const bundle = anyBundle()
 		const hidden = bundle.grading.hiddenTests[0]!
 		const target = path.join(await tmpdir(), "grading")
-		await buildGradingCopy(bundle.fixture.workspace.files, bundle.grading.hiddenTests, target)
+		await buildGradingCopy(bundle.fixture.workspace.files, bundle.grading.hiddenTests, target, [])
 		await fs.access(path.join(target, hidden.path))
 		// The run workspace itself must never contain the hidden tests.
 		assert.equal(
@@ -91,12 +91,12 @@ describe("grading copy", () => {
 		const hidden = bundle.grading.hiddenTests[0]!
 		const target = path.join(await tmpdir(), "grading-shadow")
 		const tampered = [...bundle.fixture.workspace.files, { path: hidden.path, content: "// tampered" }]
-		await buildGradingCopy(tampered, bundle.grading.hiddenTests, target)
+		await buildGradingCopy(tampered, bundle.grading.hiddenTests, target, [])
 		assert.equal(await fs.readFile(path.join(target, hidden.path), "utf8"), hidden.content)
 	})
 
 	it("rejects escaping paths", async () => {
 		const target = path.join(await tmpdir(), "grading-escape")
-		await assert.rejects(() => buildGradingCopy([{ path: "../escape.txt", content: "x" }], [], target))
+		await assert.rejects(() => buildGradingCopy([{ path: "../escape.txt", content: "x" }], [], target, []))
 	})
 })
