@@ -235,7 +235,24 @@ export abstract class BaseProvider implements ApiHandler {
 								// and null matches only the outer alternative
 								// (review 4674816421).
 								const original = normalizedProp
-								normalizedProp = { anyOf: [original, { type: "null" }] }
+								// The wrapper leaves no effective type, so the
+								// object recursion below cannot reach the
+								// original — normalize its own object shape
+								// here (review 4675158952): an object-typed
+								// original gets the strict constraints and
+								// nullable inner properties before the wrap.
+								const originalTypes: unknown[] = Array.isArray(original.type)
+									? original.type
+									: [original.type]
+								if (originalTypes.includes("object") && original.properties) {
+									const converted = this.convertToolSchemaForOpenAI({ ...original, type: "object" })
+									// Keep the original's declared (possibly
+									// nullable) type.
+									converted.type = original.type
+									normalizedProp = { anyOf: [converted, { type: "null" }] }
+								} else {
+									normalizedProp = { anyOf: [original, { type: "null" }] }
+								}
 								wrappedForOneOf = true
 							}
 							// When a single alternative already accepts null,

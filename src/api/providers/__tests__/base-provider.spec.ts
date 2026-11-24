@@ -387,6 +387,38 @@ describe("BaseProvider", () => {
 			expect(acceptsValue(prop, 7)).toBe(true)
 		})
 
+		it("normalizes the original object before wrapping a multi-match oneOf (#2653 review 4675158952)", () => {
+			// A wrapped object-typed original leaves no effective type for the
+			// recursion below, so its inner object must be normalized before
+			// the wrap.
+			const schema = {
+				type: "object",
+				properties: {
+					value: {
+						type: "object",
+						properties: { limit: { type: "integer" } },
+						oneOf: [{ type: ["object", "null"] }, { type: ["string", "null"] }],
+					},
+				},
+			}
+
+			const result = provider.testConvertToolSchemaForOpenAI(schema)
+
+			const prop = result.properties.value
+			expect(prop.anyOf).toHaveLength(2)
+			const original = prop.anyOf[0]
+			// The original carries the strict object constraints.
+			expect(original.additionalProperties).toBe(false)
+			expect(original.required).toEqual(["limit"])
+			// Its inner optional property is nullable.
+			expect(original.properties.limit.type).toEqual(["integer", "null"])
+			// The original keeps its declared (nullable) type; null is
+			// accepted through the outer alternative.
+			expect(original.type).toEqual(["object", "null"])
+			expect(prop.anyOf[1]).toEqual({ type: "null" })
+			expect(acceptsValue(prop, null)).toBe(true)
+		})
+
 		it("wraps an optional oneOf whose alternatives all accept null in an outer anyOf (#2653 review 4674816421)", () => {
 			// null matches TWO inner alternatives; appending nothing leaves
 			// oneOf rejecting null (exactly-one), so the property must be
