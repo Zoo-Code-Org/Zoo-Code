@@ -310,9 +310,18 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		// wait for a set update. The set stays as a fallback for records
 		// that predate the price parse. OpenAI-family models are excluded:
 		// their OpenRouter caching is automatic and takes no cache_control
-		// markers.
+		// markers. The capability branch additionally requires a record for
+		// the selected id: an unlisted id resolves to
+		// openRouterDefaultModelInfo, whose capability belongs to a
+		// DIFFERENT model (review 4674816431).
+		const resolvedFromCatalog =
+			Object.hasOwn(this.models, modelId) ||
+			(this.options.openRouterSpecificProvider !== undefined &&
+				Object.hasOwn(this.endpoints, this.options.openRouterSpecificProvider))
 		const promptCacheEligible =
-			(model.info.supportsPromptCache && (modelId.startsWith("anthropic/") || modelId.startsWith("google/"))) ||
+			(resolvedFromCatalog &&
+				model.info.supportsPromptCache &&
+				(modelId.startsWith("anthropic/") || modelId.startsWith("google/"))) ||
 			OPEN_ROUTER_PROMPT_CACHING_MODELS.has(modelId)
 		if (promptCacheEligible) {
 			if (modelId.startsWith("google")) {

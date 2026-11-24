@@ -631,6 +631,97 @@ describe("OpenRouterHandler", () => {
 				expect(cacheControlsIn(requestBody(mockCreate))).toHaveLength(0)
 			})
 
+			it("caches a listed ID even when its record reports no cache capability (#2502 review)", async () => {
+				// The set fallback covers records predating the price parse:
+				// membership in OPEN_ROUTER_PROMPT_CACHING_MODELS decides on
+				// its own (kills the NoSetFallback variant).
+				seedModelRecord("anthropic/claude-sonnet-4.5", {
+					maxTokens: 8192,
+					contextWindow: 200000,
+					supportsImages: true,
+					supportsPromptCache: false,
+					inputPrice: 3,
+					outputPrice: 15,
+				})
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "anthropic/claude-sonnet-4.5" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				expect(cacheControlsIn(requestBody(mockCreate)).length).toBeGreaterThan(0)
+			})
+
+			it("caches a capable Google-family record (#2502 review)", async () => {
+				seedModelRecord("google/gemini-3-pro", {
+					maxTokens: 65_536,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: true,
+					inputPrice: 1.25,
+					outputPrice: 10,
+				})
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "google/gemini-3-pro" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				expect(cacheControlsIn(requestBody(mockCreate)).length).toBeGreaterThan(0)
+			})
+
+			it("does not cache an incapable Google-family record (#2502 review)", async () => {
+				seedModelRecord("google/gemini-3-nano", {
+					maxTokens: 65_536,
+					contextWindow: 1_000_000,
+					supportsImages: true,
+					supportsPromptCache: false,
+					inputPrice: 0.1,
+					outputPrice: 0.4,
+				})
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "google/gemini-3-nano" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				expect(cacheControlsIn(requestBody(mockCreate))).toHaveLength(0)
+			})
+
+			it("does not cache an unlisted ID that resolves only to the default record (#2502 review 4674816431)", async () => {
+				// An unlisted anthropic id falls back to openRouterDefaultModelInfo,
+				// whose supportsPromptCache belongs to a DIFFERENT model — the
+				// capability branch must not fire without a real record.
+				vitest.mocked(getModels).mockResolvedValueOnce({})
+				const handler = new OpenRouterHandler(
+					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "anthropic/claude-opus-55" }),
+				)
+
+				const mockCreate = vitest.fn().mockResolvedValue(mockStreamWithUsage())
+				stubChatCreate(mockCreate)
+
+				await collectStream(
+					handler.createMessage("test system prompt", [{ role: "user", content: "test message" }]),
+				)
+
+				expect(cacheControlsIn(requestBody(mockCreate))).toHaveLength(0)
+			})
+
 			it("emits no ttl key when the knob is unset", async () => {
 				const handler = new OpenRouterHandler(
 					makeApiHandlerOptions({ ...mockOptions, openRouterModelId: "anthropic/claude-sonnet-4" }),
