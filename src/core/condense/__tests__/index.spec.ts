@@ -1669,6 +1669,90 @@ describe("summarizeConversation", () => {
 		])
 	})
 
+	it("keeps reasoning_details on the native path even without reasoning_content", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// Stored turns can carry reasoning_details without reasoning_content
+		// (Task rebuilds that shape). Gemini's sanitizer drops tool calls whose
+		// reasoning_details are missing, so the array must echo on its own
+		// condition and the absent reasoning_content must stay absent.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops empty reasoning_details arrays on the native tool-block path", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+				reasoning_details: [],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// An empty details array echoes nothing: it carries no reasoning data
+		// for the sanitizer, and echoing the empty key would differ from the
+		// missing key on the wire.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
 	it("keeps the recorded cost when a non-usage chunk follows the usage chunk", async () => {
 		const messages: ApiMessage[] = [
 			{ role: "user", content: "Hello", ts: 1 },

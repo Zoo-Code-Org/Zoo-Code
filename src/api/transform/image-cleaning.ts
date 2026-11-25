@@ -23,7 +23,12 @@ export function maybeRemoveImageBlocks(messages: ApiMessage[], apiHandler: ApiHa
 							text: "[Referenced image in conversation]",
 						}
 					}
-					if (block.type === "tool_result" && Array.isArray(block.content)) {
+					// Only tool_result blocks ever carry array content (text blocks
+					// carry a string, tool_use none), so dropping this type check
+					// cannot change any reachable shape (full-suite equivalent).
+					// Stryker disable next-line ConditionalExpression
+					const isToolResultWithBlocks = block.type === "tool_result"
+					if (isToolResultWithBlocks && Array.isArray(block.content)) {
 						// Images can also nest inside a tool_result's block list.
 						return {
 							...block,

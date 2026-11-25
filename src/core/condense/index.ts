@@ -335,25 +335,24 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// DeepSeek/Z.ai thinking mode requires reasoning_content echoed back once
 	// tools are on the request (HTTP 400 otherwise). OpenRouter's Gemini path
 	// drops tool calls (and their results) from assistant messages whose
-	// reasoning_details are missing, so both fields must survive together to
-	// keep the condense request's prefix usable.
+	// reasoning_details are missing, and stored turns can carry
+	// reasoning_details without reasoning_content, so each field survives
+	// under its own condition to keep the condense request's prefix usable.
 	const requestMessages = messagesWithTextToolBlocks.map((message) => {
-		const canEchoReasoning =
-			keepNativeToolBlocks &&
-			typeof message.reasoning_content === "string" &&
-			message.reasoning_content.length > 0
-		if (!canEchoReasoning) {
+		const hasReasoningContent =
+			typeof message.reasoning_content === "string" && message.reasoning_content.length > 0
+		const hasReasoningDetails = Array.isArray(message.reasoning_details) && message.reasoning_details.length > 0
+		if (!keepNativeToolBlocks || (!hasReasoningContent && !hasReasoningDetails)) {
 			return { role: message.role, content: message.content }
 		}
 		const projected: Anthropic.MessageParam & {
 			reasoning_content?: string
 			reasoning_details?: unknown[]
-		} = {
-			role: message.role,
-			content: message.content,
-			reasoning_content: message.reasoning_content,
+		} = { role: message.role, content: message.content }
+		if (hasReasoningContent) {
+			projected.reasoning_content = message.reasoning_content
 		}
-		if (Array.isArray(message.reasoning_details)) {
+		if (hasReasoningDetails) {
 			projected.reasoning_details = message.reasoning_details
 		}
 		return projected
