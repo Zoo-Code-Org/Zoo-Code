@@ -101,34 +101,8 @@ export function convertToolBlocksToText(
  */
 export function transformMessagesForCondensing<
 	T extends { role: string; content: string | Anthropic.Messages.ContentBlockParam[] },
->(
-	messages: T[],
-	transformToolBlocks:
-		| boolean
-		| {
-				transformToolBlocks?: boolean
-				transform?: boolean
-				keepToolBlocks?: boolean
-				keepNativeToolBlocks?: boolean
-				tools?: unknown
-		  } = true,
-): T[] {
-	let shouldTransform = true
-	if (typeof transformToolBlocks === "boolean") {
-		shouldTransform = transformToolBlocks
-	} else if (transformToolBlocks && typeof transformToolBlocks === "object") {
-		if (typeof transformToolBlocks.transformToolBlocks === "boolean") {
-			shouldTransform = transformToolBlocks.transformToolBlocks
-		} else if (typeof transformToolBlocks.transform === "boolean") {
-			shouldTransform = transformToolBlocks.transform
-		} else if (typeof transformToolBlocks.keepToolBlocks === "boolean") {
-			shouldTransform = !transformToolBlocks.keepToolBlocks
-		} else if (typeof transformToolBlocks.keepNativeToolBlocks === "boolean") {
-			shouldTransform = !transformToolBlocks.keepNativeToolBlocks
-		} else if (transformToolBlocks.tools) {
-			shouldTransform = false
-		}
-	}
+>(messages: T[], transformToolBlocks: boolean = true): T[] {
+	const shouldTransform = transformToolBlocks
 
 	if (!shouldTransform) {
 		return messages.map((msg) => ({ ...msg }))
@@ -346,7 +320,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// Transform tool_use and tool_result blocks to text representations only when the
 	// provider does not support native tool blocks. When metadata carries tools, keep
 	// the native blocks (and pass metadata.tools through) to preserve the request prefix.
-	const keepNativeToolBlocks = !!metadata?.tools && (Array.isArray(metadata.tools) ? metadata.tools.length > 0 : true)
+	const keepNativeToolBlocks = Array.isArray(metadata?.tools) && (metadata?.tools?.length ?? 0) > 0
 
 	const messagesWithTextToolBlocks = keepNativeToolBlocks
 		? maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler)
@@ -370,8 +344,10 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	let summary = ""
 	let cost = 0
 
+	const requestMetadata = metadata ? { ...metadata, tool_choice: "none" as const } : metadata
+
 	try {
-		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
+		const stream = apiHandler.createMessage(promptToUse, requestMessages, requestMetadata)
 
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {

@@ -80,6 +80,12 @@
 \* AddMsg x3, Condense, Rewind, Condense, Truncate: the count reports a stale orphan that
 \* the sink drops. The unit tests replay the rules on the real code.
 
+\* Null result (issue 2453): CondenseRequestPrefixEqualsPriorTurnPrefix was removed
+\* because it was vacuously TRUE and added no constraint. Request assembly for
+\* summarizeConversation (prefix vs prior-turn prefix) is not modeled by this spec;
+\* it is pinned by property tests in src/core/condense/__tests__/index.spec.ts.
+\* Cost: unchanged (<10s). Findings: covered 0, added 0, gap 1 (request assembly).
+
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Mode, MaxMsgs
@@ -251,11 +257,5 @@ SelectionMatchesLive ==
 \* The opposite of the summary half of Failure 4: the latest summary is the
 \* first effective message, so no truncation may ever tag it.
 SummaryUntagged == \A i \in 1..n : msgs[i].summ => ~msgs[i].trunc
-
-\* Invariant: condense request prefix equals prior turn prefix (issue 2453).
-\* The condensation request must keep the prior-turn prefix (system prompt + native
-\* tool blocks) identical so the provider can reuse the KV cache; condensing
-\* instructions are placed at the end of the request instead.
-CondenseRequestPrefixEqualsPriorTurnPrefix == TRUE
 
 ====
