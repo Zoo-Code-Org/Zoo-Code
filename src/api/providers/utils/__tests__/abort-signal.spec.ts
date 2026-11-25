@@ -840,6 +840,20 @@ describe("bridgeExternalAbortSignal", () => {
 		expect(bridge.controller.signal.aborted).toBe(true)
 	})
 
+	it("hands back the caller's controller without an external signal and never runs the hook", () => {
+		const requestController = new AbortController()
+		const hook = vitest.fn()
+		// A provider that keeps its own controller can pass it even when the caller
+		// gave no signal at all; the bridge must return that same handle and must not
+		// invent a cancellation the caller never asked for.
+		const bridge = bridgeExternalAbortSignal(undefined, { controller: requestController, onAbort: hook })
+		expect(bridge.controller).toBe(requestController)
+		expect(bridge.signal).toBeUndefined()
+		bridge.dispose()
+		expect(hook).not.toHaveBeenCalled()
+		expect(requestController.signal.aborted).toBe(false)
+	})
+
 	it("returns the signal of the controller it created", () => {
 		const external = new AbortController()
 		const bridge = bridgeExternalAbortSignal(external.signal)
@@ -885,18 +899,106 @@ describe("bridgeExternalAbortSignal", () => {
 		expect(seen.hookReason).toBe(reason)
 	})
 
+	it("keeps aborting and detaching when a live-path onAbort hook throws", () => {
+		const external = new AbortController()
+		const requestController = new AbortController()
+		const hookError = new Error("hook blew up")
+		const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+		const addSpy = vitest.spyOn(external.signal, "addEventListener")
+		const removeSpy = vitest.spyOn(external.signal, "removeEventListener")
+		let bridge: ReturnType<typeof bridgeExternalAbortSignal> | undefined
+		let warnCalls: unknown[][] = []
+		let addCalls: unknown[][] = []
+		let removeCalls: unknown[][] = []
+		try {
+			bridge = bridgeExternalAbortSignal(external.signal, {
+				controller: requestController,
+				onAbort: () => {
+					throw hookError
+				},
+			})
+			// The bridge attaches the relay with `once: true`, which is what makes a
+			// later external abort reach this request at most once.
+			addCalls = addSpy.mock.calls.map((call) => [...call])
+			// The listener runs the hook, so a throw there used to surface only as an
+			// uncaught error while the caller kept dispose by accident of ordering.
+			expect(() => external.abort(new Error("caller stop"))).not.toThrow()
+			// Read the record before mockRestore clears it.
+			warnCalls = warnSpy.mock.calls.map((call) => [...call])
+		} finally {
+			bridge?.dispose()
+			removeCalls = removeSpy.mock.calls.map((call) => [...call])
+			warnSpy.mockRestore()
+			addSpy.mockRestore()
+			removeSpy.mockRestore()
+		}
+		expect(addCalls.length).toBe(1)
+		expect(addCalls[0]?.[0]).toBe("abort")
+		expect(addCalls[0]?.[2]).toEqual({ once: true })
+		expect(requestController.signal.aborted).toBe(true)
+		expect(warnCalls.length).toBe(1)
+		expect(warnCalls[0]?.[1]).toBe(hookError)
+		expect(removeCalls.length).toBe(1)
+		expect(removeCalls[0]?.[0]).toBe("abort")
+	})
+
+	it("still hands back dispose when the pre-aborted path throws in onAbort", () => {
+		const external = new AbortController()
+		const reason = new Error("already stopped")
+		const hookError = new Error("hook blew up")
+		const warnSpy = vitest.spyOn(console, "warn").mockImplementation(() => {})
+		let bridge: ReturnType<typeof bridgeExternalAbortSignal> | undefined
+		let warnCalls: unknown[][] = []
+		try {
+			external.abort(reason)
+			bridge = bridgeExternalAbortSignal(external.signal, {
+				onAbort: () => {
+					throw hookError
+				},
+			})
+			// Read the record before mockRestore clears it.
+			warnCalls = warnSpy.mock.calls.map((call) => [...call])
+		} finally {
+			warnSpy.mockRestore()
+		}
+		// Before the guard this call never returned on this path, so the caller had no
+		// dispose and the hook's exception escaped into the caller's own stack.
+		expect(bridge).toBeDefined()
+		expect(typeof bridge?.dispose).toBe("function")
+		expect(bridge?.controller.signal.aborted).toBe(true)
+		expect(warnCalls.length).toBe(1)
+		expect(warnCalls[0]?.[1]).toBe(hookError)
+		bridge?.dispose()
+	})
+
 	it("runs the onAbort hook when the external signal was already aborted", () => {
 		const external = new AbortController()
 		const reason = new Error("already stopped")
 		external.abort(reason)
-		const hook = vitest.fn()
+		const requestController = new AbortController()
+		const seen: { calls: number; abortedDuringHook: boolean; hookReason: unknown } = {
+			calls: 0,
+			abortedDuringHook: false,
+			hookReason: undefined,
+		}
 		// native-ollama aborts its client and vscode-lm cancels its token source on the
 		// same signal: a caller that stopped before we started must reach that side
 		// effect too, not only the live-abort path.
-		const bridge = bridgeExternalAbortSignal(external.signal, { onAbort: hook })
+		const bridge = bridgeExternalAbortSignal(external.signal, {
+			controller: requestController,
+			onAbort: (hookReason) => {
+				seen.calls += 1
+				// Observing the flag from inside the hook is the only assertion that can
+				// fail if notify ever runs before controller.abort(); checking the flag
+				// afterwards passes either way.
+				seen.abortedDuringHook = requestController.signal.aborted
+				seen.hookReason = hookReason
+			},
+		})
 		expect(bridge.controller.signal.aborted).toBe(true)
-		expect(hook).toHaveBeenCalledTimes(1)
-		expect(hook).toHaveBeenCalledWith(reason)
+		expect(seen.calls).toBe(1)
+		expect(seen.abortedDuringHook).toBe(true)
+		expect(seen.hookReason).toBe(reason)
 	})
 
 	it("neither aborts nor runs the hook for an abort that lands after dispose", () => {

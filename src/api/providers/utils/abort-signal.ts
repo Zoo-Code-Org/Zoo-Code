@@ -106,6 +106,13 @@ export type AbortBridgeHooks = {
  * client-level timeout remains the only cancellation mechanism; the returned
  * `controller` is still a usable request-local signal for a provider that needs
  * one without relaying anything.
+ *
+ * An `onAbort` hook that throws is reported through `console.warn` and changes
+ * nothing else: the request controller is aborted before the hook runs, the hook
+ * still runs at most once per cancellation, and `dispose` is handed back on every
+ * path, so a caller can always detach the listener. A throwing hook is a provider
+ * bug, not a cancellation mechanism - the bridge never lets it decide whether the
+ * abort lands or whether the caller can clean up.
  */
 export function bridgeExternalAbortSignal(
 	externalSignal?: AbortSignal,
@@ -122,7 +129,19 @@ export function bridgeExternalAbortSignal(
 		if (!hooks?.onAbort) {
 			return
 		}
-		hooks.onAbort(reason)
+		try {
+			hooks.onAbort(reason)
+		} catch (error) {
+			// A provider side effect must not be able to take the bridge's contract with
+			// it. The controller is already aborted before notify runs, so swallowing
+			// the hook's error cannot leave a request signal that never settles; what
+			// the guard buys is that `dispose` still reaches the caller on the
+			// already-aborted path (where a throw used to escape the call) and that both
+			// paths report the same way instead of one surfacing as an uncaught error
+			// inside the listener. Reported rather than dropped, matching the console.warn
+			// convention already used by provider-side cleanup in this folder.
+			console.warn("[abort-signal] bridge: onAbort hook threw", error)
+		}
 	}
 
 	if (!externalSignal) {
