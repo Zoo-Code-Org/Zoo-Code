@@ -24,6 +24,13 @@
 \* StreamError; NoErrorEmit.cfg sabotages the error-path emission and
 \* must fail. Counts: covered 2 (round-1 findings already expressed by
 \* the first-version invariants), added 1 (error path), gap 0.
+\* Review ratchet r2 (PR #2689, comment 4695439815): completion is a
+\* state of its own - StreamError no longer requires chunks to remain,
+\* so an error after the final usage chunk (single-usage shape included)
+\* is modeled and delivers the stash first. ErrorAfterLastChunkUnseen is
+\* the reachability witness: ErrorAfterLastChunk.cfg lists it and must
+\* fail, and its counterexample names that ordering. Counts: covered 2,
+\* added 2 (error path; error-after-final-chunk ordering), gap 0.
 EXTENDS Naturals
 CONSTANTS EmitPerChunk, EmitOnError, MaxChunks, Usages, Threshold, NoUsage
 VARIABLES left, lastU, emitted, sinkIn, sinkOut, condense, done, errored
@@ -79,8 +86,13 @@ Evaluate == /\ left = 0
 \* The stream dies mid-request. The fixed code emits the stashed usage
 \* before the error reaches Task. The NoErrorEmit defect variant
 \* skips the emission and ErrorStillAccountsUsage fails.
-StreamError == /\ left > 0
-              /\ ~errored
+\* Completion is done, not the chunk count: an error can land after the
+\* final usage chunk, before normal completion and before any emission
+\* (PR #2689 review r2, comment 4695439815 - includes the single-usage
+\* stream shape, which leaves left = 0).
+StreamError == /\ ~errored
+              /\ done = 0
+              /\ emitted = 0
               /\ errored' = TRUE
               /\ IF lastU /= NoUsage /\ EmitOnError
                  THEN /\ emitted' = emitted + 1
@@ -120,4 +132,9 @@ ErrorStillAccountsUsage == errored => (lastU = NoUsage \/ emitted >= 1)
 
 \* Condense matches the last-usage context tokens, not an accumulated sum.
 CondenseMatchesLastUsage == done = 0 \/ (condense <=> (LastPrompt + LastOutput > Threshold))
+
+\* Witness only (never listed in a must-pass config): ErrorAfterLastChunk
+\* deliberately fails, and its counterexample is the demanded ordering -
+\* single-usage stream, error after the final chunk, usage delivered.
+ErrorAfterLastChunkUnseen == ~(errored /\ emitted >= 1 /\ left = 0 /\ lastU /= NoUsage /\ done = 0)
 ====
