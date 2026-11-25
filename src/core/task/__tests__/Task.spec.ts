@@ -535,8 +535,17 @@ describe("Cline", () => {
 			const result = await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
 			expect(result).toBe(false)
+			// The decline path restores the exact record that was saved for the failed
+			// attempt (original identity and content, including the environment-details
+			// block) so persistence keeps one copy of the turn (issue #2691).
 			expect(task.apiConversationHistory).toMatchObject([
-				{ role: "user", content: [{ type: "text", text: "original user request" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "original user request" },
+						{ type: "text", text: "" },
+					],
+				},
 				{ role: "assistant", content: [{ type: "text", text: "Failure: I did not provide a response." }] },
 			])
 			expect(task.messageCounts).toEqual({ user: 1, assistant: 1 })

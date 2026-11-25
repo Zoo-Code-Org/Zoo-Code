@@ -1451,7 +1451,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(
+		message: Anthropic.MessageParam,
+		reasoning?: string,
+		options?: { identity?: { messageId?: string; ts?: number } },
+	): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1466,6 +1470,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				api: this.api,
 				apiConfiguration: this.apiConfiguration,
 				apiConversationHistory: this.apiConversationHistory,
+				identity: options?.identity,
 			}),
 		)
 
@@ -4013,6 +4018,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			includeFileDetails: boolean
 			retryAttempt?: number
 			userMessageWasRemoved?: boolean // Track if user message was removed due to empty response
+			removedUserMessage?: ApiMessage // The saved record removed for the empty-response retry, restored with its identity
 		}
 
 		const stack: StackItem[] = [
@@ -4126,7 +4132,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+				if (currentItem.removedUserMessage) {
+					await this.addToApiConversationHistory({ role: "user", content: finalUserContent }, undefined, {
+						// A retry after an empty assistant response restores a turn that is
+						// still saved on disk. Reusing its identity makes the merge save
+						// replace that record instead of keeping both turns, so the
+						// reloaded history holds exactly one result per tool_use id.
+						identity: currentItem.removedUserMessage,
+					})
+				} else {
+					await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+				}
 				this.messageCounts.user++
 			}
 
@@ -5268,9 +5284,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					// or flushPendingToolResultsToHistory message) there is nothing to
 					// remove, and popping would corrupt history.
 					let removedCurrentUserMessage = false
+					let removedUserMessage: ApiMessage | undefined
 					if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
 						const lastMessage = this.apiConversationHistory[this.apiConversationHistory.length - 1]
 						if (lastMessage.role === "user") {
+							// Keep the saved record: the retry restores this exact identity so
+							// the merge save replaces the on-disk copy instead of adding a
+							// second turn with the same tool results (issue #2691).
+							removedUserMessage = lastMessage
 							this.apiConversationHistory.pop()
 							this.messageCounts.user--
 							removedCurrentUserMessage = true
@@ -5304,6 +5325,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							includeFileDetails: false,
 							retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 							userMessageWasRemoved: removedCurrentUserMessage,
+							removedUserMessage,
 						})
 
 						// Continue to retry the request
@@ -5325,6 +5347,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								includeFileDetails: false,
 								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
 								userMessageWasRemoved: removedCurrentUserMessage,
+								removedUserMessage,
 							})
 
 							// Continue to retry the request
@@ -5333,10 +5356,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// User declined to retry. Re-add the user message only if this
 							// iteration removed one, so the history and counter stay consistent.
 							if (removedCurrentUserMessage) {
-								await this.addToApiConversationHistory({
-									role: "user",
-									content: currentUserContent,
-								})
+								// Restore the already saved record with its original identity so
+								// the merge save keeps one copy of the turn on disk.
+								await this.addToApiConversationHistory(
+									removedUserMessage
+										? { role: "user", content: removedUserMessage.content }
+										: { role: "user", content: currentUserContent },
+									undefined,
+									{ identity: removedUserMessage },
+								)
 								this.messageCounts.user++
 							}
 
