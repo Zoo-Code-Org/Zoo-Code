@@ -71,7 +71,9 @@ it.each([
 	{ include: true, custom: undefined, model: 1000, expected: 1000 },
 	{ include: true, custom: 456, model: 1000, expected: 456 },
 	{ include: false, custom: 456, model: 1000, expected: undefined },
-	{ include: undefined, custom: 456, model: 1000, expected: undefined },
+	{ include: undefined, custom: 456, model: 1000, expected: 456 },
+	{ include: undefined, custom: undefined, model: -1, expected: undefined },
+	{ include: true, custom: -1, model: 1000, expected: 1000 },
 	{ include: true, custom: undefined, model: undefined, expected: undefined },
 ])("honors output limit defaults and omission: %j", ({ include, custom, model, expected }) => {
 	const body = buildResponsesRequest(
