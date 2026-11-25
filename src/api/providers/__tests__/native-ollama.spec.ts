@@ -3,6 +3,7 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { NativeOllamaHandler } from "../native-ollama"
+import type { ChatRequest } from "ollama"
 import { ApiHandlerOptions } from "../../../shared/api"
 import { getOllamaModels } from "../fetchers/ollama"
 import { MODEL_CATALOG_FETCH_TIMEOUT_MS } from "../fetchers/modelCache"
@@ -243,11 +244,11 @@ describe("NativeOllamaHandler", () => {
 			)
 
 			// The tool result message itself must not carry an images field.
-			const callArgs = mockChat.mock.calls[0][0] as any
-			const toolResultMessage = callArgs.messages.find(
-				(m: any) => typeof m.content === "string" && m.content.includes("line one"),
+			const callArgs = mockChat.mock.calls[0][0] as ChatRequest
+			const toolResultMessage = callArgs.messages!.find(
+				(m) => typeof m.content === "string" && m.content.includes("line one"),
 			)
-			expect(toolResultMessage.images).toBeUndefined()
+			expect(toolResultMessage!.images).toBeUndefined()
 		})
 
 		it("should drop unknown block types in tool_result content (empty string contribution)", async () => {
@@ -264,7 +265,9 @@ describe("NativeOllamaHandler", () => {
 							tool_use_id: "tool-1",
 							content: [
 								{ type: "text", text: "before" },
-								{ type: "document" } as any,
+								// Extension/Anthropic-protocol history block the converter narrows by `type`;
+								// routed through unknown to stay inside the tool_result content union.
+								{ type: "document" } as unknown as Anthropic.TextBlockParam,
 								{ type: "text", text: "after" },
 							],
 						},
@@ -556,7 +559,13 @@ describe("NativeOllamaHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "reasoning", text: "Prior reasoning", summary: [] } as any,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{
+							type: "reasoning",
+							text: "Prior reasoning",
+							summary: [],
+						} as unknown as Anthropic.ContentBlockParam,
 						{ type: "text", text: "Prior answer" },
 					],
 				},
@@ -589,7 +598,12 @@ describe("NativeOllamaHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "thinking", thinking: "Anthropic thinking text" } as any,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{
+							type: "thinking",
+							thinking: "Anthropic thinking text",
+						} as unknown as Anthropic.ContentBlockParam,
 						{ type: "text", text: "Prior answer" },
 					],
 				},
@@ -622,8 +636,16 @@ describe("NativeOllamaHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "reasoning", text: "First reasoning", summary: [] } as any,
-						{ type: "thinking", thinking: "Second thinking" } as any,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{
+							type: "reasoning",
+							text: "First reasoning",
+							summary: [],
+						} as unknown as Anthropic.ContentBlockParam,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{ type: "thinking", thinking: "Second thinking" } as unknown as Anthropic.ContentBlockParam,
 						{ type: "text", text: "Answer" },
 					],
 				},
@@ -656,8 +678,12 @@ describe("NativeOllamaHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "reasoning", text: "", summary: [] } as any,
-						{ type: "thinking", thinking: "" } as any,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{ type: "reasoning", text: "", summary: [] } as unknown as Anthropic.ContentBlockParam,
+						// Extension/Anthropic-protocol history block the converter narrows by `type`;
+						// routed through unknown to stay inside MessageParam.
+						{ type: "thinking", thinking: "" } as unknown as Anthropic.ContentBlockParam,
 						{ type: "text", text: "Answer" },
 					],
 				},
@@ -725,7 +751,8 @@ describe("NativeOllamaHandler", () => {
 				ollamaModelId: "qwen3",
 				ollamaBaseUrl: "http://localhost:11434",
 				enableReasoningEffort: true,
-				reasoningEffort: "bogus" as any,
+				// Deliberately out-of-contract value; exercises the effort fallback path.
+				reasoningEffort: "bogus" as unknown as ApiHandlerOptions["reasoningEffort"],
 			}
 
 			handler = new NativeOllamaHandler(options)
@@ -1253,8 +1280,7 @@ describe("NativeOllamaHandler", () => {
 
 	describe("error handling", () => {
 		it("should handle connection refused errors", async () => {
-			const error = new Error("ECONNREFUSED") as any
-			error.code = "ECONNREFUSED"
+			const error = Object.assign(new Error("ECONNREFUSED"), { code: "ECONNREFUSED" })
 			mockChat.mockRejectedValue(error)
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
@@ -1265,8 +1291,7 @@ describe("NativeOllamaHandler", () => {
 		})
 
 		it("should handle model not found errors", async () => {
-			const error = new Error("Not found") as any
-			error.status = 404
+			const error = Object.assign(new Error("Not found"), { status: 404 })
 			mockChat.mockRejectedValue(error)
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
@@ -1311,8 +1336,7 @@ describe("NativeOllamaHandler", () => {
 		it("should rethrow non-ECONNREFUSED non-404 errors from chat()", async () => {
 			// Covers the fall-through `throw error` branch in the outer catch
 			// when the error is neither ECONNREFUSED nor a 404.
-			const error = new Error("something else") as any
-			error.status = 500
+			const error = Object.assign(new Error("something else"), { status: 500 })
 			mockChat.mockRejectedValue(error)
 
 			const stream = handler.createMessage("System", [{ role: "user" as const, content: "Test" }])
@@ -2058,8 +2082,8 @@ describe("NativeOllamaHandler", () => {
 			)
 
 			// Explicitly verify additionalProperties is not present
-			const callArgs = mockChat.mock.calls[0][0] as any
-			expect(callArgs.tools[0].function.parameters).not.toHaveProperty("additionalProperties")
+			const callArgs = mockChat.mock.calls[0][0] as ChatRequest
+			expect(callArgs.tools![0].function.parameters).not.toHaveProperty("additionalProperties")
 		})
 
 		it("should recursively strip additionalProperties from nested tool schema parameters", async () => {
@@ -2118,15 +2142,20 @@ describe("NativeOllamaHandler", () => {
 
 			await collectStream(stream)
 
-			const callArgs = mockChat.mock.calls[0][0] as any
-			const params = callArgs.tools[0].function.parameters
+			const callArgs = mockChat.mock.calls[0][0] as ChatRequest
+			// The ollama SDK types tool parameters narrowly; the sanitizer works on the
+			// full JSON-schema shape the handler builds.
+			const params = callArgs.tools![0].function.parameters as {
+				additionalProperties?: unknown
+				properties?: Record<string, { additionalProperties?: unknown; properties?: Record<string, unknown> }>
+			}
 
 			// Top-level additionalProperties stripped
 			expect(params).not.toHaveProperty("additionalProperties")
 
 			// Nested additionalProperties also stripped
-			expect(params.properties.options).not.toHaveProperty("additionalProperties")
-			expect(params.properties.options.properties.dry_run).toEqual({ type: "boolean" })
+			expect(params.properties!.options).not.toHaveProperty("additionalProperties")
+			expect(params.properties!.options.properties?.dry_run).toEqual({ type: "boolean" })
 		})
 
 		it("should keep tool results text-only and move images onto the adjacent user message", async () => {
@@ -2172,17 +2201,17 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", messages)
 			await collectStream(stream)
 
-			const callArgs = mockChat.mock.calls[0][0] as any
+			const callArgs = mockChat.mock.calls[0][0] as ChatRequest
 
 			// The tool result uses the native "tool" role and is text-only.
-			const toolMessage = callArgs.messages.find((m: any) => m.role === "tool")
+			const toolMessage = callArgs.messages!.find((m) => m.role === "tool")
 			expect(toolMessage).toBeDefined()
-			expect(toolMessage.tool_name).toBe("read_file")
-			expect(toolMessage.images).toBeUndefined()
+			expect(toolMessage!.tool_name).toBe("read_file")
+			expect(toolMessage!.images).toBeUndefined()
 
 			// The image is carried by the adjacent user message.
-			const userMessage = callArgs.messages.find(
-				(m: any) => m.role === "user" && Array.isArray(m.images) && m.images.includes("imgdata"),
+			const userMessage = callArgs.messages!.find(
+				(m) => m.role === "user" && Array.isArray(m.images) && (m.images as string[]).includes("imgdata"),
 			)
 			expect(userMessage).toBeDefined()
 		})
@@ -2226,8 +2255,8 @@ describe("NativeOllamaHandler", () => {
 			const stream = handler.createMessage("System", messages)
 			await collectStream(stream)
 
-			const callArgs = mockChat.mock.calls[0][0] as any
-			const toolMessages = callArgs.messages.filter((m: any) => m.role === "tool")
+			const callArgs = mockChat.mock.calls[0][0] as ChatRequest
+			const toolMessages = callArgs.messages!.filter((m) => m.role === "tool")
 
 			// Neither tool result should carry an images field.
 			expect(toolMessages).toHaveLength(2)
@@ -2236,7 +2265,7 @@ describe("NativeOllamaHandler", () => {
 			}
 
 			// The single image is delivered once via the adjacent user message.
-			const userImageMessages = callArgs.messages.filter((m: any) => m.role === "user" && Array.isArray(m.images))
+			const userImageMessages = callArgs.messages!.filter((m) => m.role === "user" && Array.isArray(m.images))
 			expect(userImageMessages).toHaveLength(1)
 			expect(userImageMessages[0].images).toEqual(["img-a"])
 		})

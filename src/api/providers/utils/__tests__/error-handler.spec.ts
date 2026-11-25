@@ -5,25 +5,25 @@ describe("handleProviderError", () => {
 
 	describe("HTTP status preservation", () => {
 		it("should preserve status code from Error with status field", () => {
-			const error = new Error("API request failed") as any
-			error.status = 401
+			const error = Object.assign(new Error("API request failed"), { status: 401 })
 
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
 			expect(result.message).toContain("TestProvider completion error")
-			expect((result as any).status).toBe(401)
+			expect(result.status).toBe(401)
 		})
 
 		it("should preserve status code from Error with nested error structure", () => {
-			const error = new Error("Wrapped error") as any
-			error.status = 429
-			error.errorDetails = [{ "@type": "type.googleapis.com/google.rpc.RetryInfo" }]
+			const error = Object.assign(new Error("Wrapped error"), {
+				status: 429,
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo" }],
+			})
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).status).toBe(429)
-			expect((result as any).errorDetails).toBeDefined()
+			expect(result.status).toBe(429)
+			expect(result.errorDetails).toBeDefined()
 		})
 
 		it("should preserve status from non-Error exception", () => {
@@ -35,7 +35,7 @@ describe("handleProviderError", () => {
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
-			expect((result as any).status).toBe(500)
+			expect(result.status).toBe(500)
 		})
 
 		it("should not add status field if original error lacks it", () => {
@@ -44,7 +44,7 @@ describe("handleProviderError", () => {
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
-			expect((result as any).status).toBeUndefined()
+			expect(result.status).toBeUndefined()
 		})
 
 		// AI SDK APICallError exposes the HTTP status as statusCode, not status — the same
@@ -125,31 +125,32 @@ describe("handleProviderError", () => {
 
 	describe("errorDetails preservation", () => {
 		it("should preserve errorDetails array from original error", () => {
-			const error = new Error("Rate limited") as any
-			error.status = 429
-			error.errorDetails = [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "5s" }]
+			const error = Object.assign(new Error("Rate limited"), {
+				status: 429,
+				errorDetails: [{ "@type": "type.googleapis.com/google.rpc.RetryInfo", retryDelay: "5s" }],
+			})
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).errorDetails).toEqual(error.errorDetails)
+			expect(result.errorDetails).toEqual(error.errorDetails)
 		})
 
 		it("should preserve code field from original error", () => {
-			const error = new Error("Bad request") as any
-			error.code = "invalid_request"
+			const error = Object.assign(new Error("Bad request"), { code: "invalid_request" })
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).code).toBe("invalid_request")
+			expect(result.code).toBe("invalid_request")
 		})
 
 		it("should preserve AWS $metadata from original error", () => {
-			const error = new Error("AWS error") as any
-			error.$metadata = { httpStatusCode: 403, requestId: "test-123" }
+			const error = Object.assign(new Error("AWS error"), {
+				$metadata: { httpStatusCode: 403, requestId: "test-123" },
+			})
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).$metadata).toEqual(error.$metadata)
+			expect(result.$metadata).toEqual(error.$metadata)
 		})
 	})
 
@@ -183,15 +184,14 @@ describe("handleProviderError", () => {
 		})
 
 		it("should preserve status even with custom transformer", () => {
-			const error = new Error("Rate limited") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limited"), { status: 429 })
 
 			const result = handleProviderError(error, providerName, {
 				messageTransformer: (msg) => `Transformed: ${msg}`,
 			})
 
 			expect(result.message).toBe("Transformed: Rate limited")
-			expect((result as any).status).toBe(429)
+			expect(result.status).toBe(429)
 		})
 	})
 
@@ -207,14 +207,13 @@ describe("handleProviderError", () => {
 		})
 
 		it("should preserve status even for ByteString errors", () => {
-			const error = new Error("Cannot convert argument to a ByteString") as any
-			error.status = 400
+			const error = Object.assign(new Error("Cannot convert argument to a ByteString"), { status: 400 })
 
 			const result = handleProviderError(error, providerName)
 
 			// Even though ByteString errors are typically client-side,
 			// we preserve any status metadata that exists for debugging purposes
-			expect((result as any).status).toBe(400)
+			expect(result.status).toBe(400)
 		})
 	})
 
@@ -228,12 +227,13 @@ describe("handleProviderError", () => {
 		})
 
 		it("should handle error with nested metadata", () => {
-			const error = new Error("Network error") as any
-			error.error = {
-				metadata: {
-					raw: "Connection refused",
+			const error = Object.assign(new Error("Network error"), {
+				error: {
+					metadata: {
+						raw: "Connection refused",
+					},
 				},
-			}
+			})
 
 			const result = handleProviderError(error, providerName)
 
@@ -263,39 +263,39 @@ describe("handleProviderError", () => {
 
 	describe("real-world error scenarios", () => {
 		it("should handle 401 Unauthorized with status and message", () => {
-			const error = new Error("Unauthorized") as any
-			error.status = 401
+			const error = Object.assign(new Error("Unauthorized"), { status: 401 })
 
 			const result = handleProviderError(error, providerName)
 
 			expect(result.message).toContain("Unauthorized")
-			expect((result as any).status).toBe(401)
+			expect(result.status).toBe(401)
 		})
 
 		it("should handle 429 Rate Limit with RetryInfo", () => {
-			const error = new Error("Rate limit exceeded") as any
-			error.status = 429
-			error.errorDetails = [
-				{
-					"@type": "type.googleapis.com/google.rpc.RetryInfo",
-					retryDelay: "10s",
-				},
-			]
+			const error = Object.assign(new Error("Rate limit exceeded"), {
+				status: 429,
+				errorDetails: [
+					{
+						"@type": "type.googleapis.com/google.rpc.RetryInfo",
+						retryDelay: "10s",
+					},
+				],
+			})
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).status).toBe(429)
-			expect((result as any).errorDetails).toBeDefined()
-			expect((result as any).errorDetails[0].retryDelay).toBe("10s")
+			expect(result.status).toBe(429)
+			expect(result.errorDetails).toBeDefined()
+			const errorDetails = result.errorDetails as Array<{ retryDelay?: string }>
+			expect(errorDetails[0].retryDelay).toBe("10s")
 		})
 
 		it("should handle 500 Internal Server Error", () => {
-			const error = new Error("Internal server error") as any
-			error.status = 500
+			const error = Object.assign(new Error("Internal server error"), { status: 500 })
 
 			const result = handleProviderError(error, providerName)
 
-			expect((result as any).status).toBe(500)
+			expect(result.status).toBe(500)
 			expect(result.message).toContain("Internal server error")
 		})
 
@@ -305,30 +305,30 @@ describe("handleProviderError", () => {
 			const result = handleProviderError(error, providerName)
 
 			expect(result).toBeInstanceOf(Error)
-			expect((result as any).status).toBeUndefined()
+			expect(result.status).toBeUndefined()
 			expect(result.message).toContain("Network connectivity issue")
 		})
 
 		it("should handle Gemini-specific errors with custom transformer", () => {
-			const error = new Error("Model not found") as any
-			error.status = 404
+			const error = Object.assign(new Error("Model not found"), { status: 404 })
 
 			const result = handleProviderError(error, "Gemini", {
 				messageTransformer: (msg) => `Gemini API Error: ${msg}`,
 			})
 
 			expect(result.message).toBe("Gemini API Error: Model not found")
-			expect((result as any).status).toBe(404)
+			expect(result.status).toBe(404)
 		})
 
 		it("should handle Anthropic SDK errors", () => {
-			const error = new Error("Invalid API key") as any
-			error.status = 401
-			error.error = { type: "authentication_error" }
+			const error = Object.assign(new Error("Invalid API key"), {
+				status: 401,
+				error: { type: "authentication_error" },
+			})
 
 			const result = handleProviderError(error, "Anthropic")
 
-			expect((result as any).status).toBe(401)
+			expect(result.status).toBe(401)
 			expect(result.message).toContain("Invalid API key")
 		})
 	})
@@ -336,24 +336,22 @@ describe("handleProviderError", () => {
 
 describe("handleOpenAIError (backward compatibility)", () => {
 	it("should be an alias for handleProviderError with completion prefix", () => {
-		const error = new Error("API failed") as any
-		error.status = 500
+		const error = Object.assign(new Error("API failed"), { status: 500 })
 
 		const result = handleOpenAIError(error, "OpenAI")
 
 		expect(result).toBeInstanceOf(Error)
 		expect(result.message).toContain("OpenAI completion error")
-		expect((result as any).status).toBe(500)
+		expect(result.status).toBe(500)
 	})
 
 	it("should preserve backward compatibility for existing callers", () => {
-		const error = new Error("Authentication failed") as any
-		error.status = 401
+		const error = Object.assign(new Error("Authentication failed"), { status: 401 })
 
 		const result = handleOpenAIError(error, "Roo Code Cloud")
 
 		expect(result.message).toBe("Roo Code Cloud completion error: Authentication failed")
-		expect((result as any).status).toBe(401)
+		expect(result.status).toBe(401)
 	})
 })
 

@@ -12,6 +12,20 @@ import {
 import { normalizeMistralToolCallId } from "../mistral-format"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
+/** Anthropic history message with the extension's reasoning passthrough fields. */
+interface AnthropicMessageWithReasoning extends Anthropic.Messages.MessageParam {
+	reasoning_details?: ReasoningDetail[]
+	reasoning_content?: string
+}
+
+/** Assistant message carrying the reasoning passthrough fields convertToOpenAiMessages attaches. */
+interface AssistantMessageWithReasoning extends OpenAI.Chat.ChatCompletionAssistantMessageParam {
+	reasoning_details?: ReasoningDetail[]
+	reasoning_content?: string
+	/** Legacy top-level reasoning field the converter no longer emits. */
+	reasoning?: unknown
+}
+
 describe("convertToOpenAiMessages", () => {
 	it("should convert simple text messages", () => {
 		const anthropicMessages: Anthropic.Messages.MessageParam[] = [
@@ -85,7 +99,7 @@ describe("convertToOpenAiMessages", () => {
 					{ type: "text", text: "What is in this image?" },
 					{
 						type: "image",
-						source: { type: "url", url: "https://example.com/image.png" } as any,
+						source: { type: "url", url: "https://example.com/image.png" },
 					},
 				],
 			},
@@ -107,7 +121,8 @@ describe("convertToOpenAiMessages", () => {
 				content: [
 					{
 						type: "image",
-						source: { type: "file" } as any,
+						// Partial source double for the non-base64 branch; routed through unknown.
+						source: { type: "file" } as unknown as Anthropic.Messages.ImageBlockParam["source"],
 					},
 				],
 			},
@@ -129,10 +144,12 @@ describe("convertToOpenAiMessages", () => {
 						tool_use_id: "tool-1",
 						content: [
 							{ type: "text", text: "some text" },
+							// Document blocks inside tool_result content are routed through unknown
+							// because the SDK content union only lists text and image parts.
 							{
 								type: "document",
 								source: { type: "base64", media_type: "application/pdf", data: "abc" },
-							} as any,
+							} as unknown as Anthropic.TextBlockParam,
 						],
 					},
 				],
@@ -141,7 +158,7 @@ describe("convertToOpenAiMessages", () => {
 
 		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 		expect(openAiMessages[0].role).toBe("tool")
-		expect((openAiMessages[0] as any).content).toBe("some text\n")
+		expect(openAiMessages[0].content).toBe("some text\n")
 	})
 
 	it("should handle base64 image in tool result with placeholder", () => {
@@ -167,7 +184,7 @@ describe("convertToOpenAiMessages", () => {
 		expect(openAiMessages[0].role).toBe("tool")
 		// base64 images in tool results emit a placeholder; the image itself is
 		// flushed in a separate user message (see comment block in openai-format.ts)
-		expect((openAiMessages[0] as any).content).toBe("(see following user message for image)")
+		expect(openAiMessages[0].content).toBe("(see following user message for image)")
 	})
 
 	it("should render [Image] placeholder for URL image in tool result", () => {
@@ -181,7 +198,7 @@ describe("convertToOpenAiMessages", () => {
 						content: [
 							{
 								type: "image",
-								source: { type: "url", url: "https://example.com/img.png" } as any,
+								source: { type: "url", url: "https://example.com/img.png" },
 							},
 						],
 					},
@@ -191,7 +208,7 @@ describe("convertToOpenAiMessages", () => {
 
 		const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 		expect(openAiMessages[0].role).toBe("tool")
-		expect((openAiMessages[0] as any).content).toBe("[Image]")
+		expect(openAiMessages[0].content).toBe("[Image]")
 	})
 
 	it("should handle assistant messages with tool use (no normalization without normalizeToolCallId)", () => {
@@ -219,7 +236,7 @@ describe("convertToOpenAiMessages", () => {
 		const assistantMessage = openAiMessages[0] as OpenAI.Chat.ChatCompletionAssistantMessageParam
 		expect(assistantMessage.role).toBe("assistant")
 		expect(assistantMessage.content).toBe("Let me check the weather.")
-		expect(assistantMessage.tool_calls).toHaveLength(1)
+		expect(assistantMessage.tool_calls!).toHaveLength(1)
 		expect(assistantMessage.tool_calls![0]).toEqual({
 			id: "weather-123", // Not normalized without normalizeToolCallId function
 			type: "function",
@@ -374,7 +391,7 @@ describe("convertToOpenAiMessages", () => {
 		expect(assistantMessage.role).toBe("assistant")
 		// Content should be an empty string, NOT undefined
 		expect(assistantMessage.content).toBe("")
-		expect(assistantMessage.tool_calls).toHaveLength(1)
+		expect(assistantMessage.tool_calls!).toHaveLength(1)
 		expect(assistantMessage.tool_calls![0].id).toBe("tool-123")
 	})
 
@@ -741,22 +758,22 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 			expect(assistantMessage.role).toBe("assistant")
 			expect(assistantMessage.content).toBe("Why don't scientists trust atoms? Because they make up everything!")
-			expect(assistantMessage.reasoning_details).toHaveLength(2)
-			expect(assistantMessage.reasoning_details[0].type).toBe("reasoning.summary")
-			expect(assistantMessage.reasoning_details[1].type).toBe("reasoning.encrypted")
-			expect(assistantMessage.reasoning_details[1].id).toBe("rs_abc")
+			expect(assistantMessage.reasoning_details!).toHaveLength(2)
+			expect(assistantMessage.reasoning_details![0].type).toBe("reasoning.summary")
+			expect(assistantMessage.reasoning_details![1].type).toBe("reasoning.encrypted")
+			expect(assistantMessage.reasoning_details![1].id).toBe("rs_abc")
 		})
 
 		it("should strip id from openai-responses-v1 blocks even when assistant content is a string", () => {
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: "Ok.",
@@ -771,21 +788,21 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
-			expect(assistantMessage.reasoning_details).toHaveLength(1)
-			expect(assistantMessage.reasoning_details[0].format).toBe("openai-responses-v1")
-			expect(assistantMessage.reasoning_details[0].id).toBeUndefined()
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
+			expect(assistantMessage.reasoning_details!).toHaveLength(1)
+			expect(assistantMessage.reasoning_details![0].format).toBe("openai-responses-v1")
+			expect(assistantMessage.reasoning_details![0].id).toBeUndefined()
 		})
 
 		it("should pass through all reasoning_details without extracting to top-level reasoning", () => {
 			// This simulates the stored format after receiving from xAI/Roo API
 			// The provider (roo.ts) now consolidates all reasoning into reasoning_details
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [{ type: "text" as const, text: "I'll help you with that." }],
@@ -805,26 +822,26 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 			expect(assistantMessage.role).toBe("assistant")
 
 			// Should NOT have top-level reasoning field - we only use reasoning_details now
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should pass through all reasoning_details preserving all fields
-			expect(assistantMessage.reasoning_details).toHaveLength(2)
-			expect(assistantMessage.reasoning_details[0].type).toBe("reasoning.summary")
-			expect(assistantMessage.reasoning_details[0].summary).toBe(
+			expect(assistantMessage.reasoning_details!).toHaveLength(2)
+			expect(assistantMessage.reasoning_details![0].type).toBe("reasoning.summary")
+			expect(assistantMessage.reasoning_details![0].summary).toBe(
 				'<xai:function_call name="update_todo_list">\n\n## Reviewing task progress',
 			)
-			expect(assistantMessage.reasoning_details[1].type).toBe("reasoning.encrypted")
-			expect(assistantMessage.reasoning_details[1].id).toBe("rs_ce73018c-40cc-49b1-c589-902c53f4a16a")
-			expect(assistantMessage.reasoning_details[1].data).toBe(
+			expect(assistantMessage.reasoning_details![1].type).toBe("reasoning.encrypted")
+			expect(assistantMessage.reasoning_details![1].id).toBe("rs_ce73018c-40cc-49b1-c589-902c53f4a16a")
+			expect(assistantMessage.reasoning_details![1].data).toBe(
 				"PParvy65fOb8AhUd9an7yZ3wBF2KCQPL3zhjPNve8parmyG/Xw2K7HZn...",
 			)
 		})
@@ -834,7 +851,7 @@ describe("convertToOpenAiMessages", () => {
 			// reasoning blocks with format "openai-responses-v1" because we don't use
 			// `store: true` (we handle conversation state client-side). The error message is:
 			// "'{id}' not found. Items are not persisted when `store` is set to false."
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [
@@ -858,37 +875,39 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should NOT have top-level reasoning field - we only use reasoning_details now
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should pass through reasoning_details preserving most fields BUT stripping id
-			expect(assistantMessage.reasoning_details).toHaveLength(1)
-			expect(assistantMessage.reasoning_details[0].type).toBe("reasoning.summary")
+			expect(assistantMessage.reasoning_details!).toHaveLength(1)
+			expect(assistantMessage.reasoning_details![0].type).toBe("reasoning.summary")
 			// id should be STRIPPED for openai-responses-v1 format to avoid 404 errors
-			expect(assistantMessage.reasoning_details[0].id).toBeUndefined()
-			expect(assistantMessage.reasoning_details[0].summary).toBe(
+			expect(assistantMessage.reasoning_details![0].id).toBeUndefined()
+			expect(assistantMessage.reasoning_details![0].summary).toBe(
 				"It looks like I need to make sure I'm using the tool every time.",
 			)
-			expect(assistantMessage.reasoning_details[0].data).toBe(
+			expect(assistantMessage.reasoning_details![0].data).toBe(
 				"gAAAAABpStjXioDMX8RUobc7k-eKqax9WrI97bok93IkBI6X6eBY...",
 			)
-			expect(assistantMessage.reasoning_details[0].format).toBe("openai-responses-v1")
+			expect(assistantMessage.reasoning_details![0].format).toBe("openai-responses-v1")
 
 			// Should have tool_calls
-			expect(assistantMessage.tool_calls).toHaveLength(1)
-			expect(assistantMessage.tool_calls[0].id).toBe("call_Tb4KVEmEpEAA8W1QcxjyD5Nh")
+			expect(assistantMessage.tool_calls!).toHaveLength(1)
+			expect((assistantMessage.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).id).toBe(
+				"call_Tb4KVEmEpEAA8W1QcxjyD5Nh",
+			)
 		})
 
 		it("should preserve id for non-openai-responses-v1 formats (e.g., xai-responses-v1)", () => {
 			// For other formats like xai-responses-v1, we should preserve the id
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [{ type: "text" as const, text: "Response" }],
@@ -902,22 +921,22 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should preserve id for xai-responses-v1 format
-			expect(assistantMessage.reasoning_details).toHaveLength(1)
-			expect(assistantMessage.reasoning_details[0].id).toBe("rs_ce73018c-40cc-49b1-c589-902c53f4a16a")
-			expect(assistantMessage.reasoning_details[0].format).toBe("xai-responses-v1")
+			expect(assistantMessage.reasoning_details!).toHaveLength(1)
+			expect(assistantMessage.reasoning_details![0].id).toBe("rs_ce73018c-40cc-49b1-c589-902c53f4a16a")
+			expect(assistantMessage.reasoning_details![0].format).toBe("xai-responses-v1")
 		})
 
 		it("should handle assistant messages with tool_calls and reasoning_details", () => {
 			// This simulates a message with both tool calls and reasoning
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [
@@ -944,27 +963,31 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should NOT have top-level reasoning field
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should pass through all reasoning_details
-			expect(assistantMessage.reasoning_details).toHaveLength(2)
+			expect(assistantMessage.reasoning_details!).toHaveLength(2)
 
 			// Should have tool_calls
-			expect(assistantMessage.tool_calls).toHaveLength(1)
-			expect(assistantMessage.tool_calls[0].id).toBe("call_62462410")
-			expect(assistantMessage.tool_calls[0].function.name).toBe("read_file")
+			expect(assistantMessage.tool_calls!).toHaveLength(1)
+			expect((assistantMessage.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).id).toBe(
+				"call_62462410",
+			)
+			expect(
+				(assistantMessage.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).function.name,
+			).toBe("read_file")
 		})
 
 		it("should pass through reasoning_details with only encrypted blocks", () => {
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [{ type: "text" as const, text: "Response text" }],
@@ -978,23 +1001,23 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should NOT have reasoning field
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should still pass through reasoning_details
-			expect(assistantMessage.reasoning_details).toHaveLength(1)
-			expect(assistantMessage.reasoning_details[0].type).toBe("reasoning.encrypted")
+			expect(assistantMessage.reasoning_details!).toHaveLength(1)
+			expect(assistantMessage.reasoning_details![0].type).toBe("reasoning.encrypted")
 		})
 
 		it("should pass through reasoning_details even when only summary blocks exist (no encrypted)", () => {
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [{ type: "text" as const, text: "Response text" }],
@@ -1007,20 +1030,20 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should NOT have top-level reasoning field
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should pass through reasoning_details preserving the summary block
-			expect(assistantMessage.reasoning_details).toHaveLength(1)
-			expect(assistantMessage.reasoning_details[0].type).toBe("reasoning.summary")
-			expect(assistantMessage.reasoning_details[0].summary).toBe("Just a summary, no encrypted content")
+			expect(assistantMessage.reasoning_details!).toHaveLength(1)
+			expect(assistantMessage.reasoning_details![0].type).toBe("reasoning.summary")
+			expect(assistantMessage.reasoning_details![0].summary).toBe("Just a summary, no encrypted content")
 		})
 
 		it("should handle messages without reasoning_details", () => {
@@ -1034,7 +1057,7 @@ describe("convertToOpenAiMessages", () => {
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should not have reasoning or reasoning_details
 			expect(assistantMessage.reasoning).toBeUndefined()
@@ -1042,7 +1065,7 @@ describe("convertToOpenAiMessages", () => {
 		})
 
 		it("should pass through multiple reasoning_details blocks preserving all fields", () => {
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: [{ type: "text" as const, text: "Response" }],
@@ -1068,38 +1091,40 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any
+			]
 
 			const openAiMessages = convertToOpenAiMessages(anthropicMessages)
 
 			expect(openAiMessages).toHaveLength(1)
-			const assistantMessage = openAiMessages[0] as any
+			const assistantMessage = openAiMessages[0] as AssistantMessageWithReasoning
 
 			// Should NOT have top-level reasoning field
 			expect(assistantMessage.reasoning).toBeUndefined()
 
 			// Should pass through all reasoning_details
-			expect(assistantMessage.reasoning_details).toHaveLength(3)
-			expect(assistantMessage.reasoning_details[0].summary).toBe("First part of thinking. ")
-			expect(assistantMessage.reasoning_details[1].summary).toBe("Second part of thinking.")
-			expect(assistantMessage.reasoning_details[2].data).toBe("encrypted_data")
+			expect(assistantMessage.reasoning_details!).toHaveLength(3)
+			expect(assistantMessage.reasoning_details![0].summary).toBe("First part of thinking. ")
+			expect(assistantMessage.reasoning_details![1].summary).toBe("Second part of thinking.")
+			expect(assistantMessage.reasoning_details![2].data).toBe("encrypted_data")
 		})
 	})
 
 	describe("reasoning_content round-trip for DeepSeek / Z.ai thinking mode", () => {
 		it("should pass through top-level reasoning_content on assistant messages", () => {
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
 					content: "Here is my answer.",
 					reasoning_content: "Let me think about this carefully...",
 				},
-			] as any as Anthropic.Messages.MessageParam[]
+			]
 
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			expect((result[0] as any).reasoning_content).toBe("Let me think about this carefully...")
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBe(
+				"Let me think about this carefully...",
+			)
 		})
 
 		it("should extract reasoning_content from reasoning content block", () => {
@@ -1112,12 +1137,11 @@ describe("convertToOpenAiMessages", () => {
 						{ type: "text", text: "My answer." },
 					],
 				},
-			] as any as Anthropic.Messages.MessageParam[]
-
+			] as unknown as Anthropic.Messages.MessageParam[]
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
 			expect(msg.reasoning_content).toBe("Let me think...")
 			expect(msg.content).toBe("My answer.")
 		})
@@ -1139,15 +1163,14 @@ describe("convertToOpenAiMessages", () => {
 						},
 					],
 				},
-			] as any as Anthropic.Messages.MessageParam[]
-
+			] as unknown as Anthropic.Messages.MessageParam[]
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
 			expect(msg.reasoning_content).toBe("I need to read a file.")
-			expect(msg.tool_calls).toHaveLength(1)
-			expect(msg.tool_calls[0].id).toBe("call_abc")
+			expect(msg.tool_calls!).toHaveLength(1)
+			expect((msg.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).id).toBe("call_abc")
 		})
 
 		it("should accumulate multiple reasoning blocks in order, separated by a tool call", () => {
@@ -1168,15 +1191,14 @@ describe("convertToOpenAiMessages", () => {
 						{ type: "reasoning", text: "Now I know what to do next.", summary: [] },
 					],
 				},
-			] as any as Anthropic.Messages.MessageParam[]
-
+			] as unknown as Anthropic.Messages.MessageParam[]
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
 			expect(msg.reasoning_content).toBe("First, I should check the file.Now I know what to do next.")
-			expect(msg.tool_calls).toHaveLength(1)
-			expect(msg.tool_calls[0].id).toBe("call_abc")
+			expect(msg.tool_calls!).toHaveLength(1)
+			expect((msg.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).id).toBe("call_abc")
 		})
 
 		it("should prefer top-level reasoning_content over content block", () => {
@@ -1189,11 +1211,10 @@ describe("convertToOpenAiMessages", () => {
 					],
 					reasoning_content: "top-level reasoning",
 				},
-			] as any as Anthropic.Messages.MessageParam[]
-
+			] as unknown as Anthropic.Messages.MessageParam[]
 			const result = convertToOpenAiMessages(anthropicMessages)
 
-			expect((result[0] as any).reasoning_content).toBe("top-level reasoning")
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBe("top-level reasoning")
 		})
 
 		it("should not set reasoning_content when there is none", () => {
@@ -1214,24 +1235,25 @@ describe("convertToOpenAiMessages", () => {
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			expect((result[0] as any).reasoning_content).toBeUndefined()
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBeUndefined()
 		})
 
 		it("should ignore non-object content parts without crashing (defensive guard)", () => {
 			// getReasoningBlockText guards against non-object parts (e.g. a stray
 			// string in the content array). Such parts are not reasoning blocks and
 			// must be skipped rather than crashing or being misread as reasoning.
-			const anthropicMessages = [
+			const anthropicMessages: AnthropicMessageWithReasoning[] = [
 				{
 					role: "assistant" as const,
-					content: ["not-a-block" as any, { type: "text", text: "answer" }],
+					// Malformed string part (not a block) routed through unknown on purpose.
+					content: ["not-a-block" as unknown as Anthropic.TextBlockParam, { type: "text", text: "answer" }],
 				},
-			] as any as Anthropic.Messages.MessageParam[]
+			]
 
 			const result = convertToOpenAiMessages(anthropicMessages)
 
 			expect(result).toHaveLength(1)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
 			expect(msg.content).toBe("answer")
 			expect(msg.reasoning_content).toBeUndefined()
 		})
@@ -1244,7 +1266,7 @@ describe("consolidateReasoningDetails", () => {
 	})
 
 	it("should return empty array for undefined input", () => {
-		expect(consolidateReasoningDetails(undefined as any)).toEqual([])
+		expect(consolidateReasoningDetails(undefined)).toEqual([])
 	})
 
 	it("should filter out corrupted encrypted blocks (missing data field)", () => {
@@ -1264,7 +1286,6 @@ describe("consolidateReasoningDetails", () => {
 				index: 0,
 			},
 		]
-
 		const result = consolidateReasoningDetails(details)
 
 		// Should only have the text block, not the corrupted encrypted block
@@ -1409,7 +1430,7 @@ describe("sanitizeGeminiMessages", () => {
 	})
 
 	it("should drop tool calls without reasoning_details for Gemini models", () => {
-		const messages = [
+		const messages: (AssistantMessageWithReasoning | OpenAI.Chat.ChatCompletionMessageParam)[] = [
 			{ role: "system", content: "You are helpful" },
 			{
 				role: "assistant",
@@ -1433,11 +1454,11 @@ describe("sanitizeGeminiMessages", () => {
 		expect(result).toHaveLength(2)
 		expect(result[0].role).toBe("system")
 		expect(result[1].role).toBe("assistant")
-		expect((result[1] as any).tool_calls).toBeUndefined()
+		expect((result[1] as AssistantMessageWithReasoning).tool_calls).toBeUndefined()
 	})
 
 	it("should filter reasoning_details to only include entries matching tool call IDs", () => {
-		const messages = [
+		const messages: (AssistantMessageWithReasoning | OpenAI.Chat.ChatCompletionMessageParam)[] = [
 			{
 				role: "assistant",
 				content: "",
@@ -1465,19 +1486,19 @@ describe("sanitizeGeminiMessages", () => {
 					},
 				],
 			},
-		] as any
+		]
 
 		const result = sanitizeGeminiMessages(messages, "google/gemini-3-flash-preview")
 
 		expect(result).toHaveLength(1)
-		const assistantMsg = result[0] as any
-		expect(assistantMsg.tool_calls).toHaveLength(1)
-		expect(assistantMsg.reasoning_details).toHaveLength(1)
-		expect(assistantMsg.reasoning_details[0].id).toBe("call_abc")
+		const assistantMsg = result[0] as AssistantMessageWithReasoning
+		expect(assistantMsg.tool_calls!).toHaveLength(1)
+		expect(assistantMsg.reasoning_details!).toHaveLength(1)
+		expect(assistantMsg.reasoning_details![0].id).toBe("call_abc")
 	})
 
 	it("should drop tool calls without matching reasoning_details", () => {
-		const messages = [
+		const messages: (AssistantMessageWithReasoning | OpenAI.Chat.ChatCompletionMessageParam)[] = [
 			{
 				role: "assistant",
 				content: "Some text",
@@ -1505,24 +1526,24 @@ describe("sanitizeGeminiMessages", () => {
 			},
 			{ role: "tool", tool_call_id: "call_abc", content: "result a" },
 			{ role: "tool", tool_call_id: "call_def", content: "result b" },
-		] as any
+		]
 
 		const result = sanitizeGeminiMessages(messages, "google/gemini-3-flash-preview")
 
 		// Should have: assistant with 1 tool_call, 1 tool message
 		expect(result).toHaveLength(2)
 
-		const assistantMsg = result[0] as any
-		expect(assistantMsg.tool_calls).toHaveLength(1)
-		expect(assistantMsg.tool_calls[0].id).toBe("call_abc")
+		const assistantMsg = result[0] as AssistantMessageWithReasoning
+		expect(assistantMsg.tool_calls!).toHaveLength(1)
+		expect((assistantMsg.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall).id).toBe("call_abc")
 
 		// Only the tool result for call_abc should remain
 		expect(result[1].role).toBe("tool")
-		expect((result[1] as any).tool_call_id).toBe("call_abc")
+		expect((result[1] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("call_abc")
 	})
 
 	it("should include reasoning_details without id (legacy format)", () => {
-		const messages = [
+		const messages: (AssistantMessageWithReasoning | OpenAI.Chat.ChatCompletionMessageParam)[] = [
 			{
 				role: "assistant",
 				content: "",
@@ -1550,18 +1571,18 @@ describe("sanitizeGeminiMessages", () => {
 					},
 				],
 			},
-		] as any
+		]
 
 		const result = sanitizeGeminiMessages(messages, "google/gemini-3-flash-preview")
 
 		expect(result).toHaveLength(1)
-		const assistantMsg = result[0] as any
+		const assistantMsg = result[0] as AssistantMessageWithReasoning
 		// Both details should be included (one by matching id, one by having no id)
-		expect(assistantMsg.reasoning_details.length).toBeGreaterThanOrEqual(1)
+		expect(assistantMsg.reasoning_details!.length).toBeGreaterThanOrEqual(1)
 	})
 
 	it("should preserve messages without tool_calls", () => {
-		const messages = [
+		const messages: (AssistantMessageWithReasoning | OpenAI.Chat.ChatCompletionMessageParam)[] = [
 			{ role: "system", content: "You are helpful" },
 			{ role: "user", content: "Hello" },
 			{ role: "assistant", content: "Hi there!" },
@@ -1701,7 +1722,7 @@ describe("convertToOpenAiMessages lone surrogate sanitization (#461)", () => {
 		// The "reasoning" block is a DeepSeek / Z.ai shape outside Anthropic's
 		// ContentBlockParam union, so the array needs one explicit widening. Double
 		// assertion (not `any`) keeps this file's lint suppression count unchanged.
-		const anthropicMessages = [
+		const anthropicMessages: AnthropicMessageWithReasoning[] = [
 			{
 				role: "assistant" as const,
 				content: [

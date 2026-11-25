@@ -54,6 +54,7 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 
 import { AwsBedrockHandler } from "../bedrock"
 import { ConverseStreamCommand, BedrockRuntimeClient, ConverseCommand } from "@aws-sdk/client-bedrock-runtime"
+import type { ConverseStreamCommandInput } from "@aws-sdk/client-bedrock-runtime"
 import {
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_SERVICE_TIER_MODEL_IDS,
@@ -85,6 +86,15 @@ const mockGetSystemProxyUrl = vi.mocked(getSystemProxyUrl)
 const mockNodeHttpHandler = vi.mocked(NodeHttpHandler)
 const mockHttpProxyAgent = vi.mocked(HttpProxyAgent)
 const mockHttpsProxyAgent = vi.mocked(HttpsProxyAgent)
+
+/**
+ * The handler builds additionalModelRequestFields as a plain object; the SDK types
+ * it as the Smithy Document union, so the object shape is asserted at extraction.
+ */
+type ConverseInputWithExtensionFields = ConverseStreamCommandInput & {
+	additionalModelRequestFields: Record<string, unknown>
+	[SERVICE_TIER_KEY]?: unknown
+}
 
 describe("AwsBedrockHandler", () => {
 	let handler: AwsBedrockHandler
@@ -327,7 +337,7 @@ describe("AwsBedrockHandler", () => {
 		describe("getPrefixForRegion", () => {
 			it("should return correct prefix for US regions", () => {
 				// Access private static method using type casting
-				const getPrefixForRegion = (AwsBedrockHandler as any).getPrefixForRegion
+				const getPrefixForRegion = AwsBedrockHandler["getPrefixForRegion"]
 
 				expect(getPrefixForRegion("us-east-1")).toBe("us.")
 				expect(getPrefixForRegion("us-west-2")).toBe("us.")
@@ -335,7 +345,7 @@ describe("AwsBedrockHandler", () => {
 			})
 
 			it("should return correct prefix for EU regions", () => {
-				const getPrefixForRegion = (AwsBedrockHandler as any).getPrefixForRegion
+				const getPrefixForRegion = AwsBedrockHandler["getPrefixForRegion"]
 
 				expect(getPrefixForRegion("eu-west-1")).toBe("eu.")
 				expect(getPrefixForRegion("eu-central-1")).toBe("eu.")
@@ -343,7 +353,7 @@ describe("AwsBedrockHandler", () => {
 			})
 
 			it("should return correct prefix for APAC regions", () => {
-				const getPrefixForRegion = (AwsBedrockHandler as any).getPrefixForRegion
+				const getPrefixForRegion = AwsBedrockHandler["getPrefixForRegion"]
 
 				// Australia regions (Sydney and Melbourne) get au. prefix
 				expect(getPrefixForRegion("ap-southeast-2")).toBe("au.")
@@ -357,7 +367,7 @@ describe("AwsBedrockHandler", () => {
 			})
 
 			it("should return undefined for unsupported regions", () => {
-				const getPrefixForRegion = (AwsBedrockHandler as any).getPrefixForRegion
+				const getPrefixForRegion = AwsBedrockHandler["getPrefixForRegion"]
 
 				expect(getPrefixForRegion("unknown-region")).toBeUndefined()
 				expect(getPrefixForRegion("")).toBeUndefined()
@@ -367,7 +377,7 @@ describe("AwsBedrockHandler", () => {
 
 		describe("isSystemInferenceProfile", () => {
 			it("should return true for AWS inference profile prefixes", () => {
-				const isSystemInferenceProfile = (AwsBedrockHandler as any).isSystemInferenceProfile
+				const isSystemInferenceProfile = AwsBedrockHandler["isSystemInferenceProfile"]
 
 				expect(isSystemInferenceProfile("us.")).toBe(true)
 				expect(isSystemInferenceProfile("eu.")).toBe(true)
@@ -375,7 +385,7 @@ describe("AwsBedrockHandler", () => {
 			})
 
 			it("should return false for other prefixes", () => {
-				const isSystemInferenceProfile = (AwsBedrockHandler as any).isSystemInferenceProfile
+				const isSystemInferenceProfile = AwsBedrockHandler["isSystemInferenceProfile"]
 
 				expect(isSystemInferenceProfile("ap.")).toBe(false)
 				expect(isSystemInferenceProfile("apne1.")).toBe(false)
@@ -395,7 +405,7 @@ describe("AwsBedrockHandler", () => {
 				})
 
 				// Access private method using type casting
-				const parseBaseModelId = (handler as any).parseBaseModelId.bind(handler)
+				const parseBaseModelId = handler["parseBaseModelId"].bind(handler)
 
 				expect(parseBaseModelId("us.anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(
 					"anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -416,7 +426,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseBaseModelId = (handler as any).parseBaseModelId.bind(handler)
+				const parseBaseModelId = handler["parseBaseModelId"].bind(handler)
 
 				expect(parseBaseModelId("anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(
 					"anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -432,7 +442,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseBaseModelId = (handler as any).parseBaseModelId.bind(handler)
+				const parseBaseModelId = handler["parseBaseModelId"].bind(handler)
 
 				// Other prefixes should be preserved as part of the model ID
 				expect(parseBaseModelId("ap.anthropic.claude-3-5-sonnet-20241022-v2:0")).toBe(
@@ -518,7 +528,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				const result = parseArn(
 					"arn:aws:bedrock:us-east-1:123456789012:foundation-model/us.anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -537,7 +547,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				const result = parseArn(
 					"arn:aws:bedrock:us-east-1:123456789012:foundation-model/anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -556,7 +566,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				const euResult = parseArn(
 					"arn:aws:bedrock:eu-west-1:123456789012:foundation-model/eu.anthropic.claude-3-5-sonnet-20241022-v2:0",
@@ -580,7 +590,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				// Other prefixes should not trigger cross-region inference detection
 				const result = parseArn(
@@ -601,7 +611,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-gov-west-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				const result = parseArn(
 					"arn:aws-us-gov:bedrock:us-gov-west-1:123456789012:inference-profile/us-gov.anthropic.claude-sonnet-4-5-20250929-v1:0",
@@ -620,7 +630,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "cn-north-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				const result = parseArn(
 					"arn:aws-cn:bedrock:cn-north-1:123456789012:inference-profile/anthropic.claude-3-sonnet-20240229-v1:0",
@@ -675,7 +685,7 @@ describe("AwsBedrockHandler", () => {
 					awsRegion: "us-east-1",
 				})
 
-				const parseArn = (handler as any).parseArn.bind(handler)
+				const parseArn = handler["parseArn"].bind(handler)
 
 				// Region in ARN (us-gov-west-1) doesn't match provided region (us-east-1)
 				const result = parseArn(
@@ -724,7 +734,7 @@ describe("AwsBedrockHandler", () => {
 
 			// Verify the command was created with the right payload
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Verify the image was properly formatted
 			const imageBlock = commandArg.messages![0].content![0]
@@ -793,7 +803,7 @@ describe("AwsBedrockHandler", () => {
 
 			// Verify the command was created with the right payload
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Verify both images were properly formatted
 			const firstImage = commandArg.messages![0].content![0]
@@ -1247,7 +1257,7 @@ describe("AwsBedrockHandler", () => {
 
 			// Verify the command was created with the right payload
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Should include anthropic_beta in additionalModelRequestFields with both 1M context and fine-grained-tool-streaming
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
@@ -1280,7 +1290,7 @@ describe("AwsBedrockHandler", () => {
 
 			// Verify the command was created with the right payload
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Should include anthropic_beta with fine-grained-tool-streaming for Claude models
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
@@ -1312,7 +1322,7 @@ describe("AwsBedrockHandler", () => {
 
 			// Verify the command was created with the right payload
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Should include anthropic_beta with fine-grained-tool-streaming for Claude models (even non-Sonnet 4)
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
@@ -1365,7 +1375,7 @@ describe("AwsBedrockHandler", () => {
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
 			const commandArg = mockConverseStreamCommand.mock.calls[
 				mockConverseStreamCommand.mock.calls.length - 1
-			][0] as any
+			][0] as ConverseInputWithExtensionFields
 
 			// Should include anthropic_beta in additionalModelRequestFields with both 1M context and fine-grained-tool-streaming
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
@@ -1494,7 +1504,7 @@ describe("AwsBedrockHandler", () => {
 				// Per AWS documentation, service_tier must be a top-level parameter, not inside additionalModelRequestFields
 				// https://docs.aws.amazon.com/bedrock/latest/userguide/service-tiers-inference.html
 				expect(mockConverseStreamCommand).toHaveBeenCalled()
-				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 				// service_tier should be at the top level of the payload
 				expect(commandArg[SERVICE_TIER_KEY]).toBe("PRIORITY")
@@ -1524,7 +1534,7 @@ describe("AwsBedrockHandler", () => {
 				await generator.next() // Start the generator
 
 				expect(mockConverseStreamCommand).toHaveBeenCalled()
-				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 				// service_tier should be at the top level of the payload
 				expect(commandArg[SERVICE_TIER_KEY]).toBe("FLEX")
@@ -1555,7 +1565,7 @@ describe("AwsBedrockHandler", () => {
 				await generator.next() // Start the generator
 
 				expect(mockConverseStreamCommand).toHaveBeenCalled()
-				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 				// Service tier should NOT be included for unsupported models (at top level or in additionalModelRequestFields)
 				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
@@ -1584,7 +1594,7 @@ describe("AwsBedrockHandler", () => {
 				await generator.next() // Start the generator
 
 				expect(mockConverseStreamCommand).toHaveBeenCalled()
-				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+				const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 				// Service tier should NOT be included when not specified (at top level or in additionalModelRequestFields)
 				expect(commandArg[SERVICE_TIER_KEY]).toBeUndefined()
@@ -1774,11 +1784,11 @@ describe("AwsBedrockHandler", () => {
 			await generator.next() // Start the generator
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// System content should include a cachePoint entry since prompt caching defaults to ON
 			const systemBlocks = commandArg.system
-			const hasCachePoint = systemBlocks?.some((block: any) => block.cachePoint !== undefined)
+			const hasCachePoint = systemBlocks?.some((block) => block.cachePoint !== undefined)
 			expect(hasCachePoint).toBe(true)
 		})
 
@@ -1795,11 +1805,11 @@ describe("AwsBedrockHandler", () => {
 			await generator.next() // Start the generator
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// System content should NOT include cachePoint since caching is explicitly disabled
 			const systemBlocks = commandArg.system
-			const hasCachePoint = systemBlocks?.some((block: any) => block.cachePoint !== undefined)
+			const hasCachePoint = systemBlocks?.some((block) => block.cachePoint !== undefined)
 			expect(hasCachePoint).toBe(false)
 		})
 	})
@@ -1824,7 +1834,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Adaptive thinking — no budget_tokens, must use effort levels.
 			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
@@ -1849,7 +1859,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// 4.8 inherits the 4.7 adaptive-thinking contract — no breaking API changes.
 			expect(commandArg.additionalModelRequestFields?.thinking).toEqual({
@@ -1878,7 +1888,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Sonnet 5 uses the same adaptive-thinking contract as Opus 4.7/4.8 —
 			// budget_tokens causes a 400, so thinking.type is "adaptive" with effort.
@@ -1929,7 +1939,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Opus 5 uses the same adaptive-thinking contract as Opus 4.7/4.8 —
 			// budget_tokens causes a 400, so thinking.type is "adaptive" with effort.
@@ -1959,7 +1969,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			expect(commandArg.additionalModelRequestFields).toEqual(
 				expect.objectContaining({
@@ -1977,7 +1987,7 @@ describe("AwsBedrockHandler", () => {
 			})
 			await collectStream(provider.createMessage("System prompt", messages))
 
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 			expect(commandArg.additionalModelRequestFields).not.toHaveProperty("thinking")
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
@@ -1996,7 +2006,7 @@ describe("AwsBedrockHandler", () => {
 			})
 			await collectStream(provider.createMessage("System prompt", messages))
 
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 			expect(commandArg.additionalModelRequestFields).toEqual(
 				expect.objectContaining({ thinking: { type: "disabled" } }),
 			)
@@ -2034,7 +2044,7 @@ describe("AwsBedrockHandler", () => {
 			})
 			await collectStream(provider.createMessage("System prompt", messages))
 
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 			expect(commandArg.additionalModelRequestFields ?? {}).not.toHaveProperty("thinking")
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
 		})
@@ -2053,11 +2063,15 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// 4.6 still uses the budget_tokens-based thinking format.
-			expect(commandArg.additionalModelRequestFields?.thinking?.type).toBe("enabled")
-			expect(commandArg.additionalModelRequestFields?.thinking?.budget_tokens).toBeGreaterThan(0)
+			const thinking = commandArg.additionalModelRequestFields?.thinking as {
+				type?: string
+				budget_tokens?: number
+			}
+			expect(thinking?.type).toBe("enabled")
+			expect(thinking?.budget_tokens).toBeGreaterThan(0)
 			// 4.6 still accepts temperature.
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
 		})
@@ -2078,7 +2092,7 @@ describe("AwsBedrockHandler", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as ConverseInputWithExtensionFields
 
 			// Model ID should carry the cross-region prefix.
 			expect(commandArg.modelId).toBe("us.anthropic.claude-opus-4-8")
@@ -2106,7 +2120,7 @@ describe("AwsBedrockHandler", () => {
 			await opus48Handler.completePrompt("Test prompt")
 
 			expect(mockConverseCommand).toHaveBeenCalled()
-			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseCommand.mock.calls[0][0] as ConverseStreamCommandInput
 
 			// 4.8 must NOT receive temperature in the non-stream inferenceConfig.
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
@@ -2128,7 +2142,7 @@ describe("AwsBedrockHandler", () => {
 			await haiku55Handler.completePrompt("Test prompt")
 
 			expect(mockConverseCommand).toHaveBeenCalled()
-			const commandArg = mockConverseCommand.mock.calls[0][0]
+			const commandArg = mockConverseCommand.mock.calls[0][0] as ConverseStreamCommandInput
 
 			// Haiku 5.5 must NOT receive temperature in the non-stream inferenceConfig.
 			expect(commandArg.inferenceConfig?.temperature).toBeUndefined()
@@ -2149,7 +2163,7 @@ describe("AwsBedrockHandler", () => {
 			await opus46Handler.completePrompt("Test prompt")
 
 			expect(mockConverseCommand).toHaveBeenCalled()
-			const commandArg = mockConverseCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseCommand.mock.calls[0][0] as ConverseStreamCommandInput
 
 			// 4.6 must still receive temperature.
 			expect(commandArg.inferenceConfig?.temperature).toBeDefined()
@@ -2333,7 +2347,7 @@ describe("AwsBedrockHandler", () => {
 				awsSecretKey: "test",
 				awsRegion: "us-east-1",
 			})
-			const isAdaptiveThinkingModel = (handler as any).isAdaptiveThinkingModel.bind(handler)
+			const isAdaptiveThinkingModel = handler["isAdaptiveThinkingModel"].bind(handler)
 
 			it("returns true for all adaptive-thinking model patterns (opus/sonnet 4.7 and 4.8)", () => {
 				expect(isAdaptiveThinkingModel("anthropic.claude-opus-4-7")).toBe(true)

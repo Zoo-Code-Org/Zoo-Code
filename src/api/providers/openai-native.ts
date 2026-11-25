@@ -40,6 +40,40 @@ import { getNumericHttpStatus, hasNumericHttpStatus } from "./utils/error-handle
 
 export type OpenAiNativeModel = ReturnType<OpenAiNativeHandler["getModel"]>
 
+/** Cache-detail fields shared by the Chat Completions and Responses usage payloads. */
+interface OpenAiUsageTokenDetails {
+	cached_tokens?: number
+	cache_miss_tokens?: number
+	cache_write_tokens?: number
+	/**
+	 * TTL split of cache writes on the Responses API. Not declared by the installed
+	 * SDK types (openai@5.23.2), so it is read defensively.
+	 */
+	cache_write_tokens_details?: { ttl_12h_tokens?: number }
+}
+
+/**
+ * Usage payload this handler normalizes, covering the Responses API
+ * (input_tokens/output_tokens) and Chat Completions (prompt_tokens/completion_tokens)
+ * families. Every field is optional because normalizeUsage guards each read.
+ */
+interface OpenAiUsage {
+	input_tokens?: number
+	output_tokens?: number
+	prompt_tokens?: number
+	completion_tokens?: number
+	input_tokens_details?: OpenAiUsageTokenDetails
+	prompt_tokens_details?: OpenAiUsageTokenDetails
+	output_tokens_details?: { reasoning_tokens?: number }
+	completion_tokens_details?: { reasoning_tokens?: number }
+	// Anthropic-style top-level cache fields also flow through normalizeUsage.
+	cache_creation_input_tokens?: number
+	cache_write_tokens?: number
+	cache_read_input_tokens?: number
+	cache_read_tokens?: number
+	cached_tokens?: number
+}
+
 /**
  * OpenAI caps `prompt_cache_key` at 64 characters; longer values are rejected with a 400.
  * Task ids are uuidv7 today (36 chars), so this is a guard rather than a routine truncation.
@@ -133,17 +167,18 @@ export class OpenAiNativeHandler extends BaseProvider implements SingleCompletio
 		})
 	}
 
-	private normalizeUsage(usage: any, model: OpenAiNativeModel): ApiStreamUsageChunk | undefined {
+	private normalizeUsage(
+		usage: OpenAiUsage | null | undefined,
+		model: Pick<OpenAiNativeModel, "info">,
+	): ApiStreamUsageChunk | undefined {
 		if (!usage) return undefined
 
 		// Prefer detailed shapes when available (Responses API)
 		const inputDetails = usage.input_tokens_details ?? usage.prompt_tokens_details
 
 		// Extract cache information from details with better readability
-		const hasCachedTokens = typeof inputDetails?.cached_tokens === "number"
-		const hasCacheMissTokens = typeof inputDetails?.cache_miss_tokens === "number"
-		const cachedFromDetails = hasCachedTokens ? inputDetails.cached_tokens : 0
-		const missFromDetails = hasCacheMissTokens ? inputDetails.cache_miss_tokens : 0
+		const cachedFromDetails = typeof inputDetails?.cached_tokens === "number" ? inputDetails.cached_tokens : 0
+		const missFromDetails = typeof inputDetails?.cache_miss_tokens === "number" ? inputDetails.cache_miss_tokens : 0
 		const writesFromDetails =
 			typeof inputDetails?.cache_write_tokens === "number" ? inputDetails.cache_write_tokens : 0
 

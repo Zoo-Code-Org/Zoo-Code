@@ -32,9 +32,16 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => ({
 }))
 
 import { AwsBedrockHandler } from "../bedrock"
+import type { ApiStreamChunk } from "../../transform/stream"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
+
+/** Shape of the AWS-style errors the handler rethrows. */
+type AwsErrorShape = Error & {
+	status?: number
+	$metadata?: { requestId?: string }
+}
 
 describe("AwsBedrockHandler Error Handling", () => {
 	let handler: AwsBedrockHandler
@@ -60,15 +67,15 @@ describe("AwsBedrockHandler Error Handling", () => {
 			requestId?: string
 			extendedRequestId?: string
 			cfId?: string
-			[key: string]: any // Allow additional properties
+			[key: string]: unknown
 		}
 	}): Error => {
-		const error = new Error(options.message || "Test error") as any
-		if (options.name) error.name = options.name
-		if (options.status) error.status = options.status
-		if (options.__type) error.__type = options.__type
-		if (options.$metadata) error.$metadata = options.$metadata
-		return error
+		return Object.assign(new Error(options.message || "Test error"), {
+			...(options.name ? { name: options.name } : {}),
+			...(options.status ? { status: options.status } : {}),
+			...(options.__type ? { __type: options.__type } : {}),
+			...(options.$metadata ? { $metadata: options.$metadata } : {}),
+		})
 	}
 
 	describe("Throttling Error Detection", () => {
@@ -323,7 +330,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 
 			const generator = handler.createMessage("system", [{ role: "user", content: "test" }])
 
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 			try {
 				for await (const chunk of generator) {
 					chunks.push(chunk)
@@ -411,8 +418,8 @@ describe("AwsBedrockHandler Error Handling", () => {
 				// Should contain the verbose message template
 				expect(error.message).toContain("Request was throttled or rate limited")
 				// Should preserve original error properties
-				expect((error as any).status).toBe(429)
-				expect((error as any).$metadata.requestId).toBe("test-request-id-12345")
+				expect((error as AwsErrorShape).status).toBe(429)
+				expect((error as AwsErrorShape).$metadata?.requestId).toBe("test-request-id-12345")
 			}
 		})
 
@@ -448,7 +455,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 				expect(error.message).toContain("Too many tokens")
 				// Should preserve original error properties
 				expect(error.name).toBe("ValidationException")
-				expect((error as any).$metadata.requestId).toBe("token-error-id-67890")
+				expect((error as AwsErrorShape).$metadata?.requestId).toBe("token-error-id-67890")
 			}
 		})
 	})
@@ -497,7 +504,7 @@ describe("AwsBedrockHandler Error Handling", () => {
 				// Should be treated as throttling due to 429 status taking priority
 				expect(error.message).toContain("throttled or rate limited")
 				// Should still preserve metadata
-				expect((error as any).$metadata?.requestId).toBe("mixed-error-id")
+				expect((error as AwsErrorShape).$metadata?.requestId).toBe("mixed-error-id")
 			}
 		})
 

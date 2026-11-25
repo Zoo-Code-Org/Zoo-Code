@@ -26,6 +26,7 @@ import { applyOpenRouterMoonshotK3Profile } from "../fetchers/openrouter"
 import { OpenRouterHandler } from "../openrouter"
 import { Package } from "../../../shared/package"
 import { makeApiHandlerOptions } from "../../../test-utils/api"
+import type { Mock } from "vitest"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { collectStreamAndParseToolCalls } from "../../../test-utils/native-tool-call-stream"
 import { clearAllMocks } from "../../../test-utils/reset"
@@ -36,6 +37,14 @@ vitest.mock("delay", () => ({
 		return Promise.resolve()
 	}),
 }))
+
+/** Replaces the auto-mocked OpenAI class's inherited chat namespace with a stub. */
+function stubOpenAiChatPrototype(create: Mock): void {
+	// The auto-mocked class is structurally incompatible with the narrow stub; the
+	// double assertion routes through unknown and names the one member provided.
+	const prototype = OpenAI as unknown as { prototype: { chat?: unknown } }
+	prototype.prototype.chat = { completions: { create } }
+}
 
 const mockCaptureException = vitest.fn()
 
@@ -403,9 +412,7 @@ describe("OpenRouterHandler", () => {
 			// Mock OpenAI chat.completions.create
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
 
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const systemPrompt = "test system prompt"
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user" as const, content: "test message" }]
@@ -459,9 +466,7 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const messages: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: "message 1" },
@@ -600,9 +605,7 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("openrouter API Error 500: API Error")
@@ -641,9 +644,7 @@ describe("OpenRouterHandler", () => {
 		it("captures telemetry when createMessage throws an exception", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockCreate = vitest.fn().mockRejectedValue(new Error("Connection failed"))
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow()
@@ -660,13 +661,10 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("Rate limit exceeded")
@@ -685,9 +683,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("429 Rate limit exceeded")
@@ -706,9 +702,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("rate limit")
@@ -728,9 +722,7 @@ describe("OpenRouterHandler", () => {
 			const mockStream = asyncStreamFrom([{ error: { message: "Rate limit exceeded", code: 429 } }])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			await expect(generator.next()).rejects.toThrow("openrouter API Error 429: Rate limit exceeded")
@@ -855,9 +847,7 @@ describe("OpenRouterHandler", () => {
 			])
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockStream)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const generator = handler.createMessage("test", [])
 			const parserScope = NativeToolCallParser.createScope()
@@ -1069,9 +1059,7 @@ describe("OpenRouterHandler", () => {
 			const mockResponse = { choices: [{ message: { content: "test completion" } }] }
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockResponse)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			const result = await handler.completePrompt("test prompt")
 
@@ -1099,9 +1087,7 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("openrouter API Error 500: API Error")
 
@@ -1122,9 +1108,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Unexpected error")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Unexpected error")
 
@@ -1141,12 +1125,9 @@ describe("OpenRouterHandler", () => {
 
 		it("passes SDK exceptions with status 429 to telemetry (filtering happens in PostHogTelemetryClient)", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
-			const error = new Error("Rate limit exceeded: free-models-per-day") as any
-			error.status = 429
+			const error = Object.assign(new Error("Rate limit exceeded: free-models-per-day"), { status: 429 })
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("Rate limit exceeded")
 
@@ -1165,9 +1146,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("429 Rate limit exceeded: free-models-per-day")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("429 Rate limit exceeded")
 
@@ -1186,9 +1165,7 @@ describe("OpenRouterHandler", () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const error = new Error("Request failed due to rate limit")
 			const mockCreate = vitest.fn().mockRejectedValue(error)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow("rate limit")
 
@@ -1213,9 +1190,7 @@ describe("OpenRouterHandler", () => {
 			}
 
 			const mockCreate = vitest.fn().mockResolvedValue(mockError)
-			;(OpenAI as any).prototype.chat = {
-				completions: { create: mockCreate },
-			} as any
+			stubOpenAiChatPrototype(mockCreate)
 
 			await expect(handler.completePrompt("test prompt")).rejects.toThrow(
 				"openrouter API Error 429: Rate limit exceeded",

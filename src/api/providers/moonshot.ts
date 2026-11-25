@@ -12,6 +12,17 @@ import { OpenAiHandler } from "./openai"
 import { NOT_PROVIDED } from "./constants"
 import { getMoonshotModels } from "./fetchers/moonshot"
 
+/**
+ * Moonshot usage payload. Cache hits arrive in `prompt_tokens_details.cached_tokens`
+ * (OpenAI-style); some gateways also surface a top-level `cached_tokens`.
+ */
+interface MoonshotUsage {
+	prompt_tokens?: number
+	completion_tokens?: number
+	prompt_tokens_details?: { cached_tokens?: number } | null
+	cached_tokens?: number
+}
+
 export class MoonshotHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		// Map Moonshot-specific options to the OpenAI-compatible options that
@@ -75,7 +86,10 @@ export class MoonshotHandler extends OpenAiHandler {
 	 * Override to handle Moonshot's usage metrics, including caching.
 	 * Moonshot returns cached_tokens in a different location than standard OpenAI.
 	 */
-	protected override processUsageMetrics(usage: any, _modelInfo?: ModelInfo): ApiStreamUsageChunk {
+	protected override processUsageMetrics(
+		usage: MoonshotUsage | null | undefined,
+		_modelInfo?: ModelInfo,
+	): ApiStreamUsageChunk {
 		return {
 			type: "usage",
 			inputTokens: usage?.prompt_tokens || 0,

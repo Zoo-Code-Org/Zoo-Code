@@ -60,68 +60,60 @@ describe("Amazon Bedrock Inference Profiles", () => {
 
 	describe("getPrefixForRegion function", () => {
 		it("should return correct prefix for US government regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("us-gov-east-1")).toBe("ug.")
-			expect((handler as any).constructor.getPrefixForRegion("us-gov-west-1")).toBe("ug.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-gov-east-1")).toBe("ug.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-gov-west-1")).toBe("ug.")
 		})
 
 		it("should return correct prefix for US commercial regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("us-east-1")).toBe("us.")
-			expect((handler as any).constructor.getPrefixForRegion("us-west-1")).toBe("us.")
-			expect((handler as any).constructor.getPrefixForRegion("us-west-2")).toBe("us.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-east-1")).toBe("us.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-west-1")).toBe("us.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-west-2")).toBe("us.")
 		})
 
 		it("should return correct prefix for European regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("eu-west-1")).toBe("eu.")
-			expect((handler as any).constructor.getPrefixForRegion("eu-central-1")).toBe("eu.")
-			expect((handler as any).constructor.getPrefixForRegion("eu-north-1")).toBe("eu.")
-			expect((handler as any).constructor.getPrefixForRegion("eu-south-1")).toBe("eu.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("eu-west-1")).toBe("eu.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("eu-central-1")).toBe("eu.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("eu-north-1")).toBe("eu.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("eu-south-1")).toBe("eu.")
 		})
 
 		it("should return correct prefix for Asia Pacific regions", () => {
-			const handler = createHandler()
 			// Australia regions (Sydney and Melbourne) get au. prefix
-			expect((handler as any).constructor.getPrefixForRegion("ap-southeast-2")).toBe("au.")
-			expect((handler as any).constructor.getPrefixForRegion("ap-southeast-4")).toBe("au.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-southeast-2")).toBe("au.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-southeast-4")).toBe("au.")
 			// Japan regions (Tokyo and Osaka) get jp. prefix
-			expect((handler as any).constructor.getPrefixForRegion("ap-northeast-1")).toBe("jp.")
-			expect((handler as any).constructor.getPrefixForRegion("ap-northeast-3")).toBe("jp.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-northeast-1")).toBe("jp.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-northeast-3")).toBe("jp.")
 			// Other APAC regions get apac. prefix
-			expect((handler as any).constructor.getPrefixForRegion("ap-southeast-1")).toBe("apac.")
-			expect((handler as any).constructor.getPrefixForRegion("ap-south-1")).toBe("apac.")
-			expect((handler as any).constructor.getPrefixForRegion("ap-east-1")).toBe("apac.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-southeast-1")).toBe("apac.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-south-1")).toBe("apac.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ap-east-1")).toBe("apac.")
 		})
 
 		it("should return correct prefix for Canada regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("ca-central-1")).toBe("ca.")
-			expect((handler as any).constructor.getPrefixForRegion("ca-west-1")).toBe("ca.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ca-central-1")).toBe("ca.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("ca-west-1")).toBe("ca.")
 		})
 
 		it("should return correct prefix for South America regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("sa-east-1")).toBe("sa.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("sa-east-1")).toBe("sa.")
 		})
 
 		it("should return undefined for unsupported regions", () => {
-			const handler = createHandler()
-			expect((handler as any).constructor.getPrefixForRegion("af-south-1")).toBeUndefined()
-			expect((handler as any).constructor.getPrefixForRegion("me-south-1")).toBeUndefined()
-			expect((handler as any).constructor.getPrefixForRegion("cn-north-1")).toBeUndefined()
-			expect((handler as any).constructor.getPrefixForRegion("invalid-region")).toBeUndefined()
+			expect(AwsBedrockHandler["getPrefixForRegion"]("af-south-1")).toBeUndefined()
+			expect(AwsBedrockHandler["getPrefixForRegion"]("me-south-1")).toBeUndefined()
+			expect(AwsBedrockHandler["getPrefixForRegion"]("cn-north-1")).toBeUndefined()
+			expect(AwsBedrockHandler["getPrefixForRegion"]("invalid-region")).toBeUndefined()
 		})
 
 		it("should prioritize longer patterns over shorter ones", () => {
-			const handler = createHandler()
 			// us-gov- should be matched before us-
-			expect((handler as any).constructor.getPrefixForRegion("us-gov-east-1")).toBe("ug.")
-			expect((handler as any).constructor.getPrefixForRegion("us-gov-west-1")).toBe("ug.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-gov-east-1")).toBe("ug.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-gov-west-1")).toBe("ug.")
 
 			// Regular us- regions should still work
-			expect((handler as any).constructor.getPrefixForRegion("us-east-1")).toBe("us.")
-			expect((handler as any).constructor.getPrefixForRegion("us-west-2")).toBe("us.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-east-1")).toBe("us.")
+			expect(AwsBedrockHandler["getPrefixForRegion"]("us-west-2")).toBe("us.")
 		})
 	})
 

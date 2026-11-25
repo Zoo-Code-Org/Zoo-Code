@@ -2,6 +2,9 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { Mock } from "vitest"
+import type OpenAI from "openai"
+import type { Anthropic } from "@anthropic-ai/sdk"
 import { OpenAiCodexHandler } from "../openai-codex"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { NativeToolCallParser } from "../../../core/assistant-message/NativeToolCallParser"
@@ -9,6 +12,14 @@ import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oaut
 import { Package } from "../../../shared/package"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
+/**
+ * Replaces the handler's OpenAI client with a stub providing responses.create,
+ * the only member these tests exercise; routed through unknown.
+ */
+function stubCodexClient(handler: OpenAiCodexHandler, create: Mock): void {
+	handler["client"] = { responses: { create } } as unknown as OpenAI
+}
 
 describe("OpenAiCodexHandler native tool calls", () => {
 	let handler: OpenAiCodexHandler
@@ -29,51 +40,52 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
 		// Mock OpenAI SDK streaming (preferred path).
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.output_item.added",
-							item: {
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.output_item.added",
+					item: {
+						type: "function_call",
+						call_id: "call_1",
+						name: "attempt_completion",
+						arguments: "",
+					},
+					output_index: 0,
+				},
+				{
+					type: "response.function_call_arguments.delta",
+					delta: '{"result":"hi"}',
+					item_id: "fc_1",
+					output_index: 0,
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_1",
+						status: "completed",
+						output: [
+							{
 								type: "function_call",
 								call_id: "call_1",
 								name: "attempt_completion",
-								arguments: "",
+								arguments: '{"result":"hi"}',
 							},
-							output_index: 0,
-						},
-						{
-							type: "response.function_call_arguments.delta",
-							delta: '{"result":"hi"}',
-							item_id: "fc_1",
-							output_index: 0,
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_1",
-								status: "completed",
-								output: [
-									{
-										type: "function_call",
-										call_id: "call_1",
-										name: "attempt_completion",
-										arguments: '{"result":"hi"}',
-									},
-								],
-								usage: { input_tokens: 1, output_tokens: 1 },
-							},
-						},
-					]),
-				),
-			},
-		}
+						],
+						usage: { input_tokens: 1, output_tokens: 1 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "hello" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "hello" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const parserScope = NativeToolCallParser.createScope()
 		const chunks: ApiStreamChunk[] = []
@@ -105,43 +117,44 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("yields text when Codex emits assistant message only in response.output_item.done", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.output_item.done",
-							item: {
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.output_item.done",
+					item: {
+						type: "message",
+						role: "assistant",
+						content: [{ type: "output_text", text: "hello from spark" }],
+					},
+					output_index: 0,
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_done_only",
+						status: "completed",
+						output: [
+							{
 								type: "message",
 								role: "assistant",
 								content: [{ type: "output_text", text: "hello from spark" }],
 							},
-							output_index: 0,
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_done_only",
-								status: "completed",
-								output: [
-									{
-										type: "message",
-										role: "assistant",
-										content: [{ type: "output_text", text: "hello from spark" }],
-									},
-								],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+						],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -153,34 +166,35 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("yields text when Codex emits assistant message only in response.completed output", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_completed_only",
-								status: "completed",
-								output: [
-									{
-										type: "message",
-										role: "assistant",
-										content: [{ type: "output_text", text: "final payload only" }],
-									},
-								],
-								usage: { input_tokens: 1, output_tokens: 2 },
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_completed_only",
+						status: "completed",
+						output: [
+							{
+								type: "message",
+								role: "assistant",
+								content: [{ type: "output_text", text: "final payload only" }],
 							},
-						},
-					]),
-				),
-			},
-		}
+						],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -192,32 +206,33 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("yields text when Codex emits response.output_text.done without deltas", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.output_text.done",
-							text: "done-event text only",
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_done_text_only",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.output_text.done",
+					text: "done-event text only",
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_done_text_only",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -229,38 +244,39 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("yields tool_call when Codex emits function_call only in response.output_item.done", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.output_item.done",
-							item: {
-								type: "function_call",
-								call_id: "call_done_only",
-								name: "attempt_completion",
-								arguments: '{"result":"ok"}',
-							},
-							output_index: 0,
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_done_tool_only",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.output_item.done",
+					item: {
+						type: "function_call",
+						call_id: "call_done_only",
+						name: "attempt_completion",
+						arguments: '{"result":"ok"}',
+					},
+					output_index: 0,
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_done_tool_only",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -276,37 +292,38 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("yields text when Codex emits response.content_part.added", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{
-							type: "response.content_part.added",
-							part: {
-								type: "output_text",
-								text: "content part text",
-							},
-							output_index: 0,
-							content_index: 0,
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_content_part",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{
+					type: "response.content_part.added",
+					part: {
+						type: "output_text",
+						text: "content part text",
+					},
+					output_index: 0,
+					content_index: 0,
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_content_part",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -318,31 +335,32 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("does not duplicate text when Codex emits delta and output_text.done", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{ type: "response.output_text.delta", delta: "hello " },
-						{ type: "response.output_text.delta", delta: "world" },
-						{ type: "response.output_text.done", text: "hello world" },
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_delta_done",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "hello " },
+				{ type: "response.output_text.delta", delta: "world" },
+				{ type: "response.output_text.done", text: "hello world" },
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_delta_done",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -353,35 +371,36 @@ describe("OpenAiCodexHandler native tool calls", () => {
 	it("does not duplicate text when Codex emits delta and content_part.added", async () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockResolvedValue(
-					asyncStreamFrom([
-						{ type: "response.output_text.delta", delta: "hello world" },
-						{
-							type: "response.content_part.added",
-							part: { type: "output_text", text: "hello world" },
-							output_index: 0,
-							content_index: 0,
-						},
-						{
-							type: "response.completed",
-							response: {
-								id: "resp_delta_content_part",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 2 },
-							},
-						},
-					]),
-				),
-			},
-		}
+		const stubCreate = vi.fn().mockResolvedValue(
+			asyncStreamFrom([
+				{ type: "response.output_text.delta", delta: "hello world" },
+				{
+					type: "response.content_part.added",
+					part: { type: "output_text", text: "hello world" },
+					output_index: 0,
+					content_index: 0,
+				},
+				{
+					type: "response.completed",
+					response: {
+						id: "resp_delta_content_part",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 2 },
+					},
+				},
+			]),
+		)
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		const chunks = await collectStream(stream)
 
@@ -407,12 +426,16 @@ describe("OpenAiCodexHandler native tool calls", () => {
 				},
 			]),
 		)
-		;(handler as any).client = { responses: { create: mockCreate } }
+		stubCodexClient(handler, mockCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "headers" } as any], {
-			taskId: "task-123",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "headers" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "task-123",
+				tools: [],
+			},
+		)
 		await collectStream(stream)
 
 		expect(mockCreate).toHaveBeenCalledWith(
@@ -432,33 +455,37 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		vi.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vi.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
-		const mockFetch = vi.fn().mockResolvedValue({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"fallback"}\n\n'),
-					)
-					controller.enqueue(
-						new TextEncoder().encode(
-							'data: {"type":"response.completed","response":{"id":"resp_fetch_headers","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
-						),
-					)
-					controller.close()
-				},
-			}),
-		})
-		global.fetch = mockFetch as any
-		;(handler as any).client = {
-			responses: {
-				create: vi.fn().mockRejectedValue(new Error("SDK unavailable")),
-			},
-		}
+		const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_text.delta","delta":"fallback"}\n\n',
+							),
+						)
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.completed","response":{"id":"resp_fetch_headers","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":1}}}\n\n',
+							),
+						)
+						controller.close()
+					},
+				}),
+			),
+		)
+		global.fetch = mockFetch
+		const stubCreate = vi.fn().mockRejectedValue(new Error("SDK unavailable"))
+		stubCodexClient(handler, stubCreate)
 
-		const stream = handler.createMessage("system", [{ role: "user", content: "fallback" } as any], {
-			taskId: "task-456",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "fallback" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "task-456",
+				tools: [],
+			},
+		)
 		await collectStream(stream)
 
 		expect(mockFetch).toHaveBeenCalledWith(
@@ -483,23 +510,24 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		Reflect.set(handler, "client", {
 			responses: { create: vi.fn().mockRejectedValue(new Error("SDK unavailable")) },
 		})
-		const mockFetch = vi.fn().mockResolvedValue({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"done"}\n\n'),
-					)
-					controller.close()
-				},
-			}),
-		})
-		global.fetch = mockFetch as any
+		const mockFetch = vi.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"done"}\n\n'),
+						)
+						controller.close()
+					},
+				}),
+			),
+		)
+		global.fetch = mockFetch
 
 		await expect(handler.completePrompt("Test prompt")).resolves.toBe("done")
 
-		const fetchOptions = mockFetch.mock.calls[0][1]
-		const body = JSON.parse(fetchOptions.body)
+		const fetchOptions = mockFetch.mock.calls[0]![1]
+		const body = JSON.parse(fetchOptions!.body as string)
 		expect(body.input).toEqual([
 			{
 				role: "user",
@@ -510,10 +538,10 @@ describe("OpenAiCodexHandler native tool calls", () => {
 		expect(body.reasoning?.context).toBeUndefined()
 		expect(body.input).not.toContainEqual(expect.objectContaining({ type: "additional_tools" }))
 		expect(body.input).not.toContainEqual(expect.objectContaining({ role: "developer" }))
-		expect(fetchOptions.headers).not.toHaveProperty("session-id")
-		expect(fetchOptions.headers).not.toHaveProperty("x-session-affinity")
-		expect(fetchOptions.headers).not.toHaveProperty("version")
-		expect(fetchOptions.headers).not.toHaveProperty("x-openai-internal-codex-responses-lite")
+		expect(fetchOptions!.headers).not.toHaveProperty("session-id")
+		expect(fetchOptions!.headers).not.toHaveProperty("x-session-affinity")
+		expect(fetchOptions!.headers).not.toHaveProperty("version")
+		expect(fetchOptions!.headers).not.toHaveProperty("x-openai-internal-codex-responses-lite")
 		expect(mockFetch).toHaveBeenCalledWith(
 			expect.stringContaining("/responses"),
 			expect.objectContaining({

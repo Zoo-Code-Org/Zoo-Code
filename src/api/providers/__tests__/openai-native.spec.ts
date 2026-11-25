@@ -197,8 +197,8 @@ describe("OpenAiNativeHandler", () => {
 				tools: [{ type: "function", name: "read_file", strict: true }],
 			})
 			expect(body.temperature).toBeUndefined()
-			expect(body.top_p).toBeUndefined()
-			expect(body.logprobs).toBeUndefined()
+			expect(body).not.toHaveProperty("top_p")
+			expect(body).not.toHaveProperty("logprobs")
 			expect(body.text).toBeUndefined()
 		})
 
@@ -326,26 +326,27 @@ describe("OpenAiNativeHandler", () => {
 			"requests $requestedTier but prices manual SSE fallback usage using OpenAI's resolved $resolvedTier tier",
 			async ({ requestedTier, resolvedTier, expectedCost }) => {
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
-				const mockFetch = vitest.fn().mockResolvedValue({
-					ok: true,
-					body: new ReadableStream({
-						start(controller) {
-							controller.enqueue(
-								new TextEncoder().encode(
-									`data: ${JSON.stringify({
-										type: "response.done",
-										response: {
-											[SERVICE_TIER_KEY]: resolvedTier,
-											usage: { input_tokens: 100, output_tokens: 20 },
-										},
-									})}\n\n`,
-								),
-							)
-							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-							controller.close()
-						},
-					}),
-				})
+				const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode(
+										`data: ${JSON.stringify({
+											type: "response.done",
+											response: {
+												[SERVICE_TIER_KEY]: resolvedTier,
+												usage: { input_tokens: 100, output_tokens: 20 },
+											},
+										})}\n\n`,
+									),
+								)
+								controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+								controller.close()
+							},
+						}),
+					),
+				)
 				global.fetch = mockFetch as typeof fetch
 				handler = new OpenAiNativeHandler({
 					...mockOptions,
@@ -355,8 +356,8 @@ describe("OpenAiNativeHandler", () => {
 
 				const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
-				const [, request] = mockFetch.mock.calls[0]
-				expect(JSON.parse(request.body)).toMatchObject({ [SERVICE_TIER_KEY]: requestedTier })
+				const request = mockFetch.mock.calls[0]?.[1]
+				expect(JSON.parse(request?.body as string)).toMatchObject({ [SERVICE_TIER_KEY]: requestedTier })
 				const usage = chunks.find((chunk) => chunk.type === "usage")
 				expect(usage?.totalCost).toBeCloseTo(expectedCost, 10)
 			},
@@ -366,31 +367,32 @@ describe("OpenAiNativeHandler", () => {
 			"captures resolved $resolvedTier tier from a manual SSE completion event when $requestedTier was requested",
 			async ({ requestedTier, resolvedTier, expectedCost }) => {
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
-				const mockFetch = vitest.fn().mockResolvedValue({
-					ok: true,
-					body: new ReadableStream({
-						start(controller) {
-							controller.enqueue(
-								new TextEncoder().encode(
-									`data: ${JSON.stringify({
-										type: "response.completed",
-										response: { [SERVICE_TIER_KEY]: resolvedTier },
-									})}\n\n`,
-								),
-							)
-							controller.enqueue(
-								new TextEncoder().encode(
-									`data: ${JSON.stringify({
-										type: "response.usage",
-										usage: { input_tokens: 100, output_tokens: 20 },
-									})}\n\n`,
-								),
-							)
-							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-							controller.close()
-						},
-					}),
-				})
+				const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode(
+										`data: ${JSON.stringify({
+											type: "response.completed",
+											response: { [SERVICE_TIER_KEY]: resolvedTier },
+										})}\n\n`,
+									),
+								)
+								controller.enqueue(
+									new TextEncoder().encode(
+										`data: ${JSON.stringify({
+											type: "response.usage",
+											usage: { input_tokens: 100, output_tokens: 20 },
+										})}\n\n`,
+									),
+								)
+								controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+								controller.close()
+							},
+						}),
+					),
+				)
 				global.fetch = mockFetch as typeof fetch
 				handler = new OpenAiNativeHandler({
 					...mockOptions,
@@ -408,27 +410,30 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle streaming responses via Responses API", async () => {
 			// Mock fetch for Responses API fallback
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.text.delta","delta":"Test"}\n\n'),
-						)
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.text.delta","delta":" response"}\n\n'),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.done","response":{"usage":{"prompt_tokens":10,"completion_tokens":2}}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode('data: {"type":"response.text.delta","delta":"Test"}\n\n'),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.text.delta","delta":" response"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.done","response":{"usage":{"prompt_tokens":10,"completion_tokens":2}}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail so it falls back to fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -444,12 +449,10 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle API errors", async () => {
 			// Mock fetch to return error
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: false,
-				status: 500,
-				text: async () => "Internal Server Error",
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest
+				.fn<typeof fetch>()
+				.mockResolvedValue(new Response("Internal Server Error", { status: 500 }))
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2524,37 +2527,38 @@ describe("OpenAiNativeHandler", () => {
 	describe("GPT-5 models", () => {
 		it("should handle GPT-5 model with Responses API", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						// Simulate actual GPT-5 Responses API SSE stream format
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.created","response":{"id":"test","status":"in_progress"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Hello"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":" world"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.done","response":{"usage":{"prompt_tokens":10,"completion_tokens":2}}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							// Simulate actual GPT-5 Responses API SSE stream format
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.created","response":{"id":"test","status":"in_progress"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Hello"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":" world"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.done","response":{"usage":{"prompt_tokens":10,"completion_tokens":2}}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail so it uses fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2565,10 +2569,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify Responses API is called with correct parameters
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -2582,7 +2583,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body1 = (mockFetch.mock.calls[0][1] as any).body as string
+			const body1 = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body1)
 			expect(parsedBody.model).toBe("gpt-5.1")
 			expect(parsedBody.instructions).toBe("You are a helpful assistant.")
@@ -2608,21 +2609,22 @@ describe("OpenAiNativeHandler", () => {
 		})
 
 		it("should handle GPT-5.5 model with Responses API", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"GPT-5.5 reply"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"GPT-5.5 reply"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
@@ -2632,10 +2634,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://api.openai.com/v1/responses",
@@ -2643,7 +2642,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body = (mockFetch.mock.calls[0][1] as any).body as string
+			const body = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body)
 			expect(parsedBody.model).toBe("gpt-5.5")
 			expect(parsedBody.max_output_tokens).toBe(128000)
@@ -2658,21 +2657,22 @@ describe("OpenAiNativeHandler", () => {
 		})
 
 		it("should handle GPT-5.4 model with Responses API", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"GPT-5.4 reply"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"GPT-5.4 reply"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
@@ -2682,10 +2682,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://api.openai.com/v1/responses",
@@ -2693,7 +2690,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body = (mockFetch.mock.calls[0][1] as any).body as string
+			const body = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body)
 			expect(parsedBody.model).toBe("gpt-5.4")
 			expect(parsedBody.max_output_tokens).toBe(128000)
@@ -2709,21 +2706,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle GPT-5.3 Chat model with Responses API", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Chat reply"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Chat reply"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail so it uses fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2734,10 +2732,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			expect(mockFetch).toHaveBeenCalledWith(
 				"https://api.openai.com/v1/responses",
@@ -2745,7 +2740,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body = (mockFetch.mock.calls[0][1] as any).body as string
+			const body = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body)
 			expect(parsedBody.model).toBe("gpt-5.3-chat-latest")
 			expect(parsedBody.max_output_tokens).toBe(16_384)
@@ -2760,21 +2755,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle GPT-5-mini model with Responses API", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Response"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Response"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2785,10 +2781,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Verify correct model and default parameters
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -2801,21 +2794,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle GPT-5-nano model with Responses API", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Nano response"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Nano response"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2826,10 +2820,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Verify correct model
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -2842,21 +2833,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should support verbosity control for GPT-5", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Low verbosity"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Low verbosity"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2869,10 +2861,7 @@ describe("OpenAiNativeHandler", () => {
 
 			// Create a message to verify verbosity is passed
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Verify that verbosity is passed in the request
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -2885,21 +2874,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should replace an unsupported GPT-5.1 reasoning effort with the model default", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Minimal effort"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Minimal effort"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2907,14 +2897,11 @@ describe("OpenAiNativeHandler", () => {
 			handler = new OpenAiNativeHandler({
 				...mockOptions,
 				apiModelId: "gpt-5.1",
-				reasoningEffort: "minimal" as any, // GPT-5 supports minimal
+				reasoningEffort: "minimal", // GPT-5 supports minimal
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// GPT-5.1 does not support minimal, so use the catalog's medium default.
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -2927,21 +2914,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should support xhigh reasoning effort for GPT-5.1 Codex Max", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"XHigh effort"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"XHigh effort"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2967,21 +2955,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should omit reasoning when selection is 'disable'", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"No reasoning"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"No reasoning"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -2989,7 +2978,7 @@ describe("OpenAiNativeHandler", () => {
 			const handler = new OpenAiNativeHandler({
 				...mockOptions,
 				apiModelId: "gpt-5.1",
-				reasoningEffort: "disable" as any,
+				reasoningEffort: "disable",
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
@@ -2997,7 +2986,7 @@ describe("OpenAiNativeHandler", () => {
 				// drain
 			}
 
-			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const bodyStr = mockFetch.mock.calls[0][1]?.body as string
 			const parsed = JSON.parse(bodyStr)
 			expect(parsed.reasoning).toBeUndefined()
 			expect(parsed.include).toBeUndefined()
@@ -3005,21 +2994,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should support low reasoning effort for GPT-5", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Low effort response"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Low effort response"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3031,10 +3021,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Should use Responses API with low reasoning effort
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -3043,7 +3030,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body2 = (mockFetch.mock.calls[0][1] as any).body as string
+			const body2 = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body2)
 			expect(parsedBody.model).toBe("gpt-5.1")
 			expect(parsedBody.reasoning?.effort).toBe("low")
@@ -3056,21 +3043,22 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should support verbosity while normalizing an unsupported GPT-5 effort", async () => {
 			// Mock fetch for Responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"High verbosity minimal effort"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"High verbosity minimal effort"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3079,14 +3067,11 @@ describe("OpenAiNativeHandler", () => {
 				...mockOptions,
 				apiModelId: "gpt-5.1",
 				verbosity: "high",
-				reasoningEffort: "minimal" as any,
+				reasoningEffort: "minimal",
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Should use Responses API with both parameters
 			expect(mockFetch).toHaveBeenCalledWith(
@@ -3095,7 +3080,7 @@ describe("OpenAiNativeHandler", () => {
 					body: expect.any(String),
 				}),
 			)
-			const body3 = (mockFetch.mock.calls[0][1] as any).body as string
+			const body3 = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(body3)
 			expect(parsedBody.model).toBe("gpt-5.1")
 			expect(parsedBody.reasoning?.effort).toBe("medium")
@@ -3108,47 +3093,48 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle actual GPT-5 Responses API format", async () => {
 			// Mock fetch with actual response format from GPT-5
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						// Test actual GPT-5 response format
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.created","response":{"id":"test","status":"in_progress"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.in_progress","response":{"status":"in_progress"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"First text"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":" Second text"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"reasoning","text":"Some reasoning"}}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.done","response":{"usage":{"prompt_tokens":100,"completion_tokens":20}}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							// Test actual GPT-5 response format
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.created","response":{"id":"test","status":"in_progress"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.in_progress","response":{"status":"in_progress"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"First text"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":" Second text"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"reasoning","text":"Some reasoning"}}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.done","response":{"usage":{"prompt_tokens":100,"completion_tokens":20}}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3159,10 +3145,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Should handle the actual format correctly
 			const textChunks = chunks.filter((c) => c.type === "text")
@@ -3194,17 +3177,18 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle Responses API with no content gracefully", async () => {
 			// Mock fetch with empty response
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(new TextEncoder().encode('data: {"someField":"value"}\n\n'))
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode('data: {"someField":"value"}\n\n'))
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3215,7 +3199,7 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
+			const chunks: ApiStreamChunk[] = []
 
 			// Should not throw, just warn
 			for await (const chunk of stream) {
@@ -3230,26 +3214,29 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should handle unhandled stream events gracefully", async () => {
 			// Mock fetch for the fallback SSE path
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Hello"}}\n\n',
-							),
-						)
-						// This event is not handled, so it should be ignored
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.audio.delta","delta":"..."}\n\n'),
-						)
-						controller.enqueue(new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'))
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Hello"}}\n\n',
+								),
+							)
+							// This event is not handled, so it should be ignored
+							controller.enqueue(
+								new TextEncoder().encode('data: {"type":"response.audio.delta","delta":"..."}\n\n'),
+							)
+							controller.enqueue(
+								new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3260,8 +3247,8 @@ describe("OpenAiNativeHandler", () => {
 			})
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			const errors: any[] = []
+			const chunks: ApiStreamChunk[] = []
+			const errors: unknown[] = []
 
 			try {
 				for await (const chunk of stream) {
@@ -3278,21 +3265,22 @@ describe("OpenAiNativeHandler", () => {
 		})
 
 		it("should format full conversation correctly", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Response"}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_item.added","item":{"type":"text","text":"Response"}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
 			const gpt5Handler = new OpenAiNativeHandler({
@@ -3307,7 +3295,7 @@ describe("OpenAiNativeHandler", () => {
 				// consume
 			}
 
-			const callBody = JSON.parse(mockFetch.mock.calls[0][1].body)
+			const callBody = JSON.parse(mockFetch.mock.calls[0][1]?.body as string)
 			expect(callBody.input).toEqual([
 				{
 					role: "user",
@@ -3318,15 +3306,16 @@ describe("OpenAiNativeHandler", () => {
 		})
 
 		it("sends a task-scoped prompt_cache_key in the body and no session_id header", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
 			global.fetch = mockFetch as typeof fetch
 			// Force the hand-built SSE path so the wire body and headers are inspectable.
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3339,7 +3328,7 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}
 
-			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))
+			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init?.body as string))
 			expect(bodies).toHaveLength(3)
 			expect(bodies[0].prompt_cache_key).toBe("task-cache-one")
 			// Same task, second turn: the key must not drift, or the growing prefix loses affinity.
@@ -3354,7 +3343,7 @@ describe("OpenAiNativeHandler", () => {
 			// The affinity header is gone: OpenAI ignores it for caching and hardened
 			// gateways reject underscore header names outright.
 			for (const [, init] of mockFetch.mock.calls) {
-				expect(init.headers).not.toHaveProperty("session_id")
+				expect(init?.headers).not.toHaveProperty("session_id")
 			}
 		})
 
@@ -3362,15 +3351,16 @@ describe("OpenAiNativeHandler", () => {
 			// Task ids are uuidv7 today (36 chars), so this guards the wire contract for
 			// any caller that sends a longer id: a 64-char slice drops the distinguishing
 			// tail, so two ids sharing a 64-char prefix would land in one routing bucket.
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
 			global.fetch = mockFetch as typeof fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
@@ -3385,7 +3375,7 @@ describe("OpenAiNativeHandler", () => {
 				}
 			}
 
-			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init.body))
+			const bodies = mockFetch.mock.calls.map(([, init]) => JSON.parse(init?.body as string))
 			expect(bodies).toHaveLength(2)
 			// OpenAI rejects keys over 64 characters, so the key must still fit.
 			expect(bodies[0].prompt_cache_key.length).toBeLessThanOrEqual(64)
@@ -3459,7 +3449,7 @@ describe("OpenAiNativeHandler", () => {
 					statusText: "Error",
 					text: async () => JSON.stringify({ error: { message: "Test error" } }),
 				})
-				global.fetch = mockFetch as any
+				global.fetch = mockFetch
 
 				// Mock SDK to fail
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3478,7 +3468,7 @@ describe("OpenAiNativeHandler", () => {
 				}).rejects.toThrow(expectedMessage)
 
 				// Clean up
-				delete (global as any).fetch
+				deleteGlobalFetch()
 			}
 		})
 	})
@@ -3557,12 +3547,10 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should capture telemetry on createMessage error", async () => {
 			// Mock fetch to return error
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: false,
-				status: 500,
-				text: async () => "Internal Server Error",
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest
+				.fn<typeof fetch>()
+				.mockResolvedValue(new Response("Internal Server Error", { status: 500 }))
+			global.fetch = mockFetch
 
 			// Mock SDK to fail so it falls back to fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3593,20 +3581,21 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should capture telemetry on stream processing error", async () => {
 			// Mock fetch to return a stream with an error event
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
-							),
-						)
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
+								),
+							)
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail so it falls back to fetch
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3622,8 +3611,8 @@ describe("OpenAiNativeHandler", () => {
 			// A stream failure must be captured exactly once (handleStreamResponse rethrows to createMessage).
 			expect(mockCaptureException).toHaveBeenCalledTimes(1)
 
-			const streamErrorCall = mockCaptureException.mock.calls.find((call: any[]) =>
-				call[0]?.message?.includes("Model overloaded"),
+			const streamErrorCall = mockCaptureException.mock.calls.find(
+				(call) => call[0] instanceof ApiProviderError && call[0].message.includes("Model overloaded"),
 			)
 			expect(streamErrorCall).toBeDefined()
 			expect(streamErrorCall![0]).toMatchObject({
@@ -3660,12 +3649,10 @@ describe("OpenAiNativeHandler", () => {
 
 		it("should still throw the error after capturing telemetry", async () => {
 			// Mock fetch to return error
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: false,
-				status: 500,
-				text: async () => "Internal Server Error",
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest
+				.fn<typeof fetch>()
+				.mockResolvedValue(new Response("Internal Server Error", { status: 500 }))
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3730,30 +3717,31 @@ describe("OpenAiNativeHandler", () => {
 // Additional tests for GPT-5 streaming event coverage
 describe("GPT-5 streaming event coverage (additional)", () => {
 	afterEach(() => {
-		if ((global as any).fetch) {
-			delete (global as any).fetch
-		}
+		deleteGlobalFetch()
 	})
 
 	it("should handle reasoning delta events for GPT-5", async () => {
-		const mockFetch = vitest.fn().mockResolvedValue({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						new TextEncoder().encode(
-							'data: {"type":"response.reasoning.delta","delta":"Thinking about the problem..."}\n\n',
-						),
-					)
-					controller.enqueue(
-						new TextEncoder().encode('data: {"type":"response.text.delta","delta":"The answer is..."}\n\n'),
-					)
-					controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-					controller.close()
-				},
-			}),
-		})
-		global.fetch = mockFetch as any
+		const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.reasoning.delta","delta":"Thinking about the problem..."}\n\n',
+							),
+						)
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.text.delta","delta":"The answer is..."}\n\n',
+							),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			),
+		)
+		global.fetch = mockFetch
 
 		// Mock SDK to fail
 		mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3767,10 +3755,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello!" }]
 		const stream = handler.createMessage(systemPrompt, messages)
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const reasoningChunks = chunks.filter((c) => c.type === "reasoning")
 		const textChunks = chunks.filter((c) => c.type === "text")
@@ -3782,21 +3767,22 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 	})
 
 	it("should handle refusal delta events for GPT-5 and prefix output", async () => {
-		const mockFetch = vitest.fn().mockResolvedValue({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						new TextEncoder().encode(
-							'data: {"type":"response.refusal.delta","delta":"I cannot comply with this request."}\n\n',
-						),
-					)
-					controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-					controller.close()
-				},
-			}),
-		})
-		global.fetch = mockFetch as any
+		const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.refusal.delta","delta":"I cannot comply with this request."}\n\n',
+							),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			),
+		)
+		global.fetch = mockFetch
 
 		// Mock SDK to fail
 		mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3810,10 +3796,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Do something disallowed" }]
 		const stream = handler.createMessage(systemPrompt, messages)
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		const textChunks = chunks.filter((c) => c.type === "text")
 		expect(textChunks).toHaveLength(1)
@@ -3821,31 +3804,32 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 	})
 
 	it("should ignore malformed JSON lines in SSE stream", async () => {
-		const mockFetch = vitest.fn().mockResolvedValue({
-			ok: true,
-			body: new ReadableStream({
-				start(controller) {
-					controller.enqueue(
-						new TextEncoder().encode(
-							'data: {"type":"response.output_item.added","item":{"type":"text","text":"Before"}}\n\n',
-						),
-					)
-					// Malformed JSON line
-					controller.enqueue(
-						new TextEncoder().encode('data: {"type":"response.text.delta","delta":"Bad"\n\n'),
-					)
-					// Valid line after malformed
-					controller.enqueue(
-						new TextEncoder().encode(
-							'data: {"type":"response.output_item.added","item":{"type":"text","text":"After"}}\n\n',
-						),
-					)
-					controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-					controller.close()
-				},
-			}),
-		})
-		global.fetch = mockFetch as any
+		const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+			new Response(
+				new ReadableStream({
+					start(controller) {
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_item.added","item":{"type":"text","text":"Before"}}\n\n',
+							),
+						)
+						// Malformed JSON line
+						controller.enqueue(
+							new TextEncoder().encode('data: {"type":"response.text.delta","delta":"Bad"\n\n'),
+						)
+						// Valid line after malformed
+						controller.enqueue(
+							new TextEncoder().encode(
+								'data: {"type":"response.output_item.added","item":{"type":"text","text":"After"}}\n\n',
+							),
+						)
+						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+						controller.close()
+					},
+				}),
+			),
+		)
+		global.fetch = mockFetch
 
 		// Mock SDK to fail
 		mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3859,14 +3843,11 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 		const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hello!" }]
 		const stream = handler.createMessage(systemPrompt, messages)
 
-		const chunks: any[] = []
-		for await (const chunk of stream) {
-			chunks.push(chunk)
-		}
+		const chunks = await collectStream(stream)
 
 		// It should not throw and still capture the valid texts around the malformed line
 		const textChunks = chunks.filter((c) => c.type === "text")
-		expect(textChunks.map((c: any) => c.text)).toEqual(["Before", "After"])
+		expect(textChunks.map((c) => c.text)).toEqual(["Before", "After"])
 	})
 
 	describe("Codex Mini Model", () => {
@@ -3878,38 +3859,43 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 		it("should handle codex-mini-latest streaming response", async () => {
 			// Mock fetch for Codex Mini responses API
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						// Codex Mini uses the same responses API format
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Hello"}\n\n'),
-						)
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":" from"}\n\n'),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_text.delta","delta":" Codex"}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_text.delta","delta":" Mini!"}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.done","response":{"usage":{"prompt_tokens":50,"completion_tokens":10}}}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							// Codex Mini uses the same responses API format
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":"Hello"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":" from"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":" Codex"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":" Mini!"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.done","response":{"usage":{"prompt_tokens":50,"completion_tokens":10}}}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -3925,10 +3911,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			// Verify text chunks
 			const textChunks = chunks.filter((c) => c.type === "text")
@@ -3962,7 +3945,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 				}),
 			)
 
-			const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body)
+			const requestBody = JSON.parse(mockFetch.mock.calls[0][1]?.body as string)
 			expect(requestBody).toMatchObject({
 				model: "codex-mini-latest",
 				instructions: "You are a helpful coding assistant.",
@@ -4014,13 +3997,12 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 		it("should handle codex-mini-latest API errors", async () => {
 			// Mock fetch with error response
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: false,
-				status: 429,
-				statusText: "Too Many Requests",
-				text: async () => "Rate limit exceeded",
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest
+				.fn<typeof fetch>()
+				.mockResolvedValue(
+					new Response("Rate limit exceeded", { status: 429, statusText: "Too Many Requests" }),
+				)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -4045,22 +4027,23 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 		it("should handle codex-mini-latest with multiple user messages", async () => {
 			// Mock fetch for streaming response
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_text.delta","delta":"Combined response"}\n\n',
-							),
-						)
-						controller.enqueue(new TextEncoder().encode('data: {"type":"response.completed"}\n\n'))
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":"Combined response"}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode('data: {"type":"response.completed"}\n\n'))
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -4078,13 +4061,10 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			]
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			await collectStream(stream)
 
 			// Verify the request body includes full conversation in structured format (without embedding system prompt)
-			const requestBody = JSON.parse(mockFetch.mock.calls[0][1].body)
+			const requestBody = JSON.parse(mockFetch.mock.calls[0][1]?.body as string)
 			expect(requestBody.instructions).toBe("You are a helpful assistant.")
 			expect(requestBody.input).toEqual([
 				{
@@ -4104,26 +4084,27 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 		it("should handle codex-mini-latest stream error events", async () => {
 			// Mock fetch with error event in stream
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.output_text.delta","delta":"Partial"}\n\n',
-							),
-						)
-						controller.enqueue(
-							new TextEncoder().encode(
-								'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
-							),
-						)
-						// The error handler will throw, but we still need to close the stream
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":"Partial"}\n\n',
+								),
+							)
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.error","error":{"message":"Model overloaded"}}\n\n',
+								),
+							)
+							// The error handler will throw, but we still need to close the stream
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			// Mock SDK to fail
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -4147,19 +4128,20 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 		// New tests: ensure text.verbosity is omitted for models without supportsVerbosity
 		describe("Verbosity gating for non-GPT-5 models", () => {
 			it("should omit text.verbosity for gpt-4.1", async () => {
-				const mockFetch = vitest.fn().mockResolvedValue({
-					ok: true,
-					body: new ReadableStream({
-						start(controller) {
-							controller.enqueue(
-								new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'),
-							)
-							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-							controller.close()
-						},
-					}),
-				})
-				;(global as any).fetch = mockFetch as any
+				const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'),
+								)
+								controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+								controller.close()
+							},
+						}),
+					),
+				)
+				global.fetch = mockFetch
 
 				// Force SDK path to fail so we use fetch fallback
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -4178,7 +4160,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 					// drain
 				}
 
-				const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+				const bodyStr = mockFetch.mock.calls[0][1]?.body as string
 				const parsedBody = JSON.parse(bodyStr)
 				expect(parsedBody.model).toBe("gpt-4.1")
 				expect(parsedBody.text).toBeUndefined()
@@ -4186,19 +4168,20 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 			})
 
 			it("should omit text.verbosity for gpt-4o", async () => {
-				const mockFetch = vitest.fn().mockResolvedValue({
-					ok: true,
-					body: new ReadableStream({
-						start(controller) {
-							controller.enqueue(
-								new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'),
-							)
-							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-							controller.close()
-						},
-					}),
-				})
-				;(global as any).fetch = mockFetch as any
+				const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+					new Response(
+						new ReadableStream({
+							start(controller) {
+								controller.enqueue(
+									new TextEncoder().encode('data: {"type":"response.done","response":{}}\n\n'),
+								)
+								controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+								controller.close()
+							},
+						}),
+					),
+				)
+				global.fetch = mockFetch
 
 				// Force SDK path to fail so we use fetch fallback
 				mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
@@ -4217,7 +4200,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 					// drain
 				}
 
-				const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+				const bodyStr = mockFetch.mock.calls[0][1]?.body as string
 				const parsedBody = JSON.parse(bodyStr)
 				expect(parsedBody.model).toBe("gpt-4o")
 				expect(parsedBody.text).toBeUndefined()
@@ -4228,19 +4211,22 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 
 	describe("URL image handling", () => {
 		it("should skip URL-sourced images in formatFullConversation (only base64 emits input_image)", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
@@ -4256,7 +4242,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 						{ type: "text", text: "Look at this:" },
 						{
 							type: "image",
-							source: { type: "url", url: "https://example.com/img.png" } as any,
+							source: { type: "url", url: "https://example.com/img.png" },
 						},
 					],
 				},
@@ -4267,7 +4253,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 				// consume
 			}
 
-			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const bodyStr = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(bodyStr)
 			// URL image is skipped; only the text part is in the input
 			const userMsg = parsedBody.input[0]
@@ -4276,19 +4262,22 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 		})
 
 		it("should emit input_image for base64 images in formatFullConversation", async () => {
-			const mockFetch = vitest.fn().mockResolvedValue({
-				ok: true,
-				body: new ReadableStream({
-					start(controller) {
-						controller.enqueue(
-							new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"ok"}\n\n'),
-						)
-						controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
-						controller.close()
-					},
-				}),
-			})
-			global.fetch = mockFetch as any
+			const mockFetch = vitest.fn<typeof fetch>().mockResolvedValue(
+				new Response(
+					new ReadableStream({
+						start(controller) {
+							controller.enqueue(
+								new TextEncoder().encode(
+									'data: {"type":"response.output_text.delta","delta":"ok"}\n\n',
+								),
+							)
+							controller.enqueue(new TextEncoder().encode("data: [DONE]\n\n"))
+							controller.close()
+						},
+					}),
+				),
+			)
+			global.fetch = mockFetch
 
 			mockResponsesCreate.mockRejectedValue(new Error("SDK not available"))
 
@@ -4312,7 +4301,7 @@ describe("GPT-5 streaming event coverage (additional)", () => {
 				// consume
 			}
 
-			const bodyStr = (mockFetch.mock.calls[0][1] as any).body as string
+			const bodyStr = mockFetch.mock.calls[0][1]?.body as string
 			const parsedBody = JSON.parse(bodyStr)
 			const userMsg = parsedBody.input[0]
 			expect(userMsg.content).toContainEqual({

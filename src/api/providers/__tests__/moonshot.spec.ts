@@ -7,6 +7,23 @@ import type { ApiHandlerOptions } from "../../../shared/api"
 import { MoonshotHandler } from "../moonshot"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { collectStream } from "../../../test-utils/stream"
+import type OpenAI from "openai"
+import type { ModelInfo } from "@roo-code/types"
+
+/** Mirror of MoonshotHandler's MoonshotUsage payload shape for typed test doubles. */
+interface MoonshotUsage {
+	prompt_tokens?: number
+	completion_tokens?: number
+	prompt_tokens_details?: { cached_tokens?: number } | null
+	cached_tokens?: number
+}
+
+/**
+ * Request options accepted by addMaxTokensIfNeeded. Tests seed a minimal valid
+ * non-streaming params object; the handler only sets `max_tokens`.
+ */
+type MoonshotRequestOptions = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming
 
 describe("MoonshotHandler", () => {
 	let handler: MoonshotHandler
@@ -131,15 +148,12 @@ describe("MoonshotHandler", () => {
 						create: vi.fn().mockResolvedValue(mockStream()),
 					},
 				},
-			}
+			} // Double provides chat.completions.create, the only member createMessage exercises.
 
-			;(handler as any).client = mockClient
+			handler["client"] = mockClient as unknown as OpenAI
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
 			expect(textChunks).toHaveLength(1)
@@ -160,15 +174,12 @@ describe("MoonshotHandler", () => {
 						create: vi.fn().mockResolvedValue(mockStream()),
 					},
 				},
-			}
+			} // Double provides chat.completions.create, the only member createMessage exercises.
 
-			;(handler as any).client = mockClient
+			handler["client"] = mockClient as unknown as OpenAI
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -194,15 +205,12 @@ describe("MoonshotHandler", () => {
 						create: vi.fn().mockResolvedValue(mockStream()),
 					},
 				},
-			}
+			} // Double provides chat.completions.create, the only member createMessage exercises.
 
-			;(handler as any).client = mockClient
+			handler["client"] = mockClient as unknown as OpenAI
 
 			const stream = handler.createMessage(systemPrompt, messages)
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -221,9 +229,9 @@ describe("MoonshotHandler", () => {
 						}),
 					},
 				},
-			}
+			} // Double provides chat.completions.create, the only member createMessage exercises.
 
-			;(handler as any).client = mockClient
+			handler["client"] = mockClient as unknown as OpenAI
 
 			const result = await handler.completePrompt("Test prompt")
 
@@ -241,7 +249,7 @@ describe("MoonshotHandler", () => {
 	describe("processUsageMetrics", () => {
 		it("should correctly process usage metrics including cache information", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testProcessUsageMetrics(usage: any) {
+				public testProcessUsageMetrics(usage: MoonshotUsage | null | undefined) {
 					return this.processUsageMetrics(usage)
 				}
 			}
@@ -267,7 +275,7 @@ describe("MoonshotHandler", () => {
 
 		it("should handle missing cache metrics gracefully", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testProcessUsageMetrics(usage: any) {
+				public testProcessUsageMetrics(usage: MoonshotUsage | null | undefined) {
 					return this.processUsageMetrics(usage)
 				}
 			}
@@ -290,7 +298,7 @@ describe("MoonshotHandler", () => {
 
 		it("should handle cached_tokens at top level (not in prompt_tokens_details)", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testProcessUsageMetrics(usage: any) {
+				public testProcessUsageMetrics(usage: MoonshotUsage | null | undefined) {
 					return this.processUsageMetrics(usage)
 				}
 			}
@@ -310,7 +318,7 @@ describe("MoonshotHandler", () => {
 
 		it("should handle null usage gracefully", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testProcessUsageMetrics(usage: any) {
+				public testProcessUsageMetrics(usage: MoonshotUsage | null | undefined) {
 					return this.processUsageMetrics(usage)
 				}
 			}
@@ -328,13 +336,13 @@ describe("MoonshotHandler", () => {
 	describe("addMaxTokensIfNeeded", () => {
 		it("should use max_tokens (not max_completion_tokens) for Moonshot", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+				public testAddMaxTokensIfNeeded(requestOptions: MoonshotRequestOptions, modelInfo: ModelInfo) {
 					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 				}
 			}
 
 			const testHandler = new TestMoonshotHandler(mockOptions)
-			const requestOptions: any = {}
+			const requestOptions: MoonshotRequestOptions = { model: "kimi-k2", messages: [] }
 			testHandler.testAddMaxTokensIfNeeded(requestOptions, handler.getModel().info)
 
 			expect(requestOptions.max_tokens).toBe(16384)
@@ -343,7 +351,7 @@ describe("MoonshotHandler", () => {
 
 		it("should use modelMaxTokens override when provided", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+				public testAddMaxTokensIfNeeded(requestOptions: MoonshotRequestOptions, modelInfo: ModelInfo) {
 					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 				}
 			}
@@ -353,7 +361,7 @@ describe("MoonshotHandler", () => {
 				...mockOptions,
 				modelMaxTokens: customMaxTokens,
 			})
-			const requestOptions: any = {}
+			const requestOptions: MoonshotRequestOptions = { model: "kimi-k2", messages: [] }
 			testHandler.testAddMaxTokensIfNeeded(requestOptions, handler.getModel().info)
 
 			expect(requestOptions.max_tokens).toBe(customMaxTokens)
@@ -361,7 +369,7 @@ describe("MoonshotHandler", () => {
 
 		it("should not send maxTokens for unknown model IDs", () => {
 			class TestMoonshotHandler extends MoonshotHandler {
-				public testAddMaxTokensIfNeeded(requestOptions: any, modelInfo: any) {
+				public testAddMaxTokensIfNeeded(requestOptions: MoonshotRequestOptions, modelInfo: ModelInfo) {
 					return this.addMaxTokensIfNeeded(requestOptions, modelInfo)
 				}
 			}
@@ -370,7 +378,7 @@ describe("MoonshotHandler", () => {
 				...mockOptions,
 				apiModelId: "future-moonshot-model",
 			})
-			const requestOptions: any = {}
+			const requestOptions: MoonshotRequestOptions = { model: "kimi-k2", messages: [] }
 			testHandler.testAddMaxTokensIfNeeded(requestOptions, testHandler.getModel().info)
 
 			expect(requestOptions.max_tokens).toBeUndefined()
@@ -417,9 +425,9 @@ describe("MoonshotHandler", () => {
 						create: vi.fn().mockResolvedValue(mockStream()),
 					},
 				},
-			}
+			} // Double provides chat.completions.create, the only member createMessage exercises.
 
-			;(handler as any).client = mockClient
+			handler["client"] = mockClient as unknown as OpenAI
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -439,10 +447,7 @@ describe("MoonshotHandler", () => {
 				],
 			})
 
-			const chunks: any[] = []
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
+			const chunks = await collectStream(stream)
 
 			const partialChunks = chunks.filter((c) => c.type === "tool_call_partial")
 			const endChunks = chunks.filter((c) => c.type === "tool_call_end")

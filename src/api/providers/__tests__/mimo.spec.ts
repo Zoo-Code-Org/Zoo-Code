@@ -1,5 +1,6 @@
 const mockCreate = vi.fn()
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import { clearAllMocks } from "../../../test-utils/reset"
 vi.mock("openai", () => {
 	return {
@@ -35,7 +36,19 @@ vi.mock("openai", () => {
 import type { Anthropic } from "@anthropic-ai/sdk"
 import { mimoDefaultModelId, mimoModels } from "@roo-code/types"
 import type { ApiHandlerOptions } from "../../../shared/api"
+import type OpenAI from "openai"
 import { MimoHandler } from "../mimo"
+/** Assistant message carrying the reasoning_content passthrough convertToR1Format attaches. */
+type AssistantMessageWithReasoning = OpenAI.Chat.ChatCompletionAssistantMessageParam & {
+	reasoning_content?: string
+	reasoning_details?: unknown[]
+}
+
+/** Anthropic history message with the extension's reasoning_content passthrough. */
+type AnthropicMessageWithReasoning = Anthropic.Messages.MessageParam & {
+	reasoning_content?: string
+}
+
 import { convertToR1Format } from "../../transform/r1-format"
 import { sanitizeOpenAiCallId } from "../../../utils/tool-id"
 
@@ -69,13 +82,13 @@ describe("MimoHandler", () => {
 
 		it("should use Singapore base URL if not provided", () => {
 			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: undefined })
-			expect((h as any).options.openAiBaseUrl).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
+			expect(h["options"].openAiBaseUrl).toBe("https://token-plan-sgp.xiaomimimo.com/v1")
 		})
 
 		it("should use custom base URL when provided", () => {
 			const customUrl = "https://api.xiaomimimo.com/v1"
 			const h = new MimoHandler({ ...mockOptions, mimoBaseUrl: customUrl })
-			expect((h as any).options.openAiBaseUrl).toBe(customUrl)
+			expect(h["options"].openAiBaseUrl).toBe(customUrl)
 		})
 	})
 
@@ -117,7 +130,12 @@ describe("MimoHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "reasoning" as const, text: "Let me think..." } as any,
+						// Extension reasoning block the converter narrows by `type`; routed through
+						// unknown to stay inside MessageParam.
+						{
+							type: "reasoning" as const,
+							text: "Let me think...",
+						} as unknown as Anthropic.ContentBlockParam,
 						{ type: "text" as const, text: "Here is the answer" },
 					],
 				},
@@ -126,7 +144,7 @@ describe("MimoHandler", () => {
 			expect(result).toHaveLength(1)
 			expect(result[0].role).toBe("assistant")
 			expect(result[0].content).toBe("Here is the answer")
-			expect((result[0] as any).reasoning_content).toBe("Let me think...")
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBe("Let me think...")
 		})
 
 		it("should convert assistant message with tool_use blocks", () => {
@@ -146,11 +164,12 @@ describe("MimoHandler", () => {
 			]
 			const result = convert(messages)
 			expect(result).toHaveLength(1)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
+			const toolCall = msg.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall
 			expect(msg.tool_calls).toHaveLength(1)
-			expect(msg.tool_calls[0].id).toBe("call_123")
-			expect(msg.tool_calls[0].function.name).toBe("read_file")
-			expect(msg.tool_calls[0].function.arguments).toBe('{"path":"README.md"}')
+			expect(toolCall.id).toBe("call_123")
+			expect(toolCall.function.name).toBe("read_file")
+			expect(toolCall.function.arguments).toBe('{"path":"README.md"}')
 		})
 
 		it("should handle string-input tool_use (JSON string)", () => {
@@ -168,10 +187,11 @@ describe("MimoHandler", () => {
 				},
 			]
 			const result = convert(messages)
-			const msg = result[0] as any
+			const msg = result[0] as AssistantMessageWithReasoning
+			const toolCall = msg.tool_calls![0] as OpenAI.Chat.ChatCompletionMessageFunctionToolCall
 			expect(msg.tool_calls).toHaveLength(1)
-			expect(msg.tool_calls[0].function.name).toBe("read_file")
-			expect(msg.tool_calls[0].function.arguments).toContain("test.ts")
+			expect(toolCall.function.name).toBe("read_file")
+			expect(toolCall.function.arguments).toContain("test.ts")
 		})
 
 		it("should handle assistant message with string content", () => {
@@ -188,28 +208,28 @@ describe("MimoHandler", () => {
 		})
 
 		it("should handle assistant string content with reasoning_content", () => {
-			const messages = [
+			const messages: AnthropicMessageWithReasoning[] = [
 				{
-					role: "assistant" as const,
+					role: "assistant",
 					content: "Response after thinking",
 					reasoning_content: "My reasoning",
 				},
-			] as any[]
+			]
 			const result = convert(messages)
 			expect(result).toHaveLength(1)
-			expect((result[0] as any).reasoning_content).toBe("My reasoning")
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBe("My reasoning")
 		})
 
 		it("should not add reasoning_content if empty string", () => {
-			const messages = [
+			const messages: AnthropicMessageWithReasoning[] = [
 				{
-					role: "assistant" as const,
+					role: "assistant",
 					content: "Response",
 					reasoning_content: "",
 				},
-			] as any[]
+			]
 			const result = convert(messages)
-			expect((result[0] as any).reasoning_content).toBeUndefined()
+			expect((result[0] as AssistantMessageWithReasoning).reasoning_content).toBeUndefined()
 		})
 
 		it("should convert user messages with tool_result blocks", () => {
@@ -226,7 +246,7 @@ describe("MimoHandler", () => {
 				},
 			]
 			const result = convert(messages)
-			const msg = result[0] as any
+			const msg = result[0] as OpenAI.Chat.ChatCompletionToolMessageParam
 			expect(msg.role).toBe("tool")
 			expect(msg.tool_call_id).toBe("call_123")
 			expect(msg.content).toBe("File contents here")
@@ -325,7 +345,12 @@ describe("MimoHandler", () => {
 				{
 					role: "assistant",
 					content: [
-						{ type: "reasoning" as const, text: "User wants to read a file" } as any,
+						// Extension reasoning block the converter narrows by `type`; routed through
+						// unknown to stay inside MessageParam.
+						{
+							type: "reasoning" as const,
+							text: "User wants to read a file",
+						} as unknown as Anthropic.ContentBlockParam,
 						{ type: "text" as const, text: "I'll read it" },
 						{
 							type: "tool_use" as const,
@@ -352,11 +377,11 @@ describe("MimoHandler", () => {
 			expect(result[0].role).toBe("user")
 			// assistant with reasoning + tool_calls
 			expect(result[1].role).toBe("assistant")
-			expect((result[1] as any).reasoning_content).toBe("User wants to read a file")
-			expect((result[1] as any).tool_calls).toHaveLength(1)
+			expect((result[1] as AssistantMessageWithReasoning).reasoning_content).toBe("User wants to read a file")
+			expect((result[1] as AssistantMessageWithReasoning).tool_calls).toHaveLength(1)
 			// tool result
 			expect(result[2].role).toBe("tool")
-			expect((result[2] as any).tool_call_id).toBe("call_1")
+			expect((result[2] as OpenAI.Chat.ChatCompletionToolMessageParam).tool_call_id).toBe("call_1")
 		})
 	})
 
@@ -421,7 +446,7 @@ describe("MimoHandler", () => {
 				},
 			]
 
-			const stream = handler.createMessage("System prompt", messages, { tools } as any)
+			const stream = handler.createMessage("System prompt", messages, makeCreateMessageMetadata({ tools }))
 			await collectStream(stream)
 
 			const params = mockCreate.mock.calls[0][0]
@@ -757,7 +782,7 @@ describe("MimoHandler", () => {
 				]),
 			)
 
-			const tools: any[] = [
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
 				{
 					type: "function",
 					function: { name: "read_file", description: "Read", parameters: {} },
@@ -832,7 +857,7 @@ describe("MimoHandler", () => {
 				]),
 			)
 
-			const tools: any[] = [
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
 				{
 					type: "function",
 					function: { name: "test_tool", description: "Test", parameters: {} },
