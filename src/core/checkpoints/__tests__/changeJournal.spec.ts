@@ -111,6 +111,7 @@ describe("changeJournal", () => {
 			const realOpen = fs.open
 			const synced: string[] = []
 			const closed: string[] = []
+			const events: string[] = []
 			// Windows cannot open directories, so the directory handle is doubled
 			// here: the code under test only opens it on non-win32 platforms.
 			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
@@ -120,6 +121,7 @@ describe("changeJournal", () => {
 					return {
 						sync: async () => {
 							synced.push(p)
+							events.push("sync")
 						},
 						close: async () => {
 							closed.push(p)
@@ -128,15 +130,24 @@ describe("changeJournal", () => {
 				}
 				return openAs(p, flags as string | undefined)
 			})
+			const realRename = fs.rename
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				events.push("rename")
+				await realRename(from as string | URL, to as string | URL)
+			})
 			try {
 				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 				expect(synced).toEqual([dirPath])
 				expect(closed).toEqual([dirPath])
 				// Every replacement renames a new file into place, so the directory
-				// entry is re-synced on each update.
+				// entry is re-synced on each update. The order is part of the
+				// guarantee: a directory sync that ran before the rename would not
+				// have persisted the new journal file name.
 				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
 				expect(synced).toHaveLength(2)
+				expect(events).toEqual(["rename", "sync", "rename", "sync"])
 			} finally {
+				renameSpy.mockRestore()
 				openSpy.mockRestore()
 				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
 			}
@@ -377,7 +388,10 @@ describe("changeJournal", () => {
 			])
 
 			const result = await loadChanges(tmpRoot, taskId)
-			expect(result.map((e) => e.checkpointId).sort()).toEqual(["c1", "c2"])
+			// The queue is per-task FIFO, so write order is itself part of the
+			// contract; sorting here would let a journal whose entries landed
+			// out of order pass.
+			expect(result.map((e) => e.checkpointId)).toEqual(["c1", "c2"])
 		})
 
 		it("leaves the journal untouched when the atomic rename fails mid-update", async () => {
@@ -571,6 +585,29 @@ describe("changeJournal", () => {
 			}
 		})
 
+		it("propagates a Windows rename failure that carries no errno code without retrying", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async () => {
+				attempts++
+				throw new Error("rename rejected by an unforeseen error")
+			})
+			try {
+				// The Linux variant above never reaches the errno filter: the
+				// attempt budget rejects first. On win32 the retry decision does
+				// consult the code list, so a code-less failure must surface
+				// intact without spending the five-attempt budget.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toThrow(
+					"rename rejected by an unforeseen error",
+				)
+				expect(attempts).toBe(1)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
 		it("propagates a directory-sync failure that carries no errno code", async () => {
 			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
@@ -700,13 +737,21 @@ describe("changeJournal", () => {
 
 	describe("task ID containment", () => {
 		it("rejects task IDs that could escape the tasks directory", async () => {
+			// A storage root owned by this test, nested inside the fixture: the
+			// escape destination then lands under tmpRoot instead of a sibling
+			// of it that every other test in the run shares and that may
+			// already exist.
+			const parent = path.join(tmpRoot, "containment")
 			for (const bad of ["../../outside", "a/b", "a\\b", "", ".", ".."]) {
-				expect(() => journalPath(tmpRoot, bad)).toThrow(/Unsafe task ID/)
-				await expect(appendChange(tmpRoot, bad, entry({ checkpointId: "x" }))).rejects.toThrow(/Unsafe task ID/)
-				await expect(loadChanges(tmpRoot, bad)).rejects.toThrow(/Unsafe task ID/)
-				// Nothing was created outside the task directory.
-				await expect(fs.stat(path.join(tmpRoot, "..", "outside"))).rejects.toMatchObject({ code: "ENOENT" })
+				expect(() => journalPath(parent, bad)).toThrow(/Unsafe task ID/)
+				await expect(appendChange(parent, bad, entry({ checkpointId: "x" }))).rejects.toThrow(/Unsafe task ID/)
+				await expect(loadChanges(parent, bad)).rejects.toThrow(/Unsafe task ID/)
 			}
+			// The exact directory the "../.." id would have written through is
+			// tmpRoot/outside; asserted as the destination, not a shared path.
+			await expect(fs.stat(path.join(tmpRoot, "outside"))).rejects.toMatchObject({ code: "ENOENT" })
+			// And nothing was created under the storage root at all.
+			await expect(fs.readdir(parent)).rejects.toMatchObject({ code: "ENOENT" })
 		})
 
 		it("keeps a safe task ID under the tasks directory", () => {
@@ -916,9 +961,11 @@ describe("changeJournal", () => {
 				await realRename(from as string | URL, to as string | URL)
 			})
 			const before = journalQueueDepth()
+			let first: Promise<void> = Promise.resolve()
+			let second: Promise<void> = Promise.resolve()
 			try {
-				const first = appendChange(tmpRoot, taskId, entry({ checkpointId: "slow" }))
-				const second = appendChange(tmpRoot, taskId, entry({ checkpointId: "newer" }))
+				first = appendChange(tmpRoot, taskId, entry({ checkpointId: "slow" }))
+				second = appendChange(tmpRoot, taskId, entry({ checkpointId: "newer" }))
 				expect(journalQueueDepth()).toBe(before + 1)
 				firstGate.release()
 				await first
@@ -932,12 +979,56 @@ describe("changeJournal", () => {
 				await new Promise((resolve) => setImmediate(resolve))
 				expect(journalQueueDepth()).toBe(before)
 			} finally {
-				renameSpy.mockRestore()
+				// Release both gates and settle both appends before restoring the
+				// spy: if a depth assertion above fails, the second update must
+				// not still be mid-rename when afterEach removes tmpRoot.
 				firstGate.release()
 				secondGate.release()
+				await Promise.allSettled([first, second])
+				renameSpy.mockRestore()
 			}
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["slow", "newer"])
+		})
+	})
+
+	describe("behavior probed against the 2026-11-25 review findings", () => {
+		it("loadChanges keeps a string-typed diffStats exactly as written", async () => {
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			const withStats = JSON.stringify({
+				path: "src/a.ts",
+				operation: "create",
+				checkpointId: "s1",
+				diffStats: { additions: "5", deletions: 2 },
+			})
+			await fs.writeFile(journalPath(tmpRoot, taskId), withStats + "\n")
+			const result = await loadChanges(tmpRoot, taskId)
+			// Predicted by the finding: isEntryShaped ignores diffStats, so an
+			// untyped stats object survives the load unchanged.
+			expect(JSON.stringify(result)).toContain('"additions":"5"')
+		})
+
+		it("appendChanges tolerates a blank line after a valid final record", async () => {
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			const good = JSON.stringify(entry({ checkpointId: "good" }))
+			await fs.writeFile(journalPath(tmpRoot, taskId), good + "\n\n")
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
+			const result = await loadChanges(tmpRoot, taskId)
+			// Predicted by the finding: append skips tail validation on an
+			// empty tailText, and the blank line then reads as a skippable
+			// middle record, so both ids come back.
+			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+		})
+
+		it("appendChanges reads the caller array after the queue turn", async () => {
+			const batch = [entry({ checkpointId: "b1" })]
+			const pending = appendChanges(tmpRoot, taskId, batch)
+			batch.push(entry({ checkpointId: "b2" }))
+			await pending
+			const result = await loadChanges(tmpRoot, taskId)
+			// Predicted by the finding: the batch is joined only after the
+			// queue await, so a caller that mutates the array is journalled.
+			expect(result.map((e) => e.checkpointId)).toEqual(["b1", "b2"])
 		})
 	})
 })
