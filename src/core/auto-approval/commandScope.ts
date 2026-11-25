@@ -226,6 +226,215 @@ export function resolveWorkspaceWriteTarget(
 	return undefined
 }
 
+export interface CommandListBaselineClassification {
+	/** Entries a layer held at save start that the baseline and the submission both omit. */
+	externallyAdded: string[]
+	/** Entries the split treats as known state, so a file deletion still applies. */
+	splitSourceEntries: string[]
+	/** Hidden workspace entries the split must not read as new promotions. */
+	promotionHiddenEntries: string[]
+}
+
+/**
+ * Classifies the submitted list against the baseline the dialog displayed.
+ *
+ * The three results feed one split. `externallyAdded` holds entries that a
+ * layer gained while the dialog was open. `splitSourceEntries` holds the
+ * entries the split may keep. `promotionHiddenEntries` holds hidden entries
+ * that must not become a promotion into the global layer.
+ *
+ * @param input.baseline - The lists the dialog displayed for this key, or
+ * `undefined` when the sender shows no lists.
+ * @param input.incoming - The submitted list for this key.
+ * @param input.currentScopes - The layers read from the state copy and the
+ * save-start snapshot.
+ * @param input.configGlobalAtSaveStart - The configuration's global layer at
+ * save start.
+ * @param input.globalLayerAtSaveStart - The same layer, kept as absent when the
+ * key had no global value.
+ * @param input.hiddenWorkspaceEntries - Workspace entries the dialog did not
+ * display.
+ * @param input.gateAtDisplay - The gate as the dialog showed it, if it sent it.
+ * @param input.gateNow - Reads the gate as it stands now. It is called only
+ * when `gateAtDisplay` is present, as the display-time comparison requires.
+ * @returns The externally added entries, the split source, and the promotion
+ * hidden entries.
+ */
+export function classifyCommandListBaseline(input: {
+	baseline: string[] | undefined
+	incoming: string[]
+	currentScopes: CommandListScopes
+	configGlobalAtSaveStart: string[]
+	globalLayerAtSaveStart: string[] | undefined
+	hiddenWorkspaceEntries: string[]
+	gateAtDisplay: boolean | undefined
+	gateNow: () => boolean
+}): CommandListBaselineClassification {
+	const {
+		baseline,
+		incoming,
+		currentScopes,
+		configGlobalAtSaveStart,
+		globalLayerAtSaveStart,
+		hiddenWorkspaceEntries,
+		gateAtDisplay,
+		gateNow,
+	} = input
+
+	// A file entry the dialog never showed looks like a user deletion: in the file,
+	// absent from the submitted list. The baseline separates the two, so entries
+	// outside it are re-admitted before the split, while deleting a baseline entry
+	// still applies. Hidden entries are excluded because the caller's workspace
+	// re-add preserves them, so a warning would fire on every save. That
+	// exclusion covers only entries the hidden workspace layer held. The
+	// configuration's global layer is displayed, and excluding it would delete
+	// the user's file addition.
+	// A sender with no baseline writes its list unclassified. The union spans every
+	// layer that can hold an entry at save start, because the state copy lags.
+	const externallyAdded = Array.isArray(baseline)
+		? [...new Set([...currentScopes.workspace, ...currentScopes.global, ...configGlobalAtSaveStart])].filter(
+				(entry) =>
+					!baseline.includes(entry) &&
+					!incoming.includes(entry) &&
+					(!hiddenWorkspaceEntries.includes(entry) || configGlobalAtSaveStart.includes(entry)),
+			)
+		: []
+	// A file-deleted entry is still in the submitted list. With no layer holding
+	// it, the split would treat it as brand-new and promote a project entry into
+	// the global layer. The baseline separates that case from a user addition.
+	// Submitting a displayed entry signals retention. A retained entry that no
+	// configuration layer holds was removed in the file. The file then wins over
+	// the stale dialog buffer. The state copy still counts where the
+	// configuration has no global layer. An absent layer deleted nothing, and the
+	// activation-seeded defaults would otherwise vanish on the first save.
+	const splitSourceEntries = Array.isArray(baseline)
+		? [...incoming, ...externallyAdded].filter(
+				(entry) =>
+					!baseline.includes(entry) ||
+					currentScopes.workspace.includes(entry) ||
+					configGlobalAtSaveStart.includes(entry) ||
+					(currentScopes.global.includes(entry) && globalLayerAtSaveStart === undefined),
+			)
+		: [...incoming, ...externallyAdded]
+	// The baseline carries the gate as the dialog displayed it. If the gate
+	// flipped since, the hidden set can hold entries the user did see. Keeping
+	// a displayed entry must then stay a workspace decision. It must not become
+	// a promotion into the global layer. A baseline without the gate slot keeps
+	// the current result.
+	const promotionHiddenEntries =
+		gateAtDisplay === undefined || gateAtDisplay === gateNow()
+			? hiddenWorkspaceEntries
+			: hiddenWorkspaceEntries.filter((entry) => !Array.isArray(baseline) || !baseline.includes(entry))
+
+	return { externallyAdded, splitSourceEntries, promotionHiddenEntries }
+}
+
+export type CommandListRollbackOutcome =
+	/** The global write never landed, so nothing needs undoing. */
+	| { status: "not-applied" }
+	/** The global delta is undone, and no entry of another writer was lost. */
+	| { status: "rolled-back" }
+	| { status: "re-read-failed"; message: string }
+	| { status: "restore-failed"; message: string }
+
+/**
+ * Reconciles a failed or half-applied command-list save against its own global
+ * write.
+ *
+ * The undo is a delta against a fresh read, so an entry a third party added
+ * mid-save survives. It never rewinds to a snapshot, because the configuration
+ * API offers no compare-and-set.
+ *
+ * @param input.key - The command-list key that failed.
+ * @param input.failure - The failure text of the write that threw.
+ * @param input.globalWrite - The global list this save attempted.
+ * @param input.configGlobalAtSaveStart - The configuration's global layer at
+ * save start, which is the delta baseline.
+ * @param input.globalLayerAtSaveStart - The same layer, kept as absent when the
+ * key had no global value.
+ * @param input.globalWriteApplied - Whether this save's global write landed.
+ * @param input.readGlobalLayer - Reads the global layer now. It may throw.
+ * @param input.writeGlobalLayer - Writes the global layer, or clears the key
+ * with `undefined`. It may reject.
+ * @returns The outcome. Only `rolled-back` states that the undo landed.
+ */
+export async function rollbackFailedCommandListWrite(input: {
+	key: CommandListConfigKey
+	failure: string
+	globalWrite: string[]
+	configGlobalAtSaveStart: string[]
+	globalLayerAtSaveStart: string[] | undefined
+	globalWriteApplied: boolean
+	readGlobalLayer: () => string[] | undefined
+	writeGlobalLayer: (value: string[] | undefined) => PromiseLike<unknown>
+}): Promise<CommandListRollbackOutcome> {
+	if (!input.globalWriteApplied) {
+		return { status: "not-applied" }
+	}
+
+	const { key, failure, globalWrite, configGlobalAtSaveStart, globalLayerAtSaveStart } = input
+
+	// Undo exactly this save's global delta, against a fresh read, so entries a
+	// third party added mid-save survive. A snapshot rewind would clobber them,
+	// because the configuration API offers no compare-and-set.
+	const addedByThisSave = globalWrite.filter((entry) => !configGlobalAtSaveStart.includes(entry))
+	const removedByThisSave = configGlobalAtSaveStart.filter((entry) => !globalWrite.includes(entry))
+	// A failed re-read means nothing is safe to write. The save-start fallback
+	// is the clobber this path avoids. An undo that would empty an absent
+	// layer clears the key instead of writing `[]`. The activation seed honors
+	// that clear as the user's override. Respect whose decision the layer
+	// holds. Another writer's `[]` survives. A layer that holds only this
+	// save's own write over an absent start is the half-applied save. The
+	// undo restores its absence. No empty layer remains that no user created.
+	let freshGlobalValue: string[] | undefined
+	try {
+		freshGlobalValue = input.readGlobalLayer()
+	} catch (reReadError) {
+		return {
+			status: "re-read-failed",
+			message: `Failed to save ${key}: ${failure}. The global-scoped value could not be re-read to undo this save: ${reReadError}. Review the command lists in your user and workspace settings.`,
+		}
+	}
+	const globalUndo = [
+		...new Set([
+			...(freshGlobalValue ?? []).filter((entry) => !addedByThisSave.includes(entry)),
+			...removedByThisSave,
+		]),
+	]
+	const globalLayerExistsNow = freshGlobalValue !== undefined
+	// A layer that started absent carries another writer's decision only when it
+	// now holds something beyond this save's own write. A re-read with the same
+	// entries, order aside, is the half-applied save itself, so the rollback
+	// restores absence instead of keeping an empty layer.
+	const ownWriteIntact =
+		globalLayerAtSaveStart === undefined &&
+		freshGlobalValue !== undefined &&
+		freshGlobalValue.length === globalWrite.length &&
+		freshGlobalValue.every((entry) => globalWrite.includes(entry))
+	try {
+		if (globalUndo.length === 0 && (!globalLayerExistsNow || ownWriteIntact)) {
+			// The re-read found no layer at all, or found only this save's own write over
+			// an absent start, and nothing remains to restore. No layer at all means
+			// absent from the start, or cleared mid-save. Clear the key rather than
+			// materialize an empty layer.
+			await input.writeGlobalLayer(undefined)
+		} else {
+			await input.writeGlobalLayer(globalUndo)
+		}
+	} catch (restoreError) {
+		// The undo itself failed. The configuration keeps the partially written
+		// values, and the code skips the extension global-state write. Stored
+		// state therefore never reflects a save that did not complete. The user
+		// hears about both failures.
+		return {
+			status: "restore-failed",
+			message: `Failed to save ${key}: ${failure}. The global-scoped restore also failed: ${restoreError}. Review the command lists in your user and workspace settings.`,
+		}
+	}
+
+	return { status: "rolled-back" }
+}
+
 /**
  * Reads the gate that decides whether workspace command lists take part in
  * enforcement and display. Its manifest scope is "application", so only user

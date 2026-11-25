@@ -8,11 +8,13 @@ import * as vscode from "vscode"
 import { Package } from "../../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import {
+	classifyCommandListBaseline,
 	commandListFolderForResource,
 	getEffectiveCommandDecision,
 	readCommandListScopes,
 	resolveEffectiveCommandLists,
 	resolveWorkspaceWriteTarget,
+	rollbackFailedCommandListWrite,
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
 } from "../commandScope"
@@ -1414,4 +1416,496 @@ it("realpathSync preserves the on-disk case of an existing directory", () => {
 	} finally {
 		fs.rmSync(baseDir, { recursive: true, force: true })
 	}
+})
+
+describe("classifyCommandListBaseline", () => {
+	// The four ways a submitted entry survives the baseline filter, plus the
+	// drop case. Each row names the layer that keeps the entry, so a broken
+	// predicate fails the row that owns it and no other.
+	interface SurvivalRow {
+		name: string
+		baseline: string[]
+		incoming: string[]
+		workspace: string[]
+		stateGlobal: string[]
+		configGlobal: string[]
+		globalLayerAtSaveStart: string[] | undefined
+		survives: boolean
+	}
+
+	const rows: SurvivalRow[] = [
+		{
+			name: "an entry outside the baseline survives as a user addition",
+			baseline: [],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: [],
+			configGlobal: [],
+			globalLayerAtSaveStart: undefined,
+			survives: true,
+		},
+		{
+			name: "a baseline entry the workspace layer holds survives",
+			baseline: ["docker"],
+			incoming: ["docker"],
+			workspace: ["docker"],
+			stateGlobal: [],
+			configGlobal: [],
+			globalLayerAtSaveStart: undefined,
+			survives: true,
+		},
+		{
+			name: "a baseline entry the configuration global layer holds survives",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: [],
+			configGlobal: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			survives: true,
+		},
+		{
+			name: "a baseline entry only the state copy holds survives when the configuration has no global layer",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: ["git"],
+			configGlobal: [],
+			globalLayerAtSaveStart: undefined,
+			survives: true,
+		},
+		{
+			name: "a baseline entry only the state copy holds is dropped when a global layer exists",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: ["git"],
+			configGlobal: [],
+			globalLayerAtSaveStart: [],
+			survives: false,
+		},
+	]
+
+	it.each(rows)("$name", (row) => {
+		const result = classifyCommandListBaseline({
+			baseline: row.baseline,
+			incoming: row.incoming,
+			currentScopes: { global: row.stateGlobal, workspace: row.workspace, merged: [] },
+			configGlobalAtSaveStart: row.configGlobal,
+			globalLayerAtSaveStart: row.globalLayerAtSaveStart,
+			hiddenWorkspaceEntries: [],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+
+		expect(result.splitSourceEntries.includes(row.incoming[0])).toBe(row.survives)
+	})
+
+	// The external set spans three layers, and a submitted entry is never
+	// external. These rows pin four filter terms: the submitted-entry term, the
+	// baseline term, and the union terms for the state copy's global layer and
+	// the configuration's global layer at save start. The union's workspace term
+	// and the hidden-entry term are pinned only by the standalone tests below.
+	interface ExternalRow {
+		name: string
+		baseline: string[]
+		incoming: string[]
+		workspace: string[]
+		stateGlobal: string[]
+		configGlobal: string[]
+		expected: string[]
+	}
+
+	const externalRows: ExternalRow[] = [
+		{
+			name: "does not report a submitted entry that a workspace layer gained after display",
+			baseline: ["git"],
+			incoming: ["docker"],
+			workspace: ["docker"],
+			stateGlobal: [],
+			configGlobal: [],
+			expected: [],
+		},
+		{
+			name: "reports an entry that only the state copy's global layer gained after display",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: ["npm"],
+			configGlobal: [],
+			expected: ["npm"],
+		},
+		{
+			name: "reports an entry that only the configuration's global layer held at save start",
+			baseline: ["git"],
+			incoming: ["git"],
+			workspace: [],
+			stateGlobal: [],
+			configGlobal: ["npm"],
+			expected: ["npm"],
+		},
+		{
+			name: "does not report a displayed entry the submission deleted",
+			baseline: ["git"],
+			incoming: [],
+			workspace: ["git"],
+			stateGlobal: [],
+			configGlobal: [],
+			expected: [],
+		},
+	]
+
+	it.each(externalRows)("$name", (row) => {
+		const result = classifyCommandListBaseline({
+			baseline: row.baseline,
+			incoming: row.incoming,
+			currentScopes: { global: row.stateGlobal, workspace: row.workspace, merged: [] },
+			configGlobalAtSaveStart: row.configGlobal,
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: [],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+
+		expect(result.externallyAdded).toEqual(row.expected)
+	})
+
+	it("classifies a layer entry the submission omits as externally added", () => {
+		// The settings file gained "aws" while the dialog was open. The dialog never
+		// showed it, so the submission omits it, and the save must re-admit it.
+		const result = classifyCommandListBaseline({
+			baseline: ["git"],
+			incoming: ["git"],
+			currentScopes: { global: [], workspace: ["aws"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: [],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+
+		expect(result.externallyAdded).toEqual(["aws"])
+		expect(result.splitSourceEntries).toContain("aws")
+	})
+
+	it("keeps a hidden workspace entry out of the external set unless the global layer holds it", () => {
+		// The workspace re-add preserves a hidden entry, so reporting it as externally
+		// added would warn on every save. The global layer is displayed, so an entry
+		// there is a real file addition and does warn.
+		const hiddenOnly = classifyCommandListBaseline({
+			baseline: [],
+			incoming: [],
+			currentScopes: { global: [], workspace: ["docker"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["docker"],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+		const alsoGlobal = classifyCommandListBaseline({
+			baseline: [],
+			incoming: [],
+			currentScopes: { global: [], workspace: ["docker"], merged: [] },
+			configGlobalAtSaveStart: ["docker"],
+			globalLayerAtSaveStart: ["docker"],
+			hiddenWorkspaceEntries: ["docker"],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+
+		expect(hiddenOnly.externallyAdded).toEqual([])
+		expect(alsoGlobal.externallyAdded).toEqual(["docker"])
+	})
+
+	it("treats a sender with no baseline as unclassified and reports nothing as externally added", () => {
+		const result = classifyCommandListBaseline({
+			baseline: undefined,
+			incoming: ["git"],
+			currentScopes: { global: ["aws"], workspace: ["docker"], merged: [] },
+			configGlobalAtSaveStart: ["aws"],
+			globalLayerAtSaveStart: ["aws"],
+			hiddenWorkspaceEntries: [],
+			gateAtDisplay: undefined,
+			gateNow: () => true,
+		})
+
+		expect(result.externallyAdded).toEqual([])
+		expect(result.splitSourceEntries).toEqual(["git"])
+	})
+
+	it("keeps the hidden set as the promotion set when the gate did not flip", () => {
+		// "git" is in the hidden set and in the baseline, so an equality test that
+		// reversed its sense would drop it and leave only "docker".
+		const result = classifyCommandListBaseline({
+			baseline: ["git"],
+			incoming: ["git"],
+			currentScopes: { global: [], workspace: ["git"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["git", "docker"],
+			gateAtDisplay: true,
+			gateNow: () => true,
+		})
+
+		expect(result.promotionHiddenEntries).toEqual(["git", "docker"])
+	})
+
+	it("treats a baseline of the wrong runtime type as no baseline", () => {
+		// A sender can put anything in the baseline slot. A non-array cannot answer
+		// the display-time question, so the guard keeps the current hidden set
+		// rather than filtering it against a value that cannot hold entries.
+		const result = classifyCommandListBaseline({
+			// Deliberately wrong type: the runtime guard, not the type system, decides.
+			baseline: "git" as unknown as string[],
+			incoming: ["git"],
+			currentScopes: { global: [], workspace: ["git"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["git", "docker"],
+			gateAtDisplay: true,
+			gateNow: () => false,
+		})
+
+		expect(result.externallyAdded).toEqual([])
+		expect(result.splitSourceEntries).toEqual(["git"])
+		expect(result.promotionHiddenEntries).toEqual(["git", "docker"])
+	})
+
+	it("drops a displayed entry from the promotion set when the gate flipped since display", () => {
+		// The dialog showed "git" while the gate was on. The gate is off now, so "git"
+		// sits in the hidden set, and keeping it must stay a workspace decision rather
+		// than become a promotion into the global layer.
+		const result = classifyCommandListBaseline({
+			baseline: ["git"],
+			incoming: ["git"],
+			currentScopes: { global: [], workspace: ["git"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["git", "docker"],
+			gateAtDisplay: true,
+			gateNow: () => false,
+		})
+
+		expect(result.promotionHiddenEntries).toEqual(["docker"])
+	})
+
+	it("does not read the gate when the sender reported no display-time value", () => {
+		const gateNow = vi.fn(() => false)
+
+		const result = classifyCommandListBaseline({
+			baseline: ["git"],
+			incoming: ["git"],
+			currentScopes: { global: [], workspace: ["git"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["docker"],
+			gateAtDisplay: undefined,
+			gateNow,
+		})
+
+		expect(result.promotionHiddenEntries).toEqual(["docker"])
+		expect(gateNow).not.toHaveBeenCalled()
+	})
+})
+
+describe("rollbackFailedCommandListWrite", () => {
+	it("reports that nothing needs undoing when the global write never landed", async () => {
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			globalWriteApplied: false,
+			readGlobalLayer: () => {
+				throw new Error("must not be read")
+			},
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "not-applied" })
+		expect(writeGlobalLayer).not.toHaveBeenCalled()
+	})
+
+	it("removes this save's own additions and restores what it removed", async () => {
+		// The save replaced ["git"] with ["git", "aws"]. The undo must drop "aws"
+		// and keep "git", and it must not re-add anything the save never removed.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git", "aws"],
+			configGlobalAtSaveStart: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git", "aws"],
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledTimes(1)
+		expect(writeGlobalLayer).toHaveBeenCalledWith(["git"])
+	})
+
+	it("restores an entry this save removed", async () => {
+		// The save replaced ["git", "aws"] with ["git"], so the undo must put "aws"
+		// back. A delta that only drops its own additions would leave the deletion.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: ["git", "aws"],
+			globalLayerAtSaveStart: ["git", "aws"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git"],
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledWith(["git", "aws"])
+	})
+
+	it("keeps an entry a third party added mid-save", async () => {
+		// The re-read holds "npm", which this save never wrote. A snapshot rewind
+		// would delete it, so the delta must leave it in place.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git", "aws"],
+			configGlobalAtSaveStart: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git", "aws", "npm"],
+			writeGlobalLayer,
+		})
+
+		expect(writeGlobalLayer).toHaveBeenCalledWith(["git", "npm"])
+	})
+
+	it("clears the key when the re-read finds no layer and the undo is empty", async () => {
+		// The layer held "git" at save start and the save wrote the same list, so
+		// the delta is empty. A re-read that finds no layer means a third party
+		// cleared it mid-save. Writing `[]` would materialize a layer no user made.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => undefined,
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledWith(undefined)
+	})
+
+	it("does not duplicate an entry the undo both keeps and restores", async () => {
+		// The save removed "aws" and the re-read still holds it, so the undo meets
+		// "aws" twice: once in the kept fresh list and once in the removed set.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: ["git", "aws"],
+			globalLayerAtSaveStart: ["git", "aws"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git", "aws"],
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledWith(["git", "aws"])
+	})
+
+	it("clears the key instead of materializing an empty layer", async () => {
+		// The layer was absent at save start and the save wrote only its own entries.
+		// The undo restores absence, so the activation seed still sees a user override.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git"],
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledWith(undefined)
+	})
+
+	it("keeps another writer's empty layer rather than clearing it", async () => {
+		// The layer started absent, and another writer cleared it to `[]` mid-save.
+		// That clear is a decision this save must not undo.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			globalWriteApplied: true,
+			readGlobalLayer: () => [],
+			writeGlobalLayer,
+		})
+
+		expect(writeGlobalLayer).toHaveBeenCalledWith([])
+	})
+
+	it("reports a failed re-read and writes nothing", async () => {
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			globalWriteApplied: true,
+			readGlobalLayer: () => {
+				throw new Error("configuration unavailable")
+			},
+			writeGlobalLayer,
+		})
+
+		expect(result.status).toBe("re-read-failed")
+		expect(result).toMatchObject({ message: expect.stringContaining("could not be re-read to undo this save") })
+		expect(writeGlobalLayer).not.toHaveBeenCalled()
+	})
+
+	it("reports a failed restore and does not claim the undo landed", async () => {
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["git"],
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			globalWriteApplied: true,
+			readGlobalLayer: () => ["git"],
+			writeGlobalLayer: async () => {
+				throw new Error("restore rejected")
+			},
+		})
+
+		expect(result.status).toBe("restore-failed")
+		expect(result).toMatchObject({ message: expect.stringContaining("global-scoped restore also failed") })
+		expect(result).not.toEqual({ status: "rolled-back" })
+	})
 })
