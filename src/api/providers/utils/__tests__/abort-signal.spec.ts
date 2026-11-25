@@ -940,6 +940,10 @@ describe("bridgeExternalAbortSignal", () => {
 		expect(warnCalls[0]?.[1]).toBe(hookError)
 		expect(removeCalls.length).toBe(1)
 		expect(removeCalls[0]?.[0]).toBe("abort")
+		// The repo's own path instruction (.coderabbit.yaml line 86) asks that listener
+		// removal prove it detached the function it registered, not just that something left
+		// the "abort" event; a different callback would pass the two assertions above.
+		expect(removeCalls[0]?.[1]).toBe(addCalls[0]?.[1])
 	})
 
 	it("still hands back dispose when the pre-aborted path throws in onAbort", () => {
