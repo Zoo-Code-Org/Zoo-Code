@@ -3388,6 +3388,9 @@ describe("OpenRouterHandler", () => {
 						usage: {
 							prompt_tokens: 10,
 							completion_tokens: 5,
+							// BYOK attribution is what makes the upstream inference cost join the total;
+							// without it the rule adds nothing, so the fixture has to state it.
+							is_byok: true,
 							cost: 2,
 							cost_details: { upstream_inference_cost: 3 },
 						},
