@@ -1,0 +1,22 @@
+{
+	"source": "https://aiplatform.googleapis.com/v1/projects/[PROJECT]/locations/global/publishers/google/models/gemini-3-flash-preview:streamGenerateContent?alt=sse",
+	"capturedAt": "2026-11-25T03:12:29.772441+00:00",
+	"request": {
+		"contents": [
+			{
+				"role": "user",
+				"parts": [
+					{
+						"text": "Reply with exactly: Hello."
+					}
+				]
+			}
+		],
+		"generationConfig": {
+			"maxOutputTokens": 32,
+			"temperature": 0
+		}
+	},
+	"model": "gemini-3-flash-preview",
+	"changes": "Omitted authentication and response headers. Replaced the project ID in the source URL. The response body is unchanged."
+}
