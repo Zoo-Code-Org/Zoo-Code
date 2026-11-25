@@ -2823,7 +2823,7 @@ describe("Cline", () => {
 			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
 			const createSpy = vi
 				.spyOn(task.api, "createMessage")
-				.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+				.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
 			task["pendingInstructionRefresh"] = true
 			return { task, promptSpy, saySpy, createSpy }
 		}
@@ -2870,7 +2870,7 @@ describe("Cline", () => {
 			}
 			createSpy
 				.mockReturnValueOnce(failingStream() as ReturnType<typeof task.api.createMessage>)
-				.mockReturnValue(asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+				.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
 
 			await task.attemptApiRequest(0).next()
 
@@ -2888,6 +2888,56 @@ describe("Cline", () => {
 			await task.attemptApiRequest(0).next()
 			expect(Array.isArray(promptSpy.mock.calls[3][2])).toBe(true)
 			expect(warningCalls(saySpy)).toHaveLength(2)
+		})
+
+		it("keeps the refresh pending when the stream ends with no chunk", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			createSpy.mockReturnValueOnce(asyncStreamFrom<ApiStreamChunk>([]))
+			const emptyRequest = task.attemptApiRequest(0)
+			const retryRequest = task.attemptApiRequest(0)
+			try {
+				await emptyRequest.next()
+				expect.soft(task["pendingInstructionRefresh"]).toBe(true)
+				await retryRequest.next()
+
+				expect(promptSpy).toHaveBeenCalledTimes(2)
+				expect.soft(Array.isArray(promptSpy.mock.calls[1][2])).toBe(true)
+				expect(task["pendingInstructionRefresh"]).toBe(false)
+				expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["/workspace/.roorules (EACCES)"])
+				expect(createSpy).toHaveBeenCalledTimes(2)
+			} finally {
+				await emptyRequest.return(undefined)
+				await retryRequest.return(undefined)
+			}
+		})
+
+		it("reports only rebuild failures when the first build also collected failures", async () => {
+			const { task, promptSpy, saySpy } = await armRefreshRequest([])
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 1,
+			})
+			let savedInstructions = "old instructions"
+			promptSpy.mockImplementation(async (_state, _model, collector) => {
+				collector?.push({ sourcePath: savedInstructions, code: "EACCES" })
+				return savedInstructions
+			})
+			vi.mocked(manageContext).mockImplementationOnce(async ({ messages }) => {
+				savedInstructions = "current instructions"
+				return { messages, summary: "fresh summary", cost: 0, prevContextTokens: 1 }
+			})
+			const request = task.attemptApiRequest()
+			try {
+				await request.next()
+				expect(promptSpy).toHaveBeenCalledTimes(2)
+				expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["current instructions (EACCES)"])
+			} finally {
+				await request.return(undefined)
+			}
 		})
 
 		it("preserves read-failure tolerance in recovery while a refresh is pending (review 2)", async () => {

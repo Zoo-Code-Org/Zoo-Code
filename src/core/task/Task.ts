@@ -6176,8 +6176,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 
 			const firstChunk = await Promise.race([firstChunkPromise, abortPromise])
-			// Retries after a first-chunk failure keep tolerance; it ends only here.
-			if (servedRefreshGeneration === this.instructionRefreshGeneration) {
+			// Retries after a first-chunk failure or an empty stream keep tolerance; it ends only on a real chunk.
+			if (!firstChunk.done && servedRefreshGeneration === this.instructionRefreshGeneration) {
 				this.pendingInstructionRefresh = false
 			}
 			yield firstChunk.value
