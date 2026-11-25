@@ -135,6 +135,70 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
 
+		// Handle non-streaming completions (e.g. O3-family models with stream: false)
+		// before iterating: the SDK returns a parsed ChatCompletion object, not an
+		// iterable stream, so the chunk loop below cannot consume it.
+		const streamAny = stream as unknown as { [Symbol.asyncIterator]?: unknown }
+		if (typeof streamAny?.[Symbol.asyncIterator] !== "function") {
+			const completion = stream as unknown as OpenAI.Chat.Completions.ChatCompletion
+
+			// Check for provider-specific error responses (e.g., MiniMax base_resp)
+			const completionAny = completion as unknown as { base_resp?: { status_code?: number; status_msg?: string } }
+			if (completionAny?.base_resp?.status_code && completionAny.base_resp.status_code !== 0) {
+				throw new Error(
+					`${this.providerName} API Error (${completionAny.base_resp.status_code}): ${completionAny.base_resp.status_msg || "Unknown error"}`,
+				)
+			}
+
+			const message = completion.choices?.[0]?.message
+
+			const reasoningText = (message as { reasoning_content?: string } | undefined)?.reasoning_content
+			if (reasoningText) {
+				yield { type: "reasoning", text: reasoningText }
+			}
+
+			const content = message?.content || ""
+			for (const processedChunk of matcher.update(content)) {
+				yield processedChunk
+			}
+
+			if (message?.tool_calls) {
+				for (const [index, toolCall] of message.tool_calls.entries()) {
+					if (toolCall.id) {
+						activeToolCallIds.add(toolCall.id)
+					}
+					yield {
+						type: "tool_call_partial",
+						index,
+						id: toolCall.id,
+						name: (toolCall as { function?: { name?: string } }).function?.name,
+						arguments: (toolCall as { function?: { arguments?: string } }).function?.arguments,
+					}
+				}
+			}
+
+			const finishReason = completion.choices?.[0]?.finish_reason
+			if (finishReason === "tool_calls" && activeToolCallIds.size > 0) {
+				for (const id of activeToolCallIds) {
+					yield { type: "tool_call_end", id }
+				}
+				activeToolCallIds.clear()
+			}
+
+			if (completion.usage) {
+				lastUsage = completion.usage
+			}
+
+			if (lastUsage) {
+				yield this.processUsageMetrics(lastUsage, this.getModel().info)
+			}
+
+			for (const processedChunk of matcher.final()) {
+				yield processedChunk
+			}
+			return
+		}
+
 		for await (const chunk of stream as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const chunkAny = chunk as any
