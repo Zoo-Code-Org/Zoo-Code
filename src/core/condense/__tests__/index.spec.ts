@@ -1397,6 +1397,98 @@ describe("summarizeConversation", () => {
 		expect(serialized).not.toContain('"type":"tool_result"')
 		expect(serialized).toContain("[Tool Use: read_file]")
 	})
+
+	it("still converts tool blocks to text when metadata carries an empty tools array", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: { ...toolsMetadata, tools: [] },
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		const serialized = JSON.stringify(requestMessages)
+		expect(serialized).not.toContain('"type":"tool_use"')
+		expect(serialized).toContain("[Tool Use: read_file]")
+	})
+
+	it("treats a malformed non-array tools value as no tools offered", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+		const malformedMetadata = {
+			...toolsMetadata,
+			// Cross-provider payloads can carry tools in a non-array shape.
+			tools: { length: 2 } as unknown as typeof toolsMetadata.tools,
+		} satisfies ApiHandlerCreateMessageMetadata
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: malformedMetadata,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		const serialized = JSON.stringify(requestMessages)
+		expect(serialized).not.toContain('"type":"tool_use"')
+		expect(serialized).toContain("[Tool Use: read_file]")
+	})
+
+	it("degrades to an empty system prompt when the caller passes a nullish one", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			// Defensive contract for untyped callers: a nullish prompt degrades to "".
+			systemPrompt: undefined as unknown as string,
+			taskId,
+		})
+
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][0]).toBe("")
+	})
 })
 
 describe("summarizeConversation with custom settings", () => {
@@ -1853,5 +1945,24 @@ describe("transformMessagesForCondensing", () => {
 
 		// Original should still have tool_use type
 		expect(messages[0].content[0].type).toBe("tool_use")
+	})
+
+	it("returns shallow copies without converting blocks when transformToolBlocks is false", () => {
+		const content = [
+			{
+				type: "tool_use" as const,
+				id: "tool-1",
+				name: "read_file",
+				input: { path: "test.ts" },
+			},
+		]
+		const messages = [{ role: "assistant" as const, content }]
+
+		const result = transformMessagesForCondensing(messages, false)
+
+		expect(result).toHaveLength(1)
+		expect(result[0]).not.toBe(messages[0])
+		// The block array passes through verbatim: no text conversion on this path.
+		expect(result[0].content).toBe(content)
 	})
 })

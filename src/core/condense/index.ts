@@ -320,6 +320,9 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// Transform tool_use and tool_result blocks to text representations only when the
 	// provider does not support native tool blocks. When metadata carries tools, keep
 	// the native blocks (and pass metadata.tools through) to preserve the request prefix.
+	// Stryker disable next-line OptionalChaining: both optional chains evaluate only after
+	// Array.isArray(metadata?.tools) proved metadata non-null and tools an array, so the mutated
+	// forms always read the same values as the original (short-circuit equivalence).
 	const keepNativeToolBlocks = Array.isArray(metadata?.tools) && (metadata?.tools?.length ?? 0) > 0
 
 	const messagesWithTextToolBlocks = keepNativeToolBlocks
