@@ -407,7 +407,7 @@ describe("Copilot model capabilities", () => {
 		const handler = new GitHubCopilotHandler({})
 		try {
 			await handler.initializeClient()
-			await collectStream(handler.createMessage("", messages, metadata))
+			return await collectStream(handler.createMessage("", messages, metadata))
 		} finally {
 			handler.dispose()
 		}
@@ -603,6 +603,23 @@ describe("Copilot model capabilities", () => {
 
 	describe("requests", () => {
 		const visionModel = () => liveModel({ capabilities: { supportsImageToText: true } })
+
+		it.each([0, 7])("reports final counted usage with %s output tokens", async (outputTokens) => {
+			const countTokens = vi
+				.fn<vscode.LanguageModelChat["countTokens"]>()
+				.mockImplementation(async (content) => (typeof content === "string" ? outputTokens : 11))
+			const model = liveModel({ capabilities: { supportsImageToText: true }, countTokens })
+			const chunks = await send(model, [{ role: "user", content: "Hello" }])
+
+			expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "Done" }])
+			expect(chunks.filter((chunk) => chunk.type === "usage")).toEqual([
+				{ type: "usage", inputTokens: 22, outputTokens },
+			])
+			// Both the converted system message and user message contribute 11 input tokens.
+			expect(mockLanguageModelChat.sendRequest.mock.calls[0][0]).toHaveLength(2)
+			expect(countTokens).toHaveBeenCalledWith("Done", expect.anything())
+			expect(mockLanguageModelChat.sendRequest).toHaveBeenCalledOnce()
+		})
 
 		it("transmits image bytes and counts the real message when vision is reported", async () => {
 			await send(visionModel(), imageMessages)

@@ -1,0 +1,25 @@
+{
+	"source": "https://raw.githubusercontent.com/maruel/genai/93f3f86b21a114893f29670060b6f9f9d12dd3a8/providers/baseten/testdata/TestClient/Scoreboard/openai/gpt-oss-120b_thinking/GenStream-Text.yaml",
+	"sourceBlob": "407fb16a41d90447b4aed9b485af28ba46cb5061",
+	"recorder": "https://github.com/maruel/genai/blob/93f3f86b21a114893f29670060b6f9f9d12dd3a8/providers/baseten/client_test.go",
+	"license": "Apache-2.0",
+	"copyright": "Copyright 2026 Marc-Antoine Ruel. All rights reserved.",
+	"changes": "Extracted the response body from the HTTP recording. Removed YAML indentation and HTTP headers. SSE data is unchanged.",
+	"request": {
+		"url": "https://inference.baseten.co/v1/chat/completions",
+		"body": {
+			"model": "openai/gpt-oss-120b",
+			"messages": [
+				{
+					"role": "user",
+					"content": "Say hello. Use only one word."
+				}
+			],
+			"stream": true,
+			"stream_options": {
+				"include_usage": true
+			}
+		}
+	},
+	"capturedAt": "2026-05-31T21:50:53.000Z"
+}

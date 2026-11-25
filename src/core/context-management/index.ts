@@ -95,11 +95,27 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 
 	const truncationId = crypto.randomUUID()
 
-	// Filter to only visible messages (those not already truncated)
+	// Filter to only visible messages, mirroring the sink's fresh-start slice
+	// (getEffectiveApiHistory): when a summary exists, the API receives only the
+	// messages from the latest summary onward, so candidates start there, at the
+	// summary itself. The summary is the first candidate and the skip-first rule
+	// below keeps it untagged — excluding it split tool_use/tool_result pairs
+	// (PR 2647 review round 4). With no summary, every non-truncated, non-marker
+	// message stays a candidate, orphaned condenseParent tags included.
 	// We need to track original indices to correctly tag messages in the full array
+	let lastSummaryIndex = -1
+	// Stryker disable next-line EqualityOperator: equivalent mutant, the unscanned index 0 matters only when it holds the latest summary, and the clamp below then yields the same boundary 0 (boundary is the sole consumer)
+	for (let i = messages.length - 1; i >= 0; i--) {
+		if (messages[i].isSummary) {
+			lastSummaryIndex = i
+			break
+		}
+	}
+	// Stryker disable next-line ConditionalExpression: equivalent mutant, without a summary the fallback gives boundary -1, and the sole consumer (index >= boundary) treats -1 and 0 alike for non-negative indices
+	const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
 	const visibleIndices: number[] = []
 	messages.forEach((msg, index) => {
-		if (!msg.truncationParent && !msg.isTruncationMarker) {
+		if (index >= boundary && !msg.truncationParent && !msg.isTruncationMarker) {
 			visibleIndices.push(index)
 		}
 	})
@@ -383,10 +399,25 @@ export async function manageContext({
 	if (prevContextTokens > allowedTokens) {
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 
-		// Calculate new context tokens after truncation by counting non-truncated messages
-		// Messages with truncationParent are hidden, so we count only those without it
-		const effectiveMessages = truncationResult.messages.filter(
-			(msg) => !msg.truncationParent && !msg.isTruncationMarker,
+		// Calculate new context tokens after truncation by counting the messages the
+		// API still receives. The sink's fresh-start slice (getEffectiveApiHistory)
+		// starts at the latest summary, so the count covers the summary plus the
+		// messages after it; the summary is counted and never a truncation candidate.
+		// With no summary, every non-truncated, non-marker message is counted,
+		// orphaned condenseParent tags included (PR 2647 review thread).
+		const truncatedMessages = truncationResult.messages
+		let lastSummaryIndex = -1
+		// Stryker disable next-line EqualityOperator: equivalent mutant, the unscanned index 0 matters only when it holds the latest summary, and the clamp below then yields the same boundary 0 (boundary is the sole consumer)
+		for (let i = truncatedMessages.length - 1; i >= 0; i--) {
+			if (truncatedMessages[i].isSummary) {
+				lastSummaryIndex = i
+				break
+			}
+		}
+		// Stryker disable next-line ConditionalExpression: equivalent mutant, without a summary the fallback gives boundary -1, and the sole consumer (index >= boundary) treats -1 and 0 alike for non-negative indices
+		const boundary = lastSummaryIndex === -1 ? 0 : lastSummaryIndex
+		const effectiveMessages = truncatedMessages.filter(
+			(msg, index) => index >= boundary && !msg.truncationParent && !msg.isTruncationMarker,
 		)
 
 		// Include system prompt tokens so this value matches what we send to the API.

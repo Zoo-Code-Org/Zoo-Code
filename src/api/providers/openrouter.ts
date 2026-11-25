@@ -138,10 +138,11 @@ interface CompletionUsage {
 		cached_tokens?: number
 	}
 	total_tokens?: number
-	cost?: number
+	cost?: number | null
+	is_byok?: boolean
 	cost_details?: {
-		upstream_inference_cost?: number
-	}
+		upstream_inference_cost?: number | null
+	} | null
 }
 
 export class OpenRouterHandler extends BaseProvider implements SingleCompletionHandler {
@@ -649,7 +650,10 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 						outputTokens: lastUsage.completion_tokens || 0,
 						cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens,
 						reasoningTokens: lastUsage.completion_tokens_details?.reasoning_tokens,
-						totalCost: (lastUsage.cost_details?.upstream_inference_cost || 0) + (lastUsage.cost || 0),
+						// BYOK inference is billed separately. Other routes include it in cost.
+						totalCost:
+							(lastUsage.cost ?? 0) +
+							(lastUsage.is_byok === true ? (lastUsage.cost_details?.upstream_inference_cost ?? 0) : 0),
 					}
 				}
 			} catch (error) {

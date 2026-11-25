@@ -95,8 +95,6 @@ const expectedHandlers = {
 	[providerIdentifiers.ollama]: NativeOllamaHandler,
 	[providerIdentifiers.lmstudio]: LmStudioHandler,
 	[providerIdentifiers.gemini]: GeminiHandler,
-	// Gemini CLI currently relies on the factory's default Anthropic handler.
-	[providerIdentifiers.geminiCli]: AnthropicHandler,
 	[providerIdentifiers.openaiCodex]: OpenAiCodexHandler,
 	[providerIdentifiers.openaiNative]: OpenAiNativeHandler,
 	[providerIdentifiers.deepseek]: DeepSeekHandler,
@@ -179,6 +177,12 @@ describe("buildApiHandler", () => {
 				apiProvider: retiredProviderIdentifiers.roo,
 			}),
 		).toThrow("Roo Code Router has been removed")
+	})
+
+	it("rejects Gemini CLI instead of constructing an Anthropic handler", () => {
+		expect(() => buildApiHandler({ apiProvider: retiredProviderIdentifiers.geminiCli })).toThrow(
+			"Gemini CLI is no longer supported. Select a supported provider in your API profile settings.",
+		)
 	})
 
 	it("rejects other retired providers", () => {

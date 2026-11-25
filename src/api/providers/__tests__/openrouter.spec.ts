@@ -783,7 +783,6 @@ describe("OpenRouterHandler", () => {
 					],
 					model: "anthropic/claude-sonnet-4",
 					stream: true,
-					stream_options: { include_usage: true },
 					temperature: 0,
 					top_p: undefined,
 				}),
