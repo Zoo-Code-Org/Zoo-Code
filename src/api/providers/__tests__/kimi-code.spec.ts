@@ -41,6 +41,55 @@ describe("KimiCodeHandler", () => {
 		expect(handler.getModel().id).toBe("future-kimi-model")
 	})
 
+	it("does not send max_completion_tokens when includeMaxTokens is unset (#2668 review)", async () => {
+		// Kimi Code has no "Include max output tokens" checkbox, so the
+		// OpenAI Compatible default (include when unset) must not apply;
+		// unset keeps the pre-#2230 behavior of omitting the field.
+		// NOTE: spy on fetch before constructing the handler — the OpenAI
+		// SDK resolves `fetch` at client construction time.
+		const fetchSpy = vi.spyOn(globalThis, "fetch")
+		fetchSpy.mockResolvedValueOnce(
+			new Response(JSON.stringify({ choices: [{ message: { content: "response" }, finish_reason: "stop" }] }), {
+				status: 200,
+			}),
+		)
+		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "kimi-key" })
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
+		try {
+			for await (const _chunk of gen) {
+				// consume
+			}
+		} catch {
+			// expected - mock is incomplete
+		}
+		const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as { body?: string })?.body ?? "{}")
+		expect(body.max_completion_tokens).toBeUndefined()
+	})
+
+	it("sends max_completion_tokens when includeMaxTokens is explicitly enabled (#2668 review)", async () => {
+		const fetchSpy = vi.spyOn(globalThis, "fetch")
+		fetchSpy.mockResolvedValueOnce(
+			new Response(JSON.stringify({ choices: [{ message: { content: "response" }, finish_reason: "stop" }] }), {
+				status: 200,
+			}),
+		)
+		const handler = new KimiCodeHandler({
+			kimiCodeAuthMethod: "api-key",
+			kimiCodeApiKey: "kimi-key",
+			includeMaxTokens: true,
+		})
+		const gen = handler.createMessage("system", [{ role: "user", content: "test" }])
+		try {
+			for await (const _chunk of gen) {
+				// consume
+			}
+		} catch {
+			// expected - mock is incomplete
+		}
+		const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as { body?: string })?.body ?? "{}")
+		expect(body.max_completion_tokens).toBe(131_072)
+	})
+
 	it("uses kimi-for-coding only when no model is selected", () => {
 		const handler = new KimiCodeHandler({ kimiCodeAuthMethod: "api-key", kimiCodeApiKey: "kimi-key" })
 		expect(handler.getModel().id).toBe("kimi-for-coding")

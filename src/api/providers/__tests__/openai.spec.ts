@@ -734,6 +734,27 @@ describe("OpenAiHandler", () => {
 			expect(callArgs.max_completion_tokens).toBe(4096)
 		})
 
+		it("does not include max_completion_tokens when the model limit is null (#2668 review)", async () => {
+			const optionsWithNullMaxTokens: ApiHandlerOptions = {
+				...mockOptions,
+				includeMaxTokens: true,
+				// ModelInfo.maxTokens is nullish in the schema
+				// (z.number().nullish()), so `null` must not reach the request.
+				openAiCustomModelInfo: {
+					contextWindow: 128_000,
+					maxTokens: null,
+					supportsPromptCache: false,
+				},
+			}
+			const handlerWithNullMaxTokens = new OpenAiHandler(optionsWithNullMaxTokens)
+			const stream = handlerWithNullMaxTokens.createMessage(systemPrompt, messages)
+			// Consume the stream to trigger the API call
+			await collectStream(stream)
+			expect(mockCreate).toHaveBeenCalled()
+			const callArgs = mockCreate.mock.calls[0][0]
+			expect(callArgs.max_completion_tokens).toBeUndefined()
+		})
+
 		it("should use user-configured modelMaxTokens instead of model default maxTokens", async () => {
 			const optionsWithUserMaxTokens: ApiHandlerOptions = {
 				...mockOptions,

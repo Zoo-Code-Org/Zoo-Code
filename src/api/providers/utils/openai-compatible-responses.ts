@@ -88,10 +88,12 @@ export function buildResponsesRequest({
 		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
 	}
 
-	// Mirror the Chat Completions max-tokens policy: only cap output when the
-	// user opted in via includeMaxTokens.
+	// Mirror the Chat Completions max-tokens policy: the settings UI reads an
+	// unset includeMaxTokens as CHECKED (include unless explicitly unticked,
+	// #2230), and ModelInfo.maxTokens is nullish in the schema, so `null`
+	// must not be sent either.
 	const maxTokens = options.modelMaxTokens || modelInfo.maxTokens
-	if (options.includeMaxTokens === true && maxTokens !== undefined) {
+	if (options.includeMaxTokens !== false && maxTokens) {
 		requestBody.max_output_tokens = maxTokens
 	}
 

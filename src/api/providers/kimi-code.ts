@@ -48,6 +48,12 @@ export class KimiCodeHandler extends OpenAiHandler {
 			openAiApiKey: options.kimiCodeApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? kimiCodeDefaultModelId,
 			openAiStreamingEnabled: true,
+			// No "Include max output tokens" checkbox exists for Kimi Code, so
+			// the OpenAI Compatible default (include when unset) must not
+			// silently apply here: preserve the pre-#2230 behavior and only
+			// send max_completion_tokens when the user explicitly enabled it
+			// in stored settings (review feedback on #2668).
+			includeMaxTokens: options.includeMaxTokens ?? false,
 		})
 		this.kimiOptions = options
 	}
