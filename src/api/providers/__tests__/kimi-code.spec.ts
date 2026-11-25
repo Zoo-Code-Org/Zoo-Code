@@ -62,7 +62,11 @@ describe("KimiCodeHandler", () => {
 		} catch {
 			// expected - mock is incomplete
 		}
-		const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as { body?: string })?.body ?? "{}")
+		// A swallowed createMessage error must not masquerade as a passing
+		// unset assertion: prove a request was actually captured, then
+		// parse the real body (no "{}" fallback).
+		expect(fetchSpy).toHaveBeenCalledOnce()
+		const body = JSON.parse((fetchSpy.mock.calls[0]?.[1] as { body: string }).body)
 		expect(body.max_completion_tokens).toBeUndefined()
 	})
 
