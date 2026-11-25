@@ -332,7 +332,14 @@ export async function summarizeConversation(options: SummarizeConversationOption
 				true,
 			)
 
-	const requestMessages = messagesWithTextToolBlocks.map(({ role, content }) => ({ role, content }))
+	// DeepSeek/Z.ai thinking mode requires reasoning_content echoed back once
+	// tools are on the request (HTTP 400 otherwise) - keep it on the native path.
+	const requestMessages = messagesWithTextToolBlocks.map((message) => {
+		if (!keepNativeToolBlocks || typeof message.reasoning_content !== "string" || !message.reasoning_content) {
+			return { role: message.role, content: message.content }
+		}
+		return { role: message.role, content: message.content, reasoning_content: message.reasoning_content }
+	})
 
 	// Use the passed-in system prompt to keep the request prefix identical to the prior turn.
 	const promptToUse = systemPrompt ?? ""

@@ -1519,6 +1519,72 @@ describe("summarizeConversation", () => {
 
 		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][0]).toBe("")
 	})
+
+	it("keeps assistant reasoning_content in the native tool-block request", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+			{ role: "user", content: "Continue the task", ts: 4 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops reasoning_content when the request rebuilds tool blocks as text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2, reasoning_content: "transient reasoning" },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// No tools on the request: the provider rule does not bind, and the
+		// field must be absent, not merely undefined-valued.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{ role: "assistant", content: "Hi there" },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
 })
 
 describe("summarizeConversation with custom settings", () => {

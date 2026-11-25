@@ -23,6 +23,17 @@ export function maybeRemoveImageBlocks(messages: ApiMessage[], apiHandler: ApiHa
 							text: "[Referenced image in conversation]",
 						}
 					}
+					if (block.type === "tool_result" && Array.isArray(block.content)) {
+						// Images can also nest inside a tool_result's block list.
+						return {
+							...block,
+							content: block.content.map((nested) =>
+								nested.type === "image"
+									? { type: "text", text: "[Referenced image in conversation]" }
+									: nested,
+							),
+						}
+					}
 					return block
 				})
 			}
