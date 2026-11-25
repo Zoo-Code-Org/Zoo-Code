@@ -5,7 +5,7 @@ import type { Mock } from "vitest"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { ApiHandler } from "../../../api"
+import { ApiHandler, type ApiHandlerCreateMessageMetadata } from "../../../api"
 import { ApiMessage } from "../../task-persistence/apiMessages"
 import { maybeRemoveImageBlocks } from "../../../api/transform/image-cleaning"
 import {
@@ -929,21 +929,16 @@ describe("summarizeConversation", () => {
 			taskId,
 		})
 
-		// Verify that createMessage was called with the SUMMARY_PROMPT (which contains CRITICAL instructions), messages array, and optional metadata
+		// Verify that createMessage was called with the passed-in systemPrompt
 		expect(mockApiHandler.createMessage).toHaveBeenCalledWith(
-			expect.stringContaining("You are a helpful AI assistant tasked with summarizing conversations."),
+			defaultSystemPrompt,
 			expect.any(Array),
 			undefined, // metadata is undefined when not passed to summarizeConversation
 		)
-		// Verify the CRITICAL instructions are included in the prompt
-		const actualPrompt = (mockApiHandler.createMessage as Mock).mock.calls[0][0]
-		expect(actualPrompt).toContain("CRITICAL: This is a summarization-only request")
-		expect(actualPrompt).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
-
-		// Check that maybeRemoveImageBlocks was called with the correct messages
-		// The final request message now contains the detailed CONDENSE instructions
+		// Verify the CRITICAL instructions are included in the final request message
 		const mockCallArgs = (maybeRemoveImageBlocks as Mock).mock.calls[0][0] as any[]
 		const finalMessage = mockCallArgs[mockCallArgs.length - 1]
+		expect(finalMessage.content).toContain("CRITICAL: This is a summarization-only request")
 		expect(finalMessage.role).toBe("user")
 		expect(finalMessage.content).toContain("Your task is to create a detailed summary of the conversation")
 	})
@@ -1244,6 +1239,668 @@ describe("summarizeConversation", () => {
 			expect.stringContaining("detailed summary of the conversation"),
 		])
 	})
+
+	const toolsMetadata = {
+		taskId: "test-task-id",
+		tools: [
+			{
+				type: "function",
+				function: {
+					name: "read_file",
+					description: "Read a file from disk",
+					parameters: { type: "object", properties: {} },
+				},
+			},
+		],
+		tool_choice: "auto",
+	} satisfies ApiHandlerCreateMessageMetadata
+
+	it("keeps the prior turn's tool_choice in the condense request metadata", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// Cache-preserving contract: the request metadata passes through with
+		// tool_choice untouched, so the provider prefix stays cacheable.
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][2]).toMatchObject({
+			tool_choice: "auto",
+		})
+		expect(result.error).toBeUndefined()
+	})
+
+	it("retries with tool_choice none when the tool-offering pass returns no text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const toolCallOnlyStream = (async function* () {
+			// The model answered with tool calls only: no text chunks arrive.
+			yield { type: "usage" as const, totalCost: 0.01 }
+		})()
+		const textStream = (async function* () {
+			yield { type: "text" as const, text: "Recovered summary" }
+			yield { type: "usage" as const, totalCost: 0.02 }
+		})()
+		const streams = [toolCallOnlyStream, textStream]
+		let call = 0
+		mockApiHandler.createMessage = vi.fn(() => streams[call++]) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][2]).toMatchObject({ tool_choice: "auto" })
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[1][2]).toMatchObject({ tool_choice: "none" })
+		expect(result.summary).toBe("Recovered summary")
+		expect(result.error).toBeUndefined()
+		// Both passes are billed: the retry adds its cost instead of
+		// overwriting the first pass's spend.
+		expect(result.cost).toBeCloseTo(0.03)
+	})
+	it("keeps the billed usage when a pass streams usage and then throws", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const usageThenThrowStream = (async function* () {
+			yield { type: "text" as const, text: "Partial summary" }
+			yield { type: "usage" as const, totalCost: 0.04 }
+			throw new Error("stream died after usage")
+		})()
+		mockApiHandler.createMessage = vi.fn(() => usageThenThrowStream) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// The pass ran and was billed before the stream failed: the reported
+		// cost must include it even though the condense itself errors.
+		expect(result.error).toBeDefined()
+		expect(result.cost).toBeCloseTo(0.04)
+	})
+
+	it("mirrors the prior-turn request prefix with native tool blocks kept", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+
+		// Prefix mirrors the prior turn 1:1: same roles, native tool blocks
+		// verbatim, then the folded summary instruction as the final user message.
+		expect(requestMessages).toHaveLength(4)
+		expect(requestMessages[0]).toStrictEqual({ role: "user", content: "Initial task" })
+		expect(requestMessages[1]).toStrictEqual({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Reading the file" },
+				{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+			],
+		})
+		expect(requestMessages[2]).toStrictEqual({
+			role: "user",
+			content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+		})
+		expect(requestMessages[3].role).toBe("user")
+		expect(requestMessages[3].content).toContain("detailed summary of the conversation")
+	})
+
+	it("converts tool blocks to text when no tools are offered", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		// The converted tool_use AND tool_result texts must reach createMessage
+		// as the message content - selected-string checks pass even when the
+		// converted result never reaches the request.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		const finalMessage = requestMessages[3] as { content: string }
+		expect(finalMessage.content).toContain("detailed summary of the conversation")
+	})
+
+	it("still converts tool blocks to text when metadata carries an empty tools array", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: { ...toolsMetadata, tools: [] },
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		// Same full-request contract as the undefined-tools case: the converted
+		// tool_use and tool_result texts must reach createMessage.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		const finalMessage = requestMessages[3] as { content: string }
+		expect(finalMessage.content).toContain("detailed summary of the conversation")
+	})
+	it("does not echo reasoning fields when tool blocks convert to text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				reasoning_content: "thinking about the file",
+				reasoning_details: [{ type: "reasoning.text", text: "details", signature: "sig" }],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+			reasoning_content?: unknown
+			reasoning_details?: unknown
+		}>
+		// Text conversion strips every reasoning echo: a details-only turn must
+		// not leak its fields into a request whose tools are not offered.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		expect("reasoning_content" in requestMessages[1]).toBe(false)
+		expect("reasoning_details" in requestMessages[1]).toBe(false)
+	})
+
+	it("treats a malformed non-array tools value as no tools offered", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+		const malformedMetadata = {
+			...toolsMetadata,
+			// Cross-provider payloads can carry tools in a non-array shape.
+			tools: { length: 2 } as unknown as typeof toolsMetadata.tools,
+		} satisfies ApiHandlerCreateMessageMetadata
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: malformedMetadata,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		const serialized = JSON.stringify(requestMessages)
+		expect(serialized).not.toContain('"type":"tool_use"')
+		expect(serialized).toContain("[Tool Use: read_file]")
+	})
+
+	it("degrades to an empty system prompt when the caller passes a nullish one", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			// Defensive contract for untyped callers: a nullish prompt degrades to "".
+			systemPrompt: undefined as unknown as string,
+			taskId,
+		})
+
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][0]).toBe("")
+	})
+
+	it("keeps assistant reasoning_content in the native tool-block request", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+			{ role: "user", content: "Continue the task", ts: 4 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops reasoning_content when the request rebuilds tool blocks as text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2, reasoning_content: "transient reasoning" },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// No tools on the request: the provider rule does not bind, and the
+		// field must be absent, not merely undefined-valued.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{ role: "assistant", content: "Hi there" },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("keeps assistant reasoning_details beside reasoning_content in the native tool-block request", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+			{ role: "user", content: "Continue the task", ts: 4 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// OpenRouter's Gemini path drops tool calls whose reasoning_details are
+		// missing, so the echo must carry the array beside reasoning_content.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops empty reasoning_content on the native tool-block path", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "",
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// An empty string echoes nothing: the provider 400s on an empty
+		// reasoning_content just as it does on a missing one.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("keeps reasoning_details on the native path even without reasoning_content", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// Stored turns can carry reasoning_details without reasoning_content
+		// (Task rebuilds that shape). Gemini's sanitizer drops tool calls whose
+		// reasoning_details are missing, so the array must echo on its own
+		// condition and the absent reasoning_content must stay absent.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops empty reasoning_details arrays on the native tool-block path", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+				reasoning_details: [],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// An empty details array echoes nothing: it carries no reasoning data
+		// for the sanitizer, and echoing the empty key would differ from the
+		// missing key on the wire.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("keeps the recorded cost when a non-usage chunk follows the usage chunk", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const mixedTailStream = (async function* () {
+			yield { type: "text" as const, text: "S" }
+			yield { type: "usage" as const, totalCost: 0.05 }
+			yield { type: "reasoning" as const, text: "late thought" }
+		})()
+		mockApiHandler.createMessage = vi.fn(() => mixedTailStream) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		expect(result.summary).toBe("S")
+		// Only usage chunks write cost: a trailing non-usage chunk must not
+		// reset the final usage chunk's value.
+		expect(result.cost).toBeCloseTo(0.05)
+		expect(result.error).toBeUndefined()
+	})
+
+	it("retries with tool_choice none when the summary is only whitespace", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const whitespaceStream = (async function* () {
+			yield { type: "text" as const, text: "   " }
+			yield { type: "usage" as const, totalCost: 0.01 }
+		})()
+		const textStream = (async function* () {
+			yield { type: "text" as const, text: "Recovered summary" }
+			yield { type: "usage" as const, totalCost: 0.02 }
+		})()
+		const streams = [whitespaceStream, textStream]
+		let call = 0
+		mockApiHandler.createMessage = vi.fn(() => streams[call++]) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// The blank check reads the trimmed text, not truthiness: a
+		// whitespace-only summary is as good as no summary at all.
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[1][2]).toMatchObject({ tool_choice: "none" })
+		expect(result.summary).toBe("Recovered summary")
+		expect(result.error).toBeUndefined()
+		expect(result.cost).toBeCloseTo(0.03)
+	})
 })
 
 describe("summarizeConversation with custom settings", () => {
@@ -1319,7 +1976,7 @@ describe("summarizeConversation with custom settings", () => {
 		const requestMessages = createMessageCalls[0][1]
 		const lastMessage = requestMessages[requestMessages.length - 1]
 		expect(lastMessage.role).toBe("user")
-		expect(lastMessage.content).toBe(customPrompt)
+		expect(lastMessage.content).toContain(customPrompt)
 	})
 
 	/**
@@ -1336,13 +1993,10 @@ describe("summarizeConversation with custom settings", () => {
 			customCondensingPrompt: "  ",
 		})
 
-		// Verify the default SUMMARY_PROMPT was used (contains CRITICAL instructions)
+		// Verify the passed-in systemPrompt was used as the first arg
 		let createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
 
 		// Reset mock and test with undefined
 		vi.clearAllMocks()
@@ -1354,13 +2008,10 @@ describe("summarizeConversation with custom settings", () => {
 			isAutomaticTrigger: false,
 		})
 
-		// Verify the default SUMMARY_PROMPT was used again (contains CRITICAL instructions)
+		// Verify the passed-in systemPrompt was used again
 		createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
 	})
 
 	/**
@@ -1706,5 +2357,24 @@ describe("transformMessagesForCondensing", () => {
 
 		// Original should still have tool_use type
 		expect(messages[0].content[0].type).toBe("tool_use")
+	})
+
+	it("returns shallow copies without converting blocks when transformToolBlocks is false", () => {
+		const content = [
+			{
+				type: "tool_use" as const,
+				id: "tool-1",
+				name: "read_file",
+				input: { path: "test.ts" },
+			},
+		]
+		const messages = [{ role: "assistant" as const, content }]
+
+		const result = transformMessagesForCondensing(messages, false)
+
+		expect(result).toHaveLength(1)
+		expect(result[0]).not.toBe(messages[0])
+		// The block array passes through verbatim: no text conversion on this path.
+		expect(result[0].content).toBe(content)
 	})
 })

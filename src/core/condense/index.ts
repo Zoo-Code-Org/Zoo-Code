@@ -101,7 +101,13 @@ export function convertToolBlocksToText(
  */
 export function transformMessagesForCondensing<
 	T extends { role: string; content: string | Anthropic.Messages.ContentBlockParam[] },
->(messages: T[]): T[] {
+>(messages: T[], transformToolBlocks: boolean = true): T[] {
+	const shouldTransform = transformToolBlocks
+
+	if (!shouldTransform) {
+		return messages.map((msg) => ({ ...msg }))
+	}
+
 	return messages.map((msg) => ({
 		...msg,
 		content: convertToolBlocksToText(msg.content),
@@ -299,27 +305,61 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// This respects user's custom condensing prompt setting
 	const condenseInstructions = customCondensingPrompt?.trim() || supportPrompt.default.CONDENSE
 
+	// Fold the summarization-only (SUMMARY_PROMPT) instructions into the final
+	// request message so the system prompt can stay identical to the prior turn
+	// (preserving the KV cache). Condensing instructions go at the end.
 	const finalRequestMessage: Anthropic.MessageParam = {
 		role: "user",
-		content: condenseInstructions,
+		content: `${SUMMARY_PROMPT}\n\n${condenseInstructions}`,
 	}
 
 	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
 	// (e.g., when user triggers condense after receiving attempt_completion but before responding)
 	const messagesWithToolResults = injectSyntheticToolResults(messagesToSummarize)
 
-	// Transform tool_use and tool_result blocks to text representations.
-	// This is necessary because some providers (like Bedrock via LiteLLM) require the `tools` parameter
-	// when tool blocks are present. By converting them to text, we can send the conversation for
-	// summarization without needing to pass the tools parameter.
-	const messagesWithTextToolBlocks = transformMessagesForCondensing(
-		maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
-	)
+	// Transform tool_use and tool_result blocks to text representations only when the
+	// provider does not support native tool blocks. When metadata carries tools, keep
+	// the native blocks (and pass metadata.tools through) to preserve the request prefix.
+	// Stryker disable next-line OptionalChaining: both optional chains evaluate only after
+	// Array.isArray(metadata?.tools) proved metadata non-null and tools an array, so the mutated
+	// forms always read the same values as the original (short-circuit equivalence).
+	const keepNativeToolBlocks = Array.isArray(metadata?.tools) && (metadata?.tools?.length ?? 0) > 0
 
-	const requestMessages = messagesWithTextToolBlocks.map(({ role, content }) => ({ role, content }))
+	const messagesWithTextToolBlocks = keepNativeToolBlocks
+		? maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler)
+		: transformMessagesForCondensing(
+				maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
+				true,
+			)
 
-	// Note: this doesn't need to be a stream, consider using something like apiHandler.completePrompt
-	const promptToUse = SUMMARY_PROMPT
+	// DeepSeek/Z.ai thinking mode requires reasoning_content echoed back once
+	// tools are on the request (HTTP 400 otherwise). OpenRouter's Gemini path
+	// drops tool calls (and their results) from assistant messages whose
+	// reasoning_details are missing, and stored turns can carry
+	// reasoning_details without reasoning_content, so each field survives
+	// under its own condition to keep the condense request's prefix usable.
+	const requestMessages = messagesWithTextToolBlocks.map((message) => {
+		const hasReasoningContent =
+			typeof message.reasoning_content === "string" && message.reasoning_content.length > 0
+		const hasReasoningDetails = Array.isArray(message.reasoning_details) && message.reasoning_details.length > 0
+		if (!keepNativeToolBlocks || (!hasReasoningContent && !hasReasoningDetails)) {
+			return { role: message.role, content: message.content }
+		}
+		const projected: Anthropic.MessageParam & {
+			reasoning_content?: string
+			reasoning_details?: unknown[]
+		} = { role: message.role, content: message.content }
+		if (hasReasoningContent) {
+			projected.reasoning_content = message.reasoning_content
+		}
+		if (hasReasoningDetails) {
+			projected.reasoning_details = message.reasoning_details
+		}
+		return projected
+	})
+
+	// Use the passed-in system prompt to keep the request prefix identical to the prior turn.
+	const promptToUse = systemPrompt ?? ""
 
 	// Validate that the API handler supports message creation
 	if (!apiHandler || typeof apiHandler.createMessage !== "function") {
@@ -331,16 +371,40 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	let summary = ""
 	let cost = 0
 
-	try {
-		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
-
-		for await (const chunk of stream) {
-			if (chunk.type === "text") {
-				summary += chunk.text
-			} else if (chunk.type === "usage") {
-				// Record final usage chunk only
-				cost = chunk.totalCost ?? 0
+	// Runs one condense request pass and returns the text it collected. The
+	// pass's final usage chunk decides the recorded cost.
+	const runCondensePass = async (passMetadata: ApiHandlerCreateMessageMetadata | undefined) => {
+		let passSummary = ""
+		let passCost = 0
+		const stream = apiHandler.createMessage(promptToUse, requestMessages, passMetadata)
+		try {
+			for await (const chunk of stream) {
+				if (chunk.type === "text") {
+					passSummary += chunk.text
+				} else if (chunk.type === "usage") {
+					// Record final usage chunk only
+					passCost = chunk.totalCost ?? 0
+				}
 			}
+		} finally {
+			// Every pass is billed, so the total sums the passes instead of
+			// letting the last pass overwrite the earlier spend; a stream
+			// that emits usage and then throws still spent the pass's tokens.
+			cost += passCost
+		}
+		return passSummary
+	}
+
+	try {
+		// Keep the prior turn's metadata verbatim (tool_choice included) so the
+		// condense request reuses the provider's cached message prefix; changing
+		// tool_choice invalidates Anthropic prompt caches.
+		summary = await runCondensePass(metadata)
+		if (!summary.trim() && keepNativeToolBlocks) {
+			// Tools were offered and the model answered with tool calls only, so
+			// no text arrived. Retry once with tool_choice "none" to force a
+			// text-only summary; only this rare path pays the cache miss.
+			summary = await runCondensePass(metadata ? { ...metadata, tool_choice: "none" as const } : undefined)
 		}
 	} catch (error) {
 		console.error("Error during condensing API call:", error)

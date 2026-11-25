@@ -80,6 +80,32 @@
 \* AddMsg x3, Condense, Rewind, Condense, Truncate: the count reports a stale orphan that
 \* the sink drops. The unit tests replay the rules on the real code.
 
+\* Null result (issue 2453): CondenseRequestPrefixEqualsPriorTurnPrefix was removed
+\* because it was vacuously TRUE and added no constraint. Request assembly for
+\* summarizeConversation (prefix vs prior-turn prefix) is not modeled by this spec;
+\* it is pinned by the real-code test "mirrors the prior-turn request prefix with
+\* native tool blocks kept" in src/core/condense/__tests__/index.spec.ts.
+\* Cost: unchanged (<10s). Findings: covered 0, added 0, gap 1 (request assembly,
+\* real-code pinned; CR thread 4695216718: property-test claim corrected).
+
+\* Round 10 (PR 2698, head a8750220, CR thread 4699490202): the condense request
+\* must echo the assistant reasoning fields the prior turn sent (reasoning_content
+\* and reasoning_details), or OpenRouter's Gemini path drops the tool calls and
+\* their results, so the prefix diverges. Message field echo is not modeled here
+\* (each Msg is a unit - see Not modeled above), so this stays a gap; the
+\* toStrictEqual request pins in src/core/condense/__tests__/index.spec.ts cover
+\* it on the real code. Findings: covered 0, added 0, gap 1 (reasoning-field echo,
+\* real-code pinned).
+
+\* Round 11 (PR 2698, head 6f1facc3c, CR thread 4700217466): the echo condition is per-field:
+\* stored turns can carry reasoning_details without reasoning_content, so the
+\* projection must keep each field under its own nonempty check. Field-level
+\* projection stays unmodeled here (Msg is a unit), so this remains a gap;
+\* three toStrictEqual request pins in src/core/condense/__tests__/index.spec.ts
+\* cover it on the real code (both-fields echo, details-without-content echo,
+\* empty-array absence). Findings: covered 0, added 0, gap 1 (reasoning-field
+\* echo per-field conditions, real-code pinned).
+
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Mode, MaxMsgs

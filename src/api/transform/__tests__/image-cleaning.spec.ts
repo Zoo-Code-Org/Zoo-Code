@@ -5,6 +5,7 @@ import type { ModelInfo } from "@roo-code/types"
 import { ApiHandler } from "../../index"
 import { ApiMessage } from "../../../core/task-persistence/apiMessages"
 import { maybeRemoveImageBlocks } from "../image-cleaning"
+import type { ImageBlockParam } from "@anthropic-ai/sdk/resources"
 
 describe("maybeRemoveImageBlocks", () => {
 	// Mock ApiHandler factory function
@@ -340,5 +341,86 @@ describe("maybeRemoveImageBlocks", () => {
 			},
 		])
 		expect(apiHandler.getModel).toHaveBeenCalled()
+	})
+	const imageBlock: ImageBlockParam = {
+		type: "image",
+		source: { type: "base64", media_type: "image/png", data: "abc" },
+	}
+	const toolResultWithImage = (withImage: boolean): ApiMessage[] => [
+		{
+			role: "user",
+			content: [
+				{
+					type: "tool_result",
+					tool_use_id: "t1",
+					content: [{ type: "text", text: "Screenshot analysis:" }, ...(withImage ? [imageBlock] : [])],
+				},
+			],
+		},
+	]
+
+	it("strips images nested inside tool_result content for text-only models", () => {
+		const apiHandler = createMockApiHandler(false)
+		const messages = toolResultWithImage(true)
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		expect(result).toStrictEqual([
+			{
+				role: "user",
+				content: [
+					{
+						type: "tool_result",
+						tool_use_id: "t1",
+						content: [
+							{ type: "text", text: "Screenshot analysis:" },
+							{ type: "text", text: "[Referenced image in conversation]" },
+						],
+					},
+				],
+			},
+		])
+	})
+
+	it("keeps images nested inside tool_result content when the model supports images", () => {
+		const apiHandler = createMockApiHandler(true)
+		const messages = toolResultWithImage(true)
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		// Vision model: the nested image block passes through untouched.
+		expect(result).toStrictEqual(messages)
+	})
+
+	it("passes a string-content tool_result through unchanged for text-only models", () => {
+		const apiHandler = createMockApiHandler(false)
+		const messages: ApiMessage[] = [
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "plain file output" }],
+			},
+		]
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		// The nested-image remap only fires for block-list content: a
+		// string-content tool_result has no nested blocks to walk.
+		expect(result).toStrictEqual(messages)
+	})
+
+	it("leaves plain text blocks in array content untouched for text-only models", () => {
+		const apiHandler = createMockApiHandler(false)
+		const messages: ApiMessage[] = [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "no media here" }],
+			},
+		]
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		// Only tool_result blocks carry a nested block list: remapping any
+		// other block type would crash on its missing content array.
+		expect(result).toStrictEqual(messages)
 	})
 })
