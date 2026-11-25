@@ -219,6 +219,8 @@ A provider listing starts with a [GitHub Discussion](https://github.com/Zoo-Code
 - The operator states what it or a supplier can keep or train on in the default privacy mode. It states if the service rejects a request for a stricter mode when a supplier cannot support it.
 - A new provider pull request includes one recorded streaming response. The record shows the finish chunk. If the handler reads cost or usage from chunks, the record also shows the usage chunk.
 
+These checks also apply to providers listed before this template was added.
+
 Reviewers use these sources. Most are vendor documents, not standards. Use them as starting points:
 
 - [Anthropic Commercial Terms, section D.4](https://www.anthropic.com/legal/commercial-terms)
