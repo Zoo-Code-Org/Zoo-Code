@@ -375,7 +375,6 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 				top_p: topP,
 				messages: openAiMessages,
 				stream: true,
-				stream_options: { include_usage: true },
 				// Only include provider if openRouterSpecificProvider is not "[default]".
 				...(this.options.openRouterSpecificProvider &&
 					this.options.openRouterSpecificProvider !== OPENROUTER_DEFAULT_PROVIDER_NAME && {
