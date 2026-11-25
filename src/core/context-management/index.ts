@@ -135,21 +135,27 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 		// tool_result content while preserving its tool_use_id pairing. If no
 		// eligible tool result can shrink, report a no-progress outcome so the
 		// caller can escalate instead of retrying forever.
-		const eligible: { index: number; size: number }[] = []
+		const eligible: { index: number; size: number; blockIndex: number }[] = []
 		messages.forEach((msg, index) => {
+			// The sink (getEffectiveApiHistory) never serves messages before the
+			// latest summary, so clearing one cannot shrink model-facing tokens.
+			// Candidates start at the same boundary the recount uses.
+			if (index < boundary) return
 			if (msg.truncationParent || msg.isTruncationMarker) return
 			const content = msg.content
 			if (!Array.isArray(content)) return
-			for (const block of content) {
+			content.forEach((block, blockIndex) => {
 				if (block && typeof block === "object" && (block as { type?: string }).type === "tool_result") {
 					const b = block as { content?: unknown }
 					const size =
 						typeof b.content === "string"
 							? b.content.length
-							: Array.isArray(b.content)
+							: Array.isArray(b.content) && b.content.length > 0
 								? JSON.stringify(b.content).length
 								: 0
-					// Only oversized results are eligible for degradation.
+					// Only oversized results are eligible for degradation. An empty
+					// array serializes to a non-empty string, but clearing it cannot
+					// shrink the token count, so it must stay ineligible.
 					if (size > 0) {
 						// Preserve pairing: require a preceding assistant tool_use with matching id.
 						const toolUseId = (block as { tool_use_id?: string }).tool_use_id
@@ -168,11 +174,11 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 							}
 						}
 						if (paired) {
-							eligible.push({ index, size })
+							eligible.push({ index, size, blockIndex })
 						}
 					}
 				}
-			}
+			})
 		})
 
 		if (eligible.length === 0) {
@@ -184,15 +190,23 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 			}
 		}
 
-		// Degrade the largest eligible tool result (one step per round).
+		// Degrade the largest eligible tool result (one step per round). Only
+		// the selected block loses its content: a message can carry several
+		// parallel tool results, and clearing the others is data loss.
 		eligible.sort((a, b) => b.size - a.size)
 		const targetIndex = eligible[0].index
+		const targetBlockIndex = eligible[0].blockIndex
 		const degradedMessages = messages.map((msg, index) => {
 			if (index !== targetIndex) return msg
 			const content = Array.isArray(msg.content) ? [...msg.content] : msg.content
 			if (Array.isArray(content)) {
-				const newContent = content.map((block) => {
-					if (block && typeof block === "object" && (block as { type?: string }).type === "tool_result") {
+				const newContent = content.map((block, blockIndex) => {
+					if (
+						blockIndex === targetBlockIndex &&
+						block &&
+						typeof block === "object" &&
+						(block as { type?: string }).type === "tool_result"
+					) {
 						return { ...(block as unknown as Record<string, unknown>), content: "" }
 					}
 					return block
@@ -528,6 +542,23 @@ export async function manageContext({
 					[{ type: "text", text: content }],
 					apiHandler,
 				)
+			}
+		}
+
+		// A degraded round must shrink the recounted total before it reports
+		// success (issue 1254); otherwise the caller would retry a round that
+		// cannot make progress.
+		if (truncationResult.degraded && newContextTokensAfterTruncation >= prevContextTokens) {
+			return {
+				messages: truncationResult.messages,
+				prevContextTokens,
+				summary: "",
+				cost,
+				error: "Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+				errorDetails,
+				truncationId: truncationResult.truncationId,
+				messagesRemoved: 0,
+				newContextTokensAfterTruncation,
 			}
 		}
 

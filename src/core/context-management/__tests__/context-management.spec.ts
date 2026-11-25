@@ -269,6 +269,35 @@ describe("Context Management", () => {
 	 * Tests for the manageContext function
 	 */
 	describe("manageContext", () => {
+		it("reports the controlled error when degradation cannot shrink the recounted tokens", async () => {
+			// The recounted total includes the system prompt, which
+			// prevContextTokens omits, so a huge prompt with a tiny history makes
+			// a successful degradation impossible: the round must stall with the
+			// controlled error instead of reporting success (issue 1254).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x" }] },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "S".repeat(4000),
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.newContextTokensAfterTruncation).toBeGreaterThanOrEqual(63)
+		})
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,
 			supportsPromptCache: true,

@@ -766,3 +766,103 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 		}
 	})
 })
+
+describe("degradation candidate selection (PR 2696 review round 1)", () => {
+	const toolUse = (id: string) => [{ type: "tool_use" as const, id, name: "probe", input: {} }]
+	const toolResult = (id: string, content: string | { type: "text"; text: string }[]) => [
+		{ type: "tool_result" as const, tool_use_id: id, content },
+	]
+	const big = (n: number) => "x".repeat(n)
+	const arrayed = (m: ApiMessage) => m.content as { tool_use_id?: string; content: unknown }[]
+
+	it("never selects a pre-summary tool result when nothing post-summary is eligible", () => {
+		// The sink serves only the summary onward, so clearing a pre-summary
+		// result cannot shrink model-facing tokens: the round must stall, not
+		// claim success (thread 4692295250).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(5000)), ts: 1200 },
+			{ role: "user", content: "Summary of the conversation", ts: 1300, isSummary: true },
+			{ role: "user", content: "after", ts: 1400 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t1", big(5000)))
+	})
+
+	it("selects the post-summary tool result when both sides are eligible", () => {
+		// The boundary skips the pre-summary result even though it is larger,
+		// so the scan and the recount see the same candidate set.
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(8000)), ts: 1200 },
+			{ role: "user", content: "Summary of the conversation", ts: 1300, isSummary: true },
+			{ role: "user", content: "after", ts: 1400 },
+			{ role: "assistant", content: toolUse("t2"), ts: 1500 },
+			{ role: "user", content: toolResult("t2", big(3000)), ts: 1600 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.degraded).toBe(true)
+		const pre = arrayed(result.messages[2])
+		const post = arrayed(result.messages[6])
+		expect(pre[0].tool_use_id).toBe("t1")
+		expect(pre[0].content).toBe(big(8000))
+		expect(post[0].tool_use_id).toBe("t2")
+		expect(post[0].content).toBe("")
+	})
+
+	it.each([
+		["an empty array stays ineligible", [] as { type: "text"; text: string }[], true],
+		[
+			"a non-empty array stays eligible",
+			[{ type: "text", text: "hello" }] as { type: "text"; text: string }[],
+			false,
+		],
+	])("array size rule: %s", (_label, arrayContent, expectNoProgress) => {
+		// An empty array serializes to a non-empty string, but clearing it
+		// cannot shrink the token count, so it must never be a candidate
+		// (thread 4692295271).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", arrayContent), ts: 1200 },
+			{ role: "user", content: "after", ts: 1300 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		if (expectNoProgress) {
+			expect(result.noProgress).toBe(true)
+		} else {
+			expect(result.degraded).toBe(true)
+		}
+	})
+
+	it("clears only the selected tool_result block of the message", () => {
+		// Parallel tool calls share one message; clearing every block erases
+		// a small result that was not selected (thread 4692295281).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: [...toolUse("t1"), ...toolUse("t2")], ts: 1100 },
+			{
+				role: "user",
+				content: [...toolResult("t1", big(6000)), ...toolResult("t2", "keep me")],
+				ts: 1200,
+			},
+			{ role: "user", content: "after", ts: 1300 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.degraded).toBe(true)
+		const blocks = arrayed(result.messages[2])
+		expect(blocks[0].content).toBe("")
+		expect(blocks[1].content).toBe("keep me")
+	})
+})
