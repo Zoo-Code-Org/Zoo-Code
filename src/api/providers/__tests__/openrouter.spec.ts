@@ -4641,7 +4641,7 @@ describe("OpenRouterHandler", () => {
 			const mockCreate = vitest
 				.fn()
 				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
-				requestSignal = options?.signal
+					requestSignal = options?.signal
 					// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
 					await new Promise<void>((resolve) => {
 						if (options?.signal?.aborted) {
