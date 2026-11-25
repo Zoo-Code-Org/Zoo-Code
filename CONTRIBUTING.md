@@ -114,6 +114,14 @@ pnpm install
 
 3. **Debugging:** Open with VS Code (`F5`).
 
+4. **Optional Roo configuration (modes, commands, rules, skills):**
+
+```
+./contrib/roo/setup.sh
+```
+
+This installs the shared templates from `contrib/roo/` into `.roomodes` and `.roo/`. The script never overwrites your existing files. See `contrib/roo/README.md`.
+
 ### Writing Code Guidelines
 
 - One focused PR per feature or fix.
