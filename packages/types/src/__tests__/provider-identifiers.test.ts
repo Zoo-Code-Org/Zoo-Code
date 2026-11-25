@@ -47,7 +47,6 @@ const expectedProviderIdentifiers = [
 	"fireworks",
 	"friendli",
 	"gemini",
-	"gemini-cli",
 	"mistral",
 	"moonshot",
 	"kimi-code",
@@ -63,6 +62,7 @@ const expectedProviderIdentifiers = [
 ]
 
 const expectedRetiredProviderIdentifiers = [
+	"gemini-cli",
 	"cerebras",
 	"chutes",
 	"deepinfra",

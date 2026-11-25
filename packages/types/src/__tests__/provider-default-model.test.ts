@@ -93,7 +93,7 @@ describe("getProviderDefaultModelId", () => {
 		},
 	)
 
-	it.each([providerIdentifiers.anthropic, providerIdentifiers.geminiCli, providerIdentifiers.fakeAi])(
+	it.each([providerIdentifiers.anthropic, providerIdentifiers.fakeAi])(
 		"preserves the Anthropic fallback for %s",
 		(provider) => {
 			expect(getProviderDefaultModelId(provider, {})).toBe(anthropicDefaultModelId)

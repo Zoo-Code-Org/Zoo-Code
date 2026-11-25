@@ -40,7 +40,6 @@ describe("ProfileValidator", () => {
 			["qwenCode", { apiModelId: "model" }],
 			["zai", { apiModelId: "model" }],
 			["baseten", { apiModelId: "model" }],
-			["geminiCli", { apiModelId: "model" }],
 			["vercelAiGateway", { vercelAiGatewayModelId: "model" }],
 			["zooGateway", { zooGatewayModelId: "model" }],
 			["nanogpt", { nanoGptModelId: "model" }],
