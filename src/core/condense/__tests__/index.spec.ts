@@ -1422,10 +1422,26 @@ describe("summarizeConversation", () => {
 			role: string
 			content: unknown
 		}>
-		const serialized = JSON.stringify(requestMessages)
-		expect(serialized).not.toContain('"type":"tool_use"')
-		expect(serialized).not.toContain('"type":"tool_result"')
-		expect(serialized).toContain("[Tool Use: read_file]")
+		// The converted tool_use AND tool_result texts must reach createMessage
+		// as the message content - selected-string checks pass even when the
+		// converted result never reaches the request.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		const finalMessage = requestMessages[3] as { content: string }
+		expect(finalMessage.content).toContain("detailed summary of the conversation")
 	})
 
 	it("still converts tool blocks to text when metadata carries an empty tools array", async () => {
@@ -1457,9 +1473,78 @@ describe("summarizeConversation", () => {
 			role: string
 			content: unknown
 		}>
-		const serialized = JSON.stringify(requestMessages)
-		expect(serialized).not.toContain('"type":"tool_use"')
-		expect(serialized).toContain("[Tool Use: read_file]")
+		// Same full-request contract as the undefined-tools case: the converted
+		// tool_use and tool_result texts must reach createMessage.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		const finalMessage = requestMessages[3] as { content: string }
+		expect(finalMessage.content).toContain("detailed summary of the conversation")
+	})
+	it("does not echo reasoning fields when tool blocks convert to text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				reasoning_content: "thinking about the file",
+				reasoning_details: [{ type: "reasoning.text", text: "details", signature: "sig" }],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+			reasoning_content?: unknown
+			reasoning_details?: unknown
+		}>
+		// Text conversion strips every reasoning echo: a details-only turn must
+		// not leak its fields into a request whose tools are not offered.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Initial task" },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "text", text: "[Tool Use: read_file]\npath: a.ts" },
+				],
+			},
+			{
+				role: "user",
+				content: [{ type: "text", text: "[Tool Result]\nfile body" }],
+			},
+			expect.objectContaining({ role: "user" }),
+		])
+		expect("reasoning_content" in requestMessages[1]).toBe(false)
+		expect("reasoning_details" in requestMessages[1]).toBe(false)
 	})
 
 	it("treats a malformed non-array tools value as no tools offered", async () => {
