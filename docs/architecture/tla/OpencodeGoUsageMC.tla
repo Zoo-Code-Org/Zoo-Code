@@ -2,10 +2,12 @@
 \* Model-checking selectors and the injected defect for OpencodeGoUsage.
 \* Contract, findings, and cost: see the OpencodeGoUsage header.
 \* Fixed passes. The PerChunk defect variant fails OneRequestOneUsageTotal.
+\* The NoErrorEmit defect variant fails ErrorStillAccountsUsage.
 EXTENDS OpencodeGoUsage
 CONSTANT Variant
 
 MCEmitPerChunk == Variant = "PerChunk"
+MCEmitOnError == Variant /= "NoErrorEmit"
 MCNoUsage == [absent |-> TRUE]
 MCUsages == { [prompt |-> 1, output |-> 1],
               [prompt |-> 4, output |-> 2],

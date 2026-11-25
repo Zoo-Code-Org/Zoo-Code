@@ -252,6 +252,64 @@ describe("OpencodeGoHandler", () => {
 			expect(usageChunks).toStrictEqual([{ type: "usage", inputTokens: 4, outputTokens: 7, cacheReadTokens: 2 }])
 		})
 
+		it("emits no usage event when no chunk carries usage", async () => {
+			mockCreate.mockImplementationOnce(async () =>
+				asyncStreamFrom([
+					{ choices: [{ delta: { content: "Hi" }, index: 0 }], usage: null },
+					{ choices: [{ delta: {}, index: 0 }], usage: null },
+				]),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks = await collectStream(handler.createMessage("sys", messages))
+
+			// The post-loop guard must run its false branch too: a stream
+			// without usage totals emits nothing, not a zeroed event.
+			expect(chunks.filter(isUsageChunk)).toStrictEqual([])
+		})
+
+		it("emits the stashed usage before a mid-stream error propagates", async () => {
+			// A stream that dies after a usage chunk must still account the
+			// failed request: the stored usage reaches Task before the error.
+			const failure = new Error("stream died")
+			mockCreate.mockImplementationOnce(async () =>
+				(async function* () {
+					yield {
+						choices: [{ delta: { content: "Hel" }, index: 0 }],
+						usage: {
+							prompt_tokens: 4,
+							completion_tokens: 2,
+							total_tokens: 6,
+							prompt_tokens_details: { cached_tokens: 1 },
+						},
+					}
+					throw failure
+				})(),
+			)
+
+			const handler = new OpencodeGoHandler(mockOptions)
+			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]
+
+			const chunks: ApiStreamChunk[] = []
+			let caught: unknown
+			try {
+				for await (const chunk of handler.createMessage("sys", messages)) {
+					chunks.push(chunk)
+				}
+			} catch (error) {
+				caught = error
+			}
+
+			// The error still surfaces, and exactly one usage event was
+			// delivered before it, with the stashed chunk totals.
+			expect(caught).toBe(failure)
+			expect(chunks.filter(isUsageChunk)).toStrictEqual([
+				{ type: "usage", inputTokens: 4, outputTokens: 2, cacheReadTokens: 1 },
+			])
+		})
+
 		it("requests a streaming completion with usage included and native max tokens", async () => {
 			const handler = new OpencodeGoHandler(mockOptions)
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Hi" }]

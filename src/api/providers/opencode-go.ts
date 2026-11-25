@@ -285,35 +285,46 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 		// (DeepSeek) may repeat it on many chunks. Keep only the last one.
 		let lastUsage: OpenAI.CompletionUsage | undefined
 
-		for await (const chunk of completion) {
-			const delta = chunk.choices[0]?.delta
+		// A stream that dies mid-request still consumed tokens. Stash the
+		// failure and emit the stored usage below before rethrowing, so the
+		// failed request stays accounted for.
+		let streamError: unknown
+		let streamFailed = false
 
-			// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
-			const reasoningText = extractReasoningFromDelta(delta)
-			if (reasoningText) {
-				yield { type: "reasoning", text: reasoningText }
-			}
+		try {
+			for await (const chunk of completion) {
+				const delta = chunk.choices[0]?.delta
 
-			if (delta?.content) {
-				yield { type: "text", text: delta.content }
-			}
+				// Several Go-plan models (GLM, DeepSeek) stream reasoning via this field.
+				const reasoningText = extractReasoningFromDelta(delta)
+				if (reasoningText) {
+					yield { type: "reasoning", text: reasoningText }
+				}
 
-			// Emit raw tool call chunks - NativeToolCallParser handles state management.
-			if (delta?.tool_calls) {
-				for (const toolCall of delta.tool_calls) {
-					yield {
-						type: "tool_call_partial",
-						index: toolCall.index,
-						id: toolCall.id,
-						name: toolCall.function?.name,
-						arguments: toolCall.function?.arguments,
+				if (delta?.content) {
+					yield { type: "text", text: delta.content }
+				}
+
+				// Emit raw tool call chunks - NativeToolCallParser handles state management.
+				if (delta?.tool_calls) {
+					for (const toolCall of delta.tool_calls) {
+						yield {
+							type: "tool_call_partial",
+							index: toolCall.index,
+							id: toolCall.id,
+							name: toolCall.function?.name,
+							arguments: toolCall.function?.arguments,
+						}
 					}
 				}
-			}
 
-			if (chunk.usage) {
-				lastUsage = chunk.usage
+				if (chunk.usage) {
+					lastUsage = chunk.usage
+				}
 			}
+		} catch (error) {
+			streamFailed = true
+			streamError = error
 		}
 
 		// One usage event per request, with the last chunk's totals. The task
@@ -326,6 +337,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 				outputTokens: lastUsage.completion_tokens || 0,
 				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens || undefined,
 			}
+		}
+
+		if (streamFailed) {
+			throw streamError
 		}
 	}
 

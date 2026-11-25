@@ -18,10 +18,16 @@
 \* Expected finding: the PerChunk sabotage reproduces issue 1365. The base
 \* config models the fixed code and must pass.
 \* Cost: about 30 minutes of agent work; each TLC run takes seconds.
+\* Review ratchet (PR #2689, comment 4690155652): a stream that throws after
+\* a usage chunk must still deliver the stored usage to Task before the
+\* error propagates. Added invariant ErrorStillAccountsUsage and input rule
+\* StreamError; NoErrorEmit.cfg sabotages the error-path emission and
+\* must fail. Counts: covered 2 (round-1 findings already expressed by
+\* the first-version invariants), added 1 (error path), gap 0.
 EXTENDS Naturals
-CONSTANTS EmitPerChunk, MaxChunks, Usages, Threshold, NoUsage
-VARIABLES left, lastU, emitted, sinkIn, sinkOut, condense, done
-vars == <<left, lastU, emitted, sinkIn, sinkOut, condense, done>>
+CONSTANTS EmitPerChunk, EmitOnError, MaxChunks, Usages, Threshold, NoUsage
+VARIABLES left, lastU, emitted, sinkIn, sinkOut, condense, done, errored
+vars == <<left, lastU, emitted, sinkIn, sinkOut, condense, done, errored>>
 
 Init == /\ left \in 0..MaxChunks
         /\ lastU = NoUsage
@@ -30,15 +36,18 @@ Init == /\ left \in 0..MaxChunks
         /\ sinkOut = 0
         /\ condense = FALSE
         /\ done = 0
+        /\ errored = FALSE
 
 \* A chunk without usage. The loop passes it through.
-ChunkPlain == /\ left > 0
+ChunkPlain == /\ ~errored
+              /\ left > 0
               /\ left' = left - 1
-              /\ UNCHANGED <<lastU, emitted, sinkIn, sinkOut, condense, done>>
+              /\ UNCHANGED <<lastU, emitted, sinkIn, sinkOut, condense, done, errored>>
 
 \* A chunk with usage. The fixed loop only stashes it. The per-chunk
 \* defect also emits a usage event here, so the sink adds the totals now.
 ChunkUsage(u) == /\ u \in Usages
+                 /\ ~errored
                  /\ left > 0
                  /\ lastU' = u
                  /\ left' = left - 1
@@ -47,17 +56,17 @@ ChunkUsage(u) == /\ u \in Usages
                          /\ sinkIn' = sinkIn + u.prompt
                          /\ sinkOut' = sinkOut + u.output
                     ELSE /\ UNCHANGED <<emitted, sinkIn, sinkOut>>
-                 /\ UNCHANGED <<condense, done>>
+                 /\ UNCHANGED <<condense, done, errored>>
 
 \* The fixed loop emits one usage event after the stream, with last totals.
 YieldUsage == /\ ~EmitPerChunk
               /\ left = 0
-              /\ lastU # NoUsage
+              /\ lastU /= NoUsage
               /\ emitted = 0
               /\ emitted' = 1
               /\ sinkIn' = sinkIn + lastU.prompt
               /\ sinkOut' = sinkOut + lastU.output
-              /\ UNCHANGED <<left, lastU, condense, done>>
+              /\ UNCHANGED <<left, lastU, condense, done, errored>>
 
 \* The sink evaluates the condense threshold once, from recorded totals.
 Evaluate == /\ left = 0
@@ -65,12 +74,26 @@ Evaluate == /\ left = 0
             /\ done = 0
             /\ condense' = (sinkIn + sinkOut > Threshold)
             /\ done' = 1
-            /\ UNCHANGED <<left, lastU, emitted, sinkIn, sinkOut>>
+            /\ UNCHANGED <<left, lastU, emitted, sinkIn, sinkOut, errored>>
+
+\* The stream dies mid-request. The fixed code emits the stashed usage
+\* before the error reaches Task. The NoErrorEmit defect variant
+\* skips the emission and ErrorStillAccountsUsage fails.
+StreamError == /\ left > 0
+              /\ ~errored
+              /\ errored' = TRUE
+              /\ IF lastU /= NoUsage /\ EmitOnError
+                 THEN /\ emitted' = emitted + 1
+                      /\ sinkIn' = sinkIn + lastU.prompt
+                      /\ sinkOut' = sinkOut + lastU.output
+                      /\ UNCHANGED <<left, lastU, condense, done>>
+                 ELSE /\ UNCHANGED <<emitted, sinkIn, sinkOut, left, lastU, condense, done>>
 
 Next == \/ ChunkPlain
         \/ \E u \in Usages : ChunkUsage(u)
         \/ YieldUsage
         \/ Evaluate
+        \/ StreamError
 Spec == Init /\ [][Next]_vars
 
 TypeOK == /\ left \in 0..MaxChunks
@@ -80,6 +103,7 @@ TypeOK == /\ left \in 0..MaxChunks
           /\ sinkOut \in Nat
           /\ condense \in BOOLEAN
           /\ done \in {0, 1}
+           /\ errored \in BOOLEAN
 
 LastPrompt == IF lastU = NoUsage THEN 0 ELSE lastU.prompt
 LastOutput == IF lastU = NoUsage THEN 0 ELSE lastU.output
@@ -88,6 +112,11 @@ LastOutput == IF lastU = NoUsage THEN 0 ELSE lastU.output
 OneRequestOneUsageTotal == /\ emitted <= 1
                            /\ emitted = 0 => sinkIn = 0 /\ sinkOut = 0
                            /\ emitted >= 1 => sinkIn = LastPrompt /\ sinkOut = LastOutput
+
+\* An errored request that saw a usage chunk must have delivered it
+\* to the sink before the error surfaced (PR #2689 comment 4690155652).
+ErrorStillAccountsUsage == errored => (lastU = NoUsage \/ emitted >= 1)
+
 
 \* Condense matches the last-usage context tokens, not an accumulated sum.
 CondenseMatchesLastUsage == done = 0 \/ (condense <=> (LastPrompt + LastOutput > Threshold))
