@@ -45,7 +45,7 @@ describe("VertexHandler", () => {
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new VertexHandler({
-			apiModelId: "gemini-1.5-pro-001",
+			apiModelId: "gemini-3-flash-preview",
 			vertexProjectId: "test-project",
 			vertexRegion: "us-central1",
 		})
@@ -100,6 +100,9 @@ describe("VertexHandler", () => {
 					reasoningTokens: 2,
 				}),
 			])
+			// Catalog prices per million: $0.50 input, $0.05 cached input, and $3 output.
+			// Seven uncached inputs, three cached inputs, and seven outputs (including thoughts).
+			expect(chunks.find((chunk) => chunk.type === "usage")?.totalCost).toBeCloseTo(0.00002465, 12)
 			expect(generateContentStream).toHaveBeenCalledOnce()
 		})
 	})

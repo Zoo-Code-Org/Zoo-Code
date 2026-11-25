@@ -1,7 +1,7 @@
 import type OpenAI from "openai"
 
 import { UnboundHandler } from "../unbound"
-import { collectStream } from "../../../test-utils/stream"
+import { collectStream, sseResponse } from "../../../test-utils/stream"
 
 vi.mock("../fetchers/modelCache", () => ({
 	getModels: vi.fn(async () => ({
@@ -36,7 +36,7 @@ async function runStream(usage?: UnboundUsage) {
 		...(usage ? [{ ...header, choices: [], usage }] : []),
 	]
 	const body = events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("") + "data: [DONE]\n\n"
-	mockFetch.mockResolvedValueOnce(new Response(body, { headers: { "content-type": "text/event-stream" } }))
+	mockFetch.mockResolvedValueOnce(sseResponse(body))
 	const handler = new UnboundHandler({ unboundApiKey: "test-unbound-key", unboundModelId: "test-model" })
 	return collectStream(handler.createMessage("Answer briefly.", [{ role: "user", content: "Hello" }]))
 }

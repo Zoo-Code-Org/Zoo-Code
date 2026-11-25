@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs"
 import { basetenDefaultModelId, basetenModels } from "@roo-code/types"
 
 import { BasetenHandler } from "../baseten"
-import { collectStream } from "../../../test-utils/stream"
+import { collectStream, sseResponse } from "../../../test-utils/stream"
 
 // Keep the SDK and handler real. Only the HTTP transport is replaced.
 const mockFetch = vi.fn<typeof fetch>()
@@ -11,10 +11,6 @@ const recordedStream = readFileSync(new URL("./fixtures/baseten/gpt-oss-120b.sse
 
 function makeHandler(options: ConstructorParameters<typeof BasetenHandler>[0] = {}) {
 	return new BasetenHandler({ basetenApiKey: "test-baseten-key", ...options })
-}
-
-function streamResponse(body = recordedStream) {
-	return new Response(body, { headers: { "content-type": "text/event-stream" } })
 }
 
 async function sentRequest() {
@@ -40,7 +36,7 @@ describe("BasetenHandler", () => {
 	})
 
 	it("sends the Baseten key, endpoint, default model and streaming options", async () => {
-		mockFetch.mockResolvedValueOnce(streamResponse("data: [DONE]\n\n"))
+		mockFetch.mockResolvedValueOnce(sseResponse("data: [DONE]\n\n"))
 		const handler = makeHandler({ apiKey: "unrelated-provider-key" })
 
 		expect(handler.getModel()).toEqual({
@@ -66,7 +62,7 @@ describe("BasetenHandler", () => {
 	})
 
 	it("replays recorded reasoning, text and final cumulative usage through the SDK", async () => {
-		mockFetch.mockResolvedValueOnce(streamResponse())
+		mockFetch.mockResolvedValueOnce(sseResponse(recordedStream))
 		const handler = makeHandler({ apiModelId: "openai/gpt-oss-120b" })
 		const chunks = await collectStream(
 			handler.createMessage("", [{ role: "user", content: "Say hello. Use only one word." }]),
@@ -102,7 +98,7 @@ describe("BasetenHandler", () => {
 	})
 
 	it("sends the configured model and temperature without a catalog fallback", async () => {
-		mockFetch.mockResolvedValueOnce(streamResponse("data: [DONE]\n\n"))
+		mockFetch.mockResolvedValueOnce(sseResponse("data: [DONE]\n\n"))
 		const handler = makeHandler({ apiModelId: "custom-baseten-model", modelTemperature: 0.2 })
 		await collectStream(handler.createMessage("", []))
 

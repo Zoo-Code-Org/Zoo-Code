@@ -3,7 +3,7 @@ import type OpenAI from "openai"
 import { KIMI_CODE_BASE_URL } from "@roo-code/types"
 
 import { KimiCodeHandler } from "../kimi-code"
-import { collectStream } from "../../../test-utils/stream"
+import { collectStream, sseResponse } from "../../../test-utils/stream"
 
 const { mockGetAccessToken, mockForceRefreshAccessToken, mockGetModels } = vi.hoisted(() => ({
 	mockGetAccessToken: vi.fn<() => Promise<string | null>>(),
@@ -42,7 +42,7 @@ function streamResponse(usage: OpenAI.CompletionUsage | null = finalUsage) {
 		...(usage ? [{ ...header, choices: [], usage }] : []),
 	]
 	const body = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join("") + "data: [DONE]\n\n"
-	return new Response(body, { headers: { "content-type": "text/event-stream" } })
+	return sseResponse(body)
 }
 
 function makeHandler(options: ConstructorParameters<typeof KimiCodeHandler>[0] = {}) {

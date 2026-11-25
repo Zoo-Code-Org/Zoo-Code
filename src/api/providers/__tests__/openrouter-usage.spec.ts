@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs"
 
 import { OpenRouterHandler } from "../openrouter"
-import { collectStream } from "../../../test-utils/stream"
+import { collectStream, sseResponse } from "../../../test-utils/stream"
 
 vi.mock("../fetchers/modelCache", () => ({ getModels: vi.fn(async () => ({})) }))
 vi.mock("../fetchers/modelEndpointCache", () => ({ getModelEndpoints: vi.fn(async () => ({})) }))
@@ -14,7 +14,7 @@ const recordedStream = readFileSync(new URL("./fixtures/openrouter/gpt-4.1-nano.
 const mockFetch = vi.fn<typeof fetch>()
 
 async function replay(body: string) {
-	mockFetch.mockResolvedValueOnce(new Response(body, { headers: { "content-type": "text/event-stream" } }))
+	mockFetch.mockResolvedValueOnce(sseResponse(body))
 	const handler = new OpenRouterHandler({ openRouterApiKey: "test-openrouter-key", openRouterModelId: modelId })
 	const chunks = await collectStream(
 		handler.createMessage("", [{ role: "user", content: "Reply with exactly: Hello." }]),

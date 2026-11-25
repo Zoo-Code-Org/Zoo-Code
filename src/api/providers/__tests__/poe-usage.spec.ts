@@ -1,5 +1,5 @@
 import { PoeHandler } from "../poe"
-import { collectStream } from "../../../test-utils/stream"
+import { collectStream, sseResponse } from "../../../test-utils/stream"
 
 // The provider creates a default client during import. Stub HTTP before that happens.
 const { mockFetch } = vi.hoisted(() => {
@@ -31,7 +31,7 @@ async function runStream(modelId: string, endpoint: string, events: StreamEvent[
 			return Response.json({ data: [] })
 		}
 		requests.push(request)
-		return new Response(body, { headers: { "content-type": "text/event-stream" } })
+		return sseResponse(body)
 	})
 	const handler = new PoeHandler({ poeApiKey: "test-poe-key", apiModelId: modelId })
 	const chunks = await collectStream(handler.createMessage("Answer briefly.", [{ role: "user", content: "Hello" }]))
