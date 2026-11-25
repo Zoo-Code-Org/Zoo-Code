@@ -8136,6 +8136,64 @@ describe("Cline", () => {
 			expect(saveSpy).toHaveBeenCalledWith(true, true)
 			expect(requestSpy).toHaveBeenCalled()
 		})
+
+		it("marks an input rejection handled while the baseline block is still awaiting", async () => {
+			// Regression for the ordering finding on this branch: the rejection handler used
+			// to sit after the baseline block, and the block awaits a settings read plus a
+			// checkpoint save. A rejection that lands in that window reached the process as
+			// unhandled_rejection because the promise had no handler yet. The save spy below
+			// is the proof that the window was real: the save is still pending when the
+			// rejection settles, and the request spy awaits the content the way production
+			// does, so the failure also has to surface through the loop.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "baseline rejection task",
+				startTask: false,
+			})
+			const taskAccess = getTaskTestAccess(task)
+			let releaseSave: () => void = () => {}
+			const savePending = new Promise<void>((resolve) => {
+				releaseSave = resolve
+			})
+			const saveSpy = vi.spyOn(task, "checkpointSave").mockImplementation(() => savePending)
+			const state = await mockProvider.getState()
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(state)
+			const requestSpy = vi.spyOn(task, "recursivelyMakeClineRequests").mockImplementation(async (content) => {
+				await content
+				return true
+			})
+			const seenReasons: unknown[] = []
+			const onUnhandledRejection = (reason: unknown): void => {
+				seenReasons.push(reason)
+			}
+			process.on("unhandledRejection", onUnhandledRejection)
+			const rejectedInput = Promise.reject(new Error("input preparation failed"))
+			let caught: Error | undefined
+			try {
+				const loop = taskAccess.initiateTaskLoop(rejectedInput)
+				// One macrotask with the baseline save deliberately unfinished: this is the
+				// window in which Node reports a rejection nobody has attached a handler to.
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				releaseSave()
+				await loop
+			} catch (error) {
+				caught = error instanceof Error ? error : new Error(String(error))
+			} finally {
+				process.off("unhandledRejection", onUnhandledRejection)
+			}
+			const rejectionValues = seenReasons.filter(
+				(reason: unknown) => reason instanceof Error && reason.message === "input preparation failed",
+			)
+			// Node passes the rejection VALUE to the event, not the promise, so the
+			// comparison is against the error the input preparation rejected with.
+			expect(rejectionValues).toEqual([])
+			// The rejection still has to surface through the loop: the guard must
+			// swallow the process-level event, not the failure itself.
+			expect(caught?.message).toBe("input preparation failed")
+			expect(saveSpy).toHaveBeenCalledOnce()
+			expect(requestSpy).toHaveBeenCalledOnce()
+		})
 	})
 
 	describe("start()", () => {
