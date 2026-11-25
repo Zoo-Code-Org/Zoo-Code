@@ -720,7 +720,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Afficher la diff complète dans les cartes de modifications",
-			"description": "Inclut la diff unifiée complète en ligne pour chaque fichier dans les cartes de modifications par étape. Désactivée, les cartes n'affichent que la liste des fichiers avec les lignes ajoutées/retirées."
+			"description": "Inclut la diff unifiée complète en ligne pour chaque fichier dans les cartes de modifications par étape. Désactivée, les cartes n'affichent que la liste des fichiers avec le nombre de lignes ajoutées/retirées."
 		}
 	},
 	"notifications": {

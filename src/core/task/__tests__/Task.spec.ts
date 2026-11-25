@@ -20,6 +20,7 @@ import {
 	type ProviderSettings,
 	type ModelInfo,
 	type TaskLike,
+	TelemetryEventName,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
@@ -9063,6 +9064,44 @@ describe("Cline", () => {
 
 			enabledSpy.mockRestore()
 			instanceSpy.mockRestore()
+		})
+
+		it("captures an ordinary text message updated through updateClineMessage", async () => {
+			const { CloudService } = await import("@roo-code/cloud")
+			const enabledSpy = vi.spyOn(CloudService, "isEnabled").mockReturnValue(true)
+			const captureSpy = vi.fn()
+			const cloudDouble = { captureEvent: captureSpy } as unknown as import("@roo-code/cloud").CloudService
+			const instanceSpy = vi.spyOn(CloudService, "instance", "get").mockReturnValue(cloudDouble)
+			try {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await flushMicrotasks()
+				captureSpy.mockClear()
+
+				const textMessage = {
+					ts: Date.now(),
+					type: "say" as const,
+					say: "text" as const,
+					text: "ordinary updated text",
+				}
+				await task["updateClineMessage"](textMessage)
+
+				// Acceptance control for the capture predicate: the change_card case above
+				// still passes if the predicate rejected every message, so the accept path is
+				// proven through the same entry point with the exact payload.
+				expect(captureSpy).toHaveBeenCalledTimes(1)
+				expect(captureSpy).toHaveBeenCalledWith({
+					event: TelemetryEventName.TASK_MESSAGE,
+					properties: { taskId: task.taskId, message: textMessage },
+				})
+			} finally {
+				enabledSpy.mockRestore()
+				instanceSpy.mockRestore()
+			}
 		})
 	})
 })

@@ -583,7 +583,10 @@ export abstract class ShadowCheckpointService extends EventEmitter {
 		} catch (e) {
 			const error = e instanceof Error ? e : new Error(String(e))
 			this.log(`[${this.constructor.name}#restoreFile] failed to restore file: ${error.message}`)
-			this.emit("error", { type: "error", error })
+			// An unhandled error event throws its payload instead of the original restore error.
+			if (this.listenerCount("error") > 0) {
+				this.emit("error", { type: "error", error })
+			}
 			throw error
 		}
 	}

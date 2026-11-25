@@ -721,7 +721,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Pokaż pełny diff w kartach zmian",
-			"description": "Zawiera pełny spójny diff inline dla każdego pliku w kartach zmian per krok. Po wyłączeniu karty pokazują tylko listę plików z dodanymi/usuniętymi liniami."
+			"description": "Zawiera pełny spójny diff inline dla każdego pliku w kartach zmian per krok. Po wyłączeniu karty pokazują tylko listę plików z liczbą dodanych/usuniętych linii."
 		}
 	},
 	"notifications": {

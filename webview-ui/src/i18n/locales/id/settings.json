@@ -718,7 +718,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Tampilkan diff lengkap di kartu perubahan",
-			"description": "Termasuk diff terpadu lengkap secara inline untuk setiap file di kartu perubahan per langkah. Saat dimatikan, kartu hanya menampilkan daftar file dengan baris yang ditambahkan/dihapus."
+			"description": "Termasuk diff terpadu lengkap secara inline untuk setiap file di kartu perubahan per langkah. Saat dimatikan, kartu hanya menampilkan daftar file dengan jumlah baris yang ditambahkan/dihapus."
 		}
 	},
 	"notifications": {

@@ -720,7 +720,7 @@
 		},
 		"changeCardDetail": {
 			"label": "Mostra la diff completa nelle card dei cambiamenti",
-			"description": "Include la diff unificata completa in linea per ogni file nelle card dei cambiamenti per passo. Se disattivata, le card mostrano solo l'elenco dei file con le righe aggiunte/rimosse."
+			"description": "Include la diff unificata completa in linea per ogni file nelle card dei cambiamenti per passo. Se disattivata, le card mostrano solo l'elenco dei file con il numero di righe aggiunte/rimosse."
 		}
 	},
 	"notifications": {

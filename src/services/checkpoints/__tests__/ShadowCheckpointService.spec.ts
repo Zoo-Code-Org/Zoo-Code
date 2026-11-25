@@ -356,6 +356,74 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				expect(await fs.readFile(testFile, "utf-8")).toBe("Ahoy, world!")
 			})
 
+			it("rejects with the original restore error when no error listener is registered", async () => {
+				// Mirrors restoreCheckpoint guard: emitting "error" with no listener replaces the
+				// rejection payload with ERR_UNHANDLED_ERROR, so the caller loses the original
+				// failure. Identity, message and code are pinned here.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("Original error checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const crafted = Object.assign(new Error("restore induction failure"), {
+					code: "TEST_RESTORE_INDUCTION",
+				})
+				const proto = Object.getPrototypeOf(service) as {
+					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
+				}
+				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockRejectedValue(crafted)
+
+				let caught: unknown
+				try {
+					await service.restoreFile(commit1!.commit, "test.txt")
+					throw new Error("restoreFile resolved although the lookup was made to fail")
+				} catch (error) {
+					caught = error
+				} finally {
+					swapSpy.mockRestore()
+				}
+
+				expect(caught).toBe(crafted)
+				expect(service.listenerCount("error")).toBe(0)
+			})
+
+			it("still emits the error event when an error listener is registered", async () => {
+				// The guard must not swallow the event for listeners that do exist; it only
+				// skips the emit that EventEmitter would turn into a throw.
+				await fs.writeFile(testFile, "Ahoy, world!")
+				const commit1 = await service.saveCheckpoint("Listener checkpoint")
+				expect(commit1?.commit).toBeTruthy()
+
+				const crafted = Object.assign(new Error("restore induction failure"), {
+					code: "TEST_RESTORE_INDUCTION",
+				})
+				const events: { type: string; error?: Error }[] = []
+				const listener = (event: { type: string; error?: Error }): void => {
+					events.push(event)
+				}
+				service.on("error", listener)
+
+				const proto = Object.getPrototypeOf(service) as {
+					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
+				}
+				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockRejectedValue(crafted)
+
+				let caught: unknown
+				try {
+					await service.restoreFile(commit1!.commit, "test.txt")
+					throw new Error("restoreFile resolved although the lookup was made to fail")
+				} catch (error) {
+					caught = error
+				} finally {
+					swapSpy.mockRestore()
+					service.off("error", listener)
+				}
+
+				expect(caught).toBe(crafted)
+				expect(events.length).toBe(1)
+				expect(events[0]?.error).toBe(crafted)
+				expect(service.listenerCount("error")).toBe(0)
+			})
+
 			it("restores exactly the requested file when its name contains glob characters", async () => {
 				// A plain pathspec treats [a].ts as a character class matching
 				// a.ts, so checkout would restore the wrong file and leave the
