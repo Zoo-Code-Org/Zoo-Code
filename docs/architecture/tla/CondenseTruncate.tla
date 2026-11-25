@@ -97,7 +97,7 @@
 \* it on the real code. Findings: covered 0, added 0, gap 1 (reasoning-field echo,
 \* real-code pinned).
 
-\* Round 11 (PR 2698, head 7a604f89d, CR thread 4700217466): the echo condition is per-field:
+\* Round 11 (PR 2698, head 6f1facc3c, CR thread 4700217466): the echo condition is per-field:
 \* stored turns can carry reasoning_details without reasoning_content, so the
 \* projection must keep each field under its own nonempty check. Field-level
 \* projection stays unmodeled here (Msg is a unit), so this remains a gap;
