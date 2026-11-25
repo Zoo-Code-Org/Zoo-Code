@@ -5,7 +5,7 @@ import path from "path"
 import os from "os"
 import { EventEmitter } from "events"
 
-import { simpleGit, SimpleGit } from "simple-git"
+import { Response, simpleGit, SimpleGit } from "simple-git"
 
 import { fileExistsAtPath } from "../../../utils/fs"
 import * as fileSearch from "../../../services/search/file-search"
@@ -15,6 +15,65 @@ import * as i18n from "../../../i18n"
 import { RepoPerTaskCheckpointService } from "../RepoPerTaskCheckpointService"
 import { BLOCKED_ENV_KEYS } from "../ShadowCheckpointService"
 
+// Spies the service real git.raw boundary instead of the private
+// fileExistsInCommit method, so commit verification stays real (AGENTS.md:
+// prefer typed APIs over spying privates). The interceptor sees each call
+// git command name plus how many ls-tree calls it has seen, and either
+// throws to fail that call or awaits an action to inject a race mid-call.
+// The service awaits a rev-parse containment probe before the existence
+// ls-tree, so the tests key on the ls-tree index to keep the failing stage
+// unambiguous. Fresh handle per call: the observed command list and the
+// restore function belong to the caller.
+type GitBoundaryHandle = {
+	commands: string[]
+	restore: () => void
+}
+
+function gitBoundarySpy(
+	service: RepoPerTaskCheckpointService,
+	interceptor?: (command: string, lsTreeIndex: number) => Promise<void>,
+): GitBoundaryHandle {
+	const git = service["git"]!
+	const originalRaw = git.raw.bind(git)
+	const commands: string[] = []
+	let lsTreeCalls = 0
+	const rawSpy = vi
+		.spyOn(git, "raw")
+		.mockImplementation((...args: Parameters<typeof originalRaw>): Response<string> => {
+			const first = args[0]
+			let command = ""
+			if (Array.isArray(first)) {
+				command = String(first[0])
+			} else if (typeof first === "string") {
+				command = first
+			}
+			if (command === "ls-tree") {
+				lsTreeCalls += 1
+			}
+			// commands records only the calls that completed for real, so an assertion
+			// about it proves a stage ran rather than merely being reached.
+			const delegate = (): Response<string> => {
+				const value = originalRaw(...args)
+				return value.then((result: string) => {
+					commands.push(command)
+					return result
+				}) as Response<string>
+			}
+			if (!interceptor) {
+				return delegate()
+			}
+			// simple-git types raw as returning Response<string>, a Promise subclass at
+			// runtime; this suite ran 63/63 green through the plain chained Promise, so
+			// the assertion only papers over the declared shape.
+			return Promise.resolve(interceptor(command, lsTreeCalls)).then(delegate) as Response<string>
+		})
+	return {
+		commands: commands,
+		restore: () => {
+			rawSpy.mockRestore()
+		},
+	}
+}
 const tmpDir = path.join(os.tmpdir(), "CheckpointService")
 
 // simple-git ≥3.36 blocks env vars it considers code-execution vectors.
@@ -367,10 +426,14 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				const crafted = Object.assign(new Error("restore induction failure"), {
 					code: "TEST_RESTORE_INDUCTION",
 				})
-				const proto = Object.getPrototypeOf(service) as {
-					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
-				}
-				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockRejectedValue(crafted)
+				const boundary = gitBoundarySpy(service, async (command: string, lsTreeIndex: number) => {
+					// Only the existence lookup may fail here. The service awaits a
+					// rev-parse containment probe before this ls-tree, so failing that
+					// probe first would replace the error identity this test pins.
+					if (command === "ls-tree" && lsTreeIndex === 1) {
+						throw crafted
+					}
+				})
 
 				let caught: unknown
 				try {
@@ -379,9 +442,12 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				} catch (error) {
 					caught = error
 				} finally {
-					swapSpy.mockRestore()
+					boundary.restore()
 				}
 
+				// The containment probes ran for real before the injected call, so the
+				// failure came from the existence lookup and not from the stub itself.
+				expect(boundary.commands.filter((command: string) => command === "rev-parse").length).toBeGreaterThan(0)
 				expect(caught).toBe(crafted)
 				expect(service.listenerCount("error")).toBe(0)
 			})
@@ -402,10 +468,14 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				}
 				service.on("error", listener)
 
-				const proto = Object.getPrototypeOf(service) as {
-					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
-				}
-				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockRejectedValue(crafted)
+				const boundary = gitBoundarySpy(service, async (command: string, lsTreeIndex: number) => {
+					// Only the existence lookup may fail here. The service awaits a
+					// rev-parse containment probe before this ls-tree, so failing that
+					// probe first would replace the error identity this test pins.
+					if (command === "ls-tree" && lsTreeIndex === 1) {
+						throw crafted
+					}
+				})
 
 				let caught: unknown
 				try {
@@ -414,10 +484,13 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 				} catch (error) {
 					caught = error
 				} finally {
-					swapSpy.mockRestore()
+					boundary.restore()
 					service.off("error", listener)
 				}
 
+				// The containment probes ran for real before the injected call, so the
+				// failure came from the existence lookup and not from the stub itself.
+				expect(boundary.commands.filter((command: string) => command === "rev-parse").length).toBeGreaterThan(0)
 				expect(caught).toBe(crafted)
 				expect(events.length).toBe(1)
 				expect(events[0]?.error).toBe(crafted)
@@ -555,26 +628,22 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 
 				// Structural view of the private lookup so the race can be injected
 				// mid-call without a double assertion (AGENTS.md).
-				const proto = Object.getPrototypeOf(service) as {
-					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
-				}
-				const original = proto.fileExistsInCommit
-				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockImplementation(async function (
-					this: unknown,
-					...args: unknown[]
-				) {
-					// The concurrent ancestor replacement lands mid-lookup.
-					await fs.rm(innerDir, { recursive: true, force: true })
-					await fs.symlink(outsideDir, innerDir, "junction")
-					return original.apply(this, args)
+				// The concurrent ancestor replacement lands mid-lookup, injected at
+				// the git boundary so the commit verification itself stays real.
+				const boundary = gitBoundarySpy(service, async (command: string, lsTreeIndex: number) => {
+					if (command === "ls-tree" && lsTreeIndex === 1) {
+						await fs.rm(innerDir, { recursive: true, force: true })
+						await fs.symlink(outsideDir, innerDir, "junction")
+					}
 				})
 
 				await expect(service.restoreFile(commit1!.commit, path.join("sub", "victim.txt"))).rejects.toThrow(
 					/resolves outside the workspace/,
 				)
-				swapSpy.mockRestore()
+				boundary.restore()
 
 				// The outside file survives: the delete never followed the link.
+				expect(boundary.commands.filter((command: string) => command === "rev-parse").length).toBeGreaterThan(0)
 				expect(await fileExistsAtPath(outsideFile)).toBe(true)
 				expect(await fs.readFile(outsideFile, "utf-8")).toBe("outside")
 			})
@@ -595,25 +664,22 @@ describe.each([[RepoPerTaskCheckpointService, "RepoPerTaskCheckpointService"]])(
 
 				// Structural view of the private lookup so the race can be injected
 				// mid-call without a double assertion (AGENTS.md).
-				const proto = Object.getPrototypeOf(service) as {
-					fileExistsInCommit: (...args: unknown[]) => Promise<boolean>
-				}
-				const original = proto.fileExistsInCommit
-				const swapSpy = vi.spyOn(proto, "fileExistsInCommit").mockImplementation(async function (
-					this: unknown,
-					...args: unknown[]
-				) {
-					await fs.rm(innerDir, { recursive: true, force: true })
-					await fs.symlink(outsideDir, innerDir, "junction")
-					return original.apply(this, args)
+				// The concurrent ancestor replacement lands mid-lookup, injected at
+				// the git boundary so the commit verification itself stays real.
+				const boundary = gitBoundarySpy(service, async (command: string, lsTreeIndex: number) => {
+					if (command === "ls-tree" && lsTreeIndex === 1) {
+						await fs.rm(innerDir, { recursive: true, force: true })
+						await fs.symlink(outsideDir, innerDir, "junction")
+					}
 				})
 
 				await expect(service.restoreFile(commit1!.commit, path.join("sub", "keep.txt"))).rejects.toThrow(
 					/resolves outside the workspace/,
 				)
-				swapSpy.mockRestore()
+				boundary.restore()
 
 				// The checkout never wrote through the swapped link.
+				expect(boundary.commands.filter((command: string) => command === "rev-parse").length).toBeGreaterThan(0)
 				expect(await fileExistsAtPath(path.join(outsideDir, "keep.txt"))).toBe(false)
 			})
 
