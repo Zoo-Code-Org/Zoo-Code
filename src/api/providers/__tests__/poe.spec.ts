@@ -56,18 +56,10 @@ vitest.mock("ai-sdk-provider-poe", () => ({
 	createPoe: (...args: unknown[]) => mockCreatePoe(...args),
 }))
 
-vitest.mock("ai-sdk-provider-poe/code", () => ({
+vitest.mock("ai-sdk-provider-poe/code", async (importOriginal) => ({
+	...(await importOriginal<typeof import("ai-sdk-provider-poe/code")>()),
 	mapToolChoice: vitest.fn(function (value: unknown) {
 		return value
-	}),
-	extractUsageMetrics: vitest.fn(function (usage: any) {
-		return {
-			inputTokens: usage?.inputTokens || 0,
-			outputTokens: usage?.outputTokens || 0,
-			cacheReadTokens: usage?.cacheReadTokens,
-			cacheWriteTokens: usage?.cacheWriteTokens,
-			reasoningTokens: usage?.reasoningTokens,
-		}
 	}),
 	getPoeDefaultModelInfo: vitest.fn(function () {
 		return {

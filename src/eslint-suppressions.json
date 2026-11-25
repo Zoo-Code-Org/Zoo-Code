@@ -149,11 +149,6 @@
 			"count": 34
 		}
 	},
-	"api/providers/__tests__/poe.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/qwen-code-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
