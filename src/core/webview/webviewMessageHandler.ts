@@ -910,7 +910,6 @@ export const webviewMessageHandler = async (
 								globalLayerAtSaveStart,
 								hiddenWorkspaceEntries,
 								gateAtDisplay: message.commandListBaseline?.workspaceCommandListsEnabled,
-								gateNow: workspaceCommandListsEnabled,
 							})
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							splitSourceEntries,
@@ -953,7 +952,34 @@ export const webviewMessageHandler = async (
 							// the save skips the write, so saving never materializes one. Deletions clear
 							// it with `[]`.
 							if (workspaceTarget !== undefined) {
-								await config.update(key, workspaceWrite, workspaceTarget)
+								// The layer can gain entries while the global write runs, and the
+								// configuration API has no compare-and-set. A re-read here narrows that
+								// window: entries added since save start are merged in, so this save
+								// does not overwrite another writer's entry. An entry added inside the
+								// window that remains between this read and the write is still lost.
+								let workspaceAtWrite = workspaceWrite
+								try {
+									const freshInspection = config.inspect<string[]>(key)
+									if (freshInspection !== undefined) {
+										const workspaceNow = readCommandListScopes(
+											key,
+											globalLayerAtSaveStart,
+											freshInspection,
+										).workspace
+										// `currentScopes.workspace` is this save's start state, sanitized
+										// the same way, so an entry it never held is a mid-save addition.
+										// `globalLayerAtSaveStart` is passed only because the signature
+										// requires it; `.workspace` does not read it.
+										const addedDuringSave = workspaceNow.filter(
+											(entry) => !currentScopes.workspace.includes(entry),
+										)
+										workspaceAtWrite = [...new Set([...workspaceWrite, ...addedDuringSave])]
+									}
+								} catch {
+									// The global write already landed. Keep the precomputed list rather
+									// than abort a half-applied save over a re-read that cannot complete.
+								}
+								await config.update(key, workspaceAtWrite, workspaceTarget)
 							}
 						} catch (error) {
 							const failure = error instanceof Error ? error.message : String(error)

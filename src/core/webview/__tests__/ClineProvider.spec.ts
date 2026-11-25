@@ -4311,6 +4311,38 @@ describe("ClineProvider", () => {
 			expect(state.deniedCommands).toEqual(["curl", "pnpm"])
 		})
 
+		test("getState reads the raw global command lists after its awaits, so a save during them is kept", async () => {
+			await provider.contextProxy.setValue("allowedCommands", ["git"])
+			await provider.contextProxy.setValue("deniedCommands", ["curl"])
+			mockGateConfiguration(true)
+
+			// Hold the first await of getState, so the save below lands inside it.
+			let releaseCustomModes!: () => void
+			const customModesPending = new Promise<void>((resolve) => {
+				releaseCustomModes = () => resolve()
+			})
+			vi.mocked(provider.customModesManager.getCustomModes).mockImplementationOnce(async () => {
+				await customModesPending
+				return []
+			})
+
+			const pendingState = provider.getState()
+			await provider.contextProxy.setValue("allowedCommands", ["docker"])
+			await provider.contextProxy.setValue("deniedCommands", ["pnpm"])
+			releaseCustomModes()
+
+			const state = await pendingState
+
+			// The lists describe the state at return time, not at call time. A read from
+			// the call-time snapshot would return the pre-save entries instead.
+			expect(state.globalAllowedCommands).toEqual(["docker"])
+			expect(state.globalDeniedCommands).toEqual(["pnpm"])
+			expect(state.allowedCommands).toEqual(["docker"])
+			expect(state.deniedCommands).toEqual(["pnpm"])
+			expect(state.globalAllowedCommands).not.toContain("git")
+			expect(state.globalDeniedCommands).not.toContain("curl")
+		})
+
 		test("getState prefers the workspace-folder value for multi-root workspaces", async () => {
 			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
 				get: vi.fn().mockImplementation((key: string) => key === "workspaceCommandListsEnabled"),

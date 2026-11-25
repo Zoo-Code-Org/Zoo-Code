@@ -36,17 +36,26 @@ const workspaceState = vi.hoisted(() => ({
 // Double for `fs.realpathSync`. Only this binding is replaced. Every other fs
 // call stays real, and the manifest and real-filesystem tests use
 // `importOriginal`. The double resolves each path to itself: the mock roots
-// exist on no filesystem, and an unresolvable root compares by its
-// registered path. Tests that need other behavior script the double.
+// exist on no filesystem, and an unresolvable root gives no folder layer.
+// Tests that need other behavior script the double.
 const fsState = vi.hoisted(() => ({
-	// The real implementation, saved by the mock so a test can delegate to it.
+	// The real implementations, saved by the mock so a test can delegate to them.
 	realRealpathSync: null as null | ((target: string) => string),
+	realRealpathSyncNative: null as null | ((target: string) => string),
 }))
 
 vi.mock("fs", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("fs")>()
 	fsState.realRealpathSync = (target: string) => String(actual.realpathSync(target))
-	const realpathSync = vi.fn((target: string): string => String(target))
+	fsState.realRealpathSyncNative = (target: string) => String(actual.realpathSync.native(target))
+	// Production resolves a workspace root with `fs.realpathSync.native`, and
+	// this spec scripts `fs.realpathSync`. One function object serves both
+	// spellings, so a scripted behavior reaches the production call.
+	const realpathSyncBase = vi.fn((target: string): string => String(target))
+	const realpathSync: typeof realpathSyncBase & { native: typeof realpathSyncBase } = Object.assign(
+		realpathSyncBase,
+		{ native: realpathSyncBase },
+	)
 	// Interop: production code imports the default export, this spec imports the
 	// named one. Both must see the same double.
 	const actualDefault = (actual as { default?: typeof import("fs") }).default ?? actual
@@ -63,6 +72,14 @@ function realPath(target: string): string {
 		throw new Error("the fs module mock did not capture the unmocked realpathSync")
 	}
 	return fsState.realRealpathSync(target)
+}
+
+/** The unmocked `fs.realpathSync.native`, which reports the on-disk spelling. */
+function realPathNative(target: string): string {
+	if (!fsState.realRealpathSyncNative) {
+		throw new Error("the fs module mock did not capture the unmocked realpathSync.native")
+	}
+	return fsState.realRealpathSyncNative(target)
 }
 
 vi.mock("vscode", () => ({
@@ -443,13 +460,17 @@ it("manifest: declares the gate as a default-off, application-scoped boolean", (
 	expect(gate.scope).toBe("application")
 })
 
-it("manifest: keeps the command-list keys workspace-settable so the gated layer can exist", () => {
-	// The gate scopes the effect of the workspace layers. Scoping the list keys would remove the workspace layer entirely.
+it("manifest: declares the command-list keys at resource scope so a folder value is readable", () => {
+	// An omitted scope defaults to `window`, and VS Code excludes a `window`
+	// setting from per-folder configuration in a multi-root workspace. The
+	// folder layer would then be unreadable at folder level. `resource` is the
+	// scope that makes a per-folder value readable. The gate stays `application`
+	// (asserted above), which is what keeps the feature opt-in.
 	const manifest = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"))
 	const properties = manifest.contributes.configuration.properties
 
-	expect(properties["zoo-code.allowedCommands"].scope).toBeUndefined()
-	expect(properties["zoo-code.deniedCommands"].scope).toBeUndefined()
+	expect(properties["zoo-code.allowedCommands"].scope).toBe("resource")
+	expect(properties["zoo-code.deniedCommands"].scope).toBe("resource")
 })
 
 it("persisted-settings schema: defaults the gate to disabled", () => {
@@ -672,14 +693,15 @@ it("checkAutoApproval command: does not apply the first folder's allow list to a
 	// Folder A's layer allows "echo". The cwd names a removed or relocated
 	// folder, so no folder's layer may decide. Consuming folder A's allow entry
 	// would approve a command that runs outside every workspace folder. Only the
-	// empty global layers judge it.
+	// empty global layers judge it. The composed list carries "echo", so a check
+	// that fell back to it would approve the command and fail this test.
 	mockFolderConfigurations({
 		[folderA.fsPath]: { gate: true, deny: [], allow: ["echo"] },
 		[folderB.fsPath]: { gate: true, deny: ["rm"] },
 	})
 
 	const result = await checkAutoApproval({
-		state: taskFolderState([]),
+		state: taskFolderState(["echo"]),
 		cwd: "/mock/removed-folder",
 		ask: "command",
 		text: "echo hi",
@@ -1213,12 +1235,13 @@ it.skipIf(!directoryLinksAvailable)(
 	},
 )
 
-it("commandListFolderForResource: falls back to the registered path for a root whose real path cannot be resolved", () => {
+it("commandListFolderForResource: drops the folder layer when a registered root's real path cannot be resolved", () => {
 	vi.clearAllMocks()
 	const rootPath = path.join(path.sep + "mock", "broken-root")
 	const rootUri = makeUri(rootPath)
-	// A relocated or deleted root has no real path. Comparing it by the registered path
-	// keeps that folder's layer applied instead of dropped.
+	// A relocated or deleted root has no real path, so nothing confirms that it
+	// holds the cwd. Matching the cwd against the registered path could claim a
+	// directory the root does not own, so the lookup gives no folder layer.
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
 	vi.mocked(fs.realpathSync).mockImplementation((target) => {
 		if (String(target) === rootPath) {
@@ -1227,10 +1250,30 @@ it("commandListFolderForResource: falls back to the registered path for a root w
 		return String(target)
 	})
 
-	expect(commandListFolderForResource(path.join(rootPath, "sub"))).toBe(rootUri)
+	expect(commandListFolderForResource(path.join(rootPath, "sub"))).toBeUndefined()
 })
 
-it("commandListFolderForResource: a path inside no root stays unmatched after the real-path retry", () => {
+it("commandListFolderForResource: an unresolvable root keeps an enclosing root from claiming the cwd", () => {
+	vi.clearAllMocks()
+	// The inner root is registered but cannot be resolved. The outer root
+	// contains the cwd lexically, so a lookup that skipped the failed candidate
+	// would hand the cwd to the outer folder and apply its list.
+	const outerRoot = path.join(path.sep + "mock")
+	const innerRoot = path.join(outerRoot, "inner")
+	const outerUri = makeUri(outerRoot)
+	const innerUri = makeUri(innerRoot)
+	workspaceState.workspaceFolders = [{ uri: outerUri }, { uri: innerUri }]
+	vi.mocked(fs.realpathSync).mockImplementation((target) => {
+		if (String(target) === innerRoot) {
+			throw new Error("ENOENT: no such file or directory")
+		}
+		return String(target)
+	})
+
+	expect(commandListFolderForResource(path.join(innerRoot, "sub"))).toBeUndefined()
+})
+
+it("commandListFolderForResource: a path inside no root stays unmatched", () => {
 	vi.clearAllMocks()
 	const rootPath = path.join(path.sep + "mock", "root")
 	workspaceState.workspaceFolders = [{ uri: makeUri(rootPath) }]
@@ -1270,9 +1313,9 @@ it("commandListFolderForResource: matches a cwd inside a filesystem-root workspa
 
 it("commandListFolderForResource: matches a child of a folder registered with a trailing separator", () => {
 	vi.clearAllMocks()
-	// The real-path fallback passes a registered trailing separator through an unresolved
-	// root. Containment must then treat the separated root as its own child prefix.
-	const rootPath = path.join(path.sep + "mock", "root") + path.sep
+	// A registered path can end in a separator. Containment must then treat the
+	// separated root as its own child prefix instead of adding a second one.
+	const rootPath = path.join(path.sep, "mock", "root") + path.sep
 	const rootUri = makeUri(rootPath)
 	workspaceState.workspaceFolders = [{ uri: rootUri }]
 
@@ -1400,7 +1443,7 @@ it("checkAutoApproval command: judges a cwd inside a symlinked root by that root
 	expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, linkUri)
 })
 
-it("realpathSync preserves the on-disk case of an existing directory", () => {
+it("realpathSync reports the on-disk case of a directory created with mixed case", () => {
 	vi.clearAllMocks()
 	const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "command-scope-case-"))
 	try {
@@ -1417,6 +1460,50 @@ it("realpathSync preserves the on-disk case of an existing directory", () => {
 		fs.rmSync(baseDir, { recursive: true, force: true })
 	}
 })
+
+it.skipIf(process.platform !== "win32")(
+	"checkAutoApproval command: routes a differently-cased root and cwd through the production resolvers",
+	async () => {
+		vi.clearAllMocks()
+		const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "command-scope-case-root-"))
+		try {
+			const rootName = "MixedCase-Root"
+			const root = path.join(baseDir, rootName)
+			const taskDir = path.join(root, "sub")
+			fs.mkdirSync(root)
+			fs.mkdirSync(taskDir)
+			// Windows keeps one directory under any case, so the registry's spelling
+			// and the cwd's spelling differ while naming the same directory. Both
+			// resolvers must canonicalize before they compare.
+			const registeredRoot = root.toUpperCase()
+			const differentlyCasedCwd = taskDir.toUpperCase()
+			const rootUri = makeUri(registeredRoot)
+			workspaceState.workspaceFolders = [{ uri: rootUri }]
+			workspaceState.foldersByPath.set(registeredRoot, rootUri)
+			// The production resolver canonicalizes the registry entry with the native
+			// resolver; the cwd arrives canonical from `fs/promises.realpath`. Both
+			// report the on-disk spelling, which is what lets the two sides agree.
+			vi.mocked(fs.realpathSync).mockImplementation((target) => realPathNative(String(target)))
+			mockFolderConfigurations({ [registeredRoot]: { gate: true, allow: ["echo"] } })
+
+			const canonicalCwd = await fs.promises.realpath(differentlyCasedCwd)
+			expect(commandListFolderForResource(canonicalCwd)).toBe(rootUri)
+
+			const result = await checkAutoApproval({
+				state: taskFolderState([]),
+				cwd: canonicalCwd,
+				ask: "command",
+				text: "echo hi",
+			})
+
+			// The folder list applies, so the cwd's case did not lose the layer.
+			expect(result).toEqual({ decision: "approve" })
+			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, rootUri)
+		} finally {
+			fs.rmSync(baseDir, { recursive: true, force: true })
+		}
+	},
+)
 
 describe("classifyCommandListBaseline", () => {
 	// The four ways a submitted entry survives the baseline filter, plus the
@@ -1495,7 +1582,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: row.globalLayerAtSaveStart,
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 
 		expect(result.splitSourceEntries.includes(row.incoming[0])).toBe(row.survives)
@@ -1564,7 +1650,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 
 		expect(result.externallyAdded).toEqual(row.expected)
@@ -1581,7 +1666,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 
 		expect(result.externallyAdded).toEqual(["aws"])
@@ -1600,7 +1684,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 		const alsoGlobal = classifyCommandListBaseline({
 			baseline: [],
@@ -1610,7 +1693,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: ["docker"],
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 
 		expect(hiddenOnly.externallyAdded).toEqual([])
@@ -1626,16 +1708,16 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: ["aws"],
 			hiddenWorkspaceEntries: [],
 			gateAtDisplay: undefined,
-			gateNow: () => true,
 		})
 
 		expect(result.externallyAdded).toEqual([])
 		expect(result.splitSourceEntries).toEqual(["git"])
 	})
 
-	it("keeps the hidden set as the promotion set when the gate did not flip", () => {
-		// "git" is in the hidden set and in the baseline, so an equality test that
-		// reversed its sense would drop it and leave only "docker".
+	it("keeps a displayed entry out of the promotion set whether or not the gate moved", () => {
+		// "git" was displayed and sits in the hidden set, so keeping it stays a
+		// workspace decision. Only "docker", which the baseline never showed, may
+		// still be promoted.
 		const result = classifyCommandListBaseline({
 			baseline: ["git"],
 			incoming: ["git"],
@@ -1644,10 +1726,44 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
-			gateNow: () => true,
 		})
 
-		expect(result.promotionHiddenEntries).toEqual(["git", "docker"])
+		expect(result.promotionHiddenEntries).toEqual(["docker"])
+	})
+
+	it("keeps a displayed workspace entry out of the global write when an unchanged gate hides it", () => {
+		// The workspace layer holds "echo", a global entry shadows it, and the
+		// dialog displayed it before the gate stayed on. The configuration's global
+		// layer holds no "echo", so a promotion is the only way it could reach the
+		// user's global list. Reading the promotion set as the whole hidden set
+		// would drop "echo" from the workspace origin set, the split would read it
+		// as brand-new, and the global write would gain it. The baseline keeps it a
+		// workspace decision instead.
+		const { promotionHiddenEntries } = classifyCommandListBaseline({
+			baseline: ["echo"],
+			incoming: ["echo"],
+			currentScopes: { global: [], workspace: ["echo"], merged: [] },
+			configGlobalAtSaveStart: [],
+			globalLayerAtSaveStart: undefined,
+			hiddenWorkspaceEntries: ["echo"],
+			gateAtDisplay: true,
+		})
+
+		// The save path splits, then re-adds the hidden entries the baseline never
+		// showed. The baseline showed "echo", so the split alone decides here.
+		const baseline = ["echo"]
+		const hiddenWorkspaceEntries = ["echo"]
+		const { globalWrite, workspaceWrite } = splitCommandListScopes(
+			["echo"],
+			hiddenWorkspaceEntries.filter((entry) => !promotionHiddenEntries.includes(entry)),
+			[],
+		)
+		const workspaceWriteWithHidden = [
+			...new Set([...workspaceWrite, ...hiddenWorkspaceEntries.filter((entry) => !baseline.includes(entry))]),
+		]
+
+		expect(globalWrite).toEqual([])
+		expect(workspaceWriteWithHidden).toEqual(["echo"])
 	})
 
 	it("treats a baseline of the wrong runtime type as no baseline", () => {
@@ -1663,7 +1779,6 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
-			gateNow: () => false,
 		})
 
 		expect(result.externallyAdded).toEqual([])
@@ -1683,15 +1798,12 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: ["git", "docker"],
 			gateAtDisplay: true,
-			gateNow: () => false,
 		})
 
 		expect(result.promotionHiddenEntries).toEqual(["docker"])
 	})
 
-	it("does not read the gate when the sender reported no display-time value", () => {
-		const gateNow = vi.fn(() => false)
-
+	it("returns the whole hidden set when the sender reported no display-time value", () => {
 		const result = classifyCommandListBaseline({
 			baseline: ["git"],
 			incoming: ["git"],
@@ -1700,11 +1812,9 @@ describe("classifyCommandListBaseline", () => {
 			globalLayerAtSaveStart: undefined,
 			hiddenWorkspaceEntries: ["docker"],
 			gateAtDisplay: undefined,
-			gateNow,
 		})
 
 		expect(result.promotionHiddenEntries).toEqual(["docker"])
-		expect(gateNow).not.toHaveBeenCalled()
 	})
 })
 
@@ -1748,6 +1858,31 @@ describe("rollbackFailedCommandListWrite", () => {
 		expect(result).toEqual({ status: "rolled-back" })
 		expect(writeGlobalLayer).toHaveBeenCalledTimes(1)
 		expect(writeGlobalLayer).toHaveBeenCalledWith(["git"])
+	})
+
+	it("clears the key when a third party deleted the layer mid-save", async () => {
+		// The layer held "git" at save start and this save removed it, so the delta
+		// wants to write "git" back. The re-read finds no layer at all: a later
+		// writer deleted the key, which is the same decision as writing `[]` but
+		// stated more strongly. Restoring the removed entry would resurrect a layer
+		// the user deleted, so the rollback clears the key.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: [],
+			configGlobalAtSaveStart: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => undefined,
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledTimes(1)
+		expect(writeGlobalLayer).toHaveBeenCalledWith(undefined)
+		expect(writeGlobalLayer).not.toHaveBeenCalledWith(["git"])
 	})
 
 	it("restores an entry this save removed", async () => {

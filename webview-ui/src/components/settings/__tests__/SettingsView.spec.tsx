@@ -819,14 +819,21 @@ describe("SettingsView - Allowed Commands", () => {
 
 		fireEvent.click(screen.getByTestId("save-button"))
 
+		// The request id marks the save the host must answer, which is the save whose
+		// settle reads the edit tracking. The gate reaches the host through the
+		// baseline's third slot alone.
 		expect(vscode.postMessage).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "updateSettings",
+				requestId: expect.any(String),
 				commandListBaseline: {
 					allowedCommands: ["git"],
 					deniedCommands: [],
 					workspaceCommandListsEnabled: true,
 				},
+				updatedSettings: expect.not.objectContaining({
+					workspaceCommandListsEnabled: expect.anything(),
+				}),
 			}),
 		)
 	})

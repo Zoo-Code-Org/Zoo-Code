@@ -16,6 +16,7 @@ import {
 	importSettingsFromPath,
 	importSettingsWithFeedback,
 	exportSettings,
+	mirrorImportedCommandLists,
 } from "../importExport"
 import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
@@ -802,6 +803,76 @@ describe("importExport", () => {
 			await runFeedback(filePath)
 
 			expect(update).not.toHaveBeenCalled()
+		})
+
+		it("skips an imported workspace command-list gate value and names where the gate lives", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(
+				validProfileFile({ mode: "code", allowedCommands: ["git"], workspaceCommandListsEnabled: true }),
+			)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			const result = await importSettingsFromPath(filePath, {
+				providerSettingsManager: mockProviderSettingsManager,
+				contextProxy: mockContextProxy,
+				customModesManager: mockCustomModesManager,
+			})
+
+			if (!result.success) {
+				throw new Error(`import failed: ${result.error}`)
+			}
+
+			// The gate value is refused, so the runtime state never carries a value the
+			// enforcement path would not read. The settings beside it still land.
+			const stored = vi.mocked(mockContextProxy.setValues).mock.calls[0][0] as Record<string, unknown>
+			expect(stored).not.toHaveProperty("workspaceCommandListsEnabled")
+			expect(stored.mode).toBe("code")
+			expect(stored.allowedCommands).toEqual(["git"])
+
+			expect(
+				result.warnings?.some(
+					(warning) => warning.includes("workspaceCommandListsEnabled") && warning.includes("user settings"),
+				),
+			).toBe(true)
+		})
+
+		it("retries a failed command-list mirror once, then reports the key it could not write", async () => {
+			const config = makeWorkspaceConfiguration()
+			const update = vi.mocked(config.update)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+			const showWarningMessageSpy = vi.spyOn(vscode.window, "showWarningMessage").mockResolvedValue(undefined)
+
+			update.mockImplementation(async (key: string) => {
+				if (key === "deniedCommands") {
+					throw new Error("settings file is locked")
+				}
+			})
+
+			await mirrorImportedCommandLists({ allowedCommands: ["git"], deniedCommands: ["rm -rf"] })
+
+			expect(update).toHaveBeenCalledWith("allowedCommands", ["git"], vscode.ConfigurationTarget.Global)
+			// Two attempts: the first failure is retried, the second is reported.
+			expect(update.mock.calls.filter(([key]) => key === "deniedCommands")).toHaveLength(2)
+			expect(showWarningMessageSpy).toHaveBeenCalledTimes(1)
+			expect(showWarningMessageSpy.mock.calls[0][0]).toContain("deniedCommands")
+			expect(showWarningMessageSpy.mock.calls[0][0]).not.toContain("allowedCommands")
+
+			update.mockReset()
+			update.mockRejectedValue(new Error("settings file is locked"))
+			showWarningMessageSpy.mockClear()
+
+			await mirrorImportedCommandLists({ allowedCommands: ["git"], deniedCommands: ["rm -rf"] })
+
+			// Both keys fail twice, and one report names both of them.
+			expect(update).toHaveBeenCalledTimes(4)
+			expect(showWarningMessageSpy).toHaveBeenCalledTimes(1)
+			expect(showWarningMessageSpy.mock.calls[0][0]).toContain("allowedCommands")
+			expect(showWarningMessageSpy.mock.calls[0][0]).toContain("deniedCommands")
+
+			showWarningMessageSpy.mockRestore()
 		})
 
 		it("should handle import when reasoning budget fields are missing from config", async () => {

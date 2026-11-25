@@ -255,6 +255,8 @@ vi.mock("../SettingsSearch", () => ({
 import { useExtensionState } from "@src/context/ExtensionStateContext"
 import ApiOptions from "../ApiOptions"
 import { AutoApproveSettings } from "../AutoApproveSettings"
+import { About } from "../About"
+import { ExperimentalSettings } from "../ExperimentalSettings"
 
 describe("SettingsView - Unsaved Changes Detection", () => {
 	let queryClient: QueryClient
@@ -1556,5 +1558,153 @@ describe("SettingsView - Unsaved Changes Detection", () => {
 		view.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
 		await waitFor(() => expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["curl"])))
 		expect(screen.getByTestId("save-button")).toBeDisabled() // a folded external update is not a user edit
+	})
+
+	it("settles a save as clean when the host merges its refresh, and stays dirty for a user edit during the save", async () => {
+		// A host refresh that lands during a pending save replaces the edit buffer on
+		// its own, so the settle must not read the replacement as unsaved work. A real
+		// edit in the same window must still keep the form dirty.
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField, deniedCommands }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<span data-testid="current-deny-list">{JSON.stringify(deniedCommands)}</span>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo", "ls"])}>
+						Edit allow list
+					</button>
+					<button
+						data-testid="edit-non-list-setting"
+						onClick={() => setCachedStateField("alwaysAllowReadOnly", true)}>
+						Edit a non-list setting
+					</button>
+				</div>
+			),
+		)
+
+		const submitListEdit = async () => {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				...defaultExtensionState,
+				allowedCommands: ["echo"],
+			})
+			const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+				queryClient,
+			})
+			fireEvent.click(await screen.findByTestId("edit-allow-list"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			fireEvent.click(screen.getByTestId("save-button"))
+			return view
+		}
+
+		// First case: the host flips the gate and restates the submitted lists. The
+		// lists match the submission, so this refresh is an automatic merge.
+		const mergedView = await submitListEdit()
+		const mergeSaveId = lastSaveRequestId(postMessage)
+		expect(mergeSaveId).toBeDefined()
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			workspaceCommandListsEnabled: true,
+		})
+		mergedView.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		answerSave(mergeSaveId, { success: true })
+
+		// The merge left nothing unsaved, so the form is clean and the lists are open again.
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			deniedCommands: ["rm -rf"],
+			workspaceCommandListsEnabled: true,
+		})
+		mergedView.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		await waitFor(() =>
+			expect(screen.getByTestId("current-deny-list")).toHaveTextContent(JSON.stringify(["rm -rf"])),
+		)
+		expect(screen.getByTestId("save-button")).toBeDisabled()
+		mergedView.unmount()
+
+		// Second case: the user edits a cached field while the save is pending. The
+		// refresh still matches the submission, yet the form must stay dirty.
+		const editedView = await submitListEdit()
+		const editedSaveId = lastSaveRequestId(postMessage)
+		expect(editedSaveId).toBeDefined()
+		fireEvent.click(screen.getByTestId("edit-non-list-setting"))
+		;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+			...defaultExtensionState,
+			allowedCommands: ["echo", "ls"],
+			workspaceCommandListsEnabled: true,
+		})
+		editedView.rerender(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />)
+		answerSave(editedSaveId, { success: true })
+
+		await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+		editedView.unmount()
+	})
+
+	it("keeps the form dirty when a sibling setter edits a field during a pending save", async () => {
+		// The settle must recognise a user edit from every setter that can change the
+		// buffer, not only the generic field setter. Each sibling section below is
+		// driven in its own render; both run inside this one test so the suite's
+		// declared test count moves by exactly one.
+		vi.mocked(AutoApproveSettings).mockImplementation(
+			({ setCachedStateField }: React.ComponentProps<typeof AutoApproveSettings>) => (
+				<div>
+					<button
+						data-testid="edit-allow-list"
+						onClick={() => setCachedStateField("allowedCommands", ["echo", "ls"])}>
+						Edit allow list
+					</button>
+				</div>
+			),
+		)
+		vi.mocked(ExperimentalSettings).mockImplementation(
+			({ setExperimentEnabled }: React.ComponentProps<typeof ExperimentalSettings>) => (
+				<button data-testid="edit-sibling" onClick={() => setExperimentEnabled("imageGeneration", true)}>
+					Edit an experiment
+				</button>
+			),
+		)
+		vi.mocked(About).mockImplementation(({ setTelemetrySetting }: React.ComponentProps<typeof About>) => (
+			<button data-testid="edit-sibling" onClick={() => setTelemetrySetting("enabled")}>
+				Edit telemetry
+			</button>
+		))
+
+		const siblingSections = ["experimental", "about"] as const
+
+		for (const siblingSection of siblingSections) {
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				...defaultExtensionState,
+				allowedCommands: ["echo"],
+			})
+			const view = renderWithExtensionState(<SettingsView onDone={vi.fn()} targetSection="autoApprove" />, {
+				queryClient,
+			})
+
+			// A list edit starts the save, so the settle has a submission to reconcile.
+			fireEvent.click(await screen.findByTestId("edit-allow-list"))
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			fireEvent.click(screen.getByTestId("save-button"))
+			const saveId = lastSaveRequestId(postMessage)
+			expect(saveId).toBeDefined()
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeDisabled())
+
+			// While the save is pending, the user edits a field through a sibling setter.
+			view.rerender(<SettingsView onDone={vi.fn()} targetSection={siblingSection} />)
+			fireEvent.click(await screen.findByTestId("edit-sibling"))
+
+			// The host's refresh carries the submitted list, so that write landed and only
+			// the edit made during the save can keep the form dirty.
+			;(useExtensionState as ReturnType<typeof vi.fn>).mockReturnValue({
+				...defaultExtensionState,
+				allowedCommands: ["echo", "ls"],
+			})
+			view.rerender(<SettingsView onDone={vi.fn()} targetSection={siblingSection} />)
+			answerSave(saveId, { success: true })
+
+			await waitFor(() => expect(screen.getByTestId("save-button")).toBeEnabled())
+			view.unmount()
+		}
 	})
 })

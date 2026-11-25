@@ -180,10 +180,17 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	const confirmDialogHandler = useRef<() => void>()
 
 	const [cachedState, setCachedState] = useState(() => extensionState)
-	// The save waiting for the host's answer, and the form state it sent. The "unsaved changes" flag stays on until the
+	// The save waiting for the host's answer. The "unsaved changes" flag stays on until the
 	// host says it was stored, and then goes off only if the user has not edited anything since.
 	const [pendingSaveId, setPendingSaveId] = useState<string | undefined>(undefined)
-	const sentState = useRef<typeof extensionState | undefined>(undefined)
+	// Raised by every user edit to a cached field and lowered at each save dispatch. The
+	// settle reads it instead of comparing the buffer's identity, because the host's own
+	// refresh replaces the buffer as well, and an identity check cannot tell the two apart.
+	// It is deliberately not cleared when a save settles or times out: the settle has
+	// already read it, and the next dispatch resets it. `commandListsTouched` has the other
+	// lifetime - it is cleared only on a clean settle - so the two flags reset at different
+	// points by design.
+	const userEditedDuringSave = useRef(false)
 	const latestCachedState = useRef(cachedState)
 	latestCachedState.current = cachedState
 	// The live host state, read when a save settles.
@@ -363,141 +370,159 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		}
 	}, [extensionState])
 
-	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback((field, value) => {
-		// Claim ownership only when the value actually changes, because a no-op set
-		// must not own the lists. The guard appears twice so the marking stays outside
-		// the pure state update.
-		if ((field === "allowedCommands" || field === "deniedCommands") && latestCachedState.current[field] !== value) {
-			commandListsTouched.current = true
-		}
+	// One raising point for the form's dirty signal and the save settle's edit signal,
+	// so no user-edit path can mark the form dirty without telling the settle that the
+	// buffer holds work the host's own refresh did not produce.
+	const markUserEdit = useCallback(() => {
+		setChangeDetected(true)
+		userEditedDuringSave.current = true
+	}, [])
 
-		setCachedState((prevState) => {
-			if (prevState[field] === value) {
-				return prevState
+	const setCachedStateField: SetCachedStateField<keyof ExtensionStateContextType> = useCallback(
+		(field, value) => {
+			// A no-op set must own neither the lists nor the edit signal, so the guard runs
+			// before the update and stays outside the pure updater.
+			if (latestCachedState.current[field] === value) {
+				return
 			}
 
-			setChangeDetected(true)
-			return { ...prevState, [field]: value }
-		})
-	}, [])
+			// Only a changed command list is an edit the save has to claim ownership of.
+			if (field === "allowedCommands" || field === "deniedCommands") {
+				commandListsTouched.current = true
+			}
+
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, [field]: value }))
+		},
+		[markUserEdit],
+	)
 
 	const setApiConfigurationField = useCallback(
 		<K extends keyof ProviderSettings>(field: K, value: ProviderSettings[K], isUserAction: boolean = true) => {
-			setCachedState((prevState) => {
-				if (prevState.apiConfiguration[field] === value) {
-					return prevState
+			const previousValue = latestCachedState.current.apiConfiguration[field]
+
+			if (previousValue === value) {
+				return
+			}
+
+			// Helper to check if two values are semantically equal
+			const areValuesEqual = (a: any, b: any): boolean => {
+				if (a === b) return true
+				if (a == null && b == null) return true
+				if (typeof a !== typeof b) return false
+				if (typeof a === "object" && typeof b === "object") {
+					return JSON.stringify(a) === JSON.stringify(b)
 				}
+				return false
+			}
 
-				const previousValue = prevState.apiConfiguration[field]
+			// Only skip change detection for automatic initialization (not user actions)
+			// This prevents the dirty state when the component initializes and auto-syncs values
+			const isInitialSync =
+				!isUserAction &&
+				(previousValue === undefined || previousValue === "" || previousValue === null) &&
+				value !== undefined &&
+				value !== "" &&
+				value !== null
 
-				// Helper to check if two values are semantically equal
-				const areValuesEqual = (a: any, b: any): boolean => {
-					if (a === b) return true
-					if (a == null && b == null) return true
-					if (typeof a !== typeof b) return false
-					if (typeof a === "object" && typeof b === "object") {
-						return JSON.stringify(a) === JSON.stringify(b)
-					}
-					return false
-				}
+			// Also skip if it's an automatic sync with semantically equal values
+			const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
 
-				// Only skip change detection for automatic initialization (not user actions)
-				// This prevents the dirty state when the component initializes and auto-syncs values
-				const isInitialSync =
-					!isUserAction &&
-					(previousValue === undefined || previousValue === "" || previousValue === null) &&
-					value !== undefined &&
-					value !== "" &&
-					value !== null
+			if (!isInitialSync && !isAutomaticNoOpSync) {
+				markUserEdit()
+			}
 
-				// Also skip if it's an automatic sync with semantically equal values
-				const isAutomaticNoOpSync = !isUserAction && areValuesEqual(previousValue, value)
-
-				if (!isInitialSync && !isAutomaticNoOpSync) {
-					setChangeDetected(true)
-				}
-				return { ...prevState, apiConfiguration: { ...prevState.apiConfiguration, [field]: value } }
-			})
+			setCachedState((prevState) => ({
+				...prevState,
+				apiConfiguration: { ...prevState.apiConfiguration, [field]: value },
+			}))
 		},
-		[],
+		[markUserEdit],
 	)
 
-	const setExperimentEnabled: SetExperimentEnabled = useCallback((id: ExperimentId, enabled: boolean) => {
-		setCachedState((prevState) => {
-			if (prevState.experiments?.[id] === enabled) {
-				return prevState
+	const setExperimentEnabled: SetExperimentEnabled = useCallback(
+		(id: ExperimentId, enabled: boolean) => {
+			if (latestCachedState.current.experiments?.[id] === enabled) {
+				return
 			}
 
-			setChangeDetected(true)
-			return { ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, experiments: { ...prevState.experiments, [id]: enabled } }))
+		},
+		[markUserEdit],
+	)
 
-	const setTelemetrySetting = useCallback((setting: TelemetrySetting) => {
-		setCachedState((prevState) => {
-			if (prevState.telemetrySetting === setting) {
-				return prevState
+	const setTelemetrySetting = useCallback(
+		(setting: TelemetrySetting) => {
+			if (latestCachedState.current.telemetrySetting === setting) {
+				return
 			}
 
-			setChangeDetected(true)
-			return { ...prevState, telemetrySetting: setting }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, telemetrySetting: setting }))
+		},
+		[markUserEdit],
+	)
 
-	const setDebug = useCallback((debug: boolean) => {
-		setCachedState((prevState) => {
-			if (prevState.debug === debug) {
-				return prevState
+	const setDebug = useCallback(
+		(debug: boolean) => {
+			if (latestCachedState.current.debug === debug) {
+				return
 			}
 
-			setChangeDetected(true)
-			return { ...prevState, debug }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, debug }))
+		},
+		[markUserEdit],
+	)
 
-	const setImageGenerationProvider = useCallback((provider: ImageGenerationProvider) => {
-		setCachedState((prevState) => {
-			if (prevState.imageGenerationProvider !== provider) {
-				setChangeDetected(true)
+	const setImageGenerationProvider = useCallback(
+		(provider: ImageGenerationProvider) => {
+			if (latestCachedState.current.imageGenerationProvider === provider) {
+				return
 			}
 
-			return { ...prevState, imageGenerationProvider: provider }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, imageGenerationProvider: provider }))
+		},
+		[markUserEdit],
+	)
 
-	const setOpenRouterImageApiKey = useCallback((apiKey: string) => {
-		setCachedState((prevState) => {
-			if (prevState.openRouterImageApiKey !== apiKey) {
-				setChangeDetected(true)
+	const setOpenRouterImageApiKey = useCallback(
+		(apiKey: string) => {
+			if (latestCachedState.current.openRouterImageApiKey === apiKey) {
+				return
 			}
 
-			return { ...prevState, openRouterImageApiKey: apiKey }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, openRouterImageApiKey: apiKey }))
+		},
+		[markUserEdit],
+	)
 
-	const setImageGenerationSelectedModel = useCallback((model: string) => {
-		setCachedState((prevState) => {
-			if (prevState.openRouterImageGenerationSelectedModel !== model) {
-				setChangeDetected(true)
+	const setImageGenerationSelectedModel = useCallback(
+		(model: string) => {
+			if (latestCachedState.current.openRouterImageGenerationSelectedModel === model) {
+				return
 			}
 
-			return { ...prevState, openRouterImageGenerationSelectedModel: model }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, openRouterImageGenerationSelectedModel: model }))
+		},
+		[markUserEdit],
+	)
 
-	const setCustomSupportPromptsField = useCallback((prompts: Record<string, string | undefined>) => {
-		setCachedState((prevState) => {
-			const previousStr = JSON.stringify(prevState.customSupportPrompts)
-			const newStr = JSON.stringify(prompts)
-
-			if (previousStr === newStr) {
-				return prevState
+	const setCustomSupportPromptsField = useCallback(
+		(prompts: Record<string, string | undefined>) => {
+			if (JSON.stringify(latestCachedState.current.customSupportPrompts) === JSON.stringify(prompts)) {
+				return
 			}
 
-			setChangeDetected(true)
-			return { ...prevState, customSupportPrompts: prompts }
-		})
-	}, [])
+			markUserEdit()
+			setCachedState((prevState) => ({ ...prevState, customSupportPrompts: prompts }))
+		},
+		[markUserEdit],
+	)
 
 	const isSettingValid = !errorMessage
 
@@ -520,7 +545,6 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// rejected list edit would look saved.
 			const saveId = displayChanged || commandListsTouched.current ? nextSaveRequestId() : undefined
 			if (saveId) {
-				sentState.current = cachedState
 				submittedListSave.current = {
 					baselined: [lastDisplayedAllowed, lastDisplayedDenied],
 					sent: [allowedCommands ?? [], deniedCommands ?? []],
@@ -528,6 +552,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				setPendingSaveId(saveId)
 			}
 
+			// Lowered at dispatch, so an edit that lands before the post counts as one made
+			// before the save. No suspension point sits between this line and the post.
+			userEditedDuringSave.current = false
 			vscode.postMessage({
 				type: "updateSettings",
 				requestId: saveId,
@@ -698,7 +725,7 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 			// Clear the flag only when nothing is left unsaved. An edit made during the
 			// save, or a list whose write never landed, keeps the hold so a host refresh
 			// cannot replace the user's edit.
-			if (success && everyEditedWriteLanded && latestCachedState.current === sentState.current) {
+			if (success && everyEditedWriteLanded && !userEditedDuringSave.current) {
 				commandListsTouched.current = false
 				setChangeDetected(false)
 			}

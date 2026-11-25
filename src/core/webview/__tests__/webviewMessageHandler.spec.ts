@@ -2159,6 +2159,8 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 	// and `update()` records its target. Extension state stays unset.
 	// `updateSequence` and `inspectSequence` script successive call outcomes in
 	// call order. An Error element makes that call throw.
+	//
+	// One snapshot per key, plus the pre-write merge re-read.
 	type InspectedCommandList = {
 		globalValue?: string[]
 		workspaceValue?: string[]
@@ -2222,9 +2224,9 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
 		// One snapshot per command-list key. This key's scope read, write target, and
 		// rollback all derive from the same inspect(). The shadowing check reads the
-		// opposite key through its own guarded snapshot. The count is two, never
-		// more.
-		expect(inspect).toHaveBeenCalledTimes(2)
+		// opposite key through its own guarded snapshot, and the merge before the
+		// workspace write re-reads this key once. The count is three, never more.
+		expect(inspect).toHaveBeenCalledTimes(3)
 	})
 
 	it("writes the workspace-folder value at the folder target in multi-root workspaces", async () => {
@@ -2299,6 +2301,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			[
 				{ globalValue: ["keep", "drop"], workspaceValue: ["npm docker", "docker"] },
 				undefined,
+				undefined,
 				{ globalValue: ["aws", "mid-save"] },
 			],
 			true,
@@ -2338,7 +2341,12 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ globalValue: ["manual"], workspaceValue: ["docker"] }, undefined, { globalValue: ["aws", "mid-save"] }],
+			[
+				{ globalValue: ["manual"], workspaceValue: ["docker"] },
+				undefined,
+				undefined,
+				{ globalValue: ["aws", "mid-save"] },
+			],
 			true,
 		)
 
@@ -2377,6 +2385,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			[undefined, Promise.reject(new Error("disk on fire")), undefined],
 			[
 				{ globalValue: ["drop"], workspaceValue: ["npm"], workspaceFolderValue: ["pnpm docker", "docker"] },
+				undefined,
 				undefined,
 				{
 					globalValue: [],
@@ -2521,7 +2530,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 				Promise.reject(new Error("workspace locked")),
 				Promise.reject(new Error("restore also failed")),
 			],
-			[{ workspaceValue: ["docker", "old"] }, undefined, { globalValue: ["aws"] }],
+			[{ workspaceValue: ["docker", "old"] }, undefined, undefined, { globalValue: ["aws"] }],
 			true,
 		)
 
@@ -2553,7 +2562,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked"))],
-			[{ workspaceValue: ["docker"] }, undefined, new Error("inspect unavailable")],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, new Error("inspect unavailable")],
 			true,
 		)
 
@@ -2703,11 +2712,11 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
 	})
 
-	it("still promotes a hidden workspace entry when the baseline gate matches the current gate", async () => {
-		// The other side of the equality guard. The dialog displayed with the gate
-		// off, and the gate is still off. The hidden-entry result is unchanged even
-		// though the baseline names the entry. Only a gate-flipped baseline shows
-		// that the entry was ever displayed.
+	it("keeps a displayed workspace entry out of the global write when the baseline gate matches the current gate", async () => {
+		// The gate is off at display time and still off at save time. The workspace
+		// layer's "docker" is hidden now, but the baseline names it, so the dialog did
+		// show it. Keeping it stays a workspace decision: the baseline alone decides,
+		// whether or not the gate moved. Only the genuinely new "aws" promotes.
 		const { update } = mockCommandConfiguration({ workspaceValue: ["docker"] }, undefined, undefined, false)
 
 		await webviewMessageHandler(mockClineProvider, {
@@ -2716,11 +2725,12 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			commandListBaseline: { deniedCommands: ["docker"], workspaceCommandListsEnabled: false },
 		})
 
-		expect(update).toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
-		// The baseline names the entry, so the hidden-entry re-add honors it as
-		// displayed. The promoted global copy is this entry's only home after the
-		// save, and nothing remains to write back at the workspace scope.
-		expect(update).toHaveBeenCalledWith("deniedCommands", [], vscode.ConfigurationTarget.Workspace)
+		expect(update).toHaveBeenCalledWith("deniedCommands", ["aws"], vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["docker", "aws"], vscode.ConfigurationTarget.Global)
+		// The entry the baseline shows is not re-added as hidden, so the workspace
+		// layer is rewritten without it: its submitted copy is retained as workspace
+		// state, not promoted.
+		expect(mockClineProvider.contextProxy.setValue).toHaveBeenCalledWith("deniedCommands", ["aws"])
 	})
 
 	it("does not promote a baseline entry an external edit removed from the layers", async () => {
@@ -2865,6 +2875,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			[
 				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
 				undefined,
+				undefined,
 				{ globalValue: ["keep", "aws", "mid-save"] },
 			],
 			true,
@@ -2900,6 +2911,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			[
 				{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] },
 				undefined,
+				undefined,
 				{ globalValue: ["aws", "mid-save"] },
 			],
 			true,
@@ -2919,17 +2931,19 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		expect(update).toHaveBeenCalledTimes(3)
 	})
 
-	it("undoes with only this save's deletions when the re-read reports no global value", async () => {
-		// A cleared key inspects as no value at all. The compensation reads that as an
-		// empty layer and writes back only the deletion it must restore. It does not
-		// treat the absent value as a failed re-read.
+	it("clears the key instead of restoring its deletion when the re-read reports no global value", async () => {
+		// A cleared key inspects as no value at all. The layer existed at save start, so
+		// an absent re-read means a later writer deleted it during the save. That
+		// decision outranks this save's removed delta: writing "drop" back would
+		// resurrect a layer the other writer removed. The undo clears the key, and it
+		// does not treat the absent value as a failed re-read.
 		vi.mocked(mockClineProvider.contextProxy.getValue).mockImplementation((key: string) =>
 			key === "deniedCommands" ? ["keep", "drop"] : undefined,
 		)
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] }, undefined, undefined],
+			[{ globalValue: ["keep", "drop"], workspaceValue: ["docker"] }, undefined, undefined, undefined],
 			true,
 		)
 
@@ -2938,11 +2952,59 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 			updatedSettings: { deniedCommands: ["keep", "docker", "aws"] },
 		})
 
-		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", ["drop"], vscode.ConfigurationTarget.Global)
+		expect(update).toHaveBeenNthCalledWith(3, "deniedCommands", undefined, vscode.ConfigurationTarget.Global)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["drop"], vscode.ConfigurationTarget.Global)
 		expect(update).toHaveBeenCalledTimes(3)
 		// Only the plain write-failure message: the re-read did not fail.
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1)
 		expect(vscode.window.showErrorMessage).toHaveBeenCalledWith("Failed to save deniedCommands: workspace locked")
+	})
+
+	it("keeps a workspace entry another writer added during the global write", async () => {
+		// The global write is not instantaneous, and the configuration API offers no
+		// compare-and-set. While it runs, a third party adds "concurrent" to the
+		// workspace layer. The workspace write re-reads that layer and merges the
+		// addition, so the save does not overwrite it. The entry the user deleted
+		// ("drop") is in the save-start workspace layer, so it is not a mid-save
+		// addition and stays deleted.
+		const update = vi.fn()
+		const config = makeWorkspaceConfiguration({ workspaceCommandListsEnabled: true })
+		let workspaceLayer = ["keep", "drop"]
+		// The double reports the two layers the save path reads. The list values are
+		// the string lists the production call asks for.
+		const inspect: vscode.WorkspaceConfiguration["inspect"] = <T>(section: string) => ({
+			key: section,
+			globalValue: ["keep"] as T,
+			workspaceValue: workspaceLayer as T,
+		})
+		config.inspect = inspect
+		config.update = update
+		update.mockImplementation(async (_key: string, _value: unknown, target?: number) => {
+			if (target === vscode.ConfigurationTarget.Global) {
+				workspaceLayer = [...workspaceLayer, "concurrent"]
+			}
+			return undefined
+		})
+		vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+		await webviewMessageHandler(mockClineProvider, {
+			type: "updateSettings",
+			updatedSettings: { deniedCommands: ["keep"] },
+		})
+
+		// The submitted list drops "drop", so the workspace write keeps "keep" and adds
+		// the entry that arrived mid-save.
+		expect(update).toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
+		expect(update).not.toHaveBeenCalledWith("deniedCommands", ["keep"], vscode.ConfigurationTarget.Workspace)
+		expect(update).not.toHaveBeenCalledWith(
+			"deniedCommands",
+			["keep", "drop", "concurrent"],
+			vscode.ConfigurationTarget.Workspace,
+		)
 	})
 
 	it("clears the key only when the undo's re-read finds no layer", async () => {
@@ -2954,7 +3016,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, undefined],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, undefined],
 			true,
 		)
 
@@ -2974,7 +3036,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update: clearedMidSave } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ globalValue: ["aws"], workspaceValue: ["docker"] }, undefined, undefined],
+			[{ globalValue: ["aws"], workspaceValue: ["docker"] }, undefined, undefined, undefined],
 			true,
 		)
 
@@ -3008,7 +3070,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: ["aws"] }],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
 			true,
 		)
 
@@ -3033,7 +3095,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update: emptyWrite } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: [] }],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: [] }],
 			true,
 		)
 
@@ -3063,7 +3125,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: [] }],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: [] }],
 			true,
 		)
 
@@ -3089,7 +3151,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked")), undefined],
-			[{ globalValue: [], workspaceValue: ["docker"] }, undefined, { globalValue: ["aws"] }],
+			[{ globalValue: [], workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
 			true,
 		)
 
@@ -3108,7 +3170,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 		const { update } = mockCommandConfiguration(
 			{},
 			[undefined, Promise.reject(new Error("workspace locked"))],
-			[{ workspaceValue: ["docker"] }, undefined, new Error("inspect unavailable")],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, new Error("inspect unavailable")],
 			true,
 		)
 
@@ -3135,7 +3197,7 @@ describe("webviewMessageHandler - command list scope-aware persistence", () => {
 				Promise.reject(new Error("workspace locked")),
 				Promise.reject(new Error("restore also failed")),
 			],
-			[{ workspaceValue: ["docker"] }, undefined, { globalValue: ["aws"] }],
+			[{ workspaceValue: ["docker"] }, undefined, undefined, { globalValue: ["aws"] }],
 			true,
 		)
 
@@ -4277,7 +4339,15 @@ describe("webviewMessageHandler - requestCommands", () => {
 	})
 
 	it("includes skill slug commands and dedupes duplicate skill names while preserving first skill entry", async () => {
-		mockGetCommands.mockResolvedValue([])
+		mockGetCommands.mockResolvedValue([
+			{
+				name: "deploy",
+				content: "existing command",
+				source: "project",
+				filePath: "/mock/workspace/.roo/commands/deploy.md",
+				description: "Deploy command",
+			},
+		])
 
 		const getTaskMode = vi.fn().mockResolvedValue("code")
 		vi.mocked(mockClineProvider.getCurrentTask).mockReturnValue({
@@ -4321,24 +4391,29 @@ describe("webviewMessageHandler - requestCommands", () => {
 		expect(commandMessageCall).toBeDefined()
 
 		const commandMessage = commandMessageCall?.[0]
-		expect(commandMessage?.commands).toEqual(
-			expect.arrayContaining([
-				{
-					name: "skill-slug-entry",
-					source: "project",
-					filePath: "/mock/.roo/skills/skill-slug-entry/SKILL.md",
-					description: "Primary skill slug",
-				},
-				{
-					name: "another-skill-slug",
-					source: "global",
-					filePath: "/mock/.roo/skills/another-skill-slug/SKILL.md",
-					description: "Another skill-generated command",
-				},
-			]),
-		)
-
-		expect(commandMessage?.commands?.filter((command) => command.name === "skill-slug-entry")).toHaveLength(1)
+		// The complete array in order: the discovered command first, then the skills in
+		// discovery order. The duplicate skill contributes nothing, and the surviving
+		// copy is the first one seen.
+		expect(commandMessage?.commands).toEqual([
+			{
+				name: "deploy",
+				source: "project",
+				filePath: "/mock/workspace/.roo/commands/deploy.md",
+				description: "Deploy command",
+			},
+			{
+				name: "skill-slug-entry",
+				source: "project",
+				filePath: "/mock/.roo/skills/skill-slug-entry/SKILL.md",
+				description: "Primary skill slug",
+			},
+			{
+				name: "another-skill-slug",
+				source: "global",
+				filePath: "/mock/.roo/skills/another-skill-slug/SKILL.md",
+				description: "Another skill-generated command",
+			},
+		])
 	})
 
 	it("adds skill-backed command entries without overriding existing command names", async () => {

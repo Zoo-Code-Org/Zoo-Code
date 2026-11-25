@@ -3560,8 +3560,13 @@ export class ClineProvider
 		// One gate read and one resolver pass per call, so the effective lists
 		// and the gate value always describe one configuration state.
 		const gateEnabled = workspaceCommandListsEnabled()
-		const allowScopes = readCommandListScopes("allowedCommands", stateValues.allowedCommands)
-		const denyScopes = readCommandListScopes("deniedCommands", stateValues.deniedCommands)
+		// The two raw layers are read here, not from `stateValues`: two awaits
+		// (`getCustomModes`, `getAllowList`) sit between that snapshot and this
+		// point, and these layers feed `checkAutoApproval`. A save landing during
+		// either await would otherwise mix a pre-save global layer with a
+		// post-save workspace layer.
+		const allowScopes = readCommandListScopes("allowedCommands", this.contextProxy.getValue("allowedCommands"))
+		const denyScopes = readCommandListScopes("deniedCommands", this.contextProxy.getValue("deniedCommands"))
 		const effectiveCommandLists = resolveEffectiveCommandLists(allowScopes, denyScopes, gateEnabled)
 
 		// Return the same structure as before.

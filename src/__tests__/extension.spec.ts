@@ -232,17 +232,28 @@ vi.mock("../api/providers/fetchers/modelCache", () => ({
 describe("extension.ts", () => {
 	let mockContext: vscode.ExtensionContext
 	let globalStateValues: Map<string, unknown>
+	// Keys whose write must reject, so the real seed helper's failure path runs
+	// against the Memento boundary rather than a module double.
+	let rejectingCommandListKeys: Set<string>
 	let settingsUpdatedHandler: ((data: Record<string, never>) => void | Promise<void>) | undefined
 
 	beforeEach(() => {
 		vi.clearAllMocks()
 
 		globalStateValues = new Map<string, unknown>()
+		rejectingCommandListKeys = new Set<string>()
 		mockContext = {
 			extensionPath: "/test/path",
 			globalState: {
 				get: vi.fn((key: string) => globalStateValues.get(key)),
-				update: vi.fn(),
+				// Stateful, so a later read sees what an earlier write stored, and
+				// rejectable per key, so one seed can fail after the other succeeded.
+				update: vi.fn(async (key: string, value: unknown) => {
+					if (rejectingCommandListKeys.has(key)) {
+						throw new Error("seed state write failed")
+					}
+					globalStateValues.set(key, value)
+				}),
 			},
 			subscriptions: [],
 		} as unknown as vscode.ExtensionContext
@@ -588,50 +599,46 @@ describe("extension.ts", () => {
 		test("seeds both command lists before initializing the terminal registry", async () => {
 			// A seed rejection must fail activation before the registry initializes. The
 			// host may skip deactivate(), and only it releases the registry's listeners.
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
 			const order: string[] = []
-			const seedCommandList = vi.fn(async (_globalState: vscode.Memento, configKey: string): Promise<void> => {
-				order.push(`seed:${configKey}`)
+			vi.mocked(mockContext.globalState.update).mockImplementation(async (key: string, value: unknown) => {
+				order.push(`seed:${key}`)
+				globalStateValues.set(key, value)
 			})
-			vi.doMock("../utils/seedAllowedCommands", () => ({ seedCommandList }))
-			try {
-				const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
-				vi.mocked(TerminalRegistry.initialize).mockImplementation(() => void order.push("initialize"))
 
-				const { activate } = await import("../extension")
-				await activate(mockContext)
+			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			vi.mocked(TerminalRegistry.initialize).mockImplementation(() => void order.push("initialize"))
 
-				expect(order).toEqual(["seed:allowedCommands", "seed:deniedCommands", "initialize"])
-				expect(TerminalRegistry.initialize).toHaveBeenCalledTimes(1)
-			} finally {
-				vi.doUnmock("../utils/seedAllowedCommands")
-			}
+			const { activate } = await import("../extension")
+			await activate(mockContext)
+
+			expect(order).toEqual(["seed:allowedCommands", "seed:deniedCommands", "initialize"])
+			expect(TerminalRegistry.initialize).toHaveBeenCalledTimes(1)
 		})
 
 		test("aborts activation before the terminal registry is initialized when seeding rejects", async () => {
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
-			try {
-				const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
-				const { ClineProvider } = await import("../core/webview/ClineProvider")
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
 
-				const { activate } = await import("../extension")
-				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+			const { TerminalRegistry } = await import("../integrations/terminal/TerminalRegistry")
+			const { ClineProvider } = await import("../core/webview/ClineProvider")
 
-				// The seed rejection reaches the host unchanged; nothing downstream runs.
-				expect(TerminalRegistry.initialize).not.toHaveBeenCalled()
-				expect(ClineProvider).not.toHaveBeenCalled()
-			} finally {
-				vi.doUnmock("../utils/seedAllowedCommands")
-			}
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+			// The seed rejection reaches the host unchanged; nothing downstream runs.
+			expect(TerminalRegistry.initialize).not.toHaveBeenCalled()
+			expect(ClineProvider).not.toHaveBeenCalled()
 		})
 
 		test("shuts down the telemetry service before propagating a seed rejection", async () => {
 			// The seed runs after telemetry registers. The host may skip `deactivate()` on
 			// a failed activation, so this path must shut telemetry down itself.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
 			const teardownOrder: string[] = []
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
@@ -661,16 +668,15 @@ describe("extension.ts", () => {
 				await expect(activation).rejects.toThrow("seed state write failed")
 			} finally {
 				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
 			}
 		})
 
 		test("logs a rejected telemetry shutdown without masking the seed rejection", async () => {
 			// A rejecting shutdown must be logged, and the seed error must still
 			// reach the host as the activation failure.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
 			const teardownOrder: string[] = []
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
@@ -680,7 +686,6 @@ describe("extension.ts", () => {
 				return Promise.reject(new Error("shutdown drain failed"))
 			})
 			try {
-				const vscode = await import("vscode")
 				const { activate } = await import("../extension")
 
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
@@ -694,7 +699,6 @@ describe("extension.ts", () => {
 				expect(teardownOrder).toEqual(["telemetry-shutdown"])
 			} finally {
 				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
 			}
 		})
 
@@ -702,9 +706,9 @@ describe("extension.ts", () => {
 			// The host may skip `deactivate()` on a failed activation, so this path must
 			// dispose the channel itself. It goes last, because earlier teardown steps log
 			// through it.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
 			const teardownOrder: string[] = []
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
@@ -713,7 +717,6 @@ describe("extension.ts", () => {
 				return Promise.resolve()
 			})
 			try {
-				const vscode = await import("vscode")
 				// The fixed-object factory double returns the same channel that `activate`
 				// creates. Arming dispose then observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
@@ -729,16 +732,15 @@ describe("extension.ts", () => {
 				expect(mockContext.subscriptions).toContain(channel)
 			} finally {
 				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
 			}
 		})
 
 		test("clears the persistence trace sink before disposing the output channel when seeding rejects", async () => {
 			// The trace sink logs through the output channel, so the failure path
 			// must clear it before disposing the channel.
-			vi.doMock("../utils/seedAllowedCommands", () => ({
-				seedCommandList: vi.fn().mockRejectedValue(new Error("seed state write failed")),
-			}))
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
 			const teardownOrder: string[] = []
 			// Clearing passes undefined, which restores the default sink. That call marks the order assertion.
 			const setPersistenceTraceSink = vi.fn((sink?: unknown) => {
@@ -757,7 +759,6 @@ describe("extension.ts", () => {
 				return Promise.resolve()
 			})
 			try {
-				const vscode = await import("vscode")
 				// The same channel `activate` creates, from the same factory double.
 				// Arming dispose observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
@@ -775,9 +776,42 @@ describe("extension.ts", () => {
 				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(2, undefined)
 			} finally {
 				shutdown.mockReset()
-				vi.doUnmock("../utils/seedAllowedCommands")
 				vi.doUnmock("../core/task-persistence/persistenceTrace")
 			}
+		})
+
+		test("keeps a stored allow list when the deny-list seed write fails", async () => {
+			// The two seeds are separate awaited calls, so the allow write lands before
+			// the deny write fails. Activation still aborts.
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
+
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+			expect(globalStateValues.get("allowedCommands")).toEqual(["git"])
+			expect(globalStateValues.get("deniedCommands")).toBeUndefined()
+		})
+
+		test("preserves the stored allow list and retries only the failed deny seed", async () => {
+			// The per-key guard makes the retry cheap: the allow key is set, so only the
+			// denied key is attempted again.
+			const vscode = await import("vscode")
+			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+			rejectingCommandListKeys.add("deniedCommands")
+
+			const { activate } = await import("../extension")
+			await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+
+			rejectingCommandListKeys.clear()
+			vi.mocked(mockContext.globalState.update).mockClear()
+
+			await activate(mockContext)
+
+			expect(vi.mocked(mockContext.globalState.update).mock.calls).toEqual([["deniedCommands", ["docker"]]])
+			expect(globalStateValues.get("allowedCommands")).toEqual(["git"])
+			expect(globalStateValues.get("deniedCommands")).toEqual(["docker"])
 		})
 
 		test("does not shut down telemetry when activation completes", async () => {

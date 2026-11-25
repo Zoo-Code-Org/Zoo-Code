@@ -317,7 +317,8 @@
 						"git diff",
 						"git show"
 					],
-					"description": "%commands.allowedCommands.description%"
+					"description": "%commands.allowedCommands.description%",
+					"scope": "resource"
 				},
 				"zoo-code.deniedCommands": {
 					"type": "array",
@@ -325,7 +326,8 @@
 						"type": "string"
 					},
 					"default": [],
-					"description": "%commands.deniedCommands.description%"
+					"description": "%commands.deniedCommands.description%",
+					"scope": "resource"
 				},
 				"zoo-code.workspaceCommandListsEnabled": {
 					"type": "boolean",

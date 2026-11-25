@@ -99,6 +99,17 @@ function sanitizeGlobalSettings(rawGlobalSettings: unknown): {
 
 	for (const [key, rawValue] of Object.entries(rawGlobalSettings)) {
 		const path = `globalSettings.${key}`
+
+		// The schema accepts this key, so without this branch the import reports
+		// success and stores a value the enforcement path never reads: the gate is
+		// read from VS Code user settings only.
+		if (key === "workspaceCommandListsEnabled") {
+			warnings.push(
+				`Setting "${path}" was skipped: The workspace command-list gate applies only from VS Code user settings, not from an imported file.`,
+			)
+			continue
+		}
+
 		const schema = globalSettingsShape[key as keyof GlobalSettings]
 
 		if (!schema) {
@@ -355,6 +366,29 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 }
 
 /**
+ * Writes one imported command list into the user settings file, retrying a
+ * failed write once.
+ *
+ * @returns `true` when a write succeeded, `false` when both attempts failed.
+ */
+async function mirrorCommandList(key: "allowedCommands" | "deniedCommands", imported: string[]): Promise<boolean> {
+	// Two attempts: a transient failure retries, a persistent one is reported by
+	// the caller.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			await vscode.workspace
+				.getConfiguration(Package.name)
+				.update(key, imported, vscode.ConfigurationTarget.Global)
+			return true
+		} catch (error) {
+			console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
+		}
+	}
+
+	return false
+}
+
+/**
  * Writes the command lists an import carried into the user settings file.
  *
  * An import stores the lists only in extension state. A later save reads the
@@ -363,24 +397,32 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
  * entries a layer, so the save keeps them.
  *
  * A key the import did not carry is skipped, so the state copy never becomes
- * the source. A failed write is logged and not raised, because the import
- * itself succeeded.
+ * the source. A failed write is retried once and then reported to the user
+ * with the manual route; the import itself still succeeds. A later save can
+ * still drop the entries until they are stored in user settings, which is why
+ * the report names that route.
  *
  * @param globalSettings - The global settings an import produced, or `undefined`.
  */
 export async function mirrorImportedCommandLists(globalSettings: GlobalSettings | undefined): Promise<void> {
+	const failedKeys: string[] = []
+
 	for (const key of ["allowedCommands", "deniedCommands"] as const) {
 		const imported = globalSettings?.[key]
-		if (Array.isArray(imported)) {
-			try {
-				await vscode.workspace
-					.getConfiguration(Package.name)
-					.update(key, imported, vscode.ConfigurationTarget.Global)
-			} catch (error) {
-				// The import succeeded. The lists work until a save rewrites both homes.
-				console.warn(`Settings import: could not mirror ${key} into the global configuration:`, error)
-			}
+		if (!Array.isArray(imported)) {
+			continue
 		}
+
+		if (!(await mirrorCommandList(key, imported))) {
+			failedKeys.push(key)
+		}
+	}
+
+	if (failedKeys.length > 0) {
+		await vscode.window.showWarningMessage(
+			`Settings import: the command list(s) ${failedKeys.join(", ")} could not be written to VS Code user settings. ` +
+				`Set them in user settings, or import the file again. Until they are stored there, a later save can remove the imported entries.`,
+		)
 	}
 }
 

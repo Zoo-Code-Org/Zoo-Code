@@ -50,12 +50,17 @@ export function commandListConfiguration(folderResource?: vscode.Uri): vscode.Wo
  * The cwd arrives canonical. The registry holds roots as opened, so the lookup
  * compares each root's real path. A lexical compare alone would let an outer
  * root claim a symlinked deeper root's directory and skip its deny entries.
- * The deepest match wins, like VS Code's own containment. A root whose real
- * path does not resolve falls back to its registered path. That fallback can
- * only narrow the layer that applies. It can never widen approvals.
+ * The deepest match wins, like VS Code's own containment.
  *
- * @param cwd - The task's working directory. Empty, absent, or unmatched gives
- * `undefined` and keeps the first-folder configuration.
+ * A root whose real path does not resolve bounds nothing reliable: its real
+ * path is unknown, so no candidate can be shown to contain the cwd on its
+ * behalf. The lookup then returns `undefined`, and no enclosing root approves
+ * a command by standing in for that root. Enforcement reads the global layer
+ * only, and the folder layer contributes nothing to the decision.
+ *
+ * @param cwd - The task's working directory. Empty, absent, unmatched, or
+ * bounded only by an unresolvable root gives `undefined` and keeps the
+ * first-folder configuration.
  * @returns The containing folder's registry URI. It stays uncanonicalized,
  * because folder-scoped configuration resolves against the registry.
  */
@@ -73,6 +78,12 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 		let matchedLength = 0
 		for (const candidate of vscode.workspace.workspaceFolders ?? []) {
 			const rootPath = realPathOrRegistered(candidate.uri.fsPath)
+			if (rootPath === undefined) {
+				// The root's real path is unknown, so this candidate cannot be
+				// compared. Matching the cwd against the other roots would let one
+				// of them decide for a directory this root may own.
+				return undefined
+			}
 			// A filesystem root (`/`, `C:\`) already ends in a separator. A second separator stops child matching.
 			const childPrefix = rootPath.endsWith(path.sep) ? rootPath : rootPath + path.sep
 			if ((cwd === rootPath || cwd.startsWith(childPrefix)) && rootPath.length > matchedLength) {
@@ -87,15 +98,20 @@ export function commandListFolderForResource(cwd?: string): vscode.Uri | undefin
 }
 
 /**
- * The path that a workspace root compares by: its real path, or the registered
- * path when the real path does not resolve. The cwd is already canonical. A
- * fallback here can only narrow matching, and it can never widen approvals.
+ * The path that a workspace root compares by: its real path. The cwd is
+ * already canonical, so the two sides agree only when both are. The native
+ * resolver reports the on-disk spelling, which is what the cwd arrives as. The
+ * JavaScript resolver keeps the caller's spelling on Windows, so a root opened
+ * under different casing would never match a canonical cwd.
+ *
+ * A root that does not resolve gives `undefined`, which drops the folder layer
+ * rather than comparing the root by a path the filesystem never confirmed.
  */
-function realPathOrRegistered(fsPath: string): string {
+function realPathOrRegistered(fsPath: string): string | undefined {
 	try {
-		return fs.realpathSync(fsPath)
+		return fs.realpathSync.native(fsPath)
 	} catch {
-		return fsPath
+		return undefined
 	}
 }
 
@@ -255,8 +271,7 @@ export interface CommandListBaselineClassification {
  * @param input.hiddenWorkspaceEntries - Workspace entries the dialog did not
  * display.
  * @param input.gateAtDisplay - The gate as the dialog showed it, if it sent it.
- * @param input.gateNow - Reads the gate as it stands now. It is called only
- * when `gateAtDisplay` is present, as the display-time comparison requires.
+ * A sender that sent no value writes its hidden set unclassified.
  * @returns The externally added entries, the split source, and the promotion
  * hidden entries.
  */
@@ -268,7 +283,6 @@ export function classifyCommandListBaseline(input: {
 	globalLayerAtSaveStart: string[] | undefined
 	hiddenWorkspaceEntries: string[]
 	gateAtDisplay: boolean | undefined
-	gateNow: () => boolean
 }): CommandListBaselineClassification {
 	const {
 		baseline,
@@ -278,7 +292,6 @@ export function classifyCommandListBaseline(input: {
 		globalLayerAtSaveStart,
 		hiddenWorkspaceEntries,
 		gateAtDisplay,
-		gateNow,
 	} = input
 
 	// A file entry the dialog never showed looks like a user deletion: in the file,
@@ -316,13 +329,13 @@ export function classifyCommandListBaseline(input: {
 					(currentScopes.global.includes(entry) && globalLayerAtSaveStart === undefined),
 			)
 		: [...incoming, ...externallyAdded]
-	// The baseline carries the gate as the dialog displayed it. If the gate
-	// flipped since, the hidden set can hold entries the user did see. Keeping
-	// a displayed entry must then stay a workspace decision. It must not become
-	// a promotion into the global layer. A baseline without the gate slot keeps
-	// the current result.
+	// A hidden entry the baseline shows was displayed, so keeping it stays a
+	// workspace decision. It must not become a promotion into the global layer,
+	// whether or not the gate moved since the dialog read it. An entry absent
+	// from the baseline was never displayed and may still be promoted. A sender
+	// with no baseline writes its hidden set unclassified.
 	const promotionHiddenEntries =
-		gateAtDisplay === undefined || gateAtDisplay === gateNow()
+		gateAtDisplay === undefined
 			? hiddenWorkspaceEntries
 			: hiddenWorkspaceEntries.filter((entry) => !Array.isArray(baseline) || !baseline.includes(entry))
 
@@ -412,11 +425,16 @@ export async function rollbackFailedCommandListWrite(input: {
 		freshGlobalValue.length === globalWrite.length &&
 		freshGlobalValue.every((entry) => globalWrite.includes(entry))
 	try {
-		if (globalUndo.length === 0 && (!globalLayerExistsNow || ownWriteIntact)) {
-			// The re-read found no layer at all, or found only this save's own write over
-			// an absent start, and nothing remains to restore. No layer at all means
-			// absent from the start, or cleared mid-save. Clear the key rather than
-			// materialize an empty layer.
+		if (!globalLayerExistsNow) {
+			// The key had a layer at save start, so its absence now is a deletion by a
+			// later writer. That decision outranks this save's removed delta, exactly as
+			// another writer's `[]` does. Writing the removed entries back would
+			// resurrect a layer the user deleted.
+			await input.writeGlobalLayer(undefined)
+		} else if (globalUndo.length === 0 && ownWriteIntact) {
+			// The re-read found only this save's own write over an absent start, and
+			// nothing remains to restore. Clear the key rather than materialize an
+			// empty layer that no user created.
 			await input.writeGlobalLayer(undefined)
 		} else {
 			await input.writeGlobalLayer(globalUndo)
