@@ -26,6 +26,19 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 export const TOKEN_BUFFER_PERCENTAGE = 0.1
 
 /**
+ * Thrown by the Task call sites when context management reports a
+ * no-progress outcome (issue 1254 review, taltas thread 4695751055): the
+ * history cannot be shrunk, so resending it unchanged would fail again.
+ * The API request catch block re-throws this error without retrying.
+ */
+export class ContextManagementNoProgressError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ContextManagementNoProgressError"
+	}
+}
+
+/**
  * Counts tokens for user content using the provider's token counting implementation.
  *
  * @param {Array<Anthropic.Messages.ContentBlockParam>} content - The content to count tokens for
@@ -73,6 +86,10 @@ export type TruncationResult = {
 	messages: ApiMessage[]
 	truncationId: string
 	messagesRemoved: number
+	/** True when a zero-removal round degraded an oversized tool result instead of reporting success. */
+	degraded?: boolean
+	/** True when no progress could be made (nothing removed and nothing degraded). */
+	noProgress?: boolean
 }
 
 /**
@@ -126,11 +143,128 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 	const messagesToRemove = rawMessagesToRemove - (rawMessagesToRemove % 2)
 
 	if (messagesToRemove <= 0) {
-		// Nothing to truncate
+		// Nothing to truncate by sliding window. Instead of reporting success
+		// with no change (issue 1254), degrade the largest eligible oversized
+		// tool_result content while preserving its tool_use_id pairing. If no
+		// eligible tool result can shrink, report a no-progress outcome so the
+		// caller can escalate instead of retrying forever.
+		const eligible: { index: number; size: number; blockIndex: number }[] = []
+		messages.forEach((msg, index) => {
+			// The sink (getEffectiveApiHistory) never serves messages before the
+			// latest summary, so clearing one cannot shrink model-facing tokens.
+			// Candidates start at the same boundary the recount uses.
+			if (index < boundary) return
+			if (msg.truncationParent || msg.isTruncationMarker) return
+			const content = msg.content
+			if (!Array.isArray(content)) return
+			content.forEach((block, blockIndex) => {
+				if (block && typeof block === "object" && (block as { type?: string }).type === "tool_result") {
+					const b = block as { content?: unknown }
+					const size =
+						typeof b.content === "string"
+							? b.content.length
+							: Array.isArray(b.content) && b.content.length > 0
+								? JSON.stringify(b.content).length
+								: 0
+					// Only oversized results are eligible for degradation. An empty
+					// array serializes to a non-empty string, but clearing it cannot
+					// shrink the token count, so it must stay ineligible.
+					if (size > 0) {
+						// Preserve pairing: require a preceding assistant tool_use with matching id.
+						const toolUseId = (block as { tool_use_id?: string }).tool_use_id
+						let paired = false
+						if (index > 0) {
+							const prev = messages[index - 1]
+							const prevContent = prev?.content
+							if (Array.isArray(prevContent)) {
+								paired = prevContent.some(
+									(pb) =>
+										pb &&
+										typeof pb === "object" &&
+										(pb as { type?: string }).type === "tool_use" &&
+										(toolUseId === undefined || (pb as { id?: string }).id === toolUseId),
+								)
+							}
+						}
+						if (paired) {
+							eligible.push({ index, size, blockIndex })
+						}
+					}
+				}
+			})
+		})
+
+		if (eligible.length === 0) {
+			return {
+				messages,
+				truncationId,
+				messagesRemoved: 0,
+				noProgress: true,
+			}
+		}
+
+		// Degrade the largest eligible tool result (one step per round). Only
+		// the selected block loses its content: a message can carry several
+		// parallel tool results, and clearing the others is data loss.
+		eligible.sort((a, b) => b.size - a.size)
+		const targetIndex = eligible[0].index
+		const targetBlockIndex = eligible[0].blockIndex
+		const targetBlock = (() => {
+			const content = messages[targetIndex]?.content
+			return Array.isArray(content) ? content[targetBlockIndex] : undefined
+		})()
+		const degradedMessages = messages.map((msg, index) => {
+			if (index !== targetIndex) return msg
+			const content = Array.isArray(msg.content) ? [...msg.content] : msg.content
+			if (Array.isArray(content)) {
+				const newContent = content.map((block, blockIndex) => {
+					if (
+						blockIndex === targetBlockIndex &&
+						block &&
+						typeof block === "object" &&
+						(block as { type?: string }).type === "tool_result"
+					) {
+						return { ...(block as unknown as Record<string, unknown>), content: "" }
+					}
+					return block
+				})
+				return { ...msg, content: newContent } as ApiMessage
+			}
+			return msg
+		})
+
+		// Preserve the original result on a hidden marker so a rewind can
+		// restore the un-degraded history (issue 1254 review, taltas thread
+		// 4695751065). The marker is hidden from every API-bound slice by its
+		// isTruncationMarker flag — native providers (Anthropic, Bedrock)
+		// serialize content blocks as-is, so the original must NOT ride on the
+		// cleared block itself or it would be sent straight back to the API.
+		const degradedOriginals =
+			targetBlock !== undefined
+				? [
+						{
+							index: targetIndex,
+							blockIndex: targetBlockIndex,
+							content: (targetBlock as { content?: unknown }).content,
+						},
+					]
+				: undefined
+		if (degradedOriginals) {
+			degradedMessages.push({
+				role: "user",
+				content: `[Tool result degradation: oversized result cleared to reduce context]`,
+				ts: (messages[targetIndex]?.ts ?? Date.now()) + 1,
+				isTruncationMarker: true,
+				truncationId,
+				degradedOriginals,
+			})
+		}
+
 		return {
-			messages,
+			messages: degradedMessages,
 			truncationId,
 			messagesRemoved: 0,
+			degraded: true,
 		}
 	}
 
@@ -294,6 +428,13 @@ export type ContextManagementResult = SummarizeResponse & {
 	truncationId?: string
 	messagesRemoved?: number
 	newContextTokensAfterTruncation?: number
+	/**
+	 * True only when the round ended unable to reduce the context: nothing
+	 * removable and no degradation candidate, or a degrade whose recount did
+	 * not shrink. A condensation error below the truncation limit is NOT
+	 * no-progress: the original history still fits, so the request proceeds.
+	 */
+	noProgress?: boolean
 }
 
 /**
@@ -397,7 +538,36 @@ export async function manageContext({
 
 	// Fall back to sliding window truncation if needed
 	if (prevContextTokens > allowedTokens) {
+		// The boundary of the ORIGINAL history: the latest summary anchors the
+		// same fresh-start slice the sink uses, so the estimate below covers
+		// exactly what the API still receives before this round (issue 1254).
+		let originalLastSummaryIndex = -1
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].isSummary) {
+				originalLastSummaryIndex = i
+				break
+			}
+		}
+		const originalBoundary = originalLastSummaryIndex === -1 ? 0 : originalLastSummaryIndex
+
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
+
+		if (truncationResult.noProgress) {
+			error =
+				"Unable to reduce context: no messages removable and no oversized tool result eligible for degradation."
+			return {
+				messages,
+				prevContextTokens,
+				summary: "",
+				cost,
+				error,
+				errorDetails,
+				truncationId: truncationResult.truncationId,
+				messagesRemoved: 0,
+				newContextTokensAfterTruncation: prevContextTokens,
+				noProgress: true,
+			}
+		}
 
 		// Calculate new context tokens after truncation by counting the messages the
 		// API still receives. The sink's fresh-start slice (getEffectiveApiHistory)
@@ -436,6 +606,59 @@ export async function manageContext({
 					[{ type: "text", text: content }],
 					apiHandler,
 				)
+			}
+		}
+
+		// A degraded round must shrink the recounted total before it reports
+		// success (issue 1254); otherwise the caller would retry a round that
+		// cannot make progress. Both sides of the comparison must use the SAME
+		// token counter (issue 1254 review, taltas thread 4695751075):
+		// prevContextTokens carries the API-reported cumulative usage, which
+		// includes cache reads and provider accounting the local estimator
+		// never sees, so comparing the fresh estimate against it can reject a
+		// reduction that really shrank the history. Recount the original
+		// effective slice with the same estimator instead.
+		// Only the degradation path consumes the original-history recount:
+		// the comparison below is gated on truncationResult.degraded, and
+		// running the loop for ordinary truncation re-tokenized the removed
+		// oversized results for nothing (issue 1254 review).
+		if (truncationResult.degraded) {
+			const originalEffectiveMessages = messages.filter(
+				(msg, index) => index >= originalBoundary && !msg.truncationParent && !msg.isTruncationMarker,
+			)
+			let prevEstimatedTokens = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
+			for (const msg of originalEffectiveMessages) {
+				const content = msg.content
+				if (Array.isArray(content)) {
+					prevEstimatedTokens += await estimateTokenCount(content, apiHandler)
+				} else if (typeof content === "string") {
+					prevEstimatedTokens += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
+				}
+			}
+			// Success must clear BOTH measures (issue 1254 review round 8): the
+			// same-estimator check rejects a round that did not shrink the
+			// recounted slice, and the caller-visible check rejects a round whose
+			// recount is not lower than the prevContextTokens value the caller
+			// compares against — without it the caller would loop on a round
+			// that cannot make progress.
+			if (
+				newContextTokensAfterTruncation >= prevEstimatedTokens ||
+				newContextTokensAfterTruncation >= prevContextTokens
+			) {
+				// The round failed: handing back the degraded history would persist
+				// cleared tool_result content, so the caller keeps the original.
+				return {
+					messages,
+					prevContextTokens,
+					summary: "",
+					cost,
+					error: "Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+					errorDetails,
+					truncationId: truncationResult.truncationId,
+					messagesRemoved: 0,
+					newContextTokensAfterTruncation,
+					noProgress: true,
+				}
 			}
 		}
 

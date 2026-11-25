@@ -42,6 +42,7 @@ import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 import { manageContext } from "../../context-management"
+import { ContextManagementNoProgressError } from "../../context-management"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -662,7 +663,7 @@ describe("Cline", () => {
 			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Output token limit reached"))
 		})
 
-		it("retries from a fresh attempt count when the user confirms", async () => {
+		it("re-adds the saved user turn exactly once when the user confirms", async () => {
 			const task = await createAutoApprovedTask()
 			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 			const attemptApiRequestSpy = vi
@@ -675,7 +676,167 @@ describe("Cline", () => {
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 
-			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+			// The retry bumps the attempt count; re-insertion of the saved
+			// turn is tracked by userMessageWasRemoved, not by the count
+			// (PR 2696 review round 7).
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 1])
+			// The failed attempt saved the turn; the confirmed retry must not
+			// persist a second copy.
+			const savedTurns = task.apiConversationHistory.filter(
+				(m) =>
+					m.role === "user" &&
+					Array.isArray(m.content) &&
+					m.content.some((b) => (b as { text?: string }).text === "long request"),
+			)
+			expect(savedTurns).toHaveLength(1)
+		})
+
+		it("keeps the recovery marker when the confirmed retry removes the saved turn", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// Context recovery ran before the stream failed: the marker
+					// (role "user") now trails the saved turn, so the history
+					// tail is not this attempt's turn.
+					task.apiConversationHistory.push({
+						role: "user",
+						content: "[Tool result degradation: oversized result cleared to reduce context]",
+						ts: Date.now() + 1,
+						isTruncationMarker: true,
+						truncationId: "trunc-retry",
+						degradedOriginals: [{ index: 0, blockIndex: 0, content: "original" }],
+					})
+					return truncatedStream()
+				})
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			// The retry must remove the saved turn, not the marker: the marker
+			// carries the degradedOriginals a later rewind restores (PR 2696
+			// review round 8).
+			const marker = task.apiConversationHistory.find((m) => m.isTruncationMarker)
+			expect(marker?.truncationId).toBe("trunc-retry")
+			expect(marker?.degradedOriginals?.[0]?.content).toBe("original")
+			const savedTurns = task.apiConversationHistory.filter(
+				(m) =>
+					m.role === "user" &&
+					Array.isArray(m.content) &&
+					m.content.some((b) => (b as { text?: string }).text === "long request"),
+			)
+			expect(savedTurns).toHaveLength(1)
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 1])
+		})
+	})
+	describe("context management no-progress mid-stream", () => {
+		async function* noProgressStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new ContextManagementNoProgressError(
+				"Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+			)
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementation(() => noProgressStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Unable to reduce context"))
+		})
+
+		it("re-adds the saved user turn exactly once when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => noProgressStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			// The retry bumps the attempt count; re-insertion of the saved
+			// turn is tracked by userMessageWasRemoved, not by the count
+			// (PR 2696 review round 7).
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 1])
+			// The failed attempt saved the turn; the confirmed retry must not
+			// persist a second copy.
+			const savedTurns = task.apiConversationHistory.filter(
+				(m) =>
+					m.role === "user" &&
+					Array.isArray(m.content) &&
+					m.content.some((b) => (b as { text?: string }).text === "long request"),
+			)
+			expect(savedTurns).toHaveLength(1)
+		})
+
+		it("keeps a tool-result turn un-duplicated across a confirmed retry", async () => {
+			// A tool_result turn duplicates as plain text on the second save
+			// (prepareUserMessage converts the orphan), so the confirmed
+			// retry must remove the saved turn before re-adding it once
+			// (PR 2696 review round 7, thread on Task.ts:4870).
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => noProgressStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([
+				{ type: "tool_result", tool_use_id: "call_np_1", content: "large tool output" },
+			])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 1])
+			// The saved turn keeps no raw tool_result (prepareUserMessage
+			// converts an orphan to "Tool result:" text), so count the user
+			// turns carrying the converted payload: the failed attempt saved
+			// one; the confirmed retry must not persist a second copy.
+			const savedTurns = task.apiConversationHistory.filter(
+				(m) =>
+					m.role === "user" &&
+					Array.isArray(m.content) &&
+					m.content.some(
+						(b) =>
+							(b as { text?: string }).text?.includes("Tool result:") &&
+							(b as { text?: string }).text?.includes("large tool output"),
+					),
+			)
+			expect(savedTurns).toHaveLength(1)
 		})
 	})
 
@@ -2638,6 +2799,173 @@ describe("Cline", () => {
 				expect(reported.prevContextTokens).toBeGreaterThanOrEqual(100_000)
 				expect(reported.newContextTokens).toBeGreaterThan(0)
 				expect(reported.newContextTokens).toBeLessThan(reported.prevContextTokens)
+			})
+
+			it("does not report no-progress when a condense failure leaves the history below the limit", async () => {
+				// A failed condensation with the history still under the fallback
+				// truncation limit leaves the context usable: the handler must not
+				// treat the unchanged history as a no-progress round and stop the
+				// request (PR 2696 review round 7).
+				const { task } = await createOverflowingTask(providerStateWith())
+				const original = task.apiConversationHistory
+				vi.mocked(manageContext).mockResolvedValueOnce({
+					messages: original,
+					prevContextTokens: 100_000,
+					summary: "",
+					cost: 0,
+					error: "condense backend down",
+				})
+
+				// Before the noProgress flag, the unchanged history plus the
+				// error threw ContextManagementNoProgressError here.
+				await expect(
+					getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo),
+				).resolves.toBeUndefined()
+			})
+
+			it("rejects with ContextManagementNoProgressError on a true no-progress round", async () => {
+				// Regression evidence (PR 2696 review round 10, pre-merge check):
+				// a genuine no-progress reduction must stop the emergency handler
+				// with ContextManagementNoProgressError instead of falling through,
+				// and the round must not rewrite the history the caller came with.
+				const { task } = await createOverflowingTask(providerStateWith())
+				const original = task.apiConversationHistory
+				vi.mocked(manageContext).mockResolvedValueOnce({
+					messages: original,
+					prevContextTokens: 100_000,
+					summary: "",
+					cost: 0,
+					noProgress: true,
+					error: "Unable to reduce context: no candidates past the threshold",
+				})
+
+				await expect(getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)).rejects.toThrow(
+					ContextManagementNoProgressError,
+				)
+				expect(task.apiConversationHistory).toBe(original)
+				// The stated no-progress contract: recovery must not rewrite
+				// history. The identity assert alone passes even if recovery
+				// called the writer before throwing.
+				expect(task.overwriteApiConversationHistory).not.toHaveBeenCalled()
+			})
+
+			it("runs the real history overwrite when the emergency fallback truncates", async () => {
+				const { task } = await createOverflowingTask(providerStateWith())
+				// Undo the helper's overwrite mock: the fallback must exercise the
+				// real write path, not a double (PR 2696 review round 8).
+				vi.mocked(task.overwriteApiConversationHistory).mockRestore()
+				// Enough visible messages for the 50% fallback to hide a pair.
+				task.apiConversationHistory = ["a", "b", "c", "d", "e"].map((text, index) => ({
+					role: index % 2 === 0 ? ("user" as const) : ("assistant" as const),
+					content: [{ type: "text" as const, text }],
+					ts: index + 1,
+				}))
+				const original = task.apiConversationHistory
+				vi.mocked(summarizeConversation).mockResolvedValueOnce({
+					messages: task.apiConversationHistory,
+					summary: "",
+					cost: 0,
+					error: "Condensing failed: rate limited",
+				})
+
+				await getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)
+
+				// The real overwrite replaced the history array: identity changed
+				// and the truncation marker is in the live history.
+				expect(task.apiConversationHistory).not.toBe(original)
+				expect(task.apiConversationHistory.some((m) => m.isTruncationMarker)).toBe(true)
+			})
+
+			// Automatic request path: manageContext runs inside attemptApiRequest
+			// when auto-condense is on and the context crosses the threshold. Both
+			// review paths must behave like the emergency handler (PR 2696
+			// review round 8).
+			const setupAutomaticPath = async () => {
+				vi.spyOn(mockProvider, "getState").mockResolvedValue(providerStateWith({ mode: "code" }))
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				await task.getTaskMode()
+				vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+				vi.spyOn(task, "getTokenUsage").mockReturnValue({
+					totalCost: 0,
+					totalTokensIn: 0,
+					totalTokensOut: 0,
+					contextTokens: 100_000,
+				})
+				vi.spyOn(task.api, "getModel").mockReturnValue({
+					id: "ctx-model",
+					info: { contextWindow: 50_000, maxTokens: 1024, supportsPromptCache: false } as ModelInfo,
+				})
+				const state = await mockProvider.getState()
+				vi.spyOn(mockProvider, "getState").mockResolvedValue({
+					...state,
+					apiConfiguration: mockApiConfig,
+					mode: "code",
+					autoCondenseContext: true,
+					autoCondenseContextPercent: 80,
+					requestDelaySeconds: 0,
+					customModes: [],
+					experiments: {},
+					disabledTools: [],
+					customSupportPrompts: {},
+					autoApprovalEnabled: true,
+					profileThresholds: {},
+					currentApiConfigName: "default",
+				})
+				task.apiConversationHistory = [{ role: "user", content: [{ type: "text", text: "x" }], ts: Date.now() }]
+				return task
+			}
+
+			it("proceeds past a condense failure on the automatic request path", async () => {
+				const task = await setupAutomaticPath()
+				const original = task.apiConversationHistory
+				vi.mocked(manageContext).mockResolvedValueOnce({
+					messages: original,
+					prevContextTokens: 100_000,
+					summary: "",
+					cost: 0,
+					error: "condense backend down",
+				})
+				const stream = (async function* () {
+					yield { type: "text", text: "ok" } as ApiStreamChunk
+				})()
+				const createMessageSpy = vi.spyOn(task.api, "createMessage").mockReturnValue(stream)
+
+				await expect(task.attemptApiRequest().next()).resolves.toEqual({
+					done: false,
+					value: { type: "text", text: "ok" },
+				})
+				// The condense error did not stop the automatic request path: the
+				// request went out and the history is unchanged.
+				expect(createMessageSpy).toHaveBeenCalledOnce()
+				expect(task.apiConversationHistory).toBe(original)
+			})
+
+			it("stops the automatic request path on a true no-progress round", async () => {
+				const task = await setupAutomaticPath()
+				const original = task.apiConversationHistory
+				vi.mocked(manageContext).mockResolvedValueOnce({
+					messages: original,
+					prevContextTokens: 100_000,
+					summary: "",
+					cost: 0,
+					error: "Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+					truncationId: "trunc-np",
+					messagesRemoved: 0,
+					newContextTokensAfterTruncation: 100_000,
+					noProgress: true,
+				})
+				const createMessageSpy = vi.spyOn(task.api, "createMessage").mockImplementation(() => {
+					throw new Error("no request may leave the automatic path on no progress")
+				})
+
+				await expect(task.attemptApiRequest().next()).rejects.toThrow(ContextManagementNoProgressError)
+				expect(createMessageSpy).not.toHaveBeenCalled()
+				expect(task.apiConversationHistory).toBe(original)
 			})
 		})
 
@@ -6804,6 +7132,9 @@ describe("Cline", () => {
 				expect.objectContaining({
 					content: expect.arrayContaining([{ type: "text", text: "expanded input" }]),
 				}),
+				// The retry re-add passes the persist-merge flag (round 9).
+				undefined,
+				true,
 			)
 		})
 

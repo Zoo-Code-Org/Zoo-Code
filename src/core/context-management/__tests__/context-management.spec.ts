@@ -269,6 +269,307 @@ describe("Context Management", () => {
 	 * Tests for the manageContext function
 	 */
 	describe("manageContext", () => {
+		it("reports no progress when a degraded round cannot shrink the caller's total", async () => {
+			// A degraded success must leave the recounted total LOWER than the
+			// prevContextTokens value the caller compares against, not only
+			// lower than the same-estimator slice estimate (issue 1254 review
+			// round 8, linked-issues check). Otherwise the caller would loop on
+			// a round that cannot make progress. The prompt-dominated scenario
+			// below still clears the same-estimator check: the fresh recount
+			// drops the oversized result, so it is lower than the
+			// original-slice estimate — but it stays above the caller's
+			// API-reported total, so the round reports the controlled error.
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x" }] },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "S".repeat(4000),
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// The controlled error hands back the ORIGINAL history: the caller
+			// keeps it by array identity and stops on noProgress (review
+			// round 8). No cleared content is ever persisted.
+			expect(result.messages).toBe(history)
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.noProgress).toBe(true)
+			expect(result.error).toContain("Unable to reduce context")
+			expect(history.some((m) => m.isTruncationMarker)).toBe(false)
+		})
+
+		it("reports no progress when the degraded recount is not lower than prevContextTokens", async () => {
+			// The demanded round-8 scenario: prevContextTokens sits below the
+			// estimate of the original slice, and the degraded recount lands
+			// between the two — lower than the slice estimate (the oversized
+			// result was cleared) but not lower than the caller's number. The
+			// round must report no progress so the caller stops instead of
+			// looping (issue 1254 review round 8, linked-issues check).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }], ts: 1100 },
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(6000) }],
+					ts: 1200,
+				},
+				{ role: "user", content: "tiny last", ts: 1300 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "S".repeat(4000),
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.noProgress).toBe(true)
+			expect(result.messages).toBe(history)
+		})
+
+		it("reproduces the 4 MB tool-result case from the issue acceptance criteria", async () => {
+			// Issue 1254 acceptance: "Focused tests reproduce the 4 MB
+			// tool-result case and verify bounded recovery." A 4 MB result is
+			// ~1M tokens by the chars/4 estimate, far beyond any realistic
+			// window, and the degradation must clear it in one round without
+			// orphaning the pair or looping.
+			const big4MB = "x".repeat(4 * 1024 * 1024)
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }], ts: 1100 },
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: big4MB }],
+					ts: 1200,
+				},
+				{ role: "user", content: "after", ts: 1300 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 1_100_000,
+				contextWindow: 1_000_000,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// One degradation round recovers: the recount no longer exceeds the
+			// budget, and the original survives on the hidden marker.
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			const marker = result.messages[result.messages.length - 1]
+			expect(marker.degradedOriginals?.[0]?.content).toBe(big4MB)
+			const degraded = result.messages[2].content as { content?: unknown }[]
+			expect(degraded[0].content).toBe("")
+			// Bounded: exactly one hidden marker was appended — no retry loop
+			// multiplied the history.
+			expect(result.messages).toHaveLength(5)
+		})
+
+		it("does not recount the original history on a plain truncation round", async () => {
+			// The original-history recount feeds only the degradation
+			// comparison; a plain sliding-window round must not re-tokenize
+			// the removed messages (issue 1254 review).
+			const modelInfo = createModelInfo(100000, 30000)
+			const countSpy = vi.spyOn(mockApiHandler, "countTokens")
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: "REMOVED-one", ts: 1100 },
+				{ role: "user", content: "REMOVED-two", ts: 1200 },
+				{ role: "assistant", content: "KEPT-three", ts: 1300 },
+				{ role: "user", content: "keep", ts: 1400 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 70001,
+				contextWindow: modelInfo.contextWindow,
+				maxTokens: modelInfo.maxTokens,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.messagesRemoved).toBe(2)
+			const tokenized = countSpy.mock.calls.map(([content]) => JSON.stringify(content)).join("\n")
+			// The window removes indexes 1-2; KEPT-three stays, so the
+			// retained recount may still tokenize it.
+			const offenders = ["REMOVED-one", "REMOVED-two"].filter((m) => tokenized.includes(m))
+			expect(offenders).toStrictEqual([])
+		})
+
+		it("returns the no-progress outcome when nothing is removable or degradable", async () => {
+			// A short history with no paired oversized tool result removes zero
+			// messages and offers no degradation candidate: the round reports the
+			// controlled error with an unchanged token count (Regression Evidence,
+			// review round 2).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "user", content: "more context" },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.newContextTokensAfterTruncation).toBe(result.prevContextTokens)
+			// The caller keeps ITS array: identity, not just equal content
+			// (Persistence Integrity, review round 3).
+			expect(result.messages).toBe(history)
+		})
+
+		it("returns the degraded content when the round shrinks the recounted tokens", async () => {
+			// A degraded round is a success only when the recounted total drops:
+			// the cleared result reaches the caller, so the shrink is real
+			// (Regression Evidence, review round 2).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages.slice(0, 3)).toStrictEqual([
+				history[0],
+				history[1],
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "" }] },
+			])
+			// The degradation marker rides at the end, hidden from the API: it
+			// preserves the original result so rewind can restore it (issue
+			// 1254 review, taltas thread 4695751065).
+			const marker = result.messages[3]
+			expect(marker.isTruncationMarker).toBe(true)
+			expect(marker.degradedOriginals?.[0]).toEqual({
+				index: 2,
+				blockIndex: 0,
+				content: "x".repeat(3000),
+			})
+			expect(result.newContextTokensAfterTruncation).toBeLessThan(result.prevContextTokens)
+		})
+		it("reports the degraded round as no progress when the recount is unchanged", async () => {
+			// A degrade whose fresh recount does not shrink the original slice
+			// cannot make progress: the round must report the controlled error,
+			// flag noProgress for the caller, and hand back the ORIGINAL
+			// history, not the cleared result (PR 2696 review round 7, thread
+			// on CondenseTruncate.tla:59).
+			const countingHandler = new MockApiHandler()
+			vi.spyOn(countingHandler, "countTokens").mockResolvedValue(5)
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: countingHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.noProgress).toBe(true)
+			// The caller keeps ITS array: identity, not just equal content.
+			expect(result.messages).toBe(history)
+		})
+
+		it("keeps a failed condensation below the truncation limit out of no-progress", async () => {
+			// A condense failure with the history still below the fallback
+			// truncation limit returns the original messages with the error
+			// set, but the context still fits: the round is NOT no-progress,
+			// so the caller proceeds with the request instead of stopping
+			// (PR 2696 review round 7, thread on Task.ts).
+			const failingHandler = new MockApiHandler()
+			vi.spyOn(failingHandler, "createMessage").mockImplementation(() => {
+				throw new Error("condense backend down")
+			})
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: "middle context" },
+				{ role: "user", content: "latest" },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 200,
+				contextWindow: 1000,
+				maxTokens: 1,
+				apiHandler: failingHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 10,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.noProgress).toBeUndefined()
+			expect(result.messages).toBe(history)
+		})
+
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,
 			supportsPromptCache: true,

@@ -15,6 +15,9 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
+import { ContextManagementNoProgressError } from "../../context-management/index"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { PendingActionSettlementError, Task } from "../Task"
 import { parseMentions } from "../../mentions"
 import { ClineProvider } from "../../webview/ClineProvider"
@@ -327,6 +330,242 @@ describe("Task persistence", () => {
 			const result = await task.retrySaveApiConversationHistory()
 			expect(result).toBe(true)
 			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("persists exactly one user turn across a confirmed output-limit retry", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const access = task as unknown as {
+				diffViewProvider: { reset: () => Promise<void> }
+				safeEnsureModelFetched: () => Promise<unknown>
+				presentAssistantMessageSafe: () => void
+			}
+			vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+
+			async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial answer" }
+				throw new OutputTokenLimitError()
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// Context recovery ran before the stream failed: the marker
+					// (role "user") now trails the saved turn.
+					task.apiConversationHistory.push({
+						role: "user",
+						content: "[Tool result degradation: oversized result cleared to reduce context]",
+						ts: Date.now() + 1,
+						isTruncationMarker: true,
+						truncationId: "trunc-disk",
+						degradedOriginals: [{ index: 0, blockIndex: 0, content: "original" }],
+					})
+					return truncatedStream()
+				})
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "done" }
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+			expect(attemptApiRequestSpy).toHaveBeenCalled()
+
+			// The confirmed retry must persist the turn removal with merge=false
+			// so the disk file drops the removed record; the default merge keeps
+			// disk-only records and the re-add would duplicate the turn
+			// (PR 2696 review round 8, persistence integrity).
+			expect(mockSaveApiMessages.mock.calls.some(([arg]) => arg.merge === false)).toBe(true)
+
+			const lastSave = mockSaveApiMessages.mock.calls.at(-1)?.[0]
+			const saved = (lastSave?.messages ?? []) as Array<{
+				role: string
+				content: unknown
+				isTruncationMarker?: boolean
+				truncationId?: string
+			}>
+			const savedTurns = saved.filter(
+				(m) =>
+					m.role === "user" &&
+					!m.isTruncationMarker &&
+					Array.isArray(m.content) &&
+					(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+			)
+			expect(savedTurns).toHaveLength(1)
+			// The recovery marker survives on disk with its metadata.
+			expect(saved.some((m) => m.isTruncationMarker && m.truncationId === "trunc-disk")).toBe(true)
+		})
+
+		it.each([
+			["output-limit retry", new OutputTokenLimitError()],
+			["no-progress retry", new ContextManagementNoProgressError("unable to reduce context")],
+		] as const)(
+			"keeps later saves authoritative when the replacement write fails (%s)",
+			async (_name, streamError) => {
+				let replacementFailed = false
+				mockSaveApiMessages.mockImplementation(async (arg: unknown) => {
+					const merge = (arg as { merge?: boolean }).merge
+					if (merge === false && !replacementFailed) {
+						replacementFailed = true
+						throw new Error("disk full")
+					}
+					return []
+				})
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const access = task as unknown as {
+					diffViewProvider: { reset: () => Promise<void> }
+					safeEnsureModelFetched: () => Promise<unknown>
+					presentAssistantMessageSafe: () => void
+				}
+				vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+				vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+
+				async function* failingStream(): AsyncGenerator<ApiStreamChunk> {
+					yield { type: "text", text: "partial answer" }
+					throw streamError
+				}
+
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() => {
+						// Context recovery ran before the stream failed: the marker
+						// (role "user") now trails the saved turn.
+						task.apiConversationHistory.push({
+							role: "user",
+							content: "[Tool result degradation: oversized result cleared to reduce context]",
+							ts: Date.now() + 1,
+							isTruncationMarker: true,
+							truncationId: "trunc-disk",
+							degradedOriginals: [{ index: 0, blockIndex: 0, content: "original" }],
+						})
+						return failingStream()
+					})
+					.mockImplementationOnce(() =>
+						(async function* (): AsyncGenerator<ApiStreamChunk> {
+							yield { type: "text", text: "done" }
+						})(),
+					)
+					.mockImplementation(() => {
+						throw new Error("stop after retry response")
+					})
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+				expect(attemptApiRequestSpy).toHaveBeenCalled()
+				expect(replacementFailed).toBe(true)
+
+				const calls = mockSaveApiMessages.mock.calls
+				const failedIndex = calls.findIndex(([arg]) => (arg as { merge?: boolean }).merge === false)
+				expect(failedIndex).toBeGreaterThan(-1)
+				// The very next history save stays authoritative: a merge there would
+				// keep the stale disk copy beside the replacement turn, whose new
+				// message id defeats the merge dedupe.
+				expect((calls[failedIndex + 1]?.[0] as { merge?: boolean }).merge).toBe(false)
+
+				const lastSave = calls.at(-1)?.[0] as {
+					messages?: Array<Record<string, unknown>>
+					merge?: boolean
+				}
+				const savedTurns = (lastSave?.messages ?? []).filter(
+					(m) =>
+						m.role === "user" &&
+						!m.isTruncationMarker &&
+						Array.isArray(m.content) &&
+						(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+				)
+				expect(savedTurns).toHaveLength(1)
+
+				// The latch clears once an authoritative write lands: later saves may
+				// merge again.
+				await task.retrySaveApiConversationHistory()
+				expect(mockSaveApiMessages.mock.calls.at(-1)?.[0]).toMatchObject({ merge: true })
+			},
+		)
+
+		it("keeps the saved user turn on disk when the task aborts before the retry re-add", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const access = task as unknown as {
+				diffViewProvider: { reset: () => Promise<void> }
+				safeEnsureModelFetched: () => Promise<unknown>
+				presentAssistantMessageSafe: () => void
+			}
+			vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+			const realSay = task.say.bind(task)
+			vi.spyOn(task, "say").mockImplementation(async (...args: Parameters<typeof task.say>) => {
+				if (args[0] === "api_req_retried") {
+					// The user cancels right after the retry branch ran: the abort
+					// request lands before any re-add could run, through the public
+					// run-state API (abort is getter-only and has no setter).
+					task.requestAbort(false)
+					throw new Error("cancelled")
+				}
+				return realSay(...args)
+			})
+
+			async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial answer" }
+				throw new OutputTokenLimitError()
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+
+			// The loop ends through the cancellation-aware catch path, which
+			// reports true to the parent loop; no unexpected rejection occurs.
+			const endState = await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+			expect(attemptApiRequestSpy).toHaveBeenCalled()
+			// The abort request genuinely engaged the run state (the previous
+			// getter-only assignment threw before any cancellation existed).
+			expect(task.abort).toBe(true)
+			expect(endState).toBe(true)
+
+			// The removal stayed in memory: no persisted state may lack the
+			// saved turn, or a resumed task finds a tool_use without its
+			// tool_result (PR 2696 review round 9).
+			const savedInputs = mockSaveApiMessages.mock.calls.map(
+				([arg]) => arg.messages as Array<{ role?: string; content?: unknown }>,
+			)
+			expect(savedInputs.length).toBeGreaterThan(0)
+			for (const messages of savedInputs) {
+				expect(
+					messages.some(
+						(m) =>
+							m.role === "user" &&
+							Array.isArray(m.content) &&
+							(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+					),
+				).toBe(true)
+			}
 		})
 
 		it("uses authoritative replacement for explicit API history overwrites", async () => {
@@ -1349,6 +1588,68 @@ describe("Task persistence", () => {
 					is_error: true,
 				},
 			])
+		})
+
+		it("keeps a trailing degradation marker in the saved history when resuming", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "marker-resume",
+					number: 3,
+					ts: Date.now(),
+					task: "Marker resume",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiateTaskLoopSpy = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			// The persisted history ends with a degradation marker carrying
+			// the original tool_result content a later rewind restores.
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_mr_1", name: "read_file", input: { path: "a.txt" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_mr_1", content: "" }],
+				},
+				{
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					ts: 111,
+					isTruncationMarker: true,
+					truncationId: "trunc-mr-1",
+					degradedOriginals: [{ index: 1, blockIndex: 0, content: [{ type: "text", text: "4MB output" }] }],
+				},
+			])
+
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "marker-resume",
+				status: "interrupted",
+			})
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			// The marker must survive the resume: the saved history keeps it
+			// with its metadata, and the resumed turn does not copy its text
+			// (PR 2696 review round 7).
+			const saved = task.apiConversationHistory
+			expect(saved.at(-1)?.isTruncationMarker).toBe(true)
+			expect((saved.at(-1) as { degradedOriginals?: unknown[] }).degradedOriginals).toHaveLength(1)
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
+			const texts = newUserContent
+				.filter((block) => block.type === "text")
+				.map((block) => (block as { text: string }).text)
+			expect(texts.join("\n")).not.toContain("Tool result degradation")
 		})
 	})
 

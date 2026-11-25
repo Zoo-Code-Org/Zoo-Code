@@ -1,6 +1,8 @@
 // npx vitest utils/__tests__/tiktoken.spec.ts
 
 import { tiktoken } from "../tiktoken"
+import { Tiktoken } from "tiktoken/lite"
+import o200kBase from "tiktoken/encoders/o200k_base"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 type TextContentBlockWithoutText = Omit<Anthropic.Messages.TextBlockParam, "text"> & { text?: string }
@@ -301,6 +303,45 @@ describe("tiktoken", () => {
 
 			// Large content should have more tokens
 			expect(largeResult).toBeGreaterThan(smallResult)
+		})
+	})
+
+	describe("long-string estimates (issue 1254 regression evidence)", () => {
+		const sentence = "The assistant answered the user question with a short paragraph. "
+		const exactCount = (text: string): number =>
+			new Tiktoken(o200kBase.bpe_ranks, o200kBase.special_tokens, o200kBase.pat_str).encode(text, undefined, [])
+				.length
+
+		it("encodes a text of exactly 50,000 characters exactly", async () => {
+			const text = sentence.repeat(Math.ceil(50_000 / sentence.length)).slice(0, 50_000)
+			const exact = exactCount(text)
+
+			const result = await tiktoken([{ type: "text", text }])
+
+			// The export applies the fudge factor on top of the encoder count;
+			// the boundary length must take the exact encode path.
+			expect(result).toBe(Math.ceil(exact * 1.5))
+		})
+
+		it("estimates 50,001+ characters close to the exact count for uniform text", async () => {
+			const text = sentence.repeat(Math.ceil(60_000 / sentence.length)).slice(0, 60_000)
+			const exact = exactCount(text)
+
+			const result = await tiktoken([{ type: "text", text }])
+
+			// The sampled estimate stays within 5 percent of the exact count
+			// for uniform natural text.
+			const estimated = result / 1.5
+			expect(Math.abs(estimated - exact) / exact).toBeLessThan(0.05)
+		})
+
+		it("completes a 4 MB separator-less run without trapping or hanging", async () => {
+			const blob = "a".repeat(4 * 1024 * 1024)
+
+			const result = await tiktoken([{ type: "text", text: blob }])
+
+			expect(result).toBeGreaterThan(0)
+			expect(result).toBeLessThan(blob.length * 2)
 		})
 	})
 })

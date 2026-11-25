@@ -3,6 +3,7 @@ import { Task } from "../task/Task"
 import { cleanupAfterTruncation } from "../condense"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import type { ApiMessage } from "../task-persistence/apiMessages"
 
 export interface RewindOptions {
 	/** Whether to include the target message in deletion (edit=true, delete=false) */
@@ -192,6 +193,105 @@ export class MessageManager {
 
 		// Step 4: Remove truncation markers whose sliding_window_truncation was removed
 		if (removedIds.truncationIds.size > 0) {
+			// Restore first: a doomed degradation marker carries the original
+			// tool_result content its round cleared, and dropping it without
+			// restoring would lose that content permanently (issue 1254
+			// review). The scan runs over the ORIGINAL history: the cutoff
+			// filter above removes a marker whose timestamp equals the cutoff
+			// while the degraded message (marker.ts - 1) survives it, so a
+			// scan after the filter would miss that marker. The degraded
+			// message is located by ts (the marker is written at degraded.ts
+			// + 1), or — when it carries no timestamp and the marker fell
+			// back to Date.now() — as the original-history predecessor of the
+			// marker. Retained messages keep their object identity, so the
+			// ops map keys on the message object; restored messages are new
+			// objects routed through the final history write.
+			const restoreOps = new Map<ApiMessage, Array<{ blockIndex: number; content: unknown }>>()
+			for (let markerIndex = 0; markerIndex < originalHistory.length; markerIndex++) {
+				const marker = originalHistory[markerIndex]
+				if (!(
+					marker.isTruncationMarker &&
+					marker.truncationId &&
+					removedIds.truncationIds.has(marker.truncationId)
+				)) {
+					continue
+				}
+				if (!Array.isArray(marker.degradedOriginals)) {
+					continue
+				}
+				let degraded: ApiMessage | undefined
+				// Stable link first: the marker records the degraded message's
+				// original-history index, and a validated link is strictly more
+				// precise than the timestamp heuristic - two API messages can
+				// share the millisecond marker.ts - 1, and a retained
+				// string-content match would win the lookup and strand the
+				// cleared block (issue 1254 review round 9). Degradation rounds
+				// only append markers, so recorded positions stay valid across
+				// rounds; the predecessor fallback cannot find the message when
+				// it carries no timestamp and another marker sits between it
+				// and this one (issue 1254 review round 8). Validate the
+				// candidate so a stale index cannot mislink another message:
+				// it must still hold the cleared block.
+				const link = marker.degradedOriginals?.[0]
+				const linked = link && typeof link.index === "number" ? originalHistory[link.index] : undefined
+				const linkedBlock =
+					linked && Array.isArray(linked.content)
+						? (linked.content[link.blockIndex] as { type?: string; content?: unknown } | undefined)
+						: undefined
+				if (
+					linked &&
+					!linked.isTruncationMarker &&
+					linkedBlock?.type === "tool_result" &&
+					linkedBlock.content === ""
+				) {
+					degraded = linked
+				}
+				if (!degraded && marker.ts !== undefined) {
+					const degradedTs = marker.ts - 1
+					// A marker is never the degraded target: two rounds on
+					// timestamp-free messages chain markers, and marker.ts - 1
+					// then resolves to the earlier marker instead of the message
+					// this marker cleared (issue 1254 review round 8).
+					degraded = originalHistory.find((m) => m.ts === degradedTs && !m.isTruncationMarker)
+				}
+				if (!degraded && markerIndex > 0) {
+					const previous = originalHistory[markerIndex - 1]
+					if (Array.isArray(previous.content)) {
+						degraded = previous
+					}
+				}
+				if (!degraded) {
+					continue
+				}
+				const ops = restoreOps.get(degraded) ?? []
+				for (const original of marker.degradedOriginals) {
+					ops.push({ blockIndex: original.blockIndex, content: original.content })
+				}
+				restoreOps.set(degraded, ops)
+			}
+			if (restoreOps.size > 0) {
+				apiHistory = apiHistory.map((msg) => {
+					const ops = restoreOps.get(msg)
+					if (!ops || !Array.isArray(msg.content)) {
+						return msg
+					}
+					let changed = false
+					const content = msg.content.map((block, blockIndex) => {
+						const op = ops.find((candidate) => candidate.blockIndex === blockIndex)
+						if (
+							!op ||
+							!block ||
+							(block as { type?: string }).type !== "tool_result" ||
+							(block as { content?: unknown }).content !== ""
+						) {
+							return block
+						}
+						changed = true
+						return { ...(block as unknown as Record<string, unknown>), content: op.content }
+					})
+					return changed ? ({ ...msg, content } as typeof msg) : msg
+				})
+			}
 			apiHistory = apiHistory.filter((msg) => {
 				if (msg.isTruncationMarker && msg.truncationId && removedIds.truncationIds.has(msg.truncationId)) {
 					console.log(

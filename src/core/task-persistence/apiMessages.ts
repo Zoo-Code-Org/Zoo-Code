@@ -36,6 +36,12 @@ export type ApiMessage = Anthropic.MessageParam & {
 	truncationParent?: string
 	// Identifies a message as a truncation boundary marker
 	isTruncationMarker?: boolean
+	// For non-destructive tool-result degradation (issue 1254): the originals
+	// this degradation marker cleared, so a rewind can restore the
+	// un-degraded history. Carried on the marker because native providers
+	// serialize content blocks as-is — the originals must not ride on the
+	// cleared blocks or they would be sent back to the API.
+	degradedOriginals?: Array<{ index: number; blockIndex: number; content: unknown }>
 }
 
 export type ApiMessagesReadErrorKind = "invalid" | "io_error"

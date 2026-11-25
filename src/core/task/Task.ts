@@ -114,7 +114,12 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
+import {
+	type ContextManagementResult,
+	ContextManagementNoProgressError,
+	manageContext,
+	willManageContext,
+} from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -551,6 +556,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
+	/**
+	 * A failed authoritative (merge=false) write leaves the disk holding a
+	 * stale copy while memory holds the replacement turn under a new message
+	 * id; a later merge write would then persist both copies. While this flag
+	 * is set every history save stays authoritative until one of them lands.
+	 */
+	private historyReplacementPending = false
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
@@ -1442,7 +1454,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(
+		message: Anthropic.MessageParam,
+		reasoning?: string,
+		persistMerge = true,
+	): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1460,7 +1476,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}),
 		)
 
-		let saved = await this.saveApiConversationHistory()
+		let saved = await this.saveApiConversationHistory(persistMerge)
 		if (!saved && resolvesPendingAction) {
 			saved = await this.retrySaveApiConversationHistory()
 		}
@@ -1630,16 +1646,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/** Persists the current API conversation history to disk, returning false on I/O errors. */
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
+		const effectiveMerge = merge && !this.historyReplacementPending
 		try {
 			await saveApiMessages({
 				messages: structuredClone(this.apiConversationHistory),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
-				merge,
+				merge: effectiveMerge,
 			})
+			if (!effectiveMerge) {
+				this.historyReplacementPending = false
+			}
 			return true
 		} catch (error) {
 			console.error("Failed to save API conversation history:", error)
+			if (!effectiveMerge) {
+				this.historyReplacementPending = true
+			}
 			return false
 		}
 	}
@@ -3362,7 +3385,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (existingApiConversationHistory.length > 0) {
 				const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
 
-				if (lastMessage.isSummary) {
+				if (lastMessage.isTruncationMarker) {
+					// A trailing truncation marker must stay in the saved history:
+					// it carries the metadata (e.g. degradedOriginals) a later
+					// rewind restores, and the request never sees it
+					// (getEffectiveApiHistory filters markers). The resumed turn is
+					// built from the new user content only.
+					modifiedApiConversationHistory = [...existingApiConversationHistory]
+					modifiedOldUserContent = []
+				} else if (lastMessage.isSummary) {
 					// IMPORTANT: If the last message is a condensation summary, we must preserve it
 					// intact. The summary message carries critical metadata (isSummary, condenseId)
 					// that getEffectiveApiHistory() uses to filter out condensed messages.
@@ -4147,7 +4178,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+				// A confirmed retry re-adds the removed turn here: merge=false
+				// makes this single write replace the stale disk copy, so the
+				// disk never holds a duplicate and never holds a turn-less
+				// intermediate state (issue 1254 review rounds 8-9).
+				await this.addToApiConversationHistory(
+					{ role: "user", content: finalUserContent },
+					undefined,
+					!currentItem.userMessageWasRemoved,
+				)
 				this.messageCounts.user++
 			}
 
@@ -4840,11 +4879,97 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								throw new Error("API request failed")
 							}
 
+							// The failed attempt already saved this user turn; remove it so
+							// the retry does not persist a second copy. The next iteration
+							// re-adds it exactly once via userMessageWasRemoved.
+							let removedSavedUserTurn = false
+							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
+								// Context recovery can append a truncation marker
+								// (role "user") after the saved turn, so the tail is
+								// not always this attempt's turn. Walk back over
+								// markers and remove the saved turn itself: popping
+								// the marker would drop its degradedOriginals and a
+								// later rewind could not restore the cleared result
+								// (issue 1254 review round 8).
+								let turnIndex = -1
+								for (let i = this.apiConversationHistory.length - 1; i >= 0; i--) {
+									if (this.apiConversationHistory[i].isTruncationMarker) {
+										continue
+									}
+									turnIndex = i
+									break
+								}
+								if (turnIndex !== -1 && this.apiConversationHistory[turnIndex].role === "user") {
+									this.apiConversationHistory.splice(turnIndex, 1)
+									this.messageCounts.user--
+									removedSavedUserTurn = true
+									// The removal stays in memory only. The next iteration's
+									// re-add persists the replacement with merge=false in one
+									// authoritative write (issue 1254 review round 8,
+									// persistence integrity - moved from this branch in
+									// round 9): writing the turn-less state here would strand
+									// a saved tool_use without its tool_result on disk when
+									// the task aborts before the re-add runs.
+								}
+							}
 							await this.say("api_req_retried")
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: 0,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedSavedUserTurn,
+							})
+							continue
+						} else if (error instanceof ContextManagementNoProgressError) {
+							// Context management stopped without shrinking the history: resending
+							// the same request repeats the failure forever, so like
+							// OutputTokenLimitError the retry is the user's call, never an
+							// automatic loop (issue 1254 review).
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+
+							// The failed attempt already saved this user turn; remove it so
+							// the retry does not persist a second copy. The next iteration
+							// re-adds it exactly once via userMessageWasRemoved.
+							let removedSavedUserTurn = false
+							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
+								// Context recovery can append a truncation marker
+								// (role "user") after the saved turn, so the tail is
+								// not always this attempt's turn. Walk back over
+								// markers and remove the saved turn itself: popping
+								// the marker would drop its degradedOriginals and a
+								// later rewind could not restore the cleared result
+								// (issue 1254 review round 8).
+								let turnIndex = -1
+								for (let i = this.apiConversationHistory.length - 1; i >= 0; i--) {
+									if (this.apiConversationHistory[i].isTruncationMarker) {
+										continue
+									}
+									turnIndex = i
+									break
+								}
+								if (turnIndex !== -1 && this.apiConversationHistory[turnIndex].role === "user") {
+									this.apiConversationHistory.splice(turnIndex, 1)
+									this.messageCounts.user--
+									removedSavedUserTurn = true
+									// The removal stays in memory only. The next iteration's
+									// re-add persists the replacement with merge=false in one
+									// authoritative write (issue 1254 review round 8,
+									// persistence integrity - moved from this branch in
+									// round 9): writing the turn-less state here would strand
+									// a saved tool_use without its tool_result on disk when
+									// the task aborts before the re-add runs.
+								}
+							}
+							await this.say("api_req_retried")
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedSavedUserTurn,
 							})
 							continue
 						} else {
@@ -5709,10 +5834,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				useAvailableInputForContextPercent,
 			})
 
+			// Evaluate no-progress BEFORE the overwrite: a successful fallback
+			// reduction returns a NEW array, and once it is written back
+			// ensureMessageIdentifiers makes this.apiConversationHistory the same
+			// array, so a check after the overwrite would false-flag every
+			// successful round (issue 1254 review).
+			const noProgressError =
+				truncateResult.messages === this.apiConversationHistory && truncateResult.noProgress
+					? truncateResult.error
+					: undefined
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
 			await this.reportContextManagementResult(truncateResult)
+			// A no-progress outcome leaves the history unchanged: resending it
+			// would exceed the window again, so both request paths stop here
+			// instead (issue 1254 review, taltas thread 4695751055).
+			if (noProgressError) {
+				throw new ContextManagementNoProgressError(noProgressError)
+			}
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
@@ -5966,10 +6106,25 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				// Evaluate no-progress BEFORE the overwrite: a successful fallback
+				// reduction returns a NEW array, and once it is written back
+				// ensureMessageIdentifiers makes this.apiConversationHistory the same
+				// array, so a check after the overwrite would false-flag every
+				// successful round (issue 1254 review).
+				const noProgressError =
+					truncateResult.messages === this.apiConversationHistory && truncateResult.noProgress
+						? truncateResult.error
+						: undefined
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
 				await this.reportContextManagementResult(truncateResult)
+				// A no-progress outcome leaves the history unchanged: resending it
+				// would exceed the window again, so the automatic request path
+				// stops here instead (issue 1254 review, taltas thread 4695751055).
+				if (noProgressError) {
+					throw new ContextManagementNoProgressError(noProgressError)
+				}
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show

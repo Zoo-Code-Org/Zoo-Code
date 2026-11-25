@@ -1,96 +1,146 @@
 ---- MODULE CondenseTruncate ----
-\* Models truncateConversation and the count after it in src/core/context-management/index.ts.
+\* Models truncateConversation and the recovery round after it in
+\* src/core/context-management/index.ts (the manageContext fallback).
 \* Source: summarizeConversation (src/core/condense/index.ts) tags each old message with
-\* condenseParent and adds a summary. truncateConversation picks "visible" messages and
-\* tags them with truncationParent. manageContext reports the token count after truncation.
-\* Sink: getEffectiveApiHistory (src/core/condense/index.ts). With a summary, it returns
-\* only the messages from the latest summary onward (fresh start). Without one, a cond
-\* tag hides a message only when its summary still exists.
-\* Failure 1 (issue 1823): after a condense, the visible filter ignores condenseParent.
-\* Truncation hides only messages that the sink already hides. The live history stays
-\* over the context window, so each request fails.
-\* Failure 2: the count after truncation ignores condenseParent, so it counts messages
-\* that the sink already hides and overstates the live context.
-\* Failure 3 (PR 2647 review round 2): a rewind deletes the summary, so its tagged messages
-\* are live again at the sink. The coarse rule still hides them, so a truncation cannot
-\* remove them and the count omits them.
-\* Failure 4 (PR 2647 review round 3): with a summary present, a message before it stays a
-\* truncation candidate and the count includes it. The truncation can tag the summary
-\* itself, and the sink then drops the tagged summary from the live history.
+\* condenseParent and adds a summary. truncateConversation picks "visible" messages, tags
+\* them with truncationParent, and on a zero-removal history degrades one tool result.
+\* manageContext reports the token count after the round.
+\* Sink: getEffectiveApiHistory (src/core/condense/index.ts). With a summary, it returns only
+\* the messages from the latest summary onward (fresh start). Without one, a cond tag hides
+\* a message only when its summary still exists.
+\* Failure 1 (issue 1823): after a condense, the visible filter ignores condenseParent, so a
+\* truncation hides messages the sink already hides. Failure 2: the count after truncation
+\* ignores condenseParent and overstates the live context.
+\* Failure 3 (PR 2647 round 2): a rewind deletes the summary, so its tagged messages are live
+\* again at the sink. The coarse rule still hides them.
+\* Failure 4 (PR 2647 round 3): with a summary present, a message before it stays a
+\* truncation candidate, and the truncation can tag the summary itself.
+\* Failure 5 (issue 1254): a short visible history yields messagesToRemove = 0 under the
+\* 0.5 even-rounding rule, and the round still reports success with no change, so an
+\* oversized history retries forever. The withdrawn PR 1617 findings guided this design;
+\* no code of it is reused. Degradation must not orphan either half of a pair, and a
+\* stalled round ends in Error.
 \* Invariant RemovedIsLive: a truncation removes exactly the live messages that it reports.
 \* Invariant CountExact: right after a truncation, the reported count equals the live count.
 \* Invariant SelectionMatchesLive: every candidate is live and removable, and every live
 \* message except the latest summary is a candidate.
 \* Invariant SummaryUntagged: no summary carries a truncation tag.
-\* Modes: Fixed applies the latest-summary boundary (the fix). Matched is the code on the
-\* reviewed head f20ae85: tags decide, no positional boundary. Coarse hides every tagged
-\* message (the first version of the fix). Buggy ignores condenseParent.
-\* LiveMsg correction (PR 2647 review round 3): the first version approximated the sink
-\* with tag matching. It agreed with the real sink only on tag-matched layouts. The real
-\* rule is position-aware: with a summary, only the latest summary and the messages after
-\* it are live. The round-3 review exposed the divergence, so LiveMsg now uses position.
-\* Expected before the run: Matched breaks SelectionMatchesLive (a stale orphan before
-\* the summary is a candidate but dead) and SummaryUntagged (Truncate tags the summary).
-\* Matched breaks CountExact when the stale orphans counted do not balance the tagged
-\* summary lost. Fixed holds every invariant. Buggy and Coarse keep the round-2 failures.
-\* Not modeled: token sizes (each message is one unit), the removal fraction (0.5 in the
-\* code), the threshold that starts truncation, and the cleanup pass cleanupAfterTruncation
-\* that clears orphan tags. A rewind that orphans tags is modeled by the Rewind action.
-\* Gap: the sink also sends the marker text. The code count and this model exclude the
-\* marker. The error is small and constant. Out of scope for this fix.
-\* Cost: each run takes under 10 seconds. Agent time is not measured.
-\* Result: CondenseTruncate.cfg (Fixed) holds with 400 distinct states. UnfixedRemoved
-\* and UnfixedCount fail with 48 states each. CoarseSelection fails with 3 states.
-\* CoarseCount fails with 749 states. MatchedSelection fails with 3 states.
-\* MatchedSummary fails with 221 states. MatchedCount fails with 222 states.
-\* Every variant models a rule that this fix replaces, so each failure is a reproduction.
-\* The round-4 review (thread 4657986893) found that excluding the summary from
-\* the candidates split tool_use/tool_result pairs, and the Messages API rejects
-\* a split pair. Added: the summary is the first candidate and skip-first keeps
-\* it untagged (VisMsg Fixed uses i >= LastSumIdx, SelectionMatchesLive simplified
-\* to the sink rule). The pair-integrity unit test replays it on the real code.
-\* Findings: covered 4, added 4, gap 3. The two failures of issue 1823 are covered
-\* findings. The round-2 review had two findings: the oracle duplication is covered, the
-\* orphan regression is added (Rewind action, Coarse mode, SelectionMatchesLive).
-\* The round-3 review had three findings: the missing boundary is added (boundary VisMsg,
-\* SelectionMatchesLive redefinition, SummaryUntagged, Matched mode, three Matched cfgs,
-\* PR 2647 review thread comment 4657855243), the LiveMsg approximation is added (stale
-\* field, position-aware sink rule), and the pre-merge regression-evidence warning on the
-\* count test is covered (PR 2647, review of head f20ae85): CountExact already models the
-\* API-visible count, and the count tests now derive their expected values from the sink.
-\* Mutation round (PR 2647): the getExistingSummaryIds guard lacked direct tests. This
-\* spec cannot express the guard: it abstracts condense IDs away, so SummaryExists checks
-\* only summ and cannot tell an untagged summary from a non-summary that carries an ID.
-\* That guard is a gap here. The direct unit tests in src/core/condense/__tests__/
-\* index.spec.ts pin it on the real code (PR 2647 review thread, comment 4657908739).
-\* The other gap is the marker text below.
-\* Mutation round 2 (PR 2647, head a68ba75): four boundary mutants survived (the
-\* scan guard and the clamp, in the selection and the count). They are equivalent:
-\* the boundary is the sole consumer of the scan, and index >= boundary treats -1
-\* and 0 alike for array indices. The model derives LastSumIdx directly, so the
-\* scan and clamp guards are a gap here. The documented Stryker disables in the
-\* code pin them (PR 2647 mutation report, comment 7078205049).
-\* Replay: UnfixedRemoved and UnfixedCount keep the counterexample AddMsg x4, Condense,
-\* Truncate (2 removed reported, 0 live removed). CoarseSelection gives Condense, Rewind:
-\* one orphan is live but coarse-invisible. CoarseCount gives Condense, Rewind, AddMsg x5,
-\* Truncate: the coarse count reports 3 but the live count is 4. MatchedSelection gives
-\* Condense: the summary is a candidate, but the sink keeps it as the first effective
-\* message, so it is live but not removable. MatchedSummary gives AddMsg, Condense, Rewind,
-\* Condense, AddMsg x2, Truncate: the truncation tags the new summary. MatchedCount gives
-\* AddMsg x3, Condense, Rewind, Condense, Truncate: the count reports a stale orphan that
-\* the sink drops. The unit tests replay the rules on the real code.
+\* Invariant SuccessIsMonotonic: every reported success strictly shrinks the live weight
+\* (one unit per live message, one per live oversized tool result).
+\* Invariant DegradationPreservesPair: right after a degrade step, the degraded tool
+\* result and its paired tool use are both live.
+\* Invariant NoZeroProgressSuccess: a round that removes nothing and degrades nothing
+\* never reports success.
+\* Invariant BoundedRecovery: two stalled rounds in a row end in Error.
+\* Failure 6 (PR 2696 review round 1, thread 4692295250): the degradation scan
+\* checks every message, so with a summary it can degrade a tool result before
+\* the latest summary that the sink never counts, and the round still succeeds.
+\* Failure 7 (thread 4692295271): an empty tool_result array passes the size
+\* scan, the clear cannot shrink the recounted tokens, and the round succeeds.
+\* Failure 8 (thread 4692295281): the degrade step clears every tool_result
+\* block of the selected message, so a small parallel result is lost.
+\* Invariant DegSelectionLive: a degraded tool result is live at the sink.
+\* Invariant DegradationKeepsOtherBlocks: a degrade keeps a second oversized
+\* block of the same message.
+\* Failure 9 (PR 2696 review round 2, thread 4693277487): the recovery scan
+\* accepts only the first oversized block, so a message whose first block is
+\* cleared leaves the scan while the second block still weighs, and the round
+\* reports Error though the runtime can still recover it. Recovery selects one
+\* block per round; the scan must accept either block.
+\* Invariant ErrExhaustsCandidates: an Error round means no live paired tool
+\* result still carries an oversized block.
+\* Failure 10 (PR 2696 review round 5, taltas threads 4695751055/65/75): the
+\* no-progress outcome left both Task request paths free to resend the
+\* unchanged history (now they throw ContextManagementNoProgressError); a
+\* degrade lost the original content (now preserved on a hidden
+\* degradedOriginals marker so rewind can restore it); and the success check
+\* compared a fresh recount against the API-reported total, so a
+\* prompt-dominated or undercounted total rejected real reductions (now both
+\* sides use the same estimator over the effective slice).
+\* Failure 11 (PR 2696 review round 6, threads on CondenseTruncate.tla:56/59):
+\* the caller had no modeled response to an Error round, so nothing checked
+\* that either Task request path stops instead of resending the unchanged
+\* history; and the degraded-round recount comparison has no model side.
+\* Invariant ErrStopsRequests: after an Error round the caller never resends
+\* the unchanged history.
+\* Modes: Fixed applies the latest-summary boundary (the fix) and the fixed recovery
+\* contract (degrade one eligible tool result, or stop with Error). Matched is the reviewed
+\* head f20ae85 of PR 2647: tags decide, no positional boundary. Coarse hides every tagged
+\* message. Buggy ignores condenseParent. ZeroOK reports success on a zero-removal round
+\* with no change (issue 1254). NoPairDeg also tags the paired tool use. PreScan scans
+\* without the summary boundary; EmptyOK treats an empty-content result as oversized;
+\* AllBlocks also clears the second oversized block. OnlyBig scans only the first
+\* oversized block. NoStop lets the caller resend the unchanged history
+\* after an Error round. Other modes use the Fixed arms.
+\* LiveMsg correction (PR 2647 round 3): the sink rule is position-aware, not tag
+\* matching. Round 4 (thread 4657986893): the summary stays the first candidate and
+\* skip-first keeps pairs whole. Mutation round: the getExistingSummaryIds guard and four
+\* equivalent boundary mutants are pinned by code, not the model. Not modeled: the budget
+\* that starts a round, real token sizes, marker text, cleanupAfterTruncation. A rewind
+\* that orphans tags is the Rewind action. Eligibility also needs a live paired tool use;
+\* a pre-existing sliding-window split of a pair is out of scope for issue 1254.
+\* Cost: the full check takes under 3 minutes. Agent time is not measured.
+\* Result: CondenseTruncate.cfg (Fixed) holds. Every variant models a rule the fix
+\* replaces and fails its target invariant. CHOOSE over several eligible results makes
+\* the exact state count vary between runs; polarity does not.
+\* Issue 1823 failures are covered; PR 2647 rounds 2-4 added the Rewind action,
+\* boundary VisMsg, SummaryUntagged, skip-first (threads 4657855243, 4657986893). Issue 1254 added four invariants (ZeroOK, NoPairDeg).
+\* PR 2696 round 1 (threads 4692295250/71/81) added DegSelectionLive, the fake-big
+\* EmptyOK case, and DegradationKeepsOtherBlocks (PreScan, EmptyOK, AllBlocks sabotage).
+\* Round 2 (thread 4693277487) added ErrExhaustsCandidates and one-block-per-round
+\* selection (OnlyBig sabotage); its Persistence Integrity note is a gap. Round 6
+\* (threads on tla:56/59) added the caller transition and ErrStopsRequests
+\* (NoStop sabotage); the recount comparison is a recorded gap. Round 7
+\* (threads 4697695475/4697701195) records rewind restoration of the
+\* degradedOriginals as a gap (see Gaps) and pins the recount-unchanged
+\* degrade with a unit test.
+\* Gaps: marker text, getExistingSummaryIds guard, scan and clamp guards, the recovery
+\* budget, the caller persist path for a failed round, residual code eligibility, and
+\* the degraded-round recount comparison (the code rejects a degrade whose fresh
+\* recount did not shrink; the model weights are binary units, so a
+\* recount-unchanged degrade is unrepresentable here — the unit tests pin it).
+\* Rewind restoration (round 7) is a gap: modeling the marker-carrying history
+\* needs the degraded message's identity to survive across rounds, but this
+\* model's degIdx resets every history-mutating action (the fresh-round record
+\* DegradationPreservesPair and DegSelectionLive pin), and a persistent identity
+\* breaks DegSelectionLive when a later Truncate tags the degraded message; a
+\* marker Msg record would add a variable and multiply the state count. The
+\* message-manager rewind tests pin the restore behavior on the real code.
+\* Round 9 stays inside this gap: the lookup order (recorded index before the
+\* timestamp heuristic) and the retry turn-removal window are both below the
+\* model's abstraction (message identity and disk persistence are not modeled);
+\* the rewind and persistence tests pin them on the real code.
+\* Findings: covered 4, added 9, gap 8.
+\* Replay: ZeroOK gives Init, Recover: a one-message history reports success with no
+\* change, so the live code (issue 1254) retries forever. This is the unfixed-code
+\* reproduction. NoPairDeg gives Init, AddToolPair, Recover: the degraded tool result
+\* stays live while its paired tool use is tagged. PreScan gives Init, AddMsg,
+\* AddToolPair, Condense, Recover: the degraded result sits before the summary,
+\* hidden at the sink. EmptyOK gives Init, AddFakePair, Recover: a round succeeds
+\* with no weight loss. AllBlocks gives Init, AddToolPair, Recover: a second
+\* oversized block vanishes. OnlyBig gives Init, AddToolPair, Recover twice: the
+\* second round reports Error while the second block still weighs. NoStop gives
+\* Init, AddToolPair, Recover, CallerRespond: the caller resends the unchanged
+\* history after the Error round. The unit tests replay every rule.
 
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Mode, MaxMsgs
 
-Msg == [cond : BOOLEAN, trunc : BOOLEAN, mark : BOOLEAN, summ : BOOLEAN, stale : BOOLEAN]
-FreshMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE]
-SummaryMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> TRUE, stale |-> FALSE]
-MarkerMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> TRUE, summ |-> FALSE, stale |-> FALSE]
+\* fake: passes the size scan of the unfixed code but weighs nothing (the
+\* empty-array shape). big2: a second oversized tool_result block of the same
+\* message (the parallel tool call shape).
+Msg == [cond : BOOLEAN, trunc : BOOLEAN, mark : BOOLEAN, summ : BOOLEAN, stale : BOOLEAN, tres : BOOLEAN, big : BOOLEAN, fake : BOOLEAN, big2 : BOOLEAN]
+FreshMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE, tres |-> FALSE, big |-> FALSE, fake |-> FALSE, big2 |-> FALSE]
+SummaryMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> TRUE, stale |-> FALSE, tres |-> FALSE, big |-> FALSE, fake |-> FALSE, big2 |-> FALSE]
+MarkerMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> TRUE, summ |-> FALSE, stale |-> FALSE, tres |-> FALSE, big |-> FALSE, fake |-> FALSE, big2 |-> FALSE]
+ToolResMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE, tres |-> TRUE, big |-> TRUE, fake |-> FALSE, big2 |-> TRUE]
+FakeToolResMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE, tres |-> TRUE, big |-> FALSE, fake |-> TRUE, big2 |-> FALSE]
 
-VARIABLES n, msgs, last, repValid, repTokens
-vars == <<n, msgs, last, repValid, repTokens>>
+VARIABLES n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2, resentErr
+vars == <<n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2, resentErr>>
+\* degClr2: the last degrade round selected the second block (big2) as the
+\* block to clear, so the first block was not touched this round.
 
 \* The latest summary, when one exists.
 SumIdxSet == {i \in 1..n : msgs[i].summ}
@@ -112,49 +162,41 @@ LiveMsg(i) ==
 
 LiveCount == Cardinality({i \in 1..n : LiveMsg(i)})
 
-\* The visible filter of truncateConversation per mode.
-\* Fixed: the latest-summary boundary. The summary is the first candidate;
-\* the skip-first rule in Truncate keeps it untagged (review round 4).
-\* Matched: the code on the reviewed head. Tags decide, position does not.
-\* Coarse: hides every tagged message (the first version of the fix).
-\* Buggy: ignores condenseParent (the code before the fix).
-VisMsg(mode, i) ==
-    IF mode = "Fixed" THEN
-        /\ ~msgs[i].trunc
-        /\ ~msgs[i].mark
-        /\ \/ ~HasSummary
-           \/ i >= LastSumIdx
-    ELSE IF mode = "Matched" THEN
-        /\ ~msgs[i].trunc
-        /\ ~msgs[i].mark
-        /\ ~(msgs[i].cond /\ ~msgs[i].stale /\ HasSummary)
-    ELSE IF mode = "Coarse" THEN
-        /\ ~msgs[i].trunc
-        /\ ~msgs[i].mark
-        /\ ~msgs[i].cond
-    ELSE
-        /\ ~msgs[i].trunc
-        /\ ~msgs[i].mark
+\* The live weight: one unit per live message plus one per live oversized
+\* tool result. The code measures tokens; this is the countable progress.
+LiveWeight == LiveCount
+           + Cardinality({i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].big})
+           + Cardinality({i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].big2})
 
-\* The count after truncation per mode. Fixed uses the boundary and keeps the
-\* summary in the count. Each other mode counts by its own rule.
+\* The 0.5 even-rounding rule of truncateConversation: half of the visible
+\* messages after the first one, rounded down to an even count. A short
+\* visible history yields zero (issue 1254).
+RemovedCount(vc) ==
+    LET raw == (vc - 1) \div 2
+    IN IF raw % 2 = 0 THEN raw ELSE raw - 1
+
+\* The visible filter of truncateConversation per mode. The else arm is Fixed:
+\* the latest-summary boundary. The summary is the first candidate and the
+\* skip-first rule in Truncate keeps it untagged (PR 2647 round 4).
+VisMsg(mode, i) ==
+    IF mode = "Matched" THEN /\ ~msgs[i].trunc /\ ~msgs[i].mark
+                          /\ ~(msgs[i].cond /\ ~msgs[i].stale /\ HasSummary)
+    ELSE IF mode = "Coarse" THEN /\ ~msgs[i].trunc /\ ~msgs[i].mark /\ ~msgs[i].cond
+    ELSE IF mode = "Buggy" THEN /\ ~msgs[i].trunc /\ ~msgs[i].mark
+    ELSE /\ ~msgs[i].trunc /\ ~msgs[i].mark
+         /\ \/ ~HasSummary
+            \/ i >= LastSumIdx
+
+\* The count after truncation per mode. The else arm is Fixed: the boundary,
+\* and the summary stays in the count.
 CountMsg(mode, m, i) ==
-    IF mode = "Fixed" THEN
-        /\ ~m.trunc
-        /\ ~m.mark
-        /\ \/ ~HasSummary
-           \/ i >= LastSumIdx
-    ELSE IF mode = "Matched" THEN
-        /\ ~m.trunc
-        /\ ~m.mark
-        /\ ~(m.cond /\ ~m.stale /\ HasSummary)
-    ELSE IF mode = "Coarse" THEN
-        /\ ~m.trunc
-        /\ ~m.mark
-        /\ ~m.cond
-    ELSE
-        /\ ~m.trunc
-        /\ ~m.mark
+    IF mode = "Matched" THEN /\ ~m.trunc /\ ~m.mark
+                          /\ ~(m.cond /\ ~m.stale /\ HasSummary)
+    ELSE IF mode = "Coarse" THEN /\ ~m.trunc /\ ~m.mark /\ ~m.cond
+    ELSE IF mode = "Buggy" THEN /\ ~m.trunc /\ ~m.mark
+    ELSE /\ ~m.trunc /\ ~m.mark
+         /\ \/ ~HasSummary
+            \/ i >= LastSumIdx
 
 \* The k smallest elements of S. S has at least k elements when this runs.
 RECURSIVE MinN(_, _)
@@ -169,10 +211,38 @@ AddMsg ==
     /\ n' = n + 1
     /\ msgs' = [i \in 1..(n + 1) |-> IF i = n + 1 THEN FreshMsg ELSE msgs[i]]
     /\ repValid' = FALSE
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
+    /\ UNCHANGED resentErr
 
-\* The condense source: every untagged message gets condenseParent, then a summary
-\* follows. A fresh tag always has a live summary (stale = FALSE).
+\* A tool turn: an assistant tool use and a user tool result, adjacent. The
+\* result starts oversized, the shape of the 4MB case in issue 1254.
+AddToolPair ==
+    /\ n + 2 <= MaxMsgs
+    /\ n' = n + 2
+    /\ msgs' = [i \in 1..(n + 2) |-> IF i = n + 1 THEN FreshMsg
+                                   ELSE IF i = n + 2 THEN ToolResMsg
+                                   ELSE msgs[i]]
+    /\ repValid' = FALSE
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
+    /\ UNCHANGED <<last, repTokens>>
+    /\ UNCHANGED resentErr
+
+\* An empty-content tool turn: the serialized empty array passes the size
+\* scan of the unfixed code, but clearing it cannot shrink the token count.
+AddFakePair ==
+    /\ n + 2 <= MaxMsgs
+    /\ n' = n + 2
+    /\ msgs' = [i \in 1..(n + 2) |-> IF i = n + 1 THEN FreshMsg
+                                   ELSE IF i = n + 2 THEN FakeToolResMsg
+                                   ELSE msgs[i]]
+    /\ repValid' = FALSE
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
+    /\ UNCHANGED <<last, repTokens>>
+    /\ UNCHANGED resentErr
+
+\* The condense source: every untagged message gets condenseParent, then a
+\* summary follows. A fresh tag always has a live summary (stale = FALSE).
 Condense ==
     /\ n < MaxMsgs
     /\ n' = n + 1
@@ -180,17 +250,17 @@ Condense ==
                                    ELSE IF msgs[i].cond THEN msgs[i]
                                    ELSE [msgs[i] EXCEPT !.cond = TRUE, !.stale = FALSE]]
     /\ repValid' = FALSE
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
+    /\ UNCHANGED resentErr
 
-\* The code under test. It hides half of the visible messages after the first one,
-\* rounded to an even count. Then it reports how many it removed.
-\* Truncate keeps every message, so the summary positions keep their value.
+\* The code under test. It hides half of the visible messages after the first
+\* one, rounded to an even count. Then it reports how many it removed.
 Truncate ==
     /\ n < MaxMsgs
     /\ LET Vis == {i \in 1..n : VisMsg(Mode, i)}
            vc == Cardinality(Vis)
-           raw == (vc - 1) \div 2
-           removed == IF raw % 2 = 0 THEN raw ELSE raw - 1
+           removed == RemovedCount(vc)
        IN /\ vc >= 5
        /\ LET first == CHOOSE i \in Vis : \A j \in Vis : i <= j
               tagged == MinN(Vis \ {first}, removed)
@@ -199,10 +269,11 @@ Truncate ==
                                           ELSE msgs[i]]
           IN /\ msgs' = newM
              /\ n' = n + 1
-             /\ last' = [rep |-> removed,
-                         lost |-> Cardinality({i \in tagged : LiveMsg(i)})]
+             /\ last' = [rep |-> removed, lost |-> Cardinality({i \in tagged : LiveMsg(i)})]
              /\ repValid' = TRUE
              /\ repTokens' = Cardinality({i \in 1..(n + 1) : CountMsg(Mode, newM[i], i)})
+             /\ phase' = "ok" /\ stall' = 0 /\ prevWt' = LiveWeight /\ degIdx' = 0 /\ degClr2' = FALSE
+             /\ UNCHANGED resentErr
 
 \* A rewind to a point before the summary deletes it and the messages after it.
 \* The tagged messages before it stay, now stale and live again.
@@ -214,24 +285,94 @@ Rewind ==
              IN /\ n' = k - 1
                 /\ msgs' = [i \in 1..(k - 1) |-> IF msgs[i].cond THEN [msgs[i] EXCEPT !.stale = TRUE]
                                                   ELSE msgs[i]]
-                /\ repValid' = FALSE
-                /\ repTokens' = 0
+                /\ repValid' = FALSE /\ repTokens' = 0
+                /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
                 /\ UNCHANGED last
+                /\ UNCHANGED resentErr
+
+\* The Task-side response to a round outcome (PR 2696 review round 6, thread
+\* on CondenseTruncate.tla:56): after an Error round the request paths stop
+\* (ContextManagementNoProgressError) instead of resending the unchanged
+\* history. Fixed records the stop; the NoStop sabotage arm resends. Normal
+\* round iteration is out of scope: only the Error decision is modeled.
+CallerRespond ==
+    /\ phase = "err"
+    /\ IF Mode = "NoStop"
+       THEN /\ resentErr' = TRUE
+            /\ UNCHANGED <<n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2>>
+       ELSE /\ resentErr' = FALSE
+            /\ UNCHANGED <<n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2>>
+
+\* One recovery round of manageContext (issue 1254) on a zero-removal history.
+\* Fixed: degrade one eligible live tool result (its paired tool use stays
+\* live), or stop with Error. ZeroOK: the live code reports success with no
+\* change and never degrades. NoPairDeg: the degrade step also tags the pair.
+\* Sizes are binary, so any eligible choice models the largest one.
+Recover ==
+    /\ stall < 2
+    \* After an Error round no further Recover is enabled: both request
+    \* paths stop instead of resending the unchanged history (PR 2696
+    \* review round 8). CallerRespond models the caller's decision; a new
+    \* recovery round starts only from a fresh run phase via AddMsg and
+    \* friends, which reset phase to "run".
+    /\ phase # "err"
+    /\ LET Vis == {i \in 1..n : VisMsg(Mode, i)}
+           vc == Cardinality(Vis)
+       IN /\ vc >= 1
+          /\ RemovedCount(vc) = 0
+    /\ LET Deg == IF Mode = "PreScan" /\ HasSummary
+                  THEN {i \in 2..(LastSumIdx - 1) : ~msgs[i].trunc /\ ~msgs[i].mark /\ msgs[i].tres /\ msgs[i].big}
+                  ELSE IF Mode = "EmptyOK"
+                  THEN {i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].fake /\ LiveMsg(i - 1)}
+                  ELSE IF Mode = "OnlyBig"
+                  THEN {i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].big /\ LiveMsg(i - 1)}
+                  ELSE {i \in 1..n : LiveMsg(i) /\ msgs[i].tres
+                        /\ (msgs[i].big \/ msgs[i].big2) /\ LiveMsg(i - 1)}
+       IN \/ /\ Deg # {}
+             /\ Mode # "ZeroOK"
+             /\ LET d == CHOOSE x \in Deg : TRUE
+                   dm == IF Mode = "NoPairDeg"
+                         THEN [msgs EXCEPT ![d] = IF msgs[d].big
+                                                  THEN [msgs[d] EXCEPT !.big = FALSE]
+                                                  ELSE [msgs[d] EXCEPT !.big2 = FALSE],
+                                          ![d - 1] = [msgs[d - 1] EXCEPT !.trunc = TRUE]]
+                         ELSE IF Mode = "AllBlocks"
+                         THEN [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE, !.big2 = FALSE]]
+                         ELSE IF msgs[d].big
+                         THEN [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE, !.fake = FALSE]]
+                         ELSE [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big2 = FALSE, !.fake = FALSE]]
+                IN /\ msgs' = dm
+                   /\ phase' = "ok" /\ stall' = 0 /\ prevWt' = LiveWeight /\ degIdx' = d
+                   /\ degClr2' = ((Mode # "AllBlocks") /\ ~msgs[d].big)
+                   /\ repValid' = FALSE
+                   /\ UNCHANGED <<n, last, repTokens>>
+                   /\ UNCHANGED resentErr
+          \/ /\ (Deg = {} \/ Mode = "ZeroOK")
+             /\ phase' = IF Mode = "ZeroOK" THEN "ok" ELSE "err"
+             /\ stall' = stall + 1
+             /\ prevWt' = LiveWeight /\ degIdx' = 0 /\ degClr2' = FALSE /\ repValid' = FALSE
+             /\ UNCHANGED <<n, msgs, last, repTokens>>
+             /\ UNCHANGED resentErr
 
 Init == /\ n = 1
         /\ msgs = [i \in 1..1 |-> FreshMsg]
         /\ last = [rep |-> 0, lost |-> 0]
-        /\ repValid = FALSE
-        /\ repTokens = 0
+        /\ repValid = FALSE /\ repTokens = 0
+        /\ phase = "run" /\ stall = 0 /\ prevWt = 0 /\ degIdx = 0 /\ degClr2 = FALSE
+        /\ resentErr = FALSE
 
-Next == \/ AddMsg \/ Condense \/ Truncate \/ Rewind
+Next == \/ AddMsg \/ AddToolPair \/ AddFakePair \/ Condense \/ Truncate \/ Rewind \/ Recover
+      \/ CallerRespond
 Spec == Init /\ [][Next]_vars
 
 TypeOK == /\ n \in 1..MaxMsgs
           /\ msgs \in [1..n -> Msg]
           /\ last \in [rep : Nat, lost : Nat]
-          /\ repTokens \in Nat
-          /\ repValid \in BOOLEAN
+          /\ repTokens \in Nat /\ repValid \in BOOLEAN
+          /\ phase \in {"run", "ok", "err"} /\ stall \in 0..2
+          /\ prevWt \in Nat /\ degIdx \in 0..MaxMsgs
+          /\ degClr2 \in BOOLEAN
+          /\ resentErr \in BOOLEAN
 
 \* The opposite of Failure 1: a truncation that reports k removed messages hides
 \* exactly k live messages, so the live history shrinks by what the code reports.
@@ -251,5 +392,51 @@ SelectionMatchesLive ==
 \* The opposite of the summary half of Failure 4: the latest summary is the
 \* first effective message, so no truncation may ever tag it.
 SummaryUntagged == \A i \in 1..n : msgs[i].summ => ~msgs[i].trunc
+
+\* The opposite of the fake-success half of Failure 5: a reported success
+\* strictly shrinks the live weight, so the history cannot retry at the
+\* same size forever.
+SuccessIsMonotonic == phase = "ok" => prevWt > LiveWeight
+
+\* The opposite of the orphan half of Failure 5: right after a degrade step,
+\* the degraded tool result is live, its content is degraded, and its paired
+\* tool use is live. The Messages API rejects an orphaned half.
+DegradationPreservesPair ==
+    degIdx = 0 \/
+    /\ degIdx > 1
+    /\ LiveMsg(degIdx)
+    /\ msgs[degIdx].tres
+    /\ ~msgs[degIdx].big
+    /\ LiveMsg(degIdx - 1)
+
+\* The opposite of Failure 6: a degraded tool result is live at the sink, so
+\* the cleared content was still model-facing and the round could count it.
+DegSelectionLive == degIdx = 0 \/ LiveMsg(degIdx)
+
+\* The opposite of Failure 8: the degrade keeps a second oversized block of
+\* the selected message, so only the selected result loses its content. Each
+\* round selects one block; degClr2 marks big2 as the selected one.
+DegradationKeepsOtherBlocks == degIdx = 0 \/ degClr2 \/ msgs[degIdx].big2
+
+\* The opposite of Failure 9: the stop is honest. A round that reports Error
+\* leaves no selectable oversized block on any live paired tool result.
+ErrExhaustsCandidates ==
+    phase = "err" =>
+        \A i \in 1..n :
+            ~(LiveMsg(i) /\ msgs[i].tres
+              /\ (msgs[i].big \/ msgs[i].big2) /\ LiveMsg(i - 1))
+
+\* The opposite of the zero-progress half of Failure 5: a round that removes
+\* nothing and degrades nothing never reports success.
+NoZeroProgressSuccess == phase = "ok" => stall = 0
+
+\* The opposite of the unbounded half of Failure 5: two stalled rounds in a
+\* row end in Error, never a repeated success.
+BoundedRecovery == stall >= 2 => phase = "err"
+
+\* The opposite of Failure 11: after an Error round no request resends the
+\* unchanged history — the caller stops (the code throws
+\* ContextManagementNoProgressError on both request paths).
+ErrStopsRequests == ~resentErr
 
 ====

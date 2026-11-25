@@ -394,6 +394,281 @@ describe("MessageManager", () => {
 			const hasMarker = apiCall.some((m: any) => m.isTruncationMarker)
 			expect(hasMarker).toBe(false)
 		})
+		it("restores the degraded tool result when a removal drops its marker", async () => {
+			const truncationId = "trunc-deg-1"
+			const originalContent = [{ type: "text", text: "4MB of original output" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 300, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+				{ ts: 400, say: "user", text: "Third" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					ts: 110,
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t1", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t1", content: "" },
+					],
+				},
+				{
+					ts: 111,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: originalContent }],
+				},
+				{ ts: 150, role: "user", content: [{ type: "text", text: "Second" }] },
+			]
+
+			// Rewind to ts=150: the marker and its degraded message stay
+			// (below the cutoff) but the truncation event is removed, which
+			// dooms the marker — the original must come back with it gone.
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find((m: { ts?: number }) => m.ts === 110)
+			expect(degraded).toBeDefined()
+			expect((degraded as unknown as { content: unknown[] }).content[1]).toStrictEqual({
+				type: "tool_result",
+				tool_use_id: "t1",
+				content: originalContent,
+			})
+		})
+
+		it("restores the degraded result when the cutoff equals the marker timestamp", async () => {
+			const truncationId = "trunc-deg-2"
+			const originalContent = [{ type: "text", text: "original output for equal cutoff" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 111, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 400, say: "user", text: "Third" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					ts: 110,
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t2", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t2", content: "" },
+					],
+				},
+				{
+					ts: 111,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: originalContent }],
+				},
+				{ ts: 150, role: "user", content: [{ type: "text", text: "Second" }] },
+			]
+
+			// Rewind with cutoff 111: the marker sits at the cutoff and the
+			// timestamp filter removes it, while the degraded message (ts 110)
+			// survives — the original must still be restored (PR 2696 review
+			// round 7).
+			await manager.rewindToTimestamp(111)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find((m: { ts?: number }) => m.ts === 110)
+			expect(degraded).toBeDefined()
+			expect((degraded as unknown as { content: unknown[] }).content[1]).toStrictEqual({
+				type: "tool_result",
+				tool_use_id: "t2",
+				content: originalContent,
+			})
+		})
+
+		it("restores a degraded result whose message carries no timestamp", async () => {
+			const truncationId = "trunc-deg-3"
+			const originalContent = [{ type: "text", text: "original output without ts" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 300, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+				{ ts: 400, say: "user", text: "Third" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t3", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t3", content: "" },
+					],
+				},
+				{
+					ts: 50,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: originalContent }],
+				},
+				{ ts: 150, role: "user", content: [{ type: "text", text: "Second" }] },
+			]
+
+			// The degraded message has no ts, so the marker fell back to a
+			// Date.now()-derived timestamp (50 here) and the marker.ts - 1
+			// lookup cannot find it. The predecessor identity must restore it
+			// (PR 2696 review round 7).
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find(
+				(m: { ts?: number; content?: unknown }) => m.ts === undefined && Array.isArray(m.content),
+			)
+			expect(degraded).toBeDefined()
+			expect((degraded as unknown as { content: unknown[] }).content[1]).toStrictEqual({
+				type: "tool_result",
+				tool_use_id: "t3",
+				content: originalContent,
+			})
+		})
+
+		it("restores both results when two markers chain behind timestamp-free messages", async () => {
+			const truncationIdA = "trunc-deg-4a"
+			const truncationIdB = "trunc-deg-4b"
+			const originalA = [{ type: "text", text: "original output A" }]
+			const originalB = [{ type: "text", text: "original output B" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{
+					ts: 300,
+					say: "sliding_window_truncation",
+					contextTruncation: { truncationId: truncationIdA, reason: "window" },
+				},
+				{
+					ts: 301,
+					say: "sliding_window_truncation",
+					contextTruncation: { truncationId: truncationIdB, reason: "window" },
+				},
+				{ ts: 400, say: "user", text: "Third" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{ ts: 150, role: "user", content: [{ type: "text", text: "Second" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t4", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t4", content: "" },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t5", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t5", content: "" },
+					],
+				},
+				{
+					ts: 60,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId: truncationIdA,
+					degradedOriginals: [{ index: 2, blockIndex: 1, content: originalA }],
+				},
+				{
+					ts: 61,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId: truncationIdB,
+					degradedOriginals: [{ index: 3, blockIndex: 1, content: originalB }],
+				},
+			]
+
+			// Both degraded messages carry no ts, so each marker fell back to a
+			// Date.now()-derived timestamp and the second marker trails the
+			// first marker, not its degraded message. Result B sits before
+			// marker A, so without the recorded-index lookup the predecessor
+			// fallback mislinks marker A to result B's message and leaves
+			// marker B nothing valid: BOTH blocks must come from their
+			// recorded original-history indexes (PR 2696 review round 9).
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const restoredA = apiCall.find(
+				(m: { content?: unknown }) =>
+					Array.isArray(m.content) &&
+					(m.content as { tool_use_id?: string }[]).some((b) => b?.tool_use_id === "t4"),
+			) as { content: unknown[] } | undefined
+			expect(restoredA?.content[1]).toStrictEqual({ type: "tool_result", tool_use_id: "t4", content: originalA })
+			const restoredB = apiCall.find(
+				(m: { content?: unknown }) =>
+					Array.isArray(m.content) &&
+					(m.content as { tool_use_id?: string }[]).some((b) => b?.tool_use_id === "t5"),
+			) as { content: unknown[] } | undefined
+			expect(restoredB?.content[1]).toStrictEqual({ type: "tool_result", tool_use_id: "t5", content: originalB })
+		})
+
+		it("restores from the recorded link when a retained message shares marker.ts - 1", async () => {
+			const truncationId = "trunc-deg-ts"
+			const original = [{ type: "text", text: "original output t9" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 300, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t9", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t9", content: "" },
+					],
+				},
+				{ ts: 200, role: "user", content: "Retained plain note" },
+				{
+					ts: 201,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: original }],
+				},
+			]
+
+			// The degraded message carries no ts, so the marker derived its
+			// timestamp in the same millisecond window as the retained note:
+			// marker.ts - 1 equals the note's ts, and the timestamp lookup
+			// returns a string-content message the restore step must skip.
+			// The validated recorded link wins instead (PR 2696 review round 9).
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find(
+				(m: { content?: unknown }) =>
+					Array.isArray(m.content) &&
+					(m.content as { tool_use_id?: string }[]).some((b) => b?.tool_use_id === "t9"),
+			) as { content: unknown[] } | undefined
+			expect(degraded?.content[1]).toStrictEqual({ type: "tool_result", tool_use_id: "t9", content: original })
+		})
 
 		it("should clear orphaned truncationParent tags via cleanup", async () => {
 			const truncationId = "trunc-123"

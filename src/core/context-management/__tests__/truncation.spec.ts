@@ -766,3 +766,202 @@ describe("Non-Destructive Sliding Window Truncation", () => {
 		}
 	})
 })
+
+describe("degradation candidate selection (PR 2696 review round 1)", () => {
+	const toolUse = (id: string) => [{ type: "tool_use" as const, id, name: "probe", input: {} }]
+	const toolResult = (id: string, content: string | { type: "text"; text: string }[]) => [
+		{ type: "tool_result" as const, tool_use_id: id, content },
+	]
+	const big = (n: number) => "x".repeat(n)
+	const arrayed = (m: ApiMessage) =>
+		m.content as { tool_use_id?: string; content: unknown; originalContent?: unknown }[]
+
+	it("never selects a pre-summary tool result when nothing post-summary is eligible", () => {
+		// The sink serves only the summary onward, so clearing a pre-summary
+		// result cannot shrink model-facing tokens: the round must stall, not
+		// claim success (thread 4692295250).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(5000)), ts: 1200 },
+			{ role: "user", content: "Summary of the conversation", ts: 1300, isSummary: true },
+			{ role: "user", content: "after", ts: 1400 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t1", big(5000)))
+	})
+
+	it("selects the post-summary tool result when both sides are eligible", () => {
+		// The boundary skips the pre-summary result even though it is larger,
+		// so the scan and the recount see the same candidate set.
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(8000)), ts: 1200 },
+			{ role: "user", content: "Summary of the conversation", ts: 1300, isSummary: true },
+			{ role: "user", content: "after", ts: 1400 },
+			{ role: "assistant", content: toolUse("t2"), ts: 1500 },
+			{ role: "user", content: toolResult("t2", big(3000)), ts: 1600 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.degraded).toBe(true)
+		const pre = arrayed(result.messages[2])
+		const post = arrayed(result.messages[6])
+		expect(pre[0].tool_use_id).toBe("t1")
+		expect(pre[0].content).toBe(big(8000))
+		expect(post[0].tool_use_id).toBe("t2")
+		expect(post[0].content).toBe("")
+	})
+
+	it.each([
+		["an empty array stays ineligible", [] as { type: "text"; text: string }[], true],
+		[
+			"a non-empty array stays eligible",
+			[{ type: "text", text: "hello" }] as { type: "text"; text: string }[],
+			false,
+		],
+	])("array size rule: %s", (_label, arrayContent, expectNoProgress) => {
+		// An empty array serializes to a non-empty string, but clearing it
+		// cannot shrink the token count, so it must never be a candidate
+		// (thread 4692295271).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", arrayContent), ts: 1200 },
+			{ role: "user", content: "after", ts: 1300 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		if (expectNoProgress) {
+			expect(result.noProgress).toBe(true)
+		} else {
+			expect(result.degraded).toBe(true)
+		}
+	})
+
+	it.each([
+		[
+			"a tool_use_id that matches no preceding tool_use",
+			[{ role: "assistant", content: toolUse("t1"), ts: 1100 }] as ApiMessage[],
+		],
+		["no preceding assistant tool_use", [{ role: "user", content: "plain text", ts: 1100 }] as ApiMessage[]],
+	])("skips degradation when %s", (_label, middle) => {
+		// Pairing: a result is a candidate only when the preceding assistant
+		// message carries a tool_use with the matching id (Regression Evidence,
+		// review round 2).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			...middle,
+			{ role: "user", content: toolResult("t9", big(5000)), ts: 1200 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t9", big(5000)))
+	})
+
+	it("never selects a truncation marker as a degradation candidate", () => {
+		// Marker and parent messages are bookkeeping, not live content: the
+		// scan skips them even when they carry a paired oversized tool result
+		// (Regression Evidence, review round 2).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{
+				role: "user",
+				content: toolResult("t1", big(5000)),
+				ts: 1200,
+				isTruncationMarker: true,
+				truncationParent: "m1",
+			},
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t1", big(5000)))
+	})
+
+	it("clears only the selected tool_result block of the message", () => {
+		// Parallel tool calls share one message; clearing every block erases
+		// a small result that was not selected (thread 4692295281).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: [...toolUse("t1"), ...toolUse("t2")], ts: 1100 },
+			{
+				role: "user",
+				content: [...toolResult("t1", big(6000)), ...toolResult("t2", "keep me")],
+				ts: 1200,
+			},
+			{ role: "user", content: "after", ts: 1300 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.degraded).toBe(true)
+		const blocks = arrayed(result.messages[2])
+		expect(blocks[0].content).toBe("")
+		expect(blocks[1].content).toBe("keep me")
+		// The original survives on the hidden degradation marker appended at
+		// the end, NOT on the cleared block: native providers serialize
+		// content blocks as-is, so an extra field there would be sent back to
+		// the API (issue 1254 review, taltas thread 4695751065).
+		expect(blocks[0]).not.toHaveProperty("originalContent")
+		const marker = result.messages[result.messages.length - 1]
+		expect(marker.isTruncationMarker).toBe(true)
+		expect(marker.degradedOriginals?.[0]).toEqual({
+			index: 2,
+			blockIndex: 0,
+			content: big(6000),
+		})
+	})
+
+	it("degrades one block per round until no eligible block remains", () => {
+		// ErrExhaustsCandidates (CondenseTruncate.tla) models recovery rounds:
+		// a premature noProgress on the second round passes every single-call
+		// test, so the chain must run for real (thread 4693794543). frac 0.25
+		// keeps floor((visible-1)*frac) at the degenerate 0 so every round
+		// takes the degradation path.
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(8000)), ts: 1200 },
+			{ role: "assistant", content: toolUse("t2"), ts: 1300 },
+			{ role: "user", content: toolResult("t2", big(5000)), ts: 1400 },
+		]
+
+		const round1 = truncateConversation(history, 0.25, "test-task-id")
+		expect(round1.degraded).toBe(true)
+		expect(arrayed(round1.messages[2])[0].content).toBe("")
+		expect(arrayed(round1.messages[4])[0].content).toBe(big(5000))
+
+		const round2 = truncateConversation(round1.messages, 0.25, "test-task-id")
+		// The second round degrades the remaining oversized block...
+		expect(round2.degraded).toBe(true)
+		expect(arrayed(round2.messages[4])[0].content).toBe("")
+		// ...keeps round 1's block cleared, and retains both paired
+		// tool_use messages and their tool_result messages. Each round
+		// appends one hidden degradation marker, so the visible 5 messages
+		// are joined by round 1's and round 2's markers.
+		expect(arrayed(round2.messages[2])[0].content).toBe("")
+		expect(round2.messages[1].content).toStrictEqual(toolUse("t1"))
+		expect(round2.messages[3].content).toStrictEqual(toolUse("t2"))
+		expect(round2.messages).toHaveLength(7)
+		expect(round2.messages[5].isTruncationMarker).toBe(true)
+		expect(round2.messages[6].isTruncationMarker).toBe(true)
+
+		const round3 = truncateConversation(round2.messages, 0.25, "test-task-id")
+		// noProgress fires only when no eligible block remains: both blocks
+		// stay cleared and no content returns.
+		expect(round3.noProgress).toBe(true)
+		expect(arrayed(round3.messages[2])[0].content).toBe("")
+		expect(arrayed(round3.messages[4])[0].content).toBe("")
+	})
+})
