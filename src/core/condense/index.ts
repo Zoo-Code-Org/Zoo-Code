@@ -353,17 +353,21 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		let passSummary = ""
 		let passCost = 0
 		const stream = apiHandler.createMessage(promptToUse, requestMessages, passMetadata)
-		for await (const chunk of stream) {
-			if (chunk.type === "text") {
-				passSummary += chunk.text
-			} else if (chunk.type === "usage") {
-				// Record final usage chunk only
-				passCost = chunk.totalCost ?? 0
+		try {
+			for await (const chunk of stream) {
+				if (chunk.type === "text") {
+					passSummary += chunk.text
+				} else if (chunk.type === "usage") {
+					// Record final usage chunk only
+					passCost = chunk.totalCost ?? 0
+				}
 			}
+		} finally {
+			// Every pass is billed, so the total sums the passes instead of
+			// letting the last pass overwrite the earlier spend; a stream
+			// that emits usage and then throws still spent the pass's tokens.
+			cost += passCost
 		}
-		// Every pass is billed, so the total sums the passes instead of
-		// letting the last pass overwrite the earlier spend.
-		cost += passCost
 		return passSummary
 	}
 

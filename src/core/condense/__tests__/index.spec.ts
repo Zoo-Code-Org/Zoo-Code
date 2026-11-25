@@ -1315,6 +1315,33 @@ describe("summarizeConversation", () => {
 		// overwriting the first pass's spend.
 		expect(result.cost).toBeCloseTo(0.03)
 	})
+	it("keeps the billed usage when a pass streams usage and then throws", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const usageThenThrowStream = (async function* () {
+			yield { type: "text" as const, text: "Partial summary" }
+			yield { type: "usage" as const, totalCost: 0.04 }
+			throw new Error("stream died after usage")
+		})()
+		mockApiHandler.createMessage = vi.fn(() => usageThenThrowStream) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// The pass ran and was billed before the stream failed: the reported
+		// cost must include it even though the condense itself errors.
+		expect(result.error).toBeDefined()
+		expect(result.cost).toBeCloseTo(0.04)
+	})
 
 	it("mirrors the prior-turn request prefix with native tool blocks kept", async () => {
 		const messages: ApiMessage[] = [
