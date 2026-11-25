@@ -73,6 +73,10 @@ export type TruncationResult = {
 	messages: ApiMessage[]
 	truncationId: string
 	messagesRemoved: number
+	/** True when a zero-removal round degraded an oversized tool result instead of reporting success. */
+	degraded?: boolean
+	/** True when no progress could be made (nothing removed and nothing degraded). */
+	noProgress?: boolean
 }
 
 /**
@@ -126,11 +130,83 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 	const messagesToRemove = rawMessagesToRemove - (rawMessagesToRemove % 2)
 
 	if (messagesToRemove <= 0) {
-		// Nothing to truncate
+		// Nothing to truncate by sliding window. Instead of reporting success
+		// with no change (issue 1254), degrade the largest eligible oversized
+		// tool_result content while preserving its tool_use_id pairing. If no
+		// eligible tool result can shrink, report a no-progress outcome so the
+		// caller can escalate instead of retrying forever.
+		const eligible: { index: number; size: number }[] = []
+		messages.forEach((msg, index) => {
+			if (msg.truncationParent || msg.isTruncationMarker) return
+			const content = msg.content
+			if (!Array.isArray(content)) return
+			for (const block of content) {
+				if (block && typeof block === "object" && (block as { type?: string }).type === "tool_result") {
+					const b = block as { content?: unknown }
+					const size =
+						typeof b.content === "string"
+							? b.content.length
+							: Array.isArray(b.content)
+								? JSON.stringify(b.content).length
+								: 0
+					// Only oversized results are eligible for degradation.
+					if (size > 0) {
+						// Preserve pairing: require a preceding assistant tool_use with matching id.
+						const toolUseId = (block as { tool_use_id?: string }).tool_use_id
+						let paired = false
+						if (index > 0) {
+							const prev = messages[index - 1]
+							const prevContent = prev?.content
+							if (Array.isArray(prevContent)) {
+								paired = prevContent.some(
+									(pb) =>
+										pb &&
+										typeof pb === "object" &&
+										(pb as { type?: string }).type === "tool_use" &&
+										(toolUseId === undefined || (pb as { id?: string }).id === toolUseId),
+								)
+							}
+						}
+						if (paired) {
+							eligible.push({ index, size })
+						}
+					}
+				}
+			}
+		})
+
+		if (eligible.length === 0) {
+			return {
+				messages,
+				truncationId,
+				messagesRemoved: 0,
+				noProgress: true,
+			}
+		}
+
+		// Degrade the largest eligible tool result (one step per round).
+		eligible.sort((a, b) => b.size - a.size)
+		const targetIndex = eligible[0].index
+		const degradedMessages = messages.map((msg, index) => {
+			if (index !== targetIndex) return msg
+			const content = Array.isArray(msg.content) ? [...msg.content] : msg.content
+			if (Array.isArray(content)) {
+				const newContent = content.map((block) => {
+					if (block && typeof block === "object" && (block as { type?: string }).type === "tool_result") {
+						return { ...(block as unknown as Record<string, unknown>), content: "" }
+					}
+					return block
+				})
+				return { ...msg, content: newContent } as ApiMessage
+			}
+			return msg
+		})
+
 		return {
-			messages,
+			messages: degradedMessages,
 			truncationId,
 			messagesRemoved: 0,
+			degraded: true,
 		}
 	}
 
@@ -398,6 +474,22 @@ export async function manageContext({
 	// Fall back to sliding window truncation if needed
 	if (prevContextTokens > allowedTokens) {
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
+
+		if (truncationResult.noProgress) {
+			error =
+				"Unable to reduce context: no messages removable and no oversized tool result eligible for degradation."
+			return {
+				messages,
+				prevContextTokens,
+				summary: "",
+				cost,
+				error,
+				errorDetails,
+				truncationId: truncationResult.truncationId,
+				messagesRemoved: 0,
+				newContextTokensAfterTruncation: prevContextTokens,
+			}
+		}
 
 		// Calculate new context tokens after truncation by counting the messages the
 		// API still receives. The sink's fresh-start slice (getEffectiveApiHistory)
