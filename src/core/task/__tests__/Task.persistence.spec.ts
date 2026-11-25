@@ -16,6 +16,7 @@ import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
+import { ContextManagementNoProgressError } from "../../context-management/index"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { PendingActionSettlementError, Task } from "../Task"
 import { parseMentions } from "../../mentions"
@@ -406,6 +407,99 @@ describe("Task persistence", () => {
 			// The recovery marker survives on disk with its metadata.
 			expect(saved.some((m) => m.isTruncationMarker && m.truncationId === "trunc-disk")).toBe(true)
 		})
+
+		it.each([
+			["output-limit retry", new OutputTokenLimitError()],
+			["no-progress retry", new ContextManagementNoProgressError("unable to reduce context")],
+		] as const)(
+			"keeps later saves authoritative when the replacement write fails (%s)",
+			async (_name, streamError) => {
+				let replacementFailed = false
+				mockSaveApiMessages.mockImplementation(async (arg: unknown) => {
+					const merge = (arg as { merge?: boolean }).merge
+					if (merge === false && !replacementFailed) {
+						replacementFailed = true
+						throw new Error("disk full")
+					}
+					return []
+				})
+
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				const access = task as unknown as {
+					diffViewProvider: { reset: () => Promise<void> }
+					safeEnsureModelFetched: () => Promise<unknown>
+					presentAssistantMessageSafe: () => void
+				}
+				vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+				vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+				vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+				vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+
+				async function* failingStream(): AsyncGenerator<ApiStreamChunk> {
+					yield { type: "text", text: "partial answer" }
+					throw streamError
+				}
+
+				const attemptApiRequestSpy = vi
+					.spyOn(task, "attemptApiRequest")
+					.mockImplementationOnce(() => {
+						// Context recovery ran before the stream failed: the marker
+						// (role "user") now trails the saved turn.
+						task.apiConversationHistory.push({
+							role: "user",
+							content: "[Tool result degradation: oversized result cleared to reduce context]",
+							ts: Date.now() + 1,
+							isTruncationMarker: true,
+							truncationId: "trunc-disk",
+							degradedOriginals: [{ index: 0, blockIndex: 0, content: "original" }],
+						})
+						return failingStream()
+					})
+					.mockImplementationOnce(() =>
+						(async function* (): AsyncGenerator<ApiStreamChunk> {
+							yield { type: "text", text: "done" }
+						})(),
+					)
+					.mockImplementation(() => {
+						throw new Error("stop after retry response")
+					})
+
+				await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+				expect(attemptApiRequestSpy).toHaveBeenCalled()
+				expect(replacementFailed).toBe(true)
+
+				const calls = mockSaveApiMessages.mock.calls
+				const failedIndex = calls.findIndex(([arg]) => (arg as { merge?: boolean }).merge === false)
+				expect(failedIndex).toBeGreaterThan(-1)
+				// The very next history save stays authoritative: a merge there would
+				// keep the stale disk copy beside the replacement turn, whose new
+				// message id defeats the merge dedupe.
+				expect((calls[failedIndex + 1]?.[0] as { merge?: boolean }).merge).toBe(false)
+
+				const lastSave = calls.at(-1)?.[0] as {
+					messages?: Array<Record<string, unknown>>
+					merge?: boolean
+				}
+				const savedTurns = (lastSave?.messages ?? []).filter(
+					(m) =>
+						m.role === "user" &&
+						!m.isTruncationMarker &&
+						Array.isArray(m.content) &&
+						(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+				)
+				expect(savedTurns).toHaveLength(1)
+
+				// The latch clears once an authoritative write lands: later saves may
+				// merge again.
+				await task.retrySaveApiConversationHistory()
+				expect(mockSaveApiMessages.mock.calls.at(-1)?.[0]).toMatchObject({ merge: true })
+			},
+		)
 
 		it("keeps the saved user turn on disk when the task aborts before the retry re-add", async () => {
 			mockSaveApiMessages.mockResolvedValue([])

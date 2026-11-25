@@ -2843,6 +2843,10 @@ describe("Cline", () => {
 					ContextManagementNoProgressError,
 				)
 				expect(task.apiConversationHistory).toBe(original)
+				// The stated no-progress contract: recovery must not rewrite
+				// history. The identity assert alone passes even if recovery
+				// called the writer before throwing.
+				expect(task.overwriteApiConversationHistory).not.toHaveBeenCalled()
 			})
 
 			it("runs the real history overwrite when the emergency fallback truncates", async () => {

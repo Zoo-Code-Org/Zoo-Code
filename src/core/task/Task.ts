@@ -556,6 +556,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Set to `true` only after the assistant message is durably saved.
 	 */
 	assistantMessageSavedToHistory = false
+	/**
+	 * A failed authoritative (merge=false) write leaves the disk holding a
+	 * stale copy while memory holds the replacement turn under a new message
+	 * id; a later merge write would then persist both copies. While this flag
+	 * is set every history save stays authoritative until one of them lands.
+	 */
+	private historyReplacementPending = false
 	private assistantMessagePersistencePromise!: Promise<AssistantMessagePersistenceResult>
 	private resolveAssistantMessagePersistence!: (result: AssistantMessagePersistenceResult) => void
 	private assistantMessagePersistenceCancellation?: AssistantMessagePersistenceCancellation
@@ -1639,16 +1646,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	/** Persists the current API conversation history to disk, returning false on I/O errors. */
 	private async saveApiConversationHistory(merge = true): Promise<boolean> {
+		const effectiveMerge = merge && !this.historyReplacementPending
 		try {
 			await saveApiMessages({
 				messages: structuredClone(this.apiConversationHistory),
 				taskId: this.taskId,
 				globalStoragePath: this.globalStoragePath,
-				merge,
+				merge: effectiveMerge,
 			})
+			if (!effectiveMerge) {
+				this.historyReplacementPending = false
+			}
 			return true
 		} catch (error) {
 			console.error("Failed to save API conversation history:", error)
+			if (!effectiveMerge) {
+				this.historyReplacementPending = true
+			}
 			return false
 		}
 	}
