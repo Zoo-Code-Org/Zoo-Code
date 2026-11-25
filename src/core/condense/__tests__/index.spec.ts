@@ -1585,6 +1585,153 @@ describe("summarizeConversation", () => {
 			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
 		])
 	})
+
+	it("keeps assistant reasoning_details beside reasoning_content in the native tool-block request", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "thinking through the request",
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+			{ role: "user", content: "Continue the task", ts: 4 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// OpenRouter's Gemini path drops tool calls whose reasoning_details are
+		// missing, so the echo must carry the array beside reasoning_content.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				reasoning_content: "thinking through the request",
+				reasoning_details: [{ type: "reasoning.encrypted", data: "sig-1", id: "t1", index: 0 }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: "Continue the task" },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("drops empty reasoning_content on the native tool-block path", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+				ts: 2,
+				reasoning_content: "",
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }],
+				ts: 3,
+			},
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(result.error).toBeUndefined()
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1]
+		// An empty string echoes nothing: the provider 400s on an empty
+		// reasoning_content just as it does on a missing one.
+		expect(requestMessages).toStrictEqual([
+			{ role: "user", content: "Hello" },
+			{
+				role: "assistant",
+				content: [{ type: "tool_use", id: "t1", name: "read_file", input: {} }],
+			},
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "file contents" }] },
+			{ role: "user", content: expect.stringContaining("detailed summary of the conversation") },
+		])
+	})
+
+	it("keeps the recorded cost when a non-usage chunk follows the usage chunk", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const mixedTailStream = (async function* () {
+			yield { type: "text" as const, text: "S" }
+			yield { type: "usage" as const, totalCost: 0.05 }
+			yield { type: "reasoning" as const, text: "late thought" }
+		})()
+		mockApiHandler.createMessage = vi.fn(() => mixedTailStream) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		expect(result.summary).toBe("S")
+		// Only usage chunks write cost: a trailing non-usage chunk must not
+		// reset the final usage chunk's value.
+		expect(result.cost).toBeCloseTo(0.05)
+		expect(result.error).toBeUndefined()
+	})
+
+	it("retries with tool_choice none when the summary is only whitespace", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const whitespaceStream = (async function* () {
+			yield { type: "text" as const, text: "   " }
+			yield { type: "usage" as const, totalCost: 0.01 }
+		})()
+		const textStream = (async function* () {
+			yield { type: "text" as const, text: "Recovered summary" }
+			yield { type: "usage" as const, totalCost: 0.02 }
+		})()
+		const streams = [whitespaceStream, textStream]
+		let call = 0
+		mockApiHandler.createMessage = vi.fn(() => streams[call++]) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// The blank check reads the trimmed text, not truthiness: a
+		// whitespace-only summary is as good as no summary at all.
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[1][2]).toMatchObject({ tool_choice: "none" })
+		expect(result.summary).toBe("Recovered summary")
+		expect(result.error).toBeUndefined()
+		expect(result.cost).toBeCloseTo(0.03)
+	})
 })
 
 describe("summarizeConversation with custom settings", () => {

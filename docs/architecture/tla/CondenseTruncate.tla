@@ -88,6 +88,15 @@
 \* Cost: unchanged (<10s). Findings: covered 0, added 0, gap 1 (request assembly,
 \* real-code pinned; CR thread 4695216718: property-test claim corrected).
 
+\* Round 10 (PR 2698, head a8750220, CR thread 4699490202): the condense request
+\* must echo the assistant reasoning fields the prior turn sent (reasoning_content
+\* and reasoning_details), or OpenRouter's Gemini path drops the tool calls and
+\* their results, so the prefix diverges. Message field echo is not modeled here
+\* (each Msg is a unit - see Not modeled above), so this stays a gap; the
+\* toStrictEqual request pins in src/core/condense/__tests__/index.spec.ts cover
+\* it on the real code. Findings: covered 0, added 0, gap 1 (reasoning-field echo,
+\* real-code pinned).
+
 EXTENDS Naturals, FiniteSets
 
 CONSTANTS Mode, MaxMsgs

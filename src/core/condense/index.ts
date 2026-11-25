@@ -333,12 +333,30 @@ export async function summarizeConversation(options: SummarizeConversationOption
 			)
 
 	// DeepSeek/Z.ai thinking mode requires reasoning_content echoed back once
-	// tools are on the request (HTTP 400 otherwise) - keep it on the native path.
+	// tools are on the request (HTTP 400 otherwise). OpenRouter's Gemini path
+	// drops tool calls (and their results) from assistant messages whose
+	// reasoning_details are missing, so both fields must survive together to
+	// keep the condense request's prefix usable.
 	const requestMessages = messagesWithTextToolBlocks.map((message) => {
-		if (!keepNativeToolBlocks || typeof message.reasoning_content !== "string" || !message.reasoning_content) {
+		const canEchoReasoning =
+			keepNativeToolBlocks &&
+			typeof message.reasoning_content === "string" &&
+			message.reasoning_content.length > 0
+		if (!canEchoReasoning) {
 			return { role: message.role, content: message.content }
 		}
-		return { role: message.role, content: message.content, reasoning_content: message.reasoning_content }
+		const projected: Anthropic.MessageParam & {
+			reasoning_content?: string
+			reasoning_details?: unknown[]
+		} = {
+			role: message.role,
+			content: message.content,
+			reasoning_content: message.reasoning_content,
+		}
+		if (Array.isArray(message.reasoning_details)) {
+			projected.reasoning_details = message.reasoning_details
+		}
+		return projected
 	})
 
 	// Use the passed-in system prompt to keep the request prefix identical to the prior turn.

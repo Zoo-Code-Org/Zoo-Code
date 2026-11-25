@@ -391,4 +391,36 @@ describe("maybeRemoveImageBlocks", () => {
 		// Vision model: the nested image block passes through untouched.
 		expect(result).toStrictEqual(messages)
 	})
+
+	it("passes a string-content tool_result through unchanged for text-only models", () => {
+		const apiHandler = createMockApiHandler(false)
+		const messages: ApiMessage[] = [
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "t1", content: "plain file output" }],
+			},
+		]
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		// The nested-image remap only fires for block-list content: a
+		// string-content tool_result has no nested blocks to walk.
+		expect(result).toStrictEqual(messages)
+	})
+
+	it("leaves plain text blocks in array content untouched for text-only models", () => {
+		const apiHandler = createMockApiHandler(false)
+		const messages: ApiMessage[] = [
+			{
+				role: "assistant",
+				content: [{ type: "text", text: "no media here" }],
+			},
+		]
+
+		const result = maybeRemoveImageBlocks(messages, apiHandler)
+
+		// Only tool_result blocks carry a nested block list: remapping any
+		// other block type would crash on its missing content array.
+		expect(result).toStrictEqual(messages)
+	})
 })
