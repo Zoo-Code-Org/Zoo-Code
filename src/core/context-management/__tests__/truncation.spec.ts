@@ -773,7 +773,8 @@ describe("degradation candidate selection (PR 2696 review round 1)", () => {
 		{ type: "tool_result" as const, tool_use_id: id, content },
 	]
 	const big = (n: number) => "x".repeat(n)
-	const arrayed = (m: ApiMessage) => m.content as { tool_use_id?: string; content: unknown }[]
+	const arrayed = (m: ApiMessage) =>
+		m.content as { tool_use_id?: string; content: unknown; originalContent?: unknown }[]
 
 	it("never selects a pre-summary tool result when nothing post-summary is eligible", () => {
 		// The sink serves only the summary onward, so clearing a pre-summary
@@ -908,6 +909,18 @@ describe("degradation candidate selection (PR 2696 review round 1)", () => {
 		const blocks = arrayed(result.messages[2])
 		expect(blocks[0].content).toBe("")
 		expect(blocks[1].content).toBe("keep me")
+		// The original survives on the hidden degradation marker appended at
+		// the end, NOT on the cleared block: native providers serialize
+		// content blocks as-is, so an extra field there would be sent back to
+		// the API (issue 1254 review, taltas thread 4695751065).
+		expect(blocks[0]).not.toHaveProperty("originalContent")
+		const marker = result.messages[result.messages.length - 1]
+		expect(marker.isTruncationMarker).toBe(true)
+		expect(marker.degradedOriginals?.[0]).toEqual({
+			index: 2,
+			blockIndex: 0,
+			content: big(6000),
+		})
 	})
 
 	it("degrades one block per round until no eligible block remains", () => {
@@ -934,11 +947,15 @@ describe("degradation candidate selection (PR 2696 review round 1)", () => {
 		expect(round2.degraded).toBe(true)
 		expect(arrayed(round2.messages[4])[0].content).toBe("")
 		// ...keeps round 1's block cleared, and retains both paired
-		// tool_use messages and their tool_result messages.
+		// tool_use messages and their tool_result messages. Each round
+		// appends one hidden degradation marker, so the visible 5 messages
+		// are joined by round 1's and round 2's markers.
 		expect(arrayed(round2.messages[2])[0].content).toBe("")
 		expect(round2.messages[1].content).toStrictEqual(toolUse("t1"))
 		expect(round2.messages[3].content).toStrictEqual(toolUse("t2"))
-		expect(round2.messages).toHaveLength(5)
+		expect(round2.messages).toHaveLength(7)
+		expect(round2.messages[5].isTruncationMarker).toBe(true)
+		expect(round2.messages[6].isTruncationMarker).toBe(true)
 
 		const round3 = truncateConversation(round2.messages, 0.25, "test-task-id")
 		// noProgress fires only when no eligible block remains: both blocks

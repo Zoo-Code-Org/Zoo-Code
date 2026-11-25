@@ -114,7 +114,12 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
-import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
+import {
+	type ContextManagementResult,
+	ContextManagementNoProgressError,
+	manageContext,
+	willManageContext,
+} from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
 import {
@@ -5713,6 +5718,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
 			await this.reportContextManagementResult(truncateResult)
+			// A no-progress outcome leaves the history unchanged: resending it
+			// would exceed the window again, so both request paths stop here
+			// instead (issue 1254 review, taltas thread 4695751055).
+			if (truncateResult.messages === this.apiConversationHistory && truncateResult.error) {
+				throw new ContextManagementNoProgressError(truncateResult.error)
+			}
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
 			// IMPORTANT: Must always be sent to dismiss the spinner, even on error
@@ -5970,6 +5981,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
 				await this.reportContextManagementResult(truncateResult)
+				// A no-progress outcome leaves the history unchanged: resending it
+				// would exceed the window again, so the automatic request path
+				// stops here instead (issue 1254 review, taltas thread 4695751055).
+				if (truncateResult.messages === this.apiConversationHistory && truncateResult.error) {
+					throw new ContextManagementNoProgressError(truncateResult.error)
+				}
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show

@@ -49,6 +49,14 @@
 \* block per round; the scan must accept either block.
 \* Invariant ErrExhaustsCandidates: an Error round means no live paired tool
 \* result still carries an oversized block.
+\* Failure 10 (PR 2696 review round 5, taltas threads 4695751055/65/75): the
+\* no-progress outcome left both Task request paths free to resend the
+\* unchanged history (now they throw ContextManagementNoProgressError); a
+\* degrade lost the original content (now preserved on a hidden
+\* degradedOriginals marker so rewind can restore it); and the success check
+\* compared a fresh recount against the API-reported total, so a
+\* prompt-dominated or undercounted total rejected real reductions (now both
+\* sides use the same estimator over the effective slice).
 \* Modes: Fixed applies the latest-summary boundary (the fix) and the fixed recovery
 \* contract (degrade one eligible tool result, or stop with Error). Matched is the reviewed
 \* head f20ae85 of PR 2647: tags decide, no positional boundary. Coarse hides every tagged

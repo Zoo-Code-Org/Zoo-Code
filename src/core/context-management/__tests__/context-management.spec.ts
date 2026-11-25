@@ -269,11 +269,15 @@ describe("Context Management", () => {
 	 * Tests for the manageContext function
 	 */
 	describe("manageContext", () => {
-		it("reports the controlled error when degradation cannot shrink the recounted tokens", async () => {
+		it("accepts a prompt-dominated degradation that shrinks the shared-estimate recount", async () => {
 			// The recounted total includes the system prompt, which
-			// prevContextTokens omits, so a huge prompt with a tiny history makes
-			// a successful degradation impossible: the round must stall with the
-			// controlled error instead of reporting success (issue 1254).
+			// prevContextTokens omits. Under the old mixed-counter comparison
+			// this scenario always stalled with the controlled error — even a
+			// genuinely shrinking degradation was rejected because the fresh
+			// recount (prompt + history) exceeded the API-reported total
+			// (history only). Both sides now use the same estimator over the
+			// effective slice (issue 1254 review, taltas thread 4695751075),
+			// so a real shrink succeeds no matter how large the prompt is.
 			const history: ApiMessage[] = [
 				{ role: "user", content: "task" },
 				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
@@ -294,13 +298,58 @@ describe("Context Management", () => {
 				currentProfileId: "default",
 			})
 
-			expect(result.error).toBeDefined()
+			expect(result.error).toBeUndefined()
 			expect(result.messagesRemoved).toBe(0)
-			expect(result.newContextTokensAfterTruncation).toBeGreaterThanOrEqual(63)
-			// A failed round must not persist the cleared tool_result content;
-			// Task callers persist by array identity, not by equal content
-			// (Persistence Integrity, review rounds 2-3).
-			expect(result.messages).toBe(history)
+			// The degraded copy replaces the history: the caller persists it by
+			// array identity, not by equal content (Persistence Integrity,
+			// review rounds 2-3).
+			expect(result.messages).not.toBe(history)
+			// The original result survives on the hidden degradation marker so a
+			// rewind can restore the un-degraded history (issue 1254 review,
+			// taltas thread 4695751065).
+			const marker = result.messages[result.messages.length - 1]
+			expect(marker.isTruncationMarker).toBe(true)
+			expect(marker.degradedOriginals?.[0]?.content).toBe("x")
+		})
+
+		it("accepts a degradation that shrinks the shared-estimate recount even when prevContextTokens is lower than the true total", async () => {
+			// prevContextTokens (totalTokens + lastMessageTokens) can sit far
+			// below the real history size: the caller may pass a stale or zero
+			// cumulative total, and it never includes a mid-history oversized
+			// tool result. Comparing the fresh recount against it rejected
+			// reductions that genuinely shrank the history (issue 1254 review,
+			// taltas thread 4695751075). Both sides must use the same estimator
+			// over the effective slice: the recount drops the cleared result,
+			// the original-slice estimate keeps it, so the round succeeds.
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }], ts: 1100 },
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(6000) }],
+					ts: 1200,
+				},
+				{ role: "user", content: "tiny last", ts: 1300 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "S".repeat(4000),
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			// The degraded copy replaces the history: the caller persists it by
+			// array identity (Persistence Integrity, review rounds 2-3).
+			expect(result.messages).not.toBe(history)
 		})
 
 		it("returns the no-progress outcome when nothing is removable or degradable", async () => {
@@ -361,11 +410,21 @@ describe("Context Management", () => {
 
 			expect(result.error).toBeUndefined()
 			expect(result.messagesRemoved).toBe(0)
-			expect(result.messages).toStrictEqual([
+			expect(result.messages.slice(0, 3)).toStrictEqual([
 				history[0],
 				history[1],
 				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "" }] },
 			])
+			// The degradation marker rides at the end, hidden from the API: it
+			// preserves the original result so rewind can restore it (issue
+			// 1254 review, taltas thread 4695751065).
+			const marker = result.messages[3]
+			expect(marker.isTruncationMarker).toBe(true)
+			expect(marker.degradedOriginals?.[0]).toEqual({
+				index: 2,
+				blockIndex: 0,
+				content: "x".repeat(3000),
+			})
 			expect(result.newContextTokensAfterTruncation).toBeLessThan(result.prevContextTokens)
 		})
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({

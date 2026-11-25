@@ -26,6 +26,19 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 export const TOKEN_BUFFER_PERCENTAGE = 0.1
 
 /**
+ * Thrown by the Task call sites when context management reports a
+ * no-progress outcome (issue 1254 review, taltas thread 4695751055): the
+ * history cannot be shrunk, so resending it unchanged would fail again.
+ * The API request catch block re-throws this error without retrying.
+ */
+export class ContextManagementNoProgressError extends Error {
+	constructor(message: string) {
+		super(message)
+		this.name = "ContextManagementNoProgressError"
+	}
+}
+
+/**
  * Counts tokens for user content using the provider's token counting implementation.
  *
  * @param {Array<Anthropic.Messages.ContentBlockParam>} content - The content to count tokens for
@@ -196,6 +209,10 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 		eligible.sort((a, b) => b.size - a.size)
 		const targetIndex = eligible[0].index
 		const targetBlockIndex = eligible[0].blockIndex
+		const targetBlock = (() => {
+			const content = messages[targetIndex]?.content
+			return Array.isArray(content) ? content[targetBlockIndex] : undefined
+		})()
 		const degradedMessages = messages.map((msg, index) => {
 			if (index !== targetIndex) return msg
 			const content = Array.isArray(msg.content) ? [...msg.content] : msg.content
@@ -215,6 +232,33 @@ export function truncateConversation(messages: ApiMessage[], fracToRemove: numbe
 			}
 			return msg
 		})
+
+		// Preserve the original result on a hidden marker so a rewind can
+		// restore the un-degraded history (issue 1254 review, taltas thread
+		// 4695751065). The marker is hidden from every API-bound slice by its
+		// isTruncationMarker flag — native providers (Anthropic, Bedrock)
+		// serialize content blocks as-is, so the original must NOT ride on the
+		// cleared block itself or it would be sent straight back to the API.
+		const degradedOriginals =
+			targetBlock !== undefined
+				? [
+						{
+							index: targetIndex,
+							blockIndex: targetBlockIndex,
+							content: (targetBlock as { content?: unknown }).content,
+						},
+					]
+				: undefined
+		if (degradedOriginals) {
+			degradedMessages.push({
+				role: "user",
+				content: `[Tool result degradation: oversized result cleared to reduce context]`,
+				ts: (messages[targetIndex]?.ts ?? Date.now()) + 1,
+				isTruncationMarker: true,
+				truncationId,
+				degradedOriginals,
+			})
+		}
 
 		return {
 			messages: degradedMessages,
@@ -487,6 +531,18 @@ export async function manageContext({
 
 	// Fall back to sliding window truncation if needed
 	if (prevContextTokens > allowedTokens) {
+		// The boundary of the ORIGINAL history: the latest summary anchors the
+		// same fresh-start slice the sink uses, so the estimate below covers
+		// exactly what the API still receives before this round (issue 1254).
+		let originalLastSummaryIndex = -1
+		for (let i = messages.length - 1; i >= 0; i--) {
+			if (messages[i].isSummary) {
+				originalLastSummaryIndex = i
+				break
+			}
+		}
+		const originalBoundary = originalLastSummaryIndex === -1 ? 0 : originalLastSummaryIndex
+
 		const truncationResult = truncateConversation(messages, 0.5, taskId)
 
 		if (truncationResult.noProgress) {
@@ -547,8 +603,26 @@ export async function manageContext({
 
 		// A degraded round must shrink the recounted total before it reports
 		// success (issue 1254); otherwise the caller would retry a round that
-		// cannot make progress.
-		if (truncationResult.degraded && newContextTokensAfterTruncation >= prevContextTokens) {
+		// cannot make progress. Both sides of the comparison must use the SAME
+		// token counter (issue 1254 review, taltas thread 4695751075):
+		// prevContextTokens carries the API-reported cumulative usage, which
+		// includes cache reads and provider accounting the local estimator
+		// never sees, so comparing the fresh estimate against it can reject a
+		// reduction that really shrank the history. Recount the original
+		// effective slice with the same estimator instead.
+		const originalEffectiveMessages = messages.filter(
+			(msg, index) => index >= originalBoundary && !msg.truncationParent && !msg.isTruncationMarker,
+		)
+		let prevEstimatedTokens = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
+		for (const msg of originalEffectiveMessages) {
+			const content = msg.content
+			if (Array.isArray(content)) {
+				prevEstimatedTokens += await estimateTokenCount(content, apiHandler)
+			} else if (typeof content === "string") {
+				prevEstimatedTokens += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
+			}
+		}
+		if (truncationResult.degraded && newContextTokensAfterTruncation >= prevEstimatedTokens) {
 			// The round failed: handing back the degraded history would persist
 			// cleared tool_result content, so the caller keeps the original.
 			return {
