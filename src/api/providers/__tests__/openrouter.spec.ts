@@ -4637,9 +4637,11 @@ describe("OpenRouterHandler", () => {
 					openRouterModelId: "openai/gpt-4o",
 				}),
 			)
+			let requestSignal: AbortSignal | undefined
 			const mockCreate = vitest
 				.fn()
 				.mockImplementation(async (_params: unknown, options?: { signal?: AbortSignal }) => {
+				requestSignal = options?.signal
 					// Emulate the OpenAI SDK: the in-flight request rejects when the signal times out.
 					await new Promise<void>((resolve) => {
 						if (options?.signal?.aborted) {
@@ -4663,6 +4665,8 @@ describe("OpenRouterHandler", () => {
 			await expect(handler.completePrompt("test prompt", { timeoutMs: 50 })).rejects.toMatchObject({
 				name: "AbortError",
 			})
+
+			expect(requestSignal?.aborted).toBe(true)
 		})
 
 		it("rejects with AbortError when both an abort signal and a timeout are provided", async () => {
