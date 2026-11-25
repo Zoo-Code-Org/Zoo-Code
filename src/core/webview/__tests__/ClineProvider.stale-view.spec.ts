@@ -381,6 +381,62 @@ describe("ClineProvider - stale view lifecycle", () => {
 			expect(first.visibility.listenerCount()).toBe(0)
 			expect(first.disposed.listenerCount()).toBe(0)
 		})
+
+		test("a resolve made stale by a recovery epoch bump during state hydration removes its message listener", async () => {
+			const first = createSidebarView()
+			provider["getHtmlContent"] = vi
+				.fn<(webview: vscode.Webview) => Promise<string>>()
+				.mockResolvedValue(`<!DOCTYPE html><html><body>sidebar</body></html>`)
+			const stateDeferred = makeDeferred<ProviderState>()
+			const realGetState = provider.getState.bind(provider)
+			const stateSpy = vi.spyOn(provider, "getState").mockImplementation(() => stateDeferred.promise)
+
+			const staleResolve = provider.resolveWebviewView(first.view)
+			await flushAsync()
+			expect(first.messages.listenerCount()).toBe(1)
+
+			// Explicit recovery bumps the epoch but keeps the view and its resources.
+			provider["webviewRecoveryEpoch"]++
+			stateDeferred.resolve(await realGetState())
+			await staleResolve
+			stateSpy.mockRestore()
+
+			expect(provider["view"]).toBe(first.view)
+			expect(first.messages.listenerCount()).toBe(0)
+			expect(first.visibility.listenerCount()).toBe(0)
+		})
+	})
+
+	test("a launch message posted while state hydration is pending reaches the message handler", async () => {
+		const first = createSidebarView()
+		provider["getHtmlContent"] = vi
+			.fn<(webview: vscode.Webview) => Promise<string>>()
+			.mockResolvedValue(`<!DOCTYPE html><html><body>sidebar</body></html>`)
+		const stateDeferred = makeDeferred<ProviderState>()
+		const realGetState = provider.getState.bind(provider)
+		const stateSpy = vi.spyOn(provider, "getState").mockImplementation(() => stateDeferred.promise)
+
+		const resolving = provider.resolveWebviewView(first.view)
+		// The HTML is assigned and the resolve waits in getState(). A cold start can
+		// keep it there long enough for the webview to mount and post its launch message.
+		await flushAsync()
+		expect(first.view.webview.html).toContain("<!DOCTYPE html>")
+
+		const launch: WebviewMessage = { type: "webviewDidLaunch" }
+		first.messages.fire(launch)
+		await flushAsync()
+		expect(vi.mocked(webviewMessageHandler)).toHaveBeenCalledWith(provider, launch, provider["marketplaceManager"])
+
+		stateDeferred.resolve(await realGetState())
+		await resolving
+		stateSpy.mockRestore()
+
+		// The completed resolve does not install a second provider message listener.
+		vi.mocked(webviewMessageHandler).mockClear()
+		const focus: WebviewMessage = { type: "webviewDidFocus" }
+		first.messages.fire(focus)
+		await flushAsync()
+		expect(vi.mocked(webviewMessageHandler)).toHaveBeenCalledTimes(1)
 	})
 
 	test("a different view replacing the current one disposes the replaced view's subscriptions", async () => {

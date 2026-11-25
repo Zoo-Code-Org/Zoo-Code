@@ -562,7 +562,9 @@ describe("ClineProvider", () => {
 				postMessage: mockPostMessage,
 				html: "",
 				options: {},
-				onDidReceiveMessage: vi.fn(),
+				onDidReceiveMessage: vi.fn().mockImplementation(() => {
+					return { dispose: vi.fn() }
+				}),
 				asWebviewUri: vi.fn(),
 				cspSource: "vscode-webview://test-csp-source",
 			},
@@ -2998,7 +3000,12 @@ describe("ClineProvider", () => {
 					await vi.advanceTimersByTimeAsync(10_000)
 
 					expect(provider["view"]).toBe(failed)
-					expect(failed.webview.onDidReceiveMessage).not.toHaveBeenCalled()
+					// The resolve listens before it assigns HTML, but a failed resolve keeps no listener.
+					const subscriptions = vi.mocked(failed.webview.onDidReceiveMessage).mock.results
+					expect(subscriptions).toHaveLength(stage === "state hydration" ? 1 : 0)
+					for (const { value: subscription } of subscriptions) {
+						expect(subscription.dispose).toHaveBeenCalled()
+					}
 					expect(failed.dispose).not.toHaveBeenCalled()
 					expect(provider["webviewWatchdogInterval"]).not.toBeNull()
 					expect(provider["webviewHostRecoveryInProgress"]).toBe(false)

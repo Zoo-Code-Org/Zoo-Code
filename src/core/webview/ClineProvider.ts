@@ -1288,48 +1288,60 @@ export class ClineProvider
 			return
 		}
 
-		webviewView.webview.html = html
+		// Listen before assigning HTML: the webview posts webviewDidLaunch as soon as
+		// it mounts, and VS Code drops messages that arrive before a listener exists.
+		// A cold start can keep the state hydration below pending for seconds, which
+		// would otherwise lose the launch message and leave the view blank.
+		const messageListener = this.setWebviewMessageListener(webviewView)
 
-		// Initialize out-of-scope variables that need to receive persistent
-		// global state values.
-		await this.getState().then(
-			({
-				terminalShellIntegrationTimeout = Terminal.defaultShellIntegrationTimeout,
-				terminalShellIntegrationDisabled = false,
-				terminalCommandDelay = 0,
-				terminalZshClearEolMark = true,
-				terminalZshOhMy = false,
-				terminalZshP10k = false,
-				terminalPowershellCounter = false,
-				terminalZdotdir = false,
-				terminalProfile,
-				ttsEnabled,
-				ttsSpeed,
-			}) => {
-				if (this.isStaleViewResolve(webviewView, epoch)) return
-				Terminal.setShellIntegrationTimeout(terminalShellIntegrationTimeout)
-				Terminal.setShellIntegrationDisabled(terminalShellIntegrationDisabled)
-				Terminal.setCommandDelay(terminalCommandDelay)
-				Terminal.setTerminalZshClearEolMark(terminalZshClearEolMark)
-				Terminal.setTerminalZshOhMy(terminalZshOhMy)
-				Terminal.setTerminalZshP10k(terminalZshP10k)
-				Terminal.setPowershellCounter(terminalPowershellCounter)
-				Terminal.setTerminalZdotdir(terminalZdotdir)
-				Terminal.setTerminalProfile(terminalProfile)
-				setTtsEnabled(ttsEnabled ?? false)
-				setTtsSpeed(ttsSpeed ?? 1)
-			},
-		)
+		try {
+			webviewView.webview.html = html
+
+			// Initialize out-of-scope variables that need to receive persistent
+			// global state values.
+			await this.getState().then(
+				({
+					terminalShellIntegrationTimeout = Terminal.defaultShellIntegrationTimeout,
+					terminalShellIntegrationDisabled = false,
+					terminalCommandDelay = 0,
+					terminalZshClearEolMark = true,
+					terminalZshOhMy = false,
+					terminalZshP10k = false,
+					terminalPowershellCounter = false,
+					terminalZdotdir = false,
+					terminalProfile,
+					ttsEnabled,
+					ttsSpeed,
+				}) => {
+					if (this.isStaleViewResolve(webviewView, epoch)) return
+					Terminal.setShellIntegrationTimeout(terminalShellIntegrationTimeout)
+					Terminal.setShellIntegrationDisabled(terminalShellIntegrationDisabled)
+					Terminal.setCommandDelay(terminalCommandDelay)
+					Terminal.setTerminalZshClearEolMark(terminalZshClearEolMark)
+					Terminal.setTerminalZshOhMy(terminalZshOhMy)
+					Terminal.setTerminalZshP10k(terminalZshP10k)
+					Terminal.setPowershellCounter(terminalPowershellCounter)
+					Terminal.setTerminalZdotdir(terminalZdotdir)
+					Terminal.setTerminalProfile(terminalProfile)
+					setTtsEnabled(ttsEnabled ?? false)
+					setTtsSpeed(ttsSpeed ?? 1)
+				},
+			)
+		} catch (error) {
+			// A failed resolve leaves the view to watchdog recovery without listeners.
+			messageListener.dispose()
+			throw error
+		}
 
 		// State hydration can also finish after the view was disposed or replaced.
-		// A stale resolve must not install listeners on a view the provider no longer owns.
+		// A stale resolve must not keep listeners on a view the provider no longer owns.
+		// A recovery epoch bump does not clear webview resources, so remove the
+		// message listener here as well.
 		if (this.isStaleViewResolve(webviewView, epoch)) {
+			messageListener.dispose()
 			return
 		}
 
-		// Sets up an event listener to listen for messages passed from the webview view context
-		// and executes code based on the message that is received.
-		this.setWebviewMessageListener(webviewView)
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
@@ -2054,8 +2066,9 @@ export class ClineProvider
 	 * executes code based on the message that is received.
 	 *
 	 * @param webviewView The view whose webview messages are listened to
+	 * @returns The listener subscription, which is also tracked in the view's disposables
 	 */
-	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel) {
+	private setWebviewMessageListener(webviewView: vscode.WebviewView | vscode.WebviewPanel): vscode.Disposable {
 		const onReceiveMessage = async (message: WebviewMessage) => {
 			// Ignore messages from a view that is no longer the current view.
 			if (webviewView !== this.view) {
@@ -2089,6 +2102,7 @@ export class ClineProvider
 
 		const messageDisposable = webviewView.webview.onDidReceiveMessage(onReceiveMessage)
 		this.webviewDisposables.push(messageDisposable)
+		return messageDisposable
 	}
 
 	/**
