@@ -42,6 +42,7 @@ import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
 import { manageContext } from "../../context-management"
+import { ContextManagementNoProgressError } from "../../context-management"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
@@ -668,6 +669,61 @@ describe("Cline", () => {
 			const attemptApiRequestSpy = vi
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() => truncatedStream())
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy.mock.calls.slice(0, 2).map(([retryAttempt]) => retryAttempt)).toEqual([0, 0])
+		})
+	})
+	describe("context management no-progress mid-stream", () => {
+		async function* noProgressStream(): AsyncGenerator<ApiStreamChunk> {
+			yield { type: "text", text: "partial answer" }
+			throw new ContextManagementNoProgressError(
+				"Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+			)
+		}
+
+		async function createAutoApprovedTask() {
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(
+				providerStateWith({ autoApprovalEnabled: true, requestDelaySeconds: 0 }),
+			)
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			vi.spyOn(getTaskTestAccess(task), "presentAssistantMessageSafe").mockImplementation(() => {})
+			return task
+		}
+
+		it("asks once instead of auto-retrying, even with auto-approval", async () => {
+			const task = await createAutoApprovedTask()
+			const askSpy = vi
+				.spyOn(task, "ask")
+				.mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			const backoffSpy = vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce")
+			const attemptApiRequestSpy = vi.spyOn(task, "attemptApiRequest").mockImplementation(() => noProgressStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(backoffSpy).not.toHaveBeenCalled()
+			expect(askSpy).toHaveBeenCalledWith("api_req_failed", expect.stringContaining("Unable to reduce context"))
+		})
+
+		it("retries from a fresh attempt count when the user confirms", async () => {
+			const task = await createAutoApprovedTask()
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => noProgressStream())
 				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
 				.mockImplementation(() => {
 					throw new Error("stop after retry response")

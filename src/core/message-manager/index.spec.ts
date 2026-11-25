@@ -394,6 +394,53 @@ describe("MessageManager", () => {
 			const hasMarker = apiCall.some((m: any) => m.isTruncationMarker)
 			expect(hasMarker).toBe(false)
 		})
+		it("restores the degraded tool result when a removal drops its marker", async () => {
+			const truncationId = "trunc-deg-1"
+			const originalContent = [{ type: "text", text: "4MB of original output" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 300, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+				{ ts: 400, say: "user", text: "Third" },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					ts: 110,
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t1", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t1", content: "" },
+					],
+				},
+				{
+					ts: 111,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: originalContent }],
+				},
+				{ ts: 150, role: "user", content: [{ type: "text", text: "Second" }] },
+			]
+
+			// Rewind to ts=150: the marker and its degraded message stay
+			// (below the cutoff) but the truncation event is removed, which
+			// dooms the marker — the original must come back with it gone.
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find((m: { ts?: number }) => m.ts === 110)
+			expect(degraded).toBeDefined()
+			expect((degraded as unknown as { content: unknown[] }).content[1]).toStrictEqual({
+				type: "tool_result",
+				tool_use_id: "t1",
+				content: originalContent,
+			})
+		})
 
 		it("should clear orphaned truncationParent tags via cleanup", async () => {
 			const truncationId = "trunc-123"

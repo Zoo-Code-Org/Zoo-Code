@@ -4852,6 +4852,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								retryAttempt: 0,
 							})
 							continue
+						} else if (error instanceof ContextManagementNoProgressError) {
+							// Context management stopped without shrinking the history: resending
+							// the same request repeats the failure forever, so like
+							// OutputTokenLimitError the retry is the user's call, never an
+							// automatic loop (issue 1254 review).
+							const { response } = await this.ask("api_req_failed", rawErrorMessage)
+						
+							if (response !== "yesButtonClicked") {
+								throw new Error("API request failed")
+							}
+						
+							await this.say("api_req_retried")
+							stack.push({
+								userContent: currentUserContent,
+								includeFileDetails: false,
+								retryAttempt: 0,
+							})
+							continue
 						} else {
 							// Stream failed - log the error and retry with the same content
 							// The existing rate limiting will prevent rapid retries
@@ -5714,6 +5732,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				useAvailableInputForContextPercent,
 			})
 
+			// Evaluate no-progress BEFORE the overwrite: a successful fallback
+			// reduction returns a NEW array, and once it is written back
+			// ensureMessageIdentifiers makes this.apiConversationHistory the same
+			// array, so a check after the overwrite would false-flag every
+			// successful round (issue 1254 review).
+			const noProgressError =
+				truncateResult.messages === this.apiConversationHistory ? truncateResult.error : undefined
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
@@ -5721,8 +5746,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// A no-progress outcome leaves the history unchanged: resending it
 			// would exceed the window again, so both request paths stop here
 			// instead (issue 1254 review, taltas thread 4695751055).
-			if (truncateResult.messages === this.apiConversationHistory && truncateResult.error) {
-				throw new ContextManagementNoProgressError(truncateResult.error)
+			if (noProgressError) {
+				throw new ContextManagementNoProgressError(noProgressError)
 			}
 		} finally {
 			// Notify webview that context management is complete (removes in-progress spinner)
@@ -5977,6 +6002,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				// Evaluate no-progress BEFORE the overwrite: a successful fallback
+				// reduction returns a NEW array, and once it is written back
+				// ensureMessageIdentifiers makes this.apiConversationHistory the same
+				// array, so a check after the overwrite would false-flag every
+				// successful round (issue 1254 review).
+				const noProgressError =
+					truncateResult.messages === this.apiConversationHistory ? truncateResult.error : undefined
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
@@ -5984,8 +6016,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// A no-progress outcome leaves the history unchanged: resending it
 				// would exceed the window again, so the automatic request path
 				// stops here instead (issue 1254 review, taltas thread 4695751055).
-				if (truncateResult.messages === this.apiConversationHistory && truncateResult.error) {
-					throw new ContextManagementNoProgressError(truncateResult.error)
+				if (noProgressError) {
+					throw new ContextManagementNoProgressError(noProgressError)
 				}
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)

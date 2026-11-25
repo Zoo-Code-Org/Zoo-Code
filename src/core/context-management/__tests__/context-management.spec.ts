@@ -352,6 +352,87 @@ describe("Context Management", () => {
 			expect(result.messages).not.toBe(history)
 		})
 
+		it("reproduces the 4 MB tool-result case from the issue acceptance criteria", async () => {
+			// Issue 1254 acceptance: "Focused tests reproduce the 4 MB
+			// tool-result case and verify bounded recovery." A 4 MB result is
+			// ~1M tokens by the chars/4 estimate, far beyond any realistic
+			// window, and the degradation must clear it in one round without
+			// orphaning the pair or looping.
+			const big4MB = "x".repeat(4 * 1024 * 1024)
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }], ts: 1100 },
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "t1", content: big4MB }],
+					ts: 1200,
+				},
+				{ role: "user", content: "after", ts: 1300 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 1_100_000,
+				contextWindow: 1_000_000,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			// One degradation round recovers: the recount no longer exceeds the
+			// budget, and the original survives on the hidden marker.
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			const marker = result.messages[result.messages.length - 1]
+			expect(marker.degradedOriginals?.[0]?.content).toBe(big4MB)
+			const degraded = result.messages[2].content as { content?: unknown }[]
+			expect(degraded[0].content).toBe("")
+			// Bounded: exactly one hidden marker was appended — no retry loop
+			// multiplied the history.
+			expect(result.messages).toHaveLength(5)
+		})
+
+		it("does not recount the original history on a plain truncation round", async () => {
+			// The original-history recount feeds only the degradation
+			// comparison; a plain sliding-window round must not re-tokenize
+			// the removed messages (issue 1254 review).
+			const modelInfo = createModelInfo(100000, 30000)
+			const countSpy = vi.spyOn(mockApiHandler, "countTokens")
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task", ts: 1000 },
+				{ role: "assistant", content: "REMOVED-one", ts: 1100 },
+				{ role: "user", content: "REMOVED-two", ts: 1200 },
+				{ role: "assistant", content: "KEPT-three", ts: 1300 },
+				{ role: "user", content: "keep", ts: 1400 },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 70001,
+				contextWindow: modelInfo.contextWindow,
+				maxTokens: modelInfo.maxTokens,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.messagesRemoved).toBe(2)
+			const tokenized = countSpy.mock.calls.map(([content]) => JSON.stringify(content)).join("\n")
+			// The window removes indexes 1-2; KEPT-three stays, so the
+			// retained recount may still tokenize it.
+			const offenders = ["REMOVED-one", "REMOVED-two"].filter((m) => tokenized.includes(m))
+			expect(offenders).toStrictEqual([])
+		})
+
 		it("returns the no-progress outcome when nothing is removable or degradable", async () => {
 			// A short history with no paired oversized tool result removes zero
 			// messages and offers no degradation candidate: the round reports the

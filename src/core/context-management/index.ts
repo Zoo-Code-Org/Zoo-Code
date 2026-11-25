@@ -610,31 +610,37 @@ export async function manageContext({
 		// never sees, so comparing the fresh estimate against it can reject a
 		// reduction that really shrank the history. Recount the original
 		// effective slice with the same estimator instead.
-		const originalEffectiveMessages = messages.filter(
-			(msg, index) => index >= originalBoundary && !msg.truncationParent && !msg.isTruncationMarker,
-		)
-		let prevEstimatedTokens = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
-		for (const msg of originalEffectiveMessages) {
-			const content = msg.content
-			if (Array.isArray(content)) {
-				prevEstimatedTokens += await estimateTokenCount(content, apiHandler)
-			} else if (typeof content === "string") {
-				prevEstimatedTokens += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
+		// Only the degradation path consumes the original-history recount:
+		// the comparison below is gated on truncationResult.degraded, and
+		// running the loop for ordinary truncation re-tokenized the removed
+		// oversized results for nothing (issue 1254 review).
+		if (truncationResult.degraded) {
+			const originalEffectiveMessages = messages.filter(
+				(msg, index) => index >= originalBoundary && !msg.truncationParent && !msg.isTruncationMarker,
+			)
+			let prevEstimatedTokens = await estimateTokenCount([{ type: "text", text: systemPrompt }], apiHandler)
+			for (const msg of originalEffectiveMessages) {
+				const content = msg.content
+				if (Array.isArray(content)) {
+					prevEstimatedTokens += await estimateTokenCount(content, apiHandler)
+				} else if (typeof content === "string") {
+					prevEstimatedTokens += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
+				}
 			}
-		}
-		if (truncationResult.degraded && newContextTokensAfterTruncation >= prevEstimatedTokens) {
-			// The round failed: handing back the degraded history would persist
-			// cleared tool_result content, so the caller keeps the original.
-			return {
-				messages,
-				prevContextTokens,
-				summary: "",
-				cost,
-				error: "Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
-				errorDetails,
-				truncationId: truncationResult.truncationId,
-				messagesRemoved: 0,
-				newContextTokensAfterTruncation,
+			if (newContextTokensAfterTruncation >= prevEstimatedTokens) {
+				// The round failed: handing back the degraded history would persist
+				// cleared tool_result content, so the caller keeps the original.
+				return {
+					messages,
+					prevContextTokens,
+					summary: "",
+					cost,
+					error: "Unable to reduce context: tool result degradation did not reduce the recounted tokens.",
+					errorDetails,
+					truncationId: truncationResult.truncationId,
+					messagesRemoved: 0,
+					newContextTokensAfterTruncation,
+				}
 			}
 		}
 

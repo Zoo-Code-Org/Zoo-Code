@@ -192,6 +192,56 @@ export class MessageManager {
 
 		// Step 4: Remove truncation markers whose sliding_window_truncation was removed
 		if (removedIds.truncationIds.size > 0) {
+			// Restore first: a doomed degradation marker carries the original
+			// tool_result content its round cleared, and dropping it without
+			// restoring would lose that content permanently (issue 1254
+			// review). The marker is written at degraded.ts + 1, so the
+			// degraded message is located by ts; restored messages are new
+			// objects routed through the final history write.
+			const restoreOps = new Map<number, Array<{ blockIndex: number; content: unknown }>>()
+			for (const marker of apiHistory) {
+				if (
+					!(
+						marker.isTruncationMarker &&
+						marker.truncationId &&
+						removedIds.truncationIds.has(marker.truncationId)
+					)
+				) {
+					continue
+				}
+				if (marker.ts === undefined || !Array.isArray(marker.degradedOriginals)) {
+					continue
+				}
+				const degradedTs = marker.ts - 1
+				const ops = restoreOps.get(degradedTs) ?? []
+				for (const original of marker.degradedOriginals) {
+					ops.push({ blockIndex: original.blockIndex, content: original.content })
+				}
+				restoreOps.set(degradedTs, ops)
+			}
+			if (restoreOps.size > 0) {
+				apiHistory = apiHistory.map((msg) => {
+					const ops = restoreOps.get(msg.ts ?? Number.NaN)
+					if (!ops || !Array.isArray(msg.content)) {
+						return msg
+					}
+					let changed = false
+					const content = msg.content.map((block, blockIndex) => {
+						const op = ops.find((candidate) => candidate.blockIndex === blockIndex)
+						if (
+							!op ||
+							!block ||
+							(block as { type?: string }).type !== "tool_result" ||
+							(block as { content?: unknown }).content !== ""
+						) {
+							return block
+						}
+						changed = true
+						return { ...(block as unknown as Record<string, unknown>), content: op.content }
+					})
+					return changed ? ({ ...msg, content } as typeof msg) : msg
+				})
+			}
 			apiHistory = apiHistory.filter((msg) => {
 				if (msg.isTruncationMarker && msg.truncationId && removedIds.truncationIds.has(msg.truncationId)) {
 					console.log(
