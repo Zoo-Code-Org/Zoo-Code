@@ -1447,7 +1447,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * Appends an API turn and records whether an assistant turn reached persistent storage.
 	 * If the message resolves a pending action, retries the save on initial failure before clearing the action.
 	 */
-	private async addToApiConversationHistory(message: Anthropic.MessageParam, reasoning?: string): Promise<void> {
+	private async addToApiConversationHistory(
+		message: Anthropic.MessageParam,
+		reasoning?: string,
+		persistMerge = true,
+	): Promise<void> {
 		const resolvesPendingAction =
 			this.pendingAction &&
 			message.role === "user" &&
@@ -1465,7 +1469,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}),
 		)
 
-		let saved = await this.saveApiConversationHistory()
+		let saved = await this.saveApiConversationHistory(persistMerge)
 		if (!saved && resolvesPendingAction) {
 			saved = await this.retrySaveApiConversationHistory()
 		}
@@ -4160,7 +4164,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				userMessageWasRemoved: currentItem.userMessageWasRemoved,
 			})
 			if (shouldAddUserMessage) {
-				await this.addToApiConversationHistory({ role: "user", content: finalUserContent })
+				// A confirmed retry re-adds the removed turn here: merge=false
+				// makes this single write replace the stale disk copy, so the
+				// disk never holds a duplicate and never holds a turn-less
+				// intermediate state (issue 1254 review rounds 8-9).
+				await this.addToApiConversationHistory(
+					{ role: "user", content: finalUserContent },
+					undefined,
+					!currentItem.userMessageWasRemoved,
+				)
 				this.messageCounts.user++
 			}
 
@@ -4877,12 +4889,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									this.apiConversationHistory.splice(turnIndex, 1)
 									this.messageCounts.user--
 									removedSavedUserTurn = true
-									// Persist the reduction with merge=false so the disk
-									// file drops the removed record. The default merge
-									// keeps disk-only records, and the retry's re-add
-									// would then persist two user turns for one request
-									// (issue 1254 review round 8, persistence integrity).
-									await this.saveApiConversationHistory(false)
+									// The removal stays in memory only. The next iteration's
+									// re-add persists the replacement with merge=false in one
+									// authoritative write (issue 1254 review round 8,
+									// persistence integrity - moved from this branch in
+									// round 9): writing the turn-less state here would strand
+									// a saved tool_use without its tool_result on disk when
+									// the task aborts before the re-add runs.
 								}
 							}
 							await this.say("api_req_retried")
@@ -4928,12 +4941,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 									this.apiConversationHistory.splice(turnIndex, 1)
 									this.messageCounts.user--
 									removedSavedUserTurn = true
-									// Persist the reduction with merge=false so the disk
-									// file drops the removed record. The default merge
-									// keeps disk-only records, and the retry's re-add
-									// would then persist two user turns for one request
-									// (issue 1254 review round 8, persistence integrity).
-									await this.saveApiConversationHistory(false)
+									// The removal stays in memory only. The next iteration's
+									// re-add persists the replacement with merge=false in one
+									// authoritative write (issue 1254 review round 8,
+									// persistence integrity - moved from this branch in
+									// round 9): writing the turn-less state here would strand
+									// a saved tool_use without its tool_result on disk when
+									// the task aborts before the re-add runs.
 								}
 							}
 							await this.say("api_req_retried")

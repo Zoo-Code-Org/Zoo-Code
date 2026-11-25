@@ -7106,6 +7106,9 @@ describe("Cline", () => {
 				expect.objectContaining({
 					content: expect.arrayContaining([{ type: "text", text: "expanded input" }]),
 				}),
+				// The retry re-add passes the persist-merge flag (round 9).
+				undefined,
+				true,
 			)
 		})
 

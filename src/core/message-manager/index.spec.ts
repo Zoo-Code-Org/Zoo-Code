@@ -574,6 +574,13 @@ describe("MessageManager", () => {
 					],
 				},
 				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t5", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t5", content: "" },
+					],
+				},
+				{
 					ts: 60,
 					role: "user",
 					content: "[Tool result degradation: oversized result cleared to reduce context]",
@@ -582,28 +589,22 @@ describe("MessageManager", () => {
 					degradedOriginals: [{ index: 2, blockIndex: 1, content: originalA }],
 				},
 				{
-					role: "user",
-					content: [
-						{ type: "tool_use", id: "t5", name: "probe", input: {} },
-						{ type: "tool_result", tool_use_id: "t5", content: "" },
-					],
-				},
-				{
 					ts: 61,
 					role: "user",
 					content: "[Tool result degradation: oversized result cleared to reduce context]",
 					isTruncationMarker: true,
 					truncationId: truncationIdB,
-					degradedOriginals: [{ index: 4, blockIndex: 1, content: originalB }],
+					degradedOriginals: [{ index: 3, blockIndex: 1, content: originalB }],
 				},
 			]
 
 			// Both degraded messages carry no ts, so each marker fell back to a
-			// Date.now()-derived timestamp and the second marker trails the first
-			// marker, not its degraded message. The marker.ts - 1 lookup resolves
-			// to the earlier marker (now excluded) and the predecessor fallback
-			// picks a marker too — only the recorded original-history index
-			// restores the second block (PR 2696 review round 8).
+			// Date.now()-derived timestamp and the second marker trails the
+			// first marker, not its degraded message. Result B sits before
+			// marker A, so without the recorded-index lookup the predecessor
+			// fallback mislinks marker A to result B's message and leaves
+			// marker B nothing valid: BOTH blocks must come from their
+			// recorded original-history indexes (PR 2696 review round 9).
 			await manager.rewindToTimestamp(150)
 
 			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
@@ -620,6 +621,53 @@ describe("MessageManager", () => {
 					(m.content as { tool_use_id?: string }[]).some((b) => b?.tool_use_id === "t5"),
 			) as { content: unknown[] } | undefined
 			expect(restoredB?.content[1]).toStrictEqual({ type: "tool_result", tool_use_id: "t5", content: originalB })
+		})
+
+		it("restores from the recorded link when a retained message shares marker.ts - 1", async () => {
+			const truncationId = "trunc-deg-ts"
+			const original = [{ type: "text", text: "original output t9" }]
+
+			mockTask.clineMessages = [
+				{ ts: 100, say: "user", text: "First" },
+				{ ts: 150, say: "user", text: "Second" },
+				{ ts: 300, say: "sliding_window_truncation", contextTruncation: { truncationId, reason: "window" } },
+			]
+
+			mockTask.apiConversationHistory = [
+				{ ts: 100, role: "user", content: [{ type: "text", text: "First" }] },
+				{
+					role: "user",
+					content: [
+						{ type: "tool_use", id: "t9", name: "probe", input: {} },
+						{ type: "tool_result", tool_use_id: "t9", content: "" },
+					],
+				},
+				{ ts: 200, role: "user", content: "Retained plain note" },
+				{
+					ts: 201,
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					isTruncationMarker: true,
+					truncationId,
+					degradedOriginals: [{ index: 1, blockIndex: 1, content: original }],
+				},
+			]
+
+			// The degraded message carries no ts, so the marker derived its
+			// timestamp in the same millisecond window as the retained note:
+			// marker.ts - 1 equals the note's ts, and the timestamp lookup
+			// returns a string-content message the restore step must skip.
+			// The validated recorded link wins instead (PR 2696 review round 9).
+			await manager.rewindToTimestamp(150)
+
+			const apiCall = mockTask.overwriteApiConversationHistory.mock.calls[0][0]
+			expect(apiCall.some((m: { isTruncationMarker?: boolean }) => m.isTruncationMarker)).toBe(false)
+			const degraded = apiCall.find(
+				(m: { content?: unknown }) =>
+					Array.isArray(m.content) &&
+					(m.content as { tool_use_id?: string }[]).some((b) => b?.tool_use_id === "t9"),
+			) as { content: unknown[] } | undefined
+			expect(degraded?.content[1]).toStrictEqual({ type: "tool_result", tool_use_id: "t9", content: original })
 		})
 
 		it("should clear orphaned truncationParent tags via cleanup", async () => {

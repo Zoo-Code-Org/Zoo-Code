@@ -106,6 +106,10 @@
 \* breaks DegSelectionLive when a later Truncate tags the degraded message; a
 \* marker Msg record would add a variable and multiply the state count. The
 \* message-manager rewind tests pin the restore behavior on the real code.
+\* Round 9 stays inside this gap: the lookup order (recorded index before the
+\* timestamp heuristic) and the retry turn-removal window are both below the
+\* model's abstraction (message identity and disk persistence are not modeled);
+\* the rewind and persistence tests pin them on the real code.
 \* Findings: covered 4, added 9, gap 8.
 \* Replay: ZeroOK gives Init, Recover: a one-message history reports success with no
 \* change, so the live code (issue 1254) retries forever. This is the unfixed-code

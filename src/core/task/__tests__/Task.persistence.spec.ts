@@ -407,6 +407,66 @@ describe("Task persistence", () => {
 			expect(saved.some((m) => m.isTruncationMarker && m.truncationId === "trunc-disk")).toBe(true)
 		})
 
+		it("keeps the saved user turn on disk when the task aborts before the retry re-add", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const access = task as unknown as {
+				diffViewProvider: { reset: () => Promise<void> }
+				safeEnsureModelFetched: () => Promise<unknown>
+				presentAssistantMessageSafe: () => void
+			}
+			vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+			const realSay = task.say.bind(task)
+			vi.spyOn(task, "say").mockImplementation(async (...args: Parameters<typeof task.say>) => {
+				if (args[0] === "api_req_retried") {
+					// The user cancels right after the retry branch ran:
+					// abort is set before any re-add could run.
+					;(task as unknown as { abort: boolean }).abort = true
+					throw new Error("cancelled")
+				}
+				return realSay(...args)
+			})
+
+			async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial answer" }
+				throw new OutputTokenLimitError()
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => truncatedStream())
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }]).catch(() => undefined)
+			expect(attemptApiRequestSpy).toHaveBeenCalled()
+
+			// The removal stayed in memory: no persisted state may lack the
+			// saved turn, or a resumed task finds a tool_use without its
+			// tool_result (PR 2696 review round 9).
+			const savedInputs = mockSaveApiMessages.mock.calls.map(
+				([arg]) => arg.messages as Array<{ role?: string; content?: unknown }>,
+			)
+			expect(savedInputs.length).toBeGreaterThan(0)
+			for (const messages of savedInputs) {
+				expect(
+					messages.some(
+						(m) =>
+							m.role === "user" &&
+							Array.isArray(m.content) &&
+							(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+					),
+				).toBe(true)
+			}
+		})
+
 		it("uses authoritative replacement for explicit API history overwrites", async () => {
 			const task = new Task({
 				provider: mockProvider,
