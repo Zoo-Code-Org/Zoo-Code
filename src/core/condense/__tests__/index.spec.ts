@@ -5,7 +5,7 @@ import type { Mock } from "vitest"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { TelemetryService } from "@roo-code/telemetry"
 
-import { ApiHandler } from "../../../api"
+import { ApiHandler, type ApiHandlerCreateMessageMetadata } from "../../../api"
 import { ApiMessage } from "../../task-persistence/apiMessages"
 import { maybeRemoveImageBlocks } from "../../../api/transform/image-cleaning"
 import {
@@ -1238,6 +1238,164 @@ describe("summarizeConversation", () => {
 			"Visible post-summary user message",
 			expect.stringContaining("detailed summary of the conversation"),
 		])
+	})
+
+	const toolsMetadata = {
+		taskId: "test-task-id",
+		tools: [
+			{
+				type: "function",
+				function: {
+					name: "read_file",
+					description: "Read a file from disk",
+					parameters: { type: "object", properties: {} },
+				},
+			},
+		],
+		tool_choice: "auto",
+	} satisfies ApiHandlerCreateMessageMetadata
+
+	it("keeps the prior turn's tool_choice in the condense request metadata", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		// Cache-preserving contract: the request metadata passes through with
+		// tool_choice untouched, so the provider prefix stays cacheable.
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(1)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][2]).toMatchObject({
+			tool_choice: "auto",
+		})
+		expect(result.error).toBeUndefined()
+	})
+
+	it("retries with tool_choice none when the tool-offering pass returns no text", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Hello", ts: 1 },
+			{ role: "assistant", content: "Hi there", ts: 2 },
+			{ role: "user", content: "Continue the task", ts: 3 },
+		]
+
+		const toolCallOnlyStream = (async function* () {
+			// The model answered with tool calls only: no text chunks arrive.
+			yield { type: "usage" as const, totalCost: 0.01 }
+		})()
+		const textStream = (async function* () {
+			yield { type: "text" as const, text: "Recovered summary" }
+			yield { type: "usage" as const, totalCost: 0.02 }
+		})()
+		const streams = [toolCallOnlyStream, textStream]
+		let call = 0
+		mockApiHandler.createMessage = vi.fn(() => streams[call++]) as unknown as ApiHandler["createMessage"]
+
+		const result = await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		expect(mockApiHandler.createMessage).toHaveBeenCalledTimes(2)
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[0][2]).toMatchObject({ tool_choice: "auto" })
+		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[1][2]).toMatchObject({ tool_choice: "none" })
+		expect(result.summary).toBe("Recovered summary")
+		expect(result.error).toBeUndefined()
+	})
+
+	it("mirrors the prior-turn request prefix with native tool blocks kept", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+			metadata: toolsMetadata,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+
+		// Prefix mirrors the prior turn 1:1: same roles, native tool blocks
+		// verbatim, then the folded summary instruction as the final user message.
+		expect(requestMessages).toHaveLength(4)
+		expect(requestMessages[0]).toStrictEqual({ role: "user", content: "Initial task" })
+		expect(requestMessages[1]).toStrictEqual({
+			role: "assistant",
+			content: [
+				{ type: "text", text: "Reading the file" },
+				{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+			],
+		})
+		expect(requestMessages[2]).toStrictEqual({
+			role: "user",
+			content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+		})
+		expect(requestMessages[3].role).toBe("user")
+		expect(requestMessages[3].content).toContain("detailed summary of the conversation")
+	})
+
+	it("converts tool blocks to text when no tools are offered", async () => {
+		const messages: ApiMessage[] = [
+			{ role: "user", content: "Initial task", ts: 1 },
+			{
+				role: "assistant",
+				content: [
+					{ type: "text", text: "Reading the file" },
+					{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "a.ts" } },
+				],
+				ts: 2,
+			},
+			{
+				role: "user",
+				content: [{ type: "tool_result", tool_use_id: "toolu_1", content: "file body" }],
+				ts: 3,
+			},
+		]
+
+		await summarizeConversation({
+			messages,
+			apiHandler: mockApiHandler,
+			systemPrompt: defaultSystemPrompt,
+			taskId,
+		})
+
+		const requestMessages = vi.mocked(mockApiHandler.createMessage).mock.calls[0][1] as Array<{
+			role: string
+			content: unknown
+		}>
+		const serialized = JSON.stringify(requestMessages)
+		expect(serialized).not.toContain('"type":"tool_use"')
+		expect(serialized).not.toContain('"type":"tool_result"')
+		expect(serialized).toContain("[Tool Use: read_file]")
 	})
 })
 

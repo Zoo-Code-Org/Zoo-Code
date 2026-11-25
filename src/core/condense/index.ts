@@ -344,18 +344,32 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	let summary = ""
 	let cost = 0
 
-	const requestMetadata = metadata ? { ...metadata, tool_choice: "none" as const } : metadata
-
-	try {
-		const stream = apiHandler.createMessage(promptToUse, requestMessages, requestMetadata)
-
+	// Runs one condense request pass and returns the text it collected. The
+	// pass's final usage chunk decides the recorded cost.
+	const runCondensePass = async (passMetadata: ApiHandlerCreateMessageMetadata | undefined) => {
+		let passSummary = ""
+		const stream = apiHandler.createMessage(promptToUse, requestMessages, passMetadata)
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {
-				summary += chunk.text
+				passSummary += chunk.text
 			} else if (chunk.type === "usage") {
 				// Record final usage chunk only
 				cost = chunk.totalCost ?? 0
 			}
+		}
+		return passSummary
+	}
+
+	try {
+		// Keep the prior turn's metadata verbatim (tool_choice included) so the
+		// condense request reuses the provider's cached message prefix; changing
+		// tool_choice invalidates Anthropic prompt caches.
+		summary = await runCondensePass(metadata)
+		if (!summary.trim() && keepNativeToolBlocks) {
+			// Tools were offered and the model answered with tool calls only, so
+			// no text arrived. Retry once with tool_choice "none" to force a
+			// text-only summary; only this rare path pays the cache miss.
+			summary = await runCondensePass(metadata ? { ...metadata, tool_choice: "none" as const } : undefined)
 		}
 	} catch (error) {
 		console.error("Error during condensing API call:", error)

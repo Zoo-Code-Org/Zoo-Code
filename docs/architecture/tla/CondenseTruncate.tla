@@ -83,8 +83,10 @@
 \* Null result (issue 2453): CondenseRequestPrefixEqualsPriorTurnPrefix was removed
 \* because it was vacuously TRUE and added no constraint. Request assembly for
 \* summarizeConversation (prefix vs prior-turn prefix) is not modeled by this spec;
-\* it is pinned by property tests in src/core/condense/__tests__/index.spec.ts.
-\* Cost: unchanged (<10s). Findings: covered 0, added 0, gap 1 (request assembly).
+\* it is pinned by the real-code test "mirrors the prior-turn request prefix with
+\* native tool blocks kept" in src/core/condense/__tests__/index.spec.ts.
+\* Cost: unchanged (<10s). Findings: covered 0, added 0, gap 1 (request assembly,
+\* real-code pinned; CR thread 4695216718: property-test claim corrected).
 
 EXTENDS Naturals, FiniteSets
 
