@@ -488,6 +488,7 @@ describe("LiteLLMHandler", () => {
 				reasoning_effort: "medium",
 				tools: [{ type: "function", function: { name: "read_file" } }],
 			})
+			expect(request.tools[0].function.strict).toBeUndefined()
 			expect(request.max_tokens).toBeUndefined()
 			expect(request.temperature).toBeUndefined()
 		})
