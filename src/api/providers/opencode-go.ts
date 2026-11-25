@@ -281,6 +281,10 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			headers: { "x-opencode-session": metadata?.taskId ?? this.sessionId },
 		})
 
+		// chunk.usage carries the request's full totals, and Go-plan models
+		// (DeepSeek) may repeat it on many chunks. Keep only the last one.
+		let lastUsage: OpenAI.CompletionUsage | undefined
+
 		for await (const chunk of completion) {
 			const delta = chunk.choices[0]?.delta
 
@@ -308,12 +312,19 @@ export class OpencodeGoHandler extends RouterProvider implements SingleCompletio
 			}
 
 			if (chunk.usage) {
-				yield {
-					type: "usage",
-					inputTokens: chunk.usage.prompt_tokens || 0,
-					outputTokens: chunk.usage.completion_tokens || 0,
-					cacheReadTokens: chunk.usage.prompt_tokens_details?.cached_tokens || undefined,
-				}
+				lastUsage = chunk.usage
+			}
+		}
+
+		// One usage event per request, with the last chunk's totals. The task
+		// loop adds every usage event it receives, so per-chunk yields would
+		// inflate tokensIn and trigger runaway condense loops (issue 1365).
+		if (lastUsage) {
+			yield {
+				type: "usage",
+				inputTokens: lastUsage.prompt_tokens || 0,
+				outputTokens: lastUsage.completion_tokens || 0,
+				cacheReadTokens: lastUsage.prompt_tokens_details?.cached_tokens || undefined,
 			}
 		}
 	}
