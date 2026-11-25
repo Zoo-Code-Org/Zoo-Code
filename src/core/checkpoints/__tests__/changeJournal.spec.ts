@@ -441,6 +441,11 @@ describe("changeJournal", () => {
 			const terminated = await messageOf(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" })))
 			expect(terminated).toContain("final record is not a complete entry")
 			expect(terminated).not.toContain("unterminated")
+			// The suffix is part of the operator-facing contract, so pin the whole
+			// message rather than only its prefix.
+			expect(terminated).toBe(
+				`Cannot append to change journal ${journalPath(tmpRoot, taskId)}: final record is not a complete entry (torn-tail recovery requires explicit repair)`,
+			)
 		})
 
 		it.each([
@@ -606,6 +611,37 @@ describe("changeJournal", () => {
 			}
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result.map((e) => e.checkpointId)).toEqual(["onwin"])
+		})
+		it("appends to a journal that contains nothing but a newline", async () => {
+			// A lone newline leaves an empty tail rather than an empty file, so the
+			// tail check must be skipped instead of parsing an empty string.
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			await fs.mkdir(dirPath, { recursive: true })
+			await fs.writeFile(journalPath(tmpRoot, taskId), "\n")
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after-blank" }))
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["after-blank"])
+		})
+
+		it("does not retry a POSIX rename rejected with an errno on the retry list", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async () => {
+				attempts++
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			})
+			try {
+				// The retry budget is the platform decision: a POSIX rename failure
+				// fails on the first attempt even when its errno is on the retry list.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toMatchObject({
+					code: "EPERM",
+				})
+				expect(attempts).toBe(1)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
 		})
 	})
 
