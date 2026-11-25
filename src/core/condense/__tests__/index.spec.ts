@@ -1311,6 +1311,9 @@ describe("summarizeConversation", () => {
 		expect(vi.mocked(mockApiHandler.createMessage).mock.calls[1][2]).toMatchObject({ tool_choice: "none" })
 		expect(result.summary).toBe("Recovered summary")
 		expect(result.error).toBeUndefined()
+		// Both passes are billed: the retry adds its cost instead of
+		// overwriting the first pass's spend.
+		expect(result.cost).toBeCloseTo(0.03)
 	})
 
 	it("mirrors the prior-turn request prefix with native tool blocks kept", async () => {

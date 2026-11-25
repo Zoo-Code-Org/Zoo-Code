@@ -351,15 +351,19 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// pass's final usage chunk decides the recorded cost.
 	const runCondensePass = async (passMetadata: ApiHandlerCreateMessageMetadata | undefined) => {
 		let passSummary = ""
+		let passCost = 0
 		const stream = apiHandler.createMessage(promptToUse, requestMessages, passMetadata)
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {
 				passSummary += chunk.text
 			} else if (chunk.type === "usage") {
 				// Record final usage chunk only
-				cost = chunk.totalCost ?? 0
+				passCost = chunk.totalCost ?? 0
 			}
 		}
+		// Every pass is billed, so the total sums the passes instead of
+		// letting the last pass overwrite the earlier spend.
+		cost += passCost
 		return passSummary
 	}
 
