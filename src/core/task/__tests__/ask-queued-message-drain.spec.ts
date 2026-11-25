@@ -164,6 +164,9 @@ describe("Task.ask queued message drain", () => {
 		const task = await createTask()
 
 		const ask = task.ask("command", "ps && echo hello", false)
+		const addToClineMessages = (task as unknown as { addToClineMessages: ReturnType<typeof vi.fn> })
+			.addToClineMessages
+		await vi.waitUntil(() => addToClineMessages.mock.calls.length > 0)
 		task.messageQueueService.addMessage("mid-wait message")
 
 		const premature = await Promise.race([
