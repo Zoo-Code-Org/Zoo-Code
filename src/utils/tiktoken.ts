@@ -64,14 +64,41 @@ export async function tiktoken(content: Anthropic.Messages.ContentBlockParam[]):
 		encoder = new Tiktoken(o200kBase.bpe_ranks, o200kBase.special_tokens, o200kBase.pat_str)
 	}
 
+	// tiktoken's WASM encoder has two failure modes on very long strings
+	// (issue 1254): a 4 MB single encode traps ("unreachable"), and long
+	// separator-less runs — minified JSON, base64 blobs — encode
+	// pathologically slowly (~250 ms per 1 000 chars, so a 4 MB blob would
+	// hang recovery for minutes). Recovery must never hang on the oversized
+	// result it exists to shrink, so: short strings encode exactly, and
+	// longer strings are estimated by measuring tokens-per-char on three
+	// 10 000-char slices and extrapolating. Natural text stays near-exact
+	// (uniform density), the pathological worst case is bounded to three
+	// short encodes, and no encode ever exceeds the trap range.
+	const ENCODE_DIRECT_CHARS = 50_000
+	const SAMPLE_CHARS = 10_000
+	const SAMPLE_COUNT = 3
+	const estimateTokens = (text: string): number => {
+		if (text.length <= ENCODE_DIRECT_CHARS) {
+			return encoder!.encode(text, undefined, []).length
+		}
+		let sampleTokens = 0
+		let sampleChars = 0
+		for (let s = 0; s < SAMPLE_COUNT; s++) {
+			const start = Math.min(Math.floor((text.length / SAMPLE_COUNT) * s), text.length - SAMPLE_CHARS)
+			const slice = text.slice(start, start + SAMPLE_CHARS)
+			sampleTokens += encoder!.encode(slice, undefined, []).length
+			sampleChars += slice.length
+		}
+		return Math.ceil((sampleTokens / sampleChars) * text.length)
+	}
+
 	// Process each content block using the cached encoder.
 	for (const block of content) {
 		if (block.type === "text") {
 			const text = block.text || ""
 
 			if (text.length > 0) {
-				const tokens = encoder.encode(text, undefined, [])
-				totalTokens += tokens.length
+				totalTokens += estimateTokens(text)
 			}
 		} else if (block.type === "image") {
 			// For images, calculate based on data size.
@@ -87,15 +114,13 @@ export async function tiktoken(content: Anthropic.Messages.ContentBlockParam[]):
 			// Serialize tool_use block to text and count tokens
 			const serialized = serializeToolUse(block as Anthropic.Messages.ToolUseBlockParam)
 			if (serialized.length > 0) {
-				const tokens = encoder.encode(serialized, undefined, [])
-				totalTokens += tokens.length
+				totalTokens += estimateTokens(serialized)
 			}
 		} else if (block.type === "tool_result") {
 			// Serialize tool_result block to text and count tokens
 			const serialized = serializeToolResult(block as Anthropic.Messages.ToolResultBlockParam)
 			if (serialized.length > 0) {
-				const tokens = encoder.encode(serialized, undefined, [])
-				totalTokens += tokens.length
+				totalTokens += estimateTokens(serialized)
 			}
 		}
 	}
