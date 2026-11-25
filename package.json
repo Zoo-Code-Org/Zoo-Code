@@ -60,7 +60,7 @@
 		"knip": "5.88.1",
 		"lint-staged": "16.4.0",
 		"ovsx": "0.10.12",
-		"prettier": "3.9.10",
+		"prettier": "3.10.1",
 		"rimraf": "6.0.1",
 		"tsx": "4.23.15",
 		"turbo": "catalog:",
