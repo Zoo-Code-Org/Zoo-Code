@@ -15,6 +15,8 @@ import {
 import { TelemetryService } from "@roo-code/telemetry"
 import type { Anthropic } from "@anthropic-ai/sdk"
 
+import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
+import type { ApiStreamChunk } from "../../../api/transform/stream"
 import { PendingActionSettlementError, Task } from "../Task"
 import { parseMentions } from "../../mentions"
 import { ClineProvider } from "../../webview/ClineProvider"
@@ -327,6 +329,82 @@ describe("Task persistence", () => {
 			const result = await task.retrySaveApiConversationHistory()
 			expect(result).toBe(true)
 			expect(mockSaveApiMessages).toHaveBeenCalledWith(expect.objectContaining({ merge: true }))
+		})
+
+		it("persists exactly one user turn across a confirmed output-limit retry", async () => {
+			mockSaveApiMessages.mockResolvedValue([])
+
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			const access = task as unknown as {
+				diffViewProvider: { reset: () => Promise<void> }
+				safeEnsureModelFetched: () => Promise<unknown>
+				presentAssistantMessageSafe: () => void
+			}
+			vi.spyOn(access.diffViewProvider, "reset").mockResolvedValue(undefined)
+			vi.spyOn(access, "safeEnsureModelFetched").mockResolvedValue(undefined)
+			vi.spyOn(access, "presentAssistantMessageSafe").mockImplementation(() => {})
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } as never)
+
+			async function* truncatedStream(): AsyncGenerator<ApiStreamChunk> {
+				yield { type: "text", text: "partial answer" }
+				throw new OutputTokenLimitError()
+			}
+
+			const attemptApiRequestSpy = vi
+				.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => {
+					// Context recovery ran before the stream failed: the marker
+					// (role "user") now trails the saved turn.
+					task.apiConversationHistory.push({
+						role: "user",
+						content: "[Tool result degradation: oversized result cleared to reduce context]",
+						ts: Date.now() + 1,
+						isTruncationMarker: true,
+						truncationId: "trunc-disk",
+						degradedOriginals: [{ index: 0, blockIndex: 0, content: "original" }],
+					})
+					return truncatedStream()
+				})
+				.mockImplementationOnce(() =>
+					(async function* (): AsyncGenerator<ApiStreamChunk> {
+						yield { type: "text", text: "done" }
+					})(),
+				)
+				.mockImplementation(() => {
+					throw new Error("stop after retry response")
+				})
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
+			expect(attemptApiRequestSpy).toHaveBeenCalled()
+
+			// The confirmed retry must persist the turn removal with merge=false
+			// so the disk file drops the removed record; the default merge keeps
+			// disk-only records and the re-add would duplicate the turn
+			// (PR 2696 review round 8, persistence integrity).
+			expect(mockSaveApiMessages.mock.calls.some(([arg]) => arg.merge === false)).toBe(true)
+
+			const lastSave = mockSaveApiMessages.mock.calls.at(-1)?.[0]
+			const saved = (lastSave?.messages ?? []) as Array<{
+				role: string
+				content: unknown
+				isTruncationMarker?: boolean
+				truncationId?: string
+			}>
+			const savedTurns = saved.filter(
+				(m) =>
+					m.role === "user" &&
+					!m.isTruncationMarker &&
+					Array.isArray(m.content) &&
+					(m.content as { text?: string }[]).some((b) => b?.text === "long request"),
+			)
+			expect(savedTurns).toHaveLength(1)
+			// The recovery marker survives on disk with its metadata.
+			expect(saved.some((m) => m.isTruncationMarker && m.truncationId === "trunc-disk")).toBe(true)
 		})
 
 		it("uses authoritative replacement for explicit API history overwrites", async () => {

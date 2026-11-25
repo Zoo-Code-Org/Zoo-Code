@@ -306,6 +306,12 @@ CallerRespond ==
 \* Sizes are binary, so any eligible choice models the largest one.
 Recover ==
     /\ stall < 2
+    \* After an Error round no further Recover is enabled: both request
+    \* paths stop instead of resending the unchanged history (PR 2696
+    \* review round 8). CallerRespond models the caller's decision; a new
+    \* recovery round starts only from a fresh run phase via AddMsg and
+    \* friends, which reset phase to "run".
+    /\ phase # "err"
     /\ LET Vis == {i \in 1..n : VisMsg(Mode, i)}
            vc == Cardinality(Vis)
        IN /\ vc >= 1

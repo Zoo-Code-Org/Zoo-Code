@@ -635,7 +635,16 @@ export async function manageContext({
 					prevEstimatedTokens += await estimateTokenCount([{ type: "text", text: content }], apiHandler)
 				}
 			}
-			if (newContextTokensAfterTruncation >= prevEstimatedTokens) {
+			// Success must clear BOTH measures (issue 1254 review round 8): the
+			// same-estimator check rejects a round that did not shrink the
+			// recounted slice, and the caller-visible check rejects a round whose
+			// recount is not lower than the prevContextTokens value the caller
+			// compares against — without it the caller would loop on a round
+			// that cannot make progress.
+			if (
+				newContextTokensAfterTruncation >= prevEstimatedTokens ||
+				newContextTokensAfterTruncation >= prevContextTokens
+			) {
 				// The round failed: handing back the degraded history would persist
 				// cleared tool_result content, so the caller keeps the original.
 				return {

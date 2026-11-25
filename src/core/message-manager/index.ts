@@ -209,13 +209,11 @@ export class MessageManager {
 			const restoreOps = new Map<ApiMessage, Array<{ blockIndex: number; content: unknown }>>()
 			for (let markerIndex = 0; markerIndex < originalHistory.length; markerIndex++) {
 				const marker = originalHistory[markerIndex]
-				if (
-					!(
-						marker.isTruncationMarker &&
-						marker.truncationId &&
-						removedIds.truncationIds.has(marker.truncationId)
-					)
-				) {
+				if (!(
+					marker.isTruncationMarker &&
+					marker.truncationId &&
+					removedIds.truncationIds.has(marker.truncationId)
+				)) {
 					continue
 				}
 				if (!Array.isArray(marker.degradedOriginals)) {
@@ -224,7 +222,35 @@ export class MessageManager {
 				let degraded: ApiMessage | undefined
 				if (marker.ts !== undefined) {
 					const degradedTs = marker.ts - 1
-					degraded = originalHistory.find((m) => m.ts === degradedTs)
+					// A marker is never the degraded target: two rounds on
+					// timestamp-free messages chain markers, and marker.ts - 1
+					// then resolves to the earlier marker instead of the message
+					// this marker cleared (issue 1254 review round 8).
+					degraded = originalHistory.find((m) => m.ts === degradedTs && !m.isTruncationMarker)
+				}
+				if (!degraded) {
+					// Stable link: the marker records the degraded message's
+					// original-history index. Degradation rounds only append
+					// markers, so those positions stay valid across rounds; the
+					// predecessor fallback below cannot find the message when it
+					// carries no timestamp and another marker sits between it and
+					// this one (issue 1254 review round 8). Validate the candidate
+					// so a stale index cannot mislink another message: it must
+					// still hold the cleared block.
+					const link = marker.degradedOriginals?.[0]
+					const linked = link && typeof link.index === "number" ? originalHistory[link.index] : undefined
+					const linkedBlock =
+						linked && Array.isArray(linked.content)
+							? (linked.content[link.blockIndex] as { type?: string; content?: unknown } | undefined)
+							: undefined
+					if (
+						linked &&
+						!linked.isTruncationMarker &&
+						linkedBlock?.type === "tool_result" &&
+						linkedBlock.content === ""
+					) {
+						degraded = linked
+					}
 				}
 				if (!degraded && markerIndex > 0) {
 					const previous = originalHistory[markerIndex - 1]

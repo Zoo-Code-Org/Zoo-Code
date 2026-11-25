@@ -269,15 +269,16 @@ describe("Context Management", () => {
 	 * Tests for the manageContext function
 	 */
 	describe("manageContext", () => {
-		it("accepts a prompt-dominated degradation that shrinks the shared-estimate recount", async () => {
-			// The recounted total includes the system prompt, which
-			// prevContextTokens omits. Under the old mixed-counter comparison
-			// this scenario always stalled with the controlled error — even a
-			// genuinely shrinking degradation was rejected because the fresh
-			// recount (prompt + history) exceeded the API-reported total
-			// (history only). Both sides now use the same estimator over the
-			// effective slice (issue 1254 review, taltas thread 4695751075),
-			// so a real shrink succeeds no matter how large the prompt is.
+		it("reports no progress when a degraded round cannot shrink the caller's total", async () => {
+			// A degraded success must leave the recounted total LOWER than the
+			// prevContextTokens value the caller compares against, not only
+			// lower than the same-estimator slice estimate (issue 1254 review
+			// round 8, linked-issues check). Otherwise the caller would loop on
+			// a round that cannot make progress. The prompt-dominated scenario
+			// below still clears the same-estimator check: the fresh recount
+			// drops the oversized result, so it is lower than the
+			// original-slice estimate — but it stays above the caller's
+			// API-reported total, so the round reports the controlled error.
 			const history: ApiMessage[] = [
 				{ role: "user", content: "task" },
 				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
@@ -298,29 +299,23 @@ describe("Context Management", () => {
 				currentProfileId: "default",
 			})
 
-			expect(result.error).toBeUndefined()
+			// The controlled error hands back the ORIGINAL history: the caller
+			// keeps it by array identity and stops on noProgress (review
+			// round 8). No cleared content is ever persisted.
+			expect(result.messages).toBe(history)
 			expect(result.messagesRemoved).toBe(0)
-			// The degraded copy replaces the history: the caller persists it by
-			// array identity, not by equal content (Persistence Integrity,
-			// review rounds 2-3).
-			expect(result.messages).not.toBe(history)
-			// The original result survives on the hidden degradation marker so a
-			// rewind can restore the un-degraded history (issue 1254 review,
-			// taltas thread 4695751065).
-			const marker = result.messages[result.messages.length - 1]
-			expect(marker.isTruncationMarker).toBe(true)
-			expect(marker.degradedOriginals?.[0]?.content).toBe("x")
+			expect(result.noProgress).toBe(true)
+			expect(result.error).toContain("Unable to reduce context")
+			expect(history.some((m) => m.isTruncationMarker)).toBe(false)
 		})
 
-		it("accepts a degradation that shrinks the shared-estimate recount even when prevContextTokens is lower than the true total", async () => {
-			// prevContextTokens (totalTokens + lastMessageTokens) can sit far
-			// below the real history size: the caller may pass a stale or zero
-			// cumulative total, and it never includes a mid-history oversized
-			// tool result. Comparing the fresh recount against it rejected
-			// reductions that genuinely shrank the history (issue 1254 review,
-			// taltas thread 4695751075). Both sides must use the same estimator
-			// over the effective slice: the recount drops the cleared result,
-			// the original-slice estimate keeps it, so the round succeeds.
+		it("reports no progress when the degraded recount is not lower than prevContextTokens", async () => {
+			// The demanded round-8 scenario: prevContextTokens sits below the
+			// estimate of the original slice, and the degraded recount lands
+			// between the two — lower than the slice estimate (the oversized
+			// result was cleared) but not lower than the caller's number. The
+			// round must report no progress so the caller stops instead of
+			// looping (issue 1254 review round 8, linked-issues check).
 			const history: ApiMessage[] = [
 				{ role: "user", content: "task", ts: 1000 },
 				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }], ts: 1100 },
@@ -346,10 +341,8 @@ describe("Context Management", () => {
 				currentProfileId: "default",
 			})
 
-			expect(result.error).toBeUndefined()
-			// The degraded copy replaces the history: the caller persists it by
-			// array identity (Persistence Integrity, review rounds 2-3).
-			expect(result.messages).not.toBe(history)
+			expect(result.noProgress).toBe(true)
+			expect(result.messages).toBe(history)
 		})
 
 		it("reproduces the 4 MB tool-result case from the issue acceptance criteria", async () => {
@@ -508,74 +501,74 @@ describe("Context Management", () => {
 			})
 			expect(result.newContextTokensAfterTruncation).toBeLessThan(result.prevContextTokens)
 		})
-	it("reports the degraded round as no progress when the recount is unchanged", async () => {
-		// A degrade whose fresh recount does not shrink the original slice
-		// cannot make progress: the round must report the controlled error,
-		// flag noProgress for the caller, and hand back the ORIGINAL
-		// history, not the cleared result (PR 2696 review round 7, thread
-		// on CondenseTruncate.tla:59).
-		const countingHandler = new MockApiHandler()
-		vi.spyOn(countingHandler, "countTokens").mockResolvedValue(5)
-		const history: ApiMessage[] = [
-			{ role: "user", content: "task" },
-			{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
-			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
-		]
+		it("reports the degraded round as no progress when the recount is unchanged", async () => {
+			// A degrade whose fresh recount does not shrink the original slice
+			// cannot make progress: the round must report the controlled error,
+			// flag noProgress for the caller, and hand back the ORIGINAL
+			// history, not the cleared result (PR 2696 review round 7, thread
+			// on CondenseTruncate.tla:59).
+			const countingHandler = new MockApiHandler()
+			vi.spyOn(countingHandler, "countTokens").mockResolvedValue(5)
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
+			]
 
-		const result = await manageContext({
-			messages: history,
-			totalTokens: 60,
-			contextWindow: 60,
-			maxTokens: 1,
-			apiHandler: countingHandler,
-			autoCondenseContext: false,
-			autoCondenseContextPercent: 100,
-			systemPrompt: "System prompt",
-			taskId,
-			profileThresholds: {},
-			currentProfileId: "default",
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: countingHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.noProgress).toBe(true)
+			// The caller keeps ITS array: identity, not just equal content.
+			expect(result.messages).toBe(history)
 		})
 
-		expect(result.error).toBeDefined()
-		expect(result.noProgress).toBe(true)
-		// The caller keeps ITS array: identity, not just equal content.
-		expect(result.messages).toBe(history)
-	})
+		it("keeps a failed condensation below the truncation limit out of no-progress", async () => {
+			// A condense failure with the history still below the fallback
+			// truncation limit returns the original messages with the error
+			// set, but the context still fits: the round is NOT no-progress,
+			// so the caller proceeds with the request instead of stopping
+			// (PR 2696 review round 7, thread on Task.ts).
+			const failingHandler = new MockApiHandler()
+			vi.spyOn(failingHandler, "createMessage").mockImplementation(() => {
+				throw new Error("condense backend down")
+			})
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: "middle context" },
+				{ role: "user", content: "latest" },
+			]
 
-	it("keeps a failed condensation below the truncation limit out of no-progress", async () => {
-		// A condense failure with the history still below the fallback
-		// truncation limit returns the original messages with the error
-		// set, but the context still fits: the round is NOT no-progress,
-		// so the caller proceeds with the request instead of stopping
-		// (PR 2696 review round 7, thread on Task.ts).
-		const failingHandler = new MockApiHandler()
-		vi.spyOn(failingHandler, "createMessage").mockImplementation(() => {
-			throw new Error("condense backend down")
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 200,
+				contextWindow: 1000,
+				maxTokens: 1,
+				apiHandler: failingHandler,
+				autoCondenseContext: true,
+				autoCondenseContextPercent: 10,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.noProgress).toBeUndefined()
+			expect(result.messages).toBe(history)
 		})
-		const history: ApiMessage[] = [
-			{ role: "user", content: "task" },
-			{ role: "assistant", content: "middle context" },
-			{ role: "user", content: "latest" },
-		]
-
-		const result = await manageContext({
-			messages: history,
-			totalTokens: 200,
-			contextWindow: 1000,
-			maxTokens: 1,
-			apiHandler: failingHandler,
-			autoCondenseContext: true,
-			autoCondenseContextPercent: 10,
-			systemPrompt: "System prompt",
-			taskId,
-			profileThresholds: {},
-			currentProfileId: "default",
-		})
-
-		expect(result.error).toBeDefined()
-		expect(result.noProgress).toBeUndefined()
-		expect(result.messages).toBe(history)
-	})
 
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,

@@ -4858,11 +4858,31 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// re-adds it exactly once via userMessageWasRemoved.
 							let removedSavedUserTurn = false
 							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
-								const lastSaved = this.apiConversationHistory[this.apiConversationHistory.length - 1]
-								if (lastSaved.role === "user") {
-									this.apiConversationHistory.pop()
+								// Context recovery can append a truncation marker
+								// (role "user") after the saved turn, so the tail is
+								// not always this attempt's turn. Walk back over
+								// markers and remove the saved turn itself: popping
+								// the marker would drop its degradedOriginals and a
+								// later rewind could not restore the cleared result
+								// (issue 1254 review round 8).
+								let turnIndex = -1
+								for (let i = this.apiConversationHistory.length - 1; i >= 0; i--) {
+									if (this.apiConversationHistory[i].isTruncationMarker) {
+										continue
+									}
+									turnIndex = i
+									break
+								}
+								if (turnIndex !== -1 && this.apiConversationHistory[turnIndex].role === "user") {
+									this.apiConversationHistory.splice(turnIndex, 1)
 									this.messageCounts.user--
 									removedSavedUserTurn = true
+									// Persist the reduction with merge=false so the disk
+									// file drops the removed record. The default merge
+									// keeps disk-only records, and the retry's re-add
+									// would then persist two user turns for one request
+									// (issue 1254 review round 8, persistence integrity).
+									await this.saveApiConversationHistory(false)
 								}
 							}
 							await this.say("api_req_retried")
@@ -4879,21 +4899,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							// OutputTokenLimitError the retry is the user's call, never an
 							// automatic loop (issue 1254 review).
 							const { response } = await this.ask("api_req_failed", rawErrorMessage)
-						
+
 							if (response !== "yesButtonClicked") {
 								throw new Error("API request failed")
 							}
-						
+
 							// The failed attempt already saved this user turn; remove it so
 							// the retry does not persist a second copy. The next iteration
 							// re-adds it exactly once via userMessageWasRemoved.
 							let removedSavedUserTurn = false
 							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
-								const lastSaved = this.apiConversationHistory[this.apiConversationHistory.length - 1]
-								if (lastSaved.role === "user") {
-									this.apiConversationHistory.pop()
+								// Context recovery can append a truncation marker
+								// (role "user") after the saved turn, so the tail is
+								// not always this attempt's turn. Walk back over
+								// markers and remove the saved turn itself: popping
+								// the marker would drop its degradedOriginals and a
+								// later rewind could not restore the cleared result
+								// (issue 1254 review round 8).
+								let turnIndex = -1
+								for (let i = this.apiConversationHistory.length - 1; i >= 0; i--) {
+									if (this.apiConversationHistory[i].isTruncationMarker) {
+										continue
+									}
+									turnIndex = i
+									break
+								}
+								if (turnIndex !== -1 && this.apiConversationHistory[turnIndex].role === "user") {
+									this.apiConversationHistory.splice(turnIndex, 1)
 									this.messageCounts.user--
 									removedSavedUserTurn = true
+									// Persist the reduction with merge=false so the disk
+									// file drops the removed record. The default merge
+									// keeps disk-only records, and the retry's re-add
+									// would then persist two user turns for one request
+									// (issue 1254 review round 8, persistence integrity).
+									await this.saveApiConversationHistory(false)
 								}
 							}
 							await this.say("api_req_retried")
