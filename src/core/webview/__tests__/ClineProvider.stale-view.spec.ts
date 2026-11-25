@@ -324,11 +324,11 @@ describe("ClineProvider - stale view lifecycle", () => {
 			expect(first.disposed.listenerCount()).toBe(0)
 		})
 
-		test("a resolve that finishes after the view was replaced during state hydration installs no listeners", async () => {
+		test("a resolve that finishes after the view was replaced during state hydration assigns no HTML and installs no listeners", async () => {
 			const first = createSidebarView()
 			const second = createSidebarView()
 			// Resolve HTML immediately: the deferral under test is the resolve-level
-			// await this.getState() that runs after the HTML assignment.
+			// await this.getState() that runs before the HTML assignment.
 			provider["getHtmlContent"] = vi
 				.fn<(webview: vscode.Webview) => Promise<string>>()
 				.mockResolvedValue(`<!DOCTYPE html><html><body>sidebar</body></html>`)
@@ -340,7 +340,7 @@ describe("ClineProvider - stale view lifecycle", () => {
 				.mockImplementation(() => realGetState())
 
 			const staleResolve = provider.resolveWebviewView(first.view)
-			// Let the first resolve run past the HTML assignment and park inside getState().
+			// Let the first resolve run past the HTML load and park inside getState().
 			await flushAsync()
 
 			await provider.resolveWebviewView(second.view)
@@ -348,16 +348,15 @@ describe("ClineProvider - stale view lifecycle", () => {
 			await staleResolve
 			stateSpy.mockRestore()
 
-			// HTML was assigned before the replacement, so the replaced view keeps its document...
-			expect(first.view.webview.html).toContain("<!DOCTYPE html>")
-			// ...but the stale resolve installed no listeners on it.
+			expect(first.view.webview.html).toBe("")
+			expect(second.view.webview.html).toContain("<!DOCTYPE html>")
 			expect(first.messages.listenerCount()).toBe(0)
 			expect(first.visibility.listenerCount()).toBe(0)
 			expect(first.disposed.listenerCount()).toBe(0)
 			expect(second.messages.listenerCount()).toBeGreaterThan(0)
 		})
 
-		test("a resolve that finishes after the provider was disposed during state hydration installs no listeners", async () => {
+		test("a resolve that finishes after the provider was disposed during state hydration assigns no HTML and installs no listeners", async () => {
 			const first = createSidebarView()
 			// Resolve HTML immediately so the deferred await this.getState() is the
 			// resolve-level hydration, not the one inside getHtmlContent.
@@ -376,13 +375,13 @@ describe("ClineProvider - stale view lifecycle", () => {
 			await staleResolve
 			stateSpy.mockRestore()
 
-			expect(first.view.webview.html).toContain("<!DOCTYPE html>")
+			expect(first.view.webview.html).toBe("")
 			expect(first.messages.listenerCount()).toBe(0)
 			expect(first.visibility.listenerCount()).toBe(0)
 			expect(first.disposed.listenerCount()).toBe(0)
 		})
 
-		test("a resolve made stale by a recovery epoch bump during state hydration removes its message listener", async () => {
+		test("a resolve made stale by a recovery epoch bump during state hydration assigns no HTML and installs no listeners", async () => {
 			const first = createSidebarView()
 			provider["getHtmlContent"] = vi
 				.fn<(webview: vscode.Webview) => Promise<string>>()
@@ -393,7 +392,6 @@ describe("ClineProvider - stale view lifecycle", () => {
 
 			const staleResolve = provider.resolveWebviewView(first.view)
 			await flushAsync()
-			expect(first.messages.listenerCount()).toBe(1)
 
 			// Explicit recovery bumps the epoch but keeps the view and its resources.
 			provider["webviewRecoveryEpoch"]++
@@ -402,41 +400,10 @@ describe("ClineProvider - stale view lifecycle", () => {
 			stateSpy.mockRestore()
 
 			expect(provider["view"]).toBe(first.view)
+			expect(first.view.webview.html).toBe("")
 			expect(first.messages.listenerCount()).toBe(0)
 			expect(first.visibility.listenerCount()).toBe(0)
 		})
-	})
-
-	test("a launch message posted while state hydration is pending reaches the message handler", async () => {
-		const first = createSidebarView()
-		provider["getHtmlContent"] = vi
-			.fn<(webview: vscode.Webview) => Promise<string>>()
-			.mockResolvedValue(`<!DOCTYPE html><html><body>sidebar</body></html>`)
-		const stateDeferred = makeDeferred<ProviderState>()
-		const realGetState = provider.getState.bind(provider)
-		const stateSpy = vi.spyOn(provider, "getState").mockImplementation(() => stateDeferred.promise)
-
-		const resolving = provider.resolveWebviewView(first.view)
-		// The HTML is assigned and the resolve waits in getState(). A cold start can
-		// keep it there long enough for the webview to mount and post its launch message.
-		await flushAsync()
-		expect(first.view.webview.html).toContain("<!DOCTYPE html>")
-
-		const launch: WebviewMessage = { type: "webviewDidLaunch" }
-		first.messages.fire(launch)
-		await flushAsync()
-		expect(vi.mocked(webviewMessageHandler)).toHaveBeenCalledWith(provider, launch, provider["marketplaceManager"])
-
-		stateDeferred.resolve(await realGetState())
-		await resolving
-		stateSpy.mockRestore()
-
-		// The completed resolve does not install a second provider message listener.
-		vi.mocked(webviewMessageHandler).mockClear()
-		const focus: WebviewMessage = { type: "webviewDidFocus" }
-		first.messages.fire(focus)
-		await flushAsync()
-		expect(vi.mocked(webviewMessageHandler)).toHaveBeenCalledTimes(1)
 	})
 
 	test("a different view replacing the current one disposes the replaced view's subscriptions", async () => {
@@ -510,7 +477,7 @@ describe("ClineProvider - stale view lifecycle", () => {
 		await resolving
 		stateSpy.mockRestore()
 
-		expect(first.view.webview.html).toBe(stage === "html" ? "" : "document")
+		expect(first.view.webview.html).toBe("")
 		expect(first.messages.listenerCount()).toBe(0)
 		expect(first.visibility.listenerCount()).toBe(0)
 		expect(first.disposed.listenerCount()).toBe(0)
