@@ -428,9 +428,10 @@ describe("Task persistence", () => {
 			const realSay = task.say.bind(task)
 			vi.spyOn(task, "say").mockImplementation(async (...args: Parameters<typeof task.say>) => {
 				if (args[0] === "api_req_retried") {
-					// The user cancels right after the retry branch ran:
-					// abort is set before any re-add could run.
-					;(task as unknown as { abort: boolean }).abort = true
+					// The user cancels right after the retry branch ran: the abort
+					// request lands before any re-add could run, through the public
+					// run-state API (abort is getter-only and has no setter).
+					task.requestAbort(false)
 					throw new Error("cancelled")
 				}
 				return realSay(...args)
@@ -445,8 +446,14 @@ describe("Task persistence", () => {
 				.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() => truncatedStream())
 
-			await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }]).catch(() => undefined)
+			// The loop ends through the cancellation-aware catch path, which
+			// reports true to the parent loop; no unexpected rejection occurs.
+			const endState = await task.recursivelyMakeClineRequests([{ type: "text", text: "long request" }])
 			expect(attemptApiRequestSpy).toHaveBeenCalled()
+			// The abort request genuinely engaged the run state (the previous
+			// getter-only assignment threw before any cancellation existed).
+			expect(task.abort).toBe(true)
+			expect(endState).toBe(true)
 
 			// The removal stayed in memory: no persisted state may lack the
 			// saved turn, or a resumed task finds a tool_use without its
