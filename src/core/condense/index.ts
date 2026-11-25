@@ -101,7 +101,39 @@ export function convertToolBlocksToText(
  */
 export function transformMessagesForCondensing<
 	T extends { role: string; content: string | Anthropic.Messages.ContentBlockParam[] },
->(messages: T[]): T[] {
+>(
+	messages: T[],
+	transformToolBlocks:
+		| boolean
+		| {
+				transformToolBlocks?: boolean
+				transform?: boolean
+				keepToolBlocks?: boolean
+				keepNativeToolBlocks?: boolean
+				tools?: unknown
+		  } = true,
+): T[] {
+	let shouldTransform = true
+	if (typeof transformToolBlocks === "boolean") {
+		shouldTransform = transformToolBlocks
+	} else if (transformToolBlocks && typeof transformToolBlocks === "object") {
+		if (typeof transformToolBlocks.transformToolBlocks === "boolean") {
+			shouldTransform = transformToolBlocks.transformToolBlocks
+		} else if (typeof transformToolBlocks.transform === "boolean") {
+			shouldTransform = transformToolBlocks.transform
+		} else if (typeof transformToolBlocks.keepToolBlocks === "boolean") {
+			shouldTransform = !transformToolBlocks.keepToolBlocks
+		} else if (typeof transformToolBlocks.keepNativeToolBlocks === "boolean") {
+			shouldTransform = !transformToolBlocks.keepNativeToolBlocks
+		} else if (transformToolBlocks.tools) {
+			shouldTransform = false
+		}
+	}
+
+	if (!shouldTransform) {
+		return messages.map((msg) => ({ ...msg }))
+	}
+
 	return messages.map((msg) => ({
 		...msg,
 		content: convertToolBlocksToText(msg.content),
@@ -299,27 +331,34 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// This respects user's custom condensing prompt setting
 	const condenseInstructions = customCondensingPrompt?.trim() || supportPrompt.default.CONDENSE
 
+	// Fold the summarization-only (SUMMARY_PROMPT) instructions into the final
+	// request message so the system prompt can stay identical to the prior turn
+	// (preserving the KV cache). Condensing instructions go at the end.
 	const finalRequestMessage: Anthropic.MessageParam = {
 		role: "user",
-		content: condenseInstructions,
+		content: `${SUMMARY_PROMPT}\n\n${condenseInstructions}`,
 	}
 
 	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
 	// (e.g., when user triggers condense after receiving attempt_completion but before responding)
 	const messagesWithToolResults = injectSyntheticToolResults(messagesToSummarize)
 
-	// Transform tool_use and tool_result blocks to text representations.
-	// This is necessary because some providers (like Bedrock via LiteLLM) require the `tools` parameter
-	// when tool blocks are present. By converting them to text, we can send the conversation for
-	// summarization without needing to pass the tools parameter.
-	const messagesWithTextToolBlocks = transformMessagesForCondensing(
-		maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
-	)
+	// Transform tool_use and tool_result blocks to text representations only when the
+	// provider does not support native tool blocks. When metadata carries tools, keep
+	// the native blocks (and pass metadata.tools through) to preserve the request prefix.
+	const keepNativeToolBlocks = !!metadata?.tools && (Array.isArray(metadata.tools) ? metadata.tools.length > 0 : true)
+
+	const messagesWithTextToolBlocks = keepNativeToolBlocks
+		? maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler)
+		: transformMessagesForCondensing(
+				maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
+				true,
+			)
 
 	const requestMessages = messagesWithTextToolBlocks.map(({ role, content }) => ({ role, content }))
 
-	// Note: this doesn't need to be a stream, consider using something like apiHandler.completePrompt
-	const promptToUse = SUMMARY_PROMPT
+	// Use the passed-in system prompt to keep the request prefix identical to the prior turn.
+	const promptToUse = systemPrompt ?? ""
 
 	// Validate that the API handler supports message creation
 	if (!apiHandler || typeof apiHandler.createMessage !== "function") {

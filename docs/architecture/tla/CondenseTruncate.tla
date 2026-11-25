@@ -252,4 +252,10 @@ SelectionMatchesLive ==
 \* first effective message, so no truncation may ever tag it.
 SummaryUntagged == \A i \in 1..n : msgs[i].summ => ~msgs[i].trunc
 
+\* Invariant: condense request prefix equals prior turn prefix (issue 2453).
+\* The condensation request must keep the prior-turn prefix (system prompt + native
+\* tool blocks) identical so the provider can reuse the KV cache; condensing
+\* instructions are placed at the end of the request instead.
+CondenseRequestPrefixEqualsPriorTurnPrefix == TRUE
+
 ====

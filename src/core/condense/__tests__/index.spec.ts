@@ -929,21 +929,16 @@ describe("summarizeConversation", () => {
 			taskId,
 		})
 
-		// Verify that createMessage was called with the SUMMARY_PROMPT (which contains CRITICAL instructions), messages array, and optional metadata
+		// Verify that createMessage was called with the passed-in systemPrompt
 		expect(mockApiHandler.createMessage).toHaveBeenCalledWith(
-			expect.stringContaining("You are a helpful AI assistant tasked with summarizing conversations."),
+			defaultSystemPrompt,
 			expect.any(Array),
 			undefined, // metadata is undefined when not passed to summarizeConversation
 		)
-		// Verify the CRITICAL instructions are included in the prompt
-		const actualPrompt = (mockApiHandler.createMessage as Mock).mock.calls[0][0]
-		expect(actualPrompt).toContain("CRITICAL: This is a summarization-only request")
-		expect(actualPrompt).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
-
-		// Check that maybeRemoveImageBlocks was called with the correct messages
-		// The final request message now contains the detailed CONDENSE instructions
+		// Verify the CRITICAL instructions are included in the final request message
 		const mockCallArgs = (maybeRemoveImageBlocks as Mock).mock.calls[0][0] as any[]
 		const finalMessage = mockCallArgs[mockCallArgs.length - 1]
+		expect(finalMessage.content).toContain("CRITICAL: This is a summarization-only request")
 		expect(finalMessage.role).toBe("user")
 		expect(finalMessage.content).toContain("Your task is to create a detailed summary of the conversation")
 	})
@@ -1319,7 +1314,7 @@ describe("summarizeConversation with custom settings", () => {
 		const requestMessages = createMessageCalls[0][1]
 		const lastMessage = requestMessages[requestMessages.length - 1]
 		expect(lastMessage.role).toBe("user")
-		expect(lastMessage.content).toBe(customPrompt)
+		expect(lastMessage.content).toContain(customPrompt)
 	})
 
 	/**
@@ -1336,13 +1331,10 @@ describe("summarizeConversation with custom settings", () => {
 			customCondensingPrompt: "  ",
 		})
 
-		// Verify the default SUMMARY_PROMPT was used (contains CRITICAL instructions)
+		// Verify the passed-in systemPrompt was used as the first arg
 		let createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
 
 		// Reset mock and test with undefined
 		vi.clearAllMocks()
@@ -1354,13 +1346,10 @@ describe("summarizeConversation with custom settings", () => {
 			isAutomaticTrigger: false,
 		})
 
-		// Verify the default SUMMARY_PROMPT was used again (contains CRITICAL instructions)
+		// Verify the passed-in systemPrompt was used again
 		createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
 	})
 
 	/**
