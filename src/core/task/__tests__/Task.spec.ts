@@ -2823,6 +2823,28 @@ describe("Cline", () => {
 				).resolves.toBeUndefined()
 			})
 
+			it("rejects with ContextManagementNoProgressError on a true no-progress round", async () => {
+				// Regression evidence (PR 2696 review round 10, pre-merge check):
+				// a genuine no-progress reduction must stop the emergency handler
+				// with ContextManagementNoProgressError instead of falling through,
+				// and the round must not rewrite the history the caller came with.
+				const { task } = await createOverflowingTask(providerStateWith())
+				const original = task.apiConversationHistory
+				vi.mocked(manageContext).mockResolvedValueOnce({
+					messages: original,
+					prevContextTokens: 100_000,
+					summary: "",
+					cost: 0,
+					noProgress: true,
+					error: "Unable to reduce context: no candidates past the threshold",
+				})
+
+				await expect(getTaskTestAccess(task).handleContextWindowExceededError(ctxModelInfo)).rejects.toThrow(
+					ContextManagementNoProgressError,
+				)
+				expect(task.apiConversationHistory).toBe(original)
+			})
+
 			it("runs the real history overwrite when the emergency fallback truncates", async () => {
 				const { task } = await createOverflowingTask(providerStateWith())
 				// Undo the helper's overwrite mock: the fallback must exercise the
