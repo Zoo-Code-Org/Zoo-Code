@@ -83,21 +83,30 @@
 \* Result: CondenseTruncate.cfg (Fixed) holds. Every variant models a rule the fix
 \* replaces and fails its target invariant. CHOOSE over several eligible results makes
 \* the exact state count vary between runs; polarity does not.
-\* Findings: covered 4, added 8, gap 6. Issue 1823 failures are covered; PR 2647 rounds
-\* 2-4 added the Rewind action, boundary VisMsg, SummaryUntagged, skip-first (threads
-\* 4657855243, 4657986893). Issue 1254 added four invariants (ZeroOK, NoPairDeg).
+\* Issue 1823 failures are covered; PR 2647 rounds 2-4 added the Rewind action,
+\* boundary VisMsg, SummaryUntagged, skip-first (threads 4657855243, 4657986893). Issue 1254 added four invariants (ZeroOK, NoPairDeg).
 \* PR 2696 round 1 (threads 4692295250/71/81) added DegSelectionLive, the fake-big
 \* EmptyOK case, and DegradationKeepsOtherBlocks (PreScan, EmptyOK, AllBlocks sabotage).
 \* Round 2 (thread 4693277487) added ErrExhaustsCandidates and one-block-per-round
 \* selection (OnlyBig sabotage); its Persistence Integrity note is a gap. Round 6
 \* (threads on tla:56/59) added the caller transition and ErrStopsRequests
-\* (NoStop sabotage); the recount comparison is a recorded gap.
+\* (NoStop sabotage); the recount comparison is a recorded gap. Round 7
+\* (threads 4697695475/4697701195) records rewind restoration of the
+\* degradedOriginals as a gap (see Gaps) and pins the recount-unchanged
+\* degrade with a unit test.
 \* Gaps: marker text, getExistingSummaryIds guard, scan and clamp guards, the recovery
 \* budget, the caller persist path for a failed round, residual code eligibility, and
 \* the degraded-round recount comparison (the code rejects a degrade whose fresh
 \* recount did not shrink; the model weights are binary units, so a
 \* recount-unchanged degrade is unrepresentable here — the unit tests pin it).
-\* Findings: covered 4, added 9, gap 7.
+\* Rewind restoration (round 7) is a gap: modeling the marker-carrying history
+\* needs the degraded message's identity to survive across rounds, but this
+\* model's degIdx resets every history-mutating action (the fresh-round record
+\* DegradationPreservesPair and DegSelectionLive pin), and a persistent identity
+\* breaks DegSelectionLive when a later Truncate tags the degraded message; a
+\* marker Msg record would add a variable and multiply the state count. The
+\* message-manager rewind tests pin the restore behavior on the real code.
+\* Findings: covered 4, added 9, gap 8.
 \* Replay: ZeroOK gives Init, Recover: a one-message history reports success with no
 \* change, so the live code (issue 1254) retries forever. This is the unfixed-code
 \* reproduction. NoPairDeg gives Init, AddToolPair, Recover: the degraded tool result

@@ -3,6 +3,7 @@ import { Task } from "../task/Task"
 import { cleanupAfterTruncation } from "../condense"
 import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
 import { getTaskDirectoryPath } from "../../utils/storage"
+import type { ApiMessage } from "../task-persistence/apiMessages"
 
 export interface RewindOptions {
 	/** Whether to include the target message in deletion (edit=true, delete=false) */
@@ -195,11 +196,19 @@ export class MessageManager {
 			// Restore first: a doomed degradation marker carries the original
 			// tool_result content its round cleared, and dropping it without
 			// restoring would lose that content permanently (issue 1254
-			// review). The marker is written at degraded.ts + 1, so the
-			// degraded message is located by ts; restored messages are new
+			// review). The scan runs over the ORIGINAL history: the cutoff
+			// filter above removes a marker whose timestamp equals the cutoff
+			// while the degraded message (marker.ts - 1) survives it, so a
+			// scan after the filter would miss that marker. The degraded
+			// message is located by ts (the marker is written at degraded.ts
+			// + 1), or — when it carries no timestamp and the marker fell
+			// back to Date.now() — as the original-history predecessor of the
+			// marker. Retained messages keep their object identity, so the
+			// ops map keys on the message object; restored messages are new
 			// objects routed through the final history write.
-			const restoreOps = new Map<number, Array<{ blockIndex: number; content: unknown }>>()
-			for (const marker of apiHistory) {
+			const restoreOps = new Map<ApiMessage, Array<{ blockIndex: number; content: unknown }>>()
+			for (let markerIndex = 0; markerIndex < originalHistory.length; markerIndex++) {
+				const marker = originalHistory[markerIndex]
 				if (
 					!(
 						marker.isTruncationMarker &&
@@ -209,19 +218,32 @@ export class MessageManager {
 				) {
 					continue
 				}
-				if (marker.ts === undefined || !Array.isArray(marker.degradedOriginals)) {
+				if (!Array.isArray(marker.degradedOriginals)) {
 					continue
 				}
-				const degradedTs = marker.ts - 1
-				const ops = restoreOps.get(degradedTs) ?? []
+				let degraded: ApiMessage | undefined
+				if (marker.ts !== undefined) {
+					const degradedTs = marker.ts - 1
+					degraded = originalHistory.find((m) => m.ts === degradedTs)
+				}
+				if (!degraded && markerIndex > 0) {
+					const previous = originalHistory[markerIndex - 1]
+					if (Array.isArray(previous.content)) {
+						degraded = previous
+					}
+				}
+				if (!degraded) {
+					continue
+				}
+				const ops = restoreOps.get(degraded) ?? []
 				for (const original of marker.degradedOriginals) {
 					ops.push({ blockIndex: original.blockIndex, content: original.content })
 				}
-				restoreOps.set(degradedTs, ops)
+				restoreOps.set(degraded, ops)
 			}
 			if (restoreOps.size > 0) {
 				apiHistory = apiHistory.map((msg) => {
-					const ops = restoreOps.get(msg.ts ?? Number.NaN)
+					const ops = restoreOps.get(msg)
 					if (!ops || !Array.isArray(msg.content)) {
 						return msg
 					}

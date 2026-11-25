@@ -1350,6 +1350,68 @@ describe("Task persistence", () => {
 				},
 			])
 		})
+
+		it("keeps a trailing degradation marker in the saved history when resuming", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				historyItem: {
+					id: "marker-resume",
+					number: 3,
+					ts: Date.now(),
+					task: "Marker resume",
+					tokensIn: 10,
+					tokensOut: 5,
+					totalCost: 0.001,
+				},
+				startTask: false,
+				initialStatus: "interrupted",
+			})
+			const initiateTaskLoopSpy = vi
+				.spyOn(getTaskPersistenceAccess(task), "initiateTaskLoop")
+				.mockResolvedValue(undefined)
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" })
+
+			// The persisted history ends with a degradation marker carrying
+			// the original tool_result content a later rewind restores.
+			mockReadApiMessages.mockResolvedValue([
+				{
+					role: "assistant",
+					content: [{ type: "tool_use", id: "toolu_mr_1", name: "read_file", input: { path: "a.txt" } }],
+				},
+				{
+					role: "user",
+					content: [{ type: "tool_result", tool_use_id: "toolu_mr_1", content: "" }],
+				},
+				{
+					role: "user",
+					content: "[Tool result degradation: oversized result cleared to reduce context]",
+					ts: 111,
+					isTruncationMarker: true,
+					truncationId: "trunc-mr-1",
+					degradedOriginals: [{ index: 1, blockIndex: 0, content: [{ type: "text", text: "4MB output" }] }],
+				},
+			])
+
+			mockProvider.taskHistoryStore.get = vi.fn().mockReturnValue({
+				id: "marker-resume",
+				status: "interrupted",
+			})
+
+			await getTaskPersistenceAccess(task).resumeTaskFromHistory()
+
+			// The marker must survive the resume: the saved history keeps it
+			// with its metadata, and the resumed turn does not copy its text
+			// (PR 2696 review round 7).
+			const saved = task.apiConversationHistory
+			expect(saved.at(-1)?.isTruncationMarker).toBe(true)
+			expect((saved.at(-1) as { degradedOriginals?: unknown[] }).degradedOriginals).toHaveLength(1)
+			const newUserContent = await initiateTaskLoopSpy.mock.calls[0][0]
+			const texts = newUserContent
+				.filter((block) => block.type === "text")
+				.map((block) => (block as { text: string }).text)
+			expect(texts.join("\n")).not.toContain("Tool result degradation")
+		})
 	})
 
 	describe("pending action resume", () => {

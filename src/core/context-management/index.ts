@@ -428,6 +428,13 @@ export type ContextManagementResult = SummarizeResponse & {
 	truncationId?: string
 	messagesRemoved?: number
 	newContextTokensAfterTruncation?: number
+	/**
+	 * True only when the round ended unable to reduce the context: nothing
+	 * removable and no degradation candidate, or a degrade whose recount did
+	 * not shrink. A condensation error below the truncation limit is NOT
+	 * no-progress: the original history still fits, so the request proceeds.
+	 */
+	noProgress?: boolean
 }
 
 /**
@@ -558,6 +565,7 @@ export async function manageContext({
 				truncationId: truncationResult.truncationId,
 				messagesRemoved: 0,
 				newContextTokensAfterTruncation: prevContextTokens,
+				noProgress: true,
 			}
 		}
 
@@ -640,6 +648,7 @@ export async function manageContext({
 					truncationId: truncationResult.truncationId,
 					messagesRemoved: 0,
 					newContextTokensAfterTruncation,
+					noProgress: true,
 				}
 			}
 		}

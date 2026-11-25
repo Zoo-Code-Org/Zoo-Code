@@ -3367,7 +3367,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			if (existingApiConversationHistory.length > 0) {
 				const lastMessage = existingApiConversationHistory[existingApiConversationHistory.length - 1]
 
-				if (lastMessage.isSummary) {
+				if (lastMessage.isTruncationMarker) {
+					// A trailing truncation marker must stay in the saved history:
+					// it carries the metadata (e.g. degradedOriginals) a later
+					// rewind restores, and the request never sees it
+					// (getEffectiveApiHistory filters markers). The resumed turn is
+					// built from the new user content only.
+					modifiedApiConversationHistory = [...existingApiConversationHistory]
+					modifiedOldUserContent = []
+				} else if (lastMessage.isSummary) {
 					// IMPORTANT: If the last message is a condensation summary, we must preserve it
 					// intact. The summary message carries critical metadata (isSummary, condenseId)
 					// that getEffectiveApiHistory() uses to filter out condensed messages.
@@ -4845,11 +4853,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								throw new Error("API request failed")
 							}
 
+							// The failed attempt already saved this user turn; remove it so
+							// the retry does not persist a second copy. The next iteration
+							// re-adds it exactly once via userMessageWasRemoved.
+							let removedSavedUserTurn = false
+							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
+								const lastSaved = this.apiConversationHistory[this.apiConversationHistory.length - 1]
+								if (lastSaved.role === "user") {
+									this.apiConversationHistory.pop()
+									this.messageCounts.user--
+									removedSavedUserTurn = true
+								}
+							}
 							await this.say("api_req_retried")
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: 0,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedSavedUserTurn,
 							})
 							continue
 						} else if (error instanceof ContextManagementNoProgressError) {
@@ -4863,11 +4884,24 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								throw new Error("API request failed")
 							}
 						
+							// The failed attempt already saved this user turn; remove it so
+							// the retry does not persist a second copy. The next iteration
+							// re-adds it exactly once via userMessageWasRemoved.
+							let removedSavedUserTurn = false
+							if (shouldAddUserMessage && this.apiConversationHistory.length > 0) {
+								const lastSaved = this.apiConversationHistory[this.apiConversationHistory.length - 1]
+								if (lastSaved.role === "user") {
+									this.apiConversationHistory.pop()
+									this.messageCounts.user--
+									removedSavedUserTurn = true
+								}
+							}
 							await this.say("api_req_retried")
 							stack.push({
 								userContent: currentUserContent,
 								includeFileDetails: false,
-								retryAttempt: 0,
+								retryAttempt: (currentItem.retryAttempt ?? 0) + 1,
+								userMessageWasRemoved: removedSavedUserTurn,
 							})
 							continue
 						} else {
@@ -5738,7 +5772,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// array, so a check after the overwrite would false-flag every
 			// successful round (issue 1254 review).
 			const noProgressError =
-				truncateResult.messages === this.apiConversationHistory ? truncateResult.error : undefined
+				truncateResult.messages === this.apiConversationHistory && truncateResult.noProgress
+					? truncateResult.error
+					: undefined
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
@@ -6008,7 +6044,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// array, so a check after the overwrite would false-flag every
 				// successful round (issue 1254 review).
 				const noProgressError =
-					truncateResult.messages === this.apiConversationHistory ? truncateResult.error : undefined
+					truncateResult.messages === this.apiConversationHistory && truncateResult.noProgress
+						? truncateResult.error
+						: undefined
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}

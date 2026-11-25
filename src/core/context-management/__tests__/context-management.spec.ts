@@ -508,6 +508,75 @@ describe("Context Management", () => {
 			})
 			expect(result.newContextTokensAfterTruncation).toBeLessThan(result.prevContextTokens)
 		})
+	it("reports the degraded round as no progress when the recount is unchanged", async () => {
+		// A degrade whose fresh recount does not shrink the original slice
+		// cannot make progress: the round must report the controlled error,
+		// flag noProgress for the caller, and hand back the ORIGINAL
+		// history, not the cleared result (PR 2696 review round 7, thread
+		// on CondenseTruncate.tla:59).
+		const countingHandler = new MockApiHandler()
+		vi.spyOn(countingHandler, "countTokens").mockResolvedValue(5)
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task" },
+			{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+			{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
+		]
+
+		const result = await manageContext({
+			messages: history,
+			totalTokens: 60,
+			contextWindow: 60,
+			maxTokens: 1,
+			apiHandler: countingHandler,
+			autoCondenseContext: false,
+			autoCondenseContextPercent: 100,
+			systemPrompt: "System prompt",
+			taskId,
+			profileThresholds: {},
+			currentProfileId: "default",
+		})
+
+		expect(result.error).toBeDefined()
+		expect(result.noProgress).toBe(true)
+		// The caller keeps ITS array: identity, not just equal content.
+		expect(result.messages).toBe(history)
+	})
+
+	it("keeps a failed condensation below the truncation limit out of no-progress", async () => {
+		// A condense failure with the history still below the fallback
+		// truncation limit returns the original messages with the error
+		// set, but the context still fits: the round is NOT no-progress,
+		// so the caller proceeds with the request instead of stopping
+		// (PR 2696 review round 7, thread on Task.ts).
+		const failingHandler = new MockApiHandler()
+		vi.spyOn(failingHandler, "createMessage").mockImplementation(() => {
+			throw new Error("condense backend down")
+		})
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task" },
+			{ role: "assistant", content: "middle context" },
+			{ role: "user", content: "latest" },
+		]
+
+		const result = await manageContext({
+			messages: history,
+			totalTokens: 200,
+			contextWindow: 1000,
+			maxTokens: 1,
+			apiHandler: failingHandler,
+			autoCondenseContext: true,
+			autoCondenseContextPercent: 10,
+			systemPrompt: "System prompt",
+			taskId,
+			profileThresholds: {},
+			currentProfileId: "default",
+		})
+
+		expect(result.error).toBeDefined()
+		expect(result.noProgress).toBeUndefined()
+		expect(result.messages).toBe(history)
+	})
+
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,
 			supportsPromptCache: true,
