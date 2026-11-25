@@ -14,7 +14,7 @@ const getQueueTaskTestAccess = (task: Task) => task as unknown as QueueTaskTestA
 // it should be consumed and used to fulfill the ask.
 
 describe("Task.ask queued message drain", () => {
-	function createTask(provider?: { getState: () => Promise<Record<string, boolean>> }) {
+	function createTask(provider?: { getState: () => Promise<Record<string, unknown>> }) {
 		// Distinct task and instance ids, so an abort assertion can name this task instead of
 		// accepting whatever the fixture left unset.
 		const task = Object.create(Task.prototype, {
@@ -125,7 +125,6 @@ describe("Task.ask queued message drain", () => {
 	})
 
 	it.each([
-		["command", "npm test"],
 		["use_mcp_server", "{}"],
 		["tool", "not-json"],
 	] as const)("preserves approve-with-feedback behavior for %s asks", async (type, text) => {
@@ -133,6 +132,66 @@ describe("Task.ask queued message drain", () => {
 		task.messageQueueService.addMessage("Approval context")
 
 		const result = await task.ask(type, text, false)
+
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
+		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("does not auto-approve a plain non-allowlisted command ask from a queued message", async () => {
+		// #1574: a queued message is ordinary conversation input. Only a policy
+		// approve or an explicit user click may approve a command ask.
+		const task = await createTask()
+		task.messageQueueService.addMessage("don't do that")
+
+		const ask = task.ask("command", "ps && echo hello", false)
+
+		// The drain must not resolve the ask from the queued message.
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		// The queued message stays ordinary conversation input for the next turn.
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("don't do that")
+	})
+
+	it("does not auto-approve a plain non-allowlisted command ask when a message is queued mid-wait", async () => {
+		const task = await createTask()
+
+		const ask = task.ask("command", "ps && echo hello", false)
+		task.messageQueueService.addMessage("mid-wait message")
+
+		const premature = await Promise.race([
+			ask,
+			new Promise<"pending">((resolve) => setTimeout(() => resolve("pending"), 250)),
+		])
+		expect(premature).toBe("pending")
+		expect(task.messageQueueService.isEmpty()).toBe(false)
+
+		task.approveAsk()
+		const result = await ask
+		expect(result).toMatchObject({ response: "yesButtonClicked", text: undefined })
+		expect(task.messageQueueService.claimNextMessage()?.text).toBe("mid-wait message")
+	})
+
+	it("consumes a queued message as feedback for a policy-approved command ask", async () => {
+		// The claim gate opens only for a command the ask-time policy approves;
+		// the approve-with-feedback consume is preserved for that path.
+		const task = await createTask({
+			getState: async () => ({
+				autoApprovalEnabled: true,
+				alwaysAllowExecute: true,
+				allowedCommands: ["npm test"],
+			}),
+		})
+		task.messageQueueService.addMessage("Approval context")
+
+		const result = await task.ask("command", "npm test", false)
 
 		expect(result).toMatchObject({ response: "yesButtonClicked", text: "Approval context" })
 		expect(task.messageQueueService.isEmpty()).toBe(true)
