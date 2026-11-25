@@ -144,6 +144,59 @@ describe("changeJournal", () => {
 			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
 		})
 
+		it("closes the temp-file handle when its sync fails, on every platform", async () => {
+			// The block-statement mutant at changeJournal.ts:192:14 replaces the
+			// `finally { await handle.close() }` block with `{}`. Under the gate
+			// platform (Linux) that mutant survives: an unclosed descriptor is not
+			// observable through the file system there, it only leaks. So this test
+			// does not infer closure from OS behaviour - it watches the handle
+			// itself: the real handle is opened, then its own close() is wrapped with
+			// a counter, and its sync() is made to fail. Platform-independent.
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "kept" }))
+			const before = await loadChanges(tmpRoot, taskId)
+			expect(before.map((e) => e.checkpointId)).toEqual(["kept"])
+
+			const realOpen = fs.open
+			let closeCalls = 0
+			let tempHandleOpened = false
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				const handle = await realOpen(p, flags as string | undefined)
+				// The only "w" open in this path is the temp journal file; the
+				// directory is opened "r" (and only on POSIX). Failing sync here
+				// reproduces a mid-write durability failure without touching the
+				// published journal.
+				if (flags === "w") {
+					tempHandleOpened = true
+					vi.spyOn(handle, "sync").mockRejectedValueOnce(new Error("simulated tmp sync failure"))
+					const originalClose = handle.close.bind(handle)
+					void vi.spyOn(handle, "close").mockImplementation(async () => {
+						closeCalls++
+						await originalClose()
+					})
+				}
+				return handle
+			})
+			try {
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "lost" }))).rejects.toThrow(
+					"simulated tmp sync failure",
+				)
+				// Positive control for the fixture itself: without hitting the "w"
+				// handle the assertions below would pass vacuously.
+				expect(tempHandleOpened).toBe(true)
+				expect(closeCalls).toBe(1)
+				// The rename never ran, so the journal still holds the previous
+				// complete content and the temp file was cleaned up.
+				const dirEntries = await fs.readdir(path.dirname(journalPath(tmpRoot, taskId)))
+				expect(dirEntries.filter((name) => name.endsWith(".tmp"))).toEqual([])
+				expect(dirEntries).toContain("changes.jsonl")
+			} finally {
+				openSpy.mockRestore()
+			}
+			const after = await loadChanges(tmpRoot, taskId)
+			expect(after.map((e) => e.checkpointId)).toEqual(["kept"])
+		})
+
 		it("propagates a non-ENOENT journal-read failure instead of replacing blind", async () => {
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "good" }))
 			// The current content cannot be read (I/O error): replacing would
