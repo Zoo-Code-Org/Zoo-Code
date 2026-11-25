@@ -909,4 +909,42 @@ describe("degradation candidate selection (PR 2696 review round 1)", () => {
 		expect(blocks[0].content).toBe("")
 		expect(blocks[1].content).toBe("keep me")
 	})
+
+	it("degrades one block per round until no eligible block remains", () => {
+		// ErrExhaustsCandidates (CondenseTruncate.tla) models recovery rounds:
+		// a premature noProgress on the second round passes every single-call
+		// test, so the chain must run for real (thread 4693794543). frac 0.25
+		// keeps floor((visible-1)*frac) at the degenerate 0 so every round
+		// takes the degradation path.
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{ role: "user", content: toolResult("t1", big(8000)), ts: 1200 },
+			{ role: "assistant", content: toolUse("t2"), ts: 1300 },
+			{ role: "user", content: toolResult("t2", big(5000)), ts: 1400 },
+		]
+
+		const round1 = truncateConversation(history, 0.25, "test-task-id")
+		expect(round1.degraded).toBe(true)
+		expect(arrayed(round1.messages[2])[0].content).toBe("")
+		expect(arrayed(round1.messages[4])[0].content).toBe(big(5000))
+
+		const round2 = truncateConversation(round1.messages, 0.25, "test-task-id")
+		// The second round degrades the remaining oversized block...
+		expect(round2.degraded).toBe(true)
+		expect(arrayed(round2.messages[4])[0].content).toBe("")
+		// ...keeps round 1's block cleared, and retains both paired
+		// tool_use messages and their tool_result messages.
+		expect(arrayed(round2.messages[2])[0].content).toBe("")
+		expect(round2.messages[1].content).toStrictEqual(toolUse("t1"))
+		expect(round2.messages[3].content).toStrictEqual(toolUse("t2"))
+		expect(round2.messages).toHaveLength(5)
+
+		const round3 = truncateConversation(round2.messages, 0.25, "test-task-id")
+		// noProgress fires only when no eligible block remains: both blocks
+		// stay cleared and no content returns.
+		expect(round3.noProgress).toBe(true)
+		expect(arrayed(round3.messages[2])[0].content).toBe("")
+		expect(arrayed(round3.messages[4])[0].content).toBe("")
+	})
 })

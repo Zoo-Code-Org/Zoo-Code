@@ -297,9 +297,10 @@ describe("Context Management", () => {
 			expect(result.error).toBeDefined()
 			expect(result.messagesRemoved).toBe(0)
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThanOrEqual(63)
-			// A failed round must not persist the cleared tool_result content
-			// (Persistence Integrity, review round 2).
-			expect(result.messages).toStrictEqual(history)
+			// A failed round must not persist the cleared tool_result content;
+			// Task callers persist by array identity, not by equal content
+			// (Persistence Integrity, review rounds 2-3).
+			expect(result.messages).toBe(history)
 		})
 
 		it("returns the no-progress outcome when nothing is removable or degradable", async () => {
@@ -329,7 +330,9 @@ describe("Context Management", () => {
 			expect(result.error).toBeDefined()
 			expect(result.messagesRemoved).toBe(0)
 			expect(result.newContextTokensAfterTruncation).toBe(result.prevContextTokens)
-			expect(result.messages).toStrictEqual(history)
+			// The caller keeps ITS array: identity, not just equal content
+			// (Persistence Integrity, review round 3).
+			expect(result.messages).toBe(history)
 		})
 
 		it("returns the degraded content when the round shrinks the recounted tokens", async () => {
