@@ -1358,6 +1358,158 @@ describe("DiffViewProvider", () => {
 				consoleWarnSpy.mockRestore()
 			}
 		})
+		it("keeps the post-save report alive across reset() so the write's own tail still reports", async () => {
+			// reset() runs in the tool's common tail right after saveDirectly resolved, i.e. before the
+			// write-delay tail gets a chance to report. Clearing the ownership entry there made the tail
+			// bail at its ownership check and swallow the only report these problems had: saveDirectly
+			// hands back no problems message and the tool result carries none either. The write delay is
+			// gated so the tail is provably still parked when reset() runs.
+			const mockDelay = vi.mocked(delay)
+			let releaseTail!: () => void
+			mockDelay.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseTail = resolve }))
+			const tailProblem: vscode.Diagnostic = {
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message: "boom",
+			}
+			// Only the read the tail makes may see the problem, so the pre-save snapshot stays clean.
+			let emitTailProblem = false
+			mockTask.say.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() =>
+				emitTailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : []
+			)
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
+				await new Promise((resolve) => setTimeout(resolve, 0))
+				expect(mockDelay).toHaveBeenCalledWith(100, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(1)
+
+				await diffViewProvider.reset()
+
+				// The entry that owns this report survives the reset, so the tail can still deliver it.
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(1)
+				emitTailProblem = true
+				releaseTail()
+				await new Promise((resolve) => setTimeout(resolve, 0))
+
+				// Diagnostics were queried (pre-save snapshot plus the tail) and one error row was emitted.
+				expect(vscode.languages.getDiagnostics).toHaveBeenCalledTimes(2)
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(mockTask.say.mock.calls[0]?.[0]).toBe("error")
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("New problems detected after saving file: test.ts")
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("boom")
+				// The tail released the entry it owned instead of leaving it behind.
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(0)
+			} finally {
+				// Restore the shared mock implementations even when an assertion fails: a gated delay
+				// left in place hangs the tests that rely on the module-level resolved mock.
+				mockDelay.mockImplementation(() => Promise.resolve())
+				vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() => [])
+			}
+		})
+
+		it("keeps a superseded tail from stealing the report when generations collide", async () => {
+			// Three saves of one path with independently gated write delays: A waits longest, B reports
+			// first and releases the entry, C starts while A is still parked. If generations restart at
+			// 1 after a report, A matches C's generation, reports for a save it does not own and deletes
+			// C's entry; C then stops and its problems are never reported. Each tail carries its own
+			// problem message so the assertions can tell which save actually emitted the row.
+			const mockDelay = vi.mocked(delay)
+			const gates: Array<() => void> = []
+			mockDelay.mockImplementation(() => new Promise<void>((resolve) => { gates.push(resolve) }))
+			let tailProblem: vscode.Diagnostic | undefined
+			mockTask.say.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() =>
+				tailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : []
+			)
+			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+			const makeProblem = (message: string): vscode.Diagnostic => ({
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message,
+			})
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "content A", true, true, 100)
+				await tick()
+				expect(gates).toHaveLength(1)
+				await diffViewProvider.saveDirectly("test.ts", "content B", true, true, 100)
+				await tick()
+				expect(gates).toHaveLength(2)
+
+				// B owns the report; let it finish first, which releases the entry.
+				tailProblem = makeProblem("boom B")
+				gates[1]()
+				await tick()
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("boom B")
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(0)
+				tailProblem = undefined
+
+				await diffViewProvider.saveDirectly("test.ts", "content C", true, true, 100)
+				await tick()
+				expect(gates).toHaveLength(3)
+				const generationC = diffViewProvider["pendingSaveReports"].get(`${mockCwd}/test.ts`)?.generation
+				if (typeof generationC !== "number") {
+					throw new Error(`expected a numeric generation for the newest save, got ${String(generationC)}`)
+				}
+
+				// A wakes last and must stop at the ownership check: no report, and C still owns the entry.
+				gates[0]()
+				await tick()
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(diffViewProvider["pendingSaveReports"].get(`${mockCwd}/test.ts`)?.generation).toBe(generationC)
+
+				// C owns the report and delivers it.
+				tailProblem = makeProblem("boom C")
+				gates[2]()
+				await tick()
+				expect(mockTask.say).toHaveBeenCalledTimes(2)
+				expect(mockTask.say.mock.calls[1]?.[1]).toContain("boom C")
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(0)
+			} finally {
+				gates.forEach((release) => release())
+				mockDelay.mockImplementation(() => Promise.resolve())
+				vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() => [])
+			}
+		})
+
+		it("never reuses a generation for the next save after a report released its entry", async () => {
+			// Pins the generation arithmetic itself: a report deletes the entry, so the next save must
+			// keep counting up rather than restart where the superseded run left off.
+			const mockDelay = vi.mocked(delay)
+			const gates: Array<() => void> = []
+			mockDelay.mockImplementation(() => new Promise<void>((resolve) => { gates.push(resolve) }))
+			mockTask.say.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() => [])
+			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+			const pathKey = `${mockCwd}/test.ts`
+
+			try {
+				await diffViewProvider.saveDirectly("test.ts", "first", true, true, 0)
+				await tick()
+				const firstGeneration = diffViewProvider["pendingSaveReports"].get(pathKey)?.generation
+				gates[0]()
+				await tick()
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(0)
+
+				await diffViewProvider.saveDirectly("test.ts", "second", true, true, 0)
+				await tick()
+				const secondGeneration = diffViewProvider["pendingSaveReports"].get(pathKey)?.generation
+				if (typeof firstGeneration !== "number" || typeof secondGeneration !== "number") {
+					throw new Error(`expected numeric generations, got ${String(firstGeneration)} and ${String(secondGeneration)}`)
+				}
+				expect(secondGeneration > firstGeneration).toBe(true)
+			} finally {
+				gates.forEach((release) => release())
+				mockDelay.mockImplementation(() => Promise.resolve())
+			}
+		})
+
 	})
 
 	describe("saveChanges method with diagnostic settings", () => {

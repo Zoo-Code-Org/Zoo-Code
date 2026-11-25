@@ -80,6 +80,11 @@ export class DiffViewProvider {
 		string,
 		{ baseline: [vscode.Uri, vscode.Diagnostic[]][]; generation: number }
 	>()
+	// Generations are monotonic for the whole provider, not per path: a report deletes its
+	// entry, and the next save must not reuse a generation an older, still-waiting tail can
+	// match (three overlapping saves of one path).
+	private postSaveReportSequence = 0
+
 	// Tracks whether the user activated the target file's editor tab during the
 	// diff session. When the file was not already open before the edit, we only
 	// keep it open afterward if the user explicitly interacted with it.
@@ -1155,10 +1160,13 @@ export class DiffViewProvider {
 		this.activeLineController = undefined
 		this.streamedLines = []
 		this.preDiagnostics = []
-		// A reset ends any run of overlapping saves whose report was still pending: the
-		// tail that owned it will never run again, and a stale entry would suppress the
-		// next save's report.
-		this.pendingSaveReports.clear()
+		// A reset does not end a pending post-save report: reset follows the successful write
+		// that started the tail, and that tail still has to report the problems it is waiting
+		// for (see cancelPostSaveDiagnosticsTails). Ownership moves on its own: a newer save of
+		// the same path writes a higher generation, and a superseded tail stops at the ownership
+		// check in emitPostSaveDiagnostics before it touches diagnostics. With no newer save the
+		// entry is this save's own, and the tail deletes it after reporting.
+
 		this.preEditScrollLine = undefined
 		this.diffScrollLine = undefined
 		this.targetFileScrollLine = undefined
@@ -1234,7 +1242,8 @@ export class DiffViewProvider {
 			// and exactly once instead of once per save.
 			const pendingReport = this.pendingSaveReports.get(absolutePath)
 			const reportBaseline = pendingReport?.baseline ?? preDiagnostics
-			const reportGeneration = (pendingReport?.generation ?? 0) + 1
+			this.postSaveReportSequence += 1
+			const reportGeneration = this.postSaveReportSequence
 			this.pendingSaveReports.set(absolutePath, {
 				baseline: reportBaseline,
 				generation: reportGeneration,
