@@ -844,6 +844,50 @@ describe("degradation candidate selection (PR 2696 review round 1)", () => {
 		}
 	})
 
+	it.each([
+		[
+			"a tool_use_id that matches no preceding tool_use",
+			[{ role: "assistant", content: toolUse("t1"), ts: 1100 }] as ApiMessage[],
+		],
+		["no preceding assistant tool_use", [{ role: "user", content: "plain text", ts: 1100 }] as ApiMessage[]],
+	])("skips degradation when %s", (_label, middle) => {
+		// Pairing: a result is a candidate only when the preceding assistant
+		// message carries a tool_use with the matching id (Regression Evidence,
+		// review round 2).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			...middle,
+			{ role: "user", content: toolResult("t9", big(5000)), ts: 1200 },
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t9", big(5000)))
+	})
+
+	it("never selects a truncation marker as a degradation candidate", () => {
+		// Marker and parent messages are bookkeeping, not live content: the
+		// scan skips them even when they carry a paired oversized tool result
+		// (Regression Evidence, review round 2).
+		const history: ApiMessage[] = [
+			{ role: "user", content: "task", ts: 1000 },
+			{ role: "assistant", content: toolUse("t1"), ts: 1100 },
+			{
+				role: "user",
+				content: toolResult("t1", big(5000)),
+				ts: 1200,
+				isTruncationMarker: true,
+				truncationParent: "m1",
+			},
+		]
+
+		const result = truncateConversation(history, 0.5, "test-task-id")
+
+		expect(result.noProgress).toBe(true)
+		expect(arrayed(result.messages[2])).toStrictEqual(toolResult("t1", big(5000)))
+	})
+
 	it("clears only the selected tool_result block of the message", () => {
 		// Parallel tool calls share one message; clearing every block erases
 		// a small result that was not selected (thread 4692295281).

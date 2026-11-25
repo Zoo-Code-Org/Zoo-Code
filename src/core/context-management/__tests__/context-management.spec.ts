@@ -297,6 +297,73 @@ describe("Context Management", () => {
 			expect(result.error).toBeDefined()
 			expect(result.messagesRemoved).toBe(0)
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThanOrEqual(63)
+			// A failed round must not persist the cleared tool_result content
+			// (Persistence Integrity, review round 2).
+			expect(result.messages).toStrictEqual(history)
+		})
+
+		it("returns the no-progress outcome when nothing is removable or degradable", async () => {
+			// A short history with no paired oversized tool result removes zero
+			// messages and offers no degradation candidate: the round reports the
+			// controlled error with an unchanged token count (Regression Evidence,
+			// review round 2).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "user", content: "more context" },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeDefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.newContextTokensAfterTruncation).toBe(result.prevContextTokens)
+			expect(result.messages).toStrictEqual(history)
+		})
+
+		it("returns the degraded content when the round shrinks the recounted tokens", async () => {
+			// A degraded round is a success only when the recounted total drops:
+			// the cleared result reaches the caller, so the shrink is real
+			// (Regression Evidence, review round 2).
+			const history: ApiMessage[] = [
+				{ role: "user", content: "task" },
+				{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "probe", input: {} }] },
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(3000) }] },
+			]
+
+			const result = await manageContext({
+				messages: history,
+				totalTokens: 60,
+				contextWindow: 60,
+				maxTokens: 1,
+				apiHandler: mockApiHandler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt: "System prompt",
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+			expect(result.error).toBeUndefined()
+			expect(result.messagesRemoved).toBe(0)
+			expect(result.messages).toStrictEqual([
+				history[0],
+				history[1],
+				{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "" }] },
+			])
+			expect(result.newContextTokensAfterTruncation).toBeLessThan(result.prevContextTokens)
 		})
 		const createModelInfo = (contextWindow: number, maxTokens?: number): ModelInfo => ({
 			contextWindow,

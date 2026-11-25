@@ -549,8 +549,10 @@ export async function manageContext({
 		// success (issue 1254); otherwise the caller would retry a round that
 		// cannot make progress.
 		if (truncationResult.degraded && newContextTokensAfterTruncation >= prevContextTokens) {
+			// The round failed: handing back the degraded history would persist
+			// cleared tool_result content, so the caller keeps the original.
 			return {
-				messages: truncationResult.messages,
+				messages,
 				prevContextTokens,
 				summary: "",
 				cost,

@@ -42,13 +42,21 @@
 \* Invariant DegSelectionLive: a degraded tool result is live at the sink.
 \* Invariant DegradationKeepsOtherBlocks: a degrade keeps a second oversized
 \* block of the same message.
+\* Failure 9 (PR 2696 review round 2, thread 4693277487): the recovery scan
+\* accepts only the first oversized block, so a message whose first block is
+\* cleared leaves the scan while the second block still weighs, and the round
+\* reports Error though the runtime can still recover it. Recovery selects one
+\* block per round; the scan must accept either block.
+\* Invariant ErrExhaustsCandidates: an Error round means no live paired tool
+\* result still carries an oversized block.
 \* Modes: Fixed applies the latest-summary boundary (the fix) and the fixed recovery
 \* contract (degrade one eligible tool result, or stop with Error). Matched is the reviewed
 \* head f20ae85 of PR 2647: tags decide, no positional boundary. Coarse hides every tagged
 \* message. Buggy ignores condenseParent. ZeroOK reports success on a zero-removal round
 \* with no change (issue 1254). NoPairDeg also tags the paired tool use. PreScan scans
 \* without the summary boundary; EmptyOK treats an empty-content result as oversized;
-\* AllBlocks also clears the second oversized block. Other modes use the Fixed arms.
+\* AllBlocks also clears the second oversized block. OnlyBig scans only the first
+\* oversized block. Other modes use the Fixed arms.
 \* LiveMsg correction (PR 2647 round 3): the sink rule is position-aware, not tag
 \* matching. Round 4 (thread 4657986893): the summary stays the first candidate and
 \* skip-first keeps pairs whole. Mutation round: the getExistingSummaryIds guard and four
@@ -60,13 +68,15 @@
 \* Result: CondenseTruncate.cfg (Fixed) holds. Every variant models a rule the fix
 \* replaces and fails its target invariant. CHOOSE over several eligible results makes
 \* the exact state count vary between runs; polarity does not.
-\* Findings: covered 4, added 7, gap 5. Issue 1823 failures are covered; PR 2647 rounds
+\* Findings: covered 4, added 8, gap 6. Issue 1823 failures are covered; PR 2647 rounds
 \* 2-4 added the Rewind action, boundary VisMsg, SummaryUntagged, skip-first (threads
 \* 4657855243, 4657986893). Issue 1254 added four invariants (ZeroOK, NoPairDeg).
 \* PR 2696 round 1 (threads 4692295250/71/81) added DegSelectionLive, the fake-big
 \* EmptyOK case, and DegradationKeepsOtherBlocks (PreScan, EmptyOK, AllBlocks sabotage).
+\* Round 2 (thread 4693277487) added ErrExhaustsCandidates and one-block-per-round
+\* selection (OnlyBig sabotage); its Persistence Integrity note is a gap.
 \* Gaps: marker text, getExistingSummaryIds guard, scan and clamp guards, the recovery
-\* budget, and residual code eligibility details.
+\* budget, the caller persist path for a failed round, and residual code eligibility.
 \* Replay: ZeroOK gives Init, Recover: a one-message history reports success with no
 \* change, so the live code (issue 1254) retries forever. This is the unfixed-code
 \* reproduction. NoPairDeg gives Init, AddToolPair, Recover: the degraded tool result
@@ -74,7 +84,9 @@
 \* AddToolPair, Condense, Recover: the degraded result sits before the summary,
 \* hidden at the sink. EmptyOK gives Init, AddFakePair, Recover: a round succeeds
 \* with no weight loss. AllBlocks gives Init, AddToolPair, Recover: a second
-\* oversized block vanishes. The unit tests replay every rule.
+\* oversized block vanishes. OnlyBig gives Init, AddToolPair, Recover twice: the
+\* second round reports Error while the second block still weighs. The unit tests
+\* replay every rule.
 
 EXTENDS Naturals, FiniteSets
 
@@ -90,8 +102,10 @@ MarkerMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> TRUE, summ |-> FALSE, st
 ToolResMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE, tres |-> TRUE, big |-> TRUE, fake |-> FALSE, big2 |-> TRUE]
 FakeToolResMsg == [cond |-> FALSE, trunc |-> FALSE, mark |-> FALSE, summ |-> FALSE, stale |-> FALSE, tres |-> TRUE, big |-> FALSE, fake |-> TRUE, big2 |-> FALSE]
 
-VARIABLES n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx
-vars == <<n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx>>
+VARIABLES n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2
+vars == <<n, msgs, last, repValid, repTokens, phase, stall, prevWt, degIdx, degClr2>>
+\* degClr2: the last degrade round selected the second block (big2) as the
+\* block to clear, so the first block was not touched this round.
 
 \* The latest summary, when one exists.
 SumIdxSet == {i \in 1..n : msgs[i].summ}
@@ -162,7 +176,7 @@ AddMsg ==
     /\ n' = n + 1
     /\ msgs' = [i \in 1..(n + 1) |-> IF i = n + 1 THEN FreshMsg ELSE msgs[i]]
     /\ repValid' = FALSE
-    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
 
 \* A tool turn: an assistant tool use and a user tool result, adjacent. The
@@ -174,7 +188,7 @@ AddToolPair ==
                                    ELSE IF i = n + 2 THEN ToolResMsg
                                    ELSE msgs[i]]
     /\ repValid' = FALSE
-    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
 
 \* An empty-content tool turn: the serialized empty array passes the size
@@ -186,7 +200,7 @@ AddFakePair ==
                                    ELSE IF i = n + 2 THEN FakeToolResMsg
                                    ELSE msgs[i]]
     /\ repValid' = FALSE
-    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
 
 \* The condense source: every untagged message gets condenseParent, then a
@@ -198,7 +212,7 @@ Condense ==
                                    ELSE IF msgs[i].cond THEN msgs[i]
                                    ELSE [msgs[i] EXCEPT !.cond = TRUE, !.stale = FALSE]]
     /\ repValid' = FALSE
-    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0
+    /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
     /\ UNCHANGED <<last, repTokens>>
 
 \* The code under test. It hides half of the visible messages after the first
@@ -219,7 +233,7 @@ Truncate ==
              /\ last' = [rep |-> removed, lost |-> Cardinality({i \in tagged : LiveMsg(i)})]
              /\ repValid' = TRUE
              /\ repTokens' = Cardinality({i \in 1..(n + 1) : CountMsg(Mode, newM[i], i)})
-             /\ phase' = "ok" /\ stall' = 0 /\ prevWt' = LiveWeight /\ degIdx' = 0
+             /\ phase' = "ok" /\ stall' = 0 /\ prevWt' = LiveWeight /\ degIdx' = 0 /\ degClr2' = FALSE
 
 \* A rewind to a point before the summary deletes it and the messages after it.
 \* The tagged messages before it stay, now stale and live again.
@@ -232,7 +246,7 @@ Rewind ==
                 /\ msgs' = [i \in 1..(k - 1) |-> IF msgs[i].cond THEN [msgs[i] EXCEPT !.stale = TRUE]
                                                   ELSE msgs[i]]
                 /\ repValid' = FALSE /\ repTokens' = 0
-                /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0
+                /\ phase' = "run" /\ stall' = 0 /\ prevWt' = 0 /\ degIdx' = 0 /\ degClr2' = FALSE
                 /\ UNCHANGED last
 
 \* One recovery round of manageContext (issue 1254) on a zero-removal history.
@@ -250,31 +264,39 @@ Recover ==
                   THEN {i \in 2..(LastSumIdx - 1) : ~msgs[i].trunc /\ ~msgs[i].mark /\ msgs[i].tres /\ msgs[i].big}
                   ELSE IF Mode = "EmptyOK"
                   THEN {i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].fake /\ LiveMsg(i - 1)}
-                  ELSE {i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].big /\ LiveMsg(i - 1)}
+                  ELSE IF Mode = "OnlyBig"
+                  THEN {i \in 1..n : LiveMsg(i) /\ msgs[i].tres /\ msgs[i].big /\ LiveMsg(i - 1)}
+                  ELSE {i \in 1..n : LiveMsg(i) /\ msgs[i].tres
+                        /\ (msgs[i].big \/ msgs[i].big2) /\ LiveMsg(i - 1)}
        IN \/ /\ Deg # {}
              /\ Mode # "ZeroOK"
              /\ LET d == CHOOSE x \in Deg : TRUE
                    dm == IF Mode = "NoPairDeg"
-                         THEN [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE],
+                         THEN [msgs EXCEPT ![d] = IF msgs[d].big
+                                                  THEN [msgs[d] EXCEPT !.big = FALSE]
+                                                  ELSE [msgs[d] EXCEPT !.big2 = FALSE],
                                           ![d - 1] = [msgs[d - 1] EXCEPT !.trunc = TRUE]]
                          ELSE IF Mode = "AllBlocks"
                          THEN [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE, !.big2 = FALSE]]
-                         ELSE [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE, !.fake = FALSE]]
+                         ELSE IF msgs[d].big
+                         THEN [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big = FALSE, !.fake = FALSE]]
+                         ELSE [msgs EXCEPT ![d] = [msgs[d] EXCEPT !.big2 = FALSE, !.fake = FALSE]]
                 IN /\ msgs' = dm
                    /\ phase' = "ok" /\ stall' = 0 /\ prevWt' = LiveWeight /\ degIdx' = d
+                   /\ degClr2' = ((Mode # "AllBlocks") /\ ~msgs[d].big)
                    /\ repValid' = FALSE
                    /\ UNCHANGED <<n, last, repTokens>>
           \/ /\ (Deg = {} \/ Mode = "ZeroOK")
              /\ phase' = IF Mode = "ZeroOK" THEN "ok" ELSE "err"
              /\ stall' = stall + 1
-             /\ prevWt' = LiveWeight /\ degIdx' = 0 /\ repValid' = FALSE
+             /\ prevWt' = LiveWeight /\ degIdx' = 0 /\ degClr2' = FALSE /\ repValid' = FALSE
              /\ UNCHANGED <<n, msgs, last, repTokens>>
 
 Init == /\ n = 1
         /\ msgs = [i \in 1..1 |-> FreshMsg]
         /\ last = [rep |-> 0, lost |-> 0]
         /\ repValid = FALSE /\ repTokens = 0
-        /\ phase = "run" /\ stall = 0 /\ prevWt = 0 /\ degIdx = 0
+        /\ phase = "run" /\ stall = 0 /\ prevWt = 0 /\ degIdx = 0 /\ degClr2 = FALSE
 
 Next == \/ AddMsg \/ AddToolPair \/ AddFakePair \/ Condense \/ Truncate \/ Rewind \/ Recover
 Spec == Init /\ [][Next]_vars
@@ -285,6 +307,7 @@ TypeOK == /\ n \in 1..MaxMsgs
           /\ repTokens \in Nat /\ repValid \in BOOLEAN
           /\ phase \in {"run", "ok", "err"} /\ stall \in 0..2
           /\ prevWt \in Nat /\ degIdx \in 0..MaxMsgs
+          /\ degClr2 \in BOOLEAN
 
 \* The opposite of Failure 1: a truncation that reports k removed messages hides
 \* exactly k live messages, so the live history shrinks by what the code reports.
@@ -326,8 +349,17 @@ DegradationPreservesPair ==
 DegSelectionLive == degIdx = 0 \/ LiveMsg(degIdx)
 
 \* The opposite of Failure 8: the degrade keeps a second oversized block of
-\* the selected message, so only the selected result loses its content.
-DegradationKeepsOtherBlocks == degIdx = 0 \/ msgs[degIdx].big2
+\* the selected message, so only the selected result loses its content. Each
+\* round selects one block; degClr2 marks big2 as the selected one.
+DegradationKeepsOtherBlocks == degIdx = 0 \/ degClr2 \/ msgs[degIdx].big2
+
+\* The opposite of Failure 9: the stop is honest. A round that reports Error
+\* leaves no selectable oversized block on any live paired tool result.
+ErrExhaustsCandidates ==
+    phase = "err" =>
+        \A i \in 1..n :
+            ~(LiveMsg(i) /\ msgs[i].tres
+              /\ (msgs[i].big \/ msgs[i].big2) /\ LiveMsg(i - 1))
 
 \* The opposite of the zero-progress half of Failure 5: a round that removes
 \* nothing and degrades nothing never reports success.
