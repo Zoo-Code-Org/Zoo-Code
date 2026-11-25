@@ -1366,7 +1366,12 @@ describe("DiffViewProvider", () => {
 			// gated so the tail is provably still parked when reset() runs.
 			const mockDelay = vi.mocked(delay)
 			let releaseTail!: () => void
-			mockDelay.mockImplementationOnce(() => new Promise<void>((resolve) => { releaseTail = resolve }))
+			mockDelay.mockImplementationOnce(
+				() =>
+					new Promise<void>((resolve) => {
+						releaseTail = resolve
+					}),
+			)
 			const tailProblem: vscode.Diagnostic = {
 				severity: vscode.DiagnosticSeverity.Error,
 				range: new vscode.Range(0, 0, 0, 1),
@@ -1377,13 +1382,16 @@ describe("DiffViewProvider", () => {
 			mockTask.say.mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() =>
-				emitTailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : []
+				emitTailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : [],
 			)
 
 			try {
 				await diffViewProvider.saveDirectly("test.ts", "new content", true, true, 100)
 				await new Promise((resolve) => setTimeout(resolve, 0))
-				expect(mockDelay).toHaveBeenCalledWith(100, expect.objectContaining({ signal: expect.any(AbortSignal) }))
+				expect(mockDelay).toHaveBeenCalledWith(
+					100,
+					expect.objectContaining({ signal: expect.any(AbortSignal) }),
+				)
 				expect(diffViewProvider["pendingSaveReports"].size).toBe(1)
 
 				await diffViewProvider.reset()
@@ -1418,12 +1426,17 @@ describe("DiffViewProvider", () => {
 			// problem message so the assertions can tell which save actually emitted the row.
 			const mockDelay = vi.mocked(delay)
 			const gates: Array<() => void> = []
-			mockDelay.mockImplementation(() => new Promise<void>((resolve) => { gates.push(resolve) }))
+			mockDelay.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						gates.push(resolve)
+					}),
+			)
 			let tailProblem: vscode.Diagnostic | undefined
 			mockTask.say.mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() =>
-				tailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : []
+				tailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : [],
 			)
 			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 			const makeProblem = (message: string): vscode.Diagnostic => ({
@@ -1482,7 +1495,12 @@ describe("DiffViewProvider", () => {
 			// keep counting up rather than restart where the superseded run left off.
 			const mockDelay = vi.mocked(delay)
 			const gates: Array<() => void> = []
-			mockDelay.mockImplementation(() => new Promise<void>((resolve) => { gates.push(resolve) }))
+			mockDelay.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						gates.push(resolve)
+					}),
+			)
 			mockTask.say.mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockClear()
 			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() => [])
@@ -1501,7 +1519,9 @@ describe("DiffViewProvider", () => {
 				await tick()
 				const secondGeneration = diffViewProvider["pendingSaveReports"].get(pathKey)?.generation
 				if (typeof firstGeneration !== "number" || typeof secondGeneration !== "number") {
-					throw new Error(`expected numeric generations, got ${String(firstGeneration)} and ${String(secondGeneration)}`)
+					throw new Error(
+						`expected numeric generations, got ${String(firstGeneration)} and ${String(secondGeneration)}`,
+					)
 				}
 				expect(secondGeneration > firstGeneration).toBe(true)
 			} finally {
@@ -1509,7 +1529,6 @@ describe("DiffViewProvider", () => {
 				mockDelay.mockImplementation(() => Promise.resolve())
 			}
 		})
-
 	})
 
 	describe("saveChanges method with diagnostic settings", () => {
