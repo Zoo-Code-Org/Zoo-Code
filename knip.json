@@ -20,7 +20,8 @@
 				"extension.ts!",
 				"extension/api.ts!",
 				"workers/countTokens.ts!",
-				"core/checkpoints/changeJournal.ts!"
+				"core/checkpoints/changeJournal.ts!",
+				"core/checkpoints/rollback.ts!"
 			],
 			"project": [
 				"**/*.ts!",
