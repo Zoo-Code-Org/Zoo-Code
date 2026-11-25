@@ -1,5 +1,6 @@
 // npx vitest run src/api/providers/__tests__/anthropic-vertex.spec.ts
 
+import type { Mock } from "vitest"
 import { Anthropic } from "@anthropic-ai/sdk"
 import { AnthropicVertex } from "@anthropic-ai/vertex-sdk"
 import { GoogleAuth } from "google-auth-library"
@@ -11,6 +12,14 @@ import { MAX_TIMEOUT_MS } from "../utils/abort-signal"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
+
+/**
+ * Replaces the typed SDK messages.create with a bare vi.fn stub; routed through
+ * unknown because the stub provides only that one SDK member.
+ */
+function stubMessagesCreate(handler: AnthropicVertexHandler, stub: Mock): void {
+	handler["client"].messages.create = stub as unknown as AnthropicVertex["messages"]["create"]
+}
 
 vitest.mock("../utils/timeout-config", () => ({
 	getApiRequestTimeout: vitest.fn().mockReturnValue(300_000),
@@ -70,8 +79,8 @@ describe("VertexHandler", () => {
 
 	describe("constructor", () => {
 		beforeEach(() => {
-			;(AnthropicVertex as any).mockClear()
-			;(GoogleAuth as any).mockClear()
+			vi.mocked(AnthropicVertex).mockClear()
+			vi.mocked(GoogleAuth).mockClear()
 		})
 
 		it("should initialize with provided config for Claude", () => {
@@ -197,7 +206,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 			const chunks = await collectStream(stream)
@@ -391,7 +400,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 			const chunks = await collectStream(stream)
@@ -420,7 +429,7 @@ describe("VertexHandler", () => {
 
 			const mockError = new Error("Vertex API error")
 			const mockCreate = vitest.fn().mockRejectedValue(mockError)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
@@ -474,7 +483,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, [
 				{
@@ -623,7 +632,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 			const chunks = await collectStream(stream)
@@ -692,7 +701,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 			const chunks = await collectStream(stream)
@@ -739,7 +748,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 			const chunks = await collectStream(stream)
@@ -787,7 +796,7 @@ describe("VertexHandler", () => {
 					},
 				]),
 			)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			// Messages with internal reasoning blocks (from stored conversation history)
 			const messagesWithReasoning: Anthropic.Messages.MessageParam[] = [
@@ -799,7 +808,9 @@ describe("VertexHandler", () => {
 					role: "assistant",
 					content: [
 						{
-							type: "reasoning" as any,
+							// Extension reasoning block filtered by the converter; routed through
+							// unknown to stay inside MessageParam.
+							type: "reasoning" as unknown as "text",
 							text: "This is internal reasoning that should be filtered",
 						},
 						{
@@ -818,7 +829,7 @@ describe("VertexHandler", () => {
 			await collectStream(stream)
 
 			// Verify the API was called with filtered messages (no reasoning blocks)
-			const calledMessages = mockCreate.mock.calls[0][0].messages
+			const calledMessages: Anthropic.MessageParam[] = mockCreate.mock.calls[0][0].messages
 			expect(calledMessages).toHaveLength(3)
 
 			// Check user message 1
@@ -827,12 +838,12 @@ describe("VertexHandler", () => {
 			})
 
 			// Check assistant message - should have reasoning block filtered out
-			const assistantMessage = calledMessages.find((m: any) => m.role === "assistant")
+			const assistantMessage = calledMessages.find((m) => m.role === "assistant")
 			expect(assistantMessage).toBeDefined()
-			expect(assistantMessage.content).toEqual([{ type: "text", text: "This is the response" }])
+			expect(assistantMessage!.content).toEqual([{ type: "text", text: "This is the response" }])
 
 			// Verify reasoning blocks were NOT sent to the API
-			expect(assistantMessage.content).not.toContainEqual(expect.objectContaining({ type: "reasoning" }))
+			expect(assistantMessage!.content).not.toContainEqual(expect.objectContaining({ type: "reasoning" }))
 		})
 
 		it("should filter empty messages after removing all reasoning blocks", async () => {
@@ -855,7 +866,7 @@ describe("VertexHandler", () => {
 					},
 				]),
 			)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			// Message with only reasoning content (should be completely filtered)
 			const messagesWithOnlyReasoning: Anthropic.Messages.MessageParam[] = [
@@ -867,7 +878,9 @@ describe("VertexHandler", () => {
 					role: "assistant",
 					content: [
 						{
-							type: "reasoning" as any,
+							// Extension reasoning block filtered by the converter; routed through
+							// unknown to stay inside MessageParam.
+							type: "reasoning" as unknown as "text",
 							text: "Only reasoning, no actual text",
 						},
 					],
@@ -882,9 +895,9 @@ describe("VertexHandler", () => {
 			await collectStream(stream)
 
 			// Verify empty message was filtered out
-			const calledMessages = mockCreate.mock.calls[0][0].messages
+			const calledMessages: Anthropic.MessageParam[] = mockCreate.mock.calls[0][0].messages
 			expect(calledMessages).toHaveLength(2) // Only the two user messages
-			expect(calledMessages.every((m: any) => m.role === "user")).toBe(true)
+			expect(calledMessages.every((m) => m.role === "user")).toBe(true)
 		})
 
 		it("should reject with AbortError when createMessage is called with an already-aborted signal", async () => {
@@ -1117,7 +1130,7 @@ describe("VertexHandler", () => {
 
 			const mockError = new Error("Vertex API error")
 			const mockCreate = vitest.fn().mockRejectedValue(mockError)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				"Vertex completion error: Vertex API error",
@@ -1134,7 +1147,7 @@ describe("VertexHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({
 				content: [{ type: "image" }],
 			})
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
@@ -1150,7 +1163,7 @@ describe("VertexHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({
 				content: [{ type: "text", text: "" }],
 			})
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
@@ -1264,7 +1277,7 @@ describe("VertexHandler", () => {
 			const mockCreate = vitest.fn().mockResolvedValue({
 				content: [],
 			})
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
@@ -1283,7 +1296,7 @@ describe("VertexHandler", () => {
 					{ type: "text", text: "visible response" },
 				],
 			})
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("visible response")
@@ -1599,7 +1612,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
@@ -1637,7 +1650,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
@@ -1721,7 +1734,7 @@ describe("VertexHandler", () => {
 					{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
 				])
 			})
-			;(thinkingHandler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(thinkingHandler, mockCreate)
 
 			await thinkingHandler
 				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
@@ -1751,7 +1764,7 @@ describe("VertexHandler", () => {
 						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
 					]),
 				)
-			;(opus48Handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(opus48Handler, mockCreate)
 
 			await opus48Handler
 				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
@@ -1815,7 +1828,7 @@ describe("VertexHandler", () => {
 						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
 					]),
 				)
-			;(fableHandler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(fableHandler, mockCreate)
 
 			await fableHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
 
@@ -1846,7 +1859,7 @@ describe("VertexHandler", () => {
 						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
 					]),
 				)
-			;(sonnetHandler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(sonnetHandler, mockCreate)
 
 			await sonnetHandler
 				.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }])
@@ -1915,7 +1928,7 @@ describe("VertexHandler", () => {
 						{ type: "message_start", message: { usage: { input_tokens: 10, output_tokens: 5 } } },
 					]),
 				)
-			;(opusHandler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(opusHandler, mockCreate)
 
 			await opusHandler.createMessage("You are a helpful assistant", [{ role: "user", content: "Hello" }]).next()
 
@@ -2216,7 +2229,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -2268,7 +2281,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -2322,7 +2335,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",
@@ -2394,7 +2407,7 @@ describe("VertexHandler", () => {
 			const asyncIterator = asyncStreamFrom(mockStream)
 
 			const mockCreate = vitest.fn().mockResolvedValue(asyncIterator)
-			;(handler["client"].messages as any).create = mockCreate
+			stubMessagesCreate(handler, mockCreate)
 
 			const stream = handler.createMessage(systemPrompt, messages, {
 				taskId: "test-task",

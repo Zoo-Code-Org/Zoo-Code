@@ -1,8 +1,9 @@
+import type { Mock } from "vitest"
 import { ContentBlock, SystemContentBlock, BedrockRuntimeClient } from "@aws-sdk/client-bedrock-runtime"
 import { Anthropic } from "@anthropic-ai/sdk"
 
 import { MultiPointStrategy } from "../multi-point-strategy"
-import { CacheStrategyConfig, ModelInfo, CachePointPlacement } from "../types"
+import { CacheStrategyConfig, ModelInfo, CachePointPlacement, CacheResult } from "../types"
 import { AwsBedrockHandler } from "../../../providers/bedrock"
 
 // Common test utilities
@@ -43,15 +44,15 @@ const hasCachePoint = (block: ContentBlock | SystemContentBlock): boolean => {
 
 // Create a mock object to store the last config passed to convertToBedrockConverseMessages
 interface CacheConfig {
-	modelInfo: any
+	modelInfo?: CacheStrategyConfig["modelInfo"]
 	systemPrompt?: string
-	messages: any[]
+	messages: Anthropic.Messages.MessageParam[]
 	usePromptCache: boolean
 }
 
 const convertToBedrockConverseMessagesMock = {
 	lastConfig: null as CacheConfig | null,
-	result: null as any,
+	result: null as CacheResult | null,
 }
 
 describe("Cache Strategy", () => {
@@ -326,11 +327,14 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method to capture the config
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
-				const messages = args[0]
-				const systemMessage = args[1]
-				const usePromptCache = args[2]
-				const modelInfo = args[3]
+			const convertSpy = vitest.spyOn(handler, "convertToBedrockConverseMessages" as never) as unknown as Mock
+			convertSpy.mockImplementation((...args: unknown[]) => {
+				const [messages, systemMessage, usePromptCache, modelInfo] = args as [
+					CacheConfig["messages"],
+					string | undefined,
+					boolean,
+					CacheStrategyConfig["modelInfo"],
+				]
 
 				// Store the config for later inspection
 				const config: CacheConfig = {
@@ -343,7 +347,7 @@ describe("Cache Strategy", () => {
 
 				// Create a strategy based on the config
 				// Use MultiPointStrategy for all cases
-				const strategy = new MultiPointStrategy(config as any)
+				const strategy = new MultiPointStrategy(config as unknown as CacheStrategyConfig)
 
 				// Store the result
 				const result = strategy.determineOptimalCachePoints()
@@ -375,7 +379,9 @@ describe("Cache Strategy", () => {
 			// Verify that the config would result in a MultiPointStrategy
 			expect(convertToBedrockConverseMessagesMock.lastConfig).not.toBeNull()
 			if (convertToBedrockConverseMessagesMock.lastConfig) {
-				const strategy = new MultiPointStrategy(convertToBedrockConverseMessagesMock.lastConfig as any)
+				const strategy = new MultiPointStrategy(
+					convertToBedrockConverseMessagesMock.lastConfig as unknown as CacheStrategyConfig,
+				)
 				expect(strategy).toBeInstanceOf(MultiPointStrategy)
 			}
 		})
@@ -416,7 +422,9 @@ describe("Cache Strategy", () => {
 			// Verify that the config would result in a MultiPointStrategy
 			expect(convertToBedrockConverseMessagesMock.lastConfig).not.toBeNull()
 			if (convertToBedrockConverseMessagesMock.lastConfig) {
-				const strategy = new MultiPointStrategy(convertToBedrockConverseMessagesMock.lastConfig as any)
+				const strategy = new MultiPointStrategy(
+					convertToBedrockConverseMessagesMock.lastConfig as unknown as CacheStrategyConfig,
+				)
 				expect(strategy).toBeInstanceOf(MultiPointStrategy)
 			}
 		})
@@ -467,11 +475,14 @@ describe("Cache Strategy", () => {
 			} as unknown as BedrockRuntimeClient
 
 			// Mock the convertToBedrockConverseMessages method again for the new handler
-			vitest.spyOn(handler as any, "convertToBedrockConverseMessages").mockImplementation((...args: any[]) => {
-				const messages = args[0]
-				const systemMessage = args[1]
-				const usePromptCache = args[2]
-				const modelInfo = args[3]
+			const convertSpy = vitest.spyOn(handler, "convertToBedrockConverseMessages" as never) as unknown as Mock
+			convertSpy.mockImplementation((...args: unknown[]) => {
+				const [messages, systemMessage, usePromptCache, modelInfo] = args as [
+					CacheConfig["messages"],
+					string | undefined,
+					boolean,
+					CacheConfig["modelInfo"],
+				]
 
 				// Store the config for later inspection
 				const config: CacheConfig = {
@@ -484,7 +495,7 @@ describe("Cache Strategy", () => {
 
 				// Create a strategy based on the config
 				// Use MultiPointStrategy for all cases
-				const strategy = new MultiPointStrategy(config as any)
+				const strategy = new MultiPointStrategy(config as unknown as CacheStrategyConfig)
 
 				// Store the result
 				const result = strategy.determineOptimalCachePoints()
@@ -510,18 +521,32 @@ describe("Cache Strategy", () => {
 			// Verify that the config would result in a MultiPointStrategy
 			expect(convertToBedrockConverseMessagesMock.lastConfig).not.toBeNull()
 			if (convertToBedrockConverseMessagesMock.lastConfig) {
-				const strategy = new MultiPointStrategy(convertToBedrockConverseMessagesMock.lastConfig as any)
+				const strategy = new MultiPointStrategy(
+					convertToBedrockConverseMessagesMock.lastConfig as unknown as CacheStrategyConfig,
+				)
 				expect(strategy).toBeInstanceOf(MultiPointStrategy)
 			}
 		})
 
 		it("should include cachePoint nodes in API request when using MultiPointStrategy", async () => {
 			// Mock the convertToBedrockConverseMessages method to return a result with cache points
-			;(handler as any).convertToBedrockConverseMessages.mockReturnValueOnce({
+			// The typed spy instance is held through unknown to restate the private access.
+			;(
+				vitest.mocked(handler["convertToBedrockConverseMessages"]) as unknown as {
+					mockReturnValueOnce: (v: unknown) => unknown
+				}
+			).mockReturnValueOnce({
 				system: [{ text: systemPrompt }, { cachePoint: { type: "default" } }],
-				messages: mockMessages.map((msg: any) => ({
+				messages: mockMessages.map((msg: Anthropic.Messages.MessageParam) => ({
 					role: msg.role,
-					content: [{ text: typeof msg.content === "string" ? msg.content : msg.content[0].text }],
+					content: [
+						{
+							text:
+								typeof msg.content === "string"
+									? msg.content
+									: (msg.content[0] as Anthropic.TextBlockParam).text,
+						},
+					],
 				})),
 			})
 
@@ -572,11 +597,22 @@ describe("Cache Strategy", () => {
 
 		it("should yield usage results with cache tokens when using MultiPointStrategy", async () => {
 			// Mock the convertToBedrockConverseMessages method to return a result with cache points
-			;(handler as any).convertToBedrockConverseMessages.mockReturnValueOnce({
+			;(
+				vitest.mocked(handler["convertToBedrockConverseMessages"]) as unknown as {
+					mockReturnValueOnce: (v: unknown) => unknown
+				}
+			).mockReturnValueOnce({
 				system: [{ text: systemPrompt }, { cachePoint: { type: "default" } }],
-				messages: mockMessages.map((msg: any) => ({
+				messages: mockMessages.map((msg: Anthropic.Messages.MessageParam) => ({
 					role: msg.role,
-					content: [{ text: typeof msg.content === "string" ? msg.content : msg.content[0].text }],
+					content: [
+						{
+							text:
+								typeof msg.content === "string"
+									? msg.content
+									: (msg.content[0] as Anthropic.TextBlockParam).text,
+						},
+					],
 				})),
 			})
 
@@ -655,7 +691,7 @@ describe("Cache Strategy", () => {
 		}
 
 		// Helper to log cache point placements for debugging
-		const logPlacements = (placements: any[]) => {
+		const logPlacements = (placements: CachePointPlacement[]) => {
 			console.log(
 				"Cache point placements:",
 				placements.map((p) => `index: ${p.index}, tokens: ${p.tokensCovered}`),

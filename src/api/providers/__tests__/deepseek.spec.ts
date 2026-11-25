@@ -1,5 +1,15 @@
 // Mocks must come first, before imports
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+/** Mirror of the DeepSeek usage payload shape for typed test doubles. */
+interface MoonshotUsage {
+	prompt_tokens?: number
+	completion_tokens?: number
+	total_tokens?: number
+	prompt_cache_hit_tokens?: number
+	prompt_cache_miss_tokens?: number
+	prompt_tokens_details?: { cached_tokens?: number; cache_miss_tokens?: number } | null
+}
+import type { ProviderError } from "../utils/error-handler"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { expectNoLoneSurrogates } from "../../../test-utils/surrogates"
 
@@ -363,7 +373,7 @@ describe("DeepSeekHandler", () => {
 		]
 
 		it("should handle streaming responses", async () => {
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks.length).toBeGreaterThan(0)
 			const textChunks = chunks.filter((chunk) => chunk.type === "text")
@@ -429,7 +439,7 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("should include usage information", async () => {
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -438,7 +448,7 @@ describe("DeepSeekHandler", () => {
 		})
 
 		it("should include cache metrics in usage information", async () => {
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const usageChunks = chunks.filter((chunk) => chunk.type === "usage")
 			expect(usageChunks.length).toBeGreaterThan(0)
@@ -458,7 +468,7 @@ describe("DeepSeekHandler", () => {
 				]),
 			)
 
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "thinking..." })
 		})
@@ -474,7 +484,7 @@ describe("DeepSeekHandler", () => {
 				]),
 			)
 
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			expect(chunks).toContainEqual({ type: "reasoning", text: "router-style thought" })
 		})
@@ -487,7 +497,7 @@ describe("DeepSeekHandler", () => {
 			const err = await stream.next().catch((e) => e)
 
 			expect(err.message).toBe("DeepSeek completion error: Invalid API key")
-			expect((err as any).status).toBe(401)
+			expect((err as ProviderError).status).toBe(401)
 		})
 
 		it("prefers delta.reasoning_content over delta.reasoning when both are present", async () => {
@@ -511,7 +521,7 @@ describe("DeepSeekHandler", () => {
 				]),
 			)
 
-			const chunks: any[] = await collectStream(handler.createMessage(systemPrompt, messages))
+			const chunks = await collectStream(handler.createMessage(systemPrompt, messages))
 
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
 			expect(reasoningChunks).toEqual([{ type: "reasoning", text: "primary thought" }])
@@ -520,14 +530,15 @@ describe("DeepSeekHandler", () => {
 
 	describe("processUsageMetrics", () => {
 		class TestDeepSeekHandler extends DeepSeekHandler {
-			public testProcessUsageMetrics(usage: any) {
+			public testProcessUsageMetrics(usage: MoonshotUsage | null | undefined) {
 				return this.processUsageMetrics(usage)
 			}
 		}
 
 		// mockOptions is assigned in beforeEach, so the handler must be built
 		// per test rather than at describe-collection time.
-		const processUsage = (usage: any) => new TestDeepSeekHandler(mockOptions).testProcessUsageMetrics(usage)
+		const processUsage = (usage: MoonshotUsage | null | undefined) =>
+			new TestDeepSeekHandler(mockOptions).testProcessUsageMetrics(usage)
 
 		// DeepSeek's OpenAPI marks prompt_cache_hit_tokens and
 		// prompt_cache_miss_tokens as required top-level members, and declares
@@ -636,7 +647,7 @@ describe("DeepSeekHandler", () => {
 			})
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages)
-			const chunks: any[] = await collectStream(stream)
+			const chunks = await collectStream(stream)
 
 			// Should have reasoning chunks
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")
@@ -735,7 +746,7 @@ describe("DeepSeekHandler", () => {
 				apiModelId: "deepseek-v4-pro",
 			})
 
-			const tools: any[] = [
+			const tools: OpenAI.Chat.ChatCompletionTool[] = [
 				{
 					type: "function",
 					function: {
@@ -747,7 +758,7 @@ describe("DeepSeekHandler", () => {
 			]
 
 			const stream = reasonerHandler.createMessage(systemPrompt, messages, { taskId: "test", tools })
-			const chunks: any[] = await collectStream(stream)
+			const chunks = await collectStream(stream)
 
 			// Should have reasoning chunks
 			const reasoningChunks = chunks.filter((chunk) => chunk.type === "reasoning")

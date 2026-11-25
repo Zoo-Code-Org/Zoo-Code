@@ -24,24 +24,22 @@ vitest.mock("../../../utils/logging", () => ({
 
 // Mock AWS SDK
 vitest.mock("@aws-sdk/client-bedrock-runtime", () => {
+	const mockSend = vitest.fn().mockImplementation(async function () {
+		return {
+			output: new TextEncoder().encode(JSON.stringify({ content: "Test response" })),
+		}
+	})
 	const mockModule = {
-		lastCommandInput: null as Record<string, any> | null,
-		mockSend: vitest.fn().mockImplementation(async function () {
-			return {
-				output: new TextEncoder().encode(JSON.stringify({ content: "Test response" })),
-			}
-		}),
-		mockConverseCommand: vitest.fn(function (input) {
-			mockModule.lastCommandInput = input
+		mockSend,
+		mockConverseCommand: vitest.fn(function (input: Record<string, unknown>) {
 			return { input }
 		}),
 		MockBedrockRuntimeClient: class {
-			public config: any
-			public send: any
+			public config: { region?: string }
+			public send = mockSend
 
 			constructor(config: { region?: string }) {
 				this.config = config
-				this.send = mockModule.mockSend
 			}
 		},
 	}
@@ -73,7 +71,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "arn:aws:bedrock:us-east-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "us-east-1")
+			const result = handler["parseArn"](arn, "us-east-1")
 
 			// Verify the result contains the expected values
 			expect(result.isValid).toBe(true)
@@ -89,7 +87,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "arn:aws:bedrock:us-west-2:123456789012:inference-profile/custom-profile"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "us-west-2")
+			const result = handler["parseArn"](arn, "us-west-2")
 
 			// Verify the result contains the expected values
 			expect(result.isValid).toBe(true)
@@ -104,7 +102,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "arn:aws:bedrock:eu-west-1:123456789012:prompt-router/custom-router-name"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "eu-west-1")
+			const result = handler["parseArn"](arn, "eu-west-1")
 
 			// Verify the result contains the expected values
 			expect(result.isValid).toBe(true)
@@ -120,7 +118,7 @@ describe("Bedrock ARN Handling", () => {
 				"arn:aws:bedrock:us-east-1:123456789012:foundation-model/us.anthropic.claude-3-sonnet-20240229-v1:0"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "us-east-1")
+			const result = handler["parseArn"](arn, "us-east-1")
 
 			// Verify crossRegionInference is true
 			expect(result.crossRegionInference).toBe(true)
@@ -138,7 +136,7 @@ describe("Bedrock ARN Handling", () => {
 				"arn:aws:bedrock:ap-east-1:123456789012:foundation-model/apac.anthropic.claude-3-sonnet-20240229-v1:0"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "us-east-1")
+			const result = handler["parseArn"](arn, "us-east-1")
 
 			// Verify crossRegionInference is true
 			expect(result.crossRegionInference).toBe(true)
@@ -151,7 +149,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "arn:aws:bedrock:eu-west-1::foundation-model/anthropic.claude-3-sonnet-20240229-v1:0"
 
 			// Access the private method using type casting with mismatched region
-			const result = (handler as any).parseArn(arn, "us-east-1")
+			const result = handler["parseArn"](arn, "us-east-1")
 
 			// Verify the result contains the expected values including error message
 			expect(result.isValid).toBe(true)
@@ -168,7 +166,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "arn:aws:bedrock:us-east-1:123456789012:some-other-resource"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn, "us-east-1")
+			const result = handler["parseArn"](arn, "us-east-1")
 
 			// Verify the result indicates invalid ARN
 			expect(result.isValid).toBe(false)
@@ -184,7 +182,7 @@ describe("Bedrock ARN Handling", () => {
 			const arn = "invalid-arn-format"
 
 			// Access the private method using type casting
-			const result = (handler as any).parseArn(arn)
+			const result = handler["parseArn"](arn)
 
 			// Verify the result indicates invalid ARN
 			expect(result.isValid).toBe(false)
@@ -225,7 +223,7 @@ describe("Bedrock ARN Handling", () => {
 			})
 
 			// Verify the client was created with the ARN region, not the provided region
-			expect((handler as any).client.config.region).toBe("eu-west-1")
+			expect(handler["client"].config.region).toBe("eu-west-1")
 		})
 
 		it("should log region mismatch warning when ARN region differs from provided region", () => {

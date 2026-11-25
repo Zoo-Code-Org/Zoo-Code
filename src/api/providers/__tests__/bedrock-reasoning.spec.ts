@@ -11,8 +11,18 @@ import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 vi.mock("@aws-sdk/client-bedrock-runtime")
 vi.mock("../../../utils/logging")
 
-// Store the command payload for verification
-let capturedPayload: any = null
+// Store the command payload for verification. The test reads the extension's
+// reasoning fields off the Converse input; they are asserted via the structural shape.
+interface CapturedBedrockPayload {
+	additionalModelRequestFields?: {
+		thinking?: unknown
+		anthropic_beta?: unknown
+		anthropic_version?: unknown
+	}
+	inferenceConfig?: unknown
+	[key: string]: unknown
+}
+let capturedPayload: CapturedBedrockPayload | null = null
 
 describe("AwsBedrockHandler - Extended Thinking", () => {
 	let handler: AwsBedrockHandler
@@ -96,8 +106,8 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			// Verify the command was called with the correct payload
 			expect(mockSend).toHaveBeenCalledTimes(1)
 			expect(capturedPayload).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+			expect(capturedPayload!.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload!.additionalModelRequestFields!.thinking).toEqual({
 				type: "enabled",
 				budget_tokens: 4096, // Uses the full modelMaxThinkingTokens value
 			})
@@ -109,7 +119,7 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			expect(reasoningChunks[1].text).toBe(" about this problem.")
 
 			// Verify that topP is NOT present when thinking is enabled
-			expect(capturedPayload.inferenceConfig).not.toHaveProperty("topP")
+			expect(capturedPayload!.inferenceConfig).not.toHaveProperty("topP")
 		})
 
 		it("should pass thinking parameters from metadata", async () => {
@@ -145,14 +155,14 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			// Verify the thinking parameter was passed correctly
 			expect(mockSend).toHaveBeenCalledTimes(1)
 			expect(capturedPayload).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+			expect(capturedPayload!.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload!.additionalModelRequestFields!.thinking).toEqual({
 				type: "enabled",
 				budget_tokens: 8192,
 			})
 
 			// Verify that topP is NOT present when thinking is enabled via metadata
-			expect(capturedPayload.inferenceConfig).not.toHaveProperty("topP")
+			expect(capturedPayload!.inferenceConfig).not.toHaveProperty("topP")
 		})
 
 		it("should log when extended thinking is enabled", async () => {
@@ -224,11 +234,11 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			// Verify that topP is NOT present for any model (removed globally)
 			expect(mockSend).toHaveBeenCalledTimes(1)
 			expect(capturedPayload).toBeDefined()
-			expect(capturedPayload.inferenceConfig).not.toHaveProperty("topP")
+			expect(capturedPayload!.inferenceConfig).not.toHaveProperty("topP")
 
 			// Verify that additionalModelRequestFields contains fine-grained-tool-streaming for Claude models
-			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields.anthropic_beta).toContain(
+			expect(capturedPayload!.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload!.additionalModelRequestFields!.anthropic_beta).toContain(
 				"fine-grained-tool-streaming-2025-05-14",
 			)
 		})
@@ -271,14 +281,14 @@ describe("AwsBedrockHandler - Extended Thinking", () => {
 			// Verify thinking was enabled via settings
 			expect(mockSend).toHaveBeenCalledTimes(1)
 			expect(capturedPayload).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields).toBeDefined()
-			expect(capturedPayload.additionalModelRequestFields.thinking).toEqual({
+			expect(capturedPayload!.additionalModelRequestFields).toBeDefined()
+			expect(capturedPayload!.additionalModelRequestFields!.thinking).toEqual({
 				type: "enabled",
 				budget_tokens: 4096,
 			})
 
 			// Verify that topP is NOT present when thinking is enabled via settings
-			expect(capturedPayload.inferenceConfig).not.toHaveProperty("topP")
+			expect(capturedPayload!.inferenceConfig).not.toHaveProperty("topP")
 
 			// Verify reasoning chunks were yielded
 			const reasoningChunks = chunks.filter((c) => c.type === "reasoning")

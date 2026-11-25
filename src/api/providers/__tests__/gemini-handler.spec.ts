@@ -1,5 +1,7 @@
 import { t } from "i18next"
 import { FunctionCallingConfigMode } from "@google/genai"
+import type { Mock } from "vitest"
+import type { Anthropic } from "@anthropic-ai/sdk"
 
 const mockCaptureException = vi.fn()
 
@@ -12,6 +14,15 @@ vi.mock("@roo-code/telemetry", () => ({
 }))
 
 import { GeminiHandler } from "../gemini"
+
+/**
+ * Replaces models.generateContentStream with a bare vi.fn stub; routed through
+ * unknown because the stub provides only that one SDK member.
+ */
+function stubGeminiStream(handler: GeminiHandler, stub: Mock): void {
+	const models = handler["client"].models
+	models.generateContentStream = stub as unknown as typeof models.generateContentStream
+}
 import { makeApiHandlerOptions } from "../../../test-utils/api"
 
 describe("GeminiHandler backend support", () => {
@@ -26,9 +37,8 @@ describe("GeminiHandler backend support", () => {
 		const options = makeApiHandlerOptions()
 		const handler = new GeminiHandler(options)
 		const stub = vi.fn().mockReturnValue((async function* () {})())
-		// @ts-ignore access private client
-		handler["client"].models.generateContentStream = stub
-		await handler.createMessage("instr", [] as any).next()
+		stubGeminiStream(handler, stub)
+		await handler.createMessage("instr", []).next()
 		const config = stub.mock.calls[0][0].config
 		// createMessage always uses function declarations only
 		// (tools are always present from ALWAYS_AVAILABLE_TOOLS)
@@ -39,7 +49,6 @@ describe("GeminiHandler backend support", () => {
 		const options = makeApiHandlerOptions()
 		const handler = new GeminiHandler(options)
 		const stub = vi.fn().mockResolvedValue({ text: "ok" })
-		// @ts-ignore access private client
 		handler["client"].models.generateContent = stub
 		const res = await handler.completePrompt("hi")
 		expect(res).toBe("ok")
@@ -97,11 +106,10 @@ describe("GeminiHandler backend support", () => {
 			}
 
 			const stub = vi.fn().mockReturnValue(mockStream())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			const messages = []
-			for await (const chunk of handler.createMessage("test", [] as any)) {
+			for await (const chunk of handler.createMessage("test", [])) {
 				messages.push(chunk)
 			}
 
@@ -133,11 +141,10 @@ describe("GeminiHandler backend support", () => {
 			}
 
 			const stub = vi.fn().mockReturnValue(mockStream())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			const messages = []
-			for await (const chunk of handler.createMessage("test", [] as any)) {
+			for await (const chunk of handler.createMessage("test", [])) {
 				messages.push(chunk)
 			}
 
@@ -164,11 +171,10 @@ describe("GeminiHandler backend support", () => {
 
 			const mockError = new Error("API rate limit exceeded")
 			const stub = vi.fn().mockRejectedValue(mockError)
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await expect(async () => {
-				const generator = handler.createMessage("test", [] as any)
+				const generator = handler.createMessage("test", [])
 				await generator.next()
 			}).rejects.toThrow(t("common:errors.gemini.generate_stream", { error: "API rate limit exceeded" }))
 		})
@@ -206,11 +212,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: testTools,
 					allowedFunctionNames: ["read_file", "write_to_file"],
@@ -225,11 +230,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: testTools,
 					allowedFunctionNames: ["read_file"],
@@ -246,8 +250,7 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			const manyTools = Array.from({ length: 30 }, (_, index) => ({
 				type: "function" as const,
@@ -259,7 +262,7 @@ describe("GeminiHandler backend support", () => {
 			}))
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: manyTools,
 					allowedFunctionNames: manyTools.map((tool) => tool.function.name),
@@ -275,8 +278,7 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			const manyTools = Array.from({ length: 30 }, (_, index) => ({
 				type: "function" as const,
@@ -286,7 +288,7 @@ describe("GeminiHandler backend support", () => {
 					parameters: { type: "object", properties: {} },
 				},
 			}))
-			const messages = [
+			const messages: Anthropic.Messages.MessageParam[] = [
 				{
 					role: "assistant",
 					content: [{ type: "tool_use", id: "tool-call-29", name: "tool_29", input: {} }],
@@ -294,7 +296,7 @@ describe("GeminiHandler backend support", () => {
 			]
 
 			await handler
-				.createMessage("test", messages as any, {
+				.createMessage("test", messages, {
 					taskId: "test-task",
 					tools: manyTools,
 					allowedFunctionNames: manyTools.slice(0, 29).map((tool) => tool.function.name),
@@ -310,11 +312,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: testTools,
 					tool_choice: "auto",
@@ -331,11 +332,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: testTools,
 					tool_choice: "auto",
@@ -353,11 +353,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: testTools,
 				})
@@ -374,11 +373,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -433,11 +431,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -492,11 +489,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -537,11 +533,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -586,11 +581,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -628,11 +622,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{
@@ -680,11 +673,10 @@ describe("GeminiHandler backend support", () => {
 			const options = makeApiHandlerOptions()
 			const handler = new GeminiHandler(options)
 			const stub = vi.fn().mockReturnValue((async function* () {})())
-			// @ts-ignore access private client
-			handler["client"].models.generateContentStream = stub
+			stubGeminiStream(handler, stub)
 
 			await handler
-				.createMessage("test", [] as any, {
+				.createMessage("test", [], {
 					taskId: "test-task",
 					tools: [
 						{

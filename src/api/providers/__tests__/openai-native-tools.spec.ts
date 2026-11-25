@@ -1,9 +1,35 @@
+import type { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
 import { OpenAiHandler } from "../openai"
 import { OpenAiNativeHandler } from "../openai-native"
 import type { ApiHandlerOptions } from "../../../shared/api"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
+
+/** MCP tool schema shape this suite asserts on. */
+interface McpParameterSchema {
+	additionalProperties?: unknown
+	properties?: Record<string, McpParameterSchema>
+	required?: string[]
+	items?: { additionalProperties?: unknown }
+	[key: string]: unknown
+}
+
+interface McpToolSchema {
+	name?: string
+	strict?: boolean
+	parameters?: McpParameterSchema
+}
+
+/** Native Responses stream event doubles fed through the handler. */
+interface NativeStreamEvent {
+	type?: string
+	delta?: string
+	text?: string
+	item?: Record<string, unknown>
+	response?: Record<string, unknown>
+	[key: string]: unknown
+}
 
 describe("OpenAiHandler native tools", () => {
 	it("includes tools in request when tools are provided via metadata (regression test)", async () => {
@@ -67,7 +93,7 @@ describe("OpenAiHandler native tools", () => {
 
 describe("OpenAiNativeHandler MCP tool schema handling", () => {
 	it("should add additionalProperties: false to MCP tools while keeping strict: false", async () => {
-		let capturedRequestBody: any
+		let capturedRequestBody: { tools?: McpToolSchema[] } | undefined
 
 		const handler = new OpenAiNativeHandler({
 			openAiNativeApiKey: "test-key",
@@ -77,7 +103,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		// Mock the responses API call
 		const mockClient = {
 			responses: {
-				create: vi.fn().mockImplementation((body: any) => {
+				create: vi.fn().mockImplementation((body: Record<string, unknown>) => {
 					capturedRequestBody = body
 					return asyncStreamFrom([
 						{
@@ -91,7 +117,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 				}),
 			},
 		}
-		;(handler as any).client = mockClient
+		handler["client"] = mockClient as unknown as OpenAI
 
 		const mcpTools: OpenAI.Chat.ChatCompletionTool[] = [
 			{
@@ -118,18 +144,18 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		await collectStream(stream)
 
 		// Verify the request body
-		expect(capturedRequestBody.tools).toBeDefined()
-		expect(capturedRequestBody.tools.length).toBe(1)
+		expect(capturedRequestBody!.tools).toBeDefined()
+		expect(capturedRequestBody!.tools!.length).toBe(1)
 
-		const tool = capturedRequestBody.tools[0]
+		const tool = capturedRequestBody!.tools![0]
 		expect(tool.name).toBe("mcp--github--get_me")
 		expect(tool.strict).toBe(false) // MCP tools should have strict: false
-		expect(tool.parameters.additionalProperties).toBe(false) // Should have additionalProperties: false
-		expect(tool.parameters.required).toEqual(["token"]) // Should preserve original required array
+		expect(tool.parameters!.additionalProperties).toBe(false) // Should have additionalProperties: false
+		expect(tool.parameters!.required).toEqual(["token"]) // Should preserve original required array
 	})
 
 	it("should add additionalProperties: false and required array to non-MCP tools with strict: true", async () => {
-		let capturedRequestBody: any
+		let capturedRequestBody: { tools?: McpToolSchema[] } | undefined
 
 		const handler = new OpenAiNativeHandler({
 			openAiNativeApiKey: "test-key",
@@ -139,7 +165,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		// Mock the responses API call
 		const mockClient = {
 			responses: {
-				create: vi.fn().mockImplementation((body: any) => {
+				create: vi.fn().mockImplementation((body: Record<string, unknown>) => {
 					capturedRequestBody = body
 					return asyncStreamFrom([
 						{
@@ -153,7 +179,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 				}),
 			},
 		}
-		;(handler as any).client = mockClient
+		handler["client"] = mockClient as unknown as OpenAI
 
 		const regularTools: OpenAI.Chat.ChatCompletionTool[] = [
 			{
@@ -180,18 +206,18 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		await collectStream(stream)
 
 		// Verify the request body
-		expect(capturedRequestBody.tools).toBeDefined()
-		expect(capturedRequestBody.tools.length).toBe(1)
+		expect(capturedRequestBody!.tools).toBeDefined()
+		expect(capturedRequestBody!.tools!.length).toBe(1)
 
-		const tool = capturedRequestBody.tools[0]
+		const tool = capturedRequestBody!.tools![0]
 		expect(tool.name).toBe("read_file")
 		expect(tool.strict).toBe(true) // Non-MCP tools should have strict: true
-		expect(tool.parameters.additionalProperties).toBe(false) // Should have additionalProperties: false
-		expect(tool.parameters.required).toEqual(["path", "encoding"]) // Should have all properties as required
+		expect(tool.parameters!.additionalProperties).toBe(false) // Should have additionalProperties: false
+		expect(tool.parameters!.required).toEqual(["path", "encoding"]) // Should have all properties as required
 	})
 
 	it("should recursively add additionalProperties: false to nested objects in MCP tools", async () => {
-		let capturedRequestBody: any
+		let capturedRequestBody: { tools?: McpToolSchema[] } | undefined
 
 		const handler = new OpenAiNativeHandler({
 			openAiNativeApiKey: "test-key",
@@ -201,7 +227,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		// Mock the responses API call
 		const mockClient = {
 			responses: {
-				create: vi.fn().mockImplementation((body: any) => {
+				create: vi.fn().mockImplementation((body: Record<string, unknown>) => {
 					capturedRequestBody = body
 					return asyncStreamFrom([
 						{
@@ -215,7 +241,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 				}),
 			},
 		}
-		;(handler as any).client = mockClient
+		handler["client"] = mockClient as unknown as OpenAI
 
 		const mcpToolsWithNestedObjects: OpenAI.Chat.ChatCompletionTool[] = [
 			{
@@ -256,11 +282,11 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 		await collectStream(stream)
 
 		// Verify the request body
-		const tool = capturedRequestBody.tools[0]
+		const tool = capturedRequestBody!.tools![0]
 		expect(tool.strict).toBe(false) // MCP tool should have strict: false
-		expect(tool.parameters.additionalProperties).toBe(false) // Root level
-		expect(tool.parameters.properties.metadata.additionalProperties).toBe(false) // Nested object
-		expect(tool.parameters.properties.metadata.properties.labels.items.additionalProperties).toBe(false) // Array items
+		expect(tool.parameters!.additionalProperties).toBe(false) // Root level
+		expect(tool.parameters!.properties!.metadata!.additionalProperties).toBe(false) // Nested object
+		expect(tool.parameters!.properties!.metadata!.properties!.labels!.items!.additionalProperties).toBe(false) // Array items
 	})
 
 	it("should handle missing call_id and name in tool_call_arguments.delta by using pending tool identity", async () => {
@@ -303,7 +329,7 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 				}),
 			},
 		}
-		;(handler as any).client = mockClient
+		handler["client"] = mockClient as unknown as OpenAI
 
 		const stream = handler.createMessage("system prompt", [], {
 			taskId: "test-task-id",
@@ -330,27 +356,31 @@ describe("OpenAiNativeHandler MCP tool schema handling", () => {
 })
 
 describe("OpenAiNativeHandler done-event fallbacks", () => {
-	const createHandlerWithEvents = (events: any[]) => {
+	const createHandlerWithEvents = (events: NativeStreamEvent[]) => {
 		const handler = new OpenAiNativeHandler({
 			openAiNativeApiKey: "test-key",
 			apiModelId: "gpt-4o",
 		} as ApiHandlerOptions)
 
-		;(handler as any).client = {
+		handler["client"] = {
 			responses: {
 				create: vi.fn().mockResolvedValue(asyncStreamFrom(events)),
 			},
-		}
+		} as unknown as OpenAI
 
 		return handler
 	}
 
-	const collectChunksFromEvents = async (events: any[]) => {
+	const collectChunksFromEvents = async (events: NativeStreamEvent[]) => {
 		const handler = createHandlerWithEvents(events)
-		const stream = handler.createMessage("system", [{ role: "user", content: "test" } as any], {
-			taskId: "t",
-			tools: [],
-		})
+		const stream = handler.createMessage(
+			"system",
+			[{ role: "user", content: "test" }] as Anthropic.Messages.MessageParam[],
+			{
+				taskId: "t",
+				tools: [],
+			},
+		)
 
 		return collectStream(stream)
 	}

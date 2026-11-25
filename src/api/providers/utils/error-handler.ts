@@ -12,6 +12,28 @@
 import i18n from "../../../i18n/setup"
 
 /**
+ * Error with the provider metadata handleProviderError preserves for retry
+ * logic and UI display (status, errorDetails, code, $metadata).
+ */
+export type ProviderError = Error & {
+	status?: number
+	statusCode?: number
+	errorDetails?: unknown
+	code?: unknown
+	$metadata?: unknown
+}
+
+/** Shape handleProviderError reads off unknown thrown values. */
+type UnknownErrorShape = Error & {
+	status?: unknown
+	statusCode?: unknown
+	errorDetails?: unknown
+	code?: unknown
+	$metadata?: unknown
+	error?: { metadata?: { raw?: string } }
+}
+
+/**
  * Handles API provider errors and transforms them into user-friendly messages
  * while preserving important metadata for retry logic and UI display.
  *
@@ -78,11 +100,11 @@ export function handleProviderError(
 		/** Custom message transformer */
 		messageTransformer?: (msg: string) => string
 	},
-): Error {
+): ProviderError {
 	const messagePrefix = options?.messagePrefix || "completion"
 
 	if (error instanceof Error) {
-		const anyErr = error as any
+		const anyErr = error as UnknownErrorShape
 		const msg = anyErr?.error?.metadata?.raw || error.message || ""
 
 		// Log the original error details for debugging
@@ -94,18 +116,18 @@ export function handleProviderError(
 			statusCode: anyErr.statusCode,
 		})
 
-		let wrapped: Error
+		let wrapped: ProviderError
 
 		// Special case: Invalid character/ByteString conversion error in API key
 		// This is specific to OpenAI-compatible SDKs
 		if (msg.includes("Cannot convert argument to a ByteString")) {
-			wrapped = new Error(i18n.t("common:errors.api.invalidKeyInvalidChars"))
+			wrapped = new Error(i18n.t("common:errors.api.invalidKeyInvalidChars")) as ProviderError
 		} else {
 			// Apply custom transformer if provided, otherwise use default format
 			const finalMessage = options?.messageTransformer
 				? options.messageTransformer(msg)
 				: `${providerName} ${messagePrefix} error: ${msg}`
-			wrapped = new Error(finalMessage)
+			wrapped = new Error(finalMessage) as ProviderError
 		}
 
 		// Preserve HTTP status and structured details for retry/backoff + UI
@@ -120,17 +142,17 @@ export function handleProviderError(
 		const numericStatusCode = typeof anyErr.statusCode === "number" ? anyErr.statusCode : undefined
 		const preservedStatus = numericStatus !== undefined ? numericStatus : numericStatusCode
 		if (preservedStatus !== undefined) {
-			;(wrapped as any).status = preservedStatus
+			wrapped.status = preservedStatus
 		}
 		if (anyErr.errorDetails !== undefined) {
-			;(wrapped as any).errorDetails = anyErr.errorDetails
+			wrapped.errorDetails = anyErr.errorDetails
 		}
 		if (anyErr.code !== undefined) {
-			;(wrapped as any).code = anyErr.code
+			wrapped.code = anyErr.code
 		}
 		// Preserve AWS-specific metadata if present (for Bedrock)
 		if (anyErr.$metadata !== undefined) {
-			;(wrapped as any).$metadata = anyErr.$metadata
+			wrapped.$metadata = anyErr.$metadata
 		}
 
 		return wrapped
@@ -138,11 +160,11 @@ export function handleProviderError(
 
 	// Non-Error: wrap with provider-specific prefix
 	console.error(`[${providerName}] Non-Error exception:`, error)
-	const wrapped = new Error(`${providerName} ${messagePrefix} error: ${String(error)}`)
+	const wrapped = new Error(`${providerName} ${messagePrefix} error: ${String(error)}`) as ProviderError
 
 	// Also try to preserve status for non-Error exceptions (e.g., plain objects with
 	// status or statusCode, matching the AI SDK APICallError shape)
-	const anyErr = error as any
+	const anyErr = error as Pick<UnknownErrorShape, "status" | "statusCode">
 	const plainStatus =
 		typeof anyErr?.status === "number"
 			? anyErr.status
@@ -150,7 +172,7 @@ export function handleProviderError(
 				? anyErr.statusCode
 				: undefined
 	if (plainStatus !== undefined) {
-		;(wrapped as any).status = plainStatus
+		wrapped.status = plainStatus
 	}
 
 	return wrapped
@@ -160,6 +182,6 @@ export function handleProviderError(
  * Specialized handler for OpenAI-compatible providers
  * Re-exports with OpenAI-specific defaults for backward compatibility
  */
-export function handleOpenAIError(error: unknown, providerName: string): Error {
+export function handleOpenAIError(error: unknown, providerName: string) {
 	return handleProviderError(error, providerName, { messagePrefix: "completion" })
 }

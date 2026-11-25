@@ -200,9 +200,13 @@ export function convertToR1Format(
 								arguments: JSON.stringify(sanitizeSurrogatesDeep(part.input)),
 							},
 						})
-					} else if ((part as any).type === "reasoning" && (part as any).text) {
+					} else {
+						// Extension reasoning block stored by Task; narrow the shape defensively.
 						// Extract reasoning from content blocks (Task stores it this way)
-						extractedReasoning = sanitizeSurrogates((part as any).text)
+						const block = part as { type?: unknown; text?: unknown }
+						if (block.type === "reasoning" && typeof block.text === "string" && block.text) {
+							extractedReasoning = sanitizeSurrogates(block.text)
+						}
 					}
 				}
 
@@ -219,7 +223,7 @@ export function convertToR1Format(
 
 				// Check if we can merge with the last message (only if no tool calls)
 				const lastMessage = result[result.length - 1]
-				if (lastMessage?.role === "assistant" && !toolCalls.length && !(lastMessage as any).tool_calls) {
+				if (lastMessage?.role === "assistant" && !toolCalls.length && !lastMessage.tool_calls) {
 					// Merge text content
 					if (typeof lastMessage.content === "string" && typeof assistantMessage.content === "string") {
 						lastMessage.content += `\n${assistantMessage.content}`
@@ -238,7 +242,7 @@ export function convertToR1Format(
 				// Simple string content
 				const safeContent = sanitizeSurrogates(message.content)
 				const lastMessage = result[result.length - 1]
-				if (lastMessage?.role === "assistant" && !(lastMessage as any).tool_calls) {
+				if (lastMessage?.role === "assistant" && !lastMessage.tool_calls) {
 					if (typeof lastMessage.content === "string") {
 						lastMessage.content += `\n${safeContent}`
 					} else {

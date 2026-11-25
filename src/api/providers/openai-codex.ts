@@ -39,6 +39,140 @@ import {
 
 export type OpenAiCodexModel = ReturnType<OpenAiCodexHandler["getModel"]>
 
+/** Cache-detail fields shared by the Chat Completions and Responses usage payloads. */
+interface OpenAiUsageTokenDetails {
+	cached_tokens?: number
+	cache_miss_tokens?: number
+	cache_write_tokens?: number
+	/**
+	 * TTL split of cache writes on the Responses API. Not declared by the installed
+	 * SDK types, so it is read defensively.
+	 */
+	cache_write_tokens_details?: { ttl_12h_tokens?: number }
+}
+
+/**
+ * Usage payload this handler normalizes, covering the Responses API
+ * (input_tokens/output_tokens) and Chat Completions (prompt_tokens/completion_tokens)
+ * families. Every field is optional because normalizeUsage guards each read.
+ */
+interface OpenAiUsage {
+	input_tokens?: number
+	output_tokens?: number
+	prompt_tokens?: number
+	completion_tokens?: number
+	input_tokens_details?: OpenAiUsageTokenDetails
+	prompt_tokens_details?: OpenAiUsageTokenDetails
+	output_tokens_details?: { reasoning_tokens?: number }
+	completion_tokens_details?: { reasoning_tokens?: number }
+	// Anthropic-style top-level cache fields also flow through normalizeUsage.
+	cache_creation_input_tokens?: number
+	cache_write_tokens?: number
+	cache_read_input_tokens?: number
+	cache_read_tokens?: number
+	cached_tokens?: number
+}
+
+/** Output content parts this handler inspects across SDK and variant payloads. */
+interface ResponsesOutputContent {
+	type?: string
+	text?: string
+}
+
+/** Output items this handler inspects: a superset of the SDK union and variant payloads. */
+interface ResponsesOutputItem {
+	type?: string
+	text?: string
+	id?: string
+	call_id?: string
+	tool_call_id?: string
+	name?: string
+	function_name?: string
+	function?: { name?: string; arguments?: string }
+	arguments?: string | Record<string, unknown>
+	input?: string
+	content?: ResponsesOutputContent[]
+	encrypted_content?: string
+}
+
+/**
+ * Stream events this handler processes: a superset of the SDK ResponseStreamEvent
+ * union and the non-standard variant payloads (alternate event names, flat usage,
+ * chat-style choices) that the fallback paths feed through processEvent.
+ */
+interface ResponsesStreamEvent {
+	type?: string
+	delta?: string
+	text?: string
+	output_text?: string
+	arguments?: string
+	index?: number
+	id?: string
+	call_id?: string
+	tool_call_id?: string
+	name?: string
+	function_name?: string
+	function?: { name?: string; arguments?: string }
+	item?: ResponsesOutputItem
+	part?: { type?: string; text?: string | { value?: string } }
+	response?: {
+		id?: string
+		output?: ResponsesOutputItem[]
+		usage?: OpenAiUsage
+	}
+	usage?: OpenAiUsage
+	choices?: Array<{ delta?: { content?: string } }>
+}
+
+/** Conversation input items built by formatFullConversation for the Responses API. */
+type ResponsesInputItem =
+	| {
+			role: "user"
+			content: Array<{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }>
+	  }
+	| { role: "assistant"; content: Array<{ type: "output_text"; text: string }> }
+	| { type: "function_call"; call_id: string; name: string; arguments: string }
+	| { type: "function_call_output"; call_id: string; output: string }
+	| { type: "message"; role: "developer"; content: Array<{ type: "input_text"; text: string }> }
+	| { type: "additional_tools"; role: "developer"; tools: NonNullable<ResponsesRequestBody["tools"]> }
+	// Reasoning items already formatted in the API history pass through as-is.
+	| Anthropic.Messages.MessageParam
+
+/** JSON-schema fragment shape used by the OpenAI strict-mode parameter processors. */
+interface OpenAiToolParameterSchema {
+	type?: string
+	properties?: Record<string, OpenAiToolParameterSchema>
+	items?: OpenAiToolParameterSchema
+	additionalProperties?: boolean | OpenAiToolParameterSchema
+	required?: string[]
+	[key: string]: unknown
+}
+
+/** Request body built for the Codex Responses API (including Responses Lite fields). */
+interface ResponsesRequestBody {
+	model: string
+	input: ResponsesInputItem[]
+	stream: boolean
+	reasoning?: { effort?: ReasoningEffortExtended; summary?: "auto"; context?: string }
+	text?: { verbosity: VerbosityLevel }
+	temperature?: number
+	store?: boolean
+	instructions?: string
+	[SERVICE_TIER_KEY]?: OpenAiCodexRequestServiceTier
+	include?: string[]
+	prompt_cache_key?: string
+	session_id?: string
+	tools?: Array<{
+		type: "function"
+		name: string
+		description?: string
+		parameters?: OpenAiToolParameterSchema
+		strict?: boolean
+	}>
+	tool_choice?: OpenAI.Chat.ChatCompletionCreateParams["tool_choice"]
+	parallel_tool_calls?: boolean
+}
+
 type OpenAiCodexRequestServiceTier = typeof OpenAiCodexServiceTier.Priority
 
 /**
@@ -69,7 +203,7 @@ const getOpenAiCodexServiceTier = (options: ApiHandlerOptions): OpenAiCodexReque
 		? OpenAiCodexServiceTier.Priority
 		: undefined
 
-function stripInputImageDetail(value: any): any {
+function stripInputImageDetail(value: unknown): unknown {
 	if (Array.isArray(value)) {
 		return value.map(stripInputImageDetail)
 	}
@@ -80,41 +214,43 @@ function stripInputImageDetail(value: any): any {
 
 	return Object.fromEntries(
 		Object.entries(value)
-			.filter(([key]) => value.type !== "input_image" || key !== "detail")
+			.filter(([key]) => (value as { type?: unknown }).type !== "input_image" || key !== "detail")
 			.map(([key, child]) => [key, stripInputImageDetail(child)]),
 	)
 }
 
-export function transformResponsesLiteBody(requestBody: any, effectiveSessionId: string): any {
-	if (!Array.isArray(requestBody.input)) {
+export function transformResponsesLiteBody(requestBody: unknown, effectiveSessionId: string): ResponsesRequestBody {
+	// The Lite transform validates locally (callers may pass arbitrary bodies), so
+	// the raw input is narrowed to the request-body shape after each guard.
+	const body = requestBody as ResponsesRequestBody
+	if (!Array.isArray(body.input)) {
 		throw new Error("Invalid Responses Lite request: input must be an array.")
 	}
-	if (requestBody.tools !== undefined && !Array.isArray(requestBody.tools)) {
+	if (body.tools !== undefined && !Array.isArray(body.tools)) {
 		throw new Error("Invalid Responses Lite request: tools must be an array when provided.")
 	}
-	if (requestBody.instructions !== undefined && typeof requestBody.instructions !== "string") {
+	if (body.instructions !== undefined && typeof body.instructions !== "string") {
 		throw new Error("Invalid Responses Lite request: instructions must be a string when provided.")
 	}
 
-	const { tools, instructions, ...rest } = requestBody
-	const transformedInput = stripInputImageDetail(requestBody.input)
+	const { tools, instructions, ...rest } = body
+	// The walker is shape-preserving: it only drops `detail` keys from input_image parts.
+	const transformedInput = stripInputImageDetail(body.input) as ResponsesInputItem[]
 	const reasoning =
-		requestBody.reasoning && typeof requestBody.reasoning === "object" && !Array.isArray(requestBody.reasoning)
-			? requestBody.reasoning
-			: {}
+		body.reasoning && typeof body.reasoning === "object" && !Array.isArray(body.reasoning) ? body.reasoning : {}
 
 	return {
 		...rest,
 		input: [
 			{ type: "additional_tools", role: "developer", tools: tools ?? [] },
 			...(typeof instructions === "string" && instructions.length > 0
-				? [
+				? ([
 						{
 							type: "message",
 							role: "developer",
 							content: [{ type: "input_text", text: instructions }],
 						},
-					]
+					] satisfies ResponsesInputItem[])
 				: []),
 			...transformedInput,
 		],
@@ -144,7 +280,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	private readonly providerName = "OpenAI Codex"
 	private client?: OpenAI
 	// Complete response output array
-	private lastResponseOutput: any[] | undefined
+	private lastResponseOutput: ResponsesOutputItem[] | undefined
 	// Last top-level response id
 	private lastResponseId: string | undefined
 	// Session ID for the Codex API (persists for the lifetime of the handler)
@@ -197,15 +333,16 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		this.sessionId = uuidv7()
 	}
 
-	private normalizeUsage(usage: any, _model: OpenAiCodexModel): ApiStreamUsageChunk | undefined {
+	private normalizeUsage(
+		usage: OpenAiUsage | null | undefined,
+		_model: OpenAiCodexModel,
+	): ApiStreamUsageChunk | undefined {
 		if (!usage) return undefined
 
 		const inputDetails = usage.input_tokens_details ?? usage.prompt_tokens_details
 
-		const hasCachedTokens = typeof inputDetails?.cached_tokens === "number"
-		const hasCacheMissTokens = typeof inputDetails?.cache_miss_tokens === "number"
-		const cachedFromDetails = hasCachedTokens ? inputDetails.cached_tokens : 0
-		const missFromDetails = hasCacheMissTokens ? inputDetails.cache_miss_tokens : 0
+		const cachedFromDetails = typeof inputDetails?.cached_tokens === "number" ? inputDetails.cached_tokens : 0
+		const missFromDetails = typeof inputDetails?.cache_miss_tokens === "number" ? inputDetails.cache_miss_tokens : 0
 
 		let totalInputTokens = usage.input_tokens ?? usage.prompt_tokens ?? 0
 		if (totalInputTokens === 0 && inputDetails && (cachedFromDetails > 0 || missFromDetails > 0)) {
@@ -305,7 +442,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		// Notably: max_output_tokens and prompt_cache_retention may be rejected
 		const effectiveSessionId = metadata?.taskId || this.sessionId
 		const baseRequestBody = this.buildRequestBody(model, formattedInput, systemPrompt, reasoningEffort, metadata)
-		let requestBody: any
+		let requestBody: ResponsesRequestBody
 		try {
 			requestBody = RESPONSES_LITE_MODEL_IDS.has(model.id)
 				? this.buildResponsesLiteRequestBody(baseRequestBody, effectiveSessionId)
@@ -363,18 +500,21 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private buildResponsesLiteRequestBody(baseRequestBody: any, effectiveSessionId: string): any {
+	private buildResponsesLiteRequestBody(
+		baseRequestBody: ResponsesRequestBody,
+		effectiveSessionId: string,
+	): ResponsesRequestBody {
 		return transformResponsesLiteBody(baseRequestBody, effectiveSessionId)
 	}
 
 	private buildRequestBody(
 		model: OpenAiCodexModel,
-		formattedInput: any,
+		formattedInput: ResponsesInputItem[],
 		systemPrompt: string,
 		reasoningEffort: ReasoningEffortExtended | undefined,
 		metadata?: ApiHandlerCreateMessageMetadata,
-	): any {
-		const ensureAllRequired = (schema: any): any => {
+	): ResponsesRequestBody {
+		const ensureAllRequired = (schema: OpenAiToolParameterSchema): OpenAiToolParameterSchema => {
 			if (!schema || typeof schema !== "object" || schema.type !== "object") {
 				return schema
 			}
@@ -406,7 +546,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			return result
 		}
 
-		const ensureAdditionalPropertiesFalse = (schema: any): any => {
+		const ensureAdditionalPropertiesFalse = (schema: OpenAiToolParameterSchema): OpenAiToolParameterSchema => {
 			if (!schema || typeof schema !== "object" || schema.type !== "object") {
 				return schema
 			}
@@ -433,28 +573,6 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 			}
 
 			return result
-		}
-
-		interface ResponsesRequestBody {
-			model: string
-			input: Array<{ role: "user" | "assistant"; content: any[] } | { type: string; content: string }>
-			stream: boolean
-			[SERVICE_TIER_KEY]?: OpenAiCodexRequestServiceTier
-			reasoning?: { effort?: ReasoningEffortExtended; summary?: "auto" }
-			temperature?: number
-			store?: boolean
-			instructions?: string
-			include?: string[]
-			tools?: Array<{
-				type: "function"
-				name: string
-				description?: string
-				parameters?: any
-				strict?: boolean
-			}>
-			tool_choice?: any
-			parallel_tool_calls?: boolean
-			text?: { verbosity: VerbosityLevel }
 		}
 
 		// Per the implementation guide: Codex backend may reject max_output_tokens
@@ -486,8 +604,8 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						name: tool.function.name,
 						description: tool.function.description,
 						parameters: isMcp
-							? ensureAdditionalPropertiesFalse(tool.function.parameters)
-							: ensureAllRequired(tool.function.parameters),
+							? ensureAdditionalPropertiesFalse(tool.function.parameters as OpenAiToolParameterSchema)
+							: ensureAllRequired(tool.function.parameters as OpenAiToolParameterSchema),
 						strict: !isMcp,
 					}
 				}),
@@ -504,7 +622,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	}
 
 	private async *executeRequest(
-		requestBody: any,
+		requestBody: ResponsesRequestBody,
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
@@ -554,13 +672,19 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 						timeout: this.timeoutMs,
 					})
 
-				const stream = (await (client as any).responses.create(requestBody, {
-					signal: abortController.signal,
-					// If the SDK supports per-request overrides, ensure headers are present.
-					headers: codexHeaders,
-				})) as AsyncIterable<any>
+				// The SDK's params type does not declare the Codex custom body fields; the
+				// boundary routes through unknown, and stream events are parsed as the
+				// ResponsesStreamEvent superset.
+				const stream = (await client.responses.create(
+					requestBody as unknown as OpenAI.Responses.ResponseCreateParamsStreaming,
+					{
+						signal: abortController.signal,
+						// If the SDK supports per-request overrides, ensure headers are present.
+						headers: codexHeaders,
+					},
+				)) as AsyncIterable<ResponsesStreamEvent>
 
-				if (typeof (stream as any)?.[Symbol.asyncIterator] !== "function") {
+				if (typeof stream?.[Symbol.asyncIterator] !== "function") {
 					throw new Error(
 						"OpenAI SDK did not return an AsyncIterable for Responses API streaming. Falling back to SSE.",
 					)
@@ -613,19 +737,24 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private formatFullConversation(_systemPrompt: string, messages: Anthropic.Messages.MessageParam[]): any {
-		const formattedInput: any[] = []
+	private formatFullConversation(
+		_systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+	): ResponsesInputItem[] {
+		const formattedInput: ResponsesInputItem[] = []
 
 		for (const message of messages) {
 			// Check if this is a reasoning item
-			if ((message as any).type === "reasoning") {
+			if ((message as { type?: unknown }).type === "reasoning") {
 				formattedInput.push(message)
 				continue
 			}
 
 			if (message.role === "user") {
-				const content: any[] = []
-				const toolResults: any[] = []
+				const content: Array<
+					{ type: "input_text"; text: string } | { type: "input_image"; image_url: string }
+				> = []
+				const toolResults: Array<{ type: "function_call_output"; call_id: string; output: string }> = []
 
 				if (typeof message.content === "string") {
 					content.push({ type: "input_text", text: message.content })
@@ -662,8 +791,8 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 					formattedInput.push(...toolResults)
 				}
 			} else if (message.role === "assistant") {
-				const content: any[] = []
-				const toolCalls: any[] = []
+				const content: Array<{ type: "output_text"; text: string }> = []
+				const toolCalls: Array<{ type: "function_call"; call_id: string; name: string; arguments: string }> = []
 
 				if (typeof message.content === "string") {
 					content.push({ type: "output_text", text: message.content })
@@ -697,7 +826,7 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 	}
 
 	private async *makeCodexRequest(
-		requestBody: any,
+		requestBody: ResponsesRequestBody,
 		model: OpenAiCodexModel,
 		accessToken: string,
 		effectiveSessionId: string,
@@ -1103,12 +1232,12 @@ export class OpenAiCodexHandler extends BaseProvider implements SingleCompletion
 		}
 	}
 
-	private async *processEvent(event: any, model: OpenAiCodexModel): ApiStream {
+	private async *processEvent(event: ResponsesStreamEvent, model: OpenAiCodexModel): ApiStream {
 		if (event?.response?.output && Array.isArray(event.response.output)) {
 			this.lastResponseOutput = event.response.output
 		}
 		if (event?.response?.id) {
-			this.lastResponseId = event.response.id as string
+			this.lastResponseId = event.response.id
 		}
 
 		// Handle text deltas

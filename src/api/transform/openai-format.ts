@@ -40,7 +40,7 @@ export type ReasoningDetail = {
  * @returns Consolidated array of reasoning details
  * @see https://github.com/cline/cline/issues/8214
  */
-export function consolidateReasoningDetails(reasoningDetails: ReasoningDetail[]): ReasoningDetail[] {
+export function consolidateReasoningDetails(reasoningDetails: ReasoningDetail[] | undefined): ReasoningDetail[] {
 	if (!reasoningDetails || reasoningDetails.length === 0) {
 		return []
 	}

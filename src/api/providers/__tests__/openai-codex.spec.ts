@@ -15,6 +15,32 @@ import { OpenAiCodexHandler, transformResponsesLiteBody } from "../openai-codex"
 import { openAiCodexOAuthManager } from "../../../integrations/openai-codex/oauth"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { flushMacrotasks } from "../../../test-utils/timers"
+import type { Mock, MockInstance } from "vitest"
+import type OpenAI from "openai"
+
+/** Mirror of the codex Responses request-body shape the tests capture. */
+interface ResponsesRequestBody {
+	input?: ResponseInputItemTest[]
+	[key: string]: unknown
+}
+
+/** Input item carrying the `role` field the assertions read. */
+interface ResponseInputItemTest {
+	role?: string
+	content?: unknown
+}
+
+interface UserInputItem extends ResponseInputItemTest {
+	role: "user"
+}
+
+/**
+ * Replaces the handler's OpenAI client with a stub providing responses.create,
+ * the only member these tests exercise; routed through unknown.
+ */
+function stubCodexClient(handler: OpenAiCodexHandler, create: Mock): void {
+	handler["client"] = { responses: { create } } as unknown as OpenAI
+}
 
 function createCompletedStream() {
 	return asyncStreamFrom([
@@ -173,32 +199,29 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
-		const capturedInput: any[] = []
-		;(handler as any).client = {
-			responses: {
-				create: vitest.fn().mockImplementation(async (body: any) => {
-					capturedInput.push(...(body.input ?? []))
-					return asyncStreamFrom([
-						{
-							type: "response.completed",
-							response: {
-								id: "r1",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 1 },
-							},
-						},
-					])
-				}),
-			},
-		}
+		const capturedInput: ResponseInputItemTest[] = []
+		const stubCreate = vitest.fn().mockImplementation(async (body: ResponsesRequestBody) => {
+			capturedInput.push(...(body.input ?? []))
+			return asyncStreamFrom([
+				{
+					type: "response.completed",
+					response: {
+						id: "r1",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 1 },
+					},
+				},
+			])
+		})
+		stubCodexClient(handler, stubCreate)
 
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{
 				role: "user",
 				content: [
 					{ type: "text", text: "Look at this:" },
-					{ type: "image", source: { type: "url", url: "https://example.com/img.png" } as any },
+					{ type: "image", source: { type: "url", url: "https://example.com/img.png" } },
 				],
 			},
 		]
@@ -206,7 +229,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		await collectStream(handler.createMessage("system", messages))
 
 		// URL image is skipped; only the text input_text block should be present
-		const userMsg = capturedInput.find((item: any) => item.role === "user")
+		const userMsg = capturedInput.find((item): item is UserInputItem => item.role === "user")
 		expect(userMsg?.content).toEqual([{ type: "input_text", text: "Look at this:" }])
 		expect(JSON.stringify(capturedInput)).not.toContain("input_image")
 	})
@@ -217,25 +240,22 @@ describe("OpenAiCodexHandler.createMessage", () => {
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 
-		const capturedInput: any[] = []
-		;(handler as any).client = {
-			responses: {
-				create: vitest.fn().mockImplementation(async (body: any) => {
-					capturedInput.push(...(body.input ?? []))
-					return asyncStreamFrom([
-						{
-							type: "response.completed",
-							response: {
-								id: "r1",
-								status: "completed",
-								output: [],
-								usage: { input_tokens: 1, output_tokens: 1 },
-							},
-						},
-					])
-				}),
-			},
-		}
+		const capturedInput: ResponseInputItemTest[] = []
+		const stubCreate = vitest.fn().mockImplementation(async (body: ResponsesRequestBody) => {
+			capturedInput.push(...(body.input ?? []))
+			return asyncStreamFrom([
+				{
+					type: "response.completed",
+					response: {
+						id: "r1",
+						status: "completed",
+						output: [],
+						usage: { input_tokens: 1, output_tokens: 1 },
+					},
+				},
+			])
+		})
+		stubCodexClient(handler, stubCreate)
 
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{
@@ -249,7 +269,7 @@ describe("OpenAiCodexHandler.createMessage", () => {
 
 		await collectStream(handler.createMessage("system", messages))
 
-		const userMsg = capturedInput.find((item: any) => item.role === "user")
+		const userMsg = capturedInput.find((item): item is UserInputItem => item.role === "user")
 		expect(userMsg?.content).toContainEqual({
 			type: "input_image",
 			image_url: "data:image/png;base64,abc123",
@@ -894,7 +914,7 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 		const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
-		;(handler as any).client = { responses: { create: mockCreate } }
+		stubCodexClient(handler, mockCreate)
 
 		await collectStream(
 			handler.createMessage("Luna instructions", [{ role: "user", content: "Hello" }], {
@@ -950,12 +970,12 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna" })
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		let sdkBody: any
-		const mockCreate = vitest.fn().mockImplementation((body: any) => {
+		let sdkBody: ResponsesRequestBody | undefined
+		const mockCreate = vitest.fn().mockImplementation((body: ResponsesRequestBody) => {
 			sdkBody = body
 			throw new Error("SDK unavailable")
 		})
-		;(handler as any).client = { responses: { create: mockCreate } }
+		stubCodexClient(handler, mockCreate)
 		const mockFetch = vitest.fn().mockResolvedValue({
 			ok: true,
 			body: new ReadableStream({
@@ -988,18 +1008,19 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 			version: "0.144.0",
 			"x-openai-internal-codex-responses-lite": "true",
 		})
-		expect(sdkBody.prompt_cache_key).toBe("task-fallback")
+		expect(sdkBody!.prompt_cache_key).toBe("task-fallback")
 	})
 
 	it("preserves Luna session affinity while retrying with refreshed authentication", async () => {
 		const handler = new OpenAiCodexHandler({ apiModelId: "gpt-5.6-luna" })
-		const transformSpy = vitest.spyOn(handler as any, "buildResponsesLiteRequestBody")
+		// Spies on the private Lite-transform; the method name routes through never
+		// because private members are outside keyof, and the bound behavior is unchanged.
+		const transformSpy = vitest.spyOn(handler, "buildResponsesLiteRequestBody" as never) as MockInstance
 		vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("expired-token")
 		vitest.spyOn(openAiCodexOAuthManager, "forceRefreshAccessToken").mockResolvedValue("refreshed-token")
 		vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
-		;(handler as any).client = {
-			responses: { create: vitest.fn().mockRejectedValue(new Error("SDK unavailable")) },
-		}
+		const stubCreate = vitest.fn().mockRejectedValue(new Error("SDK unavailable"))
+		stubCodexClient(handler, stubCreate)
 		const mockFetch = vitest
 			.fn()
 			.mockResolvedValueOnce({
@@ -1104,7 +1125,7 @@ describe("OpenAiCodexHandler Responses Lite requests", () => {
 			vitest.spyOn(openAiCodexOAuthManager, "getAccessToken").mockResolvedValue("test-token")
 			vitest.spyOn(openAiCodexOAuthManager, "getAccountId").mockResolvedValue("acct_test")
 			const mockCreate = vitest.fn().mockResolvedValue(createCompletedStream())
-			;(handler as any).client = { responses: { create: mockCreate } }
+			stubCodexClient(handler, mockCreate)
 
 			await collectStream(
 				handler.createMessage("Normal instructions", [{ role: "user", content: "Hello" }], {

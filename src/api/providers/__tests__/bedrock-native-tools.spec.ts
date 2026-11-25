@@ -29,10 +29,34 @@ vi.mock("@aws-sdk/client-bedrock-runtime", () => {
 })
 
 import { AwsBedrockHandler } from "../bedrock"
+import type OpenAI from "openai"
+import type { Tool } from "@aws-sdk/client-bedrock-runtime"
+import type { ApiStreamChunk } from "../../transform/stream"
 import { ConverseStreamCommand } from "@aws-sdk/client-bedrock-runtime"
 import type { ApiHandlerCreateMessageMetadata } from "../../index"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+
+/** Reads additionalModelRequestFields as a record; the handler builds it as an object. */
+function additionalFieldsOf(commandArg: { additionalModelRequestFields?: unknown }): Record<string, unknown> {
+	return (commandArg.additionalModelRequestFields ?? {}) as Record<string, unknown>
+}
+
+/** JSON-schema shape this suite asserts on for converted tool input specs. */
+interface ToolSchemaShape {
+	type?: string
+	description?: string
+	anyOf?: Array<Record<string, unknown>>
+	properties: Record<string, ToolSchemaShape>
+	required?: string[]
+	additionalProperties?: boolean
+	[key: string]: unknown
+}
+
+/** Extracts the JSON schema of a converted tool's input spec. */
+function toolSchema(tool: Tool): ToolSchemaShape {
+	return tool.toolSpec!.inputSchema!.json as ToolSchemaShape
+}
 
 const mockConverseStreamCommand = vi.mocked(ConverseStreamCommand)
 
@@ -92,26 +116,27 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 	describe("convertToolsForBedrock", () => {
 		it("should convert OpenAI tools to Bedrock format", () => {
 			// Access private method
-			const convertToolsForBedrock = (handler as any).convertToolsForBedrock.bind(handler)
+			const convertToolsForBedrock = handler["convertToolsForBedrock"].bind(handler)
 
 			const bedrockTools = convertToolsForBedrock(testTools)
 
 			expect(bedrockTools).toHaveLength(2)
 
 			// Check structure and key properties (normalizeToolSchema adds additionalProperties: false)
-			const tool = bedrockTools[0]
-			expect(tool.toolSpec.name).toBe("read_file")
-			expect(tool.toolSpec.description).toBe("Read a file from the filesystem")
-			expect(tool.toolSpec.inputSchema.json.type).toBe("object")
-			expect(tool.toolSpec.inputSchema.json.properties.path.type).toBe("string")
-			expect(tool.toolSpec.inputSchema.json.properties.path.description).toBe("The path to the file")
-			expect(tool.toolSpec.inputSchema.json.required).toEqual(["path"])
+			const spec = bedrockTools[0]!.toolSpec!
+			expect(spec.name).toBe("read_file")
+			expect(spec.description).toBe("Read a file from the filesystem")
+			const schema = toolSchema(bedrockTools[0]!)
+			expect(schema.type).toBe("object")
+			expect(schema.properties!.path.type).toBe("string")
+			expect(schema.properties!.path.description).toBe("The path to the file")
+			expect(schema.required).toEqual(["path"])
 			// normalizeToolSchema adds additionalProperties: false by default
-			expect(tool.toolSpec.inputSchema.json.additionalProperties).toBe(false)
+			expect(schema.additionalProperties).toBe(false)
 		})
 
 		it("should transform type arrays to anyOf for JSON Schema 2020-12 compliance", () => {
-			const convertToolsForBedrock = (handler as any).convertToolsForBedrock.bind(handler)
+			const convertToolsForBedrock = handler["convertToolsForBedrock"].bind(handler)
 
 			// Tools with type: ["string", "null"] syntax (valid in draft-07 but not 2020-12)
 			const toolsWithNullableTypes = [
@@ -163,13 +188,13 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			expect(bedrockTools).toHaveLength(2)
 
 			// First tool: cwd should be transformed from type: ["string", "null"] to anyOf
-			const executeCommandSchema = bedrockTools[0].toolSpec.inputSchema.json as any
+			const executeCommandSchema = toolSchema(bedrockTools[0]!)
 			expect(executeCommandSchema.properties.cwd.anyOf).toEqual([{ type: "string" }, { type: "null" }])
 			expect(executeCommandSchema.properties.cwd.type).toBeUndefined()
 			expect(executeCommandSchema.properties.cwd.description).toBe("Working directory (optional)")
 
 			// Second tool: nested nullable object should be transformed from type: ["object", "null"] to anyOf
-			const readFileSchema = bedrockTools[1].toolSpec.inputSchema.json as any
+			const readFileSchema = toolSchema(bedrockTools[1]!)
 			const indentation = readFileSchema.properties.indentation
 			expect(indentation.anyOf).toBeDefined()
 			expect(indentation.type).toBeUndefined()
@@ -179,11 +204,12 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 		})
 
 		it("should filter non-function tools", () => {
-			const convertToolsForBedrock = (handler as any).convertToolsForBedrock.bind(handler)
+			const convertToolsForBedrock = handler["convertToolsForBedrock"].bind(handler)
 
 			const mixedTools = [
 				...testTools,
-				{ type: "other" as any, something: {} }, // Should be filtered out
+				// Non-function tool double; routed through unknown to stay in ChatCompletionTool.
+				{ type: "other", something: {} } as unknown as OpenAI.Chat.ChatCompletionTool,
 			]
 
 			const bedrockTools = convertToolsForBedrock(mixedTools)
@@ -194,7 +220,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 
 	describe("convertToolChoiceForBedrock", () => {
 		it("should convert 'auto' to Bedrock auto format", () => {
-			const convertToolChoiceForBedrock = (handler as any).convertToolChoiceForBedrock.bind(handler)
+			const convertToolChoiceForBedrock = handler["convertToolChoiceForBedrock"].bind(handler)
 
 			const result = convertToolChoiceForBedrock("auto")
 
@@ -202,7 +228,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 		})
 
 		it("should convert 'required' to Bedrock any format", () => {
-			const convertToolChoiceForBedrock = (handler as any).convertToolChoiceForBedrock.bind(handler)
+			const convertToolChoiceForBedrock = handler["convertToolChoiceForBedrock"].bind(handler)
 
 			const result = convertToolChoiceForBedrock("required")
 
@@ -210,7 +236,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 		})
 
 		it("should return undefined for 'none'", () => {
-			const convertToolChoiceForBedrock = (handler as any).convertToolChoiceForBedrock.bind(handler)
+			const convertToolChoiceForBedrock = handler["convertToolChoiceForBedrock"].bind(handler)
 
 			const result = convertToolChoiceForBedrock("none")
 
@@ -218,7 +244,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 		})
 
 		it("should convert specific tool choice to Bedrock tool format", () => {
-			const convertToolChoiceForBedrock = (handler as any).convertToolChoiceForBedrock.bind(handler)
+			const convertToolChoiceForBedrock = handler["convertToolChoiceForBedrock"].bind(handler)
 
 			const result = convertToolChoiceForBedrock({
 				type: "function",
@@ -233,7 +259,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 		})
 
 		it("should default to auto for undefined toolChoice", () => {
-			const convertToolChoiceForBedrock = (handler as any).convertToolChoiceForBedrock.bind(handler)
+			const convertToolChoiceForBedrock = handler["convertToolChoiceForBedrock"].bind(handler)
 
 			const result = convertToolChoiceForBedrock(undefined)
 
@@ -264,12 +290,12 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
 			expect(commandArg.toolConfig).toBeDefined()
-			expect(commandArg.toolConfig.tools).toHaveLength(2)
-			expect(commandArg.toolConfig.tools[0].toolSpec.name).toBe("read_file")
-			expect(commandArg.toolConfig.toolChoice).toEqual({ auto: {} })
+			expect(commandArg.toolConfig!.tools).toHaveLength(2)
+			expect(commandArg.toolConfig!.tools![0].toolSpec!.name).toBe("read_file")
+			expect(commandArg.toolConfig!.toolChoice).toEqual({ auto: {} })
 		})
 
 		it("should always include toolConfig (tools are always present after PR #10841)", async () => {
@@ -294,12 +320,12 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
 			// Tools are now always present
 			expect(commandArg.toolConfig).toBeDefined()
-			expect(commandArg.toolConfig.tools).toBeDefined()
-			expect(commandArg.toolConfig.toolChoice).toEqual({ auto: {} })
+			expect(commandArg.toolConfig!.tools).toBeDefined()
+			expect(commandArg.toolConfig!.toolChoice).toEqual({ auto: {} })
 		})
 
 		it("should include toolConfig with undefined toolChoice when tool_choice is none", async () => {
@@ -325,11 +351,11 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
 			// toolConfig is still provided but toolChoice is undefined for "none"
 			expect(commandArg.toolConfig).toBeDefined()
-			expect(commandArg.toolConfig.toolChoice).toBeUndefined()
+			expect(commandArg.toolConfig!.toolChoice).toBeUndefined()
 		})
 
 		it("should include fine-grained tool streaming beta for Claude models with native tools", async () => {
@@ -354,13 +380,11 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
 			// Should include the fine-grained tool streaming beta
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
-			expect(commandArg.additionalModelRequestFields.anthropic_beta).toContain(
-				"fine-grained-tool-streaming-2025-05-14",
-			)
+			expect(additionalFieldsOf(commandArg).anthropic_beta).toContain("fine-grained-tool-streaming-2025-05-14")
 		})
 
 		it("should always include fine-grained tool streaming beta for Claude models", async () => {
@@ -385,13 +409,11 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 			await generator.next()
 
 			expect(mockConverseStreamCommand).toHaveBeenCalled()
-			const commandArg = mockConverseStreamCommand.mock.calls[0][0] as any
+			const commandArg = mockConverseStreamCommand.mock.calls[0][0]
 
 			// Should always include anthropic_beta with fine-grained-tool-streaming for Claude models
 			expect(commandArg.additionalModelRequestFields).toBeDefined()
-			expect(commandArg.additionalModelRequestFields.anthropic_beta).toContain(
-				"fine-grained-tool-streaming-2025-05-14",
-			)
+			expect(additionalFieldsOf(commandArg).anthropic_beta).toContain("fine-grained-tool-streaming-2025-05-14")
 		})
 	})
 
@@ -443,7 +465,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 				{ role: "user", content: "Read the file" },
 			])
 
-			const results: any[] = []
+			const results: ApiStreamChunk[] = []
 			for await (const chunk of generator) {
 				results.push(chunk)
 			}
@@ -508,7 +530,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 				{ role: "user", content: "Write a file" },
 			])
 
-			const results: any[] = []
+			const results: ApiStreamChunk[] = []
 			for await (const chunk of generator) {
 				results.push(chunk)
 			}
@@ -589,7 +611,7 @@ describe("AwsBedrockHandler Native Tool Calling", () => {
 				{ role: "user", content: "Read the example file" },
 			])
 
-			const results: any[] = []
+			const results: ApiStreamChunk[] = []
 			for await (const chunk of generator) {
 				results.push(chunk)
 			}

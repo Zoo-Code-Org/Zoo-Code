@@ -3,7 +3,7 @@ import { generateImageWithImagesApi, generateImageWithProvider } from "../image-
 
 // Mock the i18n module
 vi.mock("../../../i18n", () => ({
-	t: (key: string, options?: any) => {
+	t: (key: string, options?: { message?: string }) => {
 		// Return a sensible mock for i18n
 		if (key === "tools:generateImage.failedWithMessage" && options?.message) {
 			return options.message
@@ -18,8 +18,8 @@ global.FormData = vi.fn(function () {
 	return {
 		append: vi.fn(),
 	}
-}) as any
-global.Blob = vi.fn() as any
+}) as unknown as { new (form?: HTMLFormElement, submitter?: HTMLElement | null): FormData; prototype: FormData }
+global.Blob = vi.fn() as unknown as { new (): Blob; prototype: Blob }
 global.atob = vi.fn((str: string) => {
 	return Buffer.from(str, "base64").toString("binary")
 })
@@ -43,7 +43,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -78,7 +78,7 @@ describe("generateImageWithImagesApi", () => {
 				text: vi.fn().mockResolvedValue("{}"),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -99,7 +99,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -120,7 +120,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -142,7 +142,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -165,7 +165,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -189,7 +189,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -211,7 +211,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -257,7 +257,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const inputImageDataUrl = `data:image/png;base64,${mockBase64}`
 
@@ -285,7 +285,7 @@ describe("generateImageWithImagesApi", () => {
 				text: vi.fn().mockResolvedValue("{}"),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const inputImageDataUrl =
 				"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
@@ -313,7 +313,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -335,7 +335,7 @@ describe("generateImageWithImagesApi", () => {
 				}),
 			}
 
-			vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+			vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 			const result = await generateImageWithImagesApi({
 				baseURL: "https://api.example.com/v1",
@@ -380,7 +380,7 @@ describe("generateImageWithProvider (chat completions)", () => {
 			}),
 		}
 
-		vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+		vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 		const result = await generateImageWithProvider({
 			baseURL: "https://api.example.com/v1",
@@ -404,7 +404,7 @@ describe("generateImageWithProvider (chat completions)", () => {
 			}),
 		}
 
-		vi.mocked(global.fetch).mockResolvedValue(mockResponse as any)
+		vi.mocked(global.fetch).mockResolvedValue(mockResponse as unknown as Response)
 
 		const result = await generateImageWithProvider({
 			baseURL: "https://api.example.com/v1",

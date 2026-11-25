@@ -1,9 +1,4 @@
 {
-	"api/providers/__tests__/anthropic-vertex.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
-		}
-	},
 	"api/providers/__tests__/anthropic.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
@@ -24,51 +19,6 @@
 			"count": 4
 		}
 	},
-	"api/providers/__tests__/bedrock-custom-arn.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"api/providers/__tests__/bedrock-error-handling.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
-	"api/providers/__tests__/bedrock-inference-profiles.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 27
-		}
-	},
-	"api/providers/__tests__/bedrock-native-tools.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 19
-		}
-	},
-	"api/providers/__tests__/bedrock-reasoning.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
-	"api/providers/__tests__/bedrock.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 37
-		}
-	},
-	"api/providers/__tests__/deepseek.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 12
-		}
-	},
-	"api/providers/__tests__/gemini-handler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
-	"api/providers/__tests__/gemini.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 33
-		}
-	},
 	"api/providers/__tests__/kenari.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -84,49 +34,9 @@
 			"count": 26
 		}
 	},
-	"api/providers/__tests__/mimo.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 18
-		}
-	},
 	"api/providers/__tests__/minimax.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"api/providers/__tests__/moonshot.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"api/providers/__tests__/native-ollama.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 21
-		}
-	},
-	"api/providers/__tests__/openai-codex-native-tool-calls.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 22
-		}
-	},
-	"api/providers/__tests__/openai-codex.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 16
-		}
-	},
-	"api/providers/__tests__/openai-native-tools.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 14
-		}
-	},
-	"api/providers/__tests__/openai-native-usage.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 25
-		}
-	},
-	"api/providers/__tests__/openai-native.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 74
 		}
 	},
 	"api/providers/__tests__/openai-timeout.spec.ts": {
@@ -142,11 +52,6 @@
 	"api/providers/__tests__/opencode-go.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
-		}
-	},
-	"api/providers/__tests__/openrouter.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 34
 		}
 	},
 	"api/providers/__tests__/poe.spec.ts": {
@@ -202,11 +107,6 @@
 	"api/providers/base-provider.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 4
-		}
-	},
-	"api/providers/bedrock.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 32
 		}
 	},
 	"api/providers/deepseek.ts": {
@@ -284,24 +184,14 @@
 			"count": 5
 		}
 	},
-	"api/providers/moonshot.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/native-ollama.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
 		}
 	},
-	"api/providers/openai-codex.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 31
-		}
-	},
 	"api/providers/openai-native.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 27
+			"count": 26
 		}
 	},
 	"api/providers/openai.ts": {
@@ -329,24 +219,9 @@
 			"count": 3
 		}
 	},
-	"api/providers/utils/__tests__/error-handler.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 35
-		}
-	},
-	"api/providers/utils/__tests__/image-generation.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
 	"api/providers/utils/__tests__/timeout-config.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
-		}
-	},
-	"api/providers/utils/error-handler.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
 		}
 	},
 	"api/providers/xai.ts": {
@@ -384,11 +259,6 @@
 			"count": 8
 		}
 	},
-	"api/transform/__tests__/openai-format.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 49
-		}
-	},
 	"api/transform/__tests__/r1-format.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 8
@@ -419,11 +289,6 @@
 			"count": 2
 		}
 	},
-	"api/transform/cache-strategy/__tests__/cache-strategy.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 17
-		}
-	},
 	"api/transform/caching/__tests__/gemini.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1
@@ -437,11 +302,6 @@
 	"api/transform/openai-format.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 7
-		}
-	},
-	"api/transform/r1-format.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 5
 		}
 	},
 	"api/transform/responses-api-input.ts": {

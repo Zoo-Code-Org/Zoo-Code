@@ -12,7 +12,7 @@ vitest.mock("@roo-code/telemetry", () => ({
 
 import { Anthropic } from "@anthropic-ai/sdk"
 
-import type { GenerateContentResponse } from "@google/genai"
+import type { Content, GenerateContentResponse, GoogleGenAI } from "@google/genai"
 
 import { type ModelInfo, geminiDefaultModelId, ApiProviderError } from "@roo-code/types"
 
@@ -30,6 +30,14 @@ const GEMINI_MODEL_NAME = geminiDefaultModelId
 // `candidates`, so the stub only carries the field the provider reads; the double
 // cast is the least-friction way to satisfy the class type in mocks.
 const stubGenerateContentResponse = (text: string) => ({ text }) as unknown as GenerateContentResponse
+
+/**
+ * Yields structural GenerateContentResponse doubles (candidates/usageMetadata);
+ * routed through unknown because only those members are consumed.
+ */
+function makeStream(chunks: unknown[]): AsyncGenerator<GenerateContentResponse> {
+	return asyncStreamFrom(chunks) as AsyncGenerator<GenerateContentResponse>
+}
 
 describe("GeminiHandler", () => {
 	let handler: GeminiHandler
@@ -51,13 +59,15 @@ describe("GeminiHandler", () => {
 		})
 
 		// Replace the client with our mock
+		// Double provides models.generateContentStream/generateContent/getGenerativeModel,
+		// the only members these tests exercise.
 		handler["client"] = {
 			models: {
 				generateContentStream: mockGenerateContentStream,
 				generateContent: mockGenerateContent,
 				getGenerativeModel: mockGetGenerativeModel,
 			},
-		} as any
+		} as unknown as GoogleGenAI
 	})
 
 	describe("constructor", () => {
@@ -69,12 +79,11 @@ describe("GeminiHandler", () => {
 
 	describe("thoughtSignature round-trip (issue #536)", () => {
 		const systemPrompt = "You are a helpful assistant"
-		const toolMetadata = { tools: [{ function: { name: "read_file", description: "", parameters: {} } }] } as any
+		const toolMetadata = makeCreateMessageMetadata({
+			tools: [{ type: "function" as const, function: { name: "read_file", description: "", parameters: {} } }],
+		})
 
 		// Helper: build a mock async-iterable stream from chunks
-		function makeStream(chunks: unknown[]) {
-			return asyncStreamFrom(chunks)
-		}
 
 		// Simulate a Gemini 3.x response: thoughtSignature arrives on its own part,
 		// alongside a functionCall part (the way the real Gemini 3 API returns it).
@@ -96,7 +105,7 @@ describe("GeminiHandler", () => {
 		])
 
 		it("captures thoughtSignature from the stream after turn 1", async () => {
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(turn1Response)
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(turn1Response)
 
 			const messages: Anthropic.Messages.MessageParam[] = [{ role: "user", content: "Read foo.ts" }]
 
@@ -117,7 +126,12 @@ describe("GeminiHandler", () => {
 					// tool_use block + appended thoughtSignature block
 					content: [
 						{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } },
-						{ type: "thoughtSignature", thoughtSignature: "sig-abc123" } as any,
+						// Extension history block (ThoughtSignatureContentBlock) carried through
+						// convertAnthropicContentToGemini; routed through unknown to stay in MessageParam.
+						{
+							type: "thoughtSignature",
+							thoughtSignature: "sig-abc123",
+						} as unknown as Anthropic.ContentBlockParam,
 					],
 				},
 				{
@@ -126,7 +140,7 @@ describe("GeminiHandler", () => {
 				},
 			]
 
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(
 				makeStream([
 					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
 					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
@@ -135,15 +149,17 @@ describe("GeminiHandler", () => {
 
 			await collectStream(handler.createMessage(systemPrompt, historyAfterTurn1, toolMetadata))
 
-			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
-			const contents: any[] = callArgs.contents
+			const callArgs = vi.mocked(handler["client"].models.generateContentStream).mock.calls[0][0]
+			const contents = Array.isArray(callArgs.contents) ? callArgs.contents : [callArgs.contents]
 
 			// The model turn in the outgoing request must carry the thoughtSignature on its functionCall part
-			const modelTurn = contents.find((c: any) => c.role === "model")
+			const modelTurn = contents.find(
+				(c): c is Content => typeof c === "object" && "role" in c && c.role === "model",
+			)
 			expect(modelTurn).toBeDefined()
-			const fnPart = modelTurn.parts.find((p: any) => p.functionCall)
+			const fnPart = modelTurn!.parts!.find((p) => p.functionCall)
 			expect(fnPart).toBeDefined()
-			expect(fnPart.thoughtSignature).toBe("sig-abc123")
+			expect((fnPart as { thoughtSignature?: string }).thoughtSignature).toBe("sig-abc123")
 		})
 
 		it("falls back to base64-encoded skip_thought_signature_validator when history has no signature", async () => {
@@ -162,7 +178,7 @@ describe("GeminiHandler", () => {
 				},
 			]
 
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(
 				makeStream([
 					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
 					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
@@ -171,13 +187,15 @@ describe("GeminiHandler", () => {
 
 			await collectStream(handler.createMessage(systemPrompt, historyNoSig, toolMetadata))
 
-			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
-			const contents: any[] = callArgs.contents
-			const modelTurn = contents.find((c: any) => c.role === "model")
-			const fnPart = modelTurn?.parts.find((p: any) => p.functionCall)
+			const callArgs = vi.mocked(handler["client"].models.generateContentStream).mock.calls[0][0]
+			const contents = Array.isArray(callArgs.contents) ? callArgs.contents : [callArgs.contents]
+			const modelTurn = contents.find(
+				(c): c is Content => typeof c === "object" && "role" in c && c.role === "model",
+			)
+			const fnPart = modelTurn?.parts?.find((p) => p.functionCall)
 			expect(fnPart).toBeDefined()
 			const expectedBypass = Buffer.from("skip_thought_signature_validator").toString("base64")
-			expect(fnPart.thoughtSignature).toBe(expectedBypass)
+			expect((fnPart as { thoughtSignature?: string }).thoughtSignature).toBe(expectedBypass)
 		})
 
 		it("sends thoughtSignature even when reasoningEffort is disabled", async () => {
@@ -189,9 +207,9 @@ describe("GeminiHandler", () => {
 				apiKey: "test-key",
 				geminiApiKey: "test-key",
 				apiModelId: GEMINI_MODEL_NAME,
-				reasoningEffort: "disable" as any,
+				reasoningEffort: "disable",
 			})
-			handlerNoReasoning["client"] = handler["client"] as any
+			handlerNoReasoning["client"] = handler["client"]
 
 			const historyWithSig: Anthropic.Messages.MessageParam[] = [
 				{ role: "user", content: "Read foo.ts" },
@@ -199,7 +217,12 @@ describe("GeminiHandler", () => {
 					role: "assistant",
 					content: [
 						{ type: "tool_use", id: "call-1", name: "read_file", input: { path: "foo.ts" } },
-						{ type: "thoughtSignature", thoughtSignature: "sig-xyz" } as any,
+						// Extension history block (ThoughtSignatureContentBlock) carried through
+						// convertAnthropicContentToGemini; routed through unknown to stay in MessageParam.
+						{
+							type: "thoughtSignature",
+							thoughtSignature: "sig-xyz",
+						} as unknown as Anthropic.ContentBlockParam,
 					],
 				},
 				{
@@ -208,7 +231,7 @@ describe("GeminiHandler", () => {
 				},
 			]
 
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(
 				makeStream([
 					{ candidates: [{ content: { parts: [{ text: "Done." }] } }] },
 					{ usageMetadata: { promptTokenCount: 20, candidatesTokenCount: 5 } },
@@ -217,12 +240,14 @@ describe("GeminiHandler", () => {
 
 			await collectStream(handlerNoReasoning.createMessage(systemPrompt, historyWithSig, toolMetadata))
 
-			const callArgs = (handler["client"].models.generateContentStream as any).mock.calls[0][0]
-			const contents: any[] = callArgs.contents
-			const modelTurn = contents.find((c: any) => c.role === "model")
-			const fnPart = modelTurn?.parts.find((p: any) => p.functionCall)
+			const callArgs = vi.mocked(handler["client"].models.generateContentStream).mock.calls[0][0]
+			const contents = Array.isArray(callArgs.contents) ? callArgs.contents : [callArgs.contents]
+			const modelTurn = contents.find(
+				(c): c is Content => typeof c === "object" && "role" in c && c.role === "model",
+			)
+			const fnPart = modelTurn?.parts?.find((p) => p.functionCall)
 			expect(fnPart).toBeDefined()
-			expect(fnPart.thoughtSignature).toBe("sig-xyz")
+			expect((fnPart as { thoughtSignature?: string }).thoughtSignature).toBe("sig-xyz")
 		})
 
 		it("does NOT capture thoughtSignature when there are no tools in metadata", async () => {
@@ -232,10 +257,10 @@ describe("GeminiHandler", () => {
 				apiKey: "test-key",
 				geminiApiKey: "test-key",
 				apiModelId: GEMINI_MODEL_NAME,
-				reasoningEffort: "disable" as any,
+				reasoningEffort: "disable",
 			})
-			handlerNoReasoning["client"] = handler["client"] as any
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
+			handlerNoReasoning["client"] = handler["client"]
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(
 				makeStream([
 					{
 						candidates: [
@@ -276,8 +301,8 @@ describe("GeminiHandler", () => {
 
 		it("should handle text messages correctly", async () => {
 			// Setup the mock implementation to return an async generator
-			;(handler["client"].models.generateContentStream as any).mockResolvedValue(
-				asyncStreamFrom([
+			vi.mocked(handler["client"].models.generateContentStream).mockResolvedValue(
+				makeStream([
 					{ text: "Hello" },
 					{ text: " world!" },
 					{ usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 } },
@@ -391,7 +416,7 @@ describe("GeminiHandler", () => {
 
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
-			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
+			vi.mocked(handler["client"].models.generateContentStream).mockRejectedValue(mockError)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
@@ -402,9 +427,9 @@ describe("GeminiHandler", () => {
 	describe("completePrompt", () => {
 		it("should complete prompt successfully", async () => {
 			// Mock the response with text property
-			;(handler["client"].models.generateContent as any).mockResolvedValue({
-				text: "Test response",
-			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(
+				stubGenerateContentResponse("Test response"),
+			)
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("Test response")
@@ -422,7 +447,7 @@ describe("GeminiHandler", () => {
 
 		it("should handle API errors", async () => {
 			const mockError = new Error("Gemini API error")
-			;(handler["client"].models.generateContent as any).mockRejectedValue(mockError)
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
 
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow(
 				t("common:errors.gemini.generate_complete_prompt", { error: "Gemini API error" }),
@@ -431,9 +456,7 @@ describe("GeminiHandler", () => {
 
 		it("should handle empty response", async () => {
 			// Mock the response with empty text
-			;(handler["client"].models.generateContent as any).mockResolvedValue({
-				text: "",
-			})
+			vi.mocked(handler["client"].models.generateContent).mockResolvedValue(stubGenerateContentResponse(""))
 
 			const result = await handler.completePrompt("Test prompt")
 			expect(result).toBe("")
@@ -1635,7 +1658,7 @@ describe("GeminiHandler", () => {
 
 		it("should capture telemetry on createMessage error", async () => {
 			const mockError = new Error("Gemini API error")
-			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
+			vi.mocked(handler["client"].models.generateContentStream).mockRejectedValue(mockError)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
@@ -1699,7 +1722,7 @@ describe("GeminiHandler", () => {
 
 		it("should capture telemetry on completePrompt error", async () => {
 			const mockError = new Error("Gemini completion error")
-			;(handler["client"].models.generateContent as any).mockRejectedValue(mockError)
+			vi.mocked(handler["client"].models.generateContent).mockRejectedValue(mockError)
 
 			await expect(handler.completePrompt("Test prompt")).rejects.toThrow()
 
@@ -1721,7 +1744,7 @@ describe("GeminiHandler", () => {
 
 		it("should still throw the error after capturing telemetry", async () => {
 			const mockError = new Error("Gemini API error")
-			;(handler["client"].models.generateContentStream as any).mockRejectedValue(mockError)
+			vi.mocked(handler["client"].models.generateContentStream).mockRejectedValue(mockError)
 
 			const stream = handler.createMessage(systemPrompt, mockMessages)
 
