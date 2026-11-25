@@ -382,6 +382,231 @@ describe("changeJournal", () => {
 			await appendChanges(tmpRoot, taskId, [])
 			await expect(fs.stat(journalPath(tmpRoot, taskId))).rejects.toMatchObject({ code: "ENOENT" })
 		})
+		it("writes both entries of a successful multi-entry batch in order", async () => {
+			// Production journals batch writes through appendChanges, so the batch
+			// shape must land every entry in order, not only the single-entry wrapper.
+			await appendChanges(tmpRoot, taskId, [
+				entry({ checkpointId: "m1", path: "src/m1.ts" }),
+				entry({ checkpointId: "m2", path: "src/m2.ts" }),
+			])
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["m1", "m2"])
+			expect(result.map((e) => e.path)).toEqual(["src/m1.ts", "src/m2.ts"])
+		})
+
+		it("round-trips every journal operation value", async () => {
+			// The validator admits exactly these three operations; pinning only the one
+			// the helper defaults to would let the other two rot silently.
+			for (const operation of ["create", "update", "delete"] as const) {
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "op-" + operation, operation }))
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.operation)).toEqual(["create", "update", "delete"])
+		})
+
+		it("rejects an append when the existing final record has wrongly typed fields", async () => {
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			await fs.mkdir(dirPath, { recursive: true })
+			await fs.writeFile(
+				journalPath(tmpRoot, taskId),
+				JSON.stringify({ path: 123, operation: "create", checkpointId: "old" }) + "\n",
+			)
+			await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))).rejects.toThrow(
+				/final record is not a complete entry/,
+			)
+		})
+
+		it("appends to a journal file that exists but is empty", async () => {
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			await fs.mkdir(dirPath, { recursive: true })
+			await fs.writeFile(journalPath(tmpRoot, taskId), "")
+			await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first"])
+		})
+
+		it("separates an unterminated tail from a malformed one in the rejection", async () => {
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			await fs.mkdir(dirPath, { recursive: true })
+			const messageOf = async (run: Promise<unknown>): Promise<string> =>
+				run.then(
+					() => "",
+					(error: unknown) => String((error as { message?: string }).message ?? ""),
+				)
+			// A fragment with no trailing newline is reported as unterminated.
+			await fs.writeFile(journalPath(tmpRoot, taskId), '{"path": 1, "operation": "create"}')
+			const unterminated = await messageOf(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" })))
+			expect(unterminated).toContain("unterminated")
+			await fs.writeFile(journalPath(tmpRoot, taskId), '{"path": 1, "operation": "create"}\n')
+			const terminated = await messageOf(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" })))
+			expect(terminated).toContain("final record is not a complete entry")
+			expect(terminated).not.toContain("unterminated")
+		})
+
+		it.each([
+			["EBUSY", "ebusy"],
+			["EACCES", "eacces"],
+		])("retries a Windows rename rejected with %s", async (code: string, id: string) => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			const realRename = fs.rename
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				attempts++
+				if (attempts === 1) {
+					throw Object.assign(new Error(code + ": transient failure"), { code })
+				}
+				await realRename(from as string | URL, to as string | URL)
+			})
+			try {
+				// Transient holds on the destination are retried for every errno on the
+				// list, not only for the one the first test happened to use.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: id }))
+				expect(attempts).toBe(2)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual([id])
+		})
+
+		it("gives up retrying a Windows rename after five attempts and reports the original error", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async () => {
+				attempts++
+				throw Object.assign(new Error("EPERM: operation not permitted"), { code: "EPERM" })
+			})
+			try {
+				// The retry budget is finite and the counter moves upward: a permanently
+				// held destination must fail the append instead of looping forever.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toMatchObject({
+					code: "EPERM",
+				})
+				expect(attempts).toBe(5)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
+		it("propagates a rename failure that carries no errno code", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			let attempts = 0
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async () => {
+				attempts++
+				throw new Error("rename rejected by an unforeseen error")
+			})
+			try {
+				// A failure without a code property is not on the retry list on any
+				// platform, so it must surface on the first attempt.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toThrow(
+					"rename rejected by an unforeseen error",
+				)
+				expect(attempts).toBe(1)
+			} finally {
+				renameSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
+		it("propagates a directory-sync failure that carries no errno code", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							throw new Error("sync failed for an unforeseen reason")
+						},
+						close: async () => {},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			try {
+				// An errno-less failure is not an "unsupported mount" either.
+				await expect(appendChange(tmpRoot, taskId, entry({ checkpointId: "x" }))).rejects.toThrow(
+					"sync failed for an unforeseen reason",
+				)
+			} finally {
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+		})
+
+		it("tolerates every errno the directory-sync guard treats as unsupported (POSIX)", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			let currentCode = "EINVAL"
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					return {
+						sync: async () => {
+							throw Object.assign(new Error(currentCode + ": unsupported"), { code: currentCode })
+						},
+						close: async () => {},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+			const tolerated = ["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"] as const
+			try {
+				// Every name on the tolerance list must be tolerated, not only the first.
+				for (const code of tolerated) {
+					currentCode = code
+					await appendChange(tmpRoot, taskId, entry({ checkpointId: "tol-" + code }))
+					expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("directory sync unsupported"))
+				}
+				expect(warnSpy).toHaveBeenCalledTimes(tolerated.length)
+			} finally {
+				openSpy.mockRestore()
+				warnSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(tolerated.map((code) => "tol-" + code))
+		})
+
+		it("skips the directory sync on win32 instead of failing on it", async () => {
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			Object.defineProperty(process, "platform", { value: "win32", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const realOpen = fs.open
+			const dirOpens: string[] = []
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				if (p === dirPath && flags === "r") {
+					dirOpens.push(p)
+					throw Object.assign(new Error("EPERM: windows cannot open directories"), { code: "EPERM" })
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			try {
+				// Windows cannot open a directory handle at all, so the update must land
+				// without ever attempting the directory sync.
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "onwin" }))
+				expect(dirOpens).toEqual([])
+			} finally {
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["onwin"])
+		})
 	})
 
 	describe("task ID containment", () => {
@@ -532,6 +757,29 @@ describe("changeJournal", () => {
 			const result = await loadChanges(tmpRoot, taskId)
 			expect(result[0].diffStats).toBeUndefined()
 		})
+		it("returns [] for a journal that contains only whitespace", async () => {
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			await fs.writeFile(journalPath(tmpRoot, taskId), "   \n  \n")
+			expect(await loadChanges(tmpRoot, taskId)).toEqual([])
+		})
+
+		it("skips a middle line whose fields have the wrong types and keeps the valid entries", async () => {
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			const good1 = JSON.stringify(entry({ checkpointId: "good1" }))
+			const wrongType = JSON.stringify({ path: 7, operation: "create", checkpointId: "weird" })
+			const good2 = JSON.stringify(entry({ checkpointId: "good2" }))
+			await fs.writeFile(journalPath(tmpRoot, taskId), [good1, wrongType, good2].join("\n") + "\n")
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["good1", "good2"])
+		})
+
+		it("rejects a final line that parses with the wrong field types", async () => {
+			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+			const good = JSON.stringify(entry({ checkpointId: "good" }))
+			const wrongType = JSON.stringify({ path: "src/foo.ts", operation: "create", checkpointId: 42 })
+			await fs.writeFile(journalPath(tmpRoot, taskId), good + "\n" + wrongType + "\n")
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Malformed change journal entry at line 2/)
+		})
 	})
 
 	describe("journal queue lifecycle", () => {
@@ -551,6 +799,56 @@ describe("changeJournal", () => {
 			await Promise.all([first, second])
 			await new Promise((resolve) => setImmediate(resolve))
 			expect(journalQueueDepth()).toBe(before)
+		})
+		it("keeps a newer queued update when an earlier one settles", async () => {
+			// Each gate is created before the code under test runs, so releasing it
+			// later cannot race the moment the mocked rename reaches the gate.
+			const makeGate = (): { release: () => void; wait: () => Promise<void> } => {
+				let settle = (): void => {}
+				const promise = new Promise<void>((resolve) => {
+					settle = () => resolve()
+				})
+				return {
+					release: () => settle(),
+					wait: () => promise,
+				}
+			}
+			const firstGate = makeGate()
+			const secondGate = makeGate()
+			let gateCount = 0
+			const realRename = fs.rename
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				gateCount++
+				if (gateCount === 1) {
+					await firstGate.wait()
+				} else if (gateCount === 2) {
+					await secondGate.wait()
+				}
+				await realRename(from as string | URL, to as string | URL)
+			})
+			const before = journalQueueDepth()
+			try {
+				const first = appendChange(tmpRoot, taskId, entry({ checkpointId: "slow" }))
+				const second = appendChange(tmpRoot, taskId, entry({ checkpointId: "newer" }))
+				expect(journalQueueDepth()).toBe(before + 1)
+				firstGate.release()
+				await first
+				// The pruning hook runs one microtask after the caller promise settles.
+				await new Promise((resolve) => setImmediate(resolve))
+				// The earlier update has settled while the newer one is still queued:
+				// pruning is keyed to the queue tail, so it must not drop the newer entry.
+				expect(journalQueueDepth()).toBe(before + 1)
+				secondGate.release()
+				await second
+				await new Promise((resolve) => setImmediate(resolve))
+				expect(journalQueueDepth()).toBe(before)
+			} finally {
+				renameSpy.mockRestore()
+				firstGate.release()
+				secondGate.release()
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["slow", "newer"])
 		})
 	})
 })
