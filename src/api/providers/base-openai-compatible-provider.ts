@@ -86,13 +86,19 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 
 		const temperature = this.options.modelTemperature ?? info.defaultTemperature ?? this.defaultTemperature
 
-		const params: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming = {
+		// O3-family models are detected on the model id with any non-standard
+		// prefix stripped (e.g. "custom/o3-mini" -> "o3-mini"), so prefixed ids
+		// still route to the O3 handling path.
+		const isO3Family = this.isO3FamilyModel(model)
+
+		const params: OpenAI.Chat.Completions.ChatCompletionCreateParams = {
 			model,
 			max_tokens,
 			temperature,
 			messages: [{ role: "system", content: systemPrompt }, ...convertToOpenAiMessages(messages)],
-			stream: true,
-			stream_options: { include_usage: true },
+			// O3-family models do not support streaming: disable it when detected.
+			stream: !isO3Family,
+			...(isO3Family ? {} : { stream_options: { include_usage: true } }),
 			tools: this.convertToolsForOpenAI(metadata?.tools),
 			tool_choice: metadata?.tool_choice,
 			parallel_tool_calls: metadata?.parallelToolCalls ?? true,
@@ -129,7 +135,7 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		let lastUsage: OpenAI.CompletionUsage | undefined
 		const activeToolCallIds = new Set<string>()
 
-		for await (const chunk of stream) {
+		for await (const chunk of stream as unknown as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>) {
 			// Check for provider-specific error responses (e.g., MiniMax base_resp)
 			const chunkAny = chunk as any
 			if (chunkAny.base_resp?.status_code && chunkAny.base_resp.status_code !== 0) {
@@ -240,6 +246,13 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}
+	}
+
+	protected isO3FamilyModel(modelId: string): boolean {
+		// Strip non-standard prefixes (e.g. "custom/o3-mini", "accounts/.../o3") so
+		// prefixed model ids are still recognized as O3-family models.
+		const stripped = modelId.includes("/") ? modelId.slice(modelId.lastIndexOf("/") + 1) : modelId
+		return stripped.includes("o1") || stripped.includes("o3") || stripped.includes("o4")
 	}
 
 	override getModel() {
