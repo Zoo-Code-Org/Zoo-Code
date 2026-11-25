@@ -35,7 +35,6 @@ const expectedProviderIdentifiers = [
 	"opencode-go",
 	"kenari",
 	"nanogpt",
-	"io-intelligence",
 	"ollama",
 	"lmstudio",
 	"vscode-lm",
@@ -48,7 +47,6 @@ const expectedProviderIdentifiers = [
 	"fireworks",
 	"friendli",
 	"gemini",
-	"gemini-cli",
 	"mistral",
 	"moonshot",
 	"kimi-code",
@@ -64,6 +62,7 @@ const expectedProviderIdentifiers = [
 ]
 
 const expectedRetiredProviderIdentifiers = [
+	"gemini-cli",
 	"cerebras",
 	"chutes",
 	"deepinfra",
@@ -71,6 +70,7 @@ const expectedRetiredProviderIdentifiers = [
 	"featherless",
 	"groq",
 	"huggingface",
+	"io-intelligence",
 	"roo",
 ]
 /* eslint-enable zoo/no-raw-provider-identifiers */
@@ -112,8 +112,8 @@ describe("provider identifiers", () => {
 			providerIdentifiers.opencodeGo,
 			providerIdentifiers.kenari,
 			providerIdentifiers.nanogpt,
-			providerIdentifiers.ioIntelligence,
 			providerIdentifiers.kimiCode,
+			providerIdentifiers.friendli,
 		])
 		expect(localProviders).toEqual([providerIdentifiers.ollama, providerIdentifiers.lmstudio])
 		expect(internalProviders).toEqual([providerIdentifiers.vscodeLm, providerIdentifiers.githubCopilot])

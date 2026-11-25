@@ -3,7 +3,8 @@ import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
 
-import type { ExtensionMessage } from "@roo-code/types"
+import type { ExtensionMessage, MentionSegment } from "@roo-code/types"
+import { generatedSegments } from "@roo/mentionSegments"
 
 import { mentionRegex, mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "@roo/context-mentions"
 import { WebviewMessage } from "@roo/WebviewMessage"
@@ -59,6 +60,13 @@ const isFileDrag = (dataTransfer: DataTransfer): boolean =>
 interface ChatTextAreaProps {
 	inputValue: string
 	setInputValue: (value: string) => void
+	/** Programmatic updates preserve the chat box authorization scope. */
+	/** Sets generated text, such as an enhanced prompt. Falls back to `setInputValue`. */
+	setInputValueGenerated?: (value: string) => void
+	/** Reads the draft's segments. Null means all user text. */
+	getInputSegments?: () => MentionSegment[] | null
+	/** Sets the value with its segments, for prompt history. */
+	setInputValueWithSegments?: (value: string, segments: MentionSegment[] | null) => void
 	sendingDisabled: boolean
 	selectApiConfigDisabled: boolean
 	placeholderText: string
@@ -85,6 +93,9 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		{
 			inputValue,
 			setInputValue,
+			setInputValueGenerated,
+			getInputSegments,
+			setInputValueWithSegments,
 			selectApiConfigDisabled,
 			placeholderText,
 			selectedImages,
@@ -155,6 +166,11 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			return () => document.removeEventListener("mousedown", handleClickOutside)
 		}, [showDropdown])
 
+		// Generated text routes through this setter so it is never marked as user text.
+		const setInputValueProgrammatic = setInputValueGenerated ?? setInputValue
+
+		const programmaticInsertRef = useRef(false)
+
 		// Handle enhanced prompt response and search results.
 		useEffect(() => {
 			const messageHandler = (event: MessageEvent) => {
@@ -173,12 +189,18 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 								// Select all text first
 								textarea.select()
-								document.execCommand("insertText", false, message.text)
+								programmaticInsertRef.current = true
+								if (!document.execCommand("insertText", false, message.text)) {
+									// No input event follows, so the flag would tag the next keystroke generated.
+									programmaticInsertRef.current = false
+									setInputValueProgrammatic(message.text)
+								}
 							} else {
-								setInputValue(message.text)
+								setInputValueProgrammatic(message.text)
 							}
 						} catch {
-							setInputValue(message.text)
+							programmaticInsertRef.current = false
+							setInputValueProgrammatic(message.text)
 						}
 					}
 
@@ -202,6 +224,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							message.text +
 							" " +
 							currentValue.slice(cursorPos)
+						// The user chose this text, so it is a normal edit.
 						setInputValue(newValue)
 
 						// Set cursor position after the inserted text
@@ -233,7 +256,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			window.addEventListener("message", messageHandler)
 			return () => window.removeEventListener("message", messageHandler)
-		}, [setInputValue, searchRequestId, normalizedInputValue])
+		}, [setInputValue, setInputValueProgrammatic, searchRequestId, normalizedInputValue])
 
 		const [isDraggingOver, setIsDraggingOver] = useState(false)
 		const [textAreaBaseHeight, setTextAreaBaseHeight] = useState<number | undefined>(undefined)
@@ -258,6 +281,8 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			cwd,
 			inputValue: normalizedInputValue,
 			setInputValue,
+			getSegments: getInputSegments,
+			setInputValueWithSegments,
 		})
 
 		// Fetch git commits when Git is selected or when typing a hash.
@@ -278,9 +303,9 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				setIsEnhancingPrompt(true)
 				vscode.postMessage({ type: "enhancePrompt" as const, text: trimmedInput })
 			} else {
-				setInputValue(t("chat:enhancePromptDescription"))
+				setInputValueProgrammatic(t("chat:enhancePromptDescription"))
 			}
-		}, [normalizedInputValue, setInputValue, t])
+		}, [normalizedInputValue, setInputValueProgrammatic, t])
 
 		const allModes = useMemo(() => getAllModes(customModes), [customModes])
 
@@ -451,6 +476,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 						setSelectedMenuIndex((prevIndex) => {
 							const direction = event.key === "ArrowUp" ? -1 : 1
 							const options = getContextMenuOptions(
+								t,
 								searchQuery,
 								selectedType,
 								queryItems,
@@ -489,6 +515,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
 						event.preventDefault()
 						const selectedOption = getContextMenuOptions(
+							t,
 							searchQuery,
 							selectedType,
 							queryItems,
@@ -597,6 +624,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 				resetHistoryNavigation,
 				commands,
 				enterBehavior,
+				t,
 			],
 		)
 
@@ -613,7 +641,16 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const handleInputChange = useCallback(
 			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
 				const newValue = e.target.value
-				setInputValue(newValue)
+				const inputType = e.nativeEvent instanceof InputEvent ? e.nativeEvent.inputType : ""
+				if (setInputValueWithSegments && inputType.startsWith("history")) {
+					// Undo and redo bring back older text with unknown origin. The whole draft is generated.
+					setInputValueWithSegments(newValue, generatedSegments(newValue))
+				} else if (programmaticInsertRef.current) {
+					programmaticInsertRef.current = false
+					setInputValueProgrammatic(newValue)
+				} else {
+					setInputValue(newValue)
+				}
 
 				// Reset history navigation when user types
 				resetOnInputChange()
@@ -675,7 +712,15 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 					setFileSearchResults([]) // Clear file search results.
 				}
 			},
-			[setInputValue, setSearchRequestId, setFileSearchResults, setSearchLoading, resetOnInputChange],
+			[
+				setInputValue,
+				setInputValueProgrammatic,
+				setInputValueWithSegments,
+				setSearchRequestId,
+				setFileSearchResults,
+				setSearchLoading,
+				resetOnInputChange,
+			],
 		)
 
 		useEffect(() => {

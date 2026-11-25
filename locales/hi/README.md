@@ -46,11 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## v3.96.0 में नया क्या है
+## Zoo Code v3.98.2 में नया क्या है
 
-- ✨ **नई चैट सेटिंग्स और डायग्नोस्टिक्स:** कॉन्फ़िगर करने योग्य समय और तारीख फ़ॉर्मैट के साथ मैसेज टाइमस्टैम्प दिखाएँ, Anthropic प्रोफ़ाइल के लिए prompt-cache TTL सेट करें, और प्राइवेसी-सेफ डायग्नोस्टिक्स रिपोर्ट बनाएँ।
-- 💸 **ज़्यादा सटीक प्रोवाइडर लागत और कैशिंग:** Anthropic टूल रिज़ल्ट को बरकरार रखें, Anthropic और MiniMax लागतों में क्यूमुलेटिव आउटपुट token अपनाएँ, DeepSeek के prompt-cache काउंटर पढ़ें, xAI Responses कैश को टारगेट करें, और Mistral कैश रीड को 0.1x पर बिल करें।
-- 🧭 **ज़्यादा भरोसेमंद और तेज़ चैट:** रीस्टार्ट के बाद पूरी हुई टास्क फिर से शुरू करें, सेव किया गया commit मौजूद न होने पर checkpoint रीस्टोर करें, बंद पड़े webview रेंडरर को अपने आप रीलोड करें, स्ट्रीमिंग अपडेट को थ्रॉटल करें, और भाषाएँ मांग पर लोड करें।
+- 💫अपने Zoo Gateway खाते में किसी भी राशि के साथ 1 दिसंबर तक असीमित GLM-5.3-Flash के साथ Zoo Pass का मुफ़्त पूर्वावलोकन करें।
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 मॉडल: Gemini 3.8 Flash और नए Gemini 4 Carbon, Hydrogen और Neon मॉडल का उपयोग करें। Gemini पर xhigh थिंकिंग स्तर सेट करें।
+- 🌐 Responses API: OpenAI Compatible प्रदाताओं के लिए Responses API समर्थन चालू करें। टूल उपयोग के साथ रीजनिंग उन एंडपॉइंट पर काम करता है जिन्हें इसकी आवश्यकता होती है।
+- 🔧 सुधार: Vertex Gemini अनुरोध अब मॉडल टर्न पर समाप्त नहीं होते। LiteLLM के माध्यम से Gemini थॉट सिग्नेचर सुरक्षित रहते हैं। Ollama कार्य कॉन्फ़िगर की गई कॉन्टेक्स्ट सीमा पर संकुचित होते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

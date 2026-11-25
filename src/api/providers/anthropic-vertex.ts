@@ -296,6 +296,7 @@ export class AnthropicVertexHandler extends BaseProvider implements SingleComple
 			defaultTemperature: 0,
 		})
 		const thinking = getAnthropicProviderReasoning({
+			modelId: id,
 			model: info,
 			reasoningBudget: params.reasoningBudget,
 			settings: this.options,

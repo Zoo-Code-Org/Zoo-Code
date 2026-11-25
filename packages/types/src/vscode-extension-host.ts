@@ -5,7 +5,7 @@ import type { ProviderSettings, ProviderSettingsEntry } from "./provider-setting
 import type { HistoryItem } from "./history.js"
 import type { ModeConfig, PromptComponent } from "./mode.js"
 import type { Experiments } from "./experiment.js"
-import type { ClineMessage, QueuedMessage } from "./message.js"
+import type { ClineMessage, MentionSegment, QueuedMessage } from "./message.js"
 import type { MarketplaceItem, MarketplaceInstalledMetadata, InstallMarketplaceItemOptions } from "./marketplace.js"
 import type { TodoItem } from "./todo.js"
 import type { CloudUserInfo, CloudOrganizationMembership, OrganizationAllowList, ShareVisibility } from "./cloud.js"
@@ -22,6 +22,35 @@ import type { SkillMetadata } from "./skills.js"
 import type { RuleMetadata } from "./rules.js"
 import type { TelemetrySetting } from "./telemetry.js"
 import type { WorktreeIncludeStatus } from "./worktree.js"
+
+/** Provider lookups the extension host runs for the webview, keeping provider origins out of the CSP. */
+export type ProviderInfoKind = keyof ProviderInfoResultMap
+
+export interface ProviderInfoParams {
+	apiKey?: string
+	baseUrl?: string
+	modelId?: string
+}
+
+/** Result of each lookup. The host and the webview share it, so the kind fixes the result type. */
+export interface ProviderInfoResultMap {
+	openRouterKeyInfo: {
+		label: string
+		usage: number
+		is_free_tier: boolean
+		is_provisioning_key: boolean
+		rate_limit: { requests: number; interval: string }
+		limit: number | null
+	} | null
+	openRouterModelProviders: Record<string, ModelInfo & { label: string }>
+	requestyKeyInfo: {
+		name: string
+		monthly_limit: string
+		monthly_spend: string
+		org_balance: string
+		config: { aliases?: Record<string, unknown> }
+	} | null
+}
 
 /**
  * ExtensionMessage
@@ -66,6 +95,7 @@ export interface ExtensionMessage {
 		| "ttsStart"
 		| "ttsStop"
 		| "fileSearchResults"
+		| "providerInfo"
 		| "toggleApiConfigPin"
 		| "acceptInput"
 		| "setHistoryPreviewCollapsed"
@@ -133,6 +163,8 @@ export interface ExtensionMessage {
 		| "switchTab"
 		| "toggleAutoApprove"
 	invoke?: "newChat" | "sendMessage" | "primaryButtonClick" | "secondaryButtonClick" | "setChatBoxMessage"
+	/** With `invoke: "setChatBoxMessage"`: origin of each part of `text`. Absent means all generated. */
+	segments?: MentionSegment[]
 	/**
 	 * Partial state updates are allowed to reduce message size (e.g. omit large fields like taskHistory).
 	 * The webview is responsible for merging.
@@ -340,6 +372,8 @@ export type ExtensionState = Pick<
 	| "imageGenerationProvider"
 	| "openRouterImageGenerationSelectedModel"
 	| "includeTaskHistoryInEnhance"
+	| "taskTitleGenerationEnabled"
+	| "taskTitleApiConfigId"
 	| "reasoningBlockCollapsed"
 	| "chatFontSize"
 	| "timeFormat"
@@ -512,7 +546,15 @@ export interface UpdateTodoListPayload {
 	todos: any[]
 }
 
-export type EditQueuedMessagePayload = Pick<QueuedMessage, "id" | "text" | "images">
+// Segments stay unknown. normalizeSegments fails closed on a bad list.
+export const editQueuedMessagePayloadSchema = z.object({
+	id: z.string(),
+	text: z.string(),
+	images: z.array(z.string()).optional(),
+	segments: z.unknown().optional(),
+})
+
+export type EditQueuedMessagePayload = z.infer<typeof editQueuedMessagePayloadSchema>
 
 export interface WebviewMessage {
 	type:
@@ -549,6 +591,7 @@ export interface WebviewMessage {
 		| "resetState"
 		| typeof RouterModelsMessageType.flushRouterModels
 		| typeof RouterModelsMessageType.requestRouterModels
+		| "requestProviderInfo"
 		| typeof OpenAiModelsMessageType.requestOpenAiModels
 		| typeof OllamaModelsMessageType.requestOllamaModels
 		| typeof LmStudioModelsMessageType.requestLmStudioModels
@@ -817,6 +860,8 @@ export interface WebviewMessage {
 	updatedSettings?: RooCodeSettings
 	/** Task configuration applied via `createTask()`. */
 	taskConfiguration?: RooCodeSettings
+	/** Origin of each part of `text`. Absent or not matching `text` means all generated. */
+	segments?: MentionSegment[]
 	// Worktree properties
 	worktreePath?: string
 	worktreeBranch?: string

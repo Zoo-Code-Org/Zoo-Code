@@ -99,5 +99,13 @@ describe("export-markdown", () => {
 			} satisfies ExtendedContentBlock
 			expect(formatContentBlockToMarkdown(block)).toBe("[Tool Reference]")
 		})
+
+		it("should format browser_state blocks", () => {
+			const block = {
+				type: "browser_state",
+				tabs: [],
+			} satisfies ExtendedContentBlock
+			expect(formatContentBlockToMarkdown(block)).toBe("[Browser State]")
+		})
 	})
 })

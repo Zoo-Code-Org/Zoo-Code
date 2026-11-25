@@ -1,4 +1,5 @@
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // When the backend auto-resolves an interactive ask, isAnswered:true is stamped
 // on the ClineMessage before it is added so the webview state snapshot already
@@ -12,7 +13,7 @@ type ProviderStub = {
 
 function buildTask(provider: ProviderStub | undefined) {
 	const task = Object.create(Task.prototype) as Task
-	;(task as any).abort = false
+	setAbortLatch(task, false)
 	;(task as any).clineMessages = []
 	;(task as any).askResponse = undefined
 	;(task as any).askResponseText = undefined

@@ -3,17 +3,25 @@
 import { Anthropic } from "@anthropic-ai/sdk"
 import OpenAI from "openai"
 
-import { friendliDefaultModelId, friendliModels } from "@roo-code/types"
+import { friendliDefaultModelId, friendliModels, openAiModelInfoSaneDefaults } from "@roo-code/types"
 
 import { buildApiHandler } from "../../index"
 import { getModelMaxOutputTokens } from "../../../shared/api"
 import { FriendliHandler } from "../friendli"
+import { NOT_PROVIDED } from "../constants"
 import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { clearAllMocks } from "../../../test-utils/reset"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Create mock functions
 const mockCreate = vi.fn()
+const { mockGetModels, mockGetFriendliModels } = vi.hoisted(() => ({
+	mockGetModels: vi.fn(async () => ({})),
+	mockGetFriendliModels: vi.fn(),
+}))
+
+vi.mock("../fetchers/modelCache", () => ({ getModels: mockGetModels }))
+vi.mock("../fetchers/friendli", () => ({ getFriendliModels: mockGetFriendliModels }))
 
 // Mock OpenAI module
 vi.mock("openai", () => ({
@@ -80,8 +88,292 @@ describe("FriendliHandler", () => {
 		expect(OpenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: friendliApiKey }))
 	})
 
-	it("should throw error when API key is not provided", () => {
-		expect(() => new FriendliHandler({})).toThrow("API key is required")
+	it("should construct without an API key and without fetching the catalog", () => {
+		expect(() => new FriendliHandler({})).not.toThrow()
+		expect(mockGetModels).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{ entry: "createMessage", run: (h: FriendliHandler) => h.createMessage("system", []).next() },
+		{ entry: "completePrompt", run: (h: FriendliHandler) => h.completePrompt("a") },
+	])("keyless $entry sends the placeholder key and surfaces a 401 to the caller", async ({ run }) => {
+		const unauthorized = Object.assign(new Error("Incorrect API key provided"), { status: 401 })
+		mockCreate.mockRejectedValueOnce(unauthorized)
+		const keyless = new FriendliHandler({})
+
+		await expect(run(keyless)).rejects.toMatchObject({ status: 401 })
+		expect(vi.mocked(OpenAI).mock.lastCall?.[0]).toEqual(expect.objectContaining({ apiKey: NOT_PROVIDED }))
+	})
+
+	it("should load the catalog once before building requests for fetched-only models", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+		await handlerWithModel.completePrompt("b")
+
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+		expect(handlerWithModel.getModel()).toEqual(expect.objectContaining({ id: "vendor/new-model", info }))
+	})
+
+	it("should wait for the catalog before streaming", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "test-key" })
+
+		await handlerWithModel.createMessage("system", []).next()
+
+		expect(mockCreate.mock.calls[0][0]).toEqual(expect.objectContaining({ max_tokens: 8192 }))
+	})
+
+	it("should not start a chat request when cancelled during catalog loading", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const pending = handler.createMessage("system", [], { taskId: "t", abortSignal: controller.signal }).next()
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("ensureModelFetched should expose the fetched context window before any request", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "k" })
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info.contextWindow).toBe(100_000)
+
+		await handlerWithModel.completePrompt("a")
+		expect(mockGetModels).toHaveBeenCalledTimes(1)
+	})
+
+	it("completePrompt should not start a chat request when cancelled during catalog loading", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+		const controller = new AbortController()
+		const pending = handler.completePrompt("a", { abortSignal: controller.signal })
+
+		controller.abort()
+
+		await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it.each([
+		{
+			entry: "createMessage",
+			run: (h: FriendliHandler, signal: AbortSignal) =>
+				h.createMessage("system", [], { taskId: "t", abortSignal: signal }).next(),
+		},
+		{
+			entry: "completePrompt",
+			run: (h: FriendliHandler, signal: AbortSignal) => h.completePrompt("a", { abortSignal: signal }),
+		},
+	])("$entry should not start a chat request when cancelled as the catalog settles", async ({ run }) => {
+		const controller = new AbortController()
+		mockGetModels.mockImplementationOnce(async () => {
+			controller.abort()
+			return { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+		})
+
+		await expect(run(handler, controller.signal)).rejects.toMatchObject({ name: "AbortError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("createMessage should forward a per-request signal and normalize a mid-stream abort", async () => {
+		const controller = new AbortController()
+		mockCreate.mockImplementationOnce(async function* () {
+			yield { choices: [{ delta: { content: "partial" }, index: 0 }] }
+			controller.abort()
+			throw new Error("Request was aborted.")
+		})
+
+		const stream = handler.createMessage("system", [], { taskId: "t", abortSignal: controller.signal })
+
+		await expect(collectStream(stream)).rejects.toMatchObject({
+			name: "AbortError",
+			message: "The Friendli request was aborted",
+		})
+		const forwarded = (mockCreate.mock.calls[0][1] as { signal: AbortSignal }).signal
+		expect(forwarded).not.toBe(controller.signal)
+		expect(forwarded.aborted).toBe(true)
+	})
+
+	describe("caller signal listener cleanup", () => {
+		// Mirrors openai@5 client.js: an anonymous abort listener that is never removed.
+		const leakyCreate = (body: () => AsyncGenerator<unknown>) =>
+			mockCreate.mockImplementation((_params: unknown, opts?: { signal?: AbortSignal }) => {
+				opts?.signal?.addEventListener("abort", () => {})
+				return body()
+			})
+		const trackListeners = (signal: AbortSignal) => {
+			const live = new Set<unknown>()
+			const add = signal.addEventListener.bind(signal)
+			const remove = signal.removeEventListener.bind(signal)
+			vi.spyOn(signal, "addEventListener").mockImplementation((type, fn, opts) => {
+				live.add(fn)
+				add(type, fn, opts)
+			})
+			vi.spyOn(signal, "removeEventListener").mockImplementation((type, fn, opts) => {
+				live.delete(fn)
+				remove(type, fn, opts)
+			})
+			return live
+		}
+		const chunk = { choices: [{ delta: { content: "x" }, index: 0 }] }
+
+		it("detaches from a signal reused across completed streams", async () => {
+			leakyCreate(() => asyncStreamFrom([chunk]))
+			const { signal } = new AbortController()
+			const live = trackListeners(signal)
+
+			for (let i = 0; i < 3; i++) {
+				await collectStream(handler.createMessage("system", [], { taskId: "t", abortSignal: signal }))
+			}
+
+			expect(mockCreate).toHaveBeenCalledTimes(3)
+			expect(live.size).toBe(0)
+		})
+
+		it.each([
+			{
+				exit: "a failed stream",
+				body: async function* () {
+					yield chunk
+					throw new Error("boom")
+				},
+				consume: (s: AsyncGenerator<unknown>) => expect(collectStream(s)).rejects.toThrow("boom"),
+			},
+			{
+				exit: "an early generator exit",
+				body: async function* () {
+					yield chunk
+					yield chunk
+				},
+				consume: async (s: AsyncGenerator<unknown>) => {
+					await s.next()
+					await s.return(undefined)
+				},
+			},
+		])("detaches after $exit", async ({ body, consume }) => {
+			leakyCreate(body)
+			const { signal } = new AbortController()
+			const live = trackListeners(signal)
+
+			await consume(handler.createMessage("system", [], { taskId: "t", abortSignal: signal }))
+
+			expect(live.size).toBe(0)
+		})
+
+		it("completePrompt detaches from a signal reused across keyless calls that succeed and fail", async () => {
+			const keyless = new FriendliHandler({})
+			let calls = 0
+			mockCreate.mockImplementation(async (_params: unknown, opts?: { signal?: AbortSignal }) => {
+				opts?.signal?.addEventListener("abort", () => {})
+				if (++calls === 3) throw new Error("boom")
+				if (calls === 4) {
+					// In flight until the forwarded signal aborts.
+					await new Promise((resolve) => opts?.signal?.addEventListener("abort", resolve))
+					throw new Error("Request was aborted.")
+				}
+				return { choices: [{ message: { content: "ok" } }] }
+			})
+			const controller = new AbortController()
+			const live = trackListeners(controller.signal)
+
+			await keyless.completePrompt("a", { abortSignal: controller.signal })
+			await keyless.completePrompt("b", { abortSignal: controller.signal })
+			await expect(keyless.completePrompt("c", { abortSignal: controller.signal })).rejects.toThrow("boom")
+
+			expect(mockCreate).toHaveBeenCalledTimes(3)
+			expect(live.size).toBe(0)
+			// The bridge still follows the caller after earlier calls detached.
+			const pending = keyless.completePrompt("d", { abortSignal: controller.signal })
+			await vi.waitFor(() => expect(mockCreate).toHaveBeenCalledTimes(4))
+			controller.abort()
+			await expect(pending).rejects.toThrow()
+			expect((mockCreate.mock.lastCall?.[1] as { signal: AbortSignal }).signal.aborted).toBe(true)
+		})
+	})
+
+	it("should retry an empty catalog and keep the next nonempty one", async () => {
+		const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+		mockGetModels.mockResolvedValueOnce({}).mockResolvedValueOnce({ "vendor/new-model": info })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/new-model", friendliApiKey: "k" })
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info).toEqual(openAiModelInfoSaneDefaults)
+
+		await handlerWithModel.ensureModelFetched()
+		expect(handlerWithModel.getModel().info).toBe(info)
+
+		await handlerWithModel.ensureModelFetched()
+		expect(mockGetModels).toHaveBeenCalledTimes(2)
+		expect(handlerWithModel.getModel().info).toBe(info)
+	})
+
+	it("completePrompt should give the completion only the time left after the catalog wait", async () => {
+		let now = 1_000
+		vi.spyOn(Date, "now").mockImplementation(() => now)
+		mockGetModels.mockImplementationOnce(async () => {
+			now += 1_000
+			return {}
+		})
+		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+
+		await handler.completePrompt("a", { timeoutMs: 3000 })
+
+		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: 2000 })
+	})
+
+	it("completePrompt should time out without a chat request when a resolved catalog wait spends the deadline", async () => {
+		let now = 1_000
+		vi.spyOn(Date, "now").mockImplementation(() => now)
+		mockGetModels.mockImplementationOnce(async () => {
+			now += 3_000
+			return {}
+		})
+
+		await expect(handler.completePrompt("a", { timeoutMs: 3000 })).rejects.toMatchObject({ name: "TimeoutError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("completePrompt should time out without a chat request when the catalog wait uses the deadline", async () => {
+		mockGetModels.mockReturnValueOnce(new Promise(() => {}))
+
+		await expect(handler.completePrompt("a", { timeoutMs: 20 })).rejects.toMatchObject({ name: "TimeoutError" })
+		expect(mockCreate).not.toHaveBeenCalled()
+	})
+
+	it("should fall back to static models when the catalog is empty", async () => {
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		await handler.completePrompt("a")
+
+		expect(handler.getModel().info).toEqual(friendliModels[friendliDefaultModelId])
+	})
+
+	it("should keep an unknown model id with default metadata when the catalog fails", async () => {
+		mockGetModels.mockRejectedValueOnce(new Error("Network error"))
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+		const handlerWithModel = new FriendliHandler({ apiModelId: "vendor/unknown", friendliApiKey: "test-key" })
+
+		await handlerWithModel.completePrompt("a")
+
+		expect(handlerWithModel.getModel()).toEqual(
+			expect.objectContaining({ id: "vendor/unknown", info: openAiModelInfoSaneDefaults }),
+		)
+	})
+
+	it("fetchModels should load the public /v1/models catalog", async () => {
+		const fetched = { "vendor/new-model": { contextWindow: 100_000, supportsPromptCache: false } }
+		mockGetFriendliModels.mockResolvedValueOnce(fetched)
+		const signal = new AbortController().signal
+
+		expect(await handler.fetchModels({ provider: providerIdentifiers.friendli }, signal)).toBe(fetched)
+		expect(mockGetFriendliModels).toHaveBeenCalledWith({ signal })
 	})
 
 	it("should return default model when no model is specified", () => {
@@ -181,11 +473,13 @@ describe("FriendliHandler", () => {
 		expect(result).toBe(expectedResponse)
 	})
 
-	it("completePrompt should forward the abort signal", async () => {
+	it("completePrompt should forward a per-request signal instead of the caller's", async () => {
 		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
-		const { signal } = new AbortController()
-		await handler.completePrompt("test prompt", { abortSignal: signal })
-		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { signal })
+		const controller = new AbortController()
+		await handler.completePrompt("test prompt", { abortSignal: controller.signal })
+		const forwarded = (mockCreate.mock.lastCall?.[1] as { signal: AbortSignal }).signal
+		expect(forwarded).not.toBe(controller.signal)
+		expect(forwarded.aborted).toBe(false)
 	})
 
 	it.each([
@@ -193,6 +487,7 @@ describe("FriendliHandler", () => {
 		{ label: "a fractional", input: 12.5, forwarded: 13 },
 		{ label: "an over-cap", input: 2_147_483_648, forwarded: 2_147_483_647 },
 	])("completePrompt should forward $label timeoutMs as $forwarded", async ({ input, forwarded }) => {
+		vi.spyOn(Date, "now").mockReturnValue(1_000) // no time passes during the catalog wait
 		mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
 		await handler.completePrompt("test prompt", { timeoutMs: input })
 		expect(mockCreate).toHaveBeenLastCalledWith(expect.anything(), { timeout: forwarded })
@@ -566,5 +861,82 @@ describe("FriendliHandler — Friendli-specific reasoning params", () => {
 		expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
 		expect(callArgs.parse_reasoning).toBe(true)
 		expect(callArgs.include_reasoning).toBe(true)
+	})
+
+	describe("toggle-only models (supportsReasoningBinary)", () => {
+		const toggleOnly = { contextWindow: 202_752, supportsPromptCache: false, supportsReasoningBinary: true }
+
+		const requestFor = async (settings: { enableReasoningEffort?: boolean; reasoningEffort?: "high" }) => {
+			mockGetModels.mockResolvedValueOnce({ "zai-org/GLM-5.1": toggleOnly })
+			mockCreate.mockImplementationOnce(() => asyncStreamFrom([]))
+			const handler = new FriendliHandler({ apiModelId: "zai-org/GLM-5.1", ...settings })
+			await handler.createMessage("system", []).next()
+			return mockCreate.mock.calls[0][0] as Record<string, unknown>
+		}
+
+		it("sends enable_thinking: true with reasoning parsing when enabled, without an effort", async () => {
+			// A stale effort from a previous model must not leak into a toggle-only request.
+			const callArgs = await requestFor({ enableReasoningEffort: true, reasoningEffort: "high" })
+
+			expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+			expect(callArgs.parse_reasoning).toBe(true)
+			expect(callArgs.include_reasoning).toBe(true)
+			expect(callArgs).not.toHaveProperty("reasoning_effort")
+		})
+
+		it.each([{ enableReasoningEffort: false }, {}])(
+			"sends enable_thinking: false when the toggle is off or unset (%o)",
+			async (settings) => {
+				const callArgs = await requestFor(settings)
+
+				expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: false })
+				expect(callArgs).not.toHaveProperty("parse_reasoning")
+				expect(callArgs).not.toHaveProperty("include_reasoning")
+				expect(callArgs).not.toHaveProperty("reasoning_effort")
+			},
+		)
+
+		it("completePrompt sends the same toggle params", async () => {
+			mockGetModels.mockResolvedValueOnce({ "zai-org/GLM-5.1": toggleOnly })
+			mockCreate.mockResolvedValueOnce({ choices: [{ message: { content: "ok" } }] })
+			const handler = new FriendliHandler({ apiModelId: "zai-org/GLM-5.1", enableReasoningEffort: true })
+
+			await handler.completePrompt("test")
+
+			const callArgs = mockCreate.mock.calls[0][0] as Record<string, unknown>
+			expect(callArgs.chat_template_kwargs).toEqual({ enable_thinking: true })
+			expect(callArgs).not.toHaveProperty("reasoning_effort")
+		})
+	})
+})
+
+describe("FriendliHandler — reserved model IDs", () => {
+	beforeEach(() => {
+		clearAllMocks()
+		mockCreate.mockResolvedValue({ choices: [{ message: { content: "ok" } }] })
+	})
+
+	it.each(["toString", "constructor", "__proto__"])(
+		"does not resolve inherited members for %s (catalog as a plain object)",
+		async (id) => {
+			mockGetModels.mockResolvedValueOnce({})
+			const handler = new FriendliHandler({ apiModelId: id })
+
+			await handler.completePrompt("a")
+
+			expect(handler.getModel()).toEqual(expect.objectContaining({ id, info: openAiModelInfoSaneDefaults }))
+		},
+	)
+
+	it("resolves a fetched model whose upstream ID is __proto__", async () => {
+		const info = { contextWindow: 1000, supportsPromptCache: false }
+		const catalog: Record<string, typeof info> = Object.create(null)
+		catalog["__proto__"] = info
+		mockGetModels.mockResolvedValueOnce(catalog)
+		const handler = new FriendliHandler({ apiModelId: "__proto__" })
+
+		await handler.completePrompt("a")
+
+		expect(handler.getModel().info).toBe(info)
 	})
 })

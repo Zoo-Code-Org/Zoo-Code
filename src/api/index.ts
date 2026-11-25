@@ -45,7 +45,6 @@ import {
 	VercelAiGatewayHandler,
 	OpencodeGoHandler,
 	KenariHandler,
-	IOIntelligenceHandler,
 	NanoGptHandler,
 	ZooGatewayHandler,
 	MiniMaxHandler,
@@ -203,6 +202,10 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 		throw new Error(getRouterRemovalMessage())
 	}
 
+	if (apiProvider === retiredProviderIdentifiers.geminiCli) {
+		throw new Error("Gemini CLI is no longer supported. Select a supported provider in your API profile settings.")
+	}
+
 	if (apiProvider && isRetiredProvider(apiProvider)) {
 		throw new Error(
 			`Sorry, this provider is no longer supported. We saw very few Roo users actually using it and we need to reduce the surface area of our codebase so we can keep shipping fast and serving our community well in this space. It was a really hard decision but it lets us focus on what matters most to you. It sucks, we know.\n\nPlease select a different provider in your API profile settings.`,
@@ -272,8 +275,6 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new OpencodeGoHandler(options)
 		case providerIdentifiers.kenari:
 			return new KenariHandler(options)
-		case providerIdentifiers.ioIntelligence:
-			return new IOIntelligenceHandler(options)
 		case providerIdentifiers.nanogpt:
 			return new NanoGptHandler(options)
 		case providerIdentifiers.zooGateway:
@@ -284,8 +285,6 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new BasetenHandler(options)
 		case providerIdentifiers.poe:
 			return new PoeHandler(options)
-		case providerIdentifiers.geminiCli:
-		// Intentionally falls through to the Anthropic handler pending a dedicated Gemini CLI handler implementation.
 		default:
 			return new AnthropicHandler(options)
 	}

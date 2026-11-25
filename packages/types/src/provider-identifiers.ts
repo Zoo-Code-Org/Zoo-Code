@@ -15,7 +15,6 @@ export const providerIdentifiers = {
 	opencodeGo: "opencode-go",
 	kenari: "kenari",
 	nanogpt: "nanogpt",
-	ioIntelligence: "io-intelligence",
 	ollama: "ollama",
 	lmstudio: "lmstudio",
 	vscodeLm: "vscode-lm",
@@ -28,7 +27,6 @@ export const providerIdentifiers = {
 	fireworks: "fireworks",
 	friendli: "friendli",
 	gemini: "gemini",
-	geminiCli: "gemini-cli",
 	mistral: "mistral",
 	moonshot: "moonshot",
 	kimiCode: "kimi-code",
@@ -47,6 +45,7 @@ export type ProviderIdentifier = (typeof providerIdentifiers)[keyof typeof provi
 
 /** Provider identifiers retained only for compatibility with existing settings. */
 export const retiredProviderIdentifiers = {
+	geminiCli: "gemini-cli",
 	cerebras: "cerebras",
 	chutes: "chutes",
 	deepinfra: "deepinfra",
@@ -54,6 +53,7 @@ export const retiredProviderIdentifiers = {
 	featherless: "featherless",
 	groq: "groq",
 	huggingface: "huggingface",
+	ioIntelligence: "io-intelligence",
 	roo: "roo",
 } as const
 

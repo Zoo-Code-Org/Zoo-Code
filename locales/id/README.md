@@ -46,11 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang Baru di v3.96.0
+## Yang baru di Zoo Code v3.98.2
 
-- ✨ **Setelan obrolan dan diagnostik baru:** Tampilkan stempel waktu pesan dengan format waktu dan tanggal yang bisa dikonfigurasi, atur TTL prompt-cache untuk profil Anthropic, dan buat laporan diagnostik yang menjaga privasi.
-- 💸 **Biaya dan cache penyedia yang lebih akurat:** Jaga hasil tool Anthropic tetap utuh, pakai token keluaran kumulatif dalam biaya Anthropic dan MiniMax, baca penghitung prompt-cache DeepSeek, arahkan ke cache Responses xAI, dan tagih pembacaan cache Mistral pada 0,1x.
-- 🧭 **Obrolan yang lebih andal dan cepat:** Lanjutkan tugas yang selesai setelah mulai ulang, pulihkan checkpoint saat commit yang tersimpan hilang, muat ulang otomatis renderer webview yang mati, batasi pembaruan streaming, dan muat bahasa sesuai permintaan.
+- 💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Model: Gunakan Gemini 3.8 Flash dan model baru Gemini 4 Carbon, Hydrogen, dan Neon. Atur tingkat berpikir xhigh di Gemini.
+- 🌐 API Responses: Aktifkan dukungan API Responses untuk penyedia yang kompatibel dengan OpenAI. Penalaran dengan penggunaan tool berfungsi di endpoint yang memerlukannya.
+- 🔧 Perbaikan: Permintaan Gemini di Vertex tidak lagi berakhir pada giliran model. Signature berpikir Gemini tetap utuh melalui LiteLLM. Tugas Ollama memadat pada batas konteks yang dikonfigurasi.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

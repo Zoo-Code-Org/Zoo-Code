@@ -47,11 +47,13 @@ O Zoo Code aproveita a base criada pelo Roo Code e continua ampliando-a com:
 - **Workflows de terminal e edição mais confiáveis** — correções para encerramento prematuro do terminal, race conditions no estado das tarefas, gerenciamento de contexto, edição de diff e uso de ferramentas específicas de cada provider.
 - **Mais controle sobre seu workspace** — gerenciamento de regras, restrições de MCP por modo, controles de caminhos multi-root, opções de reasoning dos modelos e ações para revisar alterações ao concluir uma tarefa.
 
-## Novidades na v3.96.0
+## Novidades do Zoo Code v3.98.2
 
-- ✨ **Novas configurações de chat e diagnósticos:** Mostra carimbos de data/hora nas mensagens com formatos de hora e data configuráveis, ajusta o TTL do prompt-cache para perfis Anthropic e gera relatórios de diagnóstico que preservam a privacidade.
-- 💸 **Custos e cache de provedores mais precisos:** Mantém os resultados de ferramentas do Anthropic intactos, adota tokens de saída cumulativos nos custos do Anthropic e MiniMax, lê os contadores de prompt-cache do DeepSeek, mira o cache de Responses do xAI e cobra leituras de cache do Mistral a 0,1x.
-- 🧭 **Chats mais confiáveis e rápidos:** Retoma tarefas concluídas depois de reiniciar, restaura checkpoints quando o commit salvo está ausente, recarrega automaticamente um renderizador de webview morto, limita atualizações de streaming e carrega idiomas sob demanda.
+- 💫Experimente o Zoo Pass com GLM-5.3-Flash ilimitado grátis até 1º de dezembro com qualquer saldo na sua conta do Zoo Gateway.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 Modelos: Use Gemini 3.8 Flash e os novos modelos Gemini 4 Carbon, Hydrogen e Neon. Defina os níveis de pensamento xhigh no Gemini.
+- 🌐 API Responses: Ative o suporte à API Responses para provedores compatíveis com OpenAI. O raciocínio com uso de ferramentas funciona em endpoints que a exigem.
+- 🔧 Correções: Solicitações do Gemini no Vertex não terminam mais com uma resposta do modelo. Assinaturas de pensamento do Gemini permanecem intactas através do LiteLLM. Tarefas do Ollama são condensadas no limite de contexto configurado.
 
 ## O que o Zoo Code pode fazer por VOCÊ?
 

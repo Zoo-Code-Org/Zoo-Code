@@ -33,6 +33,7 @@ import { AskApproval, HandleError, PushToolResult } from "../../../shared/tools"
 import * as vscode from "vscode"
 
 describe("attemptCompletionTool", () => {
+	const expandedContent = [{ type: "text" as const, text: "expanded" }]
 	let mockTask: Partial<Task>
 	let mockPushToolResult: ReturnType<typeof vi.fn<PushToolResult>>
 	let mockAskApproval: ReturnType<typeof vi.fn<AskApproval>>
@@ -60,6 +61,8 @@ describe("attemptCompletionTool", () => {
 		vi.mocked(vscode.workspace.getConfiguration).mockImplementation(mockGetConfiguration)
 
 		mockTask = {
+			userMessageContent: [],
+			userInputContent: vi.fn().mockResolvedValue(expandedContent),
 			consecutiveMistakeCount: 0,
 			recordToolError: vi.fn(),
 			todoList: undefined,
@@ -1159,6 +1162,41 @@ describe("attemptCompletionTool", () => {
 
 				expect(mockTask.say).toHaveBeenCalledWith("user_feedback", "", ["data:image/png;base64,feedback"])
 				expect(mockPushToolResult).toHaveBeenCalledTimes(1)
+			})
+
+			it.each([
+				{ label: "user segments", text: "@/allowed", segments: [{ text: "@/allowed", source: "user" }] },
+				{
+					label: "mixed segments",
+					text: "@/secret @/mine",
+					segments: [
+						{ text: "@/secret ", source: "generated" },
+						{ text: "@/mine", source: "user" },
+					],
+				},
+				{ label: "missing segments", text: "@/secret", segments: undefined },
+				{ label: "undefined feedback", text: undefined, segments: undefined },
+			])("hands the feedback with $label to Task.userInputContent", async ({ text, segments }) => {
+				const block: ToolUse<"attempt_completion"> = {
+					type: "tool_use",
+					name: "attempt_completion",
+					params: { result: "Done" },
+					nativeArgs: { result: "Done" },
+					partial: false,
+				}
+				mockTask.ask = vi.fn().mockResolvedValue({ response: "messageResponse", text, images: [], segments })
+
+				await attemptCompletionTool.handle(mockTask as Task, block, {
+					askApproval: mockAskApproval,
+					handleError: mockHandleError,
+					pushToolResult: mockPushToolResult,
+					toolCallId: "",
+					askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+					toolDescription: mockToolDescription,
+				})
+
+				expect(mockTask.userInputContent).toHaveBeenCalledWith(text ?? "", segments)
+				expect(mockTask.userMessageContent).toEqual(expandedContent)
 			})
 
 			it("does not clear pending metadata when stale delegation continues without an action id", async () => {

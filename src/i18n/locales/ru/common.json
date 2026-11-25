@@ -6,7 +6,9 @@
 	},
 	"confirmation": {
 		"reset_state": "Вы уверены, что хотите сбросить все состояние и секретное хранилище в расширении? Это действие нельзя отменить.",
-		"delete_config_profile": "Вы уверены, что хотите удалить этот профиль конфигурации?"
+		"delete_config_profile": "Вы уверены, что хотите удалить этот профиль конфигурации?",
+		"requesty_deep_link": "Активировать учётные данные Requesty по внешней ссылке?",
+		"requesty_deep_link_detail": "Это заменит активного провайдера. Последующие запросы могут отправлять содержимое вашей беседы и рабочей области по адресу:\n{{url}}\n\nПродолжайте только если вы запрашивали эти учётные данные и доверяете этому адресату."
 	},
 	"errors": {
 		"invalid_data_uri": "Неверный формат URI данных",
@@ -126,6 +128,8 @@
 		"rooHistoryImport": {
 			"nothingFound": "История задач Roo Code для импорта из {{domain}} не найдена.",
 			"alreadyImported_one": "{{count}} история задач Roo Code уже импортирована в Zoo Code.",
+			"alreadyImported_few": "Все {{count}} истории задач Roo Code уже импортированы в Zoo Code.",
+			"alreadyImported_many": "Все {{count}} историй задач Roo Code уже импортированы в Zoo Code.",
 			"alreadyImported_other": "Все {{count}} истории задач Roo Code уже импортированы в Zoo Code."
 		}
 	},
@@ -144,11 +148,14 @@
 		},
 		"rooHistoryImport": {
 			"success_one": "{{count}} история задач Roo Code импортирована в Zoo Code.",
-			"success_other": "{{count}} историй задач Roo Code импортировано в Zoo Code."
+			"success_few": "{{count}} истории задач Roo Code импортированы в Zoo Code.",
+			"success_many": "{{count}} историй задач Roo Code импортировано в Zoo Code.",
+			"success_other": "{{count}} истории задач Roo Code импортировано в Zoo Code."
 		}
 	},
 	"answers": {
-		"yes": "Да"
+		"yes": "Да",
+		"activate_requesty": "Активировать Requesty"
 	},
 	"buttons": {
 		"learn_more": "Узнать больше"

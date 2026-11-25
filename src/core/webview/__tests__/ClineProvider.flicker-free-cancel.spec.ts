@@ -10,8 +10,9 @@ import { ContextProxy } from "../../config/ContextProxy"
 import type { ProviderSettings, HistoryItem } from "@roo-code/types"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
-type MockTask = Partial<Task> &
+type MockTask = Omit<Partial<Task>, "abortReason"> &
 	Pick<Task, "taskId" | "instanceId"> & {
+		abortReason?: ClineApiReqCancelReason
 		parentTaskId?: string
 		rootTask?: { taskId: string }
 		parentTask?: { taskId: string }

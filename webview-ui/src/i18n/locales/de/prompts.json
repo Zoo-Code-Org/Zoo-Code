@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API-Konfiguration",
-		"select": "Wähle, welche API-Konfiguration für diesen Modus verwendet werden soll"
+		"select": "Wähle, welche API-Konfiguration für diesen Modus verwendet werden soll",
+		"pinnedGroupAriaLabel": "Angeheftete Konfigurationen",
+		"allGroupAriaLabel": "Alle Konfigurationen"
 	},
 	"tools": {
 		"title": "Verfügbare Werkzeuge",
@@ -47,7 +49,8 @@
 		"title": "Modusspezifische benutzerdefinierte Anweisungen (optional)",
 		"resetToDefault": "Auf Standardwerte zurücksetzen",
 		"description": "Fügen Sie verhaltensspezifische Richtlinien für den Modus {{modeName}} hinzu.",
-		"loadFromFile": "Benutzerdefinierte Anweisungen für den Modus {{mode}} können auch aus dem Ordner <span>.roo/rules-{{slug}}/</span> in deinem Arbeitsbereich oder aus dem globalen <0>.roo/rules-{{slug}}/</0> geladen werden (.roorules-{{slug}} und .clinerules-{{slug}} sind veraltet und werden bald nicht mehr funktionieren)."
+		"loadFromFile": "Benutzerdefinierte Anweisungen für den Modus {{mode}} können auch aus dem Ordner <span>.roo/rules-{{slug}}/</span> in deinem Arbeitsbereich oder aus dem globalen <0>.roo/rules-{{slug}}/</0> geladen werden (.roorules-{{slug}} und .clinerules-{{slug}} sind veraltet und werden bald nicht mehr funktionieren).",
+		"loadFromFileAriaLabel": "Mehr über globale benutzerdefinierte Anweisungen für Modi erfahren"
 	},
 	"exportMode": {
 		"title": "Modus exportieren",
@@ -69,7 +72,9 @@
 	"globalCustomInstructions": {
 		"title": "Benutzerdefinierte Anweisungen für alle Modi",
 		"description": "Diese Anweisungen gelten für alle Modi. Sie bieten einen grundlegenden Satz von Verhaltensweisen, die durch modusspezifische Anweisungen unten erweitert werden können. <0>Mehr erfahren</0>",
-		"loadFromFile": "Anweisungen können auch aus dem Ordner <span>.roo/rules/</span> in deinem Arbeitsbereich oder aus dem globalen <0>.roo/rules/</0> geladen werden (.roorules und .clinerules sind veraltet und werden bald nicht mehr funktionieren)."
+		"loadFromFile": "Anweisungen können auch aus dem Ordner <span>.roo/rules/</span> in deinem Arbeitsbereich oder aus dem globalen <0>.roo/rules/</0> geladen werden (.roorules und .clinerules sind veraltet und werden bald nicht mehr funktionieren).",
+		"learnMoreAriaLabel": "Mehr über globale benutzerdefinierte Anweisungen erfahren",
+		"loadFromFileAriaLabel": "Erfahre, wie du globale benutzerdefinierte Anweisungen einrichtest"
 	},
 	"systemPrompt": {
 		"preview": "System-Prompt Vorschau",
@@ -88,6 +93,13 @@
 			"testEnhancement": "Verbesserung testen",
 			"includeTaskHistory": "Aufgabenverlauf als Kontext einbeziehen",
 			"includeTaskHistoryDescription": "Wenn aktiviert, werden die letzten 10 Nachrichten aus der aktuellen Unterhaltung als Kontext beim Verbessern von Prompts einbezogen, um relevantere und kontextbewusste Vorschläge zu generieren."
+		},
+		"taskTitle": {
+			"enabled": "Aufgabentitel automatisch erzeugen",
+			"enabledDescription": "Fasst den ersten Prompt jeder neuen Aufgabe im Hintergrund zu einem kurzen Titel zusammen. Titelanfragen sind nicht in den Aufgabenkosten enthalten. Profile für GitHub Copilot und VS Code LM verbrauchen dein Kontingent.",
+			"apiConfiguration": "API-Konfiguration",
+			"useTaskConfig": "API-Konfiguration der Aufgabe verwenden",
+			"apiConfigDescription": "Ein leichtgewichtiges Profil ohne Reasoning wird empfohlen. Wenn du ein anderes Profil wählst, wird der Anfang deines Prompts an diesen Anbieter gesendet."
 		},
 		"types": {
 			"ENHANCE": {
@@ -129,6 +141,10 @@
 			"NEW_TASK": {
 				"label": "Neue Aufgabe starten",
 				"description": "Starte eine neue Aufgabe mit deiner Eingabe. Verfügbar in der Befehlspalette."
+			},
+			"TASK_TITLE": {
+				"label": "Aufgabentitel",
+				"description": "Erzeugt im Hintergrund einen kurzen Titel für neue Aufgaben. Er wird im Verlauf und in der Aufgabenkopfzeile angezeigt. Unten konfigurieren."
 			}
 		}
 	},
@@ -188,5 +204,10 @@
 		"rulesFolder": "Dieser Modus hat einen Regelordner unter {{folderPath}}, der ebenfalls gelöscht wird.",
 		"confirm": "Löschen",
 		"cancel": "Abbrechen"
+	},
+	"mcpServers": {
+		"restrict": "Auf bestimmte MCP-Server beschränken",
+		"noneConnected": "Keine MCP-Server verbunden",
+		"notConnected": "{{serverName}} (nicht verbunden)"
 	}
 }

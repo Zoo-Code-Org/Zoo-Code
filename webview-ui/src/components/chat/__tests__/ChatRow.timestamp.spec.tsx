@@ -6,10 +6,18 @@ import { ChatRowContent } from "../ChatRow"
 
 vi.mock("@src/utils/vscode", () => ({ vscode: { postMessage: vi.fn() } }))
 
+// Mutable so a test can switch the display language the timestamp is formatted in.
+const mockTranslation = vi.hoisted(() => ({ language: "en" }))
+
+vi.mock("@src/i18n/TranslationContext", () => ({
+	useAppTranslation: () => ({
+		t: (key: string) => key,
+		language: mockTranslation.language,
+	}),
+}))
+
 vi.mock("react-i18next", () => ({
-	useTranslation: () => ({ t: (key: string) => key, i18n: { exists: () => true } }),
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
-	initReactI18next: { type: "3rdParty", init: () => {} },
 }))
 
 // The edit box is a large component of its own. This stand-in shows the text it was given and offers the two ways
@@ -236,10 +244,8 @@ describe("ChatRow – message timestamp", () => {
 				expect(text).toContain("14:41")
 			})
 
-			it("writes the automatic date in the display language, not only in English", async () => {
-				const i18next = (await import("i18next")).default
-				const original = i18next.language
-				i18next.language = "de"
+			it("writes the automatic date in the display language, not only in English", () => {
+				mockTranslation.language = "de"
 				try {
 					mockState = { dateFormat: "auto", timeFormat: "24h" }
 					renderRow(message)
@@ -249,7 +255,7 @@ describe("ChatRow – message timestamp", () => {
 					expect(text).toContain("14:41")
 					expect(text).not.toContain("Mar")
 				} finally {
-					i18next.language = original
+					mockTranslation.language = "en"
 				}
 			})
 

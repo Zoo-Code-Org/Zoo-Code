@@ -31,7 +31,6 @@ describe("ProfileValidator", () => {
 			["ollama", { ollamaModelId: "model" }],
 			["requesty", { requestyModelId: "model" }],
 			["unbound", { unboundModelId: "model" }],
-			["ioIntelligence", { ioIntelligenceModelId: "model" }],
 			["poe", { apiModelId: "model" }],
 			["moonshot", { apiModelId: "model" }],
 			["kimiCode", { apiModelId: "model" }],
@@ -41,7 +40,6 @@ describe("ProfileValidator", () => {
 			["qwenCode", { apiModelId: "model" }],
 			["zai", { apiModelId: "model" }],
 			["baseten", { apiModelId: "model" }],
-			["geminiCli", { apiModelId: "model" }],
 			["vercelAiGateway", { vercelAiGatewayModelId: "model" }],
 			["zooGateway", { zooGatewayModelId: "model" }],
 			["nanogpt", { nanoGptModelId: "model" }],
@@ -300,25 +298,6 @@ describe("ProfileValidator", () => {
 			}
 
 			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
-		})
-
-		// Test for io-intelligence provider which uses ioIntelligenceModelId
-		it(`should extract ioIntelligenceModelId for io-intelligence provider`, () => {
-			const allowList: OrganizationAllowList = {
-				allowAll: false,
-				providers: {
-					[providerIdentifiers.ioIntelligence]: { allowAll: false, models: ["test-model"] },
-				},
-			}
-			const profile: ProviderSettings = {
-				apiProvider: providerIdentifiers.ioIntelligence,
-				ioIntelligenceModelId: "test-model",
-			}
-
-			expect(ProfileValidator.isProfileAllowed(profile, allowList)).toBe(true)
-			expect(
-				ProfileValidator.isProfileAllowed({ ...profile, ioIntelligenceModelId: "other-model" }, allowList),
-			).toBe(false)
 		})
 
 		it("should extract vsCodeLmModelSelector.id for vscode-lm provider", () => {

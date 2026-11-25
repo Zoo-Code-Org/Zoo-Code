@@ -30,7 +30,6 @@ import {
 	lMStudioDefaultModelInfo,
 	opencodeGoDefaultModelInfo,
 	kenariDefaultModelInfo,
-	ioIntelligenceDefaultModelInfo,
 	nanoGptDefaultModelInfo,
 	BEDROCK_1M_CONTEXT_MODEL_IDS,
 	BEDROCK_DEFAULT_CONTEXT,
@@ -126,19 +125,21 @@ export const useSelectedModel = (apiConfiguration: ProviderSettings) => {
 	const needLmStudio = typeof lmStudioModelId !== "undefined"
 	const needOllama = typeof ollamaModelId !== "undefined"
 
-	// LiteLLM and IO Intelligence may legitimately have no entry in the router
-	// payload (partial listing, failed fetch, renamed deployment) even though
-	// the configured ID is a valid selection, so they only need the fetch to
-	// settle. Other dynamic providers require a populated provider entry
-	// before the selection is resolved.
+	// LiteLLM may legitimately have no entry in the router payload (partial
+	// listing, failed fetch, renamed deployment) even though the configured ID
+	// is a valid selection, so it only needs the fetch to settle. Other
+	// dynamic providers require a populated provider entry before the
+	// selection is resolved.
 	const hasValidRouterData =
 		needRouterModels && dynamicProvider
-			? dynamicProvider === providerIdentifiers.litellm || dynamicProvider === providerIdentifiers.ioIntelligence
-				? !routerModels.isLoading
-				: routerModels.data &&
-					routerModels.data[dynamicProvider] !== undefined &&
-					typeof routerModels.data[dynamicProvider] === "object" &&
-					!routerModels.isLoading
+			? dynamicProvider === providerIdentifiers.friendli
+				? true // static friendliModels cover the window before /v1/models data arrives
+				: dynamicProvider === providerIdentifiers.litellm
+					? !routerModels.isLoading
+					: routerModels.data &&
+						routerModels.data[dynamicProvider] !== undefined &&
+						typeof routerModels.data[dynamicProvider] === "object" &&
+						!routerModels.isLoading
 			: true
 
 	const isReady =
@@ -512,8 +513,14 @@ function getSelectedModel({
 		case providerIdentifiers.fireworks:
 			return getStaticCatalogModel(apiConfiguration.apiModelId, fireworksModels, defaultModelId)
 		case providerIdentifiers.friendli: {
-			const id = apiConfiguration.apiModelId ?? defaultModelId
-			const info = friendliModels[id as keyof typeof friendliModels]
+			const id = apiConfiguration.apiModelId || defaultModelId
+			// Mirror the backend getModel(): own-property reads only (an ID such as "toString" must
+			// not resolve to an inherited member), and sane defaults when neither catalog has the ID.
+			const fetched = routerModels.friendli
+			const info =
+				(fetched && Object.hasOwn(fetched, id) ? fetched[id] : undefined) ??
+				(Object.hasOwn(friendliModels, id) ? friendliModels[id as keyof typeof friendliModels] : undefined) ??
+				openAiModelInfoSaneDefaults
 			return { id, info }
 		}
 		case providerIdentifiers.poe: {
@@ -562,15 +569,6 @@ function getSelectedModel({
 			const info = routerModels[providerIdentifiers.kenari]?.[id] ?? kenariDefaultModelInfo
 			return { id, info }
 		}
-		case providerIdentifiers.ioIntelligence: {
-			// A configured id is the user's explicit selection (ModelPicker's
-			// "Use custom model" path stores ids absent from the fetched catalog)
-			// and the handler sends requests with it, so keep it instead of
-			// displaying a default model that requests do not use.
-			const id = apiConfiguration.ioIntelligenceModelId || defaultModelId
-			const info = routerModels[providerIdentifiers.ioIntelligence]?.[id] ?? ioIntelligenceDefaultModelInfo
-			return { id, info }
-		}
 		case providerIdentifiers.nanogpt: {
 			const id = getValidatedModelId(
 				apiConfiguration.nanoGptModelId,
@@ -590,7 +588,6 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.anthropic:
-		case providerIdentifiers.geminiCli:
 		case providerIdentifiers.fakeAi: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const baseInfo = anthropicModels[id as keyof typeof anthropicModels]

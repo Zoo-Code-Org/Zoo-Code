@@ -3,6 +3,7 @@ import { z } from "zod"
 import { providerDefinitionList, type ProviderDefinition } from "./providers/index.js"
 import { API_PROVIDER_FIELD, SETTINGS_SHAPE_FIELD } from "./providers/common.js"
 export {
+	DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS,
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
@@ -100,8 +101,8 @@ export const dynamicProviders = [
 	providerIdentifiers.opencodeGo,
 	providerIdentifiers.kenari,
 	providerIdentifiers.nanogpt,
-	providerIdentifiers.ioIntelligence,
 	providerIdentifiers.kimiCode,
+	providerIdentifiers.friendli,
 ] as const
 
 export type DynamicProvider = (typeof dynamicProviders)[number]
@@ -315,7 +316,6 @@ export const modelIdKeys = [
 	"opencodeGoModelId",
 	"kenariModelId",
 	"nanoGptModelId",
-	"ioIntelligenceModelId",
 	"zooGatewayModelId",
 ] as const satisfies readonly ModelIdKey[]
 
@@ -437,8 +437,8 @@ export const getApiProtocol = (provider: ProviderName | undefined, modelId?: str
 export const MODELS_BY_PROVIDER: Record<
 	Exclude<
 		ProviderName,
-		// OpenAI is custom-configured; Fake AI and Gemini CLI do not expose model lists.
-		typeof providerIdentifiers.fakeAi | typeof providerIdentifiers.geminiCli | typeof providerIdentifiers.openai
+		// OpenAI is custom-configured; Fake AI does not expose a model list.
+		typeof providerIdentifiers.fakeAi | typeof providerIdentifiers.openai
 	>,
 	{ id: ProviderName; label: string; models: string[] }
 > = {
@@ -557,11 +557,6 @@ export const MODELS_BY_PROVIDER: Record<
 	},
 	[providerIdentifiers.opencodeGo]: { id: providerIdentifiers.opencodeGo, label: "Opencode Go", models: [] },
 	[providerIdentifiers.kenari]: { id: providerIdentifiers.kenari, label: "Kenari", models: [] },
-	[providerIdentifiers.ioIntelligence]: {
-		id: providerIdentifiers.ioIntelligence,
-		label: "IO Intelligence",
-		models: [],
-	},
 	[providerIdentifiers.nanogpt]: { id: providerIdentifiers.nanogpt, label: "NanoGPT", models: [] },
 	[providerIdentifiers.zooGateway]: { id: providerIdentifiers.zooGateway, label: "Zoo Gateway", models: [] },
 

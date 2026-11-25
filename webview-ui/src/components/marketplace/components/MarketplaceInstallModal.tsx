@@ -337,7 +337,7 @@ export const MarketplaceInstallModal: React.FC<MarketplaceInstallModalProps> = (
 									<div key={param.key} className="space-y-1">
 										<label htmlFor={param.key} className="text-sm">
 											{param.name}
-											{param.optional ? " (optional)" : ""}
+											{param.optional && ` ${t("marketplace:install.optional")}`}
 										</label>
 										<Input
 											id={param.key}

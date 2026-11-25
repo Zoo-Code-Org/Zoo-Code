@@ -1,5 +1,6 @@
 import { Task } from "../task/Task"
 import { formatResponse } from "../prompts/responses"
+import { MAX_FOLLOW_UP_SUGGESTIONS } from "../prompts/tools/native-tools/ask_followup_question"
 import type { ToolUse } from "../../shared/tools"
 import { getSuggestionMode } from "@roo-code/types"
 
@@ -66,13 +67,17 @@ export class AskFollowupQuestionTool extends BaseTool<"ask_followup_question"> {
 			// Transform follow_up suggestions to the format expected by task.ask
 			const follow_up_json = {
 				question,
-				suggest: follow_up.map((s) => ({ answer: s.text, mode: getSuggestionMode(s.mode) })),
+				suggest: follow_up
+					.slice(0, MAX_FOLLOW_UP_SUGGESTIONS)
+					.map((s) => ({ answer: s.text, mode: getSuggestionMode(s.mode) })),
 			}
 
 			task.consecutiveMistakeCount = 0
-			const { text, images } = await task.ask("followup", JSON.stringify(follow_up_json), false)
+			const { text, images, segments } = await task.ask("followup", JSON.stringify(follow_up_json), false)
 			const safeText = text ?? ""
 			await task.say("user_feedback", safeText, images)
+			// Only user segments expand. The tool result repeats the text by design.
+			task.userMessageContent.push(...(await task.userInputContent(safeText, segments)))
 			pushToolResult(formatResponse.toolResult(`<user_message>\n${safeText}\n</user_message>`, images))
 		} catch (error) {
 			await handleError("asking question", error as Error)

@@ -32,7 +32,7 @@ import { ClineProvider } from "../../webview/ClineProvider"
 import { ApiStreamChunk } from "../../../api/transform/stream"
 import { OutputTokenLimitError } from "../../../api/providers/utils/output-token-limit-error"
 import { ContextProxy } from "../../config/ContextProxy"
-import { processUserContentMentions } from "../../mentions/processUserContentMentions"
+import { parseMentions } from "../../mentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
@@ -41,12 +41,15 @@ import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
 import { readFileTool } from "../../tools/ReadFileTool"
 import { writeToFileTool } from "../../tools/WriteToFileTool"
+import { manageContext } from "../../context-management"
 
 type TaskTestAccess = {
 	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
 	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
-	initiateTaskLoop: (userContent: Anthropic.Messages.ContentBlockParam[]) => Promise<void>
+	initiateTaskLoop: (
+		userContent: Anthropic.Messages.ContentBlockParam[] | Promise<Anthropic.Messages.ContentBlockParam[]>,
+	) => Promise<void>
 	startTask: (task?: string, images?: string[]) => Promise<void>
 	resumeTaskFromHistory: () => Promise<void>
 	presentAssistantMessageSafe: () => void
@@ -99,6 +102,7 @@ vi.mock("delay", () => ({
 
 import delay from "delay"
 import pWaitFor from "p-wait-for"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 vi.mock("uuid", async (importOriginal) => {
 	const actual = await importOriginal<typeof import("uuid")>()
@@ -241,14 +245,6 @@ vi.mock("../../environment/getEnvironmentDetails", () => ({
 	getEnvironmentDetails: vi.fn().mockResolvedValue(""),
 }))
 
-vi.mock("../../mentions/processUserContentMentions", async (importOriginal) => {
-	const actual = await importOriginal<typeof import("../../mentions/processUserContentMentions")>()
-	return {
-		...actual,
-		processUserContentMentions: vi.fn().mockImplementation(actual.processUserContentMentions),
-	}
-})
-
 vi.mock("../../ignore/RooIgnoreController")
 
 vi.mock("../../../i18n", () => {
@@ -275,6 +271,14 @@ vi.mock("../../condense", async (importOriginal) => {
 			cost: 0,
 			newContextTokens: 1,
 		}),
+	}
+})
+
+vi.mock("../../context-management", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../context-management")>()
+	return {
+		...actual,
+		manageContext: vi.fn(actual.manageContext),
 	}
 })
 
@@ -1071,7 +1075,7 @@ describe("Cline", () => {
 			const saySpy = vi.spyOn(task, "say").mockImplementation(async (...args) => {
 				const [type, _text, _images, partial] = args
 				if (type === "text" && partial === false) {
-					task.abort = true
+					setAbortLatch(task, true)
 					throw new Error("presenter text failed while aborting")
 				}
 				return say(...args)
@@ -3509,79 +3513,67 @@ describe("Cline", () => {
 				])
 			})
 
-			describe("processUserContentMentions", () => {
-				it("should process mentions in user_message tags", async () => {
+			describe("user input mentions", () => {
+				beforeEach(() => {
+					vi.clearAllMocks()
+				})
+
+				it.each([
+					{
+						label: "all generated",
+						segments: [{ text: "read '@/secret' please", source: "generated" as const }],
+					},
+					{ label: "omitted", segments: undefined },
+					{ label: "not matching the text", segments: [{ text: "other", source: "user" as const }] },
+				])("does not expand task text when segments are $label", async ({ segments }) => {
+					const task = new Task({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "read '@/secret' please",
+						startTask: false,
+					})
+
+					const content = await task.userInputContent("read '@/secret' please", segments)
+
+					expect(parseMentions).not.toHaveBeenCalled()
+					expect(content).toEqual([
+						{ type: "text", text: "<user_message>\nread '@/secret' please\n</user_message>" },
+					])
+				})
+
+				it("expands the task text when the start authorizes it", async () => {
+					const taskText = "read '@/secret' please"
 					const [cline, task] = Task.create({
 						provider: mockProvider,
 						apiConfiguration: mockApiConfig,
-						task: "test task",
+						task: taskText,
+						segments: [{ text: taskText, source: "user" }],
 					})
 
-					const userContent = [
-						{
-							type: "text",
-							text: "Regular text with 'some/path' (see below for file content)",
-						} as const,
-						{
-							type: "text",
-							text: "<user_message>Text with 'some/path' (see below for file content) in user_message tags</user_message>",
-						} as const,
-						{
-							type: "tool_result",
-							tool_use_id: "test-id",
-							content: [
-								{
-									type: "text",
-									text: "<user_message>Check 'some/path' (see below for file content)</user_message>",
-								},
-							],
-						} as Anthropic.ToolResultBlockParam,
-						{
-							type: "tool_result",
-							tool_use_id: "test-id-2",
-							content: [
-								{
-									type: "text",
-									text: "Regular tool result with 'path' (see below for file content)",
-								},
-							],
-						} as Anthropic.ToolResultBlockParam,
-					]
-
-					const { content: processedContent } = await processUserContentMentions({
-						userContent,
-						cwd: cline.cwd,
-						fileContextTracker: cline.fileContextTracker,
-					})
-
-					// Regular text should not be processed
-					expect((processedContent[0] as Anthropic.TextBlockParam).text).toBe(
-						"Regular text with 'some/path' (see below for file content)",
-					)
-
-					// Text within user_message tags should be processed
-					expect((processedContent[1] as Anthropic.TextBlockParam).text).toContain("processed:")
-					expect((processedContent[1] as Anthropic.TextBlockParam).text).toContain(
-						"<user_message>Text with 'some/path' (see below for file content) in user_message tags</user_message>",
-					)
-
-					// user_message tag content should be processed
-					const toolResult1 = processedContent[2] as Anthropic.ToolResultBlockParam
-					const content1 = Array.isArray(toolResult1.content) ? toolResult1.content[0] : toolResult1.content
-					expect((content1 as Anthropic.TextBlockParam).text).toContain("processed:")
-					expect((content1 as Anthropic.TextBlockParam).text).toContain(
-						"<user_message>Check 'some/path' (see below for file content)</user_message>",
-					)
-
-					// Regular tool result should not be processed
-					const toolResult2 = processedContent[3] as Anthropic.ToolResultBlockParam
-					const content2 = Array.isArray(toolResult2.content) ? toolResult2.content[0] : toolResult2.content
-					expect((content2 as Anthropic.TextBlockParam).text).toBe(
-						"Regular tool result with 'path' (see below for file content)",
-					)
-
+					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
 					await cline.abortTask(true)
 					await task.catch(() => {})
+
+					expect(vi.mocked(parseMentions).mock.calls[0]?.[0]).toBe(taskText)
+				})
+
+				it("expands only the authorized substring of generated task text", async () => {
+					const [cline, task] = Task.create({
+						provider: mockProvider,
+						apiConfiguration: mockApiConfig,
+						task: "context @/context.txt\nchosen @/chosen.txt",
+						segments: [
+							{ text: "context @/context.txt\n", source: "generated" },
+							{ text: "chosen @/chosen.txt", source: "user" },
+						],
+					})
+
+					await vi.waitFor(() => expect(parseMentions).toHaveBeenCalled())
+					await cline.abortTask(true)
+					await task.catch(() => {})
+
+					const texts = vi.mocked(parseMentions).mock.calls.map(([text]) => text)
+					expect(texts).toEqual(["chosen @/chosen.txt"])
 				})
 			})
 		})
@@ -3595,40 +3587,77 @@ describe("Cline", () => {
 					startTask: false,
 				})
 
-				const ensureModelFetched = vi.fn().mockResolvedValue(undefined)
-				Object.assign(task.api, { ensureModelFetched })
-				vi.spyOn(task.api, "getModel").mockReturnValue({
-					id: mockApiConfig.apiModelId!,
-					info: {
-						supportsImages: false,
-						supportsPromptCache: true,
-						contextWindow: 200_000,
-						maxTokens: 4096,
-					} as ModelInfo,
-				})
-				vi.mocked(processUserContentMentions).mockResolvedValueOnce({
-					content: [{ type: "text", text: "run /commit" }],
+				vi.mocked(parseMentions).mockResolvedValueOnce({
+					text: "run /commit",
+					contentBlocks: [],
 					mode: "code",
-				})
-				vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
-				vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
-				vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue(undefined)
-				task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
-				vi.spyOn(task, "say").mockImplementation(async (type) => {
-					if (type === "api_req_started") {
-						task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
-					}
-					return undefined as never
-				})
-				vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
-					throw new Error("stop after mode switch")
 				})
 
 				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
 
-				await task.recursivelyMakeClineRequests([{ type: "text", text: "run /commit" }]).catch(() => {})
+				await task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
 
 				expect(handleModeSwitchSpy).toHaveBeenCalledWith("code", null)
+			})
+
+			it("does not switch the mode when a TaskStarted listener cancels while the content loads", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				let release: () => void = () => {}
+				const gate = new Promise<void>((resolve) => (release = resolve))
+				vi.mocked(parseMentions).mockImplementationOnce(async () => {
+					await gate
+					return { text: "run /commit", contentBlocks: [], mode: "code" }
+				})
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				task.on(RooCodeEventName.TaskStarted, () => void task.abortTask())
+
+				// startTask starts the content first, then the loop emits TaskStarted.
+				const pending = task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
+				await getTaskTestAccess(task)
+					.initiateTaskLoop(pending)
+					.catch(() => {})
+				release()
+				await pending
+
+				expect(task.abort).toBe(true)
+				expect(handleModeSwitchSpy).not.toHaveBeenCalled()
+			})
+
+			it.each([
+				{
+					label: "aborted",
+					cancel: (t: Task) => t.abortTask(),
+				},
+				{
+					label: "abandoned",
+					cancel: async (t: Task) => {
+						t.abandoned = true
+					},
+				},
+			])("does not switch the mode after the task is cancelled ($label)", async ({ cancel }) => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "test task",
+					startTask: false,
+				})
+				vi.mocked(parseMentions).mockResolvedValueOnce({
+					text: "run /commit",
+					contentBlocks: [],
+					mode: "code",
+				})
+				const handleModeSwitchSpy = vi.spyOn(mockProvider, "handleModeSwitch").mockResolvedValue(undefined)
+				await cancel(task)
+
+				const content = await task.userInputContent("run /commit", [{ text: "run /commit", source: "user" }])
+
+				expect(handleModeSwitchSpy).not.toHaveBeenCalled()
+				expect(content).toEqual([{ type: "text", text: "<user_message>\nrun /commit\n</user_message>" }])
 			})
 		})
 
@@ -4203,9 +4232,53 @@ describe("Cline", () => {
 				await task.submitUserMessage("test message", ["image1.png"])
 
 				// Verify handleWebviewAskResponse was called directly (not webview)
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "test message", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"test message",
+					["image1.png"],
+					[{ text: "test message", source: "generated" }],
+				)
 				// Should NOT route through webview anymore
 				expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+			})
+
+			it("forwards the segments to the ask response", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				const segments = [
+					{ text: "a @/x ", source: "generated" as const },
+					{ text: "b", source: "user" as const },
+				]
+				await task.submitUserMessage("a @/x b", [], undefined, undefined, segments)
+
+				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "a @/x b", [], segments)
+			})
+
+			it("trims the segments the same way as the text", async () => {
+				const task = new Task({
+					provider: mockProvider,
+					apiConfiguration: mockApiConfig,
+					task: "initial task",
+					startTask: false,
+				})
+				const handleResponseSpy = vi.spyOn(task, "handleWebviewAskResponse")
+
+				await task.submitUserMessage("  @/chosen.txt  ", [], undefined, undefined, [
+					{ text: "  @/chosen.txt  ", source: "user" },
+				])
+
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"@/chosen.txt",
+					[],
+					[{ text: "@/chosen.txt", source: "user" }],
+				)
 			})
 
 			it("uses a mode selected through submitUserMessage in the next API request", async () => {
@@ -4298,7 +4371,12 @@ describe("Cline", () => {
 				task.clineMessages = []
 				await task.submitUserMessage("new task", ["image1.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "new task", ["image1.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"new task",
+					["image1.png"],
+					[{ text: "new task", source: "generated" }],
+				)
 
 				// Clear mock
 				handleResponseSpy.mockClear()
@@ -4314,7 +4392,12 @@ describe("Cline", () => {
 				]
 				await task.submitUserMessage("follow-up message", ["image2.png"])
 
-				expect(handleResponseSpy).toHaveBeenCalledWith("messageResponse", "follow-up message", ["image2.png"])
+				expect(handleResponseSpy).toHaveBeenCalledWith(
+					"messageResponse",
+					"follow-up message",
+					["image2.png"],
+					[{ text: "follow-up message", source: "generated" }],
+				)
 			})
 
 			it("should handle undefined provider gracefully", async () => {
@@ -4768,6 +4851,88 @@ describe("Cline", () => {
 			).toHaveLength(1)
 		})
 
+		it("advances the cancellation generation on each cancellation and keeps it advanced across a resume", async () => {
+			// The S4a write guard compares the cancellation generation a queued write
+			// captured against the generation at publish time. The abort FLAG cannot do
+			// that on its own: it is set on cancellation and no resume path clears it,
+			// so on a resumed task it says only that some cancellation happened, not
+			// which run a queued write belongs to. Only the generation keeps the two
+			// runs apart, so it must never go backwards.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			vi.spyOn(task, "dispose").mockResolvedValue(undefined)
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.resumeAfterDelegation()
+			// The run-state model (RSK-06) no longer clears the legacy `abort` flag
+			// on resume: that is exactly why the generation exists. Only the
+			// generation keeps the cancelled run and the resumed run apart.
+			expect(task.cancellationGeneration).toBe(1)
+
+			await task.abortTask()
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
+		it("advances the cancellation generation on disposal, without any explicit cancel", async () => {
+			// A task torn down by the host never sees abortTask(). Disposal has to raise the
+			// same generation, or a write still parked on its path chain publishes after the
+			// task is gone.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			await task.dispose()
+
+			expect(task.abort).toBe(true)
+			expect(task.cancellationGeneration).toBe(1)
+		})
+		it("advances the cancellation generation for the disposal an unmocked abort performs", async () => {
+			// The two rows above mock dispose(), so each proves one increment in isolation. The
+			// sequence the guarded-write fence actually sees is an abort that tears the task down:
+			// requestAbort raises the fence, and the dispose() that abortTaskOnce drives raises it
+			// again. Nothing is mocked here, so if either increment stopped landing - or if disposal
+			// stopped being part of an abort - this row reads the stale value.
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			expect(task.cancellationGeneration).toBe(0)
+
+			// Started, not awaited. requestAbort is synchronous and raises the fence before any of the
+			// abort work runs (Task.abortTask calls it before it hands back abortPromise), so the increment
+			// has to be visible while the abort promise is still pending. Asserting the generation only
+			// after the await would still pass if the increment landed at the end of the teardown, which is
+			// exactly the delay that lets a write parked on its path chain publish after the task is gone.
+			const aborting = task.abortTask()
+			expect(task.cancellationGeneration).toBe(1)
+
+			await aborting
+
+			expect(task.abort).toBe(true)
+			// Disposal never marks a task abandoned; only an explicit abandon does.
+			expect(task.abandoned).toBe(false)
+			// One from requestAbort, one from the disposal the abort performed.
+			expect(task.cancellationGeneration).toBe(2)
+		})
+
 		it("flushes pending state before TaskAborted and disposal while queue state is intact", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -4922,7 +5087,7 @@ describe("Cline", () => {
 				const abortTaskSpy = vi.spyOn(task, "abortTask").mockResolvedValue(undefined)
 
 				// Test Case 1: Stream failure should NOT abort task
-				task.abort = false
+				setAbortLatch(task, false)
 				task.abandoned = false
 
 				// Simulate the catch block behavior for stream failure
@@ -4943,7 +5108,7 @@ describe("Cline", () => {
 				expect(abortTaskSpy).not.toHaveBeenCalled()
 
 				// Test Case 2: User cancellation SHOULD abort task
-				task.abort = true
+				setAbortLatch(task, true)
 
 				// For user cancellation, abortTask SHOULD be called
 				if (task.abort) {
@@ -6641,6 +6806,45 @@ describe("Cline", () => {
 			expect(errorSpy).toHaveBeenCalled()
 		})
 
+		it("shows the request row before pending user content resolves", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			Object.assign(task.api, { ensureModelFetched: vi.fn().mockResolvedValue(undefined) })
+			const addToHistory = vi.spyOn(getTaskTestAccess(task), "addToApiConversationHistory").mockResolvedValue()
+			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined as never)
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() => {
+				throw new Error("stop after history")
+			})
+			task.clineMessages = [{ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" }]
+			const saySpy = vi.spyOn(task, "say").mockImplementation(async (type) => {
+				if (type === "api_req_started") {
+					task.clineMessages.push({ ts: Date.now(), type: "say", say: "api_req_started", text: "{}" })
+				}
+				return undefined as never
+			})
+
+			let resolveContent: (content: Anthropic.TextBlockParam[]) => void = () => {}
+			const pending = new Promise<Anthropic.TextBlockParam[]>((resolve) => (resolveContent = resolve))
+			const run = task.recursivelyMakeClineRequests(pending, false).catch(() => {})
+
+			await vi.waitFor(() => expect(saySpy).toHaveBeenCalledWith("api_req_started", expect.any(String)))
+			expect(addToHistory).not.toHaveBeenCalled()
+
+			resolveContent([{ type: "text", text: "expanded input" }])
+			await run
+
+			expect(addToHistory).toHaveBeenCalledWith(
+				expect.objectContaining({
+					content: expect.arrayContaining([{ type: "text", text: "expanded input" }]),
+				}),
+			)
+		})
+
 		it("fetches model metadata before caching the streaming model", async () => {
 			const task = new Task({
 				provider: mockProvider,
@@ -6659,10 +6863,6 @@ describe("Cline", () => {
 					contextWindow: 200_000,
 					maxTokens: 4096,
 				} as ModelInfo,
-			})
-			vi.mocked(processUserContentMentions).mockResolvedValueOnce({
-				content: [{ type: "text", text: "hello" }],
-				mode: undefined,
 			})
 			const safeSpy = vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched")
 			const resetPersistenceSpy = vi.spyOn(getTaskTestAccess(task), "resetAssistantMessagePersistence")
@@ -7203,6 +7403,55 @@ describe("Cline", () => {
 		})
 	})
 
+	describe("context management model metadata", () => {
+		it("passes the fetched context window to context management", async () => {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+
+			let modelInfo: ModelInfo = {
+				supportsImages: false,
+				supportsPromptCache: true,
+				contextWindow: 128_000,
+				maxTokens: 4096,
+			}
+			vi.spyOn(task.api, "getModel").mockImplementation(() => ({
+				id: mockApiConfig.apiModelId!,
+				info: modelInfo,
+			}))
+			const ensureModelFetched = vi.fn().mockImplementation(async () => {
+				modelInfo = { ...modelInfo, contextWindow: 1_000_000 }
+			})
+			Object.assign(task.api, { ensureModelFetched })
+			vi.spyOn(getTaskTestAccess(task), "getSystemPrompt").mockResolvedValue("mock system prompt")
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 50_000,
+			})
+			vi.spyOn(task.api, "createMessage").mockReturnValue(
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]),
+			)
+			task.apiConversationHistory = [
+				{
+					role: "user" as const,
+					content: [{ type: "text" as const, text: "test message" }],
+					ts: Date.now(),
+				},
+			]
+
+			vi.mocked(manageContext).mockClear()
+			await task.attemptApiRequest(0).next()
+
+			expect(ensureModelFetched).toHaveBeenCalledTimes(1)
+			expect(manageContext).toHaveBeenCalledWith(expect.objectContaining({ contextWindow: 1_000_000 }))
+		})
+	})
+
 	describe("start()", () => {
 		it("should be a no-op if the task was already started in the constructor", () => {
 			const task = new Task({
@@ -7382,7 +7631,7 @@ describe("Cline", () => {
 			await flushMicrotasks()
 			consoleErrorSpy.mockClear()
 
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
@@ -7436,7 +7685,7 @@ describe("Cline", () => {
 			consoleErrorSpy.mockClear()
 
 			// Simulate the TOCTOU race: abort flips between throw and catch.
-			task.abort = true
+			setAbortLatch(task, true)
 			getTaskTestAccess(task).presentAssistantMessageSafe()
 			await flushMicrotasks()
 
@@ -7799,6 +8048,9 @@ describe("Cline", () => {
 			// task directory to exist (uuid v7 is mocked to the fixed id below).
 			const taskDir = path.join(os.tmpdir(), "test-storage", "tasks", "00000000-0000-7000-8000-000000000000")
 			fsReal.mkdirSync(taskDir, { recursive: true })
+			// Earlier tests in this file can leave a ui_messages.json for the fixed task id;
+			// merge=true would read it here and fail the first save stage for an unrelated reason.
+			fsReal.rmSync(path.join(taskDir, "ui_messages.json"), { force: true })
 			// Declared outside the try so the finally block can restore them.
 			const updateSpy = vi
 				.spyOn(getTaskTestAccess(Task.prototype), "updateClineMessage")
@@ -8113,7 +8365,7 @@ describe("Queued message processing after condense", () => {
 		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
 
 		// Queue a message during condensing
-		task.messageQueueService.addMessage("queued text", ["img1.png"])
+		task.messageQueueService.addMessage("queued text", ["img1.png"], [{ text: "queued text", source: "user" }])
 
 		// Use fake timers to capture setTimeout(0) in processQueuedMessages
 		vi.useFakeTimers()
@@ -8123,8 +8375,180 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"])
+		expect(submitSpy).toHaveBeenCalledWith("queued text", ["img1.png"], undefined, undefined, [
+			{ text: "queued text", source: "user" },
+		])
 		expect(task.messageQueueService.isEmpty()).toBe(true)
+	})
+
+	it("retries a drain that an edit blocked, once the edit commits", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const id = queue.addMessage("old")!.id
+		const token = queue.beginEdit(id)!
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		vi.runAllTimers()
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		queue.commitEdit(id, token, "edited", ["data:b"], [{ text: "edited", source: "user" }])
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy).toHaveBeenCalledWith("edited", ["data:b"], undefined, undefined, [
+			{ text: "edited", source: "user" },
+		])
+		expect(queue.isEmpty()).toBe(true)
+	})
+
+	it("retries each drain that edits blocked, one per held message", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const first = queue.addMessage("one")!.id
+		const second = queue.addMessage("two")!.id
+		const tokens = [queue.beginEdit(first)!, queue.beginEdit(second)!]
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		task.processQueuedMessages()
+		queue.commitEdit(first, tokens[0], "one edited")
+		queue.commitEdit(second, tokens[1], "two edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["one edited", "two edited"])
+		expect(queue.isEmpty()).toBe(true)
+	})
+
+	it("does not let a surplus blocked drain send a message that arrived later", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const id = queue.addMessage("old")!.id
+		const token = queue.beginEdit(id)!
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		task.processQueuedMessages()
+		queue.addMessage("later")
+		queue.commitEdit(id, token, "edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["edited"])
+		expect(queue.messages.map((m) => m.text)).toEqual(["later"])
+	})
+
+	it("serves a blocked drain when the first of two held messages commits", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const a = queue.addMessage("a")!.id
+		const b = queue.addMessage("b")!.id
+		const tokenA = queue.beginEdit(a)!
+		queue.beginEdit(b)
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.commitEdit(a, tokenA, "a edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["a edited"])
+	})
+
+	it("keeps a blocked drain when one of its held messages is removed, then serves it", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		const a = queue.addMessage("a")!.id
+		const b = queue.addMessage("b")!.id
+		const tokenA = queue.beginEdit(a)!
+		queue.beginEdit(b)
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.removeMessage(b)
+		vi.runAllTimers()
+		expect(submitSpy).not.toHaveBeenCalled()
+
+		queue.commitEdit(a, tokenA, "a edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["a edited"])
+	})
+
+	it("sends the edited message, not a consumer's released message, for a blocked drain", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+		queue.addMessage("x")
+		const x = queue.claimNextMessage()!
+		const a = queue.addMessage("a")!.id
+		const token = queue.beginEdit(a)!
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.releaseMessage(x.id)
+		queue.commitEdit(a, token, "a edited")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy.mock.calls.map((call) => call[0])).toEqual(["a edited"])
+		expect(queue.messages.map((m) => m.text)).toEqual(["x"])
+	})
+
+	it("does not retry a drain that no edit blocked", async () => {
+		const task = new Task({
+			provider: createProvider(),
+			apiConfiguration: apiConfig,
+			task: "initial task",
+			startTask: false,
+		})
+		const submitSpy = vi.spyOn(task, "submitUserMessage").mockResolvedValue(undefined)
+		const queue = task.messageQueueService
+
+		vi.useFakeTimers()
+		task.processQueuedMessages()
+		queue.addMessage("later")
+		vi.runAllTimers()
+		vi.useRealTimers()
+
+		expect(submitSpy).not.toHaveBeenCalled()
 	})
 
 	it("does not cross-drain queues between separate tasks", async () => {
@@ -8159,7 +8583,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyA).toHaveBeenCalledWith("A message", undefined)
+		expect(spyA).toHaveBeenCalledWith("A message", undefined, undefined, undefined, undefined)
 		expect(spyB).not.toHaveBeenCalled()
 		expect(taskB.messageQueueService.isEmpty()).toBe(false)
 
@@ -8169,7 +8593,7 @@ describe("Queued message processing after condense", () => {
 		vi.runAllTimers()
 		vi.useRealTimers()
 
-		expect(spyB).toHaveBeenCalledWith("B message", undefined)
+		expect(spyB).toHaveBeenCalledWith("B message", undefined, undefined, undefined, undefined)
 		expect(taskB.messageQueueService.isEmpty()).toBe(true)
 	})
 })

@@ -20,6 +20,25 @@ describe("matching off Windows", () => {
 	const matches = (filePath: string, patterns: string[]) =>
 		matcher().isFileMatchedByPatterns({ filePath, cwd: CWD, patterns })
 
+	it("keeps backslashes in a workspace root literal", () => {
+		const rootMatch = (filePath: string) =>
+			matcher().isFileMatchedByPatterns({
+				filePath,
+				cwd: "/aliases/my\\project",
+				canonicalCwd: "/storage/my\\project",
+				patterns: ["docs/**"],
+			})
+		expect(rootMatch("/aliases/my\\project/docs/notes.md")).toBe(true)
+		expect(rootMatch("/storage/my\\project/docs/notes.md")).toBe(true)
+		expect(rootMatch("/aliases/my/project/docs/notes.md")).toBe(false)
+	})
+
+	it("matches a relative grant at the filesystem root", () => {
+		expect(matcher().isFileMatchedByPatterns({ filePath: "/docs/notes.md", cwd: "/", patterns: ["docs/**"] })).toBe(
+			true,
+		)
+	})
+
 	// A backslash is a legal filename character here, where `my\file` is one file
 	// rather than `file` inside `my`.
 	it("reads a backslash as part of the filename, not as a separator", () => {
@@ -37,6 +56,18 @@ describe("matching off Windows", () => {
 	it("does not read a leading drive as one", () => {
 		expect(matches("C:/tmp/notes.md", ["C:/tmp/notes.md"])).toBe(true)
 		expect(matches("/tmp/notes.md", ["C:/tmp/notes.md"])).toBe(false)
+	})
+
+	it("keeps drive-relative-looking names usable as literal POSIX paths", () => {
+		expect(matches("C:notes.md", ["C:notes.md"])).toBe(true)
+		expect(matches("D:docs/notes.md", ["D:docs/**"])).toBe(true)
+		expect(
+			matcher().isFileMatchedByPatterns({
+				filePath: "docs/notes.md",
+				cwd: "/workspace/C:",
+				patterns: ["docs/**"],
+			}),
+		).toBe(true)
 	})
 
 	it("matches a bare pattern anywhere in the workspace, and nowhere else", () => {

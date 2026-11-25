@@ -6,7 +6,8 @@
 		"cancel": "Anuluj",
 		"select": "Wybierz",
 		"add": "Dodaj nagłówek",
-		"remove": "Usuń"
+		"remove": "Usuń",
+		"milliseconds": "{{value}} ms"
 	},
 	"search": {
 		"placeholder": "Szukaj ustawień...",
@@ -76,11 +77,15 @@
 			"summaryFailedNoFiles": "Import zatrzymał się przed skopiowaniem jakichkolwiek plików.",
 			"summaryCopied": "Skopiowano {{copied}} z {{total}} plików",
 			"detailFailed": "Rozpocznij nową próbę importu, aby spróbować ponownie.",
-			"detailTasksImported_one": "Zaimportowano {{count}} z {{total}} historię zadań.",
-			"detailTasksImported_other": "Zaimportowano {{count}} z {{total}} historii zadań.",
+			"detailTasksImported_one": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_few": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_many": "Zaimportowano historii zadań: {{count}} z {{total}}.",
+			"detailTasksImported_other": "Zaimportowano historii zadań: {{count}} z {{total}}.",
 			"detailPreparing": "Przygotowywanie importu historii Roo Code.",
 			"progressAriaLabel": "Postęp importu historii Roo Code"
-		}
+		},
+		"version": "Wersja: {{version}}",
+		"versionWithCommit": "Wersja: {{version}} ({{commit}})"
 	},
 	"slashCommands": {
 		"description": "Zarządzaj poleceniami slash, aby szybko wykonywać niestandardowe przepływy pracy i akcje. <DocsLink>Dowiedz się więcej</DocsLink>",
@@ -388,12 +393,6 @@
 		"getOpencodeGoApiKey": "Uzyskaj klucz API Opencode Go",
 		"kenariApiKey": "Klucz API Kenari",
 		"getKenariApiKey": "Uzyskaj klucz API Kenari",
-		"ioIntelligence": {
-			"provider": "IO Intelligence",
-			"apiKey": "Klucz API IO Intelligence",
-			"getApiKey": "Uzyskaj klucz API IO Intelligence",
-			"model": "Model"
-		},
 		"nanoGpt": {
 			"provider": "NanoGPT",
 			"apiKey": "Klucz API NanoGPT",
@@ -526,6 +525,8 @@
 		"openAiBaseUrl": "URL bazowy",
 		"openAiStrictToolSchemas": "Ścisłe schematy narzędzi (strict: true)",
 		"openAiStrictToolSchemasDescription": "Wysyła strict: true wraz ze schematami narzędzi, aby włączyć ścisłe przestrzeganie schematu. Wyłącz, aby korzystać z nieścisłego wywoływania narzędzi.",
+		"openAiUseResponsesApi": "Używaj API Responses",
+		"openAiUseResponsesApiDescription": "Wysyła żądania do /responses zamiast /chat/completions. Wymagane dla niektórych modeli rozumowania w punktach końcowych zgodnych z OpenAI. Rozumowanie i narzędzia pozostają aktywne.",
 		"azureOpenAiBaseUrlPlaceholder": "https://<resource>.openai.azure.com/openai",
 		"azureOpenAiDeploymentName": "Nazwa wdrożenia Azure",
 		"azureOpenAiDeploymentNameDescription": "Wprowadź nazwę wdrożenia z Azure AI Studio, a nie nazwę bazowego modelu.",
@@ -536,6 +537,13 @@
 		"codestralBaseUrlDesc": "Ustaw opcjonalny URL dla modeli Codestral.",
 		"xaiApiKey": "Klucz API xAI",
 		"getXaiApiKey": "Uzyskaj klucz API xAI",
+		"litellmPreserveReasoning": {
+			"label": "Wysyłaj rozumowanie z powrotem do modelu",
+			"auto": "Automatycznie",
+			"on": "Włączone",
+			"off": "Wyłączone",
+			"description": "Wysyłaj wcześniejsze rozumowanie z powrotem do modelu jako zwykły tekst. Automatycznie korzysta z wykrytych właściwości modelu; Włączone zawsze wysyła; Wyłączone nigdy nie wysyła. Nie włącza generowania rozumowania ani nie ukrywa go na czacie."
+		},
 		"litellmApiKey": "Klucz API LiteLLM",
 		"litellmBaseUrl": "URL bazowy LiteLLM",
 		"awsCredentials": "Poświadczenia AWS",
@@ -685,6 +693,17 @@
 			"signInDescription": "Zaloguj się, aby korzystać z Zoo Gateway ze swoim kontem",
 			"authenticated": "Uwierzytelniono",
 			"authenticatedAs": "Uwierzytelniono jako {{name}}"
+		},
+		"awsAuthMethod": "Metoda uwierzytelniania",
+		"qwenCode": {
+			"oauthPathLabel": "Ścieżka do poświadczeń OAuth",
+			"oauthPathDescription": "Ścieżka do pliku poświadczeń OAuth Qwen. Jeśli zostawisz ją pustą, zostanie użyta {{defaultPath}}.",
+			"description": "Qwen Code to API oparte na OAuth, które wymaga uwierzytelnienia przez oficjalnego klienta Qwen. Najpierw musisz skonfigurować poświadczenia OAuth.",
+			"gettingStarted": "Aby zacząć:",
+			"step1": "1. Zainstaluj oficjalnego klienta Qwen",
+			"step2": "2. Uwierzytelnij się swoim kontem",
+			"step3": "3. Poświadczenia OAuth zostaną zapisane automatycznie",
+			"setupInstructions": "Instrukcja konfiguracji"
 		}
 	},
 	"checkpoints": {
@@ -916,7 +935,12 @@
 			"refreshing": "Odświeżanie...",
 			"refreshSuccess": "Narzędzia odświeżone pomyślnie",
 			"refreshError": "Nie udało się odświeżyć narzędzi",
-			"toolParameters": "Parametry"
+			"toolParameters": "Parametry",
+			"required": "wymagany"
+		},
+		"DYNAMIC_THINKING_EFFORT": {
+			"name": "Dynamiczny wysiłek myślowy",
+			"description": "Przygotowuje narzędzie set_thinking_effort do późniejszego wsparcia: to ustawienie zapisuje tylko preferencję, zachowanie na żądanie pojawi się w kolejnych pracach. (eksperymentalne)"
 		}
 	},
 	"temperature": {
@@ -947,10 +971,20 @@
 		"useAzure": "Użyj Azure",
 		"azureApiVersion": "Ustaw wersję API Azure",
 		"gemini": {
-			"freeRequests": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_one": "* Darmowe do {{count}} zapytania na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_few": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_many": "* Darmowe do {{count}} zapytań na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
+			"freeRequests_other": "* Darmowe do {{count}} zapytania na minutę. Po tym, rozliczanie zależy od rozmiaru podpowiedzi.",
 			"pricingDetails": "Więcej informacji znajdziesz w szczegółach cennika.",
 			"billingEstimate": "* Rozliczenie jest szacunkowe - dokładny koszt zależy od rozmiaru podpowiedzi."
-		}
+		},
+		"tokensValue_one": "{{count, number}} token",
+		"tokensValue_few": "{{count, number}} tokeny",
+		"tokensValue_many": "{{count, number}} tokenów",
+		"tokensValue_other": "{{count, number}} tokena",
+		"pricePerMillionTokens": "{{price}} / 1 mln tokenów",
+		"showMore": "Więcej",
+		"showLess": "Mniej"
 	},
 	"modelPicker": {
 		"automaticFetch": "Rozszerzenie automatycznie pobiera najnowszą listę modeli dostępnych w <serviceLink>{{serviceName}}</serviceLink>. Jeśli nie jesteś pewien, który model wybrać, Zoo Code działa najlepiej z <defaultModelLink>{{defaultModelId}}</defaultModelLink>. Możesz również wyszukać \"free\", aby znaleźć obecnie dostępne opcje bezpłatne.",
@@ -1015,7 +1049,8 @@
 			"inputPrice": "np. 0.0001",
 			"outputPrice": "np. 0.0002",
 			"cacheWritePrice": "np. 0.00005"
-		}
+		},
+		"defaultValue": "Domyślnie: {{value}}"
 	},
 	"defaults": {
 		"ollamaUrl": "Domyślnie: http://localhost:11434",
@@ -1044,7 +1079,9 @@
 			"input": "Wejście",
 			"output": "Wyjście",
 			"cacheReads": "Odczyty z pamięci podręcznej"
-		}
+		},
+		"label": "Poziom usług",
+		"tooltip": "Aby szybciej przetwarzać żądania API, wypróbuj poziom usług z priorytetowym przetwarzaniem. Aby płacić mniej kosztem większych opóźnień, wypróbuj poziom przetwarzania flex."
 	},
 	"ui": {
 		"collapseThinking": {

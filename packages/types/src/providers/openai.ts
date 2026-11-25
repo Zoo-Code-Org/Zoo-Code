@@ -23,7 +23,116 @@ export type OpenAiNativeModelId = keyof typeof openAiNativeModels
 export const OPENAI_API_PROTOCOL = "openai"
 export const openAiNativeDefaultModelId: OpenAiNativeModelId = "gpt-5.6-sol"
 
+const gpt62NativeModelInfo = {
+	maxTokens: 128_000,
+	contextWindow: 1_050_000,
+	includedTools: ["apply_patch"],
+	excludedTools: ["apply_diff", "write_to_file"],
+	supportsImages: true,
+	supportsPromptCache: true,
+	supportsReasoningEffort: ["low", "medium", "high", "xhigh", "max"],
+	requiredReasoningEffort: true,
+	reasoningEffort: "medium",
+	supportsVerbosity: true,
+	supportsTemperature: false,
+	longContextPricing: {
+		thresholdTokens: 272_000,
+		inputPriceMultiplier: 2,
+		outputPriceMultiplier: 1.5,
+		cacheWritesPriceMultiplier: 2,
+		cacheReadsPriceMultiplier: 2,
+		appliesToServiceTiers: ["default", "priority"],
+	},
+} as const satisfies ModelInfo
+
 export const openAiNativeModels = {
+	// https://developers.openai.com/api/docs/models/gpt-6.2-sol
+	"gpt-6.2-sol": {
+		...gpt62NativeModelInfo,
+		inputPrice: 2,
+		outputPrice: 10,
+		cacheReadsPrice: 0.1,
+		cacheWritesPrice: 2.5,
+		cacheWritesPrice12h: 5,
+		tiers: [
+			{
+				name: "priority",
+				contextWindow: gpt62NativeModelInfo.contextWindow,
+				inputPrice: 4,
+				outputPrice: 20,
+				cacheReadsPrice: 0.2,
+				cacheWritesPrice: 5,
+				cacheWritesPrice12h: 10,
+			},
+		],
+		description: "GPT-6.2 Sol for everyday coding and agent workflows",
+	},
+	// https://developers.openai.com/api/docs/models/gpt-6.2-astra
+	"gpt-6.2-astra": {
+		...gpt62NativeModelInfo,
+		inputPrice: 8,
+		outputPrice: 40,
+		cacheReadsPrice: 0.4,
+		cacheWritesPrice: 10,
+		cacheWritesPrice12h: 20,
+		tiers: [
+			{
+				name: "priority",
+				contextWindow: gpt62NativeModelInfo.contextWindow,
+				inputPrice: 16,
+				outputPrice: 80,
+				cacheReadsPrice: 0.8,
+				cacheWritesPrice: 20,
+				cacheWritesPrice12h: 40,
+			},
+		],
+		description: "GPT-6.2 Astra for complex software engineering and professional work",
+	},
+	// https://developers.openai.com/api/docs/models/gpt-6.1-terra
+	"gpt-6.1-terra": {
+		maxTokens: 128000,
+		contextWindow: 1_050_000,
+		includedTools: ["apply_patch"],
+		excludedTools: ["apply_diff", "write_to_file"],
+		supportsImages: true,
+		supportsPromptCache: true,
+		supportsReasoningEffort: ["none", "low", "medium", "high", "xhigh", "max"],
+		reasoningEffort: "medium",
+		inputPrice: 1,
+		outputPrice: 5,
+		cacheWritesPrice: 1.25,
+		cacheWritesPrice12h: 2.5,
+		cacheReadsPrice: 0.05,
+		longContextPricing: {
+			thresholdTokens: 272_000,
+			inputPriceMultiplier: 2,
+			outputPriceMultiplier: 1.5,
+			cacheWritesPriceMultiplier: 2,
+			cacheReadsPriceMultiplier: 2,
+			appliesToServiceTiers: ["default", "flex", "priority"],
+		},
+		supportsVerbosity: true,
+		supportsTemperature: false,
+		tiers: [
+			{
+				name: "flex",
+				contextWindow: 1_050_000,
+				inputPrice: 0.5,
+				outputPrice: 2.5,
+				cacheWritesPrice: 0.625,
+				cacheReadsPrice: 0.025,
+			},
+			{
+				name: "priority",
+				contextWindow: 1_050_000,
+				inputPrice: 2,
+				outputPrice: 10,
+				cacheWritesPrice: 2.5,
+				cacheReadsPrice: 0.1,
+			},
+		],
+		description: "GPT-6.1 Terra: Fast, efficient visual reasoning, precise computer use, and natural writing",
+	},
 	// https://developers.openai.com/api/docs/models/gpt-6.1-sol
 	"gpt-6.1-sol": {
 		maxTokens: 128000,
@@ -1003,6 +1112,13 @@ export const OPEN_AI_MODEL_ID_FIELD = "openAiModelId"
  */
 export const DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS = true
 
+/**
+ * Default for the OpenAI Compatible "Include max output tokens" checkbox.
+ * The settings UI and every request builder must read this so an unset
+ * value is shown and sent the same way.
+ */
+export const DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS = true
+
 const OPENAI_EXTRA_BODY_RESERVED_KEYS = [
 	// Prototype-pollution defenses; remaining keys are request-owned, including tool-call protocol controls.
 	"__proto__",
@@ -1088,6 +1204,7 @@ export const openAiProviderDefinition = createProviderDefinition({
 		openAiUseAzure: z.boolean().optional(),
 		azureApiVersion: z.string().optional(),
 		openAiStreamingEnabled: z.boolean().optional(),
+		openAiUseResponsesApi: z.boolean().optional(),
 		openAiHostHeader: z.string().optional(), // Keep temporarily for backward compatibility during migration.
 		openAiHeaders: z.record(z.string(), z.string()).optional(),
 		openAiExtraBody: openAiExtraBodySchema,

@@ -18,8 +18,6 @@ import {
 	BEDROCK_MAX_TOKENS,
 	bedrockModels,
 	litellmDefaultModelInfo,
-	ioIntelligenceDefaultModelId,
-	ioIntelligenceDefaultModelInfo,
 	kenariDefaultModelId,
 	kenariDefaultModelInfo,
 	nanoGptDefaultModelId,
@@ -227,17 +225,20 @@ describe("useSelectedModel", () => {
 		)
 	})
 
-	it("falls back to the OpenRouter default for a retired provider", () => {
-		mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
-		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+	it.each([retiredProviderIdentifiers.cerebras, retiredProviderIdentifiers.geminiCli])(
+		"falls back to the OpenRouter default for retired provider %s",
+		(apiProvider) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
-		const { result } = renderHook(() => useSelectedModel({ apiProvider: retiredProviderIdentifiers.cerebras }), {
-			wrapper: createWrapper(),
-		})
+			const { result } = renderHook(() => useSelectedModel({ apiProvider }), {
+				wrapper: createWrapper(),
+			})
 
-		expect(result.current.id).toBe(openRouterDefaultModelId)
-		expect(result.current.info).toBeUndefined()
-	})
+			expect(result.current.id).toBe(openRouterDefaultModelId)
+			expect(result.current.info).toBeUndefined()
+		},
+	)
 
 	it("uses OpenCode Go default model information when the router catalog is empty", () => {
 		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.opencodeGo]: {} }))
@@ -727,7 +728,7 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.outputPrice).toBe(37.5)
 		})
 
-		it.each([providerIdentifiers.anthropic, providerIdentifiers.geminiCli, providerIdentifiers.fakeAi] as const)(
+		it.each([providerIdentifiers.anthropic, providerIdentifiers.fakeAi] as const)(
 			"should explicitly resolve configured models for %s",
 			(apiProvider) => {
 				const apiConfiguration: ProviderSettings = {
@@ -1289,102 +1290,6 @@ describe("useSelectedModel", () => {
 		})
 	})
 
-	describe("io-intelligence provider", () => {
-		it("uses dynamic metadata for the configured IO Intelligence model", () => {
-			const dynamicInfo: ModelInfo = {
-				maxTokens: 8_192,
-				contextWindow: 131_072,
-				supportsPromptCache: true,
-				description: "Dynamic IO Intelligence model",
-			}
-			mockUseRouterModels.mockReturnValue(
-				createRouterModelsResult({ "io-intelligence": { "zai-org/GLM-4.6": dynamicInfo } }),
-			)
-			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
-
-			const { result } = renderHook(
-				() =>
-					useSelectedModel({
-						apiProvider: providerIdentifiers.ioIntelligence,
-						ioIntelligenceModelId: "zai-org/GLM-4.6",
-					}),
-				{ wrapper: createWrapper() },
-			)
-
-			expect(result.current.id).toBe("zai-org/GLM-4.6")
-			expect(result.current.info).toEqual(dynamicInfo)
-		})
-
-		it("uses IO Intelligence's shared fallback when its dynamic catalog is empty", () => {
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ "io-intelligence": {} }))
-			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
-
-			const { result } = renderHook(
-				() =>
-					useSelectedModel({
-						apiProvider: providerIdentifiers.ioIntelligence,
-						// ioIntelligenceModelId intentionally omitted
-					}),
-				{ wrapper: createWrapper() },
-			)
-
-			expect(result.current.id).toBe(ioIntelligenceDefaultModelId)
-			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
-		})
-
-		it("preserves a configured model ID that is absent from the fetched catalog", () => {
-			mockUseRouterModels.mockReturnValue(
-				createRouterModelsResult({
-					"io-intelligence": {
-						"meta-llama/Llama-3.3-70B-Instruct": {
-							maxTokens: 8_192,
-							contextWindow: 131_072,
-							supportsPromptCache: false,
-						},
-					},
-				}),
-			)
-			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
-
-			const { result } = renderHook(
-				() =>
-					useSelectedModel({
-						apiProvider: providerIdentifiers.ioIntelligence,
-						ioIntelligenceModelId: "custom-org/custom-model",
-					}),
-				{ wrapper: createWrapper() },
-			)
-
-			// The stored id is what requests are sent with, so the picker must show it
-			// rather than the default; only the metadata falls back.
-			expect(result.current.id).toBe("custom-org/custom-model")
-			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
-		})
-
-		it("preserves the configured model ID when the catalog fetch errors", () => {
-			// A cold /models failure settles the router query with no data. The
-			// hook must still resolve and keep the configured ID (the handler
-			// sends requests with it) instead of resetting to the provider default.
-			mockUseRouterModels.mockReturnValue(
-				createRouterModelsResult(undefined, { isLoading: false, isError: true }),
-			)
-			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
-
-			const { result } = renderHook(
-				() =>
-					useSelectedModel({
-						apiProvider: providerIdentifiers.ioIntelligence,
-						ioIntelligenceModelId: "zai-org/GLM-4.6",
-					}),
-				{ wrapper: createWrapper() },
-			)
-
-			expect(result.current.id).toBe("zai-org/GLM-4.6")
-			expect(result.current.info).toEqual(ioIntelligenceDefaultModelInfo)
-			expect(result.current.isError).toBe(true)
-		})
-	})
-
 	describe("openai provider", () => {
 		beforeEach(() => {
 			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
@@ -1855,7 +1760,9 @@ describe("useSelectedModel", () => {
 
 	describe("friendli provider", () => {
 		beforeEach(() => {
-			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {} }))
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ openrouter: {}, requesty: {}, litellm: {}, friendli: {} }),
+			)
 
 			mockUseOpenRouterModelProviders.mockReturnValue({
 				data: {},
@@ -1889,6 +1796,82 @@ describe("useSelectedModel", () => {
 			expect(result.current.provider).toBe(providerIdentifiers.friendli)
 			expect(result.current.id).toBe("zai-org/GLM-5.1")
 			expect(result.current.info).toEqual(friendliModels["zai-org/GLM-5.1"])
+		})
+
+		it("should use static model info before router models load", () => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult(undefined, { isLoading: true }))
+			const apiConfiguration: ProviderSettings = { apiProvider: providerIdentifiers.friendli }
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should prefer fetched router model info", () => {
+			const info = { maxTokens: 8192, contextWindow: 100_000, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: { "vendor/new-model": info } }))
+			const apiConfiguration: ProviderSettings = {
+				apiProvider: providerIdentifiers.friendli,
+				apiModelId: "vendor/new-model",
+			}
+
+			const { result } = renderHook(() => useSelectedModel(apiConfiguration), { wrapper: createWrapper() })
+
+			expect(result.current.id).toBe("vendor/new-model")
+			expect(result.current.info).toEqual(info)
+		})
+
+		it("should use the default model for an empty model ID", () => {
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toEqual(friendliModels[friendliDefaultModelId])
+		})
+
+		it("should use fetched metadata for the default model when the model ID is empty", () => {
+			const info = { maxTokens: 8192, contextWindow: 123_456, supportsPromptCache: false }
+			mockUseRouterModels.mockReturnValue(
+				createRouterModelsResult({ friendli: { [friendliDefaultModelId]: info } }),
+			)
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.id).toBe(friendliDefaultModelId)
+			expect(result.current.info).toBe(info)
+		})
+
+		it.each(["toString", "constructor", "__proto__", "vendor/unknown"])(
+			"should use sane defaults, not an inherited member, for %s missing from both catalogs",
+			(apiModelId) => {
+				const { result } = renderHook(
+					() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId }),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.id).toBe(apiModelId)
+				expect(result.current.info).toEqual(openAiModelInfoSaneDefaults)
+			},
+		)
+
+		it("should resolve a fetched model whose upstream ID is __proto__", () => {
+			const info = { contextWindow: 1000, supportsPromptCache: false }
+			const fetched: Record<string, ModelInfo> = Object.create(null)
+			fetched["__proto__"] = info
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({ friendli: fetched }))
+
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.friendli, apiModelId: "__proto__" }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info).toBe(info)
 		})
 	})
 

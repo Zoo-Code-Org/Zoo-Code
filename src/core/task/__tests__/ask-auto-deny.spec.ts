@@ -5,6 +5,7 @@ import { type ClineMessage, type ExtensionState, RooCodeEventName } from "@roo-c
 import * as autoApprovalModule from "../../auto-approval"
 import { createRateLimitClock } from "../RateLimitClock"
 import { Task } from "../Task"
+import { setAbortLatch } from "../../../test-utils/run-state"
 
 // The streaming-loop drive below never asserts on environment details; the
 // real collector reaches into the VS Code window API, which this file's
@@ -31,7 +32,7 @@ type ProviderStub = {
 
 function buildTask(provider: ProviderStub, taskCwd: string) {
 	const task = Object.create(Task.prototype) as Task
-	task["abort"] = false
+	setAbortLatch(task, false)
 	task["clineMessages"] = []
 	task["askResponse"] = undefined
 	task["askResponseText"] = undefined
@@ -743,7 +744,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
@@ -830,7 +831,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// longer this wait runs, the less event-loop-stall slack is left before
 		// the 2 s timer could legitimately fire while the task is still live.
 		await vi.waitFor(() => expect(Date.now() - armedAt).toBeGreaterThanOrEqual(300), { timeout: 2_000 })
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		const outcome = await toolAsk.then(
 			() => "resolved",
@@ -931,7 +932,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
@@ -993,7 +994,7 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		await vi.waitFor(() => expect(getStateCalls).toBe(2))
 		expect(queue.hasUnclaimed()).toBe(false)
 
-		task["abort"] = true
+		setAbortLatch(task, true)
 
 		// `ask()` must reject on abort; racing a deadline distinguishes a wrong
 		// settle from a hang on the pending read.
@@ -1018,6 +1019,41 @@ describe("Task.ask queue path cannot bypass blanket deny", () => {
 		// consumer.
 		expect(queue.messages).toHaveLength(1)
 		expect(queue.hasUnclaimed()).toBe(true)
+		checkAutoApprovalSpy.mockRestore()
+	})
+})
+
+describe("Task.ask forwards file targets to the policy", () => {
+	it("decides a file ask on the tool's targets rather than its display path", async () => {
+		const provider: ProviderStub = {
+			postMessageToWebview: vi.fn().mockResolvedValue(undefined),
+			postStateToWebviewWithoutTaskHistory: vi.fn().mockResolvedValue(undefined),
+			getSkillsManager: () => undefined,
+			cwd: TASK_CWD,
+			getState: async () => ({ autoApprovalEnabled: true, allowedReadFiles: ["docs/**"] }),
+		}
+		const task = buildTask(provider, TASK_CWD)
+		await attachQueue(task)
+		const fileTargets = [{ absolutePath: `${TASK_CWD}/docs/notes.md`, isOutsideWorkspace: false }]
+		const checkAutoApprovalSpy = vi.spyOn(autoApprovalModule, "checkAutoApproval")
+
+		// Only the target is allowlisted, so the ask is auto-approved only if it reaches the policy;
+		// otherwise it waits for a user who never answers.
+		const askPromise = task.ask(
+			"tool",
+			JSON.stringify({ tool: "readFile", path: "notes.md" }),
+			false,
+			undefined,
+			false,
+			{ fileTargets },
+		)
+		const outcome = await Promise.race([
+			askPromise.then(({ response }) => response),
+			new Promise<string>((resolve) => setTimeout(() => resolve("still waiting for the user"), 3_000)),
+		])
+
+		expect(outcome).toBe("yesButtonClicked")
+		expect(checkAutoApprovalSpy).toHaveBeenCalledWith(expect.objectContaining({ cwd: TASK_CWD, fileTargets }))
 		checkAutoApprovalSpy.mockRestore()
 	})
 })

@@ -12,6 +12,34 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"litellm-reasoning-settings": async () => {
+		const [{ AppProviders }, { default: ApiOptions }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ApiOptions"),
+			import("@roo-code/types"),
+		])
+		const apiConfiguration: import("@roo-code/types").ProviderSettings = {
+			apiProvider: providerIdentifiers.litellm,
+			litellmBaseUrl: "http://localhost:4000",
+			litellmApiKey: "sk-litellm-example",
+			litellmModelId: "custom-alias",
+		}
+		return (
+			<AppProviders initialState={{ apiConfiguration }}>
+				<div
+					className="w-[480px] max-w-full p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="litellm-reasoning-settings-story">
+					<ApiOptions
+						uriScheme="vscode"
+						apiConfiguration={apiConfiguration}
+						setApiConfigurationField={() => undefined}
+						errorMessage={undefined}
+						setErrorMessage={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"terminal-settings": async () => {
 		const [{ AppProviders }, { TerminalSettings }] = await Promise.all([
 			import("../AppProviders"),
@@ -146,6 +174,32 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"api-provider-dropdown": async () => {
+		const [{ AppProviders }, { default: ApiOptions }, { providerIdentifiers }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/settings/ApiOptions"),
+			import("@roo-code/types"),
+		])
+		const apiConfiguration: import("@roo-code/types").ProviderSettings = {
+			apiProvider: providerIdentifiers.anthropic,
+			apiKey: "sk-ant-example-key",
+		}
+		return (
+			<AppProviders initialState={{ apiConfiguration }}>
+				<div
+					className="w-[480px] p-4 bg-vscode-editor-background text-vscode-foreground"
+					data-testid="api-provider-dropdown-story">
+					<ApiOptions
+						uriScheme="vscode"
+						apiConfiguration={apiConfiguration}
+						setApiConfigurationField={() => undefined}
+						errorMessage={undefined}
+						setErrorMessage={() => undefined}
+					/>
+				</div>
+			</AppProviders>
+		)
+	},
 	"auto-approve-settings": async () => {
 		const { AutoApproveSettingsStory } =
 			await import("@/components/settings/__tests__/AutoApproveSettings.visual.fixture")
@@ -236,39 +290,6 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
-	"io-intelligence-settings": async () => {
-		const [{ AppProviders }, { IOIntelligence }, { providerIdentifiers }] = await Promise.all([
-			import("../AppProviders"),
-			import("@/components/settings/providers/IOIntelligence"),
-			import("@roo-code/types"),
-		])
-		type ProviderSettings = React.ComponentProps<typeof IOIntelligence>["apiConfiguration"]
-
-		function IOIntelligenceSettingsStory() {
-			const [apiConfiguration, setApiConfiguration] = useState<ProviderSettings>({
-				apiProvider: providerIdentifiers.ioIntelligence,
-			})
-			return (
-				<div className="w-full p-4 bg-vscode-editor-background" data-testid="io-intelligence-settings-story">
-					<div className="flex flex-col gap-3">
-						<IOIntelligence
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={(field, value) =>
-								setApiConfiguration((current) => ({ ...current, [field]: value }))
-							}
-							organizationAllowList={{ allowAll: true, providers: {} }}
-						/>
-					</div>
-				</div>
-			)
-		}
-
-		return (
-			<AppProviders initialState={{ apiConfiguration: { apiProvider: providerIdentifiers.ioIntelligence } }}>
-				<IOIntelligenceSettingsStory />
-			</AppProviders>
-		)
-	},
 	"layout-clipped-text": () => (
 		<div className="w-40">
 			<span data-testid="clipped-direct-text" className="block w-8 overflow-hidden whitespace-nowrap">
@@ -341,10 +362,12 @@ export const stories: Record<string, Story> = {
 		return <TelemetryBannerFixture />
 	},
 	"theme-aware-controls": async () => {
-		const [{ SelectDropdown }, { default: UpdateTodoListToolBlock }] = await Promise.all([
-			import("@/components/ui/select-dropdown"),
-			import("@/components/chat/UpdateTodoListToolBlock"),
-		])
+		const [{ SelectDropdown }, { default: UpdateTodoListToolBlock }, { EnglishChatTranslations }] =
+			await Promise.all([
+				import("@/components/ui/select-dropdown"),
+				import("@/components/chat/UpdateTodoListToolBlock"),
+				import("@/components/chat/__tests__/UpdateTodoListToolBlock.visual.fixture"),
+			])
 		type Todo = NonNullable<React.ComponentProps<typeof UpdateTodoListToolBlock>["todos"]>[number]
 
 		function ThemeAwareControlsStory() {
@@ -355,7 +378,9 @@ export const stories: Record<string, Story> = {
 			return (
 				<div className="flex flex-col gap-4 w-96">
 					<SelectDropdown value={value} options={[{ value: "code", label: "Code" }]} onChange={setValue} />
-					<UpdateTodoListToolBlock todos={todos} onChange={setTodos} />
+					<EnglishChatTranslations>
+						<UpdateTodoListToolBlock todos={todos} onChange={setTodos} />
+					</EnglishChatTranslations>
 				</div>
 			)
 		}
@@ -467,6 +492,15 @@ export const stories: Record<string, Story> = {
 	"ui-settings": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")
 		return <UISettingsStory />
+	},
+	"prompts-settings": async () => {
+		const { PromptsSettingsStory } = await import("@/components/settings/__tests__/PromptsSettings.visual.fixture")
+		return <PromptsSettingsStory />
+	},
+	"experimental-settings": async () => {
+		const { ExperimentalSettingsStory } =
+			await import("@/components/settings/__tests__/ExperimentalSettings.visual.fixture")
+		return <ExperimentalSettingsStory />
 	},
 	"ui-settings-long-locale": async () => {
 		const { UISettingsStory } = await import("@/components/settings/__tests__/UISettings.visual.fixture")

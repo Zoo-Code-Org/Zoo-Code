@@ -1,6 +1,6 @@
 import { VSCodeLink } from "@vscode/webview-ui-toolkit/react"
-import { useTranslation } from "react-i18next"
 import { Trans } from "react-i18next"
+import { useAppTranslation } from "@src/i18n/TranslationContext"
 
 import { buildDocLink } from "@src/utils/docLinks"
 import { ReplaceAll, Users } from "lucide-react"
@@ -9,24 +9,24 @@ const tips = [
 	{
 		icon: <Users className="size-4 shrink-0 mt-0.5" />,
 		href: buildDocLink("basic-usage/using-modes", "tips"),
-		titleKey: "rooTips.customizableModes.title",
-		descriptionKey: "rooTips.customizableModes.description",
+		titleKey: "chat:rooTips.customizableModes.title",
+		descriptionKey: "chat:rooTips.customizableModes.description",
 	},
 	{
 		icon: <ReplaceAll className="size-4 shrink-0 mt-0.5" />,
 		href: buildDocLink("getting-started/connecting-api-provider", "tips"),
-		titleKey: "rooTips.modelAgnostic.title",
-		descriptionKey: "rooTips.modelAgnostic.description",
+		titleKey: "chat:rooTips.modelAgnostic.title",
+		descriptionKey: "chat:rooTips.modelAgnostic.description",
 	},
 ]
 
 const RooTips = () => {
-	const { t } = useTranslation("chat")
+	const { t } = useAppTranslation()
 
 	return (
 		<div className="flex flex-col gap-2 mb-4 max-w-[500px] text-vscode-descriptionForeground">
 			<p className="my-0 pr-2">
-				<Trans i18nKey="chat:about" />
+				<Trans t={t} i18nKey="chat:about" />
 			</p>
 			<div className="gap-4">
 				{tips.map((tip) => (
@@ -43,6 +43,7 @@ const RooTips = () => {
 			</div>
 			<p className="my-0 pr-8">
 				<Trans
+					t={t}
 					i18nKey="chat:docs"
 					components={{
 						DocsLink: (

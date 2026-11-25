@@ -9,7 +9,7 @@ import { vscode } from "@/utils/vscode"
 import { getTaskDisplayTitle } from "./types"
 
 type TaskTitleEditorProps = {
-	item: Pick<HistoryItem, "id" | "task" | "title">
+	item: Pick<HistoryItem, "id" | "task" | "title" | "autoTitle">
 	onDone: () => void
 	className?: string
 }
@@ -29,7 +29,12 @@ export const TaskTitleEditor = ({ item, onDone, className }: TaskTitleEditorProp
 
 	const save = useCallback(() => {
 		const normalized = normalizeTitle(value)
-		const nextTitle = normalized && normalized !== normalizeTitle(item.task) ? normalized : undefined
+		// The original prompt and the generated title are the fallbacks shown when no custom title is set,
+		// so saving either one unchanged must not turn it into a manual title.
+		const isFallback =
+			normalized === normalizeTitle(item.task) ||
+			(item.autoTitle !== undefined && normalized === normalizeTitle(item.autoTitle))
+		const nextTitle = normalized && !isFallback ? normalized : undefined
 
 		if (nextTitle !== item.title) {
 			vscode.postMessage({ type: "renameTaskWithId", taskId: item.id, text: nextTitle ?? "" })

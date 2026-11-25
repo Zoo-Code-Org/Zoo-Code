@@ -43,6 +43,10 @@ export class KimiCodeHandler extends OpenAiHandler {
 	constructor(options: ApiHandlerOptions) {
 		super({
 			...options,
+			openAiUseResponsesApi: false,
+			// Kimi Code has no "Include max output tokens" control, so a value left
+			// in the profile by OpenAI Compatible must not opt it in by default.
+			includeMaxTokens: options.includeMaxTokens === true,
 			openAiBaseUrl: KIMI_CODE_BASE_URL,
 			openAiApiKey: options.kimiCodeApiKey ?? NOT_PROVIDED,
 			openAiModelId: options.apiModelId ?? kimiCodeDefaultModelId,

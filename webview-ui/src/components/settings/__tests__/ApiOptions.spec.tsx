@@ -35,6 +35,26 @@ vi.mock("@vscode/webview-ui-toolkit/react", () => ({
 			{children}
 		</label>
 	),
+	VSCodeDropdown: ({
+		children,
+		value,
+		onChange,
+		...props
+	}: {
+		children?: React.ReactNode
+		value?: string
+		onChange?: (event: Event) => void
+		id?: string
+		"aria-label"?: string
+		className?: string
+	}) => (
+		<select value={value} onChange={(e) => onChange?.(e.nativeEvent)} {...props}>
+			{children}
+		</select>
+	),
+	VSCodeOption: ({ children, value }: { children?: React.ReactNode; value: string }) => (
+		<option value={value}>{children}</option>
+	),
 }))
 
 // Mock other components
@@ -497,7 +517,6 @@ describe("ApiOptions", () => {
 		expect(optionTexts).toContain("OpenAI")
 		expect(optionTexts).toContain("Anthropic")
 		expect(optionTexts).toContain("NanoGPT")
-		expect(optionTexts).toContain("IO Intelligence")
 
 		// Note: The mock doesn't implement search functionality, so we're just verifying
 		// that the select element is rendered with the expected options
@@ -681,6 +700,34 @@ describe("ApiOptions", () => {
 			expect(screen.getByTestId("litellm-refresh-models")).toBeInTheDocument()
 		})
 
+		it("defaults reasoning preservation to Auto in advanced settings", () => {
+			renderApiOptions({ apiConfiguration: { apiProvider: providerIdentifiers.litellm } })
+
+			const dropdown = screen.getByRole("combobox", {
+				name: "settings:providers.litellmPreserveReasoning.label",
+			})
+			expect(dropdown.closest(".collapsible-content-mock")).not.toBeNull()
+			expect(dropdown).toHaveValue("auto")
+		})
+
+		it("displays saved reasoning preservation and updates it when changed", () => {
+			const mockSetApiConfigurationField = vi.fn()
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.litellm,
+					litellmPreserveReasoning: "off",
+				},
+				setApiConfigurationField: mockSetApiConfigurationField,
+			})
+
+			const dropdown = screen.getByRole("combobox", {
+				name: "settings:providers.litellmPreserveReasoning.label",
+			})
+			expect(dropdown).toHaveValue("off")
+			fireEvent.change(dropdown, { target: { value: "on" } })
+			expect(mockSetApiConfigurationField).toHaveBeenCalledWith("litellmPreserveReasoning", "on")
+		})
+
 		it("does not render LiteLLM component when other provider is selected", () => {
 			renderApiOptions({
 				apiConfiguration: {
@@ -689,6 +736,9 @@ describe("ApiOptions", () => {
 			})
 
 			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+			expect(
+				screen.queryByRole("combobox", { name: "settings:providers.litellmPreserveReasoning.label" }),
+			).not.toBeInTheDocument()
 		})
 	})
 
@@ -716,30 +766,36 @@ describe("ApiOptions", () => {
 		})
 	})
 
-	it("renders retired provider message and hides provider-specific forms", () => {
-		renderApiOptions({
-			apiConfiguration: {
-				apiProvider: retiredProviderIdentifiers.groq,
-			},
-		})
+	it.each([retiredProviderIdentifiers.groq, retiredProviderIdentifiers.geminiCli])(
+		"renders the retirement message for %s and hides provider-specific forms",
+		(apiProvider) => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider,
+				},
+			})
 
-		expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
-			"settings:providers.retiredProviderMessage",
-		)
-		expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
-	})
+			expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
+				"settings:providers.retiredProviderMessage",
+			)
+			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+		},
+	)
 
-	it("does not reintroduce retired providers into active provider options", () => {
-		renderApiOptions({
-			apiConfiguration: {
-				apiProvider: retiredProviderIdentifiers.groq,
-			},
-		})
+	it.each([retiredProviderIdentifiers.groq, retiredProviderIdentifiers.geminiCli])(
+		"does not reintroduce retired provider %s into active provider options",
+		(apiProvider) => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider,
+				},
+			})
 
-		const providerSelectContainer = screen.getByTestId("provider-select")
-		const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
-		const providerOptions = Array.from(providerSelect.querySelectorAll("option")).map((option) => option.value)
+			const providerSelectContainer = screen.getByTestId("provider-select")
+			const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
+			const providerOptions = Array.from(providerSelect.querySelectorAll("option")).map((option) => option.value)
 
-		expect(providerOptions).not.toContain("groq")
-	})
+			expect(providerOptions).not.toContain(apiProvider)
+		},
+	)
 })

@@ -1,7 +1,7 @@
 import React, { memo, useCallback, useEffect, useMemo, useState } from "react"
 import { convertHeadersToObject } from "./utils/headers"
 import { useDebounce } from "react-use"
-import { VSCodeLink, VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import { VSCodeLink, VSCodeTextField, VSCodeDropdown, VSCodeOption } from "@vscode/webview-ui-toolkit/react"
 import { ExternalLinkIcon } from "@radix-ui/react-icons"
 
 import {
@@ -86,7 +86,6 @@ import {
 	VercelAiGateway,
 	OpenCodeGo,
 	Kenari,
-	IOIntelligence,
 	NanoGPT,
 	ZooGateway,
 	MiniMax,
@@ -308,11 +307,12 @@ const ApiOptions = ({
 
 		const apiValidationResult = validateApiConfigurationExcludingModelErrors(
 			apiConfiguration,
+			t,
 			routerModels,
 			organizationAllowList,
 		)
 		setErrorMessage(apiValidationResult)
-	}, [apiConfiguration, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
+	}, [apiConfiguration, t, routerModels, organizationAllowList, setErrorMessage, isRetiredSelectedProvider])
 
 	const onProviderChange = useCallback(
 		(value: ProviderName) => {
@@ -378,8 +378,8 @@ const ApiOptions = ({
 	)
 
 	const modelValidationError = useMemo(() => {
-		return getModelValidationError(apiConfiguration, routerModels, organizationAllowList)
-	}, [apiConfiguration, routerModels, organizationAllowList])
+		return getModelValidationError(apiConfiguration, t, routerModels, organizationAllowList)
+	}, [apiConfiguration, t, routerModels, organizationAllowList])
 
 	const docs = useMemo(() => {
 		const provider = PROVIDERS.find(({ value }) => value === selectedProvider)
@@ -433,6 +433,12 @@ const ApiOptions = ({
 				const [openRouterOption] = options.splice(openRouterIndex, 1)
 				options.unshift(openRouterOption)
 			}
+		}
+
+		const zooGatewayIndex = options.findIndex((opt) => opt.value === providerIdentifiers.zooGateway)
+		if (zooGatewayIndex > 0) {
+			const [zooGatewayOption] = options.splice(zooGatewayIndex, 1)
+			options.unshift(zooGatewayOption)
 		}
 
 		return options
@@ -709,17 +715,6 @@ const ApiOptions = ({
 						/>
 					)}
 
-					{selectedProvider === providerIdentifiers.ioIntelligence && (
-						<IOIntelligence
-							apiConfiguration={apiConfiguration}
-							setApiConfigurationField={setApiConfigurationField}
-							routerModels={routerModels}
-							organizationAllowList={organizationAllowList}
-							modelValidationError={modelValidationError}
-							simplifySettings={fromWelcomeView}
-						/>
-					)}
-
 					{selectedProvider === providerIdentifiers.nanogpt && (
 						<NanoGPT
 							apiConfiguration={apiConfiguration}
@@ -777,6 +772,7 @@ const ApiOptions = ({
 									activeSelectedProvider,
 									t("settings:labels.useCustomArn"),
 									apiConfiguration,
+									routerModels,
 								)}
 								modelIdKey="apiModelId"
 								serviceName={getProviderServiceConfig(activeSelectedProvider).serviceName}
@@ -902,6 +898,28 @@ const ApiOptions = ({
 											{t("settings:providers.poeBaseUrl")}
 										</label>
 									</VSCodeTextField>
+								)}
+								{selectedProvider === providerIdentifiers.litellm && (
+									<div>
+										<label htmlFor="litellm-preserve-reasoning" className="block font-medium mb-1">
+											{t("settings:providers.litellmPreserveReasoning.label")}
+										</label>
+										<VSCodeDropdown
+											id="litellm-preserve-reasoning"
+											aria-label={t("settings:providers.litellmPreserveReasoning.label")}
+											value={apiConfiguration.litellmPreserveReasoning ?? "auto"}
+											onChange={handleInputChange("litellmPreserveReasoning")}
+											className="w-full">
+											{(["auto", "on", "off"] as const).map((value) => (
+												<VSCodeOption key={value} value={value}>
+													{t(`settings:providers.litellmPreserveReasoning.${value}`)}
+												</VSCodeOption>
+											))}
+										</VSCodeDropdown>
+										<div className="text-sm text-vscode-descriptionForeground mt-1">
+											{t("settings:providers.litellmPreserveReasoning.description")}
+										</div>
+									</div>
 								)}
 								{selectedProvider === providerIdentifiers.openrouter &&
 									openRouterModelProviders &&

@@ -45,11 +45,13 @@ Zoo Code는 Roo Code가 만든 기반 위에서 다음 기능을 더하며 계�
 - **더 안정적인 터미널 및 편집 워크플로우** — 터미널 조기 완료, 작업 상태 경합, 컨텍스트 관리, diff 편집, 프로바이더별 도구 사용 문제를 수정.
 - **워크스페이스를 더 세밀하게 제어** — 규칙 관리, 모드별 MCP 제한, 멀티 루트 경로 제어, 모델 reasoning 옵션, 완료 시 변경 사항 검토 작업을 제공.
 
-## v3.96.0의 새로운 기능
+## Zoo Code v3.98.2의 새로운 기능
 
-- ✨ **새로운 채팅 설정 및 진단:** 구성 가능한 시간·날짜 형식으로 메시지 타임스탬프를 표시하고, Anthropic 프로필의 prompt-cache TTL을 조정하고, 개인정보를 보호하는 진단 리포트를 생성합니다.
-- 💸 **더 정확한 프로바이더 비용과 캐싱:** Anthropic 도구 결과를 그대로 유지하고, Anthropic·MiniMax 비용에 누적 output token을 반영하고, DeepSeek의 prompt-cache 카운터를 읽고, xAI Responses 캐시를 타깃으로 지정하고, Mistral 캐시 읽기를 0.1x로 청구합니다.
-- 🧭 **더 안정적이고 빠른 채팅:** 재시작 후 완료된 작업을 재개하고, 저장된 commit이 없을 때에도 checkpoint를 복원하고, 응답하지 않는 webview 렌더러를 자동으로 다시 로드하고, 스트리밍 업데이트를 조절하고, 로케일을 필요할 때 로드합니다.
+- 💫Zoo Gateway 계정에 금액에 관계없이 잔액이 있으면 12월 1일까지 GLM-5.3-Flash를 무제한으로 사용하는 Zoo Pass를 무료로 체험할 수 있습니다.
+  [https://zoocode.dev/pass](https://zoocode.dev/pass)
+- 🔌 모델: Gemini 3.8 Flash와 새로운 Gemini 4 Carbon, Hydrogen, Neon 모델을 사용하세요. Gemini에서 xhigh 사고 수준을 설정할 수 있습니다.
+- 🌐 Responses API: OpenAI Compatible 제공업체에서 Responses API 지원을 사용할 수 있습니다. 도구 사용이 포함된 추론이 이를 요구하는 엔드포인트에서도 작동합니다.
+- 🔧 수정: Vertex Gemini 요청이 더 이상 모델 턴으로 끝나지 않습니다. LiteLLM을 통해서도 Gemini 사고 서명이 손상되지 않습니다. Ollama 작업이 설정된 컨텍스트 한도에서 압축됩니다.
 
 ## Zoo Code가 당신을 위해 무엇을 할 수 있을까요?
 

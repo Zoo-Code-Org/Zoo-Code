@@ -12,6 +12,7 @@ import {
 	azureOpenAiDefaultApiVersion,
 	isAzureOpenAiBaseUrl,
 	openAiModelInfoSaneDefaults,
+	DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS,
 	DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	OpenAiModelsMessageType,
 	parseOpenAiExtraBody,
@@ -182,7 +183,7 @@ export const OpenAICompatible = ({
 			</Checkbox>
 			<div>
 				<Checkbox
-					checked={apiConfiguration.includeMaxTokens ?? true}
+					checked={apiConfiguration.includeMaxTokens ?? DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS}
 					onChange={handleInputChange("includeMaxTokens", noTransform)}>
 					{t("settings:includeMaxOutputTokens")}
 				</Checkbox>
@@ -198,6 +199,16 @@ export const OpenAICompatible = ({
 				</Checkbox>
 				<div className="text-sm text-vscode-descriptionForeground ml-6">
 					{t("settings:providers.openAiStrictToolSchemasDescription")}
+				</div>
+			</div>
+			<div>
+				<Checkbox
+					checked={apiConfiguration.openAiUseResponsesApi ?? false}
+					onChange={handleInputChange("openAiUseResponsesApi", noTransform)}>
+					{t("settings:providers.openAiUseResponsesApi")}
+				</Checkbox>
+				<div className="text-sm text-vscode-descriptionForeground ml-6">
+					{t("settings:providers.openAiUseResponsesApiDescription")}
 				</div>
 			</div>
 			<Checkbox
@@ -221,7 +232,7 @@ export const OpenAICompatible = ({
 					<VSCodeTextField
 						value={apiConfiguration.azureApiVersion || ""}
 						onInput={handleInputChange("azureApiVersion")}
-						placeholder={`Default: ${azureOpenAiDefaultApiVersion}`}
+						placeholder={t("settings:placeholders.defaultValue", { value: azureOpenAiDefaultApiVersion })}
 						className="w-full mt-1"
 					/>
 				)}

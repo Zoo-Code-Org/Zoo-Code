@@ -12,7 +12,9 @@
 	},
 	"apiConfiguration": {
 		"title": "API Configuration",
-		"select": "Select which API configuration to use for this mode"
+		"select": "Select which API configuration to use for this mode",
+		"pinnedGroupAriaLabel": "Pinned configurations",
+		"allGroupAriaLabel": "All configurations"
 	},
 	"tools": {
 		"title": "Available Tools",
@@ -47,7 +49,8 @@
 		"title": "Mode-specific Custom Instructions (optional)",
 		"resetToDefault": "Reset to default",
 		"description": "Add behavioral guidelines specific to {{modeName}} mode.",
-		"loadFromFile": "Custom instructions specific to {{mode}} mode can also be loaded from the <span>.roo/rules-{{slug}}/</span> folder in your workspace or from the global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} and .clinerules-{{slug}} are deprecated and will stop working soon)."
+		"loadFromFile": "Custom instructions specific to {{mode}} mode can also be loaded from the <span>.roo/rules-{{slug}}/</span> folder in your workspace or from the global <0>.roo/rules-{{slug}}/</0> (.roorules-{{slug}} and .clinerules-{{slug}} are deprecated and will stop working soon).",
+		"loadFromFileAriaLabel": "Learn about global custom instructions for modes"
 	},
 	"exportMode": {
 		"title": "Export Mode"
@@ -68,7 +71,9 @@
 	"globalCustomInstructions": {
 		"title": "Custom Instructions for All Modes",
 		"description": "These instructions apply to all modes. They provide a base set of behaviors that can be enhanced by mode-specific instructions below. <0>Learn more</0>",
-		"loadFromFile": "Instructions can also be loaded from the <span>.roo/rules/</span> folder in your workspace or from the global <0>.roo/rules/</0> (.roorules and .clinerules are deprecated and will stop working soon)."
+		"loadFromFile": "Instructions can also be loaded from the <span>.roo/rules/</span> folder in your workspace or from the global <0>.roo/rules/</0> (.roorules and .clinerules are deprecated and will stop working soon).",
+		"learnMoreAriaLabel": "Learn more about global custom instructions",
+		"loadFromFileAriaLabel": "Learn about setting up global custom instructions"
 	},
 	"systemPrompt": {
 		"preview": "Preview System Prompt",
@@ -87,6 +92,13 @@
 			"testEnhancement": "Test Enhancement",
 			"includeTaskHistory": "Include task history as context",
 			"includeTaskHistoryDescription": "When enabled, the last 10 messages from the current conversation will be included as context when enhancing prompts, helping to generate more relevant and context-aware suggestions."
+		},
+		"taskTitle": {
+			"enabled": "Generate task titles automatically",
+			"enabledDescription": "Summarizes the first prompt of each new task into a short title in the background. Title requests are not included in the task cost. GitHub Copilot and VS Code LM profiles consume your quota.",
+			"apiConfiguration": "API Configuration",
+			"useTaskConfig": "Same as the task",
+			"apiConfigDescription": "A lightweight, non-reasoning profile is recommended. If you select a different profile, the beginning of your prompt is sent to that provider."
 		},
 		"types": {
 			"ENHANCE": {
@@ -128,6 +140,10 @@
 			"NEW_TASK": {
 				"label": "Start New Task",
 				"description": "Start a new task with user input. Available in the Command Palette."
+			},
+			"TASK_TITLE": {
+				"label": "Task Title",
+				"description": "Generate a short title for new tasks in the background. Shown in history and the task header. Configure it below."
 			}
 		}
 	},
@@ -187,5 +203,10 @@
 		"rulesFolder": "This mode has a rules folder at {{folderPath}} that will also be deleted.",
 		"confirm": "Delete",
 		"cancel": "Cancel"
+	},
+	"mcpServers": {
+		"restrict": "Restrict to specific MCP servers",
+		"noneConnected": "No MCP servers connected",
+		"notConnected": "{{serverName}} (not connected)"
 	}
 }

@@ -239,6 +239,8 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 			new ContextProxy(mockContext),
 			new WebviewFocusTracker(),
 		)
+		// Start without the snapshot from initial fixture storage; profile tests seed their own mapping.
+		provider["initialModeConfigIds"] = Promise.resolve({})
 
 		// Mock providerSettingsManager
 		;(provider as any).providerSettingsManager = {
@@ -967,6 +969,7 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		})
 
 		test("fan-out preparation leaves the focused task untouched", async () => {
+			provider["initialModeConfigIds"] = Promise.resolve({ ask: "ask-id" })
 			const mockTask = new Task({
 				...defaultTaskOptions,
 				apiConfiguration: {

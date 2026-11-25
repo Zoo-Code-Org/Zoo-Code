@@ -1,4 +1,4 @@
-import type { ProviderName, ModelInfo, ProviderSettings } from "@roo-code/types"
+import type { ProviderName, ModelInfo, ProviderSettings, RouterModels } from "@roo-code/types"
 import {
 	providerIdentifiers,
 	anthropicDefaultModelId,
@@ -28,7 +28,6 @@ import {
 	vercelAiGatewayDefaultModelId,
 	opencodeGoDefaultModelId,
 	kenariDefaultModelId,
-	ioIntelligenceDefaultModelId,
 	nanoGptDefaultModelId,
 	zooGatewayDefaultModelId,
 	getZAiModels,
@@ -144,10 +143,6 @@ const PROVIDER_MODEL_CONFIG: Partial<Record<ProviderName, ProviderModelConfig>> 
 	},
 	[providerIdentifiers.opencodeGo]: { field: "opencodeGoModelId", default: opencodeGoDefaultModelId },
 	[providerIdentifiers.kenari]: { field: "kenariModelId", default: kenariDefaultModelId },
-	[providerIdentifiers.ioIntelligence]: {
-		field: "ioIntelligenceModelId",
-		default: ioIntelligenceDefaultModelId,
-	},
 	[providerIdentifiers.nanogpt]: { field: "nanoGptModelId", default: nanoGptDefaultModelId },
 	[providerIdentifiers.zooGateway]: { field: "zooGatewayModelId", default: zooGatewayDefaultModelId },
 	[providerIdentifiers.openai]: { field: "openAiModelId" },
@@ -183,7 +178,18 @@ export const getStaticModelsForProvider = (
 	provider: ProviderName,
 	customArnLabel?: string,
 	apiConfiguration?: ProviderSettings,
+	routerModels?: RouterModels,
 ): Record<string, ModelInfo> => {
+	// Friendli's static list is only a fallback for its fetched /v1/models list.
+	const friendliRouterModels = routerModels?.friendli
+	if (
+		provider === providerIdentifiers.friendli &&
+		friendliRouterModels &&
+		Object.keys(friendliRouterModels).length > 0
+	) {
+		return friendliRouterModels
+	}
+
 	if (provider === providerIdentifiers.zai) {
 		return getZAiModels(apiConfiguration?.zaiApiLine)
 	}

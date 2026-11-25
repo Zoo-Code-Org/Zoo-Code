@@ -6,6 +6,8 @@ import type { ModelInfo } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { BaseProvider } from "../../../api/providers/base-provider"
+import type { ApiHandlerCreateMessageMetadata } from "../../../api"
+import type { ApiStream } from "../../../api/transform/stream"
 import { ApiMessage } from "../../task-persistence/apiMessages"
 import * as condenseModule from "../../condense"
 
@@ -1701,6 +1703,247 @@ describe("Context Management", () => {
 			// a significant fraction of prevContextTokens after 50% truncation
 			// With system prompt included, we expect roughly 50% of the messages remaining
 			expect(result.newContextTokensAfterTruncation).toBeGreaterThan(0)
+		})
+	})
+
+	/**
+	 * Issue 1823: the fallback truncation runs on a history that a condensation
+	 * already tagged. The count after truncation must exclude those messages,
+	 * because the API never receives them.
+	 */
+	describe("newContextTokensAfterTruncation excludes condensed messages (issue 1823)", () => {
+		class DeterministicApiHandler extends BaseProvider {
+			override async *createMessage(
+				_systemPrompt: string,
+				_messages: Anthropic.Messages.MessageParam[],
+				_metadata?: ApiHandlerCreateMessageMetadata,
+			): ApiStream {
+				yield { type: "text", text: "Mock summary content" }
+				yield { type: "usage", inputTokens: 100, outputTokens: 50 }
+			}
+
+			getModel(): { id: string; info: ModelInfo } {
+				return {
+					id: "test-model",
+					info: {
+						contextWindow: 100000,
+						maxTokens: 50000,
+						supportsPromptCache: true,
+						supportsImages: false,
+						inputPrice: 0,
+						outputPrice: 0,
+						description: "Test model",
+					},
+				}
+			}
+
+			// One token per character. The test computes the expected count by hand.
+			override async countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number> {
+				return content.reduce((sum, block) => {
+					if ("text" in block && typeof block.text === "string") {
+						return sum + block.text.length
+					}
+					return sum
+				}, 0)
+			}
+		}
+
+		const handler = new DeterministicApiHandler()
+		const systemPrompt = "sys" // 3 tokens
+		const contextWindow = 40
+		const maxTokens = 8
+		const totalTokens = 30 // with the last message, this exceeds allowedTokens (36)
+
+		const runTruncation = (messages: ApiMessage[]) =>
+			manageContext({
+				messages,
+				totalTokens,
+				contextWindow,
+				maxTokens,
+				apiHandler: handler,
+				autoCondenseContext: false,
+				autoCondenseContextPercent: 100,
+				systemPrompt,
+				taskId,
+				profileThresholds: {},
+				currentProfileId: "default",
+			})
+
+		it("excludes messages hidden by condensation from the count", async () => {
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "condensed one", condenseParent: "c-1" },
+				{ role: "assistant", content: "condensed two", condenseParent: "c-1" },
+				{ role: "assistant", content: "The summary text", isSummary: true, condenseId: "c-1" },
+				{ role: "user", content: "live message one" },
+				{ role: "assistant", content: "live message two" },
+				{ role: "user", content: "live three" },
+				{ role: "assistant", content: "live four" },
+				{ role: "user", content: "live five" },
+			]
+
+			const result = await runTruncation(messages)
+			expect(result.truncationId).toBeDefined()
+
+			// The summary is the first candidate and skip-first keeps it; the two
+			// oldest live messages are hidden (removed is even). The count covers
+			// the system prompt, the summary and the kept live messages.
+			const expected =
+				systemPrompt.length +
+				"The summary text".length +
+				"live three".length +
+				"live four".length +
+				"live five".length
+			expect(result.newContextTokensAfterTruncation).toBe(expected)
+
+			// The condensed messages and the summary keep their state.
+			for (const msg of result.messages) {
+				if (msg.condenseParent === "c-1") {
+					expect(msg.truncationParent).toBeUndefined()
+				}
+			}
+			const summary = result.messages.find((m) => m.isSummary)
+			expect(summary?.truncationParent).toBeUndefined()
+		})
+
+		it("excludes a pre-summary orphan from the count and never tags the summary (PR 2647 review round 3)", async () => {
+			// A rewind left an orphan tag before the summary. The sink's fresh-start
+			// slice starts at the summary, so the API never receives the orphan:
+			// it is not a candidate and the count must exclude it. The summary is
+			// the first effective message, so it is counted and never tagged.
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "orphan one", condenseParent: "gone" },
+				{ role: "assistant", content: "The summary text", isSummary: true, condenseId: "c-1" },
+				{ role: "user", content: "live one" },
+				{ role: "assistant", content: "live two" },
+				{ role: "user", content: "live three" },
+				{ role: "assistant", content: "live four" },
+				{ role: "user", content: "live five" },
+				{ role: "assistant", content: "live six" },
+			]
+
+			const result = await runTruncation(messages)
+			expect(result.truncationId).toBeDefined()
+
+			// The sink decides what the API receives. The reported count must match
+			// it, plus the system prompt, minus the marker text both leave out.
+			const effective = condenseModule
+				.getEffectiveApiHistory(result.messages)
+				.filter((m) => !m.isTruncationMarker)
+			const expected =
+				systemPrompt.length +
+				effective.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0)
+			expect(result.newContextTokensAfterTruncation).toBe(expected)
+
+			// The latest summary is never a truncation candidate.
+			expect(result.messages.find((m) => m.content === "orphan one")?.truncationParent).toBeUndefined()
+			const summary = result.messages.find((m) => m.isSummary)
+			expect(summary?.truncationParent).toBeUndefined()
+
+			// Skip-first keeps the summary; the two oldest live messages are tagged.
+			expect(result.messages.find((m) => m.content === "live one")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "live two")?.truncationParent).toBe(result.truncationId)
+			expect(result.messages.find((m) => m.content === "live three")?.truncationParent).toBeUndefined()
+		})
+
+		it("matches the API-visible count: a pre-summary orphan and matched condensed messages are not counted", async () => {
+			// A rewind left an orphan tag before the summary, and an earlier condense
+			// left matched tags there too. The sink slices from the summary, so the
+			// API never receives any of them. The expected count comes from the sink
+			// (getEffectiveApiHistory), not from the count filter's own rule
+			// (PR 2647 pre-merge regression-evidence warning).
+			const messages: ApiMessage[] = [
+				{ role: "user", content: "orphan one", condenseParent: "gone" },
+				{ role: "assistant", content: "condensed one", condenseParent: "c-1" },
+				{ role: "user", content: "condensed two", condenseParent: "c-1" },
+				{ role: "assistant", content: "The summary text", isSummary: true, condenseId: "c-1" },
+				{ role: "user", content: "live one" },
+				{ role: "assistant", content: "live two" },
+				{ role: "user", content: "live three" },
+				{ role: "assistant", content: "live four" },
+				{ role: "user", content: "live five" },
+				{ role: "assistant", content: "live six" },
+			]
+
+			const result = await runTruncation(messages)
+			expect(result.truncationId).toBeDefined()
+
+			// The sink decides what the API receives. The reported count must match
+			// it, plus the system prompt, minus the marker text both leave out.
+			const effective = condenseModule
+				.getEffectiveApiHistory(result.messages)
+				.filter((m) => !m.isTruncationMarker)
+			const expected =
+				systemPrompt.length +
+				effective.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0)
+			expect(result.newContextTokensAfterTruncation).toBe(expected)
+
+			// The API-visible history keeps the summary and drops the pre-summary
+			// messages: the orphan and the two matched condensed ones.
+			const contents = effective.map((m) => (typeof m.content === "string" ? m.content : ""))
+			expect(contents).not.toContain("orphan one")
+			expect(contents).not.toContain("condensed one")
+			expect(contents).not.toContain("condensed two")
+			expect(contents).toContain("The summary text")
+
+			// None of the pre-summary messages and no summary is ever tagged.
+			expect(result.messages.find((m) => m.content === "orphan one")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "condensed one")?.truncationParent).toBeUndefined()
+			expect(result.messages.find((m) => m.content === "condensed two")?.truncationParent).toBeUndefined()
+			const summary = result.messages.find((m) => m.isSummary)
+			expect(summary?.truncationParent).toBeUndefined()
+		})
+
+		it("equals the token count of the effective history (CountExact property)", async () => {
+			const plain = (n: number, prefix: string) =>
+				Array.from({ length: n }, (_, i) => ({
+					role: (i % 2 === 0 ? "user" : "assistant") as "user" | "assistant",
+					content: `${prefix} message ${i + 1}`,
+				}))
+
+			const scenarios: ApiMessage[][] = [
+				// Plain history without tags.
+				plain(5, "Plain"),
+				// One condensation, then new turns (issue 1823).
+				[
+					...plain(2, "Condensed").map((m) => ({ ...m, condenseParent: "c-1" })),
+					{ role: "assistant" as const, content: "The summary text", isSummary: true, condenseId: "c-1" },
+					...plain(5, "Live"),
+				],
+				// A condensation and an earlier truncation, then new turns.
+				[
+					...plain(2, "Condensed").map((m) => ({ ...m, condenseParent: "c-1" })),
+					{ role: "assistant" as const, content: "The summary text", isSummary: true, condenseId: "c-1" },
+					...plain(4, "Truncated").map((m) => ({ ...m, truncationParent: "t-1" })),
+					{
+						role: "user" as const,
+						content: "[Sliding window truncation: 4 messages hidden]",
+						isTruncationMarker: true,
+						truncationId: "t-1",
+					},
+					...plain(5, "Live"),
+				],
+				// A rewind left an orphan tag before the summary; the sink drops it (round 3).
+				[
+					...plain(2, "Orphan").map((m) => ({ ...m, condenseParent: "condense-gone" })),
+					{ role: "assistant" as const, content: "The summary text", isSummary: true, condenseId: "c-1" },
+					...plain(5, "Live"),
+				],
+			]
+
+			for (const messages of scenarios) {
+				const result = await runTruncation(messages)
+				expect(result.truncationId).toBeDefined()
+
+				// The sink decides what the API receives. The reported count must
+				// match it, except for the marker text, which both leave out.
+				const effective = condenseModule
+					.getEffectiveApiHistory(result.messages)
+					.filter((m) => !m.isTruncationMarker)
+				const expected =
+					systemPrompt.length +
+					effective.reduce((sum, m) => sum + (typeof m.content === "string" ? m.content.length : 0), 0)
+				expect(result.newContextTokensAfterTruncation).toBe(expected)
+			}
 		})
 	})
 

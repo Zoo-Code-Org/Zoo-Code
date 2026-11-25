@@ -1,5 +1,6 @@
 import { ANTHROPIC_API_PROTOCOL, OPENAI_API_PROTOCOL, providerIdentifiers, providerNames } from "../index.js"
 import {
+	DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS,
 	getApiProtocol,
 	OPEN_AI_CODEX_SERVICE_TIER_KEY,
 	parseOpenAiExtraBody,
@@ -30,6 +31,31 @@ describe("provider settings discriminated union", () => {
 
 	it.each(providerNames)("accepts the %s provider branch", (apiProvider) => {
 		expect(providerSettingsSchemaDiscriminated.safeParse({ apiProvider }).success).toBe(true)
+	})
+})
+
+describe("LiteLLM reasoning preservation settings", () => {
+	it("includes reasoning preservation in the profile settings keys", () => {
+		expect(PROVIDER_SETTINGS_KEYS).toContain("litellmPreserveReasoning")
+	})
+
+	it.each([undefined, "auto", "on", "off"])("round trips %s through both profile schemas", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.parse(settings)).toEqual(settings)
+		expect(providerSettingsSchemaDiscriminated.parse(settings)).toEqual(settings)
+	})
+
+	it.each([true, false, "invalid", null])("rejects invalid preservation value %s", (value) => {
+		const settings = { apiProvider: providerIdentifiers.litellm, litellmPreserveReasoning: value }
+		expect(providerSettingsSchema.safeParse(settings).success).toBe(false)
+		expect(providerSettingsSchemaDiscriminated.safeParse(settings).success).toBe(false)
+	})
+})
+
+describe("OpenAI-compatible include max tokens setting", () => {
+	// The settings UI shows an unset value with this default, and the request builders send it the same way.
+	it("defaults the Include max output tokens checkbox to checked", () => {
+		expect(DEFAULT_OPEN_AI_INCLUDE_MAX_TOKENS).toBe(true)
 	})
 })
 

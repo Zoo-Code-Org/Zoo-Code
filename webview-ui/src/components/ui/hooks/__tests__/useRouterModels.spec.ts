@@ -1,6 +1,13 @@
+import React from "react"
+import { QueryClientProvider } from "@tanstack/react-query"
+import { renderHook, waitFor } from "@testing-library/react"
+
 import { RouterModelsMessageType, providerIdentifiers } from "@roo-code/types"
 
-import { fetchRouterModels } from "../useRouterModels"
+import { createTestQueryClient } from "@/utils/test-utils"
+import { vscode } from "@src/utils/vscode"
+
+import { fetchRouterModels, useRouterModels } from "../useRouterModels"
 
 vi.mock("@src/utils/vscode", () => ({
 	vscode: {
@@ -82,5 +89,45 @@ describe("fetchRouterModels", () => {
 
 		await assertion
 		expect(removeSpy).toHaveBeenCalledWith("message", handler)
+	})
+})
+
+describe("useRouterModels", () => {
+	afterEach(() => {
+		vi.restoreAllMocks()
+	})
+
+	test("keeps an own __proto__ model ID when a refetch replaces an empty catalog", async () => {
+		const provider = providerIdentifiers.friendli
+		// JSON.parse keeps "__proto__" as an own key, as a message from the extension host does.
+		const responses = [
+			{ [provider]: {} },
+			JSON.parse(
+				`{"${provider}": {"__proto__": {"contextWindow": 1000}, "vendor/model": {"contextWindow": 2000}}}`,
+			),
+		]
+		vi.mocked(vscode.postMessage).mockImplementation(() => {
+			const routerModels = responses.shift()
+			queueMicrotask(() =>
+				window.dispatchEvent(
+					new MessageEvent("message", {
+						data: { type: RouterModelsMessageType.routerModels, values: { provider }, routerModels },
+					}),
+				),
+			)
+		})
+		const queryClient = createTestQueryClient()
+		const wrapper = ({ children }: { children: React.ReactNode }) =>
+			React.createElement(QueryClientProvider, { client: queryClient }, children)
+
+		const { result } = renderHook(() => useRouterModels({ provider }), { wrapper })
+		await waitFor(() => expect(result.current.data).toEqual({ [provider]: {} }))
+		await result.current.refetch()
+
+		await waitFor(() => expect(Object.hasOwn(result.current.data?.[provider] ?? {}, "__proto__")).toBe(true))
+		const catalog = result.current.data?.[provider]
+		expect(Object.keys(catalog ?? {})).toEqual(["__proto__", "vendor/model"])
+		expect(Object.getOwnPropertyDescriptor(catalog, "__proto__")?.value).toEqual({ contextWindow: 1000 })
+		expect(catalog?.["vendor/model"]).toEqual({ contextWindow: 2000 })
 	})
 })

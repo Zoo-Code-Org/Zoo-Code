@@ -55,7 +55,7 @@ const McpView = ({ mcpEnabled: propsMcpEnabled, setMcpEnabled }: McpViewProps = 
 						marginBottom: "10px",
 						marginTop: "5px",
 					}}>
-					<Trans i18nKey="mcp:description">
+					<Trans t={t} i18nKey="mcp:description">
 						<VSCodeLink
 							href={buildDocLink("features/mcp/using-mcp-in-roo", "mcp_settings")}
 							style={{ display: "inline" }}>
@@ -332,7 +332,7 @@ const ServerRow = ({ server, alwaysAllowMcp }: { server: McpServer; alwaysAllowM
 							})
 						}}
 						size="medium"
-						aria-label={`Toggle ${server.name} server`}
+						aria-label={t("mcp:toggleServerAriaLabel", { serverName: server.name })}
 					/>
 				</div>
 			</div>

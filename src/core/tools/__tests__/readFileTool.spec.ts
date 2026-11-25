@@ -14,6 +14,7 @@
 
 import os from "os"
 import path from "path"
+import * as vscode from "vscode"
 
 import type { ToolUse } from "../../../shared/tools"
 import type { Task, ToolExecutionContext } from "../../task/Task"
@@ -181,9 +182,24 @@ function createMockCallbacks() {
 	}
 }
 
+const originalWorkspaceFolders = vscode.workspace.workspaceFolders
+
+function setWorkspaceFolders(folders: readonly { uri: { fsPath: string } }[] | undefined) {
+	Object.defineProperty(vscode.workspace, "workspaceFolders", { value: folders, configurable: true, writable: true })
+}
+
+/** Makes the task cwd the workspace, so the tool's real containment check can give both verdicts. */
+function useTaskCwdAsWorkspace() {
+	setWorkspaceFolders([{ uri: { fsPath: path.resolve("/test/workspace") } }])
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("ReadFileTool", () => {
+	afterEach(() => {
+		setWorkspaceFolders(originalWorkspaceFolders)
+	})
+
 	beforeEach(() => {
 		vi.clearAllMocks()
 
@@ -657,10 +673,15 @@ describe("ReadFileTool", () => {
 			const callbacks = createMockCallbacks()
 
 			mockTask.ask.mockResolvedValue({ response: "yesButtonClicked", text: undefined, images: undefined })
+			useTaskCwdAsWorkspace()
 
 			await readFileTool.execute({ path: "test.ts" }, mockTask as any, callbacks)
 
-			expect(mockTask.ask).toHaveBeenCalledWith("tool", expect.any(String), false)
+			const [, message] = mockTask.ask.mock.calls[0]
+			expect(JSON.parse(message)).toMatchObject({ isOutsideWorkspace: false })
+			expect(mockTask.ask).toHaveBeenCalledWith("tool", message, false, undefined, undefined, {
+				fileTargets: [{ absolutePath: path.resolve("/test/workspace", "test.ts"), isOutsideWorkspace: false }],
+			})
 			expect(mockTask.didRejectTool).toBe(false)
 		})
 
@@ -854,14 +875,35 @@ describe("ReadFileTool", () => {
 					includedRanges: [[1, 1]],
 				})
 
+			useTaskCwdAsWorkspace()
+
 			await readFileTool.execute(
-				{ files: [{ path: "file1.ts" }, { path: "file2.ts" }] } as any,
+				{ files: [{ path: "file1.ts" }, { path: "../file2.ts" }] } as any,
 				mockTask as any,
 				callbacks,
 			)
 
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file1 content"))
 			expect(callbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("file2 content"))
+			// One complete ask per file, each carrying the target that file is then read from.
+			// The tool uses the default `path` export, which this spec's mock leaves real.
+			const targets = [
+				{ absolutePath: path.resolve("/test/workspace", "file1.ts"), isOutsideWorkspace: false },
+				{ absolutePath: path.resolve("/test/file2.ts"), isOutsideWorkspace: true },
+			]
+			expect(mockTask.ask.mock.calls).toEqual(
+				targets.map((target) => [
+					"tool",
+					expect.any(String),
+					false,
+					undefined,
+					undefined,
+					{ fileTargets: [target] },
+				]),
+			)
+			expect(mockedFsReadFile.mock.calls.map(([target]) => target)).toEqual(
+				targets.map(({ absolutePath }) => absolutePath),
+			)
 		})
 
 		describe("batch approval denial", () => {
@@ -869,6 +911,7 @@ describe("ReadFileTool", () => {
 				response: string
 				text?: string
 				approvedIndexes?: number[]
+				files?: string[]
 			}) => {
 				const mockTask = createMockTask()
 				const context = { toolCallId: "batch-call", didReject: false }
@@ -882,7 +925,7 @@ describe("ReadFileTool", () => {
 					return { response: answer.response, text: JSON.stringify(permissions) }
 				})
 				const updateFileResult = vi.fn()
-				const filesToApprove = ["file1.ts", "file2.ts"].map((path) => ({
+				const filesToApprove = (answer.files ?? ["file1.ts", "file2.ts"]).map((path) => ({
 					path,
 					status: "pending" as const,
 					entry: { path },
@@ -916,6 +959,25 @@ describe("ReadFileTool", () => {
 				expect(context.didReject).toBe(true)
 				expect(updateFileResult).toHaveBeenCalledWith("file1.ts", { status: "approved" })
 				expect(updateFileResult).toHaveBeenCalledWith("file2.ts", expect.objectContaining({ status: "denied" }))
+			})
+
+			it("asks once with a target for every file in the batch", async () => {
+				useTaskCwdAsWorkspace()
+				const { mockTask } = await requestBatchApproval({
+					response: "yesButtonClicked",
+					files: ["file1.ts", "../outside.ts"],
+				})
+
+				expect(mockTask.ask).toHaveBeenCalledTimes(1)
+				const [, message] = mockTask.ask.mock.calls[0]
+				const { batchFiles } = JSON.parse(message) as { batchFiles: { isOutsideWorkspace: boolean }[] }
+				expect(batchFiles.map((file) => file.isOutsideWorkspace)).toEqual([false, true])
+				expect(mockTask.ask).toHaveBeenCalledWith("tool", message, false, undefined, undefined, {
+					fileTargets: [
+						{ absolutePath: path.resolve("/test/workspace", "file1.ts"), isOutsideWorkspace: false },
+						{ absolutePath: path.resolve("/test/outside.ts"), isOutsideWorkspace: true },
+					],
+				})
 			})
 
 			it("leaves the tool call unrejected when individual permissions approve every file", async () => {

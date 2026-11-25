@@ -31,11 +31,23 @@ Write the steps that test your changes. This helps reviewers check your work.
 - Add the test environment details if they matter.
 -->
 
+### Recorded Stream (new provider only)
+
+<!--
+For a new provider PR, paste or link one recorded streaming response here.
+The record must show the finish chunk. If the handler reads cost or usage
+from chunks, the record must also show the usage chunk. Some
+OpenAI-compatible proxies use a different chunk layout than the OpenAI API.
+This record helps reviewers check the real chunk layout.
+-->
+
 ### Pre-Submission Checklist
 
 <!-- Complete this checklist before you mark your PR as ready for review. -->
 
 - [ ] **Issue Linked**: This PR is linked to an approved GitHub Issue (see "Related GitHub Issue" above).
+- [ ] **Listing Discussion** (new provider or MCP server only): I opened a GitHub Discussion for this listing and linked it in the PR description.
+- [ ] **Recorded Stream** (new provider only): I added one recorded streaming response. It shows the finish chunk. If the handler reads cost or usage from chunks, it also shows the usage chunk.
 - [ ] **Scope**: My changes are focused on the linked issue (one major feature/fix per PR).
 - [ ] **Self-Review**: I reviewed my own code with care.
 - [ ] **Writing Style**: The PR title and description use Simplified Technical English (ASD-STE100): short sentences, plain words, active voice, one idea per sentence, no contractions.

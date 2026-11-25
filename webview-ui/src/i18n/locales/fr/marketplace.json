@@ -17,7 +17,8 @@
 		},
 		"tags": {
 			"label": "Filtrer par étiquettes :",
-			"clear": "Cliquez pour supprimer '{{count}}' des filtres",
+			"clear": "Effacer les étiquettes",
+			"removeFromFilter": "Clique pour retirer '{{tag}}' des filtres",
 			"placeholder": "Tapez pour rechercher et sélectionner des étiquettes...",
 			"noResults": "Aucune étiquette correspondante trouvée",
 			"selected": "Affichage des éléments avec l'une des étiquettes sélectionnées",
@@ -71,7 +72,8 @@
 		"goToModes": "Aller aux paramètres des Modes",
 		"moreInfoMcp": "Voir la documentation MCP de {{name}}",
 		"validationRequired": "Veuillez fournir une valeur pour {{paramName}}",
-		"prerequisites": "Prérequis"
+		"prerequisites": "Prérequis",
+		"optional": "(facultatif)"
 	},
 	"removeConfirm": {
 		"mode": {
@@ -88,5 +90,9 @@
 	},
 	"footer": {
 		"issueText": "Vous avez trouvé un problème avec un élément du marketplace ou avez des suggestions pour de nouveaux éléments ? <0>Ouvrez une issue GitHub</0> pour nous le faire savoir !"
+	},
+	"tabs": {
+		"mcp": "MCP",
+		"modes": "Modes"
 	}
 }

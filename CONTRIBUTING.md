@@ -23,6 +23,7 @@ Zoo Code is a community project. We value every contribution. We work on an [Iss
     - [Pull Request Expectations](#pull-request-expectations)
     - [AI-Assisted Contributions](#ai-assisted-contributions)
     - [Writing Style](#writing-style)
+- [Provider Listing Checks](#provider-listing-checks)
 - [Legal](#legal)
 
 ## Before You Contribute
@@ -197,7 +198,7 @@ Do not submit AI-generated changes that you do not understand. Do not submit cha
 
 ### Writing Style
 
-Write issue titles, issue text, PR titles, PR descriptions, and commit messages in Simplified Technical English ([ASD-STE100](https://www.asd-ste100.org/)). The issue and PR templates give the same reminder.
+Write issue titles, issue text, PR titles, PR descriptions, commit messages, GitHub Discussion posts, and comments in Simplified Technical English ([ASD-STE100](https://www.asd-ste100.org/)). The issue and PR templates give the same reminder.
 
 - Use short sentences. Use 20 words or fewer for an instruction.
 - Use plain words. Write "use", not "utilize". Write "start", not "commence".
@@ -208,6 +209,28 @@ Write issue titles, issue text, PR titles, PR descriptions, and commit messages 
 - Do not change exact logs, error messages, identifiers, commands, or reproduction evidence. Paste them as they are.
 
 These rules are writing guidance. Reviewers do not check formal ASD-STE100 compliance. Code, identifiers, and command syntax are not part of this rule.
+
+## Provider Listing Checks
+
+A provider listing starts with a [GitHub Discussion](https://github.com/Zoo-Code-Org/Zoo-Code/discussions). A maintainer decides when to merge a listing pull request. The review checks:
+
+- The operator states how it gets access to each model route. Each route uses a first-party, reseller, partner, or cloud-marketplace agreement. The operator states if any route uses a subscription or OAuth account.
+- The operator states if a gateway provider or subprocessor handles prompts. It lists each one, or its category and location. It states if no-retention and no-training terms bind it.
+- The operator states what it or a supplier can keep or train on in the default privacy mode. It states if the service rejects a request for a stricter mode when a supplier cannot support it.
+- A new provider pull request includes one recorded streaming response. The record shows the finish chunk. If the handler reads cost or usage from chunks, the record also shows the usage chunk.
+
+These checks also apply to providers listed before this template was added.
+
+Reviewers use these sources. Most are vendor documents, not standards. Use them as starting points:
+
+- [Anthropic Commercial Terms, section D.4](https://www.anthropic.com/legal/commercial-terms)
+- [Claude Code legal and compliance, "Authentication and credential use"](https://code.claude.com/docs/en/legal-and-compliance)
+- [OWASP LLM03:2025 Supply Chain](https://genai.owasp.org/llmrisk/llm03/)
+- [OpenRouter zero data retention and `data_collection`](https://openrouter.ai/docs/guides/privacy/zero-data-retention)
+- [Merge Gateway zero data retention](https://docs.merge.dev/merge-gateway/features/zero-data-retention)
+- [Vercel AI Gateway security and compliance](https://vercel.com/docs/ai-gateway/security-and-compliance)
+
+A listing is not an endorsement. It is not a certification of security or functionality.
 
 ## Legal
 
