@@ -254,9 +254,11 @@ export const webviewMessageHandler = async (
 	 * this function prefers non-summary messages to ensure user operations
 	 * target the intended message rather than the summary.
 	 */
-	const findMessageIndices = (messageTs: number, currentCline: any) => {
+	const findMessageIndices = (messageTs: number, currentCline: any, messageId?: string) => {
 		// Find the exact message by timestamp, not the first one after a cutoff
-		const messageIndex = currentCline.clineMessages.findIndex((msg: ClineMessage) => msg.ts === messageTs)
+		const messageIndex = currentCline.clineMessages.findIndex((msg: ClineMessage) =>
+			messageId ? msg.messageId === messageId : msg.ts === messageTs,
+		)
 
 		// Find all matching API messages by timestamp
 		const allApiMatches = currentCline.apiConversationHistory
@@ -284,7 +286,7 @@ export const webviewMessageHandler = async (
 	/**
 	 * Handles message deletion operations with user confirmation
 	 */
-	const handleDeleteOperation = async (messageTs: number): Promise<void> => {
+	const handleDeleteOperation = async (messageTs: number, messageId?: string): Promise<void> => {
 		// Check if there's a checkpoint before this message
 		const currentCline = provider.getCurrentTask()
 		let hasCheckpoint = false
@@ -294,7 +296,7 @@ export const webviewMessageHandler = async (
 			return
 		}
 
-		const { messageIndex } = findMessageIndices(messageTs, currentCline)
+		const { messageIndex } = findMessageIndices(messageTs, currentCline, messageId)
 
 		if (messageIndex !== -1) {
 			// Find the last checkpoint before this message
@@ -308,6 +310,9 @@ export const webviewMessageHandler = async (
 		await provider.postMessageToWebview({
 			type: "showDeleteMessageDialog",
 			messageTs,
+			...(currentCline.clineMessages[messageIndex]?.messageId
+				? { messageId: currentCline.clineMessages[messageIndex].messageId }
+				: {}),
 			hasCheckpoint,
 		})
 	}
@@ -315,14 +320,18 @@ export const webviewMessageHandler = async (
 	/**
 	 * Handles confirmed message deletion from webview dialog
 	 */
-	const handleDeleteMessageConfirm = async (messageTs: number, restoreCheckpoint?: boolean): Promise<void> => {
+	const handleDeleteMessageConfirm = async (
+		messageTs: number,
+		restoreCheckpoint?: boolean,
+		messageId?: string,
+	): Promise<void> => {
 		const currentCline = provider.getCurrentTask()
 		if (!currentCline) {
 			console.error("[handleDeleteMessageConfirm] No current cline available")
 			return
 		}
 
-		const { messageIndex, apiConversationHistoryIndex } = findMessageIndices(messageTs, currentCline)
+		const { messageIndex, apiConversationHistoryIndex } = findMessageIndices(messageTs, currentCline, messageId)
 		// Determine API truncation index with timestamp fallback if exact match not found
 		let apiIndexToUse = apiConversationHistoryIndex
 		const tsThreshold = currentCline.clineMessages[messageIndex]?.ts
@@ -352,6 +361,7 @@ export const webviewMessageHandler = async (
 						provider,
 						currentCline,
 						messageTs: targetMessage.ts!,
+						messageId: targetMessage.messageId,
 						messageIndex,
 						checkpoint: { hash: nextCheckpoint.text },
 						operation: "delete",
@@ -373,7 +383,13 @@ export const webviewMessageHandler = async (
 				}
 
 				// Delete this message and all subsequent messages using MessageManager
-				await currentCline.messageManager.rewindToTimestamp(targetMessage.ts!, { includeTargetMessage: false })
+				if (targetMessage.messageId) {
+					await currentCline.messageManager.rewindToIndex(messageIndex, { apiCutoffTs: targetMessage.ts })
+				} else {
+					await currentCline.messageManager.rewindToTimestamp(targetMessage.ts!, {
+						includeTargetMessage: false,
+					})
+				}
 
 				// Restore checkpoint associations for preserved messages
 				for (const [ts, checkpoint] of preservedCheckpoints) {
@@ -587,9 +603,10 @@ export const webviewMessageHandler = async (
 		operation: "delete" | "edit",
 		editedContent?: string,
 		images?: string[],
+		messageId?: string,
 	): Promise<void> => {
 		if (operation === "delete") {
-			await handleDeleteOperation(messageTs)
+			await handleDeleteOperation(messageTs, messageId)
 		} else if (operation === "edit" && editedContent) {
 			await handleEditOperation(messageTs, editedContent, images)
 		}
@@ -2240,7 +2257,7 @@ export const webviewMessageHandler = async (
 				break
 			}
 
-			await handleMessageModificationsOperation(message.value, "delete")
+			await handleMessageModificationsOperation(message.value, "delete", undefined, undefined, message.messageId)
 			break
 		}
 		case "submitEditedMessage": {
@@ -2614,7 +2631,7 @@ export const webviewMessageHandler = async (
 				break
 			}
 
-			await handleDeleteMessageConfirm(message.messageTs, message.restoreCheckpoint)
+			await handleDeleteMessageConfirm(message.messageTs, message.restoreCheckpoint, message.messageId)
 			break
 		case "editMessageConfirm":
 			if (message.messageTs && message.text) {

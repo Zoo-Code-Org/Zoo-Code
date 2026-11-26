@@ -269,6 +269,35 @@ describe("webviewMessageHandler - checkpoint operations", () => {
 		expect(fixture.taskDouble.checkpointRestore).not.toHaveBeenCalled()
 	})
 
+	it("uses the steering message ID through delete confirmation and checkpoint restore", async () => {
+		fixture.task.clineMessages[1].ts = 3
+		fixture.task.clineMessages[1].messageId = "other"
+		fixture.task.clineMessages[2].messageId = "steering"
+
+		await webviewMessageHandler(fixture.provider, {
+			type: "deleteMessage",
+			value: 3,
+			messageId: "steering",
+		})
+		expect(fixture.providerDouble.postMessageToWebview).toHaveBeenCalledWith(
+			expect.objectContaining({ type: "showDeleteMessageDialog", messageId: "steering" }),
+		)
+
+		await webviewMessageHandler(fixture.provider, {
+			type: "deleteMessageConfirm",
+			messageTs: 3,
+			messageId: "steering",
+			restoreCheckpoint: true,
+		})
+		expect(fixture.taskDouble.checkpointRestore).toHaveBeenCalledWith({
+			ts: 3,
+			messageId: "steering",
+			commitHash: LATEST_CHECKPOINT,
+			mode: "restore",
+			operation: "delete",
+		})
+	})
+
 	it.each([
 		{
 			type: "checkpointRestore",

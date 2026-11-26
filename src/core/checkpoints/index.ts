@@ -231,6 +231,7 @@ export async function checkpointSave(task: Task, force = false, suppressMessage 
 
 export type CheckpointRestoreOptions = {
 	ts: number
+	messageId?: string
 	commitHash: string
 	mode: "preview" | "restore"
 	operation?: "delete" | "edit" // Optional to maintain backward compatibility
@@ -238,7 +239,7 @@ export type CheckpointRestoreOptions = {
 
 export async function checkpointRestore(
 	task: Task,
-	{ ts, commitHash, mode, operation = "delete" }: CheckpointRestoreOptions,
+	{ ts, messageId, commitHash, mode, operation = "delete" }: CheckpointRestoreOptions,
 ) {
 	assertRecordedCheckpoint(task, commitHash)
 
@@ -248,7 +249,7 @@ export async function checkpointRestore(
 		return
 	}
 
-	const index = task.clineMessages.findIndex((m) => m.ts === ts)
+	const index = task.clineMessages.findIndex((m) => (messageId ? m.messageId === messageId : m.ts === ts))
 
 	if (index === -1) {
 		return
@@ -271,9 +272,13 @@ export async function checkpointRestore(
 
 			// Use MessageManager to properly handle context-management events
 			// This ensures orphaned Summary messages and truncation markers are cleaned up
-			await task.messageManager.rewindToTimestamp(ts, {
-				includeTargetMessage: operation === "edit",
-			})
+			if (messageId) {
+				await task.messageManager.rewindToIndex(index + (operation === "edit" ? 1 : 0), {
+					apiCutoffTs: ts,
+				})
+			} else {
+				await task.messageManager.rewindToTimestamp(ts, { includeTargetMessage: operation === "edit" })
+			}
 
 			// Report the deleted API request metrics
 			await task.say(

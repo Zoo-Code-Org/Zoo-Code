@@ -228,6 +228,7 @@ export interface ExtensionMessage {
 	rulesFolderPath?: string
 	settings?: any // eslint-disable-line @typescript-eslint/no-explicit-any
 	messageTs?: number
+	messageId?: string
 	hasCheckpoint?: boolean
 	context?: string
 	commands?: Command[]

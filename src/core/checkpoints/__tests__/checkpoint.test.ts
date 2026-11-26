@@ -237,6 +237,42 @@ describe("Checkpoint functionality", () => {
 			expect(mockProvider.cancelTask).toHaveBeenCalled()
 		})
 
+		it("restores the selected message when two UI messages share a timestamp", async () => {
+			mockTask.clineMessages[1].ts = 3
+			mockTask.clineMessages[1].messageId = "earlier"
+			mockTask.clineMessages[2].messageId = "selected"
+
+			await checkpointRestore(mockTask, {
+				ts: 3,
+				messageId: "selected",
+				commitHash: RESTORE_HASH,
+				mode: "restore",
+				operation: "delete",
+			})
+
+			expect(mockTask.overwriteClineMessages).toHaveBeenCalledWith(mockTask.clineMessages.slice(0, 2))
+		})
+
+		it("retains the edited UI row but removes its API turn when selected by ID", async () => {
+			mockTask.clineMessages[1].ts = 3
+			mockTask.clineMessages[1].messageId = "earlier"
+			mockTask.clineMessages[2].messageId = "selected"
+
+			await checkpointRestore(mockTask, {
+				ts: 3,
+				messageId: "selected",
+				commitHash: RESTORE_HASH,
+				mode: "restore",
+				operation: "edit",
+			})
+
+			expect(mockTask.overwriteClineMessages).toHaveBeenCalledWith(mockTask.clineMessages.slice(0, 3))
+			expect(mockTask.overwriteApiConversationHistory).toHaveBeenCalledWith([
+				{ ts: 1, role: "user", content: [{ type: "text", text: "Message 1" }] },
+				{ ts: 2, role: "assistant", content: [{ type: "text", text: "Message 2" }] },
+			])
+		})
+
 		it("should restore checkpoint for edit operation", async () => {
 			await checkpointRestore(mockTask, {
 				ts: 2,

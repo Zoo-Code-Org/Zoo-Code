@@ -2850,7 +2850,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		contextCondense?: ContextCondense,
 		contextTruncation?: ContextTruncation,
 	): Promise<undefined> {
-		if (this.abort) {
+		if (this.abort && type !== "api_req_deleted") {
 			throw new Error(`[RooCode#say] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 

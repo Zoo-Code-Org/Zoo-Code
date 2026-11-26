@@ -9,6 +9,8 @@ export interface RewindOptions {
 	includeTargetMessage?: boolean
 	/** Skip cleanup for special cases (default: false) */
 	skipCleanup?: boolean
+	/** API history boundary when the UI target is resolved by ID/index. */
+	apiCutoffTs?: number
 }
 
 interface ContextEventIds {
@@ -66,7 +68,7 @@ export class MessageManager {
 	 * @param options - Rewind options
 	 */
 	async rewindToIndex(toIndex: number, options: RewindOptions = {}): Promise<void> {
-		const cutoffTs = this.task.clineMessages[toIndex]?.ts ?? Date.now()
+		const cutoffTs = options.apiCutoffTs ?? this.task.clineMessages[toIndex]?.ts ?? Date.now()
 		await this.performRewind(toIndex, cutoffTs, options)
 	}
 
