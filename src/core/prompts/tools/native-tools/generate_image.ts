@@ -4,8 +4,8 @@ const GENERATE_IMAGE_DESCRIPTION = `Request to generate or edit an image using A
 
 Parameters:
 - prompt: (required) The text prompt describing what to generate or how to edit the image
-- path: (required) The file path where the generated/edited image should be saved (relative to the current workspace directory). The tool will automatically add the appropriate image extension if not provided.
-- image: (optional) The file path to an input image to edit or transform (relative to the current workspace directory). Supported formats: PNG, JPG, JPEG, GIF, WEBP.
+- path: (required) Destination relative to the task base, or an absolute path inside another open workspace root. The tool will automatically add the appropriate image extension if not provided.
+- image: (optional) Input image relative to the task base, or an absolute path inside another open workspace root. Supported formats: PNG, JPG, JPEG, GIF, WEBP.
 
 Example: Generating a sunset image
 { "prompt": "A beautiful sunset over mountains with vibrant orange and purple colors", "path": "images/sunset.png", "image": null }
@@ -18,9 +18,9 @@ Example: Upscaling and enhancing an image
 
 const PROMPT_PARAMETER_DESCRIPTION = `Text description of the image to generate or the edits to apply`
 
-const PATH_PARAMETER_DESCRIPTION = `Filesystem path (relative to the workspace) where the resulting image should be saved`
+const PATH_PARAMETER_DESCRIPTION = `Destination relative to the task base, or an absolute path inside another open workspace root`
 
-const IMAGE_PARAMETER_DESCRIPTION = `Optional path (relative to the workspace) to an existing image to edit; supports PNG, JPG, JPEG, GIF, and WEBP`
+const IMAGE_PARAMETER_DESCRIPTION = `Optional input image relative to the task base, or an absolute path inside another open workspace root; supports PNG, JPG, JPEG, GIF, and WEBP`
 
 export default {
 	type: "function",

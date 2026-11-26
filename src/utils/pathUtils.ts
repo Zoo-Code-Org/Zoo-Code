@@ -16,11 +16,18 @@ export function isPathOutsideWorkspace(filePath: string): boolean {
 	// Normalize and resolve the path to handle .. and . components correctly
 	const absolutePath = path.resolve(filePath)
 
-	// Check if the path is within any workspace folder
+	// Check if the path is within any workspace folder. `path.relative` handles
+	// the platform's path semantics (including case-insensitive drive paths on
+	// Windows) and avoids accepting a sibling with a shared string prefix.
 	return !vscode.workspace.workspaceFolders.some((folder) => {
-		const folderPath = folder.uri.fsPath
-		// Path is inside a workspace if it equals the workspace path or is a subfolder
-		return absolutePath === folderPath || absolutePath.startsWith(folderPath + path.sep)
+		const folderPath = path.resolve(folder.uri.fsPath)
+		const root = process.platform === "win32" ? folderPath.toLowerCase() : folderPath
+		const target = process.platform === "win32" ? absolutePath.toLowerCase() : absolutePath
+		const relative = path.relative(root, target)
+		return (
+			relative === "" ||
+			(relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+		)
 	})
 }
 

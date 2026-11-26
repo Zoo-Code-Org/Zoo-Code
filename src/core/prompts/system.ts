@@ -110,7 +110,12 @@ ${getCapabilitiesSection(policy)}
 
 ${modesSection}
 ${skillsSection ? `\n${skillsSection}` : ""}
-${getRulesSection(cwd, settings, policy)}
+${getRulesSection(
+	cwd,
+	settings,
+	policy,
+	vscode.workspace.workspaceFolders?.map((folder) => folder.uri.fsPath),
+)}
 
 ${getSystemInfoSection(cwd, policy)}
 

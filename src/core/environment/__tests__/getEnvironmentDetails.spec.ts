@@ -3,6 +3,7 @@
 import pWaitFor from "p-wait-for"
 import delay from "delay"
 import type { Mock } from "vitest"
+import * as vscode from "vscode"
 
 import { getEnvironmentDetails } from "../getEnvironmentDetails"
 import { getFullModeDetails } from "../../../shared/modes"
@@ -21,6 +22,7 @@ import { getGitStatus } from "../../../utils/git"
 import { Task } from "../../task/Task"
 
 vi.mock("vscode", () => ({
+	workspace: { workspaceFolders: [] },
 	window: {
 		tabGroups: { all: [], onDidChangeTabs: vi.fn() },
 		visibleTextEditors: [],
@@ -70,6 +72,7 @@ describe("getEnvironmentDetails", () => {
 
 	beforeEach(() => {
 		vi.clearAllMocks()
+		Object.defineProperty(vscode.workspace, "workspaceFolders", { configurable: true, value: [] })
 
 		mockState = {
 			terminalOutputLineLimit: 100,
@@ -182,6 +185,21 @@ describe("getEnvironmentDetails", () => {
 			mockCline.rooIgnoreController,
 			false,
 		)
+	})
+
+	it("lists every workspace root with a shared file budget", async () => {
+		Object.defineProperty(vscode.workspace, "workspaceFolders", {
+			configurable: true,
+			value: [
+				{ name: "first", uri: { fsPath: mockCwd } },
+				{ name: "second", uri: { fsPath: "/test/other" } },
+			],
+		})
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+		expect(result).toContain(mockCwd)
+		expect(result).toContain("/test/other")
+		expect(listFiles).toHaveBeenCalledWith(mockCwd, true, 25)
+		expect(listFiles).toHaveBeenCalledWith("/test/other", true, 25)
 	})
 
 	it("should not include file details when includeFileDetails is false", async () => {

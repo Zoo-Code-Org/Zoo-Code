@@ -27,7 +27,8 @@ export const apply_diff = {
 			properties: {
 				path: {
 					type: "string",
-					description: "The path of the file to modify, relative to the current workspace directory.",
+					description:
+						"File path relative to the task base, or an absolute path inside another open workspace root.",
 				},
 				diff: {
 					type: "string",

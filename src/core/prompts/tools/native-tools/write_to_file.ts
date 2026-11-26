@@ -11,7 +11,7 @@ When creating a new project, organize all new files within a dedicated project d
 Example: Writing a configuration file
 { "path": "frontend-config.json", "content": "{\\n  \\"apiEndpoint\\": \\"https://api.example.com\\",\\n  \\"theme\\": {\\n    \\"primaryColor\\": \\"#007bff\\"\\n  }\\n}" }`
 
-const PATH_PARAMETER_DESCRIPTION = `The path of the file to write to (relative to the current workspace directory)`
+const PATH_PARAMETER_DESCRIPTION = `File path relative to the task base, or an absolute path inside another open workspace root`
 
 const CONTENT_PARAMETER_DESCRIPTION = `The content to write to the file. ALWAYS provide the COMPLETE intended content of the file, without any truncation or omissions. You MUST include ALL parts of the file, even if they haven't been modified. Do NOT include line numbers in the content.`
 
