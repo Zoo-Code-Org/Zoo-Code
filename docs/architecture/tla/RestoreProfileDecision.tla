@@ -4,7 +4,8 @@
 \* resolved against the profile list by ClineProvider.createTaskWithHistoryItemUnlocked.
 \* Sink: the decision record (reactivateProfileName, refreshedApiConfigName) consumed by
 \* the same method: reactivate calls activateProviderProfile, refresh rewrites the pin
-\* through updateTaskHistory and the Task constructor.
+\* through updateTaskHistory (persisted to the task file) and hands the record to the
+\* Task constructor.
 \* Failure: restore re-activates a stale pinned profile, so the resumed task and the
 \* task header keep the old provider's context window (issue #970).
 \* Invariants (first version written before the fix):
@@ -13,30 +14,44 @@
 \*   PinNamesEffect. A refresh names exactly the active profile, and a reactivation
 \*   never also refreshes.
 \*   LegacyFallback. With no resolvable active profile, an existing pin is reactivated.
+\* Added in the PR 2649 review ratchet (CodeRabbit round on d58eaba2c):
+\*   RefreshPersists. A refresh whose pin write succeeds leaves the persisted pin
+\*   naming the active profile. The caller must hand the store a record distinct from
+\*   the cached one (input rule in Valid); mutating the cached record in place makes
+\*   the store's delta compare drop apiConfigName, so the stale pin survives on disk
+\*   (CR thread on ClineProvider.ts:1651).
+\*   WriteFailureRestores. The restore reaches Task construction even when the refresh
+\*   pin write rejects (CR thread on ClineProvider.ts:1652).
 \* Run each config on RestoreProfileDecisionMC.tla. The MC module holds the sabotage.
-\* Expected before the run: all invariants hold in the model; the sabotage run fails
-\* FollowActive only.
-\* Result: TypeOK, FollowActive, PinNamesEffect and LegacyFallback hold in the model in
-\* 15 distinct states. The sabotage run violates FollowActive at 9 states; no other
-\* invariant breaks.
+\* Expected: Spec.cfg passes every invariant; Sabotage.cfg fails FollowActive;
+\* CacheAlias.cfg fails RefreshPersists; WriteAbort.cfg fails WriteFailureRestores.
+\* Result: Spec.cfg holds all six invariants in 132 distinct states. CacheAlias.cfg
+\* violates RefreshPersists (21 states), Sabotage.cfg violates FollowActive (29
+\* states), WriteAbort.cfg violates WriteFailureRestores (15 states); no other
+\* invariant breaks in any run.
 \* Not modeled: the profile list (pinnedProfileExists is an oracle the caller computes),
-\* the activateProviderProfile and updateTaskHistory side effects, and the CLI runtime
+\* the activateProviderProfile side effects, mode restoration, and the CLI runtime
 \* skip flag (checked before the decision runs).
 \* Cost: TLC finishes in under 1 second per config.
+\* Review (PR 2649, round on d58eaba2c): 1 covered (LegacyFallback - the missing-profile
+\* proof case of the Regression Evidence check), 2 added (RefreshPersists + the
+\* distinct-record input rule, CR thread ClineProvider.ts:1651; WriteFailureRestores,
+\* CR thread ClineProvider.ts:1652), 1 gap (CR thread
+\* ClineProvider.restore-follows-active-profile.spec.ts:123 - test-harness settings;
+\* the model has no test doubles, the harness assertions pin it directly).
 
 CONSTANT NoActive   \* sentinel: no resolvable active profile at restore time
 
-VARIABLES input, decision
+VARIABLES input, decision, storedPin, restored
 
-vars == <<input, decision>>
+vars == <<input, decision, storedPin, restored>>
 
 NoProfile == "absent"   \* decision marker: reactivate nothing
 Keep == "keep"          \* decision marker: preserve the stored pin
 
-Input == [pin: {"p1", "p2", "absent"}, active: {"p1", "p2", NoActive}, pinExists: BOOLEAN]
-
-\* The caller never passes an existing flag for an absent pin.
-Valid(inp) == (inp.pin = "absent") => (~inp.pinExists)
+Input ==
+    [pin: {"p1", "p2", "absent"}, active: {"p1", "p2", NoActive},
+     pinExists: BOOLEAN, pinWriteOk: BOOLEAN, distinctRecord: BOOLEAN]
 
 \* Mirrors resolveRestoreProfileActivation rule for rule.
 Decide(inp) ==
@@ -48,21 +63,45 @@ Decide(inp) ==
     ELSE IF inp.active = inp.pin THEN [r |-> inp.pin, f |-> Keep]
     ELSE [r |-> NoProfile, f |-> inp.active]
 
+\* A refresh-shaped input is one whose decision carries a new pin.
+Refreshes(inp) == Decide(inp).f # Keep
+
+\* Caller rules: no existing flag for an absent pin, and a refresh write is built
+\* from a record distinct from the store-cached one (a copy), never the cached
+\* record itself.
+Valid(inp) ==
+    /\ ((inp.pin = "absent") => (~inp.pinExists))
+    /\ (Refreshes(inp) => inp.distinctRecord)
+
+\* The restore reaches Task construction even after a failed refresh write.
+Proceed(dec, inp) == TRUE
+
 Init ==
-    /\ input = [pin |-> "absent", active |-> NoActive, pinExists |-> FALSE]
+    /\ input = [pin |-> "absent", active |-> NoActive, pinExists |-> FALSE,
+                pinWriteOk |-> TRUE, distinctRecord |-> TRUE]
     /\ decision = Decide(input)
+    /\ storedPin = input.pin
+    /\ restored = TRUE
 
 Next ==
     \E inp \in Input :
         /\ Valid(inp)
         /\ input' = inp
         /\ decision' = Decide(inp)
+           \* An aliased write (the cached record handed back to the store) makes the
+           \* delta compare omit apiConfigName, so the stale pin survives on disk.
+        /\ storedPin' = IF decision'.f # Keep /\ inp.pinWriteOk /\ inp.distinctRecord
+                           THEN decision'.f
+                           ELSE storedPin
+        /\ restored' = Proceed(decision', inp)
 
 Spec == Init /\ [][Next]_vars
 
 TypeOK ==
     /\ decision.r \in {"p1", "p2", "absent"}
     /\ decision.f \in {"p1", "p2", "keep"}
+    /\ storedPin \in {"p1", "p2", "absent"}
+    /\ restored \in BOOLEAN
 
 FollowActive ==
     (input.pin # "absent" /\ input.pinExists /\ input.active # NoActive /\ input.active # input.pin)
@@ -74,5 +113,10 @@ PinNamesEffect ==
 
 LegacyFallback ==
     (input.pin # "absent" /\ input.pinExists /\ input.active = NoActive) => decision.r = input.pin
+
+RefreshPersists ==
+    (decision.f # Keep /\ input.pinWriteOk) => storedPin = decision.f
+
+WriteFailureRestores == restored
 
 ====

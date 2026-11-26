@@ -14,11 +14,25 @@
 //    restored task, so every later restore flips the configuration back.
 // 3. A restore whose pinned profile no longer exists loses the re-pin to the
 //    profile that is actually in effect.
+// 4. The restored task is built with settings that do not follow the profile in
+//    effect after activation (a stale provider/model would keep the old context
+//    window even with a correct pin).
+// 5. A restore whose currentApiConfigName does not resolve in the profile list
+//    loses the legacy reactivation of the still-existing pinned profile.
+// 6. A failed pin write aborts the restore after the previous task was already
+//    evicted, so the task cannot be resumed at all.
+// 7. The re-pinned record mutates the store-owned cached item, so the store's
+//    delta compare drops apiConfigName and the stale pin survives on disk.
 //
 // Red-verify: tests 1 and 3 fail on pre-fix code because the restore block
-// activates the stale pin unconditionally.
+// activates the stale pin unconditionally. Test 6 fails because the rejected
+// updateTaskHistory await escapes before the Task is constructed. Test 7 fails
+// because the mutated cache makes the store persist the old pin.
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
+import { mkdtemp, readFile, rm } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { providerIdentifiers } from "@roo-code/types"
 import type { HistoryItem } from "@roo-code/types"
 
@@ -67,8 +81,9 @@ vi.mock("../core/task-persistence", async (importOriginal) => {
 })
 
 // The tail of createTaskWithHistoryItemUnlocked constructs a real Task. Replace it
-// with a recording double so the test can observe the history item the restored
-// task is built from without booting the whole task runtime.
+// with a recording double so the test can observe the history item and the API
+// configuration the restored task is built from without booting the whole task
+// runtime.
 vi.mock("../core/task/Task", async (importOriginal) => {
 	const real = await importOriginal<typeof import("../core/task/Task")>()
 	// A regular (non-arrow) function so `new Task(...)` constructs the double.
@@ -86,6 +101,7 @@ vi.mock("../core/task/Task", async (importOriginal) => {
 
 import { ClineProvider } from "../core/webview/ClineProvider"
 import { Task } from "../core/task/Task"
+import { TaskHistoryStore } from "../core/task-persistence/TaskHistoryStore"
 import { makeProviderStub } from "./helpers/provider-stub"
 
 function makeHistoryItem(apiConfigName: string): HistoryItem {
@@ -103,28 +119,52 @@ function makeHistoryItem(apiConfigName: string): HistoryItem {
 
 type ProfileEntry = { name: string; apiProvider?: string }
 
-function makeRestoreHarness(options: { profiles: ProfileEntry[]; activeProfileName: string | undefined }) {
+interface RestoreHarnessOptions {
+	profiles: ProfileEntry[]
+	/** Value reported for the currentApiConfigName global (may be absent from `profiles`). */
+	activeProfileName: string | undefined
+	/** Real store to read history through and to persist with the real updateTaskHistory. */
+	taskHistoryStore?: TaskHistoryStore
+}
+
+function makeRestoreHarness(options: RestoreHarnessOptions) {
 	const listConfig = vi.fn(async () => options.profiles)
 	const getGlobalState = vi.fn((key: string) =>
 		key === "currentApiConfigName" ? options.activeProfileName : undefined,
 	)
-	const activateProviderProfile = vi.fn(async () => {})
-	const updateTaskHistory = vi.fn(async () => [])
-
-	const provider = makeProviderStub({ contextProxy: { globalStorageUri: { fsPath: "/tmp" } } })
-
-	Object.assign(provider, {
-		getState: vi.fn(async () => ({
-			apiConfiguration: { apiProvider: providerIdentifiers.openrouter },
+	// Activation switches the settings getState observes, mirroring the real
+	// contract: after activateProviderProfile, getState reports the activated
+	// profile's provider and model.
+	let effectiveProfile = options.activeProfileName
+	const activateProviderProfile = vi.fn(async ({ name }: { name: string }) => {
+		effectiveProfile = name
+	})
+	const log = vi.fn()
+	const updateTaskHistoryMock = vi.fn(async () => [])
+	const getState = vi.fn(async () => {
+		const settings = options.profiles.find((profile) => profile.name === effectiveProfile)
+		return {
+			apiConfiguration: {
+				apiProvider: settings?.apiProvider ?? providerIdentifiers.openrouter,
+				apiModelId: settings ? `model-of-${settings.name}` : "model-of-unresolved",
+			},
 			enableCheckpoints: false,
 			checkpointTimeout: 10,
 			experiments: {},
 			diffFuzzyThreshold: 0.8,
-		})),
+		}
+	})
+
+	const provider = makeProviderStub({ contextProxy: { globalStorageUri: { fsPath: "/tmp" } } })
+
+	Object.assign(provider, {
+		getState,
+		log,
 		updateGlobalState: vi.fn(async () => {}),
 		getGlobalState,
 		activateProviderProfile,
-		updateTaskHistory,
+		updateTaskHistory: options.taskHistoryStore ? ClineProvider.prototype.updateTaskHistory : updateTaskHistoryMock,
+		taskHistoryStore: options.taskHistoryStore ?? { get: () => undefined, invalidate: async () => {} },
 		providerSettingsManager: { listConfig },
 		addClineToStack: vi.fn(async () => {}),
 		getPendingEditOperation: vi.fn(() => undefined),
@@ -146,12 +186,25 @@ function makeRestoreHarness(options: { profiles: ProfileEntry[]; activeProfileNa
 	const runRestore = (historyItem: HistoryItem) =>
 		createTaskWithHistoryItemUnlocked.call(provider, historyItem, { startTask: false })
 
-	return { runRestore, activateProviderProfile, updateTaskHistory, listConfig, getGlobalState }
+	return {
+		runRestore,
+		activateProviderProfile,
+		updateTaskHistory: updateTaskHistoryMock,
+		listConfig,
+		getGlobalState,
+		log,
+	}
+}
+
+function constructedTaskConfig():
+	{ historyItem?: HistoryItem; apiConfiguration?: Record<string, unknown> } | undefined {
+	const firstCall = vi.mocked(Task).mock.calls[0]?.[0] as
+		{ historyItem?: HistoryItem; apiConfiguration?: Record<string, unknown> } | undefined
+	return firstCall
 }
 
 function constructedHistoryItem(): HistoryItem | undefined {
-	const firstCall = vi.mocked(Task).mock.calls[0]?.[0] as { historyItem?: HistoryItem } | undefined
-	return firstCall?.historyItem
+	return constructedTaskConfig()?.historyItem
 }
 
 describe("ClineProvider restore follows the active profile", () => {
@@ -175,6 +228,12 @@ describe("ClineProvider restore follows the active profile", () => {
 			expect.objectContaining({ id: "task-1", apiConfigName: "provider-2" }),
 		)
 		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-2")
+		// The restored task must run on the active profile's settings, not the stale
+		// pin's provider/model.
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiModelId: "model-of-provider-2",
+		})
 	})
 
 	it("re-activates the pinned profile when it is still the active one", async () => {
@@ -191,6 +250,12 @@ describe("ClineProvider restore follows the active profile", () => {
 		)
 		expect(harness.updateTaskHistory).not.toHaveBeenCalled()
 		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-1")
+		// After the re-activation the restored task must run on the activated
+		// profile's provider and model.
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "model-of-provider-1",
+		})
 	})
 
 	it("re-pins to the active profile when the pinned profile no longer exists", async () => {
@@ -206,6 +271,10 @@ describe("ClineProvider restore follows the active profile", () => {
 			expect.objectContaining({ id: "task-1", apiConfigName: "provider-2" }),
 		)
 		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-2")
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiModelId: "model-of-provider-2",
+		})
 	})
 
 	it("re-activates the pin when no resolvable active profile exists", async () => {
@@ -222,5 +291,95 @@ describe("ClineProvider restore follows the active profile", () => {
 		)
 		expect(harness.updateTaskHistory).not.toHaveBeenCalled()
 		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-1")
+		// The activation must be what the observed settings follow: with no active
+		// profile at restore time only the re-activated pin can supply provider/model.
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "model-of-provider-1",
+		})
+	})
+
+	it("re-activates the existing pinned profile when currentApiConfigName is absent from the profile list", async () => {
+		// Regression-evidence case: the active name is a dangling pointer, the pin
+		// still exists. Legacy fallback re-activates the pin and must not write.
+		const harness = makeRestoreHarness({
+			profiles: [{ name: "provider-1", apiProvider: providerIdentifiers.anthropic }],
+			activeProfileName: "ghost-profile",
+		})
+
+		await harness.runRestore(makeHistoryItem("provider-1"))
+
+		expect(harness.activateProviderProfile).toHaveBeenCalledWith(
+			{ name: "provider-1" },
+			expect.objectContaining({ persistTaskHistory: false }),
+		)
+		expect(harness.updateTaskHistory).not.toHaveBeenCalled()
+		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-1")
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.anthropic,
+			apiModelId: "model-of-provider-1",
+		})
+	})
+
+	it("continues the restore when the pin write rejects", async () => {
+		const harness = makeRestoreHarness({
+			profiles: [
+				{ name: "provider-1", apiProvider: providerIdentifiers.anthropic },
+				{ name: "provider-2", apiProvider: providerIdentifiers.openrouter },
+			],
+			activeProfileName: "provider-2",
+		})
+		harness.updateTaskHistory.mockRejectedValueOnce(new Error("simulated pin-write failure"))
+
+		// The previous task is already evicted at this point; the restore must not
+		// fail, and the task must still be constructed with the refreshed pin and
+		// the active configuration.
+		await expect(harness.runRestore(makeHistoryItem("provider-1"))).resolves.toBeDefined()
+
+		expect(vi.mocked(Task).mock.calls.length).toBe(1)
+		expect(constructedHistoryItem()?.apiConfigName).toBe("provider-2")
+		expect(constructedTaskConfig()?.apiConfiguration).toStrictEqual({
+			apiProvider: providerIdentifiers.openrouter,
+			apiModelId: "model-of-provider-2",
+		})
+		expect(harness.log).toHaveBeenCalledWith(
+			expect.stringContaining("Failed to persist re-pinned profile 'provider-2'"),
+		)
+	})
+
+	it("persists the refreshed pin through the real TaskHistoryStore", async () => {
+		// Persistence-integrity case: the restore must re-pin the STORE-OWNED record
+		// without mutating the cached item in place (an in-place mutation would make
+		// the store's delta compare drop apiConfigName, leaving the stale pin on
+		// disk). The disk file is the oracle.
+		const storageRoot = await mkdtemp(join(tmpdir(), "zoo-970-store-"))
+		try {
+			const store = new TaskHistoryStore(storageRoot)
+			await store.upsert(makeHistoryItem("provider-1"))
+			// Route the store-cached object through the restore, exactly as the
+			// history-navigation callers do.
+			const cached = store.get("task-1")
+			expect(cached?.apiConfigName).toBe("provider-1")
+
+			const harness = makeRestoreHarness({
+				profiles: [
+					{ name: "provider-1", apiProvider: providerIdentifiers.anthropic },
+					{ name: "provider-2", apiProvider: providerIdentifiers.openrouter },
+				],
+				activeProfileName: "provider-2",
+				taskHistoryStore: store,
+			})
+
+			await harness.runRestore(cached as HistoryItem)
+
+			const disk = JSON.parse(
+				await readFile(join(storageRoot, "tasks", "task-1", "history_item.json"), "utf8"),
+			) as HistoryItem
+			expect(disk.apiConfigName).toBe("provider-2")
+			// The cache is updated by the store's own write path, not by the restore.
+			expect(store.get("task-1")?.apiConfigName).toBe("provider-2")
+		} finally {
+			await rm(storageRoot, { recursive: true, force: true })
+		}
 	})
 })

@@ -1648,8 +1648,25 @@ export class ClineProvider
 				this.log(
 					`Restoring task ${historyItem.id} with active profile '${decision.refreshedApiConfigName}' instead of stale pinned profile '${historyItem.apiConfigName}'.`,
 				)
-				historyItem.apiConfigName = decision.refreshedApiConfigName
-				await this.updateTaskHistory({ ...historyItem, apiConfigName: decision.refreshedApiConfigName })
+				// Re-pin through a copy: historyItem is the store-owned cached record, and
+				// mutating it in place would make the store's delta compare treat apiConfigName
+				// as unchanged, so the stale pin would survive on disk. The store updates its
+				// cache only through its own write path; the restore steps below read the
+				// refreshed pin from this copy.
+				const repinnedHistoryItem = { ...historyItem, apiConfigName: decision.refreshedApiConfigName }
+				try {
+					await this.updateTaskHistory(repinnedHistoryItem)
+				} catch (error) {
+					// The previous task is already evicted here; a failed pin write must not
+					// abort the restore. Continue with the active configuration and the
+					// refreshed in-memory pin.
+					this.log(
+						`Failed to persist re-pinned profile '${decision.refreshedApiConfigName}' for task ${historyItem.id}: ${
+							error instanceof Error ? error.message : String(error)
+						}. Continuing restore with the active configuration.`,
+					)
+				}
+				historyItem = repinnedHistoryItem
 			} else if (!decision.reactivateProfileName) {
 				// Profile no longer exists, log warning but continue
 				this.log(
