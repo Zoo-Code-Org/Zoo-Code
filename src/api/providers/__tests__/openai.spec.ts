@@ -157,6 +157,7 @@ describe("OpenAiHandler", () => {
 					"User-Agent": `ZooCode/${Package.version}`,
 				},
 				timeout: MOCK_TIMEOUT_MS,
+				fetchOptions: expect.anything(),
 			})
 		})
 
