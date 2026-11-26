@@ -127,7 +127,7 @@ This installs the shared templates from `contrib/roo/` into `.roomodes` and `.ro
 - One focused PR per feature or fix.
 - Follow the ESLint and TypeScript best practices.
 - Write clear, descriptive commits that reference issues (for example, `Fixes #123`). Follow the [Writing Style](#writing-style).
-- Test your change fully (`npm test`).
+- Test your change fully (`npm test`). See [Local test runs](docs/local-testing.md) for the memory-safe commands on small containers.
 - Run both dead-code checks: `pnpm knip` and `pnpm knip:production`. See [Dead-code checks before review](docs/development-quality-checks.md) for findings, exceptions, and verification.
 - Rebase onto the latest `main` branch before you submit.
 

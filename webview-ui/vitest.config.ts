@@ -5,6 +5,9 @@ import { resolveVerbosity } from "../src/utils/vitest-verbosity"
 
 const { silent, reporters, onConsoleLog } = resolveVerbosity()
 const isCI = process.env.CI === "true"
+// CI keeps its four-worker limit. Local and Docker runs cap workers through
+// VITEST_MAX_WORKERS so jsdom workers stay inside the container memory budget.
+const localMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? "", 10)
 
 export default defineConfig({
 	plugins: [react()],
@@ -19,7 +22,7 @@ export default defineConfig({
 		onConsoleLog,
 		// Four workers match the four vCPUs of the hosted CI runners; the
 		// benchmark in #2288 ran the same inventory roughly 3x faster than one.
-		maxWorkers: isCI ? 4 : undefined,
+		maxWorkers: isCI ? 4 : Number.isFinite(localMaxWorkers) && localMaxWorkers > 0 ? localMaxWorkers : undefined,
 		testTimeout: isCI ? 15000 : 5000,
 		server: {
 			deps: {

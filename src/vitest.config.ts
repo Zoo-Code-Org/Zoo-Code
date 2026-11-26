@@ -4,6 +4,9 @@ import { resolveVerbosity } from "./utils/vitest-verbosity"
 
 const { silent, reporters, onConsoleLog } = resolveVerbosity()
 const isWindowsCI = process.platform === "win32" && process.env.CI === "true"
+// CI keeps its lane limits above. Local and Docker runs cap workers through
+// VITEST_MAX_WORKERS so the fork pool stays inside the container memory budget.
+const localMaxWorkers = Number.parseInt(process.env.VITEST_MAX_WORKERS ?? "", 10)
 
 export default defineConfig({
 	test: {
@@ -17,7 +20,11 @@ export default defineConfig({
 		onConsoleLog,
 		// Turbo runs two test lanes concurrently, so two workers per lane
 		// fill the four runner vCPUs on Windows CI.
-		maxWorkers: isWindowsCI ? 2 : undefined,
+		maxWorkers: isWindowsCI
+			? 2
+			: Number.isFinite(localMaxWorkers) && localMaxWorkers > 0
+				? localMaxWorkers
+				: undefined,
 		coverage: {
 			provider: "v8",
 			reporter: ["text", "lcov"],
