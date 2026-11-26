@@ -114,6 +114,7 @@ import { type AssistantMessageContent, presentAssistantMessage } from "../assist
 import { DispatchState, type PendingWork } from "./dispatchState"
 import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
+import { salvageXmlToolCalls } from "../assistant-message/xml-tool-salvage"
 import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -5036,6 +5037,56 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// This ensures that when new_task triggers delegation and calls flushPendingToolResultsToHistory(),
 				// the assistant message is already in history. Otherwise, tool_result blocks would appear
 				// BEFORE their corresponding tool_use blocks, causing API errors.
+
+				// Issue #547 defect 4: XML tool-call fallback. Under load some models
+				// answer with tool-shaped XML in plain text instead of native
+				// tool_calls, and the turn deadlocks on MODEL_NO_TOOLS_USED. When the
+				// completed response produced no native tool call and its text is
+				// exclusively well-formed tool XML, promote each block to a native
+				// ToolUse through the standard parser. Anything else stays text.
+				if (
+					!this.assistantMessageContent.some(
+						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
+					)
+				) {
+					const salvaged = salvageXmlToolCalls(assistantMessage)
+					if (salvaged) {
+						const promoted: ToolUse[] = []
+						for (const [index, call] of salvaged.entries()) {
+							const id = `salvage-${Date.now()}-${index}`
+							try {
+								const toolUse = NativeToolCallParser.parseToolCall({
+									id,
+									name: call.name as ToolName,
+									arguments: JSON.stringify(call.args),
+								})
+								if (toolUse && toolUse.type === "tool_use") {
+									toolUse.id = id
+									promoted.push(toolUse)
+								} else {
+									// Unknown tool name: not salvageable, keep the text.
+									promoted.length = 0
+									break
+								}
+							} catch {
+								// Invalid arguments for the named tool: not salvageable.
+								promoted.length = 0
+								break
+							}
+						}
+						if (promoted.length > 0) {
+							this.assistantMessageContent.push(...promoted)
+							// The response text was fully consumed by the salvage: the
+							// assistant message becomes its native tool calls.
+							assistantMessage = ""
+							this.userMessageContentReady = false
+							console.warn(
+								`[Task#${this.taskId}] Salvaged ${promoted.length} XML tool call(s) from a text-only response`,
+							)
+							this.presentAssistantMessageSafe()
+						}
+					}
+				}
 
 				// Check if we have any content to process (text or tool uses)
 				const hasTextContent = assistantMessage.length > 0

@@ -867,6 +867,138 @@ describe("DeepSeekHandler", () => {
 			}
 		})
 	})
+	// Issue #547: DeepSeek tool dialect. DeepSeek cannot compile strict-mode
+	// schemas (Draft 2020-12 rejects pattern/minLength and forces every property
+	// into required), so the handler must send strict: false, keep declared
+	// optionality, and still strip the keywords its gateway rejects.
+	describe("tool dialect (issue #547)", () => {
+		type ConvertedTool = {
+			type: unknown
+			function: {
+				name: unknown
+				description: unknown
+				strict: unknown
+				parameters: unknown
+			}
+		}
+
+		const convert = (tools: unknown[]): ConvertedTool[] => {
+			const view = handler as unknown as {
+				convertToolsForOpenAI: (tools: unknown[]) => ConvertedTool[] | undefined
+			}
+			return view.convertToolsForOpenAI(tools) as ConvertedTool[]
+		}
+
+		type ObjectSchema = {
+			type: unknown
+			description?: unknown
+			properties?: Record<string, Record<string, unknown>>
+			required?: string[]
+			items?: Record<string, unknown>
+			minItems?: unknown
+		}
+
+		const readTool = {
+			type: "function",
+			function: {
+				name: "read_file",
+				description: "Read a file",
+				strict: true,
+				parameters: {
+					type: "object",
+					properties: {
+						path: { type: "string", description: "The file path" },
+						limit: { type: "number", description: "Max lines" },
+						offset: { type: "number", description: "Start line" },
+					},
+					required: ["path"],
+					additionalProperties: false,
+				},
+			},
+		} satisfies Record<string, unknown>
+
+		const mcpTool = {
+			type: "function",
+			function: {
+				name: "mcp--vibe--search",
+				description: "MCP search",
+				strict: false,
+				parameters: {
+					type: "object",
+					properties: {
+						query: { type: "string", pattern: "^[a-zA-Z0-9_]+$", minLength: 2 },
+					},
+					required: [],
+				},
+			},
+		} satisfies Record<string, unknown>
+
+		it("sends DeepSeek tools with strict disabled", () => {
+			const tools = convert([readTool])
+			expect(tools).toHaveLength(1)
+			expect(tools[0].function.strict).toBe(false)
+		})
+
+		it("keeps declared optional parameters optional (defect 1)", () => {
+			const tools = convert([readTool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			expect(params.required).toStrictEqual(["path"])
+		})
+
+		it("keeps every declared property present in the schema (defect 1)", () => {
+			const tools = convert([readTool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			expect(Object.keys(params.properties ?? {}).sort()).toStrictEqual(["limit", "offset", "path"])
+		})
+
+		it("strips the forbidden pattern keyword and records it in the schema description (defect 2)", () => {
+			const tools = convert([mcpTool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const query = (params.properties ?? {}).query
+			expect(query).not.toHaveProperty("pattern")
+			expect(query).not.toHaveProperty("minLength")
+			// The removed constraints are re-encoded where they were removed: the
+			// query property carries a description hint the model still reads.
+			expect(String(query.description)).toContain("^[a-zA-Z0-9_]+$")
+			expect(String(query.description)).toContain("minLength")
+		})
+
+		it("recurses into nested object and array schemas (defect 2)", () => {
+			const nested = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							filter: {
+								type: "object",
+								properties: { ext: { type: "string", pattern: "^[a-z]+$" } },
+								required: ["ext"],
+							},
+							tags: { type: "array", items: { type: "string", minLength: 1 }, minItems: 2 },
+						},
+						required: ["filter"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([nested])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const filter = (params.properties ?? {}).filter as unknown as ObjectSchema
+			const tags = (params.properties ?? {}).tags as unknown as ObjectSchema
+			expect((filter.properties ?? {}).ext).not.toHaveProperty("pattern")
+			expect((tags.items ?? {}).minLength).toBeUndefined()
+			expect(tags).not.toHaveProperty("minItems")
+		})
+
+		it("does not mutate the caller-owned tool schema", () => {
+			const original = structuredClone(readTool)
+			convert([readTool])
+			expect(readTool).toStrictEqual(original)
+		})
+	})
 })
 
 describe("DeepSeekHandler lone surrogate sanitization (#461)", () => {
