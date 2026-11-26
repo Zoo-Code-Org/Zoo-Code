@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "これは、モデルの思考プロセスの失敗やツールを適切に使用できないことを示している可能性があり、ユーザーのガイダンスによって軽減できます（例：「タスクをより小さなステップに分割してみてください」）。",
 		"violated_organization_allowlist": "タスクの実行に失敗しました: 現在のプロファイルは組織の設定と互換性がありません",
 		"condense_failed": "コンテキストの圧縮に失敗しました",
+		"condense_failed_with_reason": "コンテキストの圧縮に失敗しました: {{reason}}",
+		"condense_task_unavailable": "選択したタスクは利用できなくなりました",
 		"condense_not_enough_messages": "コンテキストを圧縮するのに十分なメッセージがありません",
 		"condensed_recently": "コンテキストは最近圧縮されました；この試行をスキップします",
 		"condense_handler_invalid": "コンテキストを圧縮するためのAPIハンドラーが無効です",

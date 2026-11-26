@@ -299,6 +299,10 @@
 		"thinking": "考え中",
 		"seconds": "{{count}}秒"
 	},
+	"instructionRefresh": {
+		"warningHeader": "一部の指示を再読み込みできませんでした",
+		"description": "読み込めた指示で続行します。読み込めなかったソース："
+	},
 	"contextManagement": {
 		"tokens": "トークン",
 		"condensation": {

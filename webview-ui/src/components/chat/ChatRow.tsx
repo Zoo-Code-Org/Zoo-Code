@@ -50,6 +50,7 @@ import { CommandExecution } from "./CommandExecution"
 import { CommandExecutionError } from "./CommandExecutionError"
 import { AutoApprovedRequestLimitWarning } from "./AutoApprovedRequestLimitWarning"
 import { InProgressRow, CondensationResultRow, CondensationErrorRow, TruncationResultRow } from "./context-management"
+import { InstructionRefreshWarningRow } from "./InstructionRefreshWarningRow"
 import CodebaseSearchResultsDisplay from "./CodebaseSearchResultsDisplay"
 import { appendImages } from "@src/utils/imageUtils"
 import { McpExecution } from "./McpExecution"
@@ -1441,6 +1442,8 @@ export const ChatRowContent = ({
 					return null
 				case "condense_context_error":
 					return <CondensationErrorRow errorText={message.text} />
+				case "instruction_refresh_warning":
+					return <InstructionRefreshWarningRow failureText={message.text} />
 				case "sliding_window_truncation":
 					// In-progress state
 					if (message.partial) {

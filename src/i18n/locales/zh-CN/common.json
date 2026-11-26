@@ -57,6 +57,8 @@
 		"mistake_limit_guidance": "这可能表明模型思维过程失败或无法正确使用工具，可通过用户指导来缓解（例如\"尝试将任务分解为更小的步骤\"）。",
 		"violated_organization_allowlist": "执行任务失败：当前配置文件与您的组织设置不兼容",
 		"condense_failed": "压缩上下文失败",
+		"condense_failed_with_reason": "压缩上下文失败：{{reason}}",
+		"condense_task_unavailable": "所选任务已不可用",
 		"condense_not_enough_messages": "没有足够的对话来压缩上下文",
 		"condensed_recently": "上下文最近已压缩；跳过此次尝试",
 		"condense_handler_invalid": "压缩上下文的API处理程序无效",

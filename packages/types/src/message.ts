@@ -167,6 +167,7 @@ export const clineSays = [
 	"diff_error",
 	"condense_context",
 	"condense_context_error",
+	"instruction_refresh_warning",
 	"sliding_window_truncation",
 	"codebase_search_result",
 	"user_edit_todos",

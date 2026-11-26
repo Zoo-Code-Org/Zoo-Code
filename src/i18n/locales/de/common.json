@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "Dies kann auf einen Fehler im Denkprozess des Modells oder die Unfähigkeit hinweisen, ein Tool richtig zu verwenden, was durch Benutzerführung behoben werden kann (z.B. \"Versuche, die Aufgabe in kleinere Schritte zu unterteilen\").",
 		"violated_organization_allowlist": "Aufgabe konnte nicht ausgeführt werden: Das aktuelle Profil ist nicht kompatibel mit den Einstellungen deiner Organisation",
 		"condense_failed": "Fehler beim Verdichten des Kontexts",
+		"condense_failed_with_reason": "Fehler beim Verdichten des Kontexts: {{reason}}",
+		"condense_task_unavailable": "Die ausgewählte Aufgabe ist nicht mehr verfügbar",
 		"condense_not_enough_messages": "Nicht genügend Nachrichten zum Verdichten des Kontexts",
 		"condensed_recently": "Kontext wurde kürzlich verdichtet; dieser Versuch wird übersprungen",
 		"condense_handler_invalid": "API-Handler zum Verdichten des Kontexts ist ungültig",

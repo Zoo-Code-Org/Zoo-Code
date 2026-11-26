@@ -301,6 +301,10 @@
 		"thinking": "विचार कर रहा है",
 		"seconds": "{{count}} सेकंड"
 	},
+	"instructionRefresh": {
+		"warningHeader": "कुछ निर्देश दोबारा लोड नहीं किए जा सके",
+		"description": "जो निर्देश लोड हो सके, उनके साथ आगे बढ़ रहे हैं। प्रभावित स्रोत:"
+	},
 	"contextManagement": {
 		"tokens": "टोकन",
 		"condensation": {

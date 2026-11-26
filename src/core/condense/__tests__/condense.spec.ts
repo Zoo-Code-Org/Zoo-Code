@@ -11,6 +11,7 @@ import {
 	getMessagesSinceLastSummary,
 	getEffectiveApiHistory,
 	extractCommandBlocks,
+	STARTUP_READING_NOTE,
 } from "../index"
 
 // Create a mock ApiHandler for testing
@@ -217,10 +218,8 @@ Line 2
 			expect(summaryMessage).toBeTruthy()
 
 			const contentArray = summaryMessage!.content as any[]
-			// Summary content is split into separate text blocks:
-			// - First block: "## Conversation Summary\n..."
-			// - Second block: "<system-reminder>..." with command blocks
-			expect(contentArray).toHaveLength(2)
+			expect(contentArray).toHaveLength(3)
+			expect(contentArray[2]).toEqual({ type: "text", text: STARTUP_READING_NOTE })
 			expect(contentArray[0].text).toContain("## Conversation Summary")
 			expect(contentArray[1].text).toContain('<command name="prr">')
 			expect(contentArray[1].text).toContain("<system-reminder>")

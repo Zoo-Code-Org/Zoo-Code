@@ -303,6 +303,10 @@
 		"thinking": "Réflexion",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Certaines instructions n'ont pas pu être rechargées",
+		"description": "La suite utilise les instructions qui ont pu être chargées. Sources concernées :"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {

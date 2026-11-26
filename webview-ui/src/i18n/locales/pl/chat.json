@@ -305,6 +305,10 @@
 		"thinking": "Myślenie",
 		"seconds": "{{count}} s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Nie udało się ponownie wczytać niektórych instrukcji",
+		"description": "Kontynuujemy z instrukcjami, które udało się wczytać. Źródła, których dotyczy problem:"
+	},
 	"contextManagement": {
 		"tokens": "tokeny",
 		"condensation": {

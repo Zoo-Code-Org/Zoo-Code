@@ -13,7 +13,7 @@ function createMockStdout(): { stdout: NodeJS.WriteStream; lines: () => Record<s
 			chunks.push(chunk.toString())
 			callback()
 		},
-	}) as unknown as NodeJS.WriteStream
+	}) as unknown as NodeJS.WriteStream // Provides the writable stream members consumed by the emitter.
 
 	const lines = () =>
 		chunks
@@ -26,16 +26,11 @@ function createMockStdout(): { stdout: NodeJS.WriteStream; lines: () => Record<s
 }
 
 function emitMessage(emitter: JsonEventEmitter, message: ClineMessage): void {
-	;(emitter as unknown as { handleMessage: (msg: ClineMessage, isUpdate: boolean) => void }).handleMessage(
-		message,
-		false,
-	)
+	emitter["handleMessage"](message, false)
 }
 
 function emitTaskCompleted(emitter: JsonEventEmitter, event: TaskCompletedEvent): void {
-	;(emitter as unknown as { handleTaskCompleted: (taskCompleted: TaskCompletedEvent) => void }).handleTaskCompleted(
-		event,
-	)
+	emitter["handleTaskCompleted"](event)
 }
 
 function createAskCompletionMessage(ts: number, text = ""): ClineMessage {
@@ -93,6 +88,26 @@ describe("JsonEventEmitter result emission", () => {
 		expect(output).toHaveLength(2)
 		expect(output[0]?.content).toBe("FIRST")
 		expect(output[1]?.content).toBe("SECOND")
+	})
+
+	it("emits instruction_refresh_warning to JSON consumers", () => {
+		const { stdout, lines } = createMockStdout()
+		const emitter = new JsonEventEmitter({ mode: "stream-json", stdout })
+
+		emitMessage(emitter, {
+			ts: 150,
+			type: "say",
+			say: "instruction_refresh_warning",
+			partial: false,
+			text: "/workspace/.roo/rules/a.md (EACCES)\n/workspace/AGENTS.md (UNKNOWN)",
+		})
+
+		const warnings = lines().filter((line) => line.subtype === "instruction_refresh_warning")
+		expect(warnings).toHaveLength(1)
+		expect(warnings[0]).toMatchObject({
+			type: "assistant",
+			content: "/workspace/.roo/rules/a.md (EACCES)\n/workspace/AGENTS.md (UNKNOWN)",
+		})
 	})
 
 	it("clears cached completion text after each result emission", () => {
