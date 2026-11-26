@@ -370,7 +370,7 @@ it("passes frozen fixture tests to the grading runtime after deletion", async ()
 	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "frozen-run-"))
 	let graded = false
 	try {
-		await runCodingFixtureOnce({
+		const record = await runCodingFixtureOnce({
 			fixtureName: bundle.fixture.identity.name,
 			repIndex: 0,
 			credential: "test-only",
@@ -388,6 +388,12 @@ it("passes frozen fixture tests to the grading runtime after deletion", async ()
 			scratchDir: scratch,
 		})
 		assert.equal(graded, true)
+		// runGrader catches callback assertions and reports graderRuntimeFailed.
+		assert.deepEqual(record.grading, {
+			kind: "grading-failure",
+			isolation: "local-subprocess",
+			reason: "test-runtime",
+		})
 	} finally {
 		await fs.rm(scratch, { recursive: true, force: true })
 	}
