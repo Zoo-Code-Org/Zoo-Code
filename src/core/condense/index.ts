@@ -10,6 +10,7 @@ import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
 import { findLast } from "../../shared/array"
 import { supportPrompt } from "../../shared/support-prompt"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
+import { mergeConsecutiveApiMessages } from "../task/mergeConsecutiveApiMessages"
 import { generateFoldedFileContext } from "./foldedFileContext"
 
 export type { FoldedFileContextResult, FoldedFileContextOptions } from "./foldedFileContext"
@@ -111,16 +112,22 @@ export function transformMessagesForCondensing<
 export const MIN_CONDENSE_THRESHOLD = 5 // Minimum percentage of context window to trigger condensing
 export const MAX_CONDENSE_THRESHOLD = 100 // Maximum percentage of context window to trigger condensing
 
-const SUMMARY_PROMPT = `You are a helpful AI assistant tasked with summarizing conversations.
+const CONDENSE_INSTRUCTION_GUARD = `CRITICAL: This is a summarization-only request. DO NOT call any tools or functions.
+Your ONLY task is to analyze the conversation above and produce a text summary.
+Respond with text only - no tool calls will be processed.`
 
-CRITICAL: This is a summarization-only request. DO NOT call any tools or functions.
-Your ONLY task is to analyze the conversation and produce a text summary.
-Respond with text only - no tool calls will be processed.
-
-CRITICAL: This summarization request is a SYSTEM OPERATION, not a user message.
-When analyzing "user requests" and "user intent", completely EXCLUDE this summarization message.
-The "most recent user request" and "next step" must be based on what the user was doing BEFORE this system message appeared.
-The goal is for work to continue seamlessly after condensation - as if it never happened.`
+/**
+ * Builds the trailing condense instruction content: a no-tools guard followed
+ * by the condensing prompt (the custom prompt when non-empty, the default
+ * CONDENSE template otherwise). The guard is required because the condense
+ * request now carries the task system prompt and the tools parameter, so
+ * without it the model could treat the request as a normal turn and call
+ * tools.
+ */
+export function buildCondenseInstruction(condensingPrompt: string | undefined): string {
+	const prompt = condensingPrompt?.trim() || supportPrompt.default.CONDENSE
+	return `${CONDENSE_INSTRUCTION_GUARD}\n\n${prompt}`
+}
 
 /**
  * Injects synthetic tool_results for orphan tool_calls that don't have matching results.
@@ -295,31 +302,31 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		return { ...response, error }
 	}
 
-	// Use custom prompt if provided and non-empty, otherwise use the default CONDENSE prompt
-	// This respects user's custom condensing prompt setting
-	const condenseInstructions = customCondensingPrompt?.trim() || supportPrompt.default.CONDENSE
-
-	const finalRequestMessage: Anthropic.MessageParam = {
-		role: "user",
-		content: condenseInstructions,
-	}
-
-	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
-	// (e.g., when user triggers condense after receiving attempt_completion but before responding)
-	const messagesWithToolResults = injectSyntheticToolResults(messagesToSummarize)
-
-	// Transform tool_use and tool_result blocks to text representations.
-	// This is necessary because some providers (like Bedrock via LiteLLM) require the `tools` parameter
-	// when tool blocks are present. By converting them to text, we can send the conversation for
-	// summarization without needing to pass the tools parameter.
-	const messagesWithTextToolBlocks = transformMessagesForCondensing(
-		maybeRemoveImageBlocks([...messagesWithToolResults, finalRequestMessage], apiHandler),
+	// Shape the request exactly like the task loop shapes a normal request
+	// (merge consecutive user messages, clean images when unsupported, send
+	// native content blocks). KV caches are prefix caches: keeping this
+	// sequence byte-identical to the previous request keeps the cache valid
+	// and makes condensation cheap for local models (issue 2453).
+	const shapedForApi = maybeRemoveImageBlocks(
+		mergeConsecutiveApiMessages(messagesToSummarize, { roles: ["user"] }),
+		apiHandler,
 	)
 
-	const requestMessages = messagesWithTextToolBlocks.map(({ role, content }) => ({ role, content }))
+	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
+	// (e.g., when user triggers condense after receiving attempt_completion but before responding).
+	// This runs after shaping, so it can only append a suffix message.
+	const messagesWithToolResults = injectSyntheticToolResults(shapedForApi)
 
-	// Note: this doesn't need to be a stream, consider using something like apiHandler.completePrompt
-	const promptToUse = SUMMARY_PROMPT
+	const requestMessages = messagesWithToolResults.map(({ role, content }) => ({ role, content }))
+
+	// The condense instruction rides on the LAST message, appended after the
+	// untouched prefix, so the provider caches built on the previous request
+	// survive.
+	const finalRequestMessage: Anthropic.MessageParam = {
+		role: "user",
+		content: buildCondenseInstruction(customCondensingPrompt),
+	}
+	requestMessages.push(finalRequestMessage)
 
 	// Validate that the API handler supports message creation
 	if (!apiHandler || typeof apiHandler.createMessage !== "function") {
@@ -332,7 +339,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	let cost = 0
 
 	try {
-		const stream = apiHandler.createMessage(promptToUse, requestMessages, metadata)
+		const stream = apiHandler.createMessage(systemPrompt, requestMessages, metadata)
 
 		for await (const chunk of stream) {
 			if (chunk.type === "text") {

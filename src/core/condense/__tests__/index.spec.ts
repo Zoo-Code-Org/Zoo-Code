@@ -929,21 +929,30 @@ describe("summarizeConversation", () => {
 			taskId,
 		})
 
-		// Verify that createMessage was called with the SUMMARY_PROMPT (which contains CRITICAL instructions), messages array, and optional metadata
+		// Verify that createMessage was called with the task system prompt (the
+		// prefix-cache contract, issue 2453), messages array, and optional metadata
 		expect(mockApiHandler.createMessage).toHaveBeenCalledWith(
-			expect.stringContaining("You are a helpful AI assistant tasked with summarizing conversations."),
+			defaultSystemPrompt,
 			expect.any(Array),
 			undefined, // metadata is undefined when not passed to summarizeConversation
 		)
-		// Verify the CRITICAL instructions are included in the prompt
-		const actualPrompt = (mockApiHandler.createMessage as Mock).mock.calls[0][0]
-		expect(actualPrompt).toContain("CRITICAL: This is a summarization-only request")
-		expect(actualPrompt).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
+		// Verify the summarization guard rides on the trailing instruction message
+		const requestMessages = (mockApiHandler.createMessage as Mock).mock
+			.calls[0][1] as Anthropic.Messages.MessageParam[]
+		const trailingContent = requestMessages[requestMessages.length - 1].content
+		expect(trailingContent).toContain("CRITICAL: This is a summarization-only request")
+		expect(trailingContent).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
 
-		// Check that maybeRemoveImageBlocks was called with the correct messages
-		// The final request message now contains the detailed CONDENSE instructions
+		// Check that maybeRemoveImageBlocks was called with the shaped history only:
+		// the instruction is appended after cleaning, so the cleaned prefix stays
+		// byte-identical to the previous request (issue 2453)
 		const mockCallArgs = (maybeRemoveImageBlocks as Mock).mock.calls[0][0] as any[]
-		const finalMessage = mockCallArgs[mockCallArgs.length - 1]
+		const finalHistoryMessage = mockCallArgs[mockCallArgs.length - 1]
+		expect(finalHistoryMessage.role).toBe("user")
+		// The detailed CONDENSE instructions ride on the trailing request message
+		const formattedRequestMessages = (mockApiHandler.createMessage as Mock).mock
+			.calls[0][1] as Anthropic.Messages.MessageParam[]
+		const finalMessage = formattedRequestMessages[formattedRequestMessages.length - 1]
 		expect(finalMessage.role).toBe("user")
 		expect(finalMessage.content).toContain("Your task is to create a detailed summary of the conversation")
 	})
@@ -1315,11 +1324,13 @@ describe("summarizeConversation with custom settings", () => {
 		// Verify the custom prompt was used in the user message content
 		const createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		// The custom prompt should be in the last message (the finalRequestMessage)
+		// The custom prompt should be in the last message (the finalRequestMessage),
+		// wrapped with the no-tools guard
 		const requestMessages = createMessageCalls[0][1]
 		const lastMessage = requestMessages[requestMessages.length - 1]
 		expect(lastMessage.role).toBe("user")
-		expect(lastMessage.content).toBe(customPrompt)
+		expect(lastMessage.content).toContain(customPrompt)
+		expect(lastMessage.content).toContain("DO NOT call any tools")
 	})
 
 	/**
@@ -1336,13 +1347,16 @@ describe("summarizeConversation with custom settings", () => {
 			customCondensingPrompt: "  ",
 		})
 
-		// Verify the default SUMMARY_PROMPT was used (contains CRITICAL instructions)
+		// Verify the task system prompt was sent (prefix-cache contract, issue 2453)
+		// and the default CONDENSE template rides on the trailing instruction message
 		let createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
+		const trailingAfterEmpty = (createMessageCalls[0][1] as Anthropic.Messages.MessageParam[])[
+			(createMessageCalls[0][1] as Anthropic.Messages.MessageParam[]).length - 1
+		]
+		expect(trailingAfterEmpty.content).toContain("CRITICAL: This is a summarization-only request")
+		expect(trailingAfterEmpty.content).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
 
 		// Reset mock and test with undefined
 		vi.clearAllMocks()
@@ -1354,13 +1368,16 @@ describe("summarizeConversation with custom settings", () => {
 			isAutomaticTrigger: false,
 		})
 
-		// Verify the default SUMMARY_PROMPT was used again (contains CRITICAL instructions)
+		// Verify the task system prompt was sent again (prefix-cache contract,
+		// issue 2453) with the default CONDENSE template on the trailing message
 		createMessageCalls = (mockMainApiHandler.createMessage as Mock).mock.calls
 		expect(createMessageCalls.length).toBe(1)
-		expect(createMessageCalls[0][0]).toContain(
-			"You are a helpful AI assistant tasked with summarizing conversations.",
-		)
-		expect(createMessageCalls[0][0]).toContain("CRITICAL: This is a summarization-only request")
+		expect(createMessageCalls[0][0]).toBe(defaultSystemPrompt)
+		const trailingAfterUndefined = (createMessageCalls[0][1] as Anthropic.Messages.MessageParam[])[
+			(createMessageCalls[0][1] as Anthropic.Messages.MessageParam[]).length - 1
+		]
+		expect(trailingAfterUndefined.content).toContain("CRITICAL: This is a summarization-only request")
+		expect(trailingAfterUndefined.content).toContain("CRITICAL: This summarization request is a SYSTEM OPERATION")
 	})
 
 	/**
