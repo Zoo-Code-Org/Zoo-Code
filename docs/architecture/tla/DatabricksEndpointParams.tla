@@ -14,8 +14,12 @@
 \* before the fix and passes after; the 491 pre-existing openai handler tests pass both sides.
 \* Findings: none new. The spec pins the decision the tests already cover; the invariant
 \* sentence is available to future call sites that build OpenAI-compatible bodies.
-\* Result: DatabricksEndpointParams.cfg passes; NoGuard and OmitEverywhere configs fail on
-\* the invariant each names. See the run log for state counts.
+\* Review ratchet (PR #2697 round 2): OmitEverywhere duplicated NoGuard - FlagPreserved = FALSE
+\* made ParallelFieldSent constant TRUE, so the variant sent the field everywhere. Added: the
+\* conjunction form (FlagPreserved /\ ~(IsDatabricks /\ DatabricksGuard)) and a presence-checked
+\* NonDatabricksKeeps, so OmitEverywhere now drops the field everywhere and fails the loss it names.
+\* Result: DatabricksEndpointParams.cfg passes; NoGuard fails DatabricksNeverSends and
+\* OmitEverywhere fails NonDatabricksKeeps. See the run log for state counts.
 \* Cost: about 20 minutes to author and gate. TLC finishes in seconds.
 EXTENDS Naturals
 CONSTANT DatabricksGuard, FlagPreserved
@@ -25,7 +29,7 @@ Flags == {"on", "off", "unset"}
 Inputs == [base : BaseUrls, flag : Flags]
 IsDatabricks == input.base \in {"aws", "azure", "gov", "path"}
 ResolvedFlag == IF input.flag = "unset" THEN TRUE ELSE input.flag = "on"
-ParallelFieldSent == ~FlagPreserved \/ ~(IsDatabricks /\ DatabricksGuard)
+ParallelFieldSent == FlagPreserved /\ ~(IsDatabricks /\ DatabricksGuard)
 Sent == IF ParallelFieldSent
         THEN {"model", "tools", "parallel_tool_calls"}
         ELSE {"model", "tools"}
@@ -37,5 +41,5 @@ Init == input \in Inputs
 Next == UNCHANGED input
 Spec == Init /\ [][Next]_input
 DatabricksNeverSends == IsDatabricks => "parallel_tool_calls" \notin DOMAIN Body
-NonDatabricksKeeps == ~IsDatabricks => Body["parallel_tool_calls"] = ResolvedFlag
+NonDatabricksKeeps == ~IsDatabricks => "parallel_tool_calls" \in DOMAIN Body /\ Body["parallel_tool_calls"] = ResolvedFlag
 ====

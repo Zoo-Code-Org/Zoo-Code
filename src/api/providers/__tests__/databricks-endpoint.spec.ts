@@ -70,6 +70,11 @@ describe("isDatabricksEndpoint", () => {
 		["Azure workspace host", "https://adb-1111111111111111.1.azuredatabricks.net/serving-endpoints"],
 		["GovCloud workspace host", "https://dbc-gov.cloud.databricks.us/serving-endpoints"],
 		["Azure GovCloud workspace host", "https://adb-1.1.azuredatabricks.us/serving-endpoints"],
+		["AWS workspace host without the serving path", "https://dbc-12345-abcd.cloud.databricks.com/v1"],
+		["Azure workspace host without the serving path", "https://adb-1.1.azuredatabricks.net/v1"],
+		["GovCloud workspace host without the serving path", "https://dbc-gov.cloud.databricks.us/v1"],
+		["Azure GovCloud workspace host without the serving path", "https://adb-1.1.azuredatabricks.us/v1"],
+		["bare workspace root", "https://adb-1111111111111111.1.azuredatabricks.net"],
 		["serving-endpoints route on a custom domain", "https://gw.corp.example/serving-endpoints/my-ep/invocations"],
 		["host suffix match is case-insensitive", "https://DBC-1.CLOUD.DATABRICKS.COM/serving-endpoints"],
 		["surrounding whitespace is tolerated", "  https://gw.corp.example/serving-endpoints  "],
@@ -139,4 +144,22 @@ describe("OpenAiHandler Databricks request bodies", () => {
 		const body = mockCreate.mock.calls[0][0]
 		expect(body).toHaveProperty("parallel_tool_calls", false)
 	})
+
+	it.each(ROUTES)(
+		"defaults parallel_tool_calls to true when metadata omits it on a plain OpenAI endpoint ($name)",
+		async ({ modelId, streaming }) => {
+			const handler = makeHandler(OPENAI_BASE_URL, modelId, streaming)
+
+			await collectStream(
+				handler.createMessage(
+					"system prompt",
+					[{ role: "user", content: "hello" }],
+					makeCreateMessageMetadata(),
+				),
+			)
+
+			const body = mockCreate.mock.calls[0][0]
+			expect(body).toHaveProperty("parallel_tool_calls", true)
+		},
+	)
 })
