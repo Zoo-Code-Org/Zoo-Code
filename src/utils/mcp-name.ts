@@ -3,7 +3,7 @@
  * API function name requirements across all providers.
  */
 
-import { resolveMcpToolAlias, recordMcpToolAlias } from "./mcp-name-ledger"
+import { isMcpToolNameAmbiguous, resolveMcpToolAlias, recordMcpToolAlias } from "./mcp-name-ledger"
 
 /**
  * Separator used between MCP prefix, server name, and tool name.
@@ -145,8 +145,49 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 }
 
 /**
+ * Upper bound on the "__" runs a name may carry before candidate key
+ * enumeration is skipped. Models rewrite the "--" separator as "__", and a
+ * server or tool name may hold its own "__", so more than one position can
+ * be a separator. Each subset of runs maps back to "--" to form one
+ * candidate ledger key. Real names carry a handful of runs; a name beyond
+ * this bound keeps the legacy split behavior instead of a combinatorial
+ * search over the ledger.
+ */
+const MAX_CANDIDATE_SEPARATORS = 6
+
+/**
+ * Build every candidate ledger key for an echoed function name.
+ *
+ * The model echoes "mcp--svc__prod--readfile" as "mcp__svc__prod__readfile",
+ * where the first and last "__" are rewritten separators and the middle one
+ * belongs to the server name. A single normalized form cannot recover that
+ * key, so each subset of "__" runs is mapped back to "--" and checked
+ * against the ledger. The raw form itself is skipped: the caller already
+ * tried it as an exact key.
+ */
+function ledgerCandidateKeys(mcpToolName: string): string[] {
+	const segments = mcpToolName.split("__")
+	const runs = segments.length - 1
+	if (runs < 1 || runs > MAX_CANDIDATE_SEPARATORS) {
+		return []
+	}
+	const keys: string[] = []
+	for (let mask = 1; mask < 1 << runs; mask++) {
+		let key = segments[0]
+		for (let i = 0; i < runs; i++) {
+			key += (mask & (1 << i) ? MCP_TOOL_SEPARATOR : "__") + segments[i + 1]
+		}
+		keys.push(key)
+	}
+	return keys
+}
+
+/**
  * Parse an MCP tool function name back into server and tool names.
  * This handles both hyphen and underscore separators using fuzzy matching.
+ *
+ * A name the ledger marks ambiguous resolves to null: it was advertised for
+ * two different pairs, so no pair is safe to return.
  *
  * @param mcpToolName - The full MCP tool name (e.g., "mcp--weather--get_forecast" or "mcp__weather__get_forecast")
  * @returns An object with serverName and toolName, or null if parsing fails
@@ -156,14 +197,42 @@ export function parseMcpToolName(mcpToolName: string): { serverName: string; too
 	// have deleted characters that the split below can never restore (issue
 	// #2338). The raw name and its separator-normalized form are both tried,
 	// because models rewrite "mcp--x--y" as "mcp__x__y".
-	const alias = resolveMcpToolAlias(mcpToolName) ?? resolveMcpToolAlias(normalizeMcpToolName(mcpToolName))
+	const normalizedName = normalizeMcpToolName(mcpToolName)
+	const alias = resolveMcpToolAlias(mcpToolName) ?? resolveMcpToolAlias(normalizedName)
 	if (alias) {
 		return { serverName: alias.serverName, toolName: alias.toolName }
 	}
 
-	// Normalize the name to handle both separator styles
-	const normalizedName = normalizeMcpToolName(mcpToolName)
+	// An echoed name whose server or tool name carries its own "__" hides the
+	// recorded key: the rewrite of the separators cannot be told apart from
+	// the name's own underscores. Enumerate the candidate keys instead.
+	// Every candidate must agree on one pair; two different pairs, or a
+	// candidate the ledger marks ambiguous, leave the call unresolved.
+	let candidate: { serverName: string; toolName: string } | undefined
+	let ambiguous = isMcpToolNameAmbiguous(mcpToolName) || isMcpToolNameAmbiguous(normalizedName)
+	for (const key of ledgerCandidateKeys(mcpToolName)) {
+		if (isMcpToolNameAmbiguous(key)) {
+			ambiguous = true
+			break
+		}
+		const hit = resolveMcpToolAlias(key)
+		if (!hit) {
+			continue
+		}
+		if (candidate && (candidate.serverName !== hit.serverName || candidate.toolName !== hit.toolName)) {
+			ambiguous = true
+			break
+		}
+		candidate ??= hit
+	}
+	if (ambiguous) {
+		return null
+	}
+	if (candidate) {
+		return { serverName: candidate.serverName, toolName: candidate.toolName }
+	}
 
+	// Normalize the name to handle both separator styles
 	const prefix = MCP_TOOL_PREFIX + MCP_TOOL_SEPARATOR
 	if (!normalizedName.startsWith(prefix)) {
 		return null

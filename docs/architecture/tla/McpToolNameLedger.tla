@@ -7,48 +7,56 @@
 \* server that does not exist. The call fails or reaches the wrong server.
 \* Failure 2: the model calls a name and gets a pair that no advertisement put
 \* under that name. The dispatch then invents a server or tool.
-\* Failure 3: two servers sanitize to one wire name. Resolution must stay stable:
-\* the pair recorded first keeps resolving. A rewrite on each build flips the
-\* target between calls of one name.
+\* Failure 3 (CR thread 4712051715): two scopes advertise one function name for
+\* two different pairs, for example "one.server"/"tool" and "oneserver"/"tool".
+\* One name for two pairs is ambiguous. The ledger marks the conflict and the
+\* name stops resolving. Resolution must never pick one scope's pair, because
+\* that routes the other scope's calls to the wrong server.
 \* Invariant: ExactRoundTrip. A resolved pair was advertised under that exact
 \* function name. The fix records the original pair in a ledger at build time
 \* and reads it back at parse time. Split remains the fallback for unknown names.
 \* Invariant: FirstPairStable. A recorded pair never changes while the ledger lives.
+\* Invariant: AmbiguousNamesRefuse. A name advertised for two different pairs
+\* resolves to nothing.
 \* Expected before the run: NoLedger fails with a dotted name whose sanitize drops
 \* the dot. The split then returns a wire form no advertisement ever used.
 \* Sanitize is an oracle: TLC tries every mapping of the four names to the four
 \* wire forms. The invariant must hold for all of them, so the design does not
 \* depend on one sanitizer behavior.
 \* Actions: Advertise (build plus record), Call (model calls one advertised name).
-\* | Config                        | Variant                     | Verdict |
-\* | McpToolNameLedger.cfg         | On (ledger, first-wins)     | holds (14,192 states) |
-\* | ...NoLedger.cfg               | parse skips the ledger      | fails ExactRoundTrip |
-\* | ...NoRecord.cfg               | build forgets to record     | fails ExactRoundTrip |
-\* | ...LastWins.cfg               | each build overwrites       | fails FirstPairStable |
+\* Model-checking controls live in McpToolNameLedgerMC.tla (AGENTS.md rule 6).
+\* | Config                  | Variant                            | Verdict |
+\* | McpToolNameLedger.cfg   | implemented behavior               | holds (16,560 states) |
+\* | ...NoLedger.cfg         | parse skips the ledger             | fails ExactRoundTrip (1,284) |
+\* | ...NoRecord.cfg         | build forgets to record            | fails ExactRoundTrip (1,284) |
+\* | ...LastWins.cfg         | each build overwrites              | fails FirstPairStable (257) |
+\* | ...NoRefuse.cfg         | first-wins without conflict marking | fails AmbiguousNamesRefuse (4,131) |
 \* Found: NoLedger fails on the first call after a dotted advertise, as expected.
-\* No other invariant failed in any variant, so each sabotage pins one rule.
-\* Not modeled: normalizeMcpToolName separator repair, the 64-char truncation,
-\* McpHub connection state, and tool execution. Tests: mcp-name-ledger.spec.ts.
-\* Cost: each cfg run takes under 30 seconds. Agent time is not measured.
-\* Review: none yet (first version, written before the fix).
+\* NoRefuse fails on the call after the second scope records a different pair.
+\* Review (PR 2669, 2026-11-26): 1 added (AmbiguousNamesRefuse, CR thread
+\* 4712051715), 1 restructured (LedgerMode moved to the MC module, CR thread
+\* 4712051706), 1 gap (CR thread 4712051724: the "__" echo rewrite of the
+\* separators is not modeled; parser tests pin it in NativeToolCallParser.spec).
+\* Not modeled: normalizeMcpToolName separator repair and the echo forms, the
+\* 64-char truncation, McpHub connection state, and tool execution.
+\* Tests: mcp-name-ledger.spec.ts.
+\* Cost: the base cfg runs in under 2 minutes; each sabotage is faster.
 
 EXTENDS Naturals, Sequences, FiniteSets
 
-CONSTANTS Servers, Tools, WireNames, LedgerMode
-\* LedgerMode: "On" (record at build, read at parse, first wins),
-\* "Off" (parse splits only - the unfixed code), "NoRecord" (build forgets
-\* to record), "LastWins" (each build overwrites the recorded pair).
+CONSTANTS Servers, Tools, WireNames
 
-VARIABLES san, ledger, firstPair, built, callF, callRes
+VARIABLES san, pairs, ledger, firstPair, built, callF, callRes, callAmb
 \* san: the sanitize oracle, one wire form per original name.
-\* ledger: function name -> recorded original pair, NullPair when not recorded.
+\* pairs: function name -> the set of original pairs advertised under it.
+\* ledger: function name -> the resolvable pair, NullPair when none or ambiguous.
 \* firstPair: the pair each name recorded first. built: every advertisement.
-\* callF, callRes: the probe.
+\* callF, callRes: the probe. callAmb: whether the called name was ambiguous
+\* at call time. The probe keeps one call, so the snapshot is part of the state.
 
-vars == <<san, ledger, firstPair, built, callF, callRes>>
+vars == <<san, pairs, ledger, firstPair, built, callF, callRes, callAmb>>
 
 Names == Servers \cup Tools
-Pairs == Servers \X Tools
 AnyPair == (Names \cup WireNames) \X (Names \cup WireNames)
 NullPair == <<"<", ">">>  \* sentinel: these chars never occur in any name
 Fnames == {"mcp--" \o sw \o "--" \o wt : sw \in WireNames, wt \in WireNames}
@@ -64,42 +72,48 @@ WireT(f) == CHOOSE wt \in {w \in WireNames : \E ws \in WireNames : Sep3(ws, w) =
                 TRUE
 SplitOnly(f) == <<WireS(f), WireT(f)>>
 
-\* The sink of the fixed code: read the ledger first, split only unknown names.
-\* "Off" and "NoRecord" keep the old sink; "Off" also disables the record.
-ReadL(f) == IF (LedgerMode = "On" \/ LedgerMode = "LastWins") /\ ledger[f] # NullPair
-            THEN ledger[f]
-            ELSE SplitOnly(f)
+\* The implemented record. One name accumulates the pairs advertised under it.
+\* One pair resolves. Two different pairs leave nothing resolvable: the parse
+\* cannot know which scope the model meant.
+Record(pr, lg, fp, f, nm, tl) ==
+    LET np == pr[f] \cup {<<nm, tl>>}
+    IN << [pr EXCEPT ![f] = np],
+          IF Cardinality(np) > 1 THEN [lg EXCEPT ![f] = NullPair]
+          ELSE IF lg[f] = NullPair THEN [lg EXCEPT ![f] = <<nm, tl>>]
+          ELSE lg,
+          IF fp[f] = NullPair THEN [fp EXCEPT ![f] = <<nm, tl>>] ELSE fp >>
 
-WriteL(f, nm, tl) ==
-    CASE LedgerMode = "Off"      -> ledger
-    []  LedgerMode = "NoRecord"  -> ledger
-    []  LedgerMode = "LastWins"  -> [ledger EXCEPT ![f] = <<nm, tl>>]
-    []  OTHER -> [ledger EXCEPT ![f] = IF ledger[f] = NullPair THEN <<nm, tl>>
-                                       ELSE ledger[f]]
+\* The sink of the fixed code: an ambiguous name resolves to nothing; the
+\* ledger answers for recorded names; the split answers for unknown ones.
+ReadL(f) == IF Cardinality(pairs[f]) > 1 THEN NullPair
+            ELSE IF ledger[f] # NullPair THEN ledger[f]
+            ELSE SplitOnly(f)
 
 Init == \E oracle \in [Names -> WireNames] :
     /\ san = oracle
+    /\ pairs = [fnm \in Fnames |-> {}]
     /\ ledger = [fnm \in Fnames |-> NullPair]
     /\ firstPair = [fnm \in Fnames |-> NullPair]
     /\ built = {}
     /\ callF = None
     /\ callRes = NullPair
+    /\ callAmb = FALSE
 
 \* A tool definition is built and the original pair is offered to the ledger.
 Advertise(nm, tl) ==
-    /\ ledger' = WriteL(Sep3(san[nm], san[tl]), nm, tl)
-    /\ firstPair' = [firstPair EXCEPT ![Sep3(san[nm], san[tl])] =
-                        IF firstPair[Sep3(san[nm], san[tl])] = NullPair
-                        THEN <<nm, tl>>
-                        ELSE firstPair[Sep3(san[nm], san[tl])]]
-    /\ built' = built \cup {[f |-> Sep3(san[nm], san[tl]), srv |-> nm, tl |-> tl]}
-    /\ UNCHANGED <<callF, callRes, san>>
+    LET rec == Record(pairs, ledger, firstPair, Sep3(san[nm], san[tl]), nm, tl)
+    IN /\ pairs' = rec[1]
+       /\ ledger' = rec[2]
+       /\ firstPair' = rec[3]
+       /\ built' = built \cup {[f |-> Sep3(san[nm], san[tl]), srv |-> nm, tl |-> tl]}
+       /\ UNCHANGED <<callF, callRes, callAmb, san>>
 
 \* The model calls one name it was shown. built # {} guards the empty domain.
 Call == \E rec \in built :
     /\ callF' = rec.f
     /\ callRes' = ReadL(rec.f)
-    /\ UNCHANGED <<san, ledger, firstPair, built>>
+    /\ callAmb' = (Cardinality(pairs[rec.f]) > 1)
+    /\ UNCHANGED <<san, pairs, ledger, firstPair, built>>
 
 Next == (\E nm \in Servers : \E tl \in Tools : Advertise(nm, tl)) \/ Call
 
@@ -107,20 +121,29 @@ Spec == Init /\ [][Next]_vars
 
 TypeOK ==
     /\ san \in [Names -> WireNames]
+    /\ \A fnm \in Fnames : pairs[fnm] \subseteq AnyPair
     /\ \A fnm \in Fnames : ledger[fnm] \in AnyPair \cup {NullPair}
     /\ \A fnm \in Fnames : firstPair[fnm] \in AnyPair \cup {NullPair}
     /\ built \subseteq [f : Fnames, srv : Servers, tl : Tools]
     /\ (callF = None \/ callF \in Fnames)
     /\ callRes \in AnyPair \cup {NullPair}
+    /\ callAmb \in BOOLEAN
 
 \* Safety 1: a resolved pair was advertised under that exact function name.
-ExactRoundTrip == callF = None \/ \E rec \in built :
-    /\ rec.f = callF
-    /\ rec.srv = callRes[1]
-    /\ rec.tl = callRes[2]
+\* NullPair is no resolution, so a refused call does not violate the rule.
+ExactRoundTrip == callF = None \/ callRes = NullPair \/
+    (\E rec \in built :
+        /\ rec.f = callF
+        /\ rec.srv = callRes[1]
+        /\ rec.tl = callRes[2])
 
 \* Safety 2: a recorded pair never changes while the ledger lives.
 FirstPairStable == \A fnm \in Fnames :
     ledger[fnm] # NullPair => firstPair[fnm] = ledger[fnm]
+
+\* Safety 3: a call of a name that is ambiguous when it is called resolves to
+\* nothing. callAmb snapshots the ambiguity at call time, so a call made before
+\* a conflict arrived keeps its recorded outcome.
+AmbiguousNamesRefuse == callAmb => callRes = NullPair
 
 ====

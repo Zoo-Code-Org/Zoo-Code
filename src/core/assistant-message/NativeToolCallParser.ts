@@ -756,8 +756,10 @@ export class NativeToolCallParser {
 			// Normalize the tool name to handle models that output underscores instead of hyphens
 			const normalizedName = normalizeMcpToolName(toolCall.name)
 			if (normalizedName.startsWith(mcpPrefix)) {
-				// Pass the original tool call but with normalized name for parsing
-				return this.parseDynamicMcpTool({ ...toolCall, name: normalizedName })
+				// Forward the raw echoed name too: normalizing collapses the
+				// "__" runs that belong to the server or tool name itself, and
+				// the ledger lookup needs them intact to find the recorded key.
+				return this.parseDynamicMcpTool({ ...toolCall, name: normalizedName, rawName: toolCall.name })
 			}
 		}
 
@@ -1119,7 +1121,12 @@ export class NativeToolCallParser {
 	 * These are generated dynamically by getMcpServerTools() and are returned
 	 * as McpToolUse objects that preserve the original tool name.
 	 */
-	public static parseDynamicMcpTool(toolCall: { id: string; name: string; arguments: string }): McpToolUse | null {
+	public static parseDynamicMcpTool(toolCall: {
+		id: string
+		name: string
+		arguments: string
+		rawName?: string
+	}): McpToolUse | null {
 		try {
 			// Parse the arguments - these are the actual tool arguments passed directly
 			const args = JSON.parse(toolCall.arguments || "{}")
@@ -1130,7 +1137,10 @@ export class NativeToolCallParser {
 
 			// Extract server_name and tool_name from the tool name itself
 			// Format: mcp--serverName--toolName (using -- separator)
-			const parsed = parseMcpToolName(normalizedName)
+			// The raw echoed name is preferred: parseMcpToolName rebuilds the
+			// recorded ledger key from it, keeping the "__" runs that belong to
+			// the server or tool name instead of normalizing them away first.
+			const parsed = parseMcpToolName(toolCall.rawName ?? toolCall.name)
 			if (!parsed) {
 				console.error(`Invalid dynamic MCP tool name format: ${toolCall.name} (normalized: ${normalizedName})`)
 				return null

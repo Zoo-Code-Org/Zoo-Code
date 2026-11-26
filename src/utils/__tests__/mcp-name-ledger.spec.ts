@@ -91,21 +91,77 @@ describe("mcp tool name ledger", () => {
 	})
 
 	describe("collision policy", () => {
-		it("the first recorded pair wins and stays stable", () => {
-			// Two servers that sanitize to the same wire form share one function
-			// name. The first advertisement decides what the name resolves to,
-			// and a later build must not flip it.
+		it("a cross-scope conflict marks the name ambiguous and refuses to route it", () => {
+			// "one.server"/"tool" and "oneserver"/"tool" both build
+			// mcp--oneserver--tool. One function name advertised for two pairs
+			// has no safe resolution: parsing must not hand either scope's
+			// pair to the call, because one of the two scopes would receive
+			// the other's traffic.
 			const first = buildMcpToolName("one.server", "tool")
 			const second = buildMcpToolName("oneserver", "tool")
 			expect(second).toBe(first)
-			expect(parseMcpToolName(first)).toStrictEqual({
+			expect(parseMcpToolName(first)).toBeNull()
+			expect(parseMcpToolName(normalizeMcpToolName(first))).toBeNull()
+		})
+
+		it("a conflict stays refused when either pair is rebuilt", () => {
+			buildMcpToolName("one.server", "tool")
+			buildMcpToolName("oneserver", "tool")
+			buildMcpToolName("one.server", "tool")
+			expect(parseMcpToolName("mcp--oneserver--tool")).toBeNull()
+		})
+
+		it("repeated builds of one pair keep the name resolvable", () => {
+			const functionName = buildMcpToolName("one.server", "tool")
+			buildMcpToolName("one.server", "tool")
+			buildMcpToolName("one.server", "tool")
+			expect(parseMcpToolName(functionName)).toStrictEqual({
 				serverName: "one.server",
 				toolName: "tool",
 			})
-			buildMcpToolName("one,server", "tool")
-			expect(parseMcpToolName(first)).toStrictEqual({
-				serverName: "one.server",
-				toolName: "tool",
+		})
+	})
+
+	describe("echoed names with internal double underscores", () => {
+		it("resolves an echo whose server name carries double underscores", () => {
+			// sanitizeMcpName keeps underscores, so a server "svc__prod"
+			// records mcp--svc__prod--readfile. The model echoes every
+			// separator as "__": mcp__svc__prod__readfile. The first and last
+			// "__" are separators, the middle one belongs to the server.
+			const functionName = buildMcpToolName("svc__prod", "readfile")
+			expect(functionName).toBe("mcp--svc__prod--readfile")
+			const echoed = functionName.replace(/--/g, "__")
+			expect(parseMcpToolName(echoed)).toStrictEqual({
+				serverName: "svc__prod",
+				toolName: "readfile",
+			})
+		})
+
+		it("resolves an echo whose tool name carries double underscores", () => {
+			const functionName = buildMcpToolName("svc", "read__file")
+			const echoed = functionName.replace(/--/g, "__")
+			expect(parseMcpToolName(echoed)).toStrictEqual({
+				serverName: "svc",
+				toolName: "read__file",
+			})
+		})
+
+		it("an echo matching two different recorded names resolves to nothing", () => {
+			// mcp__svc__prod__readfile rebuilds both recorded keys:
+			// mcp--svc__prod--readfile and mcp--svc--prod__readfile. Two
+			// pairs, no safe pick.
+			buildMcpToolName("svc__prod", "readfile")
+			buildMcpToolName("svc", "prod__readfile")
+			expect(parseMcpToolName("mcp__svc__prod__readfile")).toBeNull()
+		})
+
+		it("a name with more underscore runs than the enumeration bound keeps the legacy split", () => {
+			// Seven "__" runs exceed MAX_CANDIDATE_SEPARATORS; no ledger key
+			// is recorded for this shape, so the split decides.
+			const echoed = "mcp__a__b__c__d__e__f__g__h"
+			expect(parseMcpToolName(echoed)).toStrictEqual({
+				serverName: "a",
+				toolName: "b--c--d--e--f--g--h",
 			})
 		})
 	})

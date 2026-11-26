@@ -258,11 +258,21 @@ describe("mcp-name utilities", () => {
 			expect(parseMcpToolName("mcp--server")).toBeNull()
 		})
 
-		it("should return null for names with mixed separators", () => {
+		it("resolves mixed-separator echoes of an advertised name", () => {
 			// normalizeMcpToolName picks a single separator for the whole split,
-			// so mixed-separator names are left unnormalized and cannot be parsed
-			expect(parseMcpToolName("mcp__server--tool")).toBeNull()
-			expect(parseMcpToolName("mcp--server__tool")).toBeNull()
+			// so a mixed-separator echo stays unnormalized. The ledger
+			// candidate lookup rebuilds the recorded key instead. A mixed name
+			// that was never advertised still fails.
+			buildMcpToolName("server", "tool")
+			expect(parseMcpToolName("mcp__server--tool")).toStrictEqual({
+				serverName: "server",
+				toolName: "tool",
+			})
+			expect(parseMcpToolName("mcp--server__tool")).toStrictEqual({
+				serverName: "server",
+				toolName: "tool",
+			})
+			expect(parseMcpToolName("mcp__other--tool")).toBeNull()
 		})
 	})
 
