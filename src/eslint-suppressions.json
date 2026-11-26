@@ -144,11 +144,6 @@
 			"count": 34
 		}
 	},
-	"api/providers/__tests__/poe.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"api/providers/__tests__/qwen-code-native-tools.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2
@@ -311,7 +306,7 @@
 	},
 	"api/providers/poe.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 3
+			"count": 2
 		}
 	},
 	"api/providers/requesty.ts": {
@@ -1101,7 +1096,7 @@
 	},
 	"services/code-index/processors/__tests__/file-watcher.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 25
+			"count": 24
 		}
 	},
 	"services/code-index/processors/__tests__/parser.spec.ts": {

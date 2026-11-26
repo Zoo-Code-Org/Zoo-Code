@@ -209,6 +209,10 @@
 		},
 		"current": "Current"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Some instructions could not be reloaded",
+		"description": "Continuing with the instructions that could be loaded. Affected sources:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {

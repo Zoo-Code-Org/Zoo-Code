@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "Ini mungkin menunjukkan kegagalan dalam proses pemikiran model atau ketidakmampuan untuk menggunakan tool dengan benar, yang dapat diatasi dengan beberapa panduan pengguna (misalnya \"Coba bagi tugas menjadi langkah-langkah yang lebih kecil\").",
 		"violated_organization_allowlist": "Gagal menjalankan tugas: profil saat ini tidak kompatibel dengan pengaturan organisasi kamu",
 		"condense_failed": "Gagal mengompres konteks",
+		"condense_failed_with_reason": "Gagal mengompres konteks: {{reason}}",
+		"condense_task_unavailable": "Tugas yang dipilih sudah tidak tersedia",
 		"condense_not_enough_messages": "Tidak cukup pesan untuk mengompres konteks",
 		"condensed_recently": "Konteks baru saja dikompres; melewati percobaan ini",
 		"condense_handler_invalid": "Handler API untuk mengompres konteks tidak valid",

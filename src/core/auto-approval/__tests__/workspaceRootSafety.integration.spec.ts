@@ -3,7 +3,7 @@ import os from "os"
 import path from "path"
 import { getReadablePath } from "../../../utils/path"
 import { checkAutoApproval } from "../index"
-import { baseState } from "./fixtures"
+import { baseState, readFileAsk } from "./fixtures"
 
 it("keeps permissions and wildcard exclusions scoped to a real symlinked workspace", async () => {
 	const temp = await fs.mkdtemp(path.join(os.tmpdir(), "zoo-workspace-approval-"))
@@ -26,7 +26,7 @@ it("keeps permissions and wildcard exclusions scoped to a real symlinked workspa
 				cwd,
 				state: { ...baseState, allowedReadFiles: patterns },
 				ask: "tool",
-				text: JSON.stringify({ tool: "readFile", path: filePath, isOutsideWorkspace: true }),
+				...readFileAsk({ tool: "readFile", path: filePath, isOutsideWorkspace: true }, cwd),
 			})
 		const canonicalInside = await fs.realpath(inside)
 		const canonicalOutside = await fs.realpath(outside)
@@ -71,6 +71,7 @@ it("checks root identity after the same parent normalization used by file reads"
 				state: { ...baseState, allowedReadFiles: patterns },
 				ask: "tool",
 				text: JSON.stringify({ tool: "readFile", path: toolPath, isOutsideWorkspace: true }),
+				fileTargets: [{ absolutePath: readPath, isOutsideWorkspace: true }],
 			})
 		expect(await approval([`${targetRoot}/docs/**`])).toEqual({ decision: "ask" })
 		expect(await approval([`${lexicalRoot}/docs/**`])).toEqual({ decision: "approve" })

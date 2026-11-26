@@ -588,7 +588,6 @@ function getSelectedModel({
 			return { id, info }
 		}
 		case providerIdentifiers.anthropic:
-		case providerIdentifiers.geminiCli:
 		case providerIdentifiers.fakeAi: {
 			const id = apiConfiguration.apiModelId ?? defaultModelId
 			const baseInfo = anthropicModels[id as keyof typeof anthropicModels]

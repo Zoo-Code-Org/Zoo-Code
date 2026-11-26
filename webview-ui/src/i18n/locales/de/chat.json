@@ -301,6 +301,10 @@
 		"thinking": "Denke nach",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Einige Anweisungen konnten nicht erneut geladen werden",
+		"description": "Es geht mit den Anweisungen weiter, die geladen werden konnten. Betroffene Quellen:"
+	},
 	"contextManagement": {
 		"tokens": "Tokens",
 		"condensation": {

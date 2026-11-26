@@ -1,7 +1,9 @@
 {
 	"extends": "@roo-code/config-typescript/base.json",
 	"compilerOptions": {
-		"types": ["node"]
+		"types": ["node"],
+		"incremental": true,
+		"tsBuildInfoFile": "node_modules/.cache/tsc/ipc.tsbuildinfo"
 	},
 	"include": ["src"],
 	"exclude": ["node_modules"]

@@ -1,5 +1,6 @@
 {
 	"$schema": "https://turbo.build/schema.json",
+	"cacheDir": ".turbo/cache",
 	"tasks": {
 		"lint": {},
 		"check-types": {

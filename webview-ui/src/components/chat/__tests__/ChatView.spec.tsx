@@ -98,7 +98,15 @@ const mockTaskHeaderState = vi.hoisted(() => ({
 }))
 
 vi.mock("../TaskHeader", () => ({
-	default: function MockTaskHeader({ task, aggregatedCost }: { task: ClineMessage; aggregatedCost?: number }) {
+	default: function MockTaskHeader({
+		task,
+		aggregatedCost,
+		handleCondenseContext,
+	}: {
+		task: ClineMessage
+		aggregatedCost?: number
+		handleCondenseContext?: (taskId: string) => void
+	}) {
 		mockTaskHeaderState.renders.push({ taskId: task.text, aggregatedCost })
 
 		return (
@@ -106,8 +114,9 @@ vi.mock("../TaskHeader", () => ({
 				data-aggregated-cost={aggregatedCost ?? ""}
 				data-task-id={task.text}
 				data-task-ts={task.ts}
-				data-testid="task-header"
-			/>
+				data-testid="task-header">
+				<button data-testid="mock-condense" onClick={() => handleCondenseContext?.("test-task-id")} />
+			</div>
 		)
 	},
 }))
@@ -1810,14 +1819,15 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 		vi.clearAllMocks()
 	})
 
-	it("should add a condensing message to groupedMessages when isCondensing is true", async () => {
-		// This test verifies that when the condenseTaskContextStarted message is received,
-		// the isCondensing state is set to true and a synthetic condensing message is added
-		// to the grouped messages list
+	it.each([
+		["test-task-id", true],
+		["other-task-id", false],
+	])("shows condensation progress only for the current task: %s", async (messageTaskId, expectedProgress) => {
 		const { getByTestId, container } = renderChatView()
 
 		// First hydrate state with an active task
 		mockPostMessage({
+			currentTaskId: "test-task-id",
 			clineMessages: [
 				{
 					type: "say",
@@ -1850,7 +1860,7 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 			const event = new MessageEvent("message", {
 				data: {
 					type: "condenseTaskContextStarted",
-					text: "test-task-id",
+					text: messageTaskId,
 				},
 			})
 			window.dispatchEvent(event)
@@ -1868,9 +1878,38 @@ describe("ChatView - Context Condensing Indicator Tests", () => {
 					const text = row.textContent || ""
 					return text.includes('"say":"condense_context"') && text.includes('"partial":true')
 				})
-				expect(condensingRow).toBeTruthy()
+				expect(Boolean(condensingRow)).toBe(expectedProgress)
 			},
 			{ timeout: 2000 },
 		)
+	})
+
+	it("keeps the manual wait until the matching response arrives", async () => {
+		const { getByTestId } = renderChatView()
+		mockPostMessage({
+			currentTaskId: "test-task-id",
+			clineMessages: [{ type: "say", say: "task", ts: Date.now() - 2000, text: "Initial task" }],
+		})
+		await waitFor(() => expect(getByTestId("task-header")).toBeInTheDocument())
+		const input = () => getByTestId("chat-textarea").querySelector("input")!
+		const respond = async (taskId: string) =>
+			act(async () => {
+				window.dispatchEvent(
+					new MessageEvent("message", { data: { type: "condenseTaskContextResponse", text: taskId } }),
+				)
+				await new Promise((resolve) => setTimeout(resolve, 0))
+			})
+
+		await waitFor(() => expect(input().getAttribute("data-sending-disabled")).toBe("false"))
+		fireEvent.click(getByTestId("mock-condense"))
+
+		expect(vscode.postMessage).toHaveBeenCalledWith({ type: "condenseTaskContextRequest", text: "test-task-id" })
+		await waitFor(() => expect(input().getAttribute("data-sending-disabled")).toBe("true"))
+
+		await respond("other-task-id")
+		expect(input().getAttribute("data-sending-disabled")).toBe("true")
+
+		await respond("test-task-id")
+		await waitFor(() => expect(input().getAttribute("data-sending-disabled")).toBe("false"))
 	})
 })

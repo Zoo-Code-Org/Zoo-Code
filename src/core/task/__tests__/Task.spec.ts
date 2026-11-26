@@ -36,6 +36,7 @@ import { parseMentions } from "../../mentions"
 import { MultiSearchReplaceDiffStrategy } from "../../diff/strategies/multi-search-replace"
 import type { ApiMessage } from "../../task-persistence"
 import type { RequestPolicySnapshot } from "../../prompts/tools/effective-tool-policy"
+import type { InstructionFailureCollector } from "../../prompts/sections/custom-instructions"
 import { asyncStreamFrom } from "../../../test-utils/stream"
 import { McpHub } from "../../../services/mcp/McpHub"
 import { McpServerManager } from "../../../services/mcp/McpServerManager"
@@ -44,7 +45,11 @@ import { writeToFileTool } from "../../tools/WriteToFileTool"
 import { manageContext } from "../../context-management"
 
 type TaskTestAccess = {
-	getSystemPrompt: (requestState: ProviderState | undefined, requestModelInfo?: ModelInfo) => Promise<string>
+	getSystemPrompt: (
+		requestState: ProviderState | undefined,
+		requestModelInfo?: ModelInfo,
+		failures?: InstructionFailureCollector,
+	) => Promise<string>
 	handleContextWindowExceededError: (requestModelInfo: ModelInfo) => Promise<void>
 	getEnabledMcpToolsCount: () => Promise<{ enabledToolCount: number; enabledServerCount: number }>
 	initiateTaskLoop: (
@@ -2786,6 +2791,468 @@ describe("Cline", () => {
 			const snapshot = await providerRef.deref()?.getState()
 
 			await expect(getTaskTestAccess(task).getSystemPrompt(snapshot)).rejects.toThrow("Provider not available")
+		})
+	})
+
+	describe("instruction refresh after condensation", () => {
+		afterEach(() => {
+			vi.restoreAllMocks()
+		})
+
+		async function armRefreshRequest(failures: Array<{ sourcePath: string; code: string }>) {
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "test task",
+				startTask: false,
+			})
+			await task.getTaskMode()
+			vi.spyOn(getTaskTestAccess(task), "safeEnsureModelFetched").mockResolvedValue(stubModelInfo)
+			const promptSpy = vi
+				.spyOn(getTaskTestAccess(task), "getSystemPrompt")
+				.mockImplementation(async (_state, _modelInfo, collector) => {
+					collector?.push(...failures)
+					return "refreshed system prompt"
+				})
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 0,
+			})
+			const saySpy = vi.spyOn(task, "say").mockResolvedValue(undefined)
+			const createSpy = vi
+				.spyOn(task.api, "createMessage")
+				.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+			task["pendingInstructionRefresh"] = true
+			return { task, promptSpy, saySpy, createSpy }
+		}
+
+		const warningCalls = (saySpy: { mock: { calls: unknown[][] } }) =>
+			saySpy.mock.calls.filter(([type]) => type === "instruction_refresh_warning")
+
+		it("passes a collector, warns once before the model call, and clears the flag (FR5, FR6)", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+
+			await task.attemptApiRequest(0).next()
+
+			expect(Array.isArray(promptSpy.mock.calls[0][2])).toBe(true)
+			expect(warningCalls(saySpy)).toEqual([
+				[
+					"instruction_refresh_warning",
+					"/workspace/.roorules (EACCES)",
+					undefined,
+					false,
+					undefined,
+					undefined,
+					{ isNonInteractive: true },
+				],
+			])
+			expect(saySpy.mock.invocationCallOrder[0]).toBeLessThan(createSpy.mock.invocationCallOrder[0])
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+
+			await task.attemptApiRequest(0).next()
+			expect(promptSpy.mock.calls[1][2]).toBeUndefined()
+			expect(warningCalls(saySpy)).toHaveLength(1)
+		})
+
+		it("keeps tolerance on a first-chunk retry, warns once, and re-arms on a new condensation", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" })
+			vi.spyOn(getTaskTestAccess(task), "backoffAndAnnounce").mockResolvedValue(undefined)
+			async function* failingStream(): AsyncGenerator<ApiStreamChunk> {
+				yield* []
+				throw new Error("first chunk failed")
+			}
+			createSpy
+				.mockReturnValueOnce(failingStream() as ReturnType<typeof task.api.createMessage>)
+				.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "ok" }]))
+
+			await task.attemptApiRequest(0).next()
+
+			expect(createSpy).toHaveBeenCalledTimes(2)
+			expect(promptSpy).toHaveBeenCalledTimes(2)
+			for (const call of promptSpy.mock.calls) expect(Array.isArray(call[2])).toBe(true)
+			expect(warningCalls(saySpy)).toHaveLength(1)
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+
+			await task.attemptApiRequest(0).next()
+			expect(promptSpy.mock.calls[2][2]).toBeUndefined()
+			expect(warningCalls(saySpy)).toHaveLength(1)
+
+			task["armInstructionRefresh"]()
+			await task.attemptApiRequest(0).next()
+			expect(Array.isArray(promptSpy.mock.calls[3][2])).toBe(true)
+			expect(warningCalls(saySpy)).toHaveLength(2)
+		})
+
+		it("keeps the refresh pending when the stream ends with no chunk", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			createSpy.mockReturnValueOnce(asyncStreamFrom<ApiStreamChunk>([]))
+			const emptyRequest = task.attemptApiRequest(0)
+			const retryRequest = task.attemptApiRequest(0)
+			try {
+				await emptyRequest.next()
+				expect.soft(task["pendingInstructionRefresh"]).toBe(true)
+				await retryRequest.next()
+
+				expect(promptSpy).toHaveBeenCalledTimes(2)
+				expect.soft(Array.isArray(promptSpy.mock.calls[1][2])).toBe(true)
+				expect(task["pendingInstructionRefresh"]).toBe(false)
+				expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["/workspace/.roorules (EACCES)"])
+				expect(createSpy).toHaveBeenCalledTimes(2)
+			} finally {
+				await emptyRequest.return(undefined)
+				await retryRequest.return(undefined)
+			}
+		})
+
+		it("reports only rebuild failures when the first build also collected failures", async () => {
+			const { task, promptSpy, saySpy } = await armRefreshRequest([])
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 1,
+			})
+			let savedInstructions = "old instructions"
+			promptSpy.mockImplementation(async (_state, _model, collector) => {
+				collector?.push({ sourcePath: savedInstructions, code: "EACCES" })
+				return savedInstructions
+			})
+			vi.mocked(manageContext).mockImplementationOnce(async ({ messages }) => {
+				savedInstructions = "current instructions"
+				return { messages, summary: "fresh summary", cost: 0, prevContextTokens: 1 }
+			})
+			const request = task.attemptApiRequest()
+			try {
+				await request.next()
+				expect(promptSpy).toHaveBeenCalledTimes(2)
+				expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["current instructions (EACCES)"])
+			} finally {
+				await request.return(undefined)
+			}
+		})
+
+		it("preserves read-failure tolerance in recovery while a refresh is pending (review 2)", async () => {
+			const { task, promptSpy } = await armRefreshRequest([])
+			task.apiConversationHistory = [
+				{ role: "user", content: [{ type: "text", text: "continue after condensation" }], ts: Date.now() },
+			]
+			promptSpy.mockRestore()
+			vi.mocked(SYSTEM_PROMPT).mockImplementation(async (...parameters) => {
+				const collector = parameters[18]
+				if (!collector) throw Object.assign(new Error("instruction source denied"), { code: "EACCES" })
+				collector.push({ sourcePath: "/workspace/.roorules", code: "EACCES" })
+				return "readable instructions"
+			})
+			await expect(
+				getTaskTestAccess(task).handleContextWindowExceededError(stubModelInfo),
+			).resolves.toBeUndefined()
+			expect(vi.mocked(SYSTEM_PROMPT).mock.calls.at(-1)?.[18]).toEqual([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			expect(task["pendingInstructionRefresh"]).toBe(true)
+		})
+
+		it("retains a newer manual refresh when an older request receives its first chunk (review 3)", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task, "processQueuedMessages").mockImplementation(() => {})
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: task.apiConversationHistory,
+				summary: "new summary while waiting",
+				cost: 0,
+				newContextTokens: 1,
+			})
+			createSpy.mockReturnValueOnce(
+				(async function* (): AsyncGenerator<ApiStreamChunk> {
+					expect(task.isWaitingForFirstChunk).toBe(true)
+					await task.condenseContext()
+					expect(task["pendingInstructionRefresh"]).toBe(true)
+					yield { type: "text", text: "older request response" }
+				})(),
+			)
+			const olderRequest = task.attemptApiRequest()
+			const continuingRequest = task.attemptApiRequest()
+			try {
+				await olderRequest.next()
+				expect.soft(task["pendingInstructionRefresh"]).toBe(true)
+				await continuingRequest.next()
+				expect.soft(Array.isArray(promptSpy.mock.calls.at(-1)?.[2])).toBe(true)
+				expect.soft(warningCalls(saySpy)).toHaveLength(2)
+			} finally {
+				await olderRequest.return(undefined)
+				await continuingRequest.return(undefined)
+			}
+		})
+
+		it("warns only for the refresh that is current when a newer one is armed during construction", async () => {
+			const { task, promptSpy, saySpy } = await armRefreshRequest([])
+			promptSpy
+				.mockImplementationOnce(async (_state, _modelInfo, collector) => {
+					collector?.push({ sourcePath: "/workspace/old.roorules", code: "EACCES" })
+					task["armInstructionRefresh"]()
+					return "superseded prompt"
+				})
+				.mockImplementation(async (_state, _modelInfo, collector) => {
+					collector?.push({ sourcePath: "/workspace/new.roorules", code: "EPERM" })
+					return "current prompt"
+				})
+
+			await task.attemptApiRequest(0).next()
+			expect(warningCalls(saySpy)).toHaveLength(0)
+			expect(task["pendingInstructionRefresh"]).toBe(true)
+			expect(task["instructionRefreshWarned"]).toBe(false)
+
+			await task.attemptApiRequest(0).next()
+			expect(warningCalls(saySpy).map(([, text]) => text)).toEqual(["/workspace/new.roorules (EPERM)"])
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+		})
+
+		it.each(["manual", "recovery", "automatic"] as const)(
+			"resets the warned marker through the real %s trigger (review 4)",
+			async (trigger) => {
+				const { task, saySpy } = await armRefreshRequest([
+					{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+				])
+				vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+				vi.spyOn(task, "processQueuedMessages").mockImplementation(() => {})
+				task["pendingInstructionRefresh"] = false
+				task["instructionRefreshWarned"] = true
+				const result = {
+					messages: task.apiConversationHistory,
+					summary: "new successful summary",
+					cost: 0,
+					prevContextTokens: 1,
+				}
+				if (trigger === "manual") {
+					vi.mocked(summarizeConversation).mockResolvedValueOnce(result)
+					await task.condenseContext()
+				} else if (trigger === "recovery") {
+					vi.mocked(manageContext).mockResolvedValueOnce(result)
+					await getTaskTestAccess(task).handleContextWindowExceededError(stubModelInfo)
+				} else {
+					vi.spyOn(task, "getTokenUsage").mockReturnValue({
+						totalCost: 0,
+						totalTokensIn: 0,
+						totalTokensOut: 0,
+						contextTokens: 1,
+					})
+					vi.mocked(manageContext).mockResolvedValueOnce(result)
+				}
+				if (trigger !== "automatic") expect(task["instructionRefreshWarned"]).toBe(false)
+				const request = task.attemptApiRequest()
+				try {
+					await request.next()
+					expect(warningCalls(saySpy)).toHaveLength(1)
+				} finally {
+					await request.return(undefined)
+				}
+			},
+		)
+
+		it("clears the flag without a warning when every source loads", async () => {
+			const { task, saySpy } = await armRefreshRequest([])
+
+			await task.attemptApiRequest(0).next()
+
+			expect(warningCalls(saySpy)).toHaveLength(0)
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+		})
+
+		it("does not warn or call the model when the task is aborted during the prompt build (FR18)", async () => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([
+				{ sourcePath: "/workspace/.roorules", code: "EACCES" },
+			])
+			promptSpy.mockImplementation(async (_state, _modelInfo, collector) => {
+				collector?.push({ sourcePath: "/workspace/.roorules", code: "EACCES" })
+				setAbortLatch(task, true)
+				return "refreshed system prompt"
+			})
+
+			await expect(task.attemptApiRequest(0).next()).rejects.toThrow(/aborted during request construction/)
+
+			expect(warningCalls(saySpy)).toHaveLength(0)
+			expect(createSpy).not.toHaveBeenCalled()
+		})
+		it.each(["manual", "recovery"] as const)("arms refresh only for a successful %s summary", async (trigger) => {
+			const { task, saySpy } = await armRefreshRequest([])
+			vi.spyOn(task, "overwriteApiConversationHistory").mockResolvedValue(undefined)
+			vi.spyOn(task, "processQueuedMessages").mockImplementation(() => {})
+			for (const summary of ["", "fresh summary"]) {
+				task["pendingInstructionRefresh"] = false
+				const result = { messages: task.apiConversationHistory, summary, cost: 0, prevContextTokens: 1 }
+				if (trigger === "manual") {
+					vi.mocked(summarizeConversation).mockResolvedValueOnce(result)
+					await task.condenseContext()
+				} else {
+					vi.mocked(manageContext).mockResolvedValueOnce(result)
+					await getTaskTestAccess(task).handleContextWindowExceededError(stubModelInfo)
+				}
+				expect(task["pendingInstructionRefresh"]).toBe(Boolean(summary))
+				if (summary) {
+					const request = task.attemptApiRequest()
+					try {
+						await request.next()
+						expect(task["pendingInstructionRefresh"]).toBe(false)
+					} finally {
+						await request.return(undefined)
+					}
+				}
+			}
+			expect(saySpy).toHaveBeenCalled()
+		})
+
+		it.each(["", "fresh summary"])("rebuilds only after automatic summary %j (FR1–FR6)", async (summary) => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([])
+			task["pendingInstructionRefresh"] = !summary
+			const snapshot = providerStateWith({ mode: "architect", disabledTools: ["execute_command"] })
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(snapshot)
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 1,
+			})
+			let savedInstructions = "old instructions"
+			promptSpy.mockImplementation(async (_state, _model, collector) => {
+				collector?.push({ sourcePath: savedInstructions, code: "EACCES" })
+				return savedInstructions
+			})
+			vi.mocked(manageContext).mockImplementationOnce(async ({ messages }) => {
+				savedInstructions = "current instructions"
+				return { messages, summary, cost: 0, prevContextTokens: 1 }
+			})
+			const request = task.attemptApiRequest()
+			try {
+				await request.next()
+				expect(promptSpy).toHaveBeenCalledTimes(summary ? 2 : 1)
+				for (const [state, model] of promptSpy.mock.calls) {
+					expect(state).toBe(snapshot)
+					expect(model).toBe(stubModelInfo)
+				}
+				expect(createSpy.mock.calls[0][0]).toBe(summary ? "current instructions" : "old instructions")
+				expect(warningCalls(saySpy)).toHaveLength(1)
+				expect(warningCalls(saySpy)[0][1]).toBe(`${summary ? "current" : "old"} instructions (EACCES)`)
+				if (summary) expect(promptSpy.mock.calls[0][2]).not.toBe(promptSpy.mock.calls[1][2])
+				expect(task["pendingInstructionRefresh"]).toBe(false)
+			} finally {
+				await request.return(undefined)
+			}
+		})
+
+		it("rebuilds through getSystemPrompt with the task scope and original settings (FR1–FR4)", async () => {
+			const { task, promptSpy, createSpy } = await armRefreshRequest([])
+			promptSpy.mockRestore()
+			const snapshot = providerStateWith({
+				mode: "architect",
+				customInstructions: "request settings",
+				disabledTools: ["execute_command"],
+			})
+			vi.spyOn(mockProvider, "getState").mockResolvedValue(snapshot)
+			const taskMode = await task.getTaskMode()
+			const taskConfiguration = task.apiConfiguration
+			let savedRules = "superseded rules"
+			vi.mocked(SYSTEM_PROMPT).mockClear()
+			vi.mocked(SYSTEM_PROMPT)
+				.mockImplementationOnce(async () => savedRules)
+				.mockImplementationOnce(async () => savedRules)
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 1,
+			})
+			vi.mocked(manageContext).mockImplementationOnce(async ({ messages }) => {
+				savedRules = "current rules"
+				vi.mocked(mockProvider.getState).mockResolvedValue(
+					providerStateWith({
+						mode: "ask",
+						customInstructions: "other task settings",
+						disabledTools: ["read_file"],
+					}),
+				)
+				return { messages, summary: "accepted summary", cost: 0, prevContextTokens: 1 }
+			})
+			const request = task.attemptApiRequest()
+			try {
+				await request.next()
+				expect(SYSTEM_PROMPT).toHaveBeenCalledTimes(2)
+				for (const call of vi.mocked(SYSTEM_PROMPT).mock.calls) {
+					expect(call[1]).toBe(task.cwd)
+					expect(call[5]).toBe(taskMode)
+					expect(call[8]).toBe("request settings")
+					expect(call[16]).toBe(snapshot.disabledTools)
+					expect(call[17]).toBe(stubModelInfo)
+					expect(call[12]?.todoListEnabled).toBe(taskConfiguration.todoListEnabled ?? true)
+				}
+				expect(createSpy.mock.calls[0][0]).toBe("current rules")
+				expect(createSpy.mock.calls[0][2]?.mode).toBe(taskMode)
+				expect(task.apiConfiguration).toBe(taskConfiguration)
+			} finally {
+				await request.return(undefined)
+			}
+		})
+
+		it("reports an expected manual rejection once and posts its terminal response (D6)", async () => {
+			const { task, saySpy } = await armRefreshRequest([])
+			task["pendingInstructionRefresh"] = false
+			mockProvider["taskRegistry"].push(task)
+			vi.mocked(summarizeConversation).mockResolvedValueOnce({
+				messages: task.apiConversationHistory,
+				summary: "",
+				cost: 0,
+				error: "Not enough new history",
+			})
+			const notification = vi.mocked(vscode.window.showErrorMessage)
+			notification.mockClear()
+			await mockProvider.condenseTaskContext(task.taskId)
+			expect(saySpy.mock.calls.map(([type]) => type)).toEqual(["condense_context_error"])
+			expect(saySpy.mock.calls[0][1]).toBe("Not enough new history")
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "condenseTaskContextResponse",
+				text: task.taskId,
+			})
+			expect(notification).not.toHaveBeenCalled()
+			expect(task["pendingInstructionRefresh"]).toBe(false)
+		})
+
+		it.each(["abort", "abandoned"] as const)("stops after the rebuild sets %s (FR18)", async (state) => {
+			const { task, promptSpy, saySpy, createSpy } = await armRefreshRequest([])
+			task["pendingInstructionRefresh"] = false
+			vi.spyOn(task, "getTokenUsage").mockReturnValue({
+				totalCost: 0,
+				totalTokensIn: 0,
+				totalTokensOut: 0,
+				contextTokens: 1,
+			})
+			vi.mocked(manageContext).mockResolvedValueOnce({
+				messages: task.apiConversationHistory,
+				summary: "fresh summary",
+				cost: 0,
+				prevContextTokens: 1,
+			})
+			promptSpy
+				.mockResolvedValueOnce("initial prompt")
+				.mockImplementationOnce(async (_state, _model, collector) => {
+					collector?.push({ sourcePath: "/workspace/rules", code: "EACCES" })
+					if (state === "abort") setAbortLatch(task, true)
+					else task.abandoned = true
+					return "rebuilt prompt"
+				})
+			await expect(task.attemptApiRequest().next()).rejects.toThrow(/aborted during request construction/)
+			expect(promptSpy).toHaveBeenCalledTimes(2)
+			expect(warningCalls(saySpy)).toHaveLength(0)
+			expect(createSpy).not.toHaveBeenCalled()
 		})
 	})
 

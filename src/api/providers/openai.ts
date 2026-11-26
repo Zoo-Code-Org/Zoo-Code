@@ -24,6 +24,7 @@ import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
 import { isOSeriesModelId } from "./utils/is-o-series-model"
 import { buildResponsesRequest } from "./utils/openai-compatible-responses"
+import { resolveOpenAiCompatibleMaxTokens } from "./utils/openai-compatible-max-tokens"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
 import { ApiStream, ApiStreamUsageChunk } from "../transform/stream"
 import { assertResponsesApiSuccess } from "../transform/responses-api-error"
@@ -956,11 +957,11 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			| OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming,
 		modelInfo: ModelInfo,
 	): void {
-		// Only add max_completion_tokens if includeMaxTokens is true
-		if (this.options.includeMaxTokens === true) {
-			// Use user-configured modelMaxTokens if available, otherwise fall back to model's default maxTokens
-			// Using max_completion_tokens as max_tokens is deprecated
-			requestOptions.max_completion_tokens = this.options.modelMaxTokens || modelInfo.maxTokens
+		// Only an explicit includeMaxTokens: false opts out; unset follows the checkbox default.
+		// Using max_completion_tokens as max_tokens is deprecated
+		const maxTokens = resolveOpenAiCompatibleMaxTokens(this.options, modelInfo)
+		if (maxTokens !== undefined) {
+			requestOptions.max_completion_tokens = maxTokens
 		}
 	}
 

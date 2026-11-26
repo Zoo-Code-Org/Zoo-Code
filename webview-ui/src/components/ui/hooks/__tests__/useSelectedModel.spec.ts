@@ -225,17 +225,20 @@ describe("useSelectedModel", () => {
 		)
 	})
 
-	it("falls back to the OpenRouter default for a retired provider", () => {
-		mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
-		mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
+	it.each([retiredProviderIdentifiers.cerebras, retiredProviderIdentifiers.geminiCli])(
+		"falls back to the OpenRouter default for retired provider %s",
+		(apiProvider) => {
+			mockUseRouterModels.mockReturnValue(createRouterModelsResult({}))
+			mockUseOpenRouterModelProviders.mockReturnValue(createOpenRouterModelProvidersResult({}))
 
-		const { result } = renderHook(() => useSelectedModel({ apiProvider: retiredProviderIdentifiers.cerebras }), {
-			wrapper: createWrapper(),
-		})
+			const { result } = renderHook(() => useSelectedModel({ apiProvider }), {
+				wrapper: createWrapper(),
+			})
 
-		expect(result.current.id).toBe(openRouterDefaultModelId)
-		expect(result.current.info).toBeUndefined()
-	})
+			expect(result.current.id).toBe(openRouterDefaultModelId)
+			expect(result.current.info).toBeUndefined()
+		},
+	)
 
 	it("uses OpenCode Go default model information when the router catalog is empty", () => {
 		mockUseRouterModels.mockReturnValue(createRouterModelsResult({ [providerIdentifiers.opencodeGo]: {} }))
@@ -725,7 +728,7 @@ describe("useSelectedModel", () => {
 			expect(result.current.info?.outputPrice).toBe(37.5)
 		})
 
-		it.each([providerIdentifiers.anthropic, providerIdentifiers.geminiCli, providerIdentifiers.fakeAi] as const)(
+		it.each([providerIdentifiers.anthropic, providerIdentifiers.fakeAi] as const)(
 			"should explicitly resolve configured models for %s",
 			(apiProvider) => {
 				const apiConfiguration: ProviderSettings = {

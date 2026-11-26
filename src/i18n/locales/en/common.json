@@ -52,6 +52,8 @@
 		"mistake_limit_guidance": "This may indicate a failure in the model's thought process or inability to use a tool properly, which can be mitigated with some user guidance (e.g. \"Try breaking down the task into smaller steps\").",
 		"violated_organization_allowlist": "Failed to run task: the current profile isn't compatible with your organization settings",
 		"condense_failed": "Failed to condense context",
+		"condense_failed_with_reason": "Failed to condense context: {{reason}}",
+		"condense_task_unavailable": "The selected task is no longer available",
 		"condense_not_enough_messages": "Not enough messages to condense context",
 		"condensed_recently": "Context was condensed recently; skipping this attempt",
 		"condense_handler_invalid": "API handler for condensing context is invalid",

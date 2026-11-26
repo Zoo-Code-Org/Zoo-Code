@@ -766,30 +766,36 @@ describe("ApiOptions", () => {
 		})
 	})
 
-	it("renders retired provider message and hides provider-specific forms", () => {
-		renderApiOptions({
-			apiConfiguration: {
-				apiProvider: retiredProviderIdentifiers.groq,
-			},
-		})
+	it.each([retiredProviderIdentifiers.groq, retiredProviderIdentifiers.geminiCli])(
+		"renders the retirement message for %s and hides provider-specific forms",
+		(apiProvider) => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider,
+				},
+			})
 
-		expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
-			"settings:providers.retiredProviderMessage",
-		)
-		expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
-	})
+			expect(screen.getByTestId("retired-provider-message")).toHaveTextContent(
+				"settings:providers.retiredProviderMessage",
+			)
+			expect(screen.queryByTestId("litellm-provider")).not.toBeInTheDocument()
+		},
+	)
 
-	it("does not reintroduce retired providers into active provider options", () => {
-		renderApiOptions({
-			apiConfiguration: {
-				apiProvider: retiredProviderIdentifiers.groq,
-			},
-		})
+	it.each([retiredProviderIdentifiers.groq, retiredProviderIdentifiers.geminiCli])(
+		"does not reintroduce retired provider %s into active provider options",
+		(apiProvider) => {
+			renderApiOptions({
+				apiConfiguration: {
+					apiProvider,
+				},
+			})
 
-		const providerSelectContainer = screen.getByTestId("provider-select")
-		const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
-		const providerOptions = Array.from(providerSelect.querySelectorAll("option")).map((option) => option.value)
+			const providerSelectContainer = screen.getByTestId("provider-select")
+			const providerSelect = providerSelectContainer.querySelector("select") as HTMLSelectElement
+			const providerOptions = Array.from(providerSelect.querySelectorAll("option")).map((option) => option.value)
 
-		expect(providerOptions).not.toContain("groq")
-	})
+			expect(providerOptions).not.toContain(apiProvider)
+		},
+	)
 })

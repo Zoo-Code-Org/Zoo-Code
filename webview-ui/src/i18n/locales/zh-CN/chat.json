@@ -300,6 +300,10 @@
 		"thinking": "思考中",
 		"seconds": "{{count}}秒"
 	},
+	"instructionRefresh": {
+		"warningHeader": "部分指令无法重新加载",
+		"description": "将使用已成功加载的指令继续。受影响的来源："
+	},
 	"contextManagement": {
 		"tokens": "Token",
 		"condensation": {

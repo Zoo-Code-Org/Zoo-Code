@@ -6,7 +6,9 @@
 		// Scripts import src code. Match the src package settings so the root check does not report src errors.
 		"noUncheckedIndexedAccess": false,
 		"types": ["node"],
-		"useUnknownInCatchVariables": false
+		"useUnknownInCatchVariables": false,
+		"incremental": true,
+		"tsBuildInfoFile": "node_modules/.cache/tsc/root.tsbuildinfo"
 	},
 	"exclude": ["node_modules"],
 	"include": ["scripts/*.ts", "src/types/global-agent.d.ts"]

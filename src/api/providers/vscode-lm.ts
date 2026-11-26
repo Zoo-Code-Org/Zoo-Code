@@ -981,8 +981,14 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	 * @returns A promise resolving to the token count
 	 */
 	override async countTokens(content: Array<Anthropic.Messages.ContentBlockParam>): Promise<number> {
+		// Copilot undercounts tool results; their length is a floor for context-management decisions.
+		const toolResultChars = content.reduce((sum, block) => sum + (readToolResultText(block)?.length ?? 0), 0)
+		const lengthEstimate = Math.ceil(toolResultChars / VSCODE_LM_BUDGET_CHARS_PER_TOKEN)
 		if (this.supportsImageInput(this.getModel().info) && containsImageBlock(content)) {
-			return this.calculateTotalInputTokens(convertToVsCodeLmMessages([{ role: "user", content }], true))
+			const counted = await this.calculateTotalInputTokens(
+				convertToVsCodeLmMessages([{ role: "user", content }], true),
+			)
+			return Math.max(counted, lengthEstimate)
 		}
 
 		// Preserve text-only counting for models that cannot send native images.
@@ -996,7 +1002,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			}
 		}
 
-		return this.internalCountTokens(textContent)
+		return Math.max(await this.internalCountTokens(textContent), lengthEstimate)
 	}
 
 	/**
@@ -1314,17 +1320,18 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Keep context-window trimming on OUR side. Copilot's backend trims an over-window request
 			// without preserving tool_use/tool_result pairing, which orphans a tool_result and triggers a
 			// 400 ("unexpected tool_use_id"). See truncateToolResultsToFitWindow.
-			const contextWindowTokens = this.getCondenseContextWindow()
-			if (Number.isFinite(contextWindowTokens) && contextWindowTokens > 0) {
-				const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
-				const rawBudgetChars =
-					contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
-					systemPrompt.length -
-					toolSchemaChars
+			let lengthEstimatedInputTokens = 0
+			const budget = this.getMessagesBudget(systemPrompt, metadata)
+			if (budget) {
+				const { rawBudgetChars, toolSchemaChars } = budget
 				// A system prompt or tool schema large enough to consume the whole budget would leave a
 				// non-positive budget, which disables trimming exactly when the request is most oversized.
 				const messagesBudgetChars = Math.max(MIN_TOOL_RESULT_CHARS, rawBudgetChars)
 				const { remainingChars } = truncateToolResultsToFitWindow(cleanedMessages, messagesBudgetChars)
+				// Copilot undercounts tool results; report at least the length estimate.
+				lengthEstimatedInputTokens = Math.ceil(
+					(remainingChars + systemPrompt.length + toolSchemaChars) / VSCODE_LM_BUDGET_CHARS_PER_TOKEN,
+				)
 
 				// Shrinking tool_results cannot always reach the budget: each keeps MIN_TOOL_RESULT_CHARS,
 				// and the excess may be non-tool content (a huge paste, tool_use inputs, or the system
@@ -1516,7 +1523,7 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 			// Report final usage after stream completion
 			yield {
 				type: "usage",
-				inputTokens: totalInputTokens,
+				inputTokens: Math.max(totalInputTokens, lengthEstimatedInputTokens),
 				outputTokens: totalOutputTokens,
 			}
 		} catch (error: unknown) {
@@ -1622,6 +1629,32 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 				description: `VSCode Language Model (Fallback): ${fallbackId}`,
 			},
 		}
+	}
+
+	measureInputOverageChars(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): number {
+		const budget = this.getMessagesBudget(systemPrompt, metadata)
+		return budget ? estimateMessagesChars(messages) - budget.rawBudgetChars : 0
+	}
+
+	// Single admission budget shared by createMessage and measureInputOverageChars so they cannot disagree.
+	private getMessagesBudget(
+		systemPrompt: string,
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): { rawBudgetChars: number; toolSchemaChars: number } | undefined {
+		const contextWindowTokens = this.getCondenseContextWindow()
+		if (!Number.isFinite(contextWindowTokens) || contextWindowTokens <= 0) {
+			return undefined
+		}
+		const toolSchemaChars = metadata?.tools ? JSON.stringify(metadata.tools).length : 0
+		const rawBudgetChars =
+			contextWindowTokens * VSCODE_LM_INPUT_BUDGET_FRACTION * VSCODE_LM_BUDGET_CHARS_PER_TOKEN -
+			systemPrompt.length -
+			toolSchemaChars
+		return { rawBudgetChars, toolSchemaChars }
 	}
 
 	/**
