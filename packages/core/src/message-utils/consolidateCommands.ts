@@ -4,6 +4,30 @@ import { safeJsonParse } from "./safeJsonParse.js"
 
 export const COMMAND_OUTPUT_STRING = "Output:"
 
+type TextSnapshot = { parts: string[]; text: string }
+// Values contain strings, never their owning message/transcript. Task switches
+// can collect the keys and their derived output together.
+const commandTextCache = new WeakMap<ClineMessage, TextSnapshot>()
+const mcpTextCache = new WeakMap<ClineMessage, TextSnapshot>()
+
+function reuseText(
+	cache: WeakMap<ClineMessage, TextSnapshot>,
+	message: ClineMessage,
+	parts: string[],
+	build: () => string,
+): string {
+	const previous = cache.get(message)
+	if (
+		previous &&
+		previous.parts.length === parts.length &&
+		parts.every((part, index) => part === previous.parts[index])
+	)
+		return previous.text
+	const text = build()
+	cache.set(message, { parts, text })
+	return text
+}
+
 /**
  * Consolidates sequences of command and command_output messages in an array of ClineMessages.
  * Also consolidates sequences of use_mcp_server and mcp_server_response messages.
@@ -27,134 +51,69 @@ export const COMMAND_OUTPUT_STRING = "Output:"
  * // Result: [{ type: 'ask', ask: 'command', text: 'ls\nfile1.txt\nfile2.txt', ts: 1625097600000 }]
  */
 export function consolidateCommands(messages: ClineMessage[]): ClineMessage[] {
-	const consolidatedMessages = new Map<number, ClineMessage>()
-	const processedIndices = new Set<number>()
-
-	// Single pass through all messages
-	for (let i = 0; i < messages.length; i++) {
-		const msg = messages[i]
-		if (!msg) continue
-
-		// Handle MCP server requests
-		if (msg.type === "ask" && msg.ask === "use_mcp_server") {
-			// Look ahead for MCP responses
-			const responses: string[] = []
-			let j = i + 1
-
-			while (j < messages.length) {
-				const nextMsg = messages[j]
-				if (!nextMsg) {
-					j++
-					continue
-				}
-				if (nextMsg.say === "mcp_server_response") {
-					responses.push(nextMsg.text || "")
-					processedIndices.add(j)
-					j++
-				} else if (nextMsg.type === "ask" && nextMsg.ask === "use_mcp_server") {
-					// Stop if we encounter another MCP request
-					break
-				} else {
-					j++
-				}
-			}
-
-			if (responses.length > 0) {
-				// Parse the JSON from the message text
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				const jsonObj = safeJsonParse<any>(msg.text || "{}", {})
-
-				// Add the response to the JSON object
-				jsonObj.response = responses.join("\n")
-
-				// Stringify the updated JSON object
-				const consolidatedText = JSON.stringify(jsonObj)
-
-				consolidatedMessages.set(msg.ts, { ...msg, text: consolidatedText })
-			} else {
-				// If there's no response, just keep the original message
-				consolidatedMessages.set(msg.ts, { ...msg })
-			}
-		}
-		// Handle command sequences
-		else if (msg.type === "ask" && msg.ask === "command") {
-			let consolidatedText = msg.text || ""
-			let j = i + 1
-			let previous: { type: "ask" | "say"; text: string } | undefined
-			let lastProcessedIndex = i
-
-			while (j < messages.length) {
-				const currentMsg = messages[j]
-				if (!currentMsg) {
-					j++
-					continue
-				}
-				const { type, ask, say, text = "" } = currentMsg
-
-				if (type === "ask" && ask === "command") {
-					break // Stop if we encounter the next command.
-				}
-
-				if (ask === "command_output" || say === "command_output") {
-					if (!previous) {
-						consolidatedText += `\n${COMMAND_OUTPUT_STRING}`
-					}
-
-					const isDuplicate = previous && previous.type !== type && previous.text === text
-
-					if (text.length > 0 && !isDuplicate) {
-						// Add a newline before adding the text if there's already content
-						if (
-							previous &&
-							consolidatedText.length >
-								consolidatedText.indexOf(COMMAND_OUTPUT_STRING) + COMMAND_OUTPUT_STRING.length
-						) {
-							consolidatedText += "\n"
-						}
-						consolidatedText += text
-					}
-
-					previous = { type, text }
-					processedIndices.add(j)
-					lastProcessedIndex = j
-				}
-
-				j++
-			}
-
-			consolidatedMessages.set(msg.ts, { ...msg, text: consolidatedText })
-
-			// Only skip ahead if we actually processed command outputs
-			if (lastProcessedIndex > i) {
-				i = lastProcessedIndex
-			}
-		}
-	}
-
-	// Build final result: filter out processed messages and use consolidated versions
 	const result: ClineMessage[] = []
-	for (let i = 0; i < messages.length; i++) {
-		const msg = messages[i]
-		if (!msg) continue
-
-		// Skip messages that were processed as outputs/responses
-		if (processedIndices.has(i)) {
-			continue
-		}
-
-		// Skip command_output and mcp_server_response messages
-		if (msg.ask === "command_output" || msg.say === "command_output" || msg.say === "mcp_server_response") {
-			continue
-		}
-
-		// Use consolidated version if available
-		const consolidatedMsg = consolidatedMessages.get(msg.ts)
-		if (consolidatedMsg) {
-			result.push(consolidatedMsg)
-		} else {
-			result.push(msg)
+	let command:
+		| { index: number; chunks: string[]; previous?: { type: "ask" | "say"; text: string }; hasText: boolean }
+		| undefined
+	let mcp: { index: number; responses: string[] } | undefined
+	const finishCommand = () => {
+		if (command) {
+			const message = result[command.index]
+			if (message) {
+				const chunks = command.chunks
+				const text = reuseText(commandTextCache, message, chunks, () => {
+					// Keep untouched output strings shared/lazy until a visible row needs them.
+					let combined = ""
+					for (const chunk of chunks) combined += chunk
+					return combined
+				})
+				result[command.index] = { ...message, text }
+			}
 		}
 	}
-
+	const finishMcp = () => {
+		if (!mcp) return
+		const message = result[mcp.index]
+		if (!message) return
+		if (mcp.responses.length === 0) {
+			result[mcp.index] = { ...message }
+			return
+		}
+		const responses = mcp.responses
+		const text = reuseText(mcpTextCache, message, [message.text ?? "", ...responses], () => {
+			const parsed = safeJsonParse<unknown>(message.text || "{}", {})
+			const data = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+			return JSON.stringify({ ...data, response: responses.join("\n") })
+		})
+		result[mcp.index] = { ...message, text }
+	}
+	for (const message of messages) {
+		if (!message) continue
+		if (message.type === "ask" && message.ask === "command") {
+			finishCommand()
+			command = { index: result.length, chunks: [message.text || ""], hasText: false }
+			result.push(message)
+		} else if (message.type === "ask" && message.ask === "use_mcp_server") {
+			finishMcp()
+			mcp = { index: result.length, responses: [] }
+			result.push(message)
+		} else if (message.ask === "command_output" || message.say === "command_output") {
+			if (!command) continue // Preserve legacy orphan-output filtering.
+			const text = message.text || ""
+			if (!command.previous) command.chunks.push("\n" + COMMAND_OUTPUT_STRING)
+			const duplicate =
+				command.previous && command.previous.type !== message.type && command.previous.text === text
+			if (text && !duplicate) {
+				if (command.hasText) command.chunks.push("\n")
+				command.chunks.push(text)
+				command.hasText = true
+			}
+			command.previous = { type: message.type, text }
+		} else if (message.say === "mcp_server_response") {
+			mcp?.responses.push(message.text || "")
+		} else result.push(message)
+	}
+	finishCommand()
+	finishMcp()
 	return result
 }
