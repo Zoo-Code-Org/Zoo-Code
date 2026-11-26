@@ -1,5 +1,10 @@
 import * as vscode from "vscode"
-import { BATCH_SEGMENT_THRESHOLD, MAX_BATCH_RETRIES, INITIAL_RETRY_DELAY_MS } from "../constants"
+import {
+	BATCH_SEGMENT_THRESHOLD,
+	MAX_BATCH_RETRIES,
+	INITIAL_RETRY_DELAY_MS,
+	CIRCUIT_BREAKER_BATCH_THRESHOLD,
+} from "../constants"
 import { RooIgnoreController } from "../../../core/ignore/RooIgnoreController"
 import { Ignore } from "ignore"
 import { scannerExtensions } from "../shared/supported-extensions"
@@ -32,6 +37,16 @@ export class FileWatcher implements IFileWatcher {
 	private readonly BATCH_DEBOUNCE_DELAY_MS = 500
 	private readonly FILE_PROCESSING_CONCURRENCY_LIMIT = 10
 	private readonly batchSegmentThreshold: number
+
+	// Per-workspace circuit breaker. A permanently broken embedder or vector store
+	// configuration used to re-trigger the failing pipeline on every file-system
+	// event with no backoff, flooding CODE_INDEX_ERROR telemetry (issue #830).
+	// After CIRCUIT_BREAKER_BATCH_THRESHOLD consecutive failed batches the watcher
+	// stops consuming events entirely until it is recreated — which happens when
+	// the embedder/vector-store configuration changes (CodeIndexManager
+	// _recreateServices) or the workspace re-initializes the watcher.
+	private consecutiveFailedBatches = 0
+	private circuitBreakerOpen = false
 
 	private readonly _onDidStartBatchProcessing = new vscode.EventEmitter<string[]>()
 	private readonly _onBatchProgressUpdate = new vscode.EventEmitter<{
@@ -107,6 +122,10 @@ export class FileWatcher implements IFileWatcher {
 	 * Initializes the file watcher
 	 */
 	async initialize(): Promise<void> {
+		// A fresh watcher subscription starts with a closed circuit breaker.
+		this.consecutiveFailedBatches = 0
+		this.circuitBreakerOpen = false
+
 		// Create file watcher
 		const filePattern = new vscode.RelativePattern(
 			this.workspacePath,
@@ -165,6 +184,12 @@ export class FileWatcher implements IFileWatcher {
 	 * Schedules batch processing with debounce
 	 */
 	private scheduleBatchProcessing(): void {
+		if (this.circuitBreakerOpen) {
+			// Circuit breaker is open: drop pending events instead of re-triggering
+			// a permanently failing embedder/vector-store pipeline.
+			this.accumulatedEvents.clear()
+			return
+		}
 		if (this.batchProcessDebounceTimer) {
 			clearTimeout(this.batchProcessDebounceTimer)
 		}
@@ -175,6 +200,12 @@ export class FileWatcher implements IFileWatcher {
 	 * Triggers processing of accumulated events
 	 */
 	private async triggerBatchProcessing(): Promise<void> {
+		if (this.circuitBreakerOpen) {
+			// A debounce timer scheduled before the breaker opened must not flush
+			// the events it captured.
+			this.accumulatedEvents.clear()
+			return
+		}
 		if (this.accumulatedEvents.size === 0) {
 			return
 		}
@@ -252,22 +283,23 @@ export class FileWatcher implements IFileWatcher {
 	}
 
 	private async _processFilesAndPrepareUpserts(
-		filesToUpsertDetails: Array<{ path: string; uri: vscode.Uri; originalType: "create" | "change" }>,
+		filesToUpsertDetails: ReadonlyArray<{ path: string; uri: vscode.Uri; originalType: "create" | "change" }>,
 		batchResults: FileProcessingResult[],
 		processedCountInBatch: number,
 		totalFilesInBatch: number,
 		pathsToExplicitlyDelete: string[],
 	): Promise<{
 		pointsForBatchUpsert: PointStruct[]
+		embeddingOutcomes: NonNullable<FileProcessingResult["embeddingOutcome"]>[]
 		successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }>
 		processedCount: number
 	}> {
 		const pointsForBatchUpsert: PointStruct[] = []
+		const embeddingOutcomes: NonNullable<FileProcessingResult["embeddingOutcome"]>[] = []
 		const successfullyProcessedForUpsert: Array<{ path: string; newHash?: string }> = []
-		const filesToProcessConcurrently = [...filesToUpsertDetails]
 
-		for (let i = 0; i < filesToProcessConcurrently.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
-			const chunkToProcess = filesToProcessConcurrently.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
+		for (let i = 0; i < filesToUpsertDetails.length; i += this.FILE_PROCESSING_CONCURRENCY_LIMIT) {
+			const chunkToProcess = filesToUpsertDetails.slice(i, i + this.FILE_PROCESSING_CONCURRENCY_LIMIT)
 
 			const chunkProcessingPromises = chunkToProcess.map(async (fileDetail) => {
 				this._onBatchProgressUpdate.fire({
@@ -297,6 +329,7 @@ export class FileWatcher implements IFileWatcher {
 					if (directError) {
 						batchResults.push({ path, status: "error", error: directError })
 					} else if (result) {
+						if (result.embeddingOutcome) embeddingOutcomes.push(result.embeddingOutcome)
 						if (result.status === "skipped" || result.status === "local_error") {
 							batchResults.push(result)
 						} else if (result.status === "processed_for_batching" && result.pointsToUpsert) {
@@ -346,6 +379,7 @@ export class FileWatcher implements IFileWatcher {
 
 		return {
 			pointsForBatchUpsert,
+			embeddingOutcomes,
 			successfullyProcessedForUpsert,
 			processedCount: processedCountInBatch,
 		}
@@ -464,6 +498,7 @@ export class FileWatcher implements IFileWatcher {
 		// Phase 2: Process files and prepare upserts
 		const {
 			pointsForBatchUpsert,
+			embeddingOutcomes,
 			successfullyProcessedForUpsert,
 			processedCount: upsertCount,
 		} = await this._processFilesAndPrepareUpserts(
@@ -483,10 +518,37 @@ export class FileWatcher implements IFileWatcher {
 			overallBatchError,
 		)
 
+		// A single rejected input does not establish an embedding service failure.
+		// Storage failures count at any batch size. File read and parse errors stay local.
+		const allAttemptedEmbeddingsFailed =
+			embeddingOutcomes.length >= 2 && embeddingOutcomes.every((outcome) => outcome === "failure")
+
+		if (overallBatchError !== undefined || allAttemptedEmbeddingsFailed) {
+			this.consecutiveFailedBatches++
+		} else if (embeddingOutcomes.length > 0) {
+			this.consecutiveFailedBatches = 0
+		}
+
+		if (!this.circuitBreakerOpen && this.consecutiveFailedBatches >= CIRCUIT_BREAKER_BATCH_THRESHOLD) {
+			this.circuitBreakerOpen = true
+			this.accumulatedEvents.clear()
+			TelemetryService.instance.captureEvent(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: "File watcher stopped after repeated indexing failures",
+				location: "FileWatcher.processBatch",
+				errorType: "circuit_breaker_open",
+				failedBatches: this.consecutiveFailedBatches,
+			})
+			console.error(
+				`[FileWatcher] Circuit breaker opened after ${this.consecutiveFailedBatches} consecutive failed batches; ` +
+					`dropping further file-system events for this workspace until the embedder or vector store configuration changes.`,
+			)
+		}
+
 		// Finalize
 		this._onDidFinishBatchProcessing.fire({
 			processedFiles: batchResults,
 			batchError: overallBatchError,
+			circuitBreakerOpen: this.circuitBreakerOpen,
 		})
 		this._onBatchProgressUpdate.fire({
 			processedInBatch: totalFilesInBatch,

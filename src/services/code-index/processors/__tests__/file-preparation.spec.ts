@@ -188,6 +188,7 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			path: filePath,
 			status: "processed_for_batching",
 			newHash: hash,
+			embeddingOutcome: "success",
 			pointsToUpsert: [
 				{
 					id: uuidv5(`${normalizedFilePath}:2`, QDRANT_CODE_BLOCK_NAMESPACE),
@@ -310,7 +311,35 @@ describe.each(["posix", "win32"] as const)("FilePreparation (%s paths)", (platfo
 			if (stage === "parse") dependencies.parser.parseFile.mockRejectedValue(error)
 			if (stage === "embed") dependencies.embedder.createEmbeddings.mockRejectedValue(error)
 			const result = await new FilePreparation(dependencies).prepareFile(filePath)
-			expect(result).toEqual({ path: filePath, status: "local_error", error })
+			expect(result).toEqual({
+				path: filePath,
+				status: "local_error",
+				error,
+				...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
+			})
+			expect(result.error).toBe(error)
+		},
+	)
+
+	it.each([Error, TypeError, RangeError])(
+		"preserves embedding success when point preparation throws %s",
+		async (ErrorType) => {
+			const dependencies = setup()
+			const error = new ErrorType("Point preparation failed")
+			dependencies.parser.parseFile.mockResolvedValue([
+				{
+					...block,
+					// Point preparation reads this path after the embedding request succeeds.
+					get file_path(): string {
+						throw error
+					},
+				},
+			])
+
+			const result = await new FilePreparation(dependencies).prepareFile(filePath)
+
+			expect(dependencies.embedder.createEmbeddings).toHaveBeenCalledExactlyOnceWith([content])
+			expect(result).toEqual({ path: filePath, status: "local_error", error, embeddingOutcome: "success" })
 			expect(result.error).toBe(error)
 		},
 	)

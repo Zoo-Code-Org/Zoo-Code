@@ -2,8 +2,7 @@
 
 import * as vscode from "vscode"
 
-import { TelemetryEventName } from "@roo-code/types"
-import type { ClineMessage, TelemetryEvent } from "@roo-code/types"
+import type { ClineMessage } from "@roo-code/types"
 
 import { TaskNotFoundError } from "../errors.js"
 import { CloudService } from "../CloudService.js"
@@ -635,21 +634,6 @@ describe("CloudService", () => {
 			expect(mockShareService.shareTask).toHaveBeenCalledTimes(1)
 			expect(mockShareService.shareTask).toHaveBeenCalledWith(taskId, "organization")
 			expect(result).toEqual(expectedResult)
-		})
-
-		it("captureEvent is a no-op in compatibility mode", async () => {
-			const log = vi.fn()
-			const compatService = cloudService
-			vi.spyOn(compatService as unknown as { log: (...args: unknown[]) => void }, "log").mockImplementation(log)
-
-			const telemetryEvent: TelemetryEvent = {
-				event: TelemetryEventName.TASK_CREATED,
-				properties: { taskId: "task-123" },
-			}
-
-			compatService.captureEvent(telemetryEvent)
-
-			expect(log).toHaveBeenCalledWith("[CloudService] Skipping cloud telemetry capture in compatibility mode")
 		})
 	})
 })

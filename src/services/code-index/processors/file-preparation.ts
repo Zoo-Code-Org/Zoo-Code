@@ -13,6 +13,7 @@ export class FilePreparation {
 
 	public async prepareFile(filePath: string): Promise<FileProcessingResult> {
 		const dependencies = this.dependencies
+		let embeddingOutcome: FileProcessingResult["embeddingOutcome"]
 		try {
 			const skipReason = await this.getSkipReason(filePath)
 			if (skipReason !== undefined) {
@@ -28,19 +29,32 @@ export class FilePreparation {
 			}
 
 			const blocks = await dependencies.parser.parseFile(filePath, { content, fileHash: newHash })
-			const pointsToUpsert = await this.preparePoints(blocks)
+			let pointsToUpsert: PointStruct[] = []
+			if (dependencies.embedder && blocks.length > 0) {
+				let embeddings: number[][]
+				try {
+					const result = await dependencies.embedder.createEmbeddings(blocks.map((block) => block.content))
+					embeddingOutcome = "success"
+					embeddings = result.embeddings
+				} catch (error) {
+					return { path: filePath, status: "local_error", error: error as Error, embeddingOutcome: "failure" }
+				}
+				pointsToUpsert = this.preparePoints(blocks, embeddings)
+			}
 
 			return {
 				path: filePath,
 				status: "processed_for_batching",
 				newHash,
 				pointsToUpsert,
+				...(embeddingOutcome ? { embeddingOutcome } : {}),
 			}
 		} catch (error) {
 			return {
 				path: filePath,
 				status: "local_error",
 				error: error as Error,
+				...(embeddingOutcome ? { embeddingOutcome } : {}),
 			}
 		}
 	}
@@ -71,14 +85,8 @@ export class FilePreparation {
 		return { path: filePath, status: "skipped", reason }
 	}
 
-	private async preparePoints(blocks: CodeBlock[]): Promise<PointStruct[]> {
+	private preparePoints(blocks: CodeBlock[], embeddings: number[][]): PointStruct[] {
 		const dependencies = this.dependencies
-		if (!dependencies.embedder || blocks.length === 0) {
-			return []
-		}
-
-		const texts = blocks.map((block) => block.content)
-		const { embeddings } = await dependencies.embedder.createEmbeddings(texts)
 
 		return blocks.map((block, index) => {
 			const normalizedAbsolutePath = generateNormalizedAbsolutePath(block.file_path, dependencies.workspacePath)

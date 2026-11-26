@@ -33,10 +33,11 @@ go—and, importantly, where they don't.
   model), it is stored locally on your device and never sent to us or any third
   party, except the provider you have chosen.
 - **Telemetry (Usage Data)**: We collect feature usage and error data to help us
-  improve Zoo Code. This telemetry is powered by PostHog and includes your VS
-  Code machine ID, feature usage patterns, and exception reports. The VS Code
-  machine ID is a persistent identifier and may be considered personal data in
-  some jurisdictions; we use it only for product analytics and error grouping.
+  improve Zoo Code. This telemetry is powered by PostHog and includes a salted
+  hash of your VS Code machine ID, feature usage patterns, and exception
+  reports. The hashed ID is a persistent identifier and may be personal data in
+  some jurisdictions. The raw machine ID never leaves your device. We use the
+  hashed ID only for product analytics and error grouping.
   PostHog event data is retained for 12 months under our current project
   configuration. This PostHog-based telemetry does **not** collect your code or AI
   prompts. Telemetry is on by default. To turn it off, choose "Disabled" in

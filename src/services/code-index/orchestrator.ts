@@ -44,9 +44,13 @@ export class CodeIndexOrchestrator {
 		try {
 			await this.fileWatcher.initialize()
 
+			let circuitBreakerOpen = false
+
 			this._fileWatcherSubscriptions = [
 				this.fileWatcher.onDidStartBatchProcessing((_filePaths: string[]) => {}),
 				this.fileWatcher.onBatchProgressUpdate(({ processedInBatch, totalInBatch, currentFile }) => {
+					// Final progress can arrive after the trip summary. Keep the failure visible.
+					if (circuitBreakerOpen) return
 					if (totalInBatch > 0 && this.stateManager.state !== "Indexing") {
 						this.stateManager.setSystemState("Indexing", "Processing file changes...")
 					}
@@ -69,6 +73,13 @@ export class CodeIndexOrchestrator {
 					}
 				}),
 				this.fileWatcher.onDidFinishBatchProcessing((summary: BatchProcessingSummary) => {
+					if (summary.circuitBreakerOpen) {
+						circuitBreakerOpen = true
+						this.stateManager.setSystemState(
+							"Error",
+							"File watching stopped after repeated indexing failures. Check the embedder or vector store configuration, then restart indexing.",
+						)
+					}
 					if (summary.batchError) {
 						console.error(`[CodeIndexOrchestrator] Batch processing failed:`, summary.batchError)
 					}

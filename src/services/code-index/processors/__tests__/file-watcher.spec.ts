@@ -4,11 +4,15 @@ import * as vscode from "vscode"
 
 import { FileWatcher } from "../file-watcher"
 import { FilePreparation } from "../file-preparation"
+import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryEventName } from "@roo-code/types"
+import { codeParser } from "../parser"
+import type { BatchProcessingSummary, FileProcessingResult } from "../../interfaces"
 
 import { clearAllMocks } from "../../../../test-utils/reset"
 
 // Mock TelemetryService
-vi.mock("../../../../../packages/telemetry/src/TelemetryService", () => ({
+vi.mock("@roo-code/telemetry", () => ({
 	TelemetryService: {
 		instance: {
 			captureEvent: vi.fn(),
@@ -101,7 +105,7 @@ describe("FileWatcher", () => {
 	let mockIgnoreInstance: any
 
 	const waitForNextBatch = () =>
-		new Promise<any>((resolve) => {
+		new Promise<BatchProcessingSummary>((resolve) => {
 			const disposable = fileWatcher.onDidFinishBatchProcessing((summary) => {
 				disposable.dispose()
 				resolve(summary)
@@ -355,6 +359,274 @@ describe("FileWatcher", () => {
 			expect(skippedPaths).toContain("/mock/workspace/src/.hidden/components/Button.tsx")
 			expect(skippedPaths).toContain("/mock/workspace/.hidden/src/components/Button.tsx")
 			expect(skippedPaths).toContain("/mock/workspace/src/components/.hidden/Button.tsx")
+		})
+	})
+
+	describe("per-workspace circuit breaker", () => {
+		/** Queue file events, flush the debounce window, and wait for the batch to finish. */
+		const runBatch = async (filePath: string, type: "create" | "delete" = "create", files = 1) => {
+			const batchPromise = waitForNextBatch()
+			for (let index = 0; index < files; index++) {
+				await (type === "delete" ? mockOnDidDelete : mockOnDidCreate)({
+					fsPath: index === 0 ? filePath : `${filePath}.peer.ts`,
+				})
+			}
+			await vi.advanceTimersByTimeAsync(500)
+			return batchPromise
+		}
+
+		it("stops consuming file-system events after three consecutive failed batches", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("embedder misconfigured"))
+
+			// Three consecutive all-fail batches trip the breaker on the third.
+			for (let i = 0; i < 3; i++) {
+				const summary = await runBatch(`/mock/workspace/src/broken-${i}.ts`, "create", 2)
+				expect(summary.processedFiles).toHaveLength(2)
+				expect(summary.processedFiles[0].status).toBe("local_error")
+			}
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(6)
+
+			// Further events are dropped: no batch starts and no embedder call is made.
+			const started = vi.fn()
+			fileWatcher.onDidStartBatchProcessing(started)
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/after-breaker.ts" })
+			await vi.advanceTimersByTimeAsync(500)
+			expect(started).not.toHaveBeenCalled()
+			expect(mockEmbedder.createEmbeddings).toHaveBeenCalledTimes(6)
+		})
+
+		it.each(["stat", "read", "parse", "embed"] as const)(
+			"does not count repeated single-file %s failures as service failures",
+			async (stage) => {
+				await fileWatcher.initialize()
+				for (let index = 0; index < 4; index++) {
+					const error = new Error(`${stage} failed`)
+					if (stage === "stat") vi.mocked(vscode.workspace.fs.stat).mockRejectedValueOnce(error)
+					if (stage === "read") vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
+					if (stage === "parse") vi.mocked(codeParser.parseFile).mockRejectedValueOnce(error)
+					if (stage === "embed") mockEmbedder.createEmbeddings.mockRejectedValueOnce(error)
+					const summary = await runBatch(`/mock/workspace/src/local-${index}.ts`)
+					expect(summary.processedFiles).toEqual([
+						{
+							path: `/mock/workspace/src/local-${index}.ts`,
+							status: "local_error",
+							error,
+							...(stage === "embed" ? { embeddingOutcome: "failure" } : {}),
+						},
+					])
+					expect(summary.circuitBreakerOpen).toBe(false)
+				}
+			},
+		)
+
+		it.each(["stat", "read", "parse"] as const)(
+			"does not count two-file %s failures as embedding failures",
+			async (stage) => {
+				await fileWatcher.initialize()
+				const error = new Error(`${stage} failed`)
+				for (let index = 0; index < 4; index++) {
+					for (let file = 0; file < 2; file++) {
+						if (stage === "stat") vi.mocked(vscode.workspace.fs.stat).mockRejectedValueOnce(error)
+						if (stage === "read") vi.mocked(vscode.workspace.fs.readFile).mockRejectedValueOnce(error)
+						if (stage === "parse") vi.mocked(codeParser.parseFile).mockRejectedValueOnce(error)
+					}
+					const summary = await runBatch(`/mock/workspace/src/local-${index}.ts`, "create", 2)
+					expect(summary.processedFiles).toHaveLength(2)
+					expect(summary.processedFiles.every((result) => result.status === "local_error")).toBe(true)
+					expect(summary.circuitBreakerOpen).toBe(false)
+				}
+				expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+			},
+		)
+
+		it("resets the count when one embedding succeeds and another fails", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("Embedding failed"))
+			await runBatch("/mock/workspace/src/before-1.ts", "create", 2)
+			await runBatch("/mock/workspace/src/before-2.ts", "create", 2)
+			mockEmbedder.createEmbeddings.mockResolvedValueOnce({ embeddings: [[0.1, 0.2, 0.3]] })
+			const mixed = await runBatch("/mock/workspace/src/mixed.ts", "create", 2)
+			expect(mixed.processedFiles.map((result) => result.status).sort()).toEqual(["local_error", "success"])
+			expect(mixed.circuitBreakerOpen).toBe(false)
+			for (let index = 0; index < 3; index++) {
+				const summary = await runBatch(`/mock/workspace/src/after-${index}.ts`, "create", 2)
+				expect(summary.circuitBreakerOpen).toBe(index === 2)
+			}
+		})
+
+		it("ignores skipped files when counting embedding attempts", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("Embedder unavailable"))
+			// One embedding failure plus a file with no blocks is still below the minimum.
+			for (let index = 0; index < 3; index++) {
+				vi.mocked(codeParser.parseFile).mockResolvedValueOnce([])
+				expect((await runBatch(`/mock/workspace/src/single-${index}.ts`, "create", 2)).circuitBreakerOpen).toBe(
+					false,
+				)
+			}
+			for (let index = 0; index < 3; index++) {
+				const finished = waitForNextBatch()
+				await mockOnDidCreate({ fsPath: `/mock/workspace/src/broken-${index}.ts` })
+				await mockOnDidCreate({ fsPath: `/mock/workspace/src/other-${index}.ts` })
+				await mockOnDidCreate({ fsPath: `/mock/workspace/.hidden/skipped-${index}.ts` })
+				await vi.advanceTimersByTimeAsync(500)
+				const summary = await finished
+				expect(summary.processedFiles.filter((result) => result.status === "skipped")).toHaveLength(1)
+				expect(summary.circuitBreakerOpen).toBe(index === 2)
+			}
+		})
+
+		it("preserves outage evidence across a batch with no embedding attempt", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("Embedder unavailable"))
+			await runBatch("/mock/workspace/src/fail-1.ts", "create", 2)
+			await runBatch("/mock/workspace/src/fail-2.ts", "create", 2)
+			const skipped = await runBatch("/mock/workspace/.hidden/skipped.ts")
+			expect(skipped.processedFiles[0].status).toBe("skipped")
+			expect(skipped.circuitBreakerOpen).toBe(false)
+			expect((await runBatch("/mock/workspace/src/fail-3.ts", "create", 2)).circuitBreakerOpen).toBe(true)
+		})
+
+		it("counts failed delete-only batches and drops later deletions", async () => {
+			await fileWatcher.initialize()
+			const error = new Error("Vector store unavailable")
+			mockVectorStore.deletePointsByMultipleFilePaths.mockRejectedValue(error)
+			for (let index = 0; index < 3; index++) {
+				const summary = await runBatch(`/mock/workspace/src/deleted-${index}.ts`, "delete")
+				expect(summary.batchError).toBe(error)
+				expect(summary.circuitBreakerOpen).toBe(index === 2)
+			}
+			await mockOnDidDelete({ fsPath: "/mock/workspace/src/after-trip.ts" })
+			expect(fileWatcher["accumulatedEvents"].size).toBe(0)
+			expect(vi.getTimerCount()).toBe(0)
+			await vi.advanceTimersByTimeAsync(500)
+			expect(mockVectorStore.deletePointsByMultipleFilePaths).toHaveBeenCalledTimes(3)
+			expect(mockEmbedder.createEmbeddings).not.toHaveBeenCalled()
+		})
+
+		it("reports one trip and clears events without scheduling more work", async () => {
+			await fileWatcher.initialize()
+			mockEmbedder.createEmbeddings.mockRejectedValue(new Error("Embedder unavailable"))
+			const capture = vi.mocked(TelemetryService.instance.captureEvent)
+			for (let index = 0; index < 3; index++) {
+				await runBatch(`/mock/workspace/src/broken-${index}.ts`, "create", 2)
+				expect(
+					capture.mock.calls.filter(([, props]) => props?.errorType === "circuit_breaker_open"),
+				).toHaveLength(index === 2 ? 1 : 0)
+			}
+			for (let index = 0; index < 4; index++) {
+				await mockOnDidCreate({ fsPath: `/mock/workspace/src/dropped-${index}.ts` })
+				expect(fileWatcher["accumulatedEvents"].size).toBe(0)
+				expect(vi.getTimerCount()).toBe(0)
+			}
+			expect(capture).toHaveBeenCalledWith(TelemetryEventName.CODE_INDEX_ERROR, {
+				error: "File watcher stopped after repeated indexing failures",
+				location: "FileWatcher.processBatch",
+				errorType: "circuit_breaker_open",
+				failedBatches: 3,
+			})
+			expect(capture.mock.calls.filter(([, props]) => props?.errorType === "circuit_breaker_open")).toHaveLength(
+				1,
+			)
+		})
+
+		it("resets the failure counter when a batch succeeds between failures", async () => {
+			await fileWatcher.initialize()
+
+			const fail = () => mockEmbedder.createEmbeddings.mockRejectedValue(new Error("down"))
+			const succeed = () => mockEmbedder.createEmbeddings.mockResolvedValue({ embeddings: [[0.1, 0.2, 0.3]] })
+
+			// Two consecutive failures...
+			fail()
+			await runBatch("/mock/workspace/src/fail-1.ts", "create", 2)
+			await runBatch("/mock/workspace/src/fail-2.ts", "create", 2)
+
+			// ...then a success resets the counter.
+			succeed()
+			await runBatch("/mock/workspace/src/ok-1.ts")
+
+			// Only two failures since the reset: the breaker must stay closed.
+			fail()
+			await runBatch("/mock/workspace/src/fail-3.ts", "create", 2)
+			await runBatch("/mock/workspace/src/fail-4.ts", "create", 2)
+
+			const started = vi.fn()
+			fileWatcher.onDidStartBatchProcessing(started)
+			const batchPromise = waitForNextBatch()
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/fail-5.ts" })
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/fail-5-peer.ts" })
+			await vi.advanceTimersByTimeAsync(500)
+			await batchPromise
+			expect(started).toHaveBeenCalledTimes(1)
+
+			// That third consecutive failure opens the breaker; the next event is dropped.
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/after-breaker.ts" })
+			await vi.advanceTimersByTimeAsync(500)
+			expect(started).toHaveBeenCalledTimes(1)
+		})
+
+		it("counts a batch whose upsert exhausts retries as a failed batch", async () => {
+			await fileWatcher.initialize()
+			mockVectorStore.upsertPoints.mockRejectedValue(new Error("qdrant down"))
+
+			// Each batch exhausts MAX_BATCH_RETRIES (3 attempts) before failing.
+			for (let i = 0; i < 3; i++) {
+				const batchPromise = waitForNextBatch()
+				await mockOnDidCreate({ fsPath: `/mock/workspace/src/upsert-fail-${i}.ts` })
+				await vi.advanceTimersByTimeAsync(10_000)
+				const summary = await batchPromise
+				expect(summary.batchError).toBeDefined()
+			}
+			expect(mockVectorStore.upsertPoints).toHaveBeenCalledTimes(9)
+
+			// Breaker is open: further events produce no upsert attempts at all.
+			const upsertCalls = mockVectorStore.upsertPoints.mock.calls.length
+			await mockOnDidCreate({ fsPath: "/mock/workspace/src/after-breaker.ts" })
+			await vi.advanceTimersByTimeAsync(10_000)
+			expect(mockVectorStore.upsertPoints.mock.calls.length).toBe(upsertCalls)
+		})
+
+		it("does not open the breaker when only isolated files in a batch fail", async () => {
+			await fileWatcher.initialize()
+
+			const defaultReadFile = () => Buffer.from("test content")
+			vi.mocked(vscode.workspace.fs.readFile).mockImplementation(async (uri: vscode.Uri) => {
+				if (uri.fsPath.includes("bad")) {
+					throw new Error("EACCES: unreadable file")
+				}
+				return defaultReadFile()
+			})
+
+			try {
+				// Five batches in a row where exactly one of two files fails must never
+				// count as a consecutive failure.
+				for (let i = 0; i < 5; i++) {
+					const batchPromise = waitForNextBatch()
+					await mockOnDidCreate({ fsPath: `/mock/workspace/src/ok-${i}.ts` })
+					await mockOnDidCreate({ fsPath: `/mock/workspace/src/bad-${i}.ts` })
+					await vi.advanceTimersByTimeAsync(500)
+					const summary = await batchPromise
+					expect(
+						summary.processedFiles.some((result: FileProcessingResult) => result.status === "success"),
+					).toBe(true)
+					expect(
+						summary.processedFiles.some((result: FileProcessingResult) => result.status === "local_error"),
+					).toBe(true)
+				}
+
+				// Breaker still closed: the next batch runs normally.
+				const started = vi.fn()
+				fileWatcher.onDidStartBatchProcessing(started)
+				const batchPromise = waitForNextBatch()
+				await mockOnDidCreate({ fsPath: "/mock/workspace/src/still-ok.ts" })
+				await vi.advanceTimersByTimeAsync(500)
+				await batchPromise
+				expect(started).toHaveBeenCalledTimes(1)
+			} finally {
+				vi.mocked(vscode.workspace.fs.readFile).mockReset()
+				vi.mocked(vscode.workspace.fs.readFile).mockResolvedValue(defaultReadFile())
+			}
 		})
 	})
 
