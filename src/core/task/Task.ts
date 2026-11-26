@@ -112,9 +112,10 @@ import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { RooProtectedController } from "../protect/RooProtectedController"
 import { type AssistantMessageContent, presentAssistantMessage } from "../assistant-message"
 import { DispatchState, type PendingWork } from "./dispatchState"
-import { type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
+import { resolveToolAlias, type RequestPolicySnapshot } from "../prompts/tools/effective-tool-policy"
 import { NativeToolCallParser } from "../assistant-message/NativeToolCallParser"
 import { salvageXmlToolCalls } from "../assistant-message/xml-tool-salvage"
+import { getNativeTools } from "../prompts/tools/native-tools"
 import { type ContextManagementResult, manageContext, willManageContext } from "../context-management"
 import { ClineProvider } from "../webview/ClineProvider"
 import { MultiSearchReplaceDiffStrategy } from "../diff/strategies/multi-search-replace"
@@ -290,6 +291,61 @@ export class PendingActionSettlementError extends Error {
 		super(message, options)
 		this.name = "PendingActionSettlementError"
 	}
+}
+
+/**
+ * Converts salvaged XML argument values to their declared structured types
+ * (issue #547 review 4712438429). The salvage scanner captures every
+ * parameter value as a string and the native parser forwards values
+ * unchanged, so a stringified array (ask_followup_question's follow_up)
+ * reached the tool's shape validation as a string and the call was rejected.
+ * Values whose declared type is array or object are parsed back to
+ * structures before promotion. Ordinary string parameters, unparseable
+ * values and unknown tools stay untouched, so the parser keeps rejecting
+ * genuinely invalid calls and the response stays plain text.
+ */
+function structureDeclaredParamsForSalvage(
+	args: Record<string, string>,
+	toolName: string,
+	nativeTools: ReturnType<typeof getNativeTools>,
+): Record<string, unknown> {
+	const resolvedName = resolveToolAlias(toolName)
+	type NativeToolDef = ReturnType<typeof getNativeTools>[number]
+	const schema = nativeTools.find(
+		(tool): tool is Extract<NativeToolDef, { function: { name: string } }> =>
+			tool.type === "function" && tool.function?.name === resolvedName,
+	)
+	const declaredStructured = new Set<string>()
+	if (schema?.function && typeof schema.function.parameters === "object" && schema.function.parameters !== null) {
+		const properties = (schema.function.parameters as unknown as Record<string, unknown>).properties
+		if (typeof properties === "object" && properties !== null) {
+			for (const [param, paramSchema] of Object.entries(properties as Record<string, unknown>)) {
+				const type = (paramSchema as unknown as Record<string, unknown>)?.type
+				const types = Array.isArray(type) ? type : [type]
+				if (types.includes("array") || types.includes("object")) {
+					declaredStructured.add(param)
+				}
+			}
+		}
+	}
+
+	const structured: Record<string, unknown> = {}
+	for (const [key, value] of Object.entries(args)) {
+		if (declaredStructured.has(key)) {
+			try {
+				const parsed: unknown = JSON.parse(value)
+				if (typeof parsed === "object" && parsed !== null) {
+					structured[key] = parsed
+					continue
+				}
+			} catch {
+				// Not JSON: keep the string; the native parser rejects the call
+				// and the response stays plain text.
+			}
+		}
+		structured[key] = value
+	}
+	return structured
 }
 
 export class Task extends EventEmitter<TaskEvents> implements TaskLike {
@@ -5051,6 +5107,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				) {
 					const salvaged = salvageXmlToolCalls(assistantMessage)
 					if (salvaged) {
+						const nativeTools = getNativeTools()
 						const promoted: ToolUse[] = []
 						for (const [index, call] of salvaged.entries()) {
 							const id = `salvage-${Date.now()}-${index}`
@@ -5058,7 +5115,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 								const toolUse = NativeToolCallParser.parseToolCall({
 									id,
 									name: call.name as ToolName,
-									arguments: JSON.stringify(call.args),
+									arguments: JSON.stringify(
+										structureDeclaredParamsForSalvage(call.args, call.name, nativeTools),
+									),
 								})
 								if (toolUse && toolUse.type === "tool_use") {
 									toolUse.id = id

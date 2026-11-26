@@ -269,7 +269,12 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
+		// The provider registers itself in the static ClineProvider.activeInstances
+		// set on construction and only dispose() removes it; stale entries leak
+		// into later tests' visible-instance lookups (review 4712438417). Dispose
+		// first so the teardown never depends on parser fixture state.
+		await mockProvider.dispose()
 		NativeToolCallParser.clearAllStreamingToolCalls(scope)
 		NativeToolCallParser.clearRawChunkState(scope)
 	})
@@ -301,7 +306,21 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			type: string
 			name: string
 			partial: boolean
+			content?: string
 			nativeArgs?: Record<string, unknown>
+		}
+
+		// Captures assistantMessageContent at each save point so a test can
+		// observe the response as finalized BEFORE a later retry replaces the
+		// observed content (review 4712438423).
+		function recordSaveSnapshots(task: Task): { snapshots: FinalizedEntry[][] } {
+			const snapshots: FinalizedEntry[][] = []
+			vi.spyOn(getTaskStreamingAccess(task), "saveClineMessages").mockImplementation(async () => {
+				const access = getSalvageAccess(task)
+				snapshots.push((access.assistantMessageContent as FinalizedEntry[]).map((block) => ({ ...block })))
+				return true
+			})
+			return { snapshots }
 		}
 
 		// Replaces the plain counter field with a recording accessor so a test can
@@ -368,6 +387,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		it("leaves prose-wrapped XML alone (no false promotion)", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
+			const { snapshots } = recordSaveSnapshots(task)
 
 			vi.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -396,6 +416,15 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			expect(toolUses).toHaveLength(1)
 			expect(toolUses[0].name).toBe("write_to_file")
 			expect(counter.peak()).toBe(1)
+			// The rejected response stays plain text before the retry replaces it
+			// (review 4712438423).
+			// Early saves run before the stream produces content; observe the
+			// first capture that holds the finalized response.
+			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
+			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+				"I will check the file now: <read_file><path>a.ts</path></read_file>",
+			)
 		})
 
 		it("promotes several XML blocks in order", async () => {
@@ -420,6 +449,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		it("keeps malformed tool XML as text instead of promoting a broken call", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
+			const { snapshots } = recordSaveSnapshots(task)
 
 			vi.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -448,6 +478,92 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			expect(toolUses).toHaveLength(1)
 			expect(toolUses[0].nativeArgs).toMatchObject({ path: "b.ts" })
 			expect(counter.peak()).toBe(1)
+			// The rejected nested-XML response stays plain text before the retry
+			// replaces it (review 4712438423).
+			// Early saves run before the stream produces content; observe the
+			// first capture that holds the finalized response.
+			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
+			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+				"<read_file><read_file><path>a.ts</path></read_file></read_file>",
+			)
+		})
+
+		it("promotes neither call when a valid call is followed by a parser-rejected one (review 4712438440)", async () => {
+			const task = await createStreamingTask()
+			const counter = recordNoToolUsePeak(task)
+			const { snapshots } = recordSaveSnapshots(task)
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "text",
+							text: "<read_file><path>a.ts</path></read_file><read_file></read_file>",
+						},
+					]),
+				)
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call",
+							id: "toolu_native3",
+							name: "write_to_file",
+							arguments: '{"path":"b.ts","content":"hi"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// The parser rejects the pathless call, so the valid call staged
+			// before it is discarded too: failure promotes nothing and the
+			// complete response text is preserved.
+			// Early saves run before the stream produces content; observe the
+			// first capture that holds the finalized response.
+			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
+			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+				"<read_file><path>a.ts</path></read_file><read_file></read_file>",
+			)
+			expect(counter.peak()).toBe(1)
+			// The retry's native call is the only tool_use in the content.
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].name).toBe("write_to_file")
+			expect(toolUses[0].nativeArgs).toMatchObject({ path: "b.ts" })
+		})
+
+		it("converts stringified structured parameters before native parsing (review 4712438429)", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "text",
+						text: '<ask_followup_question><question>Continue?</question><follow_up>[{"text":"Yes"}]</follow_up></ask_followup_question>',
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const salvagedBlocks = content.filter((block) => block.type === "tool_use")
+			expect(salvagedBlocks).toHaveLength(1)
+			expect(salvagedBlocks[0].name).toBe("ask_followup_question")
+			// The scanner captures every value as a string; the promotion
+			// converts follow_up to its declared array type so the native
+			// parser receives structured suggestions, while the ordinary
+			// string parameter stays a string.
+			expect(salvagedBlocks[0].nativeArgs).toMatchObject({
+				question: "Continue?",
+				follow_up: [{ text: "Yes" }],
+			})
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Salvaged 1 XML tool call"))
+			warnSpy.mockRestore()
 		})
 	})
 })

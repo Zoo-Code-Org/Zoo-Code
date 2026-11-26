@@ -14,6 +14,10 @@
  *   nesting level);
  * - keywords DeepSeek gateways reject are removed and re-encoded as readable
  *   description hints, so the model still sees the constraint they carried;
+ * - compilation never turns a satisfiable schema into an unsatisfiable one:
+ *   removing patternProperties relaxes a retained additionalProperties: false,
+ *   a oneOf whose branches changed moves under anyOf, and a not whose
+ *   predicate changed is dropped (its original rule stays in the hint);
  * - compilation is pure: the caller-owned schema object is never mutated.
  *
  * Unlike stripUnsupportedStrictKeywords (the strict-mode sanitizer applied for
@@ -55,6 +59,25 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
+ * Structural equality for compiled-vs-original schema nodes: compilation
+ * rebuilds nodes in input key order and appends a description only when it
+ * removed keywords, so an unchanged node serializes identically.
+ */
+function deepEqualJson(a: unknown, b: unknown): boolean {
+	return JSON.stringify(a) === JSON.stringify(b)
+}
+
+/**
+ * Explicit own-property creation: a schema key like "__proto__" (legal in
+ * JSON and produced by JSON.parse as an own property) must become an own data
+ * property of the compiled copy, never a prototype change (issue #547 review
+ * 4712438384).
+ */
+function defineOwnKey(target: Record<string, unknown>, key: string, value: unknown): void {
+	Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true })
+}
+
+/**
  * Renders removed constraints as readable description text so the model keeps
  * seeing the constraint the schema carried (the endpoint ignores them, the
  * caller side still benefits).
@@ -81,10 +104,11 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 
 	const result: Record<string, unknown> = {}
 	const removed: Record<string, unknown> = {}
+	let relaxedOneOf: unknown[] | undefined
 
 	for (const [key, value] of Object.entries(schema)) {
 		if (DEEPSEEK_REJECTED_SCHEMA_KEYWORDS.has(key)) {
-			removed[key] = value
+			defineOwnKey(removed, key, value)
 			continue
 		}
 
@@ -92,42 +116,90 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 			if (isRecord(value)) {
 				const compiled: Record<string, unknown> = {}
 				for (const [name, subSchema] of Object.entries(value)) {
-					compiled[name] = compileSchemaNode(subSchema, depth + 1)
+					defineOwnKey(compiled, name, compileSchemaNode(subSchema, depth + 1))
 				}
-				result[key] = compiled
+				defineOwnKey(result, key, compiled)
 				continue
 			}
 		} else if (key === "items") {
-			result[key] = Array.isArray(value)
-				? value.map((entry) => compileSchemaNode(entry, depth + 1))
-				: compileSchemaNode(value, depth + 1)
+			defineOwnKey(
+				result,
+				key,
+				Array.isArray(value)
+					? value.map((entry) => compileSchemaNode(entry, depth + 1))
+					: compileSchemaNode(value, depth + 1),
+			)
 			continue
 		} else if (key === "anyOf" || key === "oneOf" || key === "allOf" || key === "prefixItems") {
 			if (Array.isArray(value)) {
-				result[key] = value.map((entry) => compileSchemaNode(entry, depth + 1))
+				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1))
+				const relaxed =
+					key === "oneOf" && compiledBranches.some((branch, index) => !deepEqualJson(branch, value[index]))
+				if (relaxed) {
+					// oneOf accepts exactly one alternative: compilation that
+					// relaxed branch constraints (removed distinguishing
+					// patterns) can make every value match several branches,
+					// and oneOf would then accept nothing. The branches move
+					// under the overlap-safe anyOf instead.
+					relaxedOneOf = compiledBranches
+				} else {
+					defineOwnKey(result, key, compiledBranches)
+				}
+				continue
+			}
+		} else if (key === "not") {
+			if (isRecord(value)) {
+				const compiledChild = compileSchemaNode(value, depth + 1)
+				if (deepEqualJson(compiledChild, value)) {
+					defineOwnKey(result, key, compiledChild)
+				} else {
+					// The negated predicate carried a rejected keyword: the
+					// compiled child accepts every value, so a retained not
+					// would reject every value (a tightening). Drop the
+					// negation and keep the original rule as a hint.
+					defineOwnKey(removed, "not", value)
+				}
 				continue
 			}
 		} else if (
 			key === "additionalProperties" ||
-			key === "not" ||
 			key === "if" ||
 			key === "then" ||
 			key === "else" ||
 			key === "propertyNames"
 		) {
 			if (isRecord(value)) {
-				result[key] = compileSchemaNode(value, depth + 1)
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
 				continue
 			}
 		}
 
-		result[key] = value
+		defineOwnKey(result, key, value)
+	}
+
+	if (relaxedOneOf) {
+		// Merge instead of overwrite: the input may declare anyOf alongside
+		// the relaxed oneOf.
+		const existing = Array.isArray(result.anyOf) ? (result.anyOf as unknown[]) : []
+		defineOwnKey(result, "anyOf", [...existing, ...relaxedOneOf])
+	}
+
+	// Removing patternProperties can strand keys that were legal only through
+	// the pattern rules: a retained additionalProperties: false would leave
+	// the object without any valid instance (issue #547 review 4712438380).
+	// Relax exactly that case; ordinary closed objects keep their rule.
+	if ("patternProperties" in removed && result.additionalProperties === false) {
+		defineOwnKey(result, "additionalProperties", true)
 	}
 
 	if (Object.keys(removed).length > 0) {
 		const hint = describeRemovedConstraints(removed)
 		const existing = result.description
-		result.description = typeof existing === "string" && existing.length > 0 ? `${existing}\n${hint}` : hint
+		defineOwnKey(
+			result,
+			"description",
+			typeof existing === "string" && existing.length > 0 ? `${existing}\n${hint}` : hint,
+		)
 	}
 
 	return result
@@ -135,9 +207,10 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 
 /**
  * Compiles a tool's `parameters` schema into the dialect DeepSeek accepts:
- * gateway-rejected keywords are removed and re-encoded into descriptions, and
- * the declared `required` arrays are preserved untouched (optionality stays
- * optional). Pure: the input schema is left untouched.
+ * gateway-rejected keywords are removed and re-encoded into descriptions, the
+ * declared `required` arrays are preserved untouched (optionality stays
+ * optional), and no satisfiable schema compiles into an unsatisfiable one.
+ * Pure: the input schema is left untouched.
  */
 export function compileToolParametersForDeepSeek(schema: unknown): unknown {
 	return compileSchemaNode(schema, 0)

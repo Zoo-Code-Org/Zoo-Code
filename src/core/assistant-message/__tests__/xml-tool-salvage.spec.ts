@@ -63,13 +63,23 @@ describe("salvageXmlToolCalls", () => {
 		expect(salvageXmlToolCalls(text)).toBeNull()
 	})
 
-	it("parses a nested same-name tag as an ordinary parameter; the production parser rejects the junk", () => {
-		// The scanner cannot tell nested tool XML from content that starts with a
-		// tag (write_to_file content legitimately contains markup), so it parses
-		// the inner tag as a parameter. NativeToolCallParser then rejects the
-		// resulting pathless call, and the caller keeps the text.
-		const salvaged = salvageXmlToolCalls("<read_file><read_file><path>a.ts</path></read_file></read_file>")
-		expect(salvaged?.[0]?.args.read_file).toBe("<path>a.ts</path>")
+	it("returns null when a same-name child is itself a nested tool block (review round 2026-11-26)", () => {
+		// A same-name child whose payload is a well-formed tool block is a
+		// nested invocation, not a parameter. Path-first nesting would
+		// otherwise promote the outer call while silently dropping the
+		// nested request.
+		expect(
+			salvageXmlToolCalls("<read_file><path>a.ts</path><read_file><path>b.ts</path></read_file></read_file>"),
+		).toBeNull()
+		expect(salvageXmlToolCalls("<read_file><read_file><path>a.ts</path></read_file></read_file>")).toBeNull()
+	})
+
+	it("accepts a same-name value argument such as skill = name (review round 2026-11-26)", () => {
+		// The skill tool takes a skill argument: a same-name child with a
+		// plain-text value is an ordinary parameter, not a nested block.
+		const salvaged = salvageXmlToolCalls("<skill><skill>name</skill></skill>")
+		expect(salvaged?.[0]?.name).toBe("skill")
+		expect(salvaged?.[0]?.args.skill).toBe("name")
 	})
 
 	it("rejects more blocks than the salvage cap", () => {

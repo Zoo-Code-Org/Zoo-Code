@@ -998,6 +998,177 @@ describe("DeepSeekHandler", () => {
 			convert([readTool])
 			expect(readTool).toStrictEqual(original)
 		})
+
+		it("relaxes additionalProperties when patternProperties is removed (review 4712438380)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^x": { type: "string" } },
+						properties: { query: { type: "string" } },
+						required: ["x"],
+						additionalProperties: false,
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema & {
+				additionalProperties?: unknown
+			}
+			// The required key x was legal only through the pattern rules; a
+			// retained closed-object rule would leave the object with no valid
+			// instance.
+			expect(params.additionalProperties).toBe(true)
+			// An ordinary closed object without patternProperties keeps its rule.
+			const plain = convert([readTool])
+			const plainParams = plain[0].function.parameters as unknown as ObjectSchema & {
+				additionalProperties?: unknown
+			}
+			expect(plainParams.additionalProperties).toBe(false)
+		})
+
+		it("moves a relaxed oneOf under anyOf so branch values stay valid (review 4712438393)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							label: {
+								oneOf: [
+									{ type: "string", pattern: "^a" },
+									{ type: "string", pattern: "^b" },
+								],
+							},
+						},
+						required: ["label"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const label = (params.properties ?? {}).label as unknown as {
+				oneOf?: unknown
+				anyOf?: Array<Record<string, unknown>>
+			}
+			// Both branches lost their distinguishing patterns, so every
+			// string would match both and oneOf would accept nothing.
+			expect(label).not.toHaveProperty("oneOf")
+			const branches = label.anyOf ?? []
+			expect(branches).toHaveLength(2)
+			// Each relaxed branch is a plain string schema: "apple" matched ^a
+			// before compilation and stays valid afterwards.
+			for (const branch of branches) {
+				expect(branch.type).toBe("string")
+				expect(branch).not.toHaveProperty("pattern")
+			}
+		})
+
+		it("keeps an unchanged oneOf as oneOf (review 4712438393)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							label: { oneOf: [{ type: "string" }, { type: "integer" }] },
+						},
+						required: ["label"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const label = (params.properties ?? {}).label as unknown as {
+				oneOf?: unknown[]
+				anyOf?: unknown
+			}
+			expect(label.oneOf).toHaveLength(2)
+			expect(label).not.toHaveProperty("anyOf")
+		})
+
+		it("drops a not whose predicate changed and records it in the description (review 4712438405)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							name: { type: "string", not: { pattern: "^tmp" } },
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The compiled predicate accepts every value, so a retained not
+			// would reject every value.
+			expect(name).not.toHaveProperty("not")
+			// The original rule stays visible as a hint.
+			expect(String(name.description)).toContain("not")
+			expect(String(name.description)).toContain("^tmp")
+		})
+
+		it("keeps an unchanged not in place (review 4712438405)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							name: { type: "string", not: { format: "uuid" } },
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The predicate compiles unchanged, so the negation is preserved.
+			expect(name.not).toStrictEqual({ format: "uuid" })
+		})
+
+		it("preserves an own __proto__ property as a data property (review 4712438384)", () => {
+			// JSON.parse produces an own "__proto__" property; ordinary
+			// assignment would change the compiled object's prototype and lose
+			// the definition instead of keeping it.
+			const parameters = JSON.parse(
+				'{"type":"object","properties":{"__proto__":{"type":"string"}},"required":["__proto__"]}',
+			)
+			const tool = {
+				type: "function",
+				function: { name: "read_file", description: "Read", strict: true, parameters },
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as {
+				properties: Record<string, unknown>
+				required: string[]
+			}
+			const props = params.properties
+			expect(Object.prototype.hasOwnProperty.call(props, "__proto__")).toBe(true)
+			expect(Object.getPrototypeOf(props)).toBe(Object.prototype)
+			expect((props["__proto__"] as Record<string, unknown>).type).toBe("string")
+			expect(params.required).toStrictEqual(["__proto__"])
+		})
 	})
 })
 

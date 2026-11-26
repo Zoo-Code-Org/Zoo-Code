@@ -9,8 +9,8 @@
  *
  * The salvage scanner is deliberately conservative: it only accepts text that
  * consists ENTIRELY of one or more consecutive, well-formed, two-level tool
- * blocks. Anything else - prose around the XML, attributes, nested tool tags,
- * comments, unknown syntax - returns null and the caller keeps the text as
+ * blocks. Anything else - prose around the XML, attributes, nested same-name
+ * tool blocks, comments, unknown syntax - returns null and the caller keeps the text as
  * plain text (the pre-existing behavior). Validation of the tool name and
  * parameter names stays with the production parser
  * (NativeToolCallParser.parseToolCall); this module only recognizes shapes.
@@ -153,7 +153,17 @@ function readToolBlock(state: ScannerState, calls: SalvagedXmlToolCall[]): boole
 		if (closeIndex === -1) {
 			return false
 		}
-		args[paramName] = decodeXmlEntities(state.text.slice(state.pos, closeIndex))
+		const rawValue = state.text.slice(state.pos, closeIndex)
+		if (paramName === name && rawValue.trimStart().startsWith("<")) {
+			// A same-name child whose payload opens another element is a
+			// nested invocation attempt, not a two-level parameter; the
+			// scanner only recognizes two-level tool XML, so the whole text
+			// stays unsalvaged (issue #547 review round 2026-11-26). A
+			// same-name child with a plain value (the skill tool's skill
+			// argument) is still an ordinary parameter.
+			return false
+		}
+		args[paramName] = decodeXmlEntities(rawValue)
 		state.pos = closeIndex + closeTag.length
 		skipWhitespace(state)
 	}

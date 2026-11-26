@@ -50,7 +50,10 @@ const acceptsValue = (schema: unknown, value: unknown): boolean => {
 	if (accepts && schema.type !== undefined) {
 		const types: unknown[] = Array.isArray(schema.type) ? schema.type : [schema.type]
 		const jsType = schemaTypeOf(value)
-		if (!types.includes(jsType)) {
+		// Draft 2020-12: an integer is also a number (#2653 review
+		// 4682419243), so a "number" constraint accepts integer values too.
+		const matches = types.includes(jsType) || (jsType === "integer" && types.includes("number"))
+		if (!matches) {
 			accepts = false
 		}
 	}
@@ -913,6 +916,25 @@ describe("BaseProvider", () => {
 			expect(format.oneOf).toEqual([{ type: "string" }, { type: "integer" }, { type: "null" }])
 			expect(acceptsValue(format, null)).toBe(true)
 			expect(acceptsValue(format, "docx")).toBe(true)
+			// Sibling rejection: no anyOf alternative accepts a number, so the
+			// string-or-null union rejects 7 even though the oneOf sibling
+			// accepts it (#2653 review 4682419243).
+			expect(acceptsValue(format, 7)).toBe(false)
+		})
+
+		it("treats integers as numbers in the oracle while keeping oneOf exclusive (mock, #547)", () => {
+			// Mock evidence only: the oracle mirrors Draft 2020-12 numeric
+			// types (#2653 review 4682419243). An integer is also a number; a
+			// fractional value is not an integer.
+			expect(acceptsValue({ type: "number" }, 7)).toBe(true)
+			expect(acceptsValue({ type: "number" }, 1.5)).toBe(true)
+			expect(acceptsValue({ type: "integer" }, 7)).toBe(true)
+			expect(acceptsValue({ type: "integer" }, 1.5)).toBe(false)
+			// The integer now matches both alternatives, so the exactly-one
+			// rule of oneOf rejects it.
+			expect(acceptsValue({ oneOf: [{ type: "integer" }, { type: "number" }] }, 7)).toBe(false)
+			// A value neither alternative accepts stays rejected.
+			expect(acceptsValue({ oneOf: [{ type: "integer" }, { type: "number" }] }, "read")).toBe(false)
 		})
 
 		it("makes an optional enum property accept null while a declared required enum stays unchanged (mock, #547)", () => {
