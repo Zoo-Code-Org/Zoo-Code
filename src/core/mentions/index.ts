@@ -13,6 +13,7 @@ import { extractTextFromFileWithMetadata, type ExtractTextResult } from "../../i
 import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
 
+import { assembleFolderInline, type FolderInlineFileInput } from "./folderInlineBudget"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
@@ -324,7 +325,7 @@ async function getFileOrFolderContentWithMetadata(
 		} else if (stats.isDirectory()) {
 			const entries = await fs.readdir(absPath, { withFileTypes: true })
 			let folderListing = ""
-			const fileReadResults: string[] = []
+			const inlineInputs: FolderInlineFileInput[] = []
 			const LOCK_SYMBOL = "🔒"
 
 			for (let index = 0; index < entries.length; index++) {
@@ -347,16 +348,26 @@ async function getFileOrFolderContentWithMetadata(
 				if (entry.isFile()) {
 					folderListing += `${linePrefix}${displayName}\n`
 					if (!isIgnored) {
-						const filePath = path.join(mentionPath, entry.name)
+						const relPath = path.join(mentionPath, entry.name).toPosix()
 						const absoluteFilePath = path.resolve(absPath, entry.name)
 						try {
 							const isBinary = await isBinaryFile(absoluteFilePath).catch(() => false)
-							if (!isBinary) {
+							if (isBinary) {
+								inlineInputs.push({ relPath, extracted: null })
+							} else {
 								const result = await extractTextFromFileWithMetadata(absoluteFilePath)
-								fileReadResults.push(formatFileReadResult(filePath.toPosix(), result))
+								inlineInputs.push({
+									relPath,
+									extracted: {
+										content: result.content,
+										totalLines: result.totalLines,
+										returnedLines: result.returnedLines,
+									},
+								})
 							}
 						} catch {
-							// Skip files that can't be read
+							// The pointer note below keeps the file reachable.
+							inlineInputs.push({ relPath, extracted: null })
 						}
 					}
 				} else if (entry.isDirectory()) {
@@ -366,10 +377,28 @@ async function getFileOrFolderContentWithMetadata(
 				}
 			}
 
-			// Format folder content similar to read_file output
+			// The ledger caps what the block can add to the context, so a
+			// folder mention can never inflate the token count (issue #1539).
+			const ledger = assembleFolderInline(inlineInputs)
+
 			let content = `[read_file for folder '${mentionPath}']\nFolder listing:\n${folderListing}`
-			if (fileReadResults.length > 0) {
-				content += `\n\n--- File Contents ---\n\n${fileReadResults.join("\n\n")}`
+			if (ledger.included.length > 0) {
+				const sections = ledger.included.map((slice) => {
+					const body = slice.wasTruncated
+						? `${slice.content}[folder inline budget: showing ${slice.shownLines} of ${slice.totalLines} lines. Use the read_file tool on '${slice.relPath}' with offset=${slice.shownLines + 1} to read more.]`
+						: slice.content
+					return `[read_file for '${slice.relPath}']\nFile: ${slice.relPath}\n${body}`
+				})
+				content += `\n\n--- File Contents ---\n\n${sections.join("\n\n")}`
+			}
+			if (ledger.skipped.length > 0) {
+				const notes = ledger.skipped
+					.map(
+						(skip) =>
+							`- ${skip.relPath} — not inlined (${skip.reason === "budget" ? "folder budget reached" : "not readable"}). Use the read_file tool to read it.`,
+					)
+					.join("\n")
+				content += `\n\n--- Files not inlined ---\n${notes}`
 			}
 
 			return {
