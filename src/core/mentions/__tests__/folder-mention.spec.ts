@@ -17,6 +17,26 @@ vi.mock("../../../i18n", () => ({
 	t: vi.fn((key: string) => key),
 }))
 
+/**
+ * Paths the hoisted extractor mock below rejects with a read error. Kept on
+ * globalThis so the hoisted factory and the test body share one slot; unset
+ * means every file uses the real extractor.
+ */
+const readRejects = globalThis as unknown as { __folderMentionRejectedPaths?: Set<string> }
+
+vi.mock("../../../integrations/misc/extract-text", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("../../../integrations/misc/extract-text")>()
+	return {
+		...actual,
+		extractTextFromFileWithMetadata: async (filePath: string, limit?: number) => {
+			if (readRejects.__folderMentionRejectedPaths?.has(filePath)) {
+				throw new Error(`EACCES: permission denied, open '${filePath}'`)
+			}
+			return actual.extractTextFromFileWithMetadata(filePath, limit)
+		},
+	}
+})
+
 /** Writes a text file with `count` numbered, marker-prefixed lines. */
 async function writeLines(dir: string, name: string, count: number, marker: string): Promise<void> {
 	const lines = Array.from({ length: count }, (_, k) => `${marker}_LINE_${k + 1}`)
@@ -104,8 +124,46 @@ describe("parseMentions - folder mention inline budget", () => {
 		expect(block.content).toContain("index.html")
 		expect(block.content).toContain("HTML_LINE_1")
 		expect(block.content).not.toContain("CELL149_TAIL")
-		expect(block.content).toContain("Use the read_file tool on '")
-		expect(block.content).toContain("data.ipynb")
+		// The truncated notebook gets recovery guidance without an offset: the
+		// shown lines are extraction coordinates, and read_file slices raw
+		// lines, which for a notebook are not the same numbering.
+		expect(block.content).toContain("folder inline budget: showing 250 of")
+		expect(block.content).toContain("Use the read_file tool on 'web/data.ipynb' to read it directly.")
+		expect(block.content).not.toContain("offset=")
+	})
+
+	it("inlines a small folder fully with no budget notices", async () => {
+		const dir = await makeFolder(cwd, "tiny")
+		await writeLines(dir, "a.txt", 5, "AAA")
+		await writeLines(dir, "b.txt", 5, "BBB")
+
+		const result = await parseMentions("@/tiny/", cwd, undefined, allowAllController())
+		const block = result.contentBlocks[0]
+
+		// Every body appears in full.
+		expect(block.content).toContain("AAA_LINE_1")
+		expect(block.content).toContain("AAA_LINE_5")
+		expect(block.content).toContain("BBB_LINE_1")
+		expect(block.content).toContain("BBB_LINE_5")
+		// Nothing was skipped and nothing was truncated.
+		expect(block.content).not.toContain("Files not inlined")
+		expect(block.content).not.toContain("folder inline budget")
+	})
+
+	it("names the exact continuation offset when one file fills the block", async () => {
+		const dir = await makeFolder(cwd, "solo")
+		await writeLines(dir, "big.txt", 400, "BIG")
+
+		const result = await parseMentions("@/solo/", cwd, undefined, allowAllController())
+		const block = result.contentBlocks[0]
+
+		// 250 lines shown of the 401 the extractor reports (its count includes
+		// the trailing newline). The notice names the exact next raw line so
+		// the model can continue with read_file.
+		expect(block.content).toContain(
+			"[folder inline budget: showing 250 of 401 lines. Use the read_file tool on 'solo/big.txt' with offset=251 to read more.]",
+		)
+		expect(block.content).not.toContain("_LINE_251")
 	})
 
 	it("never inlines the content of an ignored file, even when told to show ignored files", async () => {
@@ -130,7 +188,11 @@ describe("parseMentions - folder mention inline budget", () => {
 		await writeLines(dir, "ok.txt", 10, "OK")
 		const locked = path.join(dir, "locked.txt")
 		await fs.writeFile(locked, "LOCKED_LINE_1\n", "utf8")
-		await fs.chmod(locked, 0o000)
+
+		// The extractor mock rejects only for locked.txt, so the error-
+		// recovery path runs deterministically on every platform and user;
+		// a chmod 0o000 does not block reads on Windows or as root.
+		readRejects.__folderMentionRejectedPaths = new Set([locked])
 
 		try {
 			const result = await parseMentions("@/guard/", cwd, undefined, allowAllController())
@@ -141,8 +203,69 @@ describe("parseMentions - folder mention inline budget", () => {
 			expect(block.content).toContain("not inlined (not readable)")
 			expect(block.content).toContain("Use the read_file tool to read it")
 		} finally {
-			await fs.chmod(locked, 0o644)
+			readRejects.__folderMentionRejectedPaths = undefined
 		}
+	})
+
+	it("lists a binary file as not inlined instead of dumping its bytes", async () => {
+		const dir = await makeFolder(cwd, "assets")
+		await fs.writeFile(
+			path.join(dir, "blob.bin"),
+			Buffer.concat([Buffer.from([0x00, 0x01, 0x02, 0xff, 0xfe]), Buffer.from("BINPAYLOAD", "utf8")]),
+		)
+		await writeLines(dir, "readme.txt", 5, "TXT")
+
+		const result = await parseMentions("@/assets/", cwd, undefined, allowAllController())
+		const block = result.contentBlocks[0]
+
+		expect(block.content).toContain("TXT_LINE_1")
+		// The binary file stays named and readable.
+		expect(block.content).toContain("--- Files not inlined ---")
+		expect(block.content).toContain("blob.bin")
+		expect(block.content).toContain("not inlined (not readable)")
+		expect(block.content).toContain("Use the read_file tool to read it")
+		// No binary content enters the block.
+		expect(block.content).not.toContain("BINPAYLOAD")
+	})
+
+	it("bounds a notebook whose one oversized source line would pass the line caps", async () => {
+		const dir = await makeFolder(cwd, "nb")
+		const cells = [
+			{
+				cell_type: "code",
+				source: [`${"H".repeat(2_000_000)} END_OF_HUGE\n`],
+				metadata: {},
+				outputs: [],
+				execution_count: null,
+			},
+			{
+				cell_type: "code",
+				source: ["TAIL_AFTER_HUGE\n"],
+				metadata: {},
+				outputs: [],
+				execution_count: null,
+			},
+		]
+		await fs.writeFile(
+			path.join(dir, "big.ipynb"),
+			JSON.stringify({ cells, metadata: {}, nbformat: 4, nbformat_minor: 2 }),
+			"utf8",
+		)
+		await writeLines(dir, "normal.txt", 10, "NORM")
+
+		const result = await parseMentions("@/nb/", cwd, undefined, allowAllController())
+		const block = result.contentBlocks[0]
+
+		// The oversized line passes both line caps as a single line; the
+		// character budget is what keeps the block bounded. No complete line
+		// of the notebook fits it, so the notebook is named, not dumped.
+		expect(block.content.length).toBeLessThan(20_000)
+		expect(block.content).toContain("big.ipynb")
+		expect(block.content).toContain("not inlined (folder budget reached)")
+		expect(block.content).not.toContain("END_OF_HUGE")
+		expect(block.content).not.toContain("TAIL_AFTER_HUGE")
+		// The plain neighbor file inlines in full.
+		expect(block.content).toContain("NORM_LINE_10")
 	})
 
 	it("keeps the directory listing when the budget skips everything", async () => {

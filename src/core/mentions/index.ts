@@ -9,17 +9,42 @@ import { mentionRegexGlobal, commandRegexGlobal, unescapeSpaces } from "../../sh
 import { getCommitInfo, getWorkingState } from "../../utils/git"
 
 import { openFile } from "../../integrations/misc/open-file"
-import { extractTextFromFileWithMetadata, type ExtractTextResult } from "../../integrations/misc/extract-text"
+import {
+	extractTextFromFileWithMetadata,
+	getSupportedBinaryFormats,
+	type ExtractTextResult,
+} from "../../integrations/misc/extract-text"
 import { diagnosticsToProblemsString } from "../../integrations/diagnostics"
 import { DEFAULT_LINE_LIMIT } from "../prompts/tools/native-tools/read_file"
 
-import { assembleFolderInline, type FolderInlineFileInput } from "./folderInlineBudget"
+import { assembleFolderInline, type FolderInlineFileInput, type FolderInlineFileSlice } from "./folderInlineBudget"
 import { FileContextTracker } from "../context-tracking/FileContextTracker"
 
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 import { getCommand, type Command } from "../../services/command/commands"
 import { buildSkillResult, resolveSkillContentForMode, type SkillLookup } from "../../services/skills/skillInvocation"
 import type { SkillContent } from "../../shared/skills"
+
+/**
+ * Extensions the extractor converts instead of reading raw. For these, the
+ * extracted line numbers are not the coordinates read_file slices by, so the
+ * recovery guidance must not advertise an offset.
+ */
+const EXTRACTED_FORMATS = new Set(getSupportedBinaryFormats())
+
+/**
+ * Recovery guidance for a truncated inline. Plain files keep the offset that
+ * continues the shown lines: read_file slices raw lines, and for a plain file
+ * the extracted lines are the raw lines. For an extractable format (.ipynb,
+ * .pdf, .docx, .xlsx) the extraction converts the file, so an offset would
+ * name the wrong lines; the guidance points at the file without one.
+ */
+function folderInlineRecoveryHint(slice: FolderInlineFileSlice): string {
+	const extractedFormat = EXTRACTED_FORMATS.has(path.extname(slice.relPath).toLowerCase())
+	return extractedFormat
+		? `Use the read_file tool on '${slice.relPath}' to read it directly.`
+		: `Use the read_file tool on '${slice.relPath}' with offset=${slice.shownLines + 1} to read more.`
+}
 
 export async function openMention(cwd: string, mention?: string): Promise<void> {
 	if (!mention) {
@@ -385,7 +410,7 @@ async function getFileOrFolderContentWithMetadata(
 			if (ledger.included.length > 0) {
 				const sections = ledger.included.map((slice) => {
 					const body = slice.wasTruncated
-						? `${slice.content}[folder inline budget: showing ${slice.shownLines} of ${slice.totalLines} lines. Use the read_file tool on '${slice.relPath}' with offset=${slice.shownLines + 1} to read more.]`
+						? `${slice.content}[folder inline budget: showing ${slice.shownLines} of ${slice.totalLines} lines. ${folderInlineRecoveryHint(slice)}]`
 						: slice.content
 					return `[read_file for '${slice.relPath}']\nFile: ${slice.relPath}\n${body}`
 				})

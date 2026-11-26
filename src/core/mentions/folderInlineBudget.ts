@@ -8,9 +8,12 @@
  * skipped. It never touches the filesystem and never parses file formats; the
  * caller hands it already-extracted text.
  *
- * Budget accounting is done on the lines that actually land in the context
- * block, so the block size - and therefore the token count - stays bounded and
- * predictable regardless of folder size or file format.
+ * Budget accounting is done on the lines and the characters that actually land
+ * in the context block, so the block size - and therefore the token count -
+ * stays bounded and predictable regardless of folder size or file format. The
+ * character budget exists because extraction does not cap line length: one
+ * notebook source line can carry millions of characters and would pass every
+ * line cap as a single line.
  */
 
 /** One candidate file with its already-extracted text (or null when unreadable). */
@@ -25,22 +28,29 @@ export interface FolderInlineFileInput {
 	} | null
 }
 
-/** Line budgets for one folder-mention block. */
+/** Line and character budgets for one folder-mention block. */
 export interface FolderInlineBudgetConfig {
 	/** Maximum extracted lines a single file may contribute. */
 	perFileLines: number
 	/** Maximum extracted lines all files together may contribute. */
 	totalLines: number
+	/** Maximum characters a single file may contribute. */
+	perFileChars: number
+	/** Maximum characters all files together may contribute. */
+	totalChars: number
 }
 
 /**
  * Default folder-mention budget. Chosen so a folder mention stays a compact
  * overview: small folders inline fully, large folders inline a bounded sample
- * and name the rest for read_file.
+ * and name the rest for read_file. The character budgets bound the content of
+ * few-line extractions whose lines are very long.
  */
 export const DEFAULT_FOLDER_INLINE_BUDGET: FolderInlineBudgetConfig = {
 	perFileLines: 250,
 	totalLines: 1000,
+	perFileChars: 25_000,
+	totalChars: 100_000,
 }
 
 /** Why a file's content is not in the block. */
@@ -100,12 +110,30 @@ function sliceRenderedLines(content: string, take: number): string {
 }
 
 /**
+ * Keeps at most `cap` characters of `content`, cut on a line boundary: the
+ * result holds only complete lines, so a source line longer than the cap is
+ * left out in full instead of entering the block in an arbitrary slice. The
+ * result is never longer than `cap`.
+ */
+function capRenderedChars(content: string, cap: number): string {
+	if (content.length <= cap) {
+		return content
+	}
+	const cut = content.slice(0, cap)
+	const lastNewline = cut.lastIndexOf("\n")
+	return lastNewline === -1 ? "" : cut.slice(0, lastNewline + 1)
+}
+
+/**
  * Applies the budget to an ordered list of candidate files.
  *
  * Files are processed in the given order; each file takes at most
- * `min(returnedLines, perFileLines, remaining)` lines, so the sum of shown
- * lines never exceeds `totalLines`. A file with no extraction is skipped as
- * `unreadable`; a file whose budget share is zero is skipped as `budget`.
+ * `min(returnedLines, perFileLines, remaining)` lines and at most
+ * `min(perFileChars, remainingChars)` characters, so the sums of shown lines
+ * and of shown characters never exceed the total budgets. Only the bounded
+ * content is accounted: a character cut reduces the lines a file is charged
+ * for. A file with no extraction is skipped as `unreadable`; a file whose
+ * bounded share is empty is skipped as `budget`.
  *
  * The same input always yields the same result: order is preserved and no
  * randomness or wall-clock data takes part.
@@ -116,7 +144,8 @@ export function assembleFolderInline(
 ): FolderInlineLedgerResult {
 	const included: FolderInlineFileSlice[] = []
 	const skipped: { relPath: string; reason: FolderInlineSkipReason }[] = []
-	let remaining = budget.totalLines
+	let remainingLines = budget.totalLines
+	let remainingChars = budget.totalChars
 
 	for (const file of files) {
 		if (!file.extracted) {
@@ -130,7 +159,6 @@ export function assembleFolderInline(
 		// .docx, .xlsx) return every extracted line with no cap of their own,
 		// so the ledger's caps are what bounds them.
 		const available = Math.min(file.extracted.returnedLines, countRenderedLines(file.extracted.content))
-		const take = Math.min(available, budget.perFileLines, remaining)
 
 		if (available <= 0) {
 			// Nothing to show (empty extraction); no budget is consumed and
@@ -146,19 +174,30 @@ export function assembleFolderInline(
 			continue
 		}
 
-		if (take <= 0) {
+		const take = Math.min(available, budget.perFileLines, remainingLines)
+		const rawSlice = take > 0 ? sliceRenderedLines(file.extracted.content, take) : ""
+		const charCap = Math.min(budget.perFileChars, remainingChars)
+		const bounded = capRenderedChars(rawSlice, charCap)
+		const shownLines = countRenderedLines(bounded)
+
+		if (take <= 0 || shownLines <= 0) {
+			// The line or the character share leaves no complete line to show.
+			// No budget is consumed; the pointer note keeps the file readable.
 			skipped.push({ relPath: file.relPath, reason: "budget" })
 			continue
 		}
 
 		included.push({
 			relPath: file.relPath,
-			content: sliceRenderedLines(file.extracted.content, take),
-			shownLines: take,
+			content: bounded,
+			shownLines,
 			totalLines: file.extracted.totalLines,
-			wasTruncated: take < file.extracted.totalLines,
+			// A cut in lines or in characters leaves extraction out; the
+			// caller turns this into the recovery note.
+			wasTruncated: bounded.length < file.extracted.content.length,
 		})
-		remaining -= take
+		remainingLines -= shownLines
+		remainingChars -= bounded.length
 	}
 
 	const totalShownLines = included.reduce((sum, slice) => sum + slice.shownLines, 0)
