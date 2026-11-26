@@ -47,6 +47,7 @@ import { forceFullModelDetailsLoad, hasLoadedFullDetails } from "../../../api/pr
 import { makeCompositeDisposable, makeEventEmitter } from "../../../test-utils/vscode"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 import { resolveChatProvider } from "../../../activate/resolveChatProvider"
+import { t } from "../../../i18n"
 
 // Mock setup must come before imports.
 vi.mock("../../prompts/sections/custom-instructions")
@@ -631,6 +632,111 @@ describe("ClineProvider", () => {
 
 	test("reports an unresolved webview as not visible", () => {
 		expect(provider.isViewVisible).toBe(false)
+	})
+
+	describe("manual context condensation", () => {
+		beforeEach(async () => {
+			vi.spyOn(await import("../../../i18n"), "t").mockImplementation((key) => key)
+		})
+
+		afterEach(() => {
+			vi.mocked(t).mockRestore()
+		})
+		// A partial Task double: condenseTaskContext reads only taskId, abort, abandoned, and condenseContext.
+		const registerTask = (
+			condenseContext: () => Promise<void>,
+			state: { abort?: boolean; abandoned?: boolean } = {},
+		) => {
+			const task = { taskId: "selected-task", abandoned: false, abort: false, condenseContext, ...state }
+			Object.assign(provider, { taskRegistry: new TaskRegistry() })
+			provider["taskRegistry"].push(task as unknown as Task)
+			return task
+		}
+		const expectResponse = (postMessage: ReturnType<typeof vi.spyOn>, taskId: string) =>
+			expect(postMessage).toHaveBeenCalledExactlyOnceWith({ type: "condenseTaskContextResponse", text: taskId })
+
+		it("responds and reports an unavailable task", async () => {
+			const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			Object.assign(provider, { taskRegistry: new TaskRegistry() })
+
+			await provider.condenseTaskContext("missing-task")
+
+			expectResponse(postMessage, "missing-task")
+			expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+				"common:errors.condense_task_unavailable",
+			)
+		})
+
+		it.each([new Error("summary request exploded"), "provider unavailable"])(
+			"responds and reports an unexpected throw: %s",
+			async (error) => {
+				const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+				registerTask(vi.fn().mockRejectedValue(error))
+
+				await provider.condenseTaskContext("selected-task")
+
+				expectResponse(postMessage, "selected-task")
+				expect(t).toHaveBeenCalledWith("common:errors.condense_failed_with_reason", {
+					reason: error instanceof Error ? error.message : error,
+				})
+				expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+					"common:errors.condense_failed_with_reason",
+				)
+			},
+		)
+
+		it.each(["success", "expected rejection"])("responds without a duplicate popup after %s", async (outcome) => {
+			const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const reported = vi.fn()
+			const condenseContext = vi.fn(async () => {
+				reported(outcome === "success" ? "condense_context" : "condense_context_error")
+			})
+			registerTask(condenseContext)
+
+			await provider.condenseTaskContext("selected-task")
+
+			expect(reported).toHaveBeenCalledExactlyOnceWith(
+				outcome === "success" ? "condense_context" : "condense_context_error",
+			)
+			expect(condenseContext).toHaveBeenCalledOnce()
+			expectResponse(postMessage, "selected-task")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it.each(["abort", "abandoned"] as const)("ends the wait without a popup after %s", async (state) => {
+			const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			const task = registerTask(vi.fn())
+			task.condenseContext = vi.fn(async () => {
+				task[state] = true
+				throw new Error("task selected-task aborted")
+			})
+
+			await provider.condenseTaskContext("selected-task")
+
+			expectResponse(postMessage, "selected-task")
+			expect(vscode.window.showErrorMessage).not.toHaveBeenCalled()
+		})
+
+		it("posts the response only after condensation settles", async () => {
+			const postMessage = vi.spyOn(provider, "postMessageToWebview").mockResolvedValue(undefined)
+			let settle: () => void = () => {}
+			registerTask(() => new Promise<void>((resolve) => (settle = resolve)))
+
+			const pending = provider.condenseTaskContext("selected-task")
+			await Promise.resolve()
+			expect(postMessage).not.toHaveBeenCalled()
+
+			settle()
+			await pending
+			expectResponse(postMessage, "selected-task")
+		})
+
+		it("does not reject when the final response cannot be posted", async () => {
+			vi.spyOn(provider, "postMessageToWebview").mockRejectedValue(new Error("webview disposed"))
+			registerTask(vi.fn().mockResolvedValue(undefined))
+
+			await expect(provider.condenseTaskContext("selected-task")).resolves.toBeUndefined()
+		})
 	})
 
 	describe("instance registry", () => {
@@ -3939,6 +4045,26 @@ describe("ClineProvider", () => {
 
 		// Should post state and theme to webview
 		expect(mockPostMessage).toHaveBeenCalled()
+	})
+
+	test("receives the launch message that the webview posts as soon as its HTML loads", async () => {
+		// The webview posts webviewDidLaunch when it mounts. VS Code drops a message
+		// that arrives before a listener exists, so the listener must exist first.
+		let launch: Promise<void> | undefined
+		Object.defineProperty(mockWebviewView.webview, "html", {
+			configurable: true,
+			get: () => "",
+			set: () => {
+				const listener = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls.at(-1)?.[0]
+				launch = listener?.({ type: "webviewDidLaunch" })
+			},
+		})
+
+		await provider.resolveWebviewView(mockWebviewView)
+
+		expect(launch).toBeDefined()
+		await launch
+		expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
 	})
 
 	test("logs detached workspace initialization failures", async () => {

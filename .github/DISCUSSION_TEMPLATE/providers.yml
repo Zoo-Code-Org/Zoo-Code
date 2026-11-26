@@ -22,10 +22,31 @@ body:
       validations:
           required: false
     - type: textarea
+      id: model-route-access
+      attributes:
+          label: How does the operator get access to each model route?
+          description: For each route, write if it uses a first-party, reseller, partner, or cloud-marketplace agreement. Note any route that uses a subscription or OAuth account.
+      validations:
+          required: false
+    - type: textarea
       id: prompt-handling
       attributes:
           label: What happens to prompts?
           description: Link to the privacy policy and the terms of service, if they exist.
+      validations:
+          required: false
+    - type: textarea
+      id: gateways-subprocessors
+      attributes:
+          label: Does any gateway provider or subprocessor handle prompts?
+          description: List each one, or its category and location. Do no-retention and no-training terms bind it?
+      validations:
+          required: false
+    - type: textarea
+      id: default-privacy-mode
+      attributes:
+          label: What can the operator or a supplier keep or train on in the default privacy mode?
+          description: If a request asks for a stricter mode and a supplier cannot support it, does the service reject the request?
       validations:
           required: false
     - type: textarea

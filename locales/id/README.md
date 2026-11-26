@@ -46,13 +46,13 @@ Zoo Code dikembangkan di atas fondasi yang dibuat oleh Roo Code dan terus memper
 - **Workflow terminal dan pengeditan yang lebih andal** — perbaikan untuk terminal yang selesai terlalu dini, race condition status task, pengelolaan konteks, pengeditan diff, dan penggunaan tool khusus provider.
 - **Kontrol lebih besar atas workspace kamu** — pengelolaan rules, pembatasan MCP per mode, kontrol path multi-root, opsi reasoning model, dan tindakan untuk meninjau perubahan saat selesai.
 
-## Yang baru di Zoo Code v3.98.1
+## Yang baru di Zoo Code v3.98.2
 
 - 💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 Model dan penalaran: Gunakan GPT-6.2 Sol, GPT-6.2 Astra, dan Claude Sonnet 5.5. Atur upaya penalaran untuk setiap profil LiteLLM.
-- 🛡️ Keamanan: Perbaikan penguraian metadata skill dan perintah, penanganan penyebutan, tautan penyedia, dan pemeriksaan persetujuan CLI.
-- 🔧 Perbaikan: Biaya tingkat layanan OpenAI, pengenalan tautan simbolis ruang kerja, dan lebih banyak teks UI yang diterjemahkan.
+- 🔌 Model: Gunakan Gemini 3.8 Flash dan model baru Gemini 4 Carbon, Hydrogen, dan Neon. Atur tingkat berpikir xhigh di Gemini.
+- 🌐 API Responses: Aktifkan dukungan API Responses untuk penyedia yang kompatibel dengan OpenAI. Penalaran dengan penggunaan tool berfungsi di endpoint yang memerlukannya.
+- 🔧 Perbaikan: Permintaan Gemini di Vertex tidak lagi berakhir pada giliran model. Signature berpikir Gemini tetap utuh melalui LiteLLM. Tugas Ollama memadat pada batas konteks yang dikonfigurasi.
 
 ## Apa yang Bisa Zoo Code Lakukan Untuk ANDA?
 

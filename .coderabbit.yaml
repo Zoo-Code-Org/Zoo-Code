@@ -1,9 +1,7 @@
 # yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
 language: en-US
 tone_instructions: >-
-    Be direct and evidence-first. Report only concrete, actionable findings grounded in changed code.
-    Prioritize correctness, security, data loss, lifecycle, and regressions; avoid speculative style
-    comments and unrelated refactors.
+    Use ASD-STE100 and the Writing Style rules in CONTRIBUTING.md. Use short sentences, plain words, and active voice. Preserve exact code, commands, logs, and errors. Report concrete defects. Put correctness and security first.
 
 chat:
     allow_non_org_members: true
@@ -46,123 +44,107 @@ reviews:
     path_instructions:
         - path: "**/*"
           instructions: >-
-              Act as an adversarial second-opinion reviewer. Verify PR claims against implementation and
-              contracts. Trace changed inputs through normal, boundary, error, cancellation, retry, and
-              default paths and their direct test counterparts. Do not flag defects in files not changed by
-              this PR unless the defect is directly triggered by changed code and cannot be detected in the
-              changed file alone. Seek plausible counterexamples and regressions from removed safeguards.
-              Identify assumptions in changed code that depend on facts outside the diff. First verify
-              repository conventions, tests, and related implementations. When a potential finding depends on
-              external behavior, use web search and prefer official documentation, specifications, or upstream
-              repositories. Report only concrete, actionable conflicts or failure modes, citing the relevant
-              repository location or external source. Prioritize correctness, security, data loss, lifecycle, and
-              test gaps. Do not report generic best practices, unsupported concerns, speculative style
-              comments, or unrelated refactors. When changed code introduces a local implementation of a
-              cross-cutting concern, check whether it bypasses or duplicates an established repository
-              abstraction or nearby convention. Report only a concrete inconsistency with behavioral or
-              maintenance impact, and allow intentional deviations. Treat the linked issue and this PR
-              description as the scope boundary. When a confirmed defect needs work beyond that boundary
-              and this PR does not create the hazard, do not request changes for it. List it once in the
-              walkthrough under follow-up candidates, with one line for the trigger.
+              Review each change as an independent reviewer. Check PR claims against the code and its contracts.
+              Trace changed inputs through normal, boundary, error, cancellation, retry, and default paths. Check their direct tests.
+              Report a defect in an unchanged file only when changed code triggers it. Also confirm that the changed file alone cannot reveal it.
+              Look for inputs that break assumptions or guards removed by the change.
+              First check repository rules, tests, and related code. Verify assumptions that depend on facts outside the diff.
+              For external behavior, use web search. Prefer official documentation, specifications, and upstream repositories.
+              Report only concrete defects or conflicts that the author can fix. Cite the code or external source.
+              Give correctness, security, data loss, lifecycle defects, and test gaps priority.
+              Do not report generic advice, unsupported concerns, style preferences, or unrelated code changes.
+              When new code handles a concern shared across modules, check the existing helpers and rules.
+              Report a difference only when it affects behavior or maintenance. Allow deliberate differences.
+              Use the linked issue and current PR description to determine scope.
+              Include specs and TLC configs required by docs/architecture/tla/AGENTS.md when they model behavior changed by this PR.
+              Keep these files with the implementation. Do not call them unrelated work only because they are specs.
+              Still flag unrelated files. Resolve explicit scope conflicts using repository policy and the current issue and PR description.
+              For an existing defect outside this scope, do not request changes unless this PR creates the risk.
+              List it once under follow-up candidates in the walkthrough. State the trigger in one line.
+              Write review comments, summaries, walkthroughs, and replies in Simplified Technical English (ASD-STE100).
+              Follow the Writing Style rules in CONTRIBUTING.md. Use plain words, active voice, and one idea per sentence.
+              Use 20 words or fewer for an instruction. Do not use contractions, semicolons, or em dashes.
+              Keep exact code, logs, error messages, identifiers, commands, and reproduction evidence unchanged.
+              Use these as writing rules. Do not claim formal ASD-STE100 compliance.
 
         - path: "**/*.{ts,tsx,js,jsx,mts,mjs,cts,cjs}"
           instructions: >-
-              Check strict typing and exhaustive behavior across normal, boundary, error,
-              cancellation, retry, and compatibility paths. Verify promises and errors are handled,
-              existing helpers are reused, and new code introduces no `any`, unjustified double
-              assertions, floating promises, duplicated helpers, or increased lint suppressions.
-              When a refactor adds early-return guards that redirect a subset of inputs to a new
-              code path, confirm the old branches for those inputs are removed or unreachable.
+              Check types and behavior for normal, boundary, error, cancellation, retry, and compatibility cases.
+              Check that code handles promises and errors and uses existing helpers.
+              Flag new `any` types, double assertions without a reason, unhandled promises, repeated helpers, and increased lint suppressions.
+              When an early return handles an input, confirm that old branches for that input are removed or unreachable.
 
         - path: "{**/*.{test,spec}.{ts,tsx,js,jsx},**/__tests__/**}"
           instructions: >-
-              Require regression coverage at the lowest valid harness with behavior-focused
-              assertions, including relevant negative, error, false/unset, and boundary cases.
-              Check cleanup and deterministic async behavior and prefer shared typed test helpers.
-              For guards and validators, require tests for both the accept path and the reject path
-              through every public entry point; a reject-only matrix cannot catch a guard that rejects
-              good input.
-              Visible webview changes require a durable Playwright component snapshot; behavior-only
-              changes do not.
-              Reject weak assertions on values that could take multiple forms: .toBeDefined() or
-              .toHaveBeenCalled() alone are not sufficient when the actual type, value, or object
-              identity is verifiable. For listener registration and removal, assert the same function
-              reference was added and removed (not expect.any(Function)).
-              Flag tests that assert in-flight behavior only after the call completes — these cannot
-              prove the behavior fires during execution. Check that describe block names match the
-              actual subjects of the tests they contain.
-              For tests that assert only mock call counts, confirm a corresponding return-value
-              assertion exists; a regression that silently returns stale fallback data can satisfy
-              a call-count check. For code with fallback behavior, verify both the cold-start case
-              (no prior state) and the warm case (prior state exists) are covered, as they exercise
-              different branches.
-              A test double must not re-implement production logic. If a mock, stub, or inline helper
-              copies a predicate, filter, sort, or transform that also exists in production code, a
-              change to the production copy cannot fail the test. Bind the real function instead, for
-              example with `vi.importActual` or `vi.spyOn`, and replace only the external boundary
-              (network, filesystem, VS Code API).
-              For code that filters, groups, reorders, or deduplicates a collection, require a test
-              with mixed input, such as interleaved item types and repeated items, that asserts the
-              full output array. A test that uses only one item type cannot fail when the production
-              predicate becomes narrower. Ask for the case that fails when the predicate covers a
-              subset of the intended items.
-              When Stryker reports a surviving mutant on changed code, prefer a test that kills it.
-              If the mutant is equivalent, prefer to delete the redundant branch before adding a
-              `Stryker disable` comment.
+              Require regression tests at the lowest test layer that can show the behavior.
+              Include relevant negative, error, false, unset, and boundary cases. Check cleanup and repeatable behavior in async tests.
+              Prefer shared test helpers with precise types.
+              For each public guard or validator, require tests that accept good input and reject bad input.
+              A test that only rejects bad input can pass when the guard rejects all input.
+              Require a saved Playwright component snapshot for a visible webview change. Do not require one for behavior alone.
+              Do not accept .toBeDefined() or .toHaveBeenCalled() alone when tests can check the exact type, value, or identity.
+              For listener removal, assert that code removes the same function that it registered. Do not use expect.any(Function) for this check.
+              A test must check behavior during a pending call before that call completes.
+              Check that each describe block names the subject that it tests.
+              When a test checks only mock call counts, look for a related return-value assertion.
+              Call counts alone can pass when code returns stale fallback data.
+              For fallback behavior, check both the case without prior state and the case with prior state.
+              A test double must not copy production logic. Check mocks, stubs, and helpers for repeated predicates, filters, sorts, and transforms.
+              Use the real function through vi.importActual or vi.spyOn. Replace only external services, filesystem access, or VS Code APIs.
+              For collection filters, groups, ordering, and duplicate removal, require mixed input and an assertion on the full output array.
+              Use interleaved types and repeated items when relevant. One item type cannot reveal a predicate that covers too few types.
+              When Stryker reports a surviving mutant in changed code, prefer a test that detects it.
+              For an equivalent mutant, prefer removal of the redundant branch before a Stryker disable comment.
 
         - path: "apps/vscode-e2e/**"
           instructions: >-
-              Reserve end-to-end coverage for behavior that requires the real VS Code host, workspace
-              APIs, extension activation, webview messaging, file watchers, or a full workflow. Keep
-              detailed protocol, parsing, storage, retry, and edge cases at lower test layers.
+              Use end-to-end tests only when the behavior needs the real VS Code host or a full workflow.
+              Examples include workspace APIs, extension activation, webview messages, and file watchers.
+              Keep detailed protocol, parsing, storage, retry, and edge-case tests at lower test layers.
 
         - path: "{packages/types/src/**,webview-ui/src/components/settings/**,src/core/config/**,src/core/webview/**}"
           instructions: >-
-              For persisted settings, verify the complete schema/storage/runtime/webview round trip,
-              shared default semantics, and focused true plus false/unset tests. SettingsView controls
-              must read and update local `cachedState`, include the value in the explicit save payload,
-              and receive the persisted value back from extension state.
+              For saved settings, trace the schema, storage, runtime, and webview in both directions.
+              Check that consumers use the same defaults. Require focused tests for true, false, and unset values.
+              SettingsView controls must read and update local cachedState. Include each setting in the explicit save payload.
+              Return each saved value in extension state so the control shows it after saving.
 
         - path: "src/**"
           instructions: >-
-              Verify extension/webview contracts, cancellation and error propagation, VS Code
-              lifecycle correctness, and behavior under retries and partial failure. Check listeners,
-              resources, and providers are disposed without stale state or duplicate work.
+              Check extension and webview contracts, cancellation, error propagation, and the VS Code lifecycle.
+              Check retries and partial failures. Confirm that code disposes of listeners, resources, and providers without stale state or duplicate work.
 
         - path: "webview-ui/**"
           instructions: >-
-              Check React state and effect dependencies, cleanup, accessibility, i18n, and light/dark
-              theme behavior. New markup should use Tailwind; add VS Code CSS variables to
-              `src/index.css` before Tailwind use. Use Vitest for behavior and Playwright component
-              snapshots only for durable visible changes.
+              Check React state, effect dependencies, cleanup, accessibility, translations, and light and dark themes.
+              Use Tailwind for new markup. Add VS Code CSS variables to src/index.css before using them with Tailwind.
+              Use Vitest for behavior tests. Use Playwright component snapshots for visible states that need saved regression coverage.
 
         - path: "{src/api/**,src/core/prompts/**,src/core/tools/**,src/services/mcp/**,src/services/destructive-command-guard/**}"
           instructions: >-
-              Treat model, provider, MCP, path, command, and tool data as untrusted. Check approval and
-              allowlist bypasses, injection and traversal risks, secrets/PII exposure in logs, abort and
-              stream behavior, retries, provider compatibility, and enforcement at execution time—not
-              only at presentation or planning time.
+              Treat model, provider, MCP, path, command, and tool data as untrusted input.
+              Check for approval bypasses, allowlist bypasses, injection, path traversal, and secrets or personal data in logs.
+              Check cancellation, streaming, retries, and provider compatibility. Enforce restrictions when code runs, not only during display or planning.
 
         - path: "{src/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**,packages/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**,webview-ui/src/**/{state,history,task,tasks,service,services,cache,caches,worktree,worktrees}/**}"
           instructions: >-
-              Check persistence and lifecycle invariants: awaited atomic writes, rollback or explicit
-              partial-failure behavior, cross-window state consistency, stale listeners/watchers,
-              cancellation, idempotency, and safe restart/resume without lost or duplicated state.
-              For async functions that read shared mutable state before an `await` and write it back
-              after, verify the captured reference is still valid when the write executes; a concurrent
-              mutation during the await can cause a stale snapshot to overwrite a newer state.
+              Check saved state and lifecycle rules. Check awaited atomic writes, rollback, shared state across windows, cancellation, and safe restart and resume.
+              If rollback is unavailable, require code to handle partial failure explicitly.
+              Check that repeated operations do not duplicate work. Check for stale listeners and watchers.
+              Check that restart and resume do not lose or duplicate saved state.
+              When code reads shared mutable state before await, check the reference again before writing after await.
+              Another operation can replace that state during the wait. The old reference can then overwrite newer data.
 
         - path: ".github/**"
           instructions: >-
-              Require full commit SHA pins, least-privilege permissions, safe expression and shell
-              interpolation, and trusted metadata handling. Privileged workflows must never check out,
-              execute, install from, or otherwise trust a fork PR head.
+              Require full commit SHA pins, minimum permissions, safe expression and shell substitution, and trusted metadata handling.
+              Privileged workflows must never check out, run, install from, or trust code from a fork PR branch.
 
         - path: "{AGENTS.md,**/AGENTS.md,CONTRIBUTING.md,.changeset/**,CHANGELOG.md,src/CHANGELOG.md}"
           instructions: >-
-              Enforce repository policy: routine PRs must not add changesets or edit changelogs except
-              during release preparation. Verify documentation describes real behavior and contracts,
-              and deprioritize prose-only nits that do not affect correctness or usability.
+              Enforce repository policy. Routine PRs must not add changesets or edit changelogs outside release preparation.
+              Check that documentation describes real behavior and contracts.
+              Give prose preferences low priority unless they affect correctness or usability.
 
     finishing_touches:
         docstrings:
@@ -182,32 +164,33 @@ reviews:
             - name: Regression evidence
               mode: warning
               instructions: >-
-                  Fail only when a concrete changed behavior lacks focused coverage at the lowest valid
-                  test layer, tests merely mirror implementation, an affected error/negative/unset branch
-                  is omitted, or a durable visible UI change lacks its required Playwright component
-                  snapshot. Do not demand tests for unchanged behavior, mechanical configuration, or every
-                  branch without a plausible regression scenario. Cite the changed behavior and missing
-                  evidence.
+                  Fail only when changed behavior has a concrete test gap at the lowest valid test layer.
+                  Examples include tests that copy the implementation and missing relevant negative, error, or unset cases.
+                  Also check for missing required snapshots for visible UI changes.
+                  Do not demand tests for unchanged behavior or mechanical configuration changes.
+                  Do not demand coverage of a branch without a plausible regression case.
+                  Cite the changed behavior and the missing evidence.
             - name: Security boundaries
               mode: error
               instructions: >-
-                  Fail only when a concrete changed path leaks secrets or PII, trusts or executes
-                  unvalidated input, or bypasses approval or allowlist controls. Cite the changed path
-                  and a plausible triggering scenario; pass when no such changed path exists.
+                  Fail only for a concrete defect in a changed path.
+                  Check for exposed secrets or personal data, trusted or executed unvalidated input, and bypassed approval or allowlist controls.
+                  Cite the changed path and an input or event that can trigger the defect.
+                  Pass when no changed path has such a defect.
             - name: Persistence integrity
               mode: error
               instructions: >-
-                  Fail only when a concrete changed persistence path can lose or corrupt state because an
-                  operation is not awaited, a write is non-atomic, rollback or explicit partial-failure
-                  behavior is missing, or a persisted default is not propagated to a consumer. Cite the
-                  changed path and a plausible triggering scenario; pass when no such changed path exists.
+                  Fail only when a changed persistence path can lose or corrupt state.
+                  Check for writes without await, non-atomic writes, missing rollback or partial-failure handling, and defaults that do not reach consumers.
+                  Cite the changed path and an input or event that can trigger the defect.
+                  Pass when no changed path has such a defect.
             - name: Lifecycle resource cleanup
               mode: warning
               instructions: >-
-                  Fail only when a concrete changed lifecycle path can leak a listener, watcher, provider,
-                  timer, task, or other resource, or can duplicate work after cancellation, disposal, or
-                  restart. Cite the changed path and a plausible triggering scenario; pass when no such
-                  changed path exists.
+                  Fail only when a changed lifecycle path can leak a listener, watcher, provider, timer, task, or other resource.
+                  Also check for duplicate work after cancellation, disposal, or restart.
+                  Cite the changed path and an input or event that can trigger the defect.
+                  Pass when no changed path has such a defect.
 
     tools:
         eslint:

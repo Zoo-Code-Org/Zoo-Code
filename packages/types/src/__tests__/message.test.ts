@@ -36,6 +36,25 @@ describe("clineMessageSchema autoApprovalDecision", () => {
 	})
 })
 
+describe("clineMessageSchema instruction refresh warning", () => {
+	it("preserves source paths and error codes in warning text", () => {
+		const message: ClineMessage = {
+			ts: 1,
+			type: "say",
+			say: "instruction_refresh_warning",
+			text: "/workspace/.roorules (EACCES)\n/workspace/AGENTS.md (UNKNOWN)",
+		}
+
+		expect(clineMessageSchema.parse(message)).toEqual(message)
+	})
+
+	it("rejects an unknown warning type", () => {
+		expect(
+			clineMessageSchema.safeParse({ ts: 1, type: "say", say: "instruction_refresh_warning_unknown" }).success,
+		).toBe(false)
+	})
+})
+
 describe("getCompletionCheckpoint", () => {
 	it("returns the first checkpoint after the latest user prompt before completion", () => {
 		const messages: ClineMessage[] = [

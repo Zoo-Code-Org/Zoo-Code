@@ -106,7 +106,8 @@ export async function run(): Promise<void> {
 			lastShownAnnouncementId: api.getLatestAnnouncementId(),
 			openRouterApiKey: "mock-key",
 			openRouterModelId: "openai/gpt-4.1",
-			openRouterBaseUrl: `${aimockUrl}/v1`,
+			// AIMock's OpenRouter route returns streaming usage without stream_options.include_usage.
+			openRouterBaseUrl: `${aimockUrl}/api/v1`,
 			telemetrySetting: "disabled",
 			// A generated title lands asynchronously and would race the task header screenshot.
 			taskTitleGenerationEnabled: false,

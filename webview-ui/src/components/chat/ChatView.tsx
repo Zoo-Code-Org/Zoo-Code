@@ -70,6 +70,7 @@ import { QueuedMessages } from "./QueuedMessages"
 import { WorktreeSelector } from "./WorktreeSelector"
 import FileChangesPanel from "./FileChangesPanel"
 import { useScrollLifecycle } from "@src/hooks/useScrollLifecycle"
+import { isMessageForCurrentTask, useManualCondenseWait } from "./hooks/useManualCondenseWait"
 
 export interface ChatViewProps {
 	isHidden: boolean
@@ -188,7 +189,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	const [inputValue, setInputValue] = useState("")
 	const inputValueRef = useRef(inputValue)
 	const textAreaRef = useRef<HTMLTextAreaElement>(null)
-	const [sendingDisabled, setSendingDisabled] = useState(false)
+	const [baseSendingDisabled, setSendingDisabled] = useState(false)
+	// The manual-condense wait is kept apart so ending it never lifts another operation's restriction.
+	const {
+		waitingTaskId: manualCondenseTaskId,
+		startWait: startManualCondenseWait,
+		finishWait: finishManualCondenseWait,
+	} = useManualCondenseWait(currentTaskId)
+	const sendingDisabled = baseSendingDisabled || manualCondenseTaskId !== undefined
 	const [selectedImages, setSelectedImages] = useState<string[]>([])
 
 	// We need to hold on to the ask because useEffect > lastMessage will always
@@ -1024,23 +1032,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "condenseTaskContextStarted":
-					// Handle both manual and automatic condensation start
-					// We don't check the task ID because:
-					// 1. There can only be one active task at a time
-					// 2. Task switching resets isCondensing to false (see useEffect with currentTaskId dependency)
-					// 3. For new tasks, currentTaskItem may not be populated yet due to async state updates
-					if (message.text) {
+					// Automatic condensation shows progress but never sets the manual wait.
+					if (isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
 						setIsCondensing(true)
-						// Note: sendingDisabled is only set for manual condensation via handleCondenseContext
-						// Automatic condensation doesn't disable sending since the task is already running
 					}
 					break
 				case "condenseTaskContextResponse":
-					// Same reasoning as above - we trust this is for the current task
-					if (message.text) {
-						if (isCondensing && sendingDisabled) {
-							setSendingDisabled(false)
-						}
+					if (message.text && isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
+						finishManualCondenseWait(message.text)
 						setIsCondensing(false)
 					}
 					break
@@ -1061,7 +1060,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			// not using its value but its reference.
 		},
 		[
-			isCondensing,
+			finishManualCondenseWait,
 			isHidden,
 			sendingDisabled,
 			enableButtons,
@@ -1726,7 +1725,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			return
 		}
 		setIsCondensing(true)
-		setSendingDisabled(true)
+		startManualCondenseWait(taskId)
 		vscode.postMessage({ type: "condenseTaskContextRequest", text: taskId })
 	}
 

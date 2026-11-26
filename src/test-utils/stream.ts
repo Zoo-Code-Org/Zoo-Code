@@ -11,3 +11,7 @@ export async function collectStream<T>(stream: AsyncIterable<T>): Promise<T[]> {
 	}
 	return chunks
 }
+
+export function sseResponse(body: string): Response {
+	return new Response(body, { headers: { "content-type": "text/event-stream" } })
+}

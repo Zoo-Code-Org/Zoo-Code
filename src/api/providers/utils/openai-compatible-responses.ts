@@ -11,6 +11,7 @@ import {
 	sanitizeIdentifierSurrogates,
 } from "../../transform/sanitize-surrogates"
 import { truncateOpenAiCallId } from "../../../utils/tool-id"
+import { resolveOpenAiCompatibleMaxTokens } from "./openai-compatible-max-tokens"
 
 type ResponsesRequestInput = {
 	options: Readonly<ApiHandlerOptions>
@@ -88,10 +89,9 @@ export function buildResponsesRequest({
 		if (String(reasoning.reasoning_effort) !== "none") requestBody.include = ["reasoning.encrypted_content"]
 	}
 
-	// Mirror the Chat Completions max-tokens policy: only cap output when the
-	// user opted in via includeMaxTokens.
-	const maxTokens = options.modelMaxTokens || modelInfo.maxTokens
-	if (options.includeMaxTokens === true && maxTokens !== undefined) {
+	// Same policy as Chat Completions: see resolveOpenAiCompatibleMaxTokens().
+	const maxTokens = resolveOpenAiCompatibleMaxTokens(options, modelInfo)
+	if (maxTokens !== undefined) {
 		requestBody.max_output_tokens = maxTokens
 	}
 

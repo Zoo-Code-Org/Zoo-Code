@@ -1,0 +1,112 @@
+---- MODULE CodeIndexWatcher ----
+\* Sources: FileWatcher.scheduleBatchProcessing and triggerBatchProcessing; batch results are an oracle.
+\* Sinks: processBatch finish/progress events and CodeIndexOrchestrator._startWatcher listeners.
+\* Failure: work starts after the breaker trips. Invariant: NoStartAfterTrip.
+\* Review ratchet: a tripped watcher must show Error. Invariant: TripIsVisible.
+\* PR 2329, https://github.com/Zoo-Code-Org/Zoo-Code/pull/2329#discussion_r4485895183: added.
+\* Expect: the old summary leaves Indexed on trip. Late progress must not clear Error.
+\* Initial rules were recorded before review. The prior rebase exposed the fix summary: this spec is retrospective.
+\* Scope: sequential batch results and arbitrary progress events. Providers and file results are oracles.
+\* Recovery source: CodeIndexManager.recoverFromError; sink: CodeIndexOrchestrator.stopWatcher.
+\* Failure: recovery loses a live watcher. Invariant: RecoveryDisposes.
+\* Expect: recovery without disposal leaks after a trip. Overlapping work and cancellation remain outside scope.
+\* PR 2329, https://github.com/Zoo-Code-Org/Zoo-Code/pull/2329#discussion_r4638535661: added.
+\* Prior result: fixed passes (9 states). All eleven sabotage configs fail. No additional failure was found.
+\* Variant states: SingleEmbedding 3, Local 3, Delete 4, Silent 8, StaleCount 8, Unreported 8, Leaked 10, Queued 10, Unguarded 10, Idle 6, Skipped 4.
+\* Replay: watcher-boundary.property.spec.ts failed on 20 of 64 histories before the summary fix; all 64 now pass.
+\* Sabotage replay: silent summary, removed admission guards, and removed progress latch each fail test assertions.
+\* Prior recovery tests checked call counts. Review found that recovery could swallow their ordering assertion.
+\* Recovery replay now records the owner during stop and checks it after await. Moving clear before stop fails.
+\* Replay: stat, read, and parse errors each tripped after three single-file batches before the fix. They no longer trip.
+\* Replay: the old code omitted the trip event. The new test failed before emission was added.
+\* Scope: disposal is an oracle. Tests check the call before the manager clears the owner.
+\* Prior cost: two model files, ten configs, 689 batch histories, and focused boundary tests. Each TLC run took under 1 second.
+\* Review cost: five new configs, 256 new histories, and seven runtime sabotages. Agent time is not measured.
+\* Gate: TLA_JAR=<jar> ./check.sh CodeIndexWatcherMC. Review counts: covered 1, added 9, gap 4.
+\* Review round: PR 2329, user-supplied Code Review Summary, findings 1-8. No thread URL was supplied.
+\* Expected: local failures must not count; delete-only failures must count; each trip sends one event.
+\* Expected: an open watcher drops queued events; restart clears the failure count.
+\* Sources: FilePreparation.prepareFile, FileWatcher.processBatch, scheduleBatchProcessing, and initialize.
+\* Sinks: the breaker flag, pending events, and CODE_INDEX_ERROR with errorType circuit_breaker_open.
+\* Ratchet: 1, 4, 5, 6 added; 8 covered by TripIsVisible and the real watcher-to-orchestrator test.
+\* Gap 2: PR structure is outside the runtime model. The user chose to keep one PR.
+\* Gap 3: the model cannot check swallowed test assertions or disposal exceptions. Tests cover both paths.
+\* Gap 7 is recorded in TelemetryBoundary. This review preceded the new invariants.
+\* Runtime sabotages fail: local classification, delete clause, queue clear, counter reset, recovery order,
+\* progress latch, and embedding-source tag. A stop exception is logged; recovery clears references and releases its guard.
+\* Test scope: disposal exceptions can leave native resources. The model does not claim cleanup after a thrown disposal.
+\* Follow-up review: a single rejected embedding must not count as a workspace failure.
+\* Expect: three single-file embedding failures trip the old code. Two-file embedding failures still count.
+\* The embedding oracle now distinguishes one attempted file from two. Delete-only batches still count at size one.
+\* Replay: the real single-file embedding test failed on the old guard and passes with the two-file minimum.
+\* Result: fixed still has 9 states; SingleEmbedding fails at 3 states. No additional failure was found.
+\* Cost: one new config and 369 additional histories. Privacy line wrapping is outside this model.
+\* Prior simplification used one conditional expression. Runtime flags remain because the model excludes overlap.
+\* Incremental review at 12cd1c66f2: PR 2329, user-supplied summary, no thread URL.
+\* Expect: skipped files must not mask two failed embedding attempts. Idle batches must preserve the count.
+\* Failure: a skipped file hides an outage, or an idle batch resets outage evidence. Invariant: CorrectFailureSource.
+\* Ratchet: findings 1 and 2 added through mixed and idle input rules. Finding 3 is a prose gap.
+\* Finding 4 remains a scope gap. The user chose one PR. No new invariant preceded this supplied review.
+\* Source: FilePreparation.prepareFile embeddingOutcome; sink: FileWatcher.processBatch failure counter.
+\* Incremental result: fixed passes at 9 states. All eleven sabotage configs fail; no additional bug was found.
+\* Skipped sabotage: 4 states. Idle-reset sabotage: 6 states. Both real-code regressions failed before the fix.
+\* Replay: local-as-embedding, every-to-some, and idle-reset runtime mutations each fail focused tests.
+\* Cost: two new configs and 3,471 more histories (4,160 total). No new state variable. Agent time is not measured.
+\* Incremental ratchet: added 2, gap 2. PR prose and the optional split are outside the runtime model.
+\* Review at 3b368b8d: PR 2329, user-supplied summary, no thread URL. Ratchet: covered 0, added 0, gap 4.
+\* Expect: a point error after embedding success must preserve that success in the returned local error.
+\* Failure: FilePreparation.prepareFile loses embeddingOutcome before FileWatcher.processBatch reads it.
+\* Invariant sentence: a later local error preserves the completed embedding outcome.
+\* Gap 1: file results are oracles here. The real-code property checks three point errors on both path platforms.
+\* Gap 2: the variant count is model metadata. The header now lists all eleven variants.
+\* Gaps 3 and 4: PR prose and the optional split are outside the runtime model. Keep one PR for issue 830.
+\* Result: fixed passes at 9 states; all eleven variants fail. The spread sabotage fails all six new test cases.
+\* Cost: six real-code cases and one header update. No new model state. No additional bug was found.
+\* Simplification: processBatch owns the file list; _processFilesAndPrepareUpserts reads it without a full copy.
+\* Expect: removing the copy preserves batch results. The caller finishes the list before awaiting processing.
+\* The parameter is ReadonlyArray. Array ownership is outside this model; no transition or invariant changes.
+\* Result: fixed passes at 9 states; all eleven variants fail. Focused runtime tests pass; no new bug was found.
+\* Cost: one runtime edit and this header entry. No new model state or tests.
+EXTENDS Naturals
+CONSTANTS Threshold, Guard, Visible, DisposeOnRecovery,
+          CountLocal, CountDelete, ReportTrip, ClearQueue, ResetFailures, CountSingleEmbedding, IgnoreSkipped, ResetIdle
+VARIABLES failures, open, ui, badStart, leaked, badClassification, queued, fresh, tripEvents
+vars == <<failures, open, ui, badStart, leaked, badClassification, queued, fresh, tripEvents>>
+Kinds == {"success", "local", "singleEmbedding", "embedding", "delete", "embeddingSkipped", "idle", "mixed"}
+ServiceFailure(kind) == kind \in {"embedding", "embeddingSkipped", "delete"}
+CountsAsFailure(kind) == kind = "embedding" \/ (kind = "embeddingSkipped" /\ IgnoreSkipped) \/ (kind = "delete" /\ CountDelete)
+                        \/ (kind = "local" /\ CountLocal) \/ (kind = "singleEmbedding" /\ CountSingleEmbedding)
+Init == /\ failures = 0 /\ open = FALSE /\ ui = "Indexed" /\ badStart = FALSE /\ leaked = FALSE
+        /\ badClassification = FALSE /\ queued = FALSE /\ fresh = TRUE /\ tripEvents = 0
+Batch(kind) ==
+    /\ (~open \/ ~Guard)
+    /\ failures' = IF CountsAsFailure(kind) THEN IF failures < Threshold THEN failures + 1 ELSE Threshold
+                  ELSE IF kind \in {"idle", "local"} /\ ~ResetIdle THEN failures ELSE 0
+    /\ open' = (open \/ failures' >= Threshold)
+    /\ ui' = IF Visible /\ open' THEN "Error" ELSE "Indexed"
+    /\ badStart' = (badStart \/ open)
+    /\ badClassification' = (badClassification \/ (CountsAsFailure(kind) # ServiceFailure(kind))
+                                  \/ (kind \in {"idle", "local"} /\ ~CountsAsFailure(kind) /\ failures' # failures))
+    /\ tripEvents' = IF ~open /\ open' /\ ReportTrip THEN tripEvents + 1 ELSE tripEvents
+    /\ queued' = FALSE /\ fresh' = FALSE
+    /\ UNCHANGED leaked
+Queue == /\ queued' = IF open /\ ClearQueue THEN FALSE ELSE TRUE
+         /\ UNCHANGED <<failures, open, ui, badStart, leaked, badClassification, fresh, tripEvents>>
+Progress ==
+    /\ ui' = IF Visible /\ open THEN ui ELSE "Indexed"
+    /\ UNCHANGED <<failures, open, badStart, leaked, badClassification, queued, fresh, tripEvents>>
+Restart == /\ failures' = IF ResetFailures THEN 0 ELSE failures
+           /\ open' = FALSE /\ ui' = "Indexed" /\ badStart' = FALSE
+           /\ leaked' = (leaked \/ (open /\ ~DisposeOnRecovery))
+           /\ queued' = FALSE /\ fresh' = TRUE /\ tripEvents' = 0
+           /\ UNCHANGED badClassification
+Next == (\E kind \in Kinds: Batch(kind)) \/ Queue \/ Progress \/ Restart
+Spec == Init /\ [][Next]_vars
+NoStartAfterTrip == ~badStart
+TripIsVisible == open => ui = "Error"
+RecoveryDisposes == ~leaked
+CorrectFailureSource == ~badClassification
+OpenQueueEmpty == open => ~queued
+RestartIsFresh == fresh => failures = 0
+TripIsReported == tripEvents = (IF open THEN 1 ELSE 0)
+====

@@ -85,7 +85,7 @@ import {
 	type TaskExecutionContext,
 } from "../task/providerHandoff"
 import { aggregateTaskCostsRecursive, type AggregatedCosts } from "./aggregateTaskCosts"
-import { TelemetryService } from "@roo-code/telemetry"
+import { TelemetryService, hashDistinctId } from "@roo-code/telemetry"
 import { CloudService, getRooCodeApiUrl } from "@roo-code/cloud"
 
 import { Package } from "../../shared/package"
@@ -421,7 +421,7 @@ export class ClineProvider
 
 	public isViewLaunched = false
 	public settingsImportedAt?: number
-	public readonly latestAnnouncementId = "nov-2026-v3.98.1-pass-models-security" // v3.98.1 Zoo Pass, model support, and security
+	public readonly latestAnnouncementId = "nov-2026-v3.98.2-pass-gemini-responses-fixes" // v3.98.2 Zoo Pass, Gemini models, Responses API, and provider fixes
 	public readonly providerSettingsManager: ProviderSettingsManager
 	public readonly customModesManager: CustomModesManager
 
@@ -1288,8 +1288,6 @@ export class ClineProvider
 			return
 		}
 
-		webviewView.webview.html = html
-
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
 		await this.getState().then(
@@ -1322,14 +1320,18 @@ export class ClineProvider
 		)
 
 		// State hydration can also finish after the view was disposed or replaced.
-		// A stale resolve must not install listeners on a view the provider no longer owns.
+		// A stale resolve must not assign HTML or install listeners on a view the
+		// provider no longer owns.
 		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
-		// Sets up an event listener to listen for messages passed from the webview view context
-		// and executes code based on the message that is received.
+		// Listen before assigning HTML: the webview posts webviewDidLaunch as soon as
+		// it mounts, and VS Code drops messages that arrive before a listener exists.
+		// Assigning HTML only after hydration also keeps webview messages from racing
+		// the settings snapshot applied above.
 		this.setWebviewMessageListener(webviewView)
+		webviewView.webview.html = html
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.
@@ -2920,14 +2922,37 @@ export class ClineProvider
 		}
 	}
 
-	/* Condenses a task's message history to use fewer tokens. */
-	async condenseTaskContext(taskId: string) {
+	/**
+	 * Condenses a task's message history and always posts a terminal response for `taskId`.
+	 *
+	 * 1. Unknown task: show `condense_task_unavailable`; no Task exists to say on.
+	 * 2. Expected rejection or provider failure: the task already said `condense_context_error`.
+	 * 3. Cancellation: a throw on an aborted or abandoned task is not reported as a failure.
+	 * 4. Unexpected throw: show `condense_failed_with_reason`.
+	 *
+	 * Never rejects, so the webview handler needs no try.
+	 */
+	async condenseTaskContext(taskId: string): Promise<void> {
 		const task = this.taskRegistry.getById(taskId)
-		if (!task) {
-			throw new Error(`Task with id ${taskId} not found in stack`)
+		try {
+			if (!task) {
+				void vscode.window.showErrorMessage(t("common:errors.condense_task_unavailable"))
+				return
+			}
+			await task.condenseContext()
+		} catch (error) {
+			this.log(`Failed to condense task ${taskId}: ${String(error)}`)
+			if (!task?.abort && !task?.abandoned) {
+				const reason = error instanceof Error ? error.message : String(error)
+				void vscode.window.showErrorMessage(t("common:errors.condense_failed_with_reason", { reason }))
+			}
+		} finally {
+			try {
+				await this.postMessageToWebview({ type: "condenseTaskContextResponse", text: taskId })
+			} catch (postError) {
+				this.log(`Failed to post condense response for task ${taskId}: ${String(postError)}`)
+			}
 		}
-		await task.condenseContext()
-		await this.postMessageToWebview({ type: "condenseTaskContextResponse", text: taskId })
 	}
 
 	// this function deletes a task from task history, and deletes its checkpoints and delete the task folder
@@ -3315,7 +3340,9 @@ export class ClineProvider
 		}
 
 		const telemetryKey = process.env.POSTHOG_API_KEY
-		const machineId = vscode.env.machineId
+		// The webview uses this value as its PostHog distinct ID, so it must be the
+		// salted hash: the raw machine ID never crosses the webview boundary (issue #830).
+		const machineId = hashDistinctId(vscode.env.machineId)
 		const vscodeTelemetryEnabled = vscode.env.isTelemetryEnabled
 		const mergedAllowedCommands = this.mergeAllowedCommands(allowedCommands)
 		const mergedDeniedCommands = this.mergeDeniedCommands(deniedCommands)

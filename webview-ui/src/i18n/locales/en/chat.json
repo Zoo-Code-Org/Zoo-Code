@@ -209,6 +209,10 @@
 		},
 		"current": "Current"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Some instructions could not be reloaded",
+		"description": "Continuing with the instructions that could be loaded. Affected sources:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {
@@ -348,12 +352,12 @@
 		"title": "Zoo Code {{version}} Released",
 		"support": "Please support Zoo Code by starring us on <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "What is new in Zoo Code v3.98.1",
+			"heading": "What is new in Zoo Code v3.98.2",
 			"highlight0": "💫Preview the Zoo Pass with unlimited GLM-5.3-Flash free until Dec 1 with any amount of money on your Zoo Gateway account.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Models and reasoning: Use GPT-6.2 Sol, GPT-6.2 Astra, and Claude Sonnet 5.5. Set reasoning effort for each LiteLLM profile.",
-			"highlight2": "🛡️ Security: Improve skill and command metadata parsing, mention handling, provider links, and CLI approval checks.",
-			"highlight3": "🔧 Fixes: Correct OpenAI service-tier costs, recognize workspace symbolic links, and translate more UI labels."
+			"highlight1": "🔌 Models: Use Gemini 3.8 Flash and the new Gemini 4 Carbon, Hydrogen, and Neon models. Set xhigh thinking on Gemini.",
+			"highlight2": "🌐 Responses API: Turn on Responses API support for OpenAI Compatible providers. Reasoning with tool use works on endpoints that require it.",
+			"highlight3": "🔧 Fixes: Vertex Gemini requests no longer end on a model turn. Gemini thought signatures stay intact through LiteLLM. Ollama tasks condense at the configured context limit."
 		}
 	},
 	"reasoning": {

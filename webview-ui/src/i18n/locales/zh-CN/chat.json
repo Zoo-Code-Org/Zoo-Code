@@ -300,6 +300,10 @@
 		"thinking": "思考中",
 		"seconds": "{{count}}秒"
 	},
+	"instructionRefresh": {
+		"warningHeader": "部分指令无法重新加载",
+		"description": "将使用已成功加载的指令继续。受影响的来源："
+	},
 	"contextManagement": {
 		"tokens": "Token",
 		"condensation": {
@@ -326,12 +330,12 @@
 		"title": "Zoo Code {{version}} 已发布",
 		"support": "请在 <githubLink>GitHub</githubLink> 上为 Zoo Code 点星支持我们。",
 		"release": {
-			"heading": "Zoo Code v3.98.1 新增内容",
+			"heading": "Zoo Code v3.98.2 新增内容",
 			"highlight0": "💫预览 Zoo Pass：只要你的 Zoo Gateway 账户中有任意金额的余额，即可在 12 月 1 日前免费无限使用 GLM-5.3-Flash。",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 模型与推理：支持 GPT-6.2 Sol、GPT-6.2 Astra 和 Claude Sonnet 5.5。可为每个 LiteLLM 配置设置推理强度。",
-			"highlight2": "🛡️ 安全：改进技能和命令元数据解析、提及处理、提供商链接及 CLI 审批检查。",
-			"highlight3": "🔧 修复：修正 OpenAI 服务层级费用，识别工作区符号链接，并补充更多界面翻译。"
+			"highlight1": "🔌 模型：支持 Gemini 3.8 Flash 和新的 Gemini 4 Carbon、Hydrogen、Neon 模型。可为 Gemini 设置 xhigh 思考级别。",
+			"highlight2": "🌐 Responses API：可为 OpenAI Compatible 提供商启用 Responses API 支持。在需要该 API 的端点上，带工具使用的推理也能正常工作。",
+			"highlight3": "🔧 修复：Vertex 的 Gemini 请求不再以模型轮次结尾；LiteLLM 下的 Gemini 思考签名保持完整；Ollama 任务会在配置的上下文限制处压缩。"
 		}
 	},
 	"costs": {

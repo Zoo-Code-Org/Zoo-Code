@@ -302,6 +302,10 @@
 		"thinking": "Düşünüyor",
 		"seconds": "{{count}}sn"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Bazı talimatlar yeniden yüklenemedi",
+		"description": "Yüklenebilen talimatlarla devam ediliyor. Etkilenen kaynaklar:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {
@@ -329,12 +333,12 @@
 		"title": "Zoo Code {{version}} yayınlandı",
 		"support": "Lütfen <githubLink>GitHub</githubLink>'da bize yıldız vererek Zoo Code'u destekle.",
 		"release": {
-			"heading": "Zoo Code v3.98.1'deki yenilikler",
+			"heading": "Zoo Code v3.98.2'deki yenilikler",
 			"highlight0": "💫Zoo Gateway hesabındaki herhangi bir tutarla 1 Aralık'a kadar sınırsız GLM-5.3-Flash sunan Zoo Pass'i ücretsiz dene.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Modeller ve akıl yürütme: GPT-6.2 Sol, GPT-6.2 Astra ve Claude Sonnet 5.5 kullan. Her LiteLLM profili için akıl yürütme düzeyini ayarla.",
-			"highlight2": "🛡️ Güvenlik: Beceri ve komut meta verilerinin ayrıştırılması, bahsetmeler, sağlayıcı bağlantıları ve CLI onay denetimleri iyileştirildi.",
-			"highlight3": "🔧 Düzeltmeler: OpenAI hizmet katmanı maliyetleri, çalışma alanı sembolik bağlantılarının tanınması ve daha fazla arayüz çevirisi."
+			"highlight1": "🔌 Modeller: Gemini 3.8 Flash ve yeni Gemini 4 Carbon, Hydrogen ve Neon modellerini kullan. Gemini için xhigh düşünme düzeylerini ayarla.",
+			"highlight2": "🌐 Responses API: OpenAI Compatible sağlayıcılar için Responses API desteğini aç. Araç kullanımıyla akıl yürütme, bu API'yi gerektiren uç noktalarda çalışır.",
+			"highlight3": "🔧 Düzeltmeler: Vertex Gemini istekleri artık bir model turuyla bitmiyor. Gemini düşünme imzaları LiteLLM üzerinden bozulmadan kalıyor. Ollama görevleri yapılandırılan bağlam sınırında yoğunlaşıyor."
 		}
 	},
 	"costs": {

@@ -46,13 +46,13 @@ Zoo Code, Roo Code की बनाई नींव पर आगे बढ़�
 - **ज़्यादा भरोसेमंद terminal और editing workflows** — terminal के समय से पहले पूरा होने, task-state race conditions, context management, diff editing और provider-specific tool use से जुड़ी समस्याओं के fixes।
 - **अपने workspace पर ज़्यादा control** — rules management, हर mode के लिए MCP restrictions, multi-root path controls, model reasoning options और completion changes की review actions।
 
-## Zoo Code v3.98.1 में नया क्या है
+## Zoo Code v3.98.2 में नया क्या है
 
 - 💫अपने Zoo Gateway खाते में किसी भी राशि के साथ 1 दिसंबर तक असीमित GLM-5.3-Flash के साथ Zoo Pass का मुफ़्त पूर्वावलोकन करें।
   [https://zoocode.dev/pass](https://zoocode.dev/pass)
-- 🔌 मॉडल और रीजनिंग: GPT-6.2 Sol, GPT-6.2 Astra और Claude Sonnet 5.5 का उपयोग करें। हर LiteLLM प्रोफ़ाइल के लिए रीजनिंग प्रयास सेट करें।
-- 🛡️ सुरक्षा: स्किल और कमांड मेटाडेटा पार्सिंग, उल्लेखों, प्रदाता लिंक और CLI अनुमोदन जाँच में सुधार।
-- 🔧 सुधार: OpenAI सेवा स्तर की लागत ठीक की गई, कार्यक्षेत्र के प्रतीकात्मक लिंक पहचाने जाते हैं और अधिक UI पाठ का अनुवाद किया गया।
+- 🔌 मॉडल: Gemini 3.8 Flash और नए Gemini 4 Carbon, Hydrogen और Neon मॉडल का उपयोग करें। Gemini पर xhigh थिंकिंग स्तर सेट करें।
+- 🌐 Responses API: OpenAI Compatible प्रदाताओं के लिए Responses API समर्थन चालू करें। टूल उपयोग के साथ रीजनिंग उन एंडपॉइंट पर काम करता है जिन्हें इसकी आवश्यकता होती है।
+- 🔧 सुधार: Vertex Gemini अनुरोध अब मॉडल टर्न पर समाप्त नहीं होते। LiteLLM के माध्यम से Gemini थॉट सिग्नेचर सुरक्षित रहते हैं। Ollama कार्य कॉन्फ़िगर की गई कॉन्टेक्स्ट सीमा पर संकुचित होते हैं।
 
 ## Zoo Code आपके लिए क्या कर सकता है?
 

@@ -38,7 +38,6 @@ import {
 	type ClineApiReqCancelReason,
 	type ClineApiReqInfo,
 	RooCodeEventName,
-	TelemetryEventName,
 	TaskStatus,
 	TodoItem,
 	getApiProtocol,
@@ -60,7 +59,6 @@ import {
 	type MentionSegment,
 } from "@roo-code/types"
 import { TelemetryService } from "@roo-code/telemetry"
-import { CloudService } from "@roo-code/cloud"
 
 // api
 import { ApiHandler, ApiHandlerCreateMessageMetadata, buildApiHandler } from "../../api"
@@ -100,6 +98,7 @@ import { getTaskDirectoryPath } from "../../utils/storage"
 // prompts
 import { formatResponse } from "../prompts/responses"
 import { SYSTEM_PROMPT } from "../prompts/system"
+import type { InstructionFailureCollector } from "../prompts/sections/custom-instructions"
 import { partitionDisabledToolsForProtocol } from "../prompts/tools/effective-tool-policy"
 import { buildNativeToolsArrayWithRestrictions } from "./build-tools"
 
@@ -415,6 +414,17 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 */
 	metadataFetchAbortController?: AbortController
 	skipPrevResponseIdOnce: boolean = false
+	// Set when a condensation installs a summary; requests collect instruction read failures until a first chunk arrives.
+	private pendingInstructionRefresh = false
+	private instructionRefreshWarned = false
+	// Lets a request's first chunk end only the refresh its own prompt served, not a newer one.
+	private instructionRefreshGeneration = 0
+
+	private armInstructionRefresh(): void {
+		this.pendingInstructionRefresh = true
+		this.instructionRefreshWarned = false
+		this.instructionRefreshGeneration++
+	}
 
 	// TaskStatus
 	idleAsk?: ClineMessage
@@ -699,7 +709,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private debouncedEmitTokenUsage: ReturnType<typeof debounce>
 
 	// Historical cloud sync tracking retained only to avoid task resume churn.
-	private cloudSyncedMessageTimestamps: Set<number> = new Set()
 
 	// Initial status for the task's history item (set at creation time to avoid race conditions)
 	private readonly initialStatus?: "active" | "delegated" | "completed" | "interrupted"
@@ -1728,17 +1737,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		}
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
-
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
-
-		if (shouldCaptureMessage) {
-			CloudService.instance.captureEvent({
-				event: TelemetryEventName.TASK_MESSAGE,
-				properties: { taskId: this.taskId, message },
-			})
-			// Track that this message has been synced to cloud
-			this.cloudSyncedMessageTimestamps.add(message.ts)
-		}
 	}
 
 	/**
@@ -1755,15 +1753,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private hydrateClineMessages(messages: ClineMessage[]) {
 		this.clineMessages = ensureMessageIdentifiers(messages)
 		restoreTodoListForTask(this)
-
-		// When hydrating or overwriting messages, repopulate the cloud sync tracking Set
-		// with timestamps from all non-partial messages to prevent re-syncing previously synced messages
-		this.cloudSyncedMessageTimestamps.clear()
-		for (const msg of messages) {
-			if (msg.partial !== true) {
-				this.cloudSyncedMessageTimestamps.add(msg.ts)
-			}
-		}
 	}
 
 	private hydrateApiConversationHistory(messages: ApiMessage[]) {
@@ -1839,19 +1828,6 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		const provider = this.providerRef.deref()
 		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
-
-		// Check if we should sync to cloud and haven't already synced this message
-		const shouldCaptureMessage = message.partial !== true && CloudService.isEnabled()
-		const hasNotBeenSynced = !this.cloudSyncedMessageTimestamps.has(message.ts)
-
-		if (shouldCaptureMessage && hasNotBeenSynced) {
-			CloudService.instance.captureEvent({
-				event: TelemetryEventName.TASK_MESSAGE,
-				properties: { taskId: this.taskId, message },
-			})
-			// Track that this message has been synced to cloud
-			this.cloudSyncedMessageTimestamps.add(message.ts)
-		}
 	}
 
 	/**
@@ -2015,6 +1991,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					text,
 					isProtected,
 					dcgDecision: autoApprovalContext?.dcgDecision,
+					fileTargets: autoApprovalContext?.fileTargets,
 				})
 		const isAutoAnswered = approval.decision === "approve" || approval.decision === "deny"
 		const autoApprovalDecision = isAutoAnswered ? approval.decision : undefined
@@ -2832,6 +2809,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				{ isNonInteractive: true } /* options */,
 			)
 			return
+		}
+		if (summary) {
+			this.armInstructionRefresh()
 		}
 		await this.overwriteApiConversationHistory(messages)
 
@@ -5412,6 +5392,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private async getSystemPrompt(
 		requestState: Awaited<ReturnType<ClineProvider["getState"]>> | undefined,
 		requestModelInfo?: ModelInfo,
+		failures?: InstructionFailureCollector,
 	): Promise<string> {
 		const { mcpEnabled } = requestState ?? {}
 		let mcpHub: McpHub | undefined
@@ -5483,6 +5464,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				provider.getSkillsManager(),
 				requestState?.disabledTools,
 				modelInfo,
+				failures,
 			)
 		})()
 	}
@@ -5694,7 +5676,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				apiHandler: this.api,
 				autoCondenseContext: true,
 				autoCondenseContextPercent: FORCED_CONTEXT_REDUCTION_PERCENT,
-				systemPrompt: await this.getSystemPrompt(state, modelInfo),
+				// Pending refresh: read errors are tolerated here too; the refresh request reports them.
+				systemPrompt: this.pendingInstructionRefresh
+					? await this.getSystemPrompt(state, modelInfo, [])
+					: await this.getSystemPrompt(state, modelInfo),
 				taskId: this.taskId,
 				// Recovery must summarize like the automatic path: same prompt and folded file context.
 				customCondensingPrompt: state?.customSupportPrompts?.CONDENSE,
@@ -5708,6 +5693,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				useAvailableInputForContextPercent,
 			})
 
+			if (truncateResult.summary) {
+				this.armInstructionRefresh()
+			}
 			if (truncateResult.messages !== this.apiConversationHistory) {
 				await this.overwriteApiConversationHistory(truncateResult.messages)
 			}
@@ -5828,7 +5816,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			customModes: state?.customModes,
 			modelInfo: requestModelInfo,
 		}
-		const systemPrompt = await this.getSystemPrompt(state, requestModelInfo)
+		let instructionFailures: InstructionFailureCollector = []
+		let servedRefreshGeneration = this.instructionRefreshGeneration
+		let systemPrompt = await this.getSystemPrompt(
+			state,
+			requestModelInfo,
+			this.pendingInstructionRefresh ? instructionFailures : undefined,
+		)
 
 		// A cancellation landing during the rate-limit countdown, the bounded metadata
 		// wait, or the MCP wait inside getSystemPrompt must stop this request before any
@@ -5965,10 +5959,19 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
 				})
+				if (truncateResult.summary) {
+					this.armInstructionRefresh()
+				}
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)
 				}
 				await this.reportContextManagementResult(truncateResult)
+				if (truncateResult.summary) {
+					// Same request-state snapshot keeps prompt and tools consistent; files are re-read.
+					instructionFailures = []
+					servedRefreshGeneration = this.instructionRefreshGeneration
+					systemPrompt = await this.getSystemPrompt(state, requestModelInfo, instructionFailures)
+				}
 			} finally {
 				// Notify webview that context management is complete (sets isCondensing = false)
 				// This removes the in-progress spinner and allows the completed result to show
@@ -5979,6 +5982,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						?.postMessageToWebview({ type: "condenseTaskContextResponse", text: this.taskId })
 				}
 			}
+		}
+
+		// The rebuild above adds another MCP wait; cancellation must not reach the warning or model call.
+		if (this.abort || this.abandoned) {
+			throw new Error(
+				`[Task#attemptApiRequest] task ${this.taskId}.${this.instanceId} aborted during request construction`,
+			)
 		}
 
 		// Get the effective API history by filtering out condensed messages
@@ -6072,6 +6082,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// Reset the flag after using it
 		this.skipPrevResponseIdOnce = false
 
+		// Failures from a superseded refresh must not mark a newer refresh as warned.
+		if (
+			servedRefreshGeneration === this.instructionRefreshGeneration &&
+			this.pendingInstructionRefresh &&
+			!this.instructionRefreshWarned
+		) {
+			if (instructionFailures.length > 0) {
+				this.instructionRefreshWarned = true
+				await this.say(
+					"instruction_refresh_warning",
+					instructionFailures.map(({ sourcePath, code }) => `${sourcePath} (${code})`).join("\n"),
+					undefined /* images */,
+					false /* partial */,
+					undefined /* checkpoint */,
+					undefined /* progressStatus */,
+					{ isNonInteractive: true } /* options */,
+				)
+			}
+		}
+
 		// The provider accepts reasoning items alongside standard messages; cast to the expected parameter type.
 		const stream = this.api.createMessage(
 			systemPrompt,
@@ -6111,6 +6141,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			})
 
 			const firstChunk = await Promise.race([firstChunkPromise, abortPromise])
+			// Retries after a first-chunk failure or an empty stream keep tolerance; it ends only on a real chunk.
+			if (!firstChunk.done && servedRefreshGeneration === this.instructionRefreshGeneration) {
+				this.pendingInstructionRefresh = false
+			}
 			yield firstChunk.value
 			this.isWaitingForFirstChunk = false
 		} catch (error) {

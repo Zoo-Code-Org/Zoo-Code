@@ -211,6 +211,10 @@
 		},
 		"current": "Saat Ini"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Beberapa instruksi tidak dapat dimuat ulang",
+		"description": "Melanjutkan dengan instruksi yang berhasil dimuat. Sumber yang terdampak:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {
@@ -354,12 +358,12 @@
 		"title": "Zoo Code {{version}} Dirilis",
 		"support": "Dukung Zoo Code dengan memberi kami bintang di <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Yang baru di Zoo Code v3.98.1",
+			"heading": "Yang baru di Zoo Code v3.98.2",
 			"highlight0": "💫Coba Zoo Pass dengan GLM-5.3-Flash tanpa batas gratis hingga 1 Desember dengan saldo berapa pun di akun Zoo Gateway kamu.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Model dan penalaran: Gunakan GPT-6.2 Sol, GPT-6.2 Astra, dan Claude Sonnet 5.5. Atur upaya penalaran untuk setiap profil LiteLLM.",
-			"highlight2": "🛡️ Keamanan: Perbaikan penguraian metadata skill dan perintah, penanganan penyebutan, tautan penyedia, dan pemeriksaan persetujuan CLI.",
-			"highlight3": "🔧 Perbaikan: Biaya tingkat layanan OpenAI, pengenalan tautan simbolis ruang kerja, dan lebih banyak teks UI yang diterjemahkan."
+			"highlight1": "🔌 Model: Gunakan Gemini 3.8 Flash dan model baru Gemini 4 Carbon, Hydrogen, dan Neon. Atur tingkat berpikir xhigh di Gemini.",
+			"highlight2": "🌐 API Responses: Aktifkan dukungan API Responses untuk penyedia yang kompatibel dengan OpenAI. Penalaran dengan penggunaan tool berfungsi di endpoint yang memerlukannya.",
+			"highlight3": "🔧 Perbaikan: Permintaan Gemini di Vertex tidak lagi berakhir pada giliran model. Signature berpikir Gemini tetap utuh melalui LiteLLM. Tugas Ollama memadat pada batas konteks yang dikonfigurasi."
 		}
 	},
 	"reasoning": {

@@ -303,6 +303,10 @@
 		"thinking": "Pensant",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "No s'han pogut tornar a carregar algunes instruccions",
+		"description": "Continuant amb les instruccions que s'han pogut carregar. Fonts afectades:"
+	},
 	"contextManagement": {
 		"tokens": "tokens",
 		"condensation": {
@@ -331,12 +335,12 @@
 		"title": "S'ha publicat Zoo Code {{version}}",
 		"support": "Dona suport a Zoo Code fent-nos una estrella a <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Novetats de Zoo Code v3.98.1",
+			"heading": "Novetats de Zoo Code v3.98.2",
 			"highlight0": "💫Prova Zoo Pass amb GLM-5.3-Flash il·limitat de franc fins a l'1 de desembre amb qualsevol saldo al teu compte de Zoo Gateway.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Models i raonament: Utilitza GPT-6.2 Sol, GPT-6.2 Astra i Claude Sonnet 5.5. Configura l'esforç de raonament per a cada perfil de LiteLLM.",
-			"highlight2": "🛡️ Seguretat: Millores en el processament de metadades d'habilitats i ordres, mencions, enllaços de proveïdors i aprovacions de la CLI.",
-			"highlight3": "🔧 Correccions: Costos dels nivells de servei d'OpenAI, reconeixement d'enllaços simbòlics de l'espai de treball i més textos traduïts."
+			"highlight1": "🔌 Models: Utilitza Gemini 3.8 Flash i els nous models Gemini 4 Carbon, Hydrogen i Neon. Configura els nivells de pensament xhigh a Gemini.",
+			"highlight2": "🌐 API de Responses: Activa la compatibilitat amb l'API de Responses per a proveïdors compatibles amb OpenAI. El raonament amb ús d'eines funciona en punts finals que la requereixen.",
+			"highlight3": "🔧 Correccions: Les peticions de Gemini a Vertex ja no acaben amb un torn del model. Les signatures de pensament de Gemini es mantenen intactes amb LiteLLM. Les tasques d'Ollama es condensen al límit de context configurat."
 		}
 	},
 	"costs": {

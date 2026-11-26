@@ -23,11 +23,9 @@ import { Anthropic } from "@anthropic-ai/sdk"
 
 import type { GenerateContentResponse } from "@google/genai"
 
-import { ApiStreamChunk } from "../../transform/stream"
-
 import { t } from "i18next"
 import { VertexHandler } from "../vertex"
-import { collectStream } from "../../../test-utils/stream"
+import { asyncStreamFrom, collectStream } from "../../../test-utils/stream"
 import { makeCreateMessageMetadata } from "../../../test-utils/api"
 
 // @google/genai's GenerateContentResponse exposes `text` via a getter backed by
@@ -47,7 +45,7 @@ describe("VertexHandler", () => {
 		const mockGetGenerativeModel = vitest.fn()
 
 		handler = new VertexHandler({
-			apiModelId: "gemini-1.5-pro-001",
+			apiModelId: "gemini-3-flash-preview",
 			vertexProjectId: "test-project",
 			vertexRegion: "us-central1",
 		})
@@ -70,39 +68,42 @@ describe("VertexHandler", () => {
 
 		const systemPrompt = "You are a helpful assistant"
 
-		it("should handle streaming responses correctly for Gemini", async () => {
-			// Let's examine the test expectations and adjust our mock accordingly
-			// The test expects 4 chunks:
-			// 1. Usage chunk with input tokens
-			// 2. Text chunk with "Gemini response part 1"
-			// 3. Text chunk with " part 2"
-			// 4. Usage chunk with output tokens
+		it("parses final Gemini usage metadata through the Vertex handler", async () => {
+			const generateContentStream = vitest.spyOn(handler["client"].models, "generateContentStream")
+			// These are synthetic SDK responses, not a recorded Vertex stream.
+			generateContentStream.mockResolvedValueOnce(
+				asyncStreamFrom([
+					{
+						candidates: [{ content: { parts: [{ text: "Hello" }] } }],
+						usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 1 },
+					},
+					{
+						usageMetadata: {
+							promptTokenCount: 10,
+							candidatesTokenCount: 5,
+							cachedContentTokenCount: 3,
+							thoughtsTokenCount: 2,
+						},
+					},
+				]) as AsyncGenerator<GenerateContentResponse>,
+			)
 
-			// Let's modify our approach and directly mock the createMessage method
-			// instead of mocking the client
-			vitest.spyOn(handler, "createMessage").mockImplementation(async function* () {
-				yield { type: "usage", inputTokens: 10, outputTokens: 0 }
-				yield { type: "text", text: "Gemini response part 1" }
-				yield { type: "text", text: " part 2" }
-				yield { type: "usage", inputTokens: 0, outputTokens: 5 }
-			})
+			const chunks = await collectStream(handler.createMessage(systemPrompt, mockMessages))
 
-			const stream = handler.createMessage(systemPrompt, mockMessages)
-
-			const chunks: ApiStreamChunk[] = []
-
-			for await (const chunk of stream) {
-				chunks.push(chunk)
-			}
-
-			expect(chunks.length).toBe(4)
-			expect(chunks[0]).toEqual({ type: "usage", inputTokens: 10, outputTokens: 0 })
-			expect(chunks[1]).toEqual({ type: "text", text: "Gemini response part 1" })
-			expect(chunks[2]).toEqual({ type: "text", text: " part 2" })
-			expect(chunks[3]).toEqual({ type: "usage", inputTokens: 0, outputTokens: 5 })
-
-			// Since we're directly mocking createMessage, we don't need to verify
-			// that generateContentStream was called
+			expect(chunks.filter((chunk) => chunk.type === "text")).toEqual([{ type: "text", text: "Hello" }])
+			expect(chunks.filter((chunk) => chunk.type === "usage")).toEqual([
+				expect.objectContaining({
+					type: "usage",
+					inputTokens: 10,
+					outputTokens: 5,
+					cacheReadTokens: 3,
+					reasoningTokens: 2,
+				}),
+			])
+			// Catalog prices per million: $0.50 input, $0.05 cached input, and $3 output.
+			// Seven uncached inputs, three cached inputs, and seven outputs (including thoughts).
+			expect(chunks.find((chunk) => chunk.type === "usage")?.totalCost).toBeCloseTo(0.00002465, 12)
+			expect(generateContentStream).toHaveBeenCalledOnce()
 		})
 	})
 

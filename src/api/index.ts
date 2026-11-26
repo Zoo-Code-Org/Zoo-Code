@@ -171,6 +171,16 @@ export interface ApiHandler {
 	getCondenseContextWindow?(): number
 
 	/**
+	 * Returns input characters over the provider's admission budget (≤ 0 if they fit).
+	 * The provider cannot trim tool results flattened to text for summary requests.
+	 */
+	measureInputOverageChars?(
+		systemPrompt: string,
+		messages: Anthropic.Messages.MessageParam[],
+		metadata?: ApiHandlerCreateMessageMetadata,
+	): number
+
+	/**
 	 * Counts tokens for content blocks
 	 * All providers extend BaseProvider which provides a default tiktoken implementation,
 	 * but they can override this to use their native token counting endpoints
@@ -200,6 +210,10 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 
 	if (apiProvider === retiredProviderIdentifiers.roo) {
 		throw new Error(getRouterRemovalMessage())
+	}
+
+	if (apiProvider === retiredProviderIdentifiers.geminiCli) {
+		throw new Error("Gemini CLI is no longer supported. Select a supported provider in your API profile settings.")
 	}
 
 	if (apiProvider && isRetiredProvider(apiProvider)) {
@@ -281,8 +295,6 @@ export function buildApiHandler(configuration: ProviderSettings): ApiHandler {
 			return new BasetenHandler(options)
 		case providerIdentifiers.poe:
 			return new PoeHandler(options)
-		case providerIdentifiers.geminiCli:
-		// Intentionally falls through to the Anthropic handler pending a dedicated Gemini CLI handler implementation.
 		default:
 			return new AnthropicHandler(options)
 	}

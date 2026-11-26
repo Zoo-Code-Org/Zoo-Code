@@ -6720,3 +6720,127 @@ describe("getVsCodeLmModels", () => {
 		logged.mockRestore()
 	})
 })
+
+describe("VsCodeLmHandler length-based token floor", () => {
+	let handler: VsCodeLmHandler
+	const largeResult = "X".repeat(30_000)
+	const toolExchange: Anthropic.Messages.MessageParam[] = [
+		{ role: "user", content: "read it" },
+		{ role: "assistant", content: [{ type: "tool_use", id: "t1", name: "read_file", input: { path: "a" } }] },
+		{ role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: largeResult }] },
+	]
+
+	beforeEach(() => {
+		clearAllMocks()
+		handler = new VsCodeLmHandler({ vsCodeLmModelSelector: { vendor: "test-vendor", family: "test-family" } })
+		handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
+		mockLanguageModelChat.countTokens.mockResolvedValue(10)
+	})
+
+	afterEach(() => {
+		handler.dispose()
+	})
+
+	it("countTokens never reports less than the character-length estimate", async () => {
+		const tokens = await handler.countTokens([
+			{ type: "tool_result", tool_use_id: "t1", content: largeResult },
+		] as Anthropic.Messages.ContentBlockParam[])
+
+		expect(tokens).toBe(10_000)
+	})
+
+	it("reports usage input tokens of at least the length estimate when the client undercounts", async () => {
+		mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+			stream: (async function* () {
+				yield new vscode.LanguageModelTextPart("ok")
+			})(),
+		})
+
+		const chunks = await collectStream(handler.createMessage("system", toolExchange, { taskId: "test-task" }))
+		const usage = chunks.find((chunk) => chunk.type === "usage") as { inputTokens: number }
+
+		expect(usage.inputTokens).toBe(10_009)
+	})
+
+	it("adds tool-schema characters to the usage floor", async () => {
+		mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+			stream: (async function* () {
+				yield new vscode.LanguageModelTextPart("ok")
+			})(),
+		})
+		const buildTools = (descriptionLength: number) => [
+			{
+				type: "function" as const,
+				function: {
+					name: "lookup",
+					description: "D".repeat(descriptionLength),
+					parameters: { type: "object" },
+				},
+			},
+		]
+		// The floor rounds up once over all characters; a schema length divisible by 3 keeps the sum exact.
+		let descriptionLength = 3_000
+		while (JSON.stringify(buildTools(descriptionLength)).length % 3 !== 0) descriptionLength++
+		const tools = buildTools(descriptionLength)
+
+		const chunks = await collectStream(
+			handler.createMessage("system", toolExchange, { taskId: "test-task", tools }),
+		)
+		const usage = chunks.find((chunk) => chunk.type === "usage") as { inputTokens: number }
+
+		expect(usage.inputTokens).toBe(10_009 + JSON.stringify(tools).length / 3)
+	})
+})
+
+describe("VsCodeLmHandler.measureInputOverageChars", () => {
+	let handler: VsCodeLmHandler
+	const textMessages = (chars: number): Anthropic.Messages.MessageParam[] => [
+		{ role: "user", content: [{ type: "text", text: "X".repeat(chars) }] },
+	]
+
+	beforeEach(() => {
+		clearAllMocks()
+		handler = new VsCodeLmHandler({ vsCodeLmModelSelector: { vendor: "test-vendor", family: "test-family" } })
+		handler["client"] = mockLanguageModelChat as unknown as vscode.LanguageModelChat
+		mockLanguageModelChat.countTokens.mockResolvedValue(10)
+	})
+
+	afterEach(() => {
+		handler.dispose()
+	})
+
+	it("reports the characters createMessage needs removed before it accepts plain-text history", async () => {
+		const oversized = textMessages(3_000_000)
+		const overage = handler.measureInputOverageChars("system", oversized, { taskId: "test-task" })
+
+		expect(overage).toBeGreaterThan(0)
+		await expect(
+			collectStream(handler.createMessage("system", oversized, { taskId: "test-task" })),
+		).rejects.toThrow(/too large for this model's context window/)
+
+		const fitted = textMessages(3_000_000 - Math.ceil(overage))
+		expect(handler.measureInputOverageChars("system", fitted, { taskId: "test-task" })).toBeLessThanOrEqual(0)
+		mockLanguageModelChat.sendRequest.mockResolvedValueOnce({
+			stream: (async function* () {
+				yield new vscode.LanguageModelTextPart("ok")
+			})(),
+		})
+		const chunks = await collectStream(handler.createMessage("system", fitted, { taskId: "test-task" }))
+		expect(chunks).toContainEqual({ type: "text", text: "ok" })
+	})
+
+	it("counts tool schemas against the budget", () => {
+		const tools = [
+			{
+				type: "function" as const,
+				function: { name: "read_file", description: "D".repeat(5_000), parameters: { type: "object" } },
+			},
+		]
+		const messages = textMessages(1_000)
+
+		const withoutTools = handler.measureInputOverageChars("system", messages, { taskId: "test-task" })
+		const withTools = handler.measureInputOverageChars("system", messages, { taskId: "test-task", tools })
+
+		expect(withTools - withoutTools).toBe(JSON.stringify(tools).length)
+	})
+})

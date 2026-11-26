@@ -300,6 +300,10 @@
 		"thinking": "Đang suy nghĩ",
 		"seconds": "{{count}} giây"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Không thể tải lại một số chỉ dẫn",
+		"description": "Tiếp tục với các chỉ dẫn đã tải được. Các nguồn bị ảnh hưởng:"
+	},
 	"contextManagement": {
 		"tokens": "token",
 		"condensation": {
@@ -326,12 +330,12 @@
 		"title": "Zoo Code {{version}} đã phát hành",
 		"support": "Hãy ủng hộ Zoo Code bằng cách tặng sao cho chúng tôi trên <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Điểm mới trong Zoo Code v3.98.1",
+			"heading": "Điểm mới trong Zoo Code v3.98.2",
 			"highlight0": "💫Trải nghiệm Zoo Pass với GLM-5.3-Flash không giới hạn miễn phí đến ngày 1 tháng 12 khi tài khoản Zoo Gateway của bạn có số dư bất kỳ.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Mô hình và suy luận: Dùng GPT-6.2 Sol, GPT-6.2 Astra và Claude Sonnet 5.5. Đặt mức suy luận cho từng hồ sơ LiteLLM.",
-			"highlight2": "🛡️ Bảo mật: Cải thiện phân tích siêu dữ liệu kỹ năng và lệnh, xử lý đề cập, liên kết nhà cung cấp và kiểm tra phê duyệt CLI.",
-			"highlight3": "🔧 Sửa lỗi: Chi phí cấp dịch vụ OpenAI, nhận diện liên kết tượng trưng trong không gian làm việc và thêm bản dịch giao diện."
+			"highlight1": "🔌 Mô hình: Dùng Gemini 3.8 Flash và các mô hình mới Gemini 4 Carbon, Hydrogen và Neon. Đặt mức suy nghĩ xhigh cho Gemini.",
+			"highlight2": "🌐 Responses API: Bật hỗ trợ Responses API cho nhà cung cấp tương thích OpenAI. Suy luận có dùng công cụ hoạt động trên các điểm cuối yêu cầu nó.",
+			"highlight3": "🔧 Sửa lỗi: Yêu cầu Gemini trên Vertex không còn kết thúc bằng lượt của mô hình. Chữ ký suy nghĩ của Gemini vẫn nguyên vẹn qua LiteLLM. Tác vụ Ollama nén tại giới hạn ngữ cảnh đã cấu hình."
 		}
 	},
 	"costs": {

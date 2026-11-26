@@ -1,4 +1,5 @@
 import React from "react"
+import type { ClineMessage } from "@roo-code/types"
 
 import { renderWithExtensionState, screen } from "@/utils/test-utils"
 import { ChatRowContent } from "../ChatRow"
@@ -8,6 +9,8 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({
 		t: (key: string, options?: { defaultValue?: string }) => {
 			const map: Record<string, string> = {
+				"chat:instructionRefresh.warningHeader": "Some instructions could not be reloaded",
+				"chat:instructionRefresh.description": "Continuing with the instructions that could be loaded.",
 				"chat:apiRequest.rateLimitWait": "Rate limiting",
 				"chat:apiRequest.failed": "API Request Failed",
 				"chat:apiRequest.errorTitle": "Provider Error",
@@ -24,7 +27,7 @@ vi.mock("react-i18next", () => ({
 	Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }))
 
-function renderChatRow(message: any) {
+function renderChatRow(message: ClineMessage) {
 	return renderWithExtensionState(
 		<ChatRowContent
 			message={message}
@@ -40,9 +43,24 @@ function renderChatRow(message: any) {
 	)
 }
 
+describe("ChatRow - instruction refresh warning", () => {
+	it("renders the warning text and each affected source without a button", () => {
+		renderChatRow({
+			type: "say",
+			say: "instruction_refresh_warning",
+			ts: Date.now(),
+			text: "/workspace/.roorules (EACCES)\n/workspace/AGENTS.md (UNKNOWN)",
+		})
+		expect(screen.getByText("Some instructions could not be reloaded")).toBeInTheDocument()
+		expect(screen.getByText("Continuing with the instructions that could be loaded.")).toBeInTheDocument()
+		expect(screen.getByText(/\.roorules \(EACCES\)/)).toHaveTextContent("AGENTS.md (UNKNOWN)")
+		expect(screen.queryByRole("button")).toBeNull()
+	})
+})
+
 describe("ChatRow - rate limit wait", () => {
 	it("renders a non-error progress row for api_req_rate_limit_wait", () => {
-		const message: any = {
+		const message: ClineMessage = {
 			type: "say",
 			say: "api_req_rate_limit_wait",
 			ts: Date.now(),
@@ -59,7 +77,7 @@ describe("ChatRow - rate limit wait", () => {
 	})
 
 	it("renders nothing when rate limit wait is complete", () => {
-		const message: any = {
+		const message: ClineMessage = {
 			type: "say",
 			say: "api_req_rate_limit_wait",
 			ts: Date.now(),
@@ -76,7 +94,7 @@ describe("ChatRow - rate limit wait", () => {
 	})
 
 	it("shows the message for a known API error code", () => {
-		const message: any = {
+		const message: ClineMessage = {
 			type: "say",
 			say: "api_req_retry_delayed",
 			ts: Date.now(),
@@ -90,7 +108,7 @@ describe("ChatRow - rate limit wait", () => {
 	})
 
 	it("links unknown API errors to GitHub issues", () => {
-		const message: any = {
+		const message: ClineMessage = {
 			type: "say",
 			say: "api_req_retry_delayed",
 			ts: Date.now(),

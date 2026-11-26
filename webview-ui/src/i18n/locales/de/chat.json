@@ -301,6 +301,10 @@
 		"thinking": "Denke nach",
 		"seconds": "{{count}}s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Einige Anweisungen konnten nicht erneut geladen werden",
+		"description": "Es geht mit den Anweisungen weiter, die geladen werden konnten. Betroffene Quellen:"
+	},
 	"contextManagement": {
 		"tokens": "Tokens",
 		"condensation": {
@@ -328,12 +332,12 @@
 		"title": "Zoo Code {{version}} veröffentlicht",
 		"support": "Bitte unterstütze Zoo Code, indem du uns auf <githubLink>GitHub</githubLink> einen Stern gibst.",
 		"release": {
-			"heading": "Neu in Zoo Code v3.98.1",
+			"heading": "Neu in Zoo Code v3.98.2",
 			"highlight0": "💫Teste den Zoo Pass mit unbegrenztem GLM-5.3-Flash kostenlos bis zum 1. Dezember, wenn du einen beliebigen Geldbetrag auf deinem Zoo Gateway-Konto hast.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Modelle und Reasoning: Nutze GPT-6.2 Sol, GPT-6.2 Astra und Claude Sonnet 5.5. Stelle den Reasoning-Aufwand für jedes LiteLLM-Profil ein.",
-			"highlight2": "🛡️ Sicherheit: Verbesserte Verarbeitung von Skill- und Befehlsmetadaten, Erwähnungen, Anbieterlinks und CLI-Freigaben.",
-			"highlight3": "🔧 Korrekturen: Korrekte OpenAI-Service-Tier-Kosten, Erkennung symbolischer Workspace-Links und mehr übersetzte UI-Texte."
+			"highlight1": "🔌 Modelle: Nutze Gemini 3.8 Flash und die neuen Modelle Gemini 4 Carbon, Hydrogen und Neon. Stelle xhigh-Denkstufen für Gemini ein.",
+			"highlight2": "🌐 Responses API: Aktiviere die Responses-API-Unterstützung für OpenAI-Compatible-Anbieter. Reasoning mit Tool-Nutzung funktioniert auf Endpunkten, die sie verlangen.",
+			"highlight3": "🔧 Korrekturen: Vertex-Gemini-Anfragen enden nicht mehr mit einem Modellzug. Thought-Signaturen von Gemini bleiben über LiteLLM intakt. Ollama-Aufgaben kondensieren am konfigurierten Kontextlimit."
 		}
 	},
 	"costs": {

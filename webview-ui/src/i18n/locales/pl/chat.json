@@ -305,6 +305,10 @@
 		"thinking": "Myślenie",
 		"seconds": "{{count}} s"
 	},
+	"instructionRefresh": {
+		"warningHeader": "Nie udało się ponownie wczytać niektórych instrukcji",
+		"description": "Kontynuujemy z instrukcjami, które udało się wczytać. Źródła, których dotyczy problem:"
+	},
 	"contextManagement": {
 		"tokens": "tokeny",
 		"condensation": {
@@ -334,12 +338,12 @@
 		"title": "Zoo Code {{version}} wydany",
 		"support": "Wesprzyj Zoo Code, dając nam gwiazdkę na <githubLink>GitHub</githubLink>.",
 		"release": {
-			"heading": "Nowości w Zoo Code v3.98.1",
+			"heading": "Nowości w Zoo Code v3.98.2",
 			"highlight0": "💫Wypróbuj Zoo Pass z nieograniczonym GLM-5.3-Flash za darmo do 1 grudnia z dowolną kwotą na koncie Zoo Gateway.",
 			"highlight0Url": "https://zoocode.dev/pass",
-			"highlight1": "🔌 Modele i rozumowanie: Korzystaj z GPT-6.2 Sol, GPT-6.2 Astra i Claude Sonnet 5.5. Ustaw wysiłek rozumowania dla każdego profilu LiteLLM.",
-			"highlight2": "🛡️ Bezpieczeństwo: Ulepszenia analizy metadanych umiejętności i poleceń, obsługi wzmianek, linków dostawców i zatwierdzania w CLI.",
-			"highlight3": "🔧 Poprawki: Koszty poziomów usług OpenAI, rozpoznawanie dowiązań symbolicznych obszaru roboczego i więcej tłumaczeń interfejsu."
+			"highlight1": "🔌 Modele: Korzystaj z Gemini 3.8 Flash i nowych modeli Gemini 4 Carbon, Hydrogen i Neon. Ustaw poziomy myślenia xhigh dla Gemini.",
+			"highlight2": "🌐 API Responses: Włącz obsługę API Responses dla dostawców zgodnych z OpenAI. Rozumowanie z użyciem narzędzi działa w punktach końcowych, które tego wymagają.",
+			"highlight3": "🔧 Poprawki: Żądania Gemini w Vertex nie kończą się już na turze modelu. Podpisy myśli Gemini pozostają nienaruszone przez LiteLLM. Zadania Ollama kondensują na skonfigurowanym limicie kontekstu."
 		}
 	},
 	"costs": {

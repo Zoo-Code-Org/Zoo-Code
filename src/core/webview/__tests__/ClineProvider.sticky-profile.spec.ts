@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { WebviewFocusTracker } from "../WebviewFocusTracker"
 // npx vitest run core/webview/__tests__/ClineProvider.sticky-profile.spec.ts
 
@@ -48,6 +49,9 @@ vi.mock("vscode", () => ({
 		onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
 	},
 	env: {
+		get machineId() {
+			return "test-machine-id"
+		},
 		uriScheme: "vscode",
 		language: "en",
 		appName: "Visual Studio Code",
@@ -195,20 +199,26 @@ vi.mock("../../../utils/storage", async (importOriginal) => {
 	}
 })
 
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		hasInstance: vi.fn().mockReturnValue(true),
-		createInstance: vi.fn(),
-		get instance() {
-			return {
-				trackEvent: vi.fn(),
-				trackError: vi.fn(),
-				setProvider: vi.fn(),
-				captureModeSwitch: vi.fn(),
-			}
+vi.mock("@roo-code/telemetry", async (importOriginal) => {
+	const actual = await importOriginal<typeof import("@roo-code/telemetry")>()
+	return {
+		// Keep the real hashDistinctId: getStateToPostToWebview hashes the machine ID
+		// before posting it to the webview (issue #830).
+		...actual,
+		TelemetryService: {
+			hasInstance: vi.fn().mockReturnValue(true),
+			createInstance: vi.fn(),
+			get instance() {
+				return {
+					trackEvent: vi.fn(),
+					trackError: vi.fn(),
+					setProvider: vi.fn(),
+					captureModeSwitch: vi.fn(),
+				}
+			},
 		},
-	},
-}))
+	}
+})
 
 describe("ClineProvider - Sticky Provider Profile", () => {
 	let provider: ClineProvider
@@ -329,6 +339,23 @@ describe("ClineProvider - Sticky Provider Profile", () => {
 			delete process.env.ROO_CLI_RUNTIME
 		} else {
 			process.env.ROO_CLI_RUNTIME = originalRooCliRuntimeEnv
+		}
+	})
+
+	it("posts only the hashed identity for generated machine IDs", async () => {
+		const ids = [
+			"",
+			"someValue.machineId",
+			"01234567-89ab-cdef-0123-456789abcdef",
+			"机器-id",
+			...Array.from({ length: 32 }, (_, i) => "device-" + i.toString(16).repeat(i + 1)),
+		]
+		for (const raw of ids) {
+			vi.spyOn(vscode.env, "machineId", "get").mockReturnValue(raw)
+			const state = await provider.getStateToPostToWebview()
+			const expected = createHash("sha256").update(`zoo-code-telemetry-distinct-id-v1:${raw}`).digest("hex")
+			expect(state.machineId).toBe(expected)
+			expect(state.machineId).not.toBe(raw)
 		}
 	})
 
