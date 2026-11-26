@@ -1288,8 +1288,6 @@ export class ClineProvider
 			return
 		}
 
-		webviewView.webview.html = html
-
 		// Initialize out-of-scope variables that need to receive persistent
 		// global state values.
 		await this.getState().then(
@@ -1322,14 +1320,18 @@ export class ClineProvider
 		)
 
 		// State hydration can also finish after the view was disposed or replaced.
-		// A stale resolve must not install listeners on a view the provider no longer owns.
+		// A stale resolve must not assign HTML or install listeners on a view the
+		// provider no longer owns.
 		if (this.isStaleViewResolve(webviewView, epoch)) {
 			return
 		}
 
-		// Sets up an event listener to listen for messages passed from the webview view context
-		// and executes code based on the message that is received.
+		// Listen before assigning HTML: the webview posts webviewDidLaunch as soon as
+		// it mounts, and VS Code drops messages that arrive before a listener exists.
+		// Assigning HTML only after hydration also keeps webview messages from racing
+		// the settings snapshot applied above.
 		this.setWebviewMessageListener(webviewView)
+		webviewView.webview.html = html
 		this.webviewDisposables.push(this.webviewFocusTracker.init(this, webviewView))
 
 		// Detect a dead webview renderer process (gray screen) via heartbeat timeout.

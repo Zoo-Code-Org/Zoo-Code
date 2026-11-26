@@ -4044,6 +4044,26 @@ describe("ClineProvider", () => {
 		expect(mockPostMessage).toHaveBeenCalled()
 	})
 
+	test("receives the launch message that the webview posts as soon as its HTML loads", async () => {
+		// The webview posts webviewDidLaunch when it mounts. VS Code drops a message
+		// that arrives before a listener exists, so the listener must exist first.
+		let launch: Promise<void> | undefined
+		Object.defineProperty(mockWebviewView.webview, "html", {
+			configurable: true,
+			get: () => "",
+			set: () => {
+				const listener = vi.mocked(mockWebviewView.webview.onDidReceiveMessage).mock.calls.at(-1)?.[0]
+				launch = listener?.({ type: "webviewDidLaunch" })
+			},
+		})
+
+		await provider.resolveWebviewView(mockWebviewView)
+
+		expect(launch).toBeDefined()
+		await launch
+		expect(mockPostMessage).toHaveBeenCalledWith(expect.objectContaining({ type: "state" }))
+	})
+
 	test("logs detached workspace initialization failures", async () => {
 		await provider.resolveWebviewView(mockWebviewView)
 
