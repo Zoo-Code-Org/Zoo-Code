@@ -3,6 +3,8 @@
  * API function name requirements across all providers.
  */
 
+import { resolveMcpToolAlias, recordMcpToolAlias } from "./mcp-name-ledger"
+
 /**
  * Separator used between MCP prefix, server name, and tool name.
  * We use "--" (double hyphen) because:
@@ -132,11 +134,14 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 	const fullName = `${MCP_TOOL_PREFIX}${MCP_TOOL_SEPARATOR}${sanitizedServer}${MCP_TOOL_SEPARATOR}${sanitizedTool}`
 
 	// Truncate if necessary (max 64 chars for Gemini)
-	if (fullName.length > 64) {
-		return fullName.slice(0, 64)
-	}
+	const functionName = fullName.length > 64 ? fullName.slice(0, 64) : fullName
 
-	return fullName
+	// The sanitized name may have lost characters (dots, spaces) or length.
+	// Record the original pair under the exact name the model will call, so
+	// parseMcpToolName can hand them back (issue #2338).
+	recordMcpToolAlias(functionName, serverName, toolName)
+
+	return functionName
 }
 
 /**
@@ -147,6 +152,15 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
  * @returns An object with serverName and toolName, or null if parsing fails
  */
 export function parseMcpToolName(mcpToolName: string): { serverName: string; toolName: string } | null {
+	// Prefer the exact pair recorded when the name was built: sanitization may
+	// have deleted characters that the split below can never restore (issue
+	// #2338). The raw name and its separator-normalized form are both tried,
+	// because models rewrite "mcp--x--y" as "mcp__x__y".
+	const alias = resolveMcpToolAlias(mcpToolName) ?? resolveMcpToolAlias(normalizeMcpToolName(mcpToolName))
+	if (alias) {
+		return { serverName: alias.serverName, toolName: alias.toolName }
+	}
+
 	// Normalize the name to handle both separator styles
 	const normalizedName = normalizeMcpToolName(mcpToolName)
 

@@ -316,20 +316,21 @@ describe("mcp-name utilities", () => {
 		})
 
 		it("should preserve names through roundtrip with underscores", () => {
-			const toolName = buildMcpToolName("my_server", "my_tool")
+			const toolName = buildMcpToolName("my_server", "get_forecast")
 			const parsed = parseMcpToolName(toolName)
 			expect(parsed).toEqual({
 				serverName: "my_server",
-				toolName: "my_tool",
+				toolName: "get_forecast",
 			})
 		})
 
-		it("should handle spaces that get converted to underscores", () => {
+		it("should return the original names although spaces became underscores", () => {
+			// The ledger returns what was advertised, not the sanitized form.
 			const toolName = buildMcpToolName("my server", "get tool")
 			const parsed = parseMcpToolName(toolName)
 			expect(parsed).toEqual({
-				serverName: "my_server",
-				toolName: "get_tool",
+				serverName: "my server",
+				toolName: "get tool",
 			})
 		})
 
@@ -337,7 +338,7 @@ describe("mcp-name utilities", () => {
 			const toolName = buildMcpToolName("Weather API", "get_current_forecast")
 			const parsed = parseMcpToolName(toolName)
 			expect(parsed).toEqual({
-				serverName: "Weather_API",
+				serverName: "Weather API",
 				toolName: "get_current_forecast",
 			})
 		})
