@@ -45,12 +45,13 @@ graph. They are excluded from the production project so their imports cannot mak
 otherwise unused application helpers appear reachable. Shared `src/test-utils`
 files are excluded only in production mode.
 
-Two existing source files have explicit production-only exceptions:
+Three existing source files have explicit production-only exceptions:
 
-| File                                             | Reason                                                                                                                                                                                                              |
-| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `src/utils/versionToken.ts`                      | A staged compare-and-swap helper from epic #1375 with direct tests; it has no runtime caller yet. Remove this exception when the write guard consumes it, or remove the helper if that work is abandoned.           |
-| `src/core/tools/helpers/toolResultFormatting.ts` | Existing display helper with direct tests and no runtime callers. Retained as existing debt rather than expanding this PR's removal scope. Remove the exception when integrated or delete the helper and its tests. |
+| File                                             | Reason                                                                                                                                                                                                                                                                                                               |
+| ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `src/utils/versionToken.ts`                      | A staged compare-and-swap helper from epic #1375 with direct tests; it has no runtime caller yet. Remove this exception when the write guard consumes it, or remove the helper if that work is abandoned.                                                                                                            |
+| `src/core/tools/helpers/toolResultFormatting.ts` | Existing display helper with direct tests and no runtime callers. Retained as existing debt rather than expanding this PR's removal scope. Remove the exception when integrated or delete the helper and its tests.                                                                                                  |
+| `src/core/checkpoints/changeJournal.ts`          | Staged change journal for the checkpoint split (issue #1410, units #2707/#2708/#2709) with direct tests and no runtime caller until the shadow service and the rollback consume it. Remove this exception when the first production importer lands, and remove the journal with its tests if that work is abandoned. |
 
 `resolveModelWithAbort` also currently has only contract-test callers. Its explicit
 `@internal` annotation retains the existing shared cancellation helper for provider

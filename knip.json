@@ -16,12 +16,7 @@
 	"playwright-ct": false,
 	"workspaces": {
 		"src": {
-			"entry": [
-				"extension.ts!",
-				"extension/api.ts!",
-				"workers/countTokens.ts!",
-				"core/checkpoints/changeJournal.ts!"
-			],
+			"entry": ["extension.ts!", "extension/api.ts!", "workers/countTokens.ts!"],
 			"project": [
 				"**/*.ts!",
 				"!**/__tests__/**!",
@@ -33,6 +28,7 @@
 				"!utils/versionToken.ts!",
 				"!services/tools/Bm25Ranker.ts!",
 				"!services/tools/types.ts!",
+				"!core/checkpoints/changeJournal.ts!",
 				"!core/tools/helpers/toolResultFormatting.ts!"
 			],
 			"ignoreDependencies": [
