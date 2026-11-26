@@ -11,6 +11,8 @@ import { clearAllMocks } from "../../../test-utils/reset"
 import { makeExtensionContext } from "../../../test-utils/vscode"
 
 import {
+	awaitCommandListImportSettled,
+	beginCommandListImport,
 	importSettings,
 	importSettingsFromFile,
 	importSettingsFromPath,
@@ -22,6 +24,7 @@ import { ProviderSettingsManager } from "../ProviderSettingsManager"
 import { ContextProxy } from "../ContextProxy"
 import { CustomModesManager } from "../CustomModesManager"
 import { Package } from "../../../shared/package"
+import { flushMacrotasks } from "../../../test-utils/timers"
 import { makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import { safeWriteJson } from "../../../utils/safeWriteJson"
 
@@ -873,6 +876,163 @@ describe("importExport", () => {
 			expect(showWarningMessageSpy.mock.calls[0][0]).toContain("deniedCommands")
 
 			showWarningMessageSpy.mockRestore()
+		})
+
+		it("posts the imported state while the mirror warning is still pending", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git"] }))
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			const config = makeWorkspaceConfiguration()
+			// Both attempts fail, so the mirror reports the key it could not write.
+			vi.mocked(config.update).mockRejectedValue(new Error("settings file is locked"))
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			// Never resolved: the real promise settles only when the user dismisses the
+			// warning, so an awaited warning would stall the import here.
+			const dismissal = createDeferred<vscode.MessageItem | undefined>()
+			const showWarningMessageSpy = vi
+				.spyOn(vscode.window, "showWarningMessage")
+				.mockReturnValue(dismissal.promise)
+
+			const provider = feedbackProvider()
+
+			await importSettingsWithFeedback(
+				{
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider,
+				},
+				filePath,
+			)
+
+			expect(provider.postStateToWebview).toHaveBeenCalledTimes(1)
+			expect(showWarningMessageSpy).toHaveBeenCalledWith(expect.stringContaining("allowedCommands"))
+
+			showWarningMessageSpy.mockRestore()
+		})
+
+		it("lets a save dispatched during an import run only against the post-import configuration", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git", "imported"] }))
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			const mirrorWrite = createDeferred<void>()
+			// The settings file the save reads. It stays empty until the mirror's write
+			// lands, which is the half-imported state the save must not observe.
+			let fileHolds: string[] | undefined
+			const config = makeWorkspaceConfiguration()
+			vi.mocked(config.update).mockImplementation(async (key, value) => {
+				await mirrorWrite.promise
+				if (key === "allowedCommands") {
+					fileHolds = value as string[]
+				}
+			})
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			const imported = importSettingsWithFeedback(
+				{
+					providerSettingsManager: mockProviderSettingsManager,
+					contextProxy: mockContextProxy,
+					customModesManager: mockCustomModesManager,
+					provider: feedbackProvider(),
+				},
+				filePath,
+			)
+
+			await vi.waitFor(() =>
+				expect(config.update).toHaveBeenCalledWith(
+					"allowedCommands",
+					["git", "imported"],
+					vscode.ConfigurationTarget.Global,
+				),
+			)
+
+			// A save that reads the settings file here sees the pre-import one, which is
+			// why the save path waits for the span to settle first.
+			let saveObserved: string[] | undefined | "not-yet" = "not-yet"
+			const save = awaitCommandListImportSettled().then(() => {
+				saveObserved = fileHolds
+			})
+
+			await Promise.resolve()
+			expect(saveObserved).toBe("not-yet")
+
+			mirrorWrite.resolve()
+			await imported
+			await save
+
+			expect(saveObserved).toEqual(["git", "imported"])
+		})
+
+		it("settles the import span when the import throws", async () => {
+			const filePath = "/mock/path/settings.json"
+			;(fs.readFile as Mock).mockResolvedValue(validProfileFile({ allowedCommands: ["git"] }))
+			;(fs.access as Mock).mockResolvedValue(undefined)
+			stubValidProviderProfiles()
+			mockContextProxy.setValues.mockResolvedValue(undefined)
+			mockContextProxy.setValue.mockResolvedValue(undefined)
+			mockContextProxy.setProviderSettings.mockResolvedValue(undefined)
+
+			const config = makeWorkspaceConfiguration()
+			// `mirrorCommandList` catches a failed write, so the span's own `finally`
+			// is the path under test rather than the retry.
+			vi.mocked(config.update).mockResolvedValue(undefined)
+			vi.mocked(vscode.workspace.getConfiguration).mockReturnValue(config)
+
+			const provider = feedbackProvider()
+			provider.postStateToWebview.mockRejectedValue(new Error("state post failed"))
+
+			await expect(
+				importSettingsWithFeedback(
+					{
+						providerSettingsManager: mockProviderSettingsManager,
+						contextProxy: mockContextProxy,
+						customModesManager: mockCustomModesManager,
+						provider,
+					},
+					filePath,
+				),
+			).rejects.toThrow("state post failed")
+
+			// A save that arrives after the failed import must not wait for a span
+			// whose owner is gone.
+			await expect(awaitCommandListImportSettled()).resolves.toBeUndefined()
+		})
+
+		it("keeps the span open until every overlapping import releases it", async () => {
+			const firstRelease = beginCommandListImport()
+			const secondRelease = beginCommandListImport()
+
+			let settled = false
+			const save = awaitCommandListImportSettled().then(() => {
+				settled = true
+			})
+
+			// The first import leaving its window does not mean the settings file is
+			// whole: the second import is still between its state write and its mirror,
+			// so a save released here would read the file mid-import.
+			firstRelease()
+			await flushMacrotasks()
+			expect(settled).toBe(false)
+
+			secondRelease()
+			await save
+			expect(settled).toBe(true)
+
+			// Both handles are safe to call again, and the span they shared settles once.
+			firstRelease()
+			secondRelease()
+			await expect(awaitCommandListImportSettled()).resolves.toBeUndefined()
 		})
 
 		it("should handle import when reasoning budget fields are missing from config", async () => {

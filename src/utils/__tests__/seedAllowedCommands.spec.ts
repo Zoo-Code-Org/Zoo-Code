@@ -28,7 +28,8 @@ interface ConfigDouble {
 		defaultValue?: string[]
 		globalValue?: string[]
 		workspaceValue?: string[]
-		workspaceFolderValue?: string[]
+		// VS Code reports `null` for a key that settings.json sets to null.
+		workspaceFolderValue?: string[] | null
 	}
 	effective?: string[]
 	inspectThrows?: boolean
@@ -172,6 +173,32 @@ describe("seedCommandList", () => {
 
 		expect(globalState.update).not.toHaveBeenCalled()
 		expect(globalState.get("allowedCommands")).toBeUndefined()
+	})
+
+	it("seeds the declared default when the folder value is stored as null", async () => {
+		// A stored null selects no folder layer, so it is not an override and must
+		// not withhold the default. Withholding it leaves enforcement reading an
+		// empty global list plus no workspace layer, which approves nothing.
+		const folderA = makeUri("/mock/folder-a")
+		workspaceState.workspaceFolders = [{ uri: folderA }]
+		const defaultValue = ["git log", "git diff", "git show"]
+		mockConfiguration({
+			inspect: {
+				key: "allowedCommands",
+				defaultValue,
+				globalValue: undefined,
+				workspaceFolderValue: null,
+				workspaceValue: undefined,
+			},
+			effective: defaultValue,
+			gate: true,
+		})
+		const globalState = mockMemento()
+
+		await seedCommandList(globalState, "allowedCommands")
+
+		expect(globalState.update).toHaveBeenCalledExactlyOnceWith("allowedCommands", defaultValue)
+		expect(globalState.get("allowedCommands")).toEqual(defaultValue)
 	})
 
 	it("seeds the declared default on a fresh install with no value set at any scope", async () => {

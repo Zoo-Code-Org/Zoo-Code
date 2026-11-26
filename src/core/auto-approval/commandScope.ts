@@ -26,7 +26,12 @@ export interface CommandListScopes {
  */
 export interface CommandListInspection {
 	workspaceValue?: string[]
-	workspaceFolderValue?: string[]
+	/**
+	 * VS Code reports `null` here for a key that settings.json sets to `null`,
+	 * so the type admits it and {@link selectWorkspaceCommandListLayer} decides
+	 * what it means.
+	 */
+	workspaceFolderValue?: string[] | null
 }
 
 /**
@@ -115,6 +120,79 @@ function realPathOrRegistered(fsPath: string): string | undefined {
 	}
 }
 
+export type WorkspaceCommandListLayer = "workspaceFolder" | "workspace"
+
+export interface WorkspaceCommandListSelection {
+	/** The layer that owns the workspace list, or `undefined` when none is set. */
+	layer: WorkspaceCommandListLayer | undefined
+	/** The layer's value. It is `undefined` only when `layer` is `undefined`. */
+	value: string[] | undefined
+}
+
+/**
+ * The value one named workspace layer holds, or `undefined` when that layer
+ * holds none.
+ *
+ * This answers a different question from
+ * {@link selectWorkspaceCommandListLayer}, which answers which layer wins. A
+ * caller that needs to know whether a specific layer still exists must ask
+ * here: a folder override appearing mid-save makes the selector report the
+ * folder layer, and that is not the workspace layer vanishing.
+ *
+ * @param inspection - The layers from one `inspect()`, or `undefined` when the
+ * lookup failed.
+ * @param layer - The layer to read.
+ * @returns That layer's list, or `undefined` when it holds none.
+ */
+export function workspaceLayerValue(
+	inspection: CommandListInspection | undefined,
+	layer: WorkspaceCommandListLayer,
+): string[] | undefined {
+	// `!= null` covers both an absent folder value and a stored null, which VS
+	// Code uses to mean the same thing here: no folder override. An explicit `[]`
+	// is a real override and survives the test.
+	const folder = inspection?.workspaceFolderValue
+	if (layer === "workspaceFolder") {
+		return folder == null ? undefined : folder
+	}
+	return inspection?.workspaceValue
+}
+
+/**
+ * Decides which configuration layer holds the workspace command list, and what
+ * that layer holds, from one inspection. Every reader of the workspace layer
+ * resolves it here: the enforcement read, the write target, and the save path's
+ * re-read. A caller that picks the layer itself can disagree with the others
+ * about which layer exists, and then write one layer while reading another.
+ *
+ * A `null` folder value means "no folder override", not an override that holds
+ * nothing. VS Code reports `null` when settings.json sets the key to null, and
+ * a stored null selects no folder layer, so the workspace value serves instead.
+ * Reading it as an override would write a folder layer that no read ever saw.
+ * An explicit `[]` is a real override and keeps the folder layer.
+ *
+ * The per-layer rule lives in {@link workspaceLayerValue}, so the layer that
+ * wins and the layer a caller writes cannot disagree about what "set" means.
+ *
+ * @param inspection - The layers from one `inspect()`, or `undefined` when the
+ * lookup failed.
+ * @returns The owning layer and its value, both `undefined` when neither layer
+ * is set.
+ */
+export function selectWorkspaceCommandListLayer(
+	inspection: CommandListInspection | undefined,
+): WorkspaceCommandListSelection {
+	const folderValue = workspaceLayerValue(inspection, "workspaceFolder")
+	if (folderValue !== undefined) {
+		return { layer: "workspaceFolder", value: folderValue }
+	}
+	const workspaceList = workspaceLayerValue(inspection, "workspace")
+	if (workspaceList !== undefined) {
+		return { layer: "workspace", value: workspaceList }
+	}
+	return { layer: undefined, value: undefined }
+}
+
 /**
  * Reads one auto-approval command list from both configuration layers and
  * composes the list to enforce and display.
@@ -122,7 +200,9 @@ function realPathOrRegistered(fsPath: string): string | undefined {
  * The workspace layer comes from `inspect()`, not `get()`. `get()` returns the
  * effective value, which already folds in `globalValue`. A union with the
  * global layer would count an entry twice and would keep a global removal from
- * shrinking the enforced set.
+ * shrinking the enforced set. Which layer supplies the workspace list is
+ * {@link selectWorkspaceCommandListLayer}'s decision, so a read agrees with the
+ * target a save writes.
  *
  * @param configKey - The extension configuration key to read.
  * @param globalList - The list persisted in extension global state.
@@ -153,8 +233,7 @@ export function readCommandListScopes(
 		}
 	}
 
-	// Folder value wins over workspace value, as in VS Code's precedence.
-	const workspace = sanitizeCommandList(inspected?.workspaceFolderValue ?? inspected?.workspaceValue)
+	const workspace = sanitizeCommandList(selectWorkspaceCommandListLayer(inspected).value)
 
 	// Set union: an entry in both layers collapses to one.
 	const merged = [...new Set([...global, ...workspace])]
@@ -206,11 +285,13 @@ export function splitCommandListScopes(
 /**
  * Picks the configuration target that owns the current workspace layer for
  * `configKey`. It reads through the same scoped configuration as
- * `readCommandListScopes`.
+ * `readCommandListScopes`, and takes the layer from
+ * {@link selectWorkspaceCommandListLayer}, so the target is the layer a read
+ * saw.
  *
- * - A set `workspaceFolderValue` gives `WorkspaceFolder`.
- * - Else a set `workspaceValue` gives `Workspace`.
- * - Neither gives `undefined`, so an empty workspace layer never appears in
+ * - The folder layer gives `WorkspaceFolder`.
+ * - Else the workspace layer gives `Workspace`.
+ * - No layer gives `undefined`, so an empty workspace layer never appears in
  *   settings.json.
  *
  * @param configKey - The extension configuration key to inspect.
@@ -233,13 +314,14 @@ export function resolveWorkspaceWriteTarget(
 		}
 	}
 
-	if (inspected?.workspaceFolderValue !== undefined) {
-		return vscode.ConfigurationTarget.WorkspaceFolder
+	switch (selectWorkspaceCommandListLayer(inspected).layer) {
+		case "workspaceFolder":
+			return vscode.ConfigurationTarget.WorkspaceFolder
+		case "workspace":
+			return vscode.ConfigurationTarget.Workspace
+		default:
+			return undefined
 	}
-	if (inspected?.workspaceValue !== undefined) {
-		return vscode.ConfigurationTarget.Workspace
-	}
-	return undefined
 }
 
 export interface CommandListBaselineClassification {
@@ -393,12 +475,7 @@ export async function rollbackFailedCommandListWrite(input: {
 	const addedByThisSave = globalWrite.filter((entry) => !configGlobalAtSaveStart.includes(entry))
 	const removedByThisSave = configGlobalAtSaveStart.filter((entry) => !globalWrite.includes(entry))
 	// A failed re-read means nothing is safe to write. The save-start fallback
-	// is the clobber this path avoids. An undo that would empty an absent
-	// layer clears the key instead of writing `[]`. The activation seed honors
-	// that clear as the user's override. Respect whose decision the layer
-	// holds. Another writer's `[]` survives. A layer that holds only this
-	// save's own write over an absent start is the half-applied save. The
-	// undo restores its absence. No empty layer remains that no user created.
+	// is the clobber this path avoids.
 	let freshGlobalValue: string[] | undefined
 	try {
 		freshGlobalValue = input.readGlobalLayer()
@@ -408,33 +485,48 @@ export async function rollbackFailedCommandListWrite(input: {
 			message: `Failed to save ${key}: ${failure}. The global-scoped value could not be re-read to undo this save: ${reReadError}. Review the command lists in your user and workspace settings.`,
 		}
 	}
-	const globalUndo = [
-		...new Set([
-			...(freshGlobalValue ?? []).filter((entry) => !addedByThisSave.includes(entry)),
-			...removedByThisSave,
-		]),
-	]
+	// The compensation decides the global layer from four cases, in this order.
+	// (a) No value now: the layer that existed at save start is gone, so a later
+	//     writer deleted it. Clearing the key is that writer's decision, and the
+	//     entries this save removed must not come back.
+	// (b) The value now is this save's own write, order aside: the half-applied
+	//     save itself, so the entries this save removed go back. A layer that
+	//     started absent is restored to absence, because an empty layer left
+	//     behind reads back as the user's explicit empty override.
+	// (c) An empty value now while this save wrote entries: another writer
+	//     cleared the layer. That clear outranks this save's removal, and
+	//     restoring over it would re-add entries the user just deleted.
+	// (d) Anything else, in particular a value that merely gained entries: the
+	//     difference is not a decision about the entries this save removed, so
+	//     they go back beside the additions.
 	const globalLayerExistsNow = freshGlobalValue !== undefined
-	// A layer that started absent carries another writer's decision only when it
-	// now holds something beyond this save's own write. A re-read with the same
-	// entries, order aside, is the half-applied save itself, so the rollback
-	// restores absence instead of keeping an empty layer.
-	const ownWriteIntact =
-		globalLayerAtSaveStart === undefined &&
+	const freshIsThisSavesWrite =
 		freshGlobalValue !== undefined &&
 		freshGlobalValue.length === globalWrite.length &&
 		freshGlobalValue.every((entry) => globalWrite.includes(entry))
+	const freshClearedByAnotherWriter =
+		freshGlobalValue !== undefined && freshGlobalValue.length === 0 && globalWrite.length > 0
+	// Case (c) yields to the clear; cases (b) and (d) restore the removals. Case
+	// (a) never reaches this list, because it clears the key instead.
+	const restoreRemovedByThisSave = freshIsThisSavesWrite || !freshClearedByAnotherWriter
+	const globalUndo = [
+		...new Set([
+			...(freshGlobalValue ?? []).filter((entry) => !addedByThisSave.includes(entry)),
+			...(restoreRemovedByThisSave ? removedByThisSave : []),
+		]),
+	]
+	// Case (b) over a start that held no layer restores the absence itself. An
+	// empty layer left behind would read back as the user's explicit override.
+	const ownWriteRestoresAbsence =
+		globalLayerAtSaveStart === undefined && freshIsThisSavesWrite && globalUndo.length === 0
 	try {
 		if (!globalLayerExistsNow) {
-			// The key had a layer at save start, so its absence now is a deletion by a
-			// later writer. That decision outranks this save's removed delta, exactly as
-			// another writer's `[]` does. Writing the removed entries back would
-			// resurrect a layer the user deleted.
+			// Case (a): the key had a layer at save start, so its absence now is a
+			// deletion by a later writer. That decision outranks this save's removed
+			// delta, exactly as another writer's `[]` does. Writing the removed entries
+			// back would resurrect a layer the user deleted.
 			await input.writeGlobalLayer(undefined)
-		} else if (globalUndo.length === 0 && ownWriteIntact) {
-			// The re-read found only this save's own write over an absent start, and
-			// nothing remains to restore. Clear the key rather than materialize an
-			// empty layer that no user created.
+		} else if (ownWriteRestoresAbsence) {
 			await input.writeGlobalLayer(undefined)
 		} else {
 			await input.writeGlobalLayer(globalUndo)
@@ -562,7 +654,7 @@ export function getEffectiveCommandDecision(command: string, effective: Effectiv
 	return getSingleCommandDecision(command, effective.keptWorkspaceAllow, effective.keptWorkspaceDeny)
 }
 
-function sanitizeCommandList(list: unknown): string[] {
+export function sanitizeCommandList(list: unknown): string[] {
 	if (!Array.isArray(list)) {
 		return []
 	}

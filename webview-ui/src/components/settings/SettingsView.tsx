@@ -123,6 +123,29 @@ const commandListsEquivalent = (left?: string[], right?: string[]) =>
 	left === right ||
 	(!!left && !!right && left.length === right.length && left.every((entry, index) => entry === right[index]))
 
+// A list's write landed when the refreshed list holds every entry the dialog sent and
+// none of the entries the dialog dropped. The host orders the list its own way and may
+// add entries of its own, so this is containment plus absence rather than equality:
+// equality answers whether the dialog's own baseline moved, which is a different
+// question and stays on `commandListsEquivalent`.
+const commandListWriteLanded = (baselined: string[], sent: string[], refreshed?: string[]) => {
+	if (commandListsEquivalent(baselined, sent)) {
+		return true
+	}
+
+	// Without a refreshed list there is no evidence either way, and a list the dialog
+	// changed is the case that needs evidence. Treat it as not landed so the user's
+	// edit stays on screen.
+	if (!refreshed) {
+		return false
+	}
+
+	return (
+		sent.every((entry) => refreshed.includes(entry)) &&
+		baselined.filter((entry) => !sent.includes(entry)).every((entry) => !refreshed.includes(entry))
+	)
+}
+
 export interface SettingsViewRef {
 	checkUnsaveChanges: (then: () => void) => void
 }
@@ -195,16 +218,40 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 	latestCachedState.current = cachedState
 	// The live host state, read when a save settles.
 	const latestExtensionState = useRef(extensionState)
-	// Refresh synchronously at commit. The save answer can follow its state post
-	// immediately, so it must see that post, not the state before it.
+	// The command lists the save was dispatched from. The host posts its state ahead of
+	// its answer, so a save whose lists changed can tell whether the post it is owed has
+	// landed by comparing that post's lists with these. A post carrying any other lists
+	// is the save's own; a post repeating these leaves the answer waiting. A count of
+	// posts cannot draw that line, because an unrelated post advances it too.
+	const dispatchedCommandSnapshot = useRef<string | undefined>(undefined)
+	// A save answer handled before the post carrying its own lists committed.
+	const heldSaveResult = useRef<{ success: boolean } | undefined>(undefined)
+	// The running save's settle, reachable from the commit effect and from the timer.
+	const settleSave = useRef<((success: boolean) => void) | undefined>(undefined)
+	// Counts the resets that take the edit buffer back. A save settled after one of them
+	// must not write the baseline it captured before, nor adopt host lists into the
+	// buffer the user discarded.
+	const baselineGeneration = useRef(0)
+	// Refresh synchronously at commit, then apply a held answer: the post carrying the
+	// save's own lists is the state the answer follows, so this is the first moment the
+	// settlement can judge the write against it.
 	useLayoutEffect(() => {
 		latestExtensionState.current = extensionState
+
+		const held = heldSaveResult.current
+		if (!held || commandListSnapshot(extensionState) === dispatchedCommandSnapshot.current) {
+			return
+		}
+
+		heldSaveResult.current = undefined
+		settleSave.current?.(held.success)
 	}, [extensionState])
-	// Records the baseline and the lists of the save the host must answer. The
-	// save-result effect reconciles each list against its own write outcome.
-	const submittedListSave = useRef<{ baselined: [string[], string[]]; sent: [string[], string[]] } | undefined>(
-		undefined,
-	)
+	// Records the baseline, the lists and the buffer generation of the save the host
+	// must answer. The save-result effect reconciles each list against its own write
+	// outcome.
+	const submittedListSave = useRef<
+		{ baselined: [string[], string[]]; sent: [string[], string[]]; generation: number } | undefined
+	>(undefined)
 
 	// What the dialog last displayed, so a later post counts as an external
 	// change, not a repeat.
@@ -302,6 +349,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		prevMode.current = mode
 		lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
 		commandListsTouched.current = false
+		// The buffer this save would have settled is gone, so a late answer must not
+		// write the baseline it captured from it.
+		baselineGeneration.current += 1
 		setChangeDetected(false)
 	}, [currentApiConfigName, mode, extensionState])
 
@@ -315,6 +365,8 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		setCachedState((prevCachedState) => ({ ...prevCachedState, ...extensionState }))
 		lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
 		commandListsTouched.current = false
+		// The import replaced the buffer the pending save submitted.
+		baselineGeneration.current += 1
 		setChangeDetected(false)
 	}, [settingsImportedAt, extensionState])
 
@@ -548,7 +600,15 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				submittedListSave.current = {
 					baselined: [lastDisplayedAllowed, lastDisplayedDenied],
 					sent: [allowedCommands ?? [], deniedCommands ?? []],
+					// The buffer this save owns. A reset after this line invalidates it, so
+					// the settle writes no baseline for a buffer the user has discarded.
+					generation: baselineGeneration.current,
 				}
+				dispatchedCommandSnapshot.current = commandListSnapshot({
+					allowedCommands: lastDisplayedAllowed,
+					deniedCommands: lastDisplayedDenied,
+					workspaceCommandListsEnabled: gateAtSubmit,
+				})
 				setPendingSaveId(saveId)
 			}
 
@@ -674,74 +734,123 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 		if (!pendingSaveId) return
 
 		const settle = (success: boolean) => {
+			settleSave.current = undefined
+			heldSaveResult.current = undefined
 			setPendingSaveId(undefined)
+
 			// The answer's flag reports the whole payload. Each list's own write result
 			// comes from the refresh the host posts before its answer. Reconcile each
-			// edited list: one equal to what was submitted landed, so its baseline stays
-			// advanced. Every other edited list rolls back to the pre-submit baseline, so
-			// an unwritten deletion stays a user deletion on retry. Unedited lists keep
-			// the stamp's baseline.
+			// edited list: one whose write landed keeps its advanced baseline, and every
+			// other edited list rolls back to the pre-submit baseline, so an unwritten
+			// deletion stays a user deletion on retry. Unedited lists keep the stamp's
+			// baseline.
 			const save = submittedListSave.current
 			submittedListSave.current = undefined
-			let everyEditedWriteLanded = true
-			if (save) {
-				const [stampAllowed, stampDenied, stampGate] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
-					string[],
-					string[],
-					boolean,
-				]
-				const reconcileList = (
-					baselined: string[],
-					sent: string[],
-					refreshed: string[] | undefined,
-					stamped: string[],
-				) =>
-					commandListsEquivalent(baselined, sent)
-						? stamped
-						: commandListsEquivalent(refreshed, sent)
-							? sent
-							: baselined
-				const writeLanded = (baselined: string[], sent: string[], refreshed: string[] | undefined) =>
-					commandListsEquivalent(baselined, sent) || commandListsEquivalent(refreshed, sent)
-				everyEditedWriteLanded =
-					writeLanded(save.baselined[0], save.sent[0], latestExtensionState.current.allowedCommands) &&
-					writeLanded(save.baselined[1], save.sent[1], latestExtensionState.current.deniedCommands)
-				lastDisplayedCommandSnapshot.current = commandListSnapshot({
-					allowedCommands: reconcileList(
-						save.baselined[0],
-						save.sent[0],
-						latestExtensionState.current.allowedCommands,
-						stampAllowed,
-					),
-					deniedCommands: reconcileList(
-						save.baselined[1],
-						save.sent[1],
-						latestExtensionState.current.deniedCommands,
-						stampDenied,
-					),
-					workspaceCommandListsEnabled: stampGate,
-				})
+			// A reset after submit took the buffer this save owned, so its baselines
+			// describe lists the dialog no longer shows.
+			if (!save || save.generation !== baselineGeneration.current) {
+				return
 			}
+
+			const refreshedAllowed = latestExtensionState.current.allowedCommands
+			const refreshedDenied = latestExtensionState.current.deniedCommands
+			const [stampAllowed, stampDenied, stampGate] = JSON.parse(lastDisplayedCommandSnapshot.current) as [
+				string[],
+				string[],
+				boolean,
+			]
+			const reconcileList = (
+				baselined: string[],
+				sent: string[],
+				refreshed: string[] | undefined,
+				stamped: string[],
+			) =>
+				commandListsEquivalent(baselined, sent)
+					? stamped
+					: commandListWriteLanded(baselined, sent, refreshed)
+						? sent
+						: baselined
+			const everyEditedWriteLanded =
+				commandListWriteLanded(save.baselined[0], save.sent[0], refreshedAllowed) &&
+				commandListWriteLanded(save.baselined[1], save.sent[1], refreshedDenied)
+			lastDisplayedCommandSnapshot.current = commandListSnapshot({
+				allowedCommands: reconcileList(save.baselined[0], save.sent[0], refreshedAllowed, stampAllowed),
+				deniedCommands: reconcileList(save.baselined[1], save.sent[1], refreshedDenied, stampDenied),
+				workspaceCommandListsEnabled: stampGate,
+			})
+
 			// Clear the flag only when nothing is left unsaved. An edit made during the
 			// save, or a list whose write never landed, keeps the hold so a host refresh
 			// cannot replace the user's edit.
-			if (success && everyEditedWriteLanded && !userEditedDuringSave.current) {
-				commandListsTouched.current = false
-				setChangeDetected(false)
+			if (!success || !everyEditedWriteLanded || userEditedDuringSave.current) {
+				return
 			}
+
+			commandListsTouched.current = false
+
+			// The hold is gone, so the lists the host posted become what the dialog shows.
+			// An entry posted during the hold would otherwise stay invisible until the
+			// host's next post.
+			const adoptedAllowed = latestExtensionState.current.allowedCommands
+			const adoptedDenied = latestExtensionState.current.deniedCommands
+			const adoptedGate = latestExtensionState.current.workspaceCommandListsEnabled
+			lastDisplayedCommandSnapshot.current = commandListSnapshot({
+				allowedCommands: adoptedAllowed,
+				deniedCommands: adoptedDenied,
+				workspaceCommandListsEnabled: adoptedGate ?? stampGate,
+			})
+			setCachedState((prevCachedState) => ({
+				...prevCachedState,
+				allowedCommands: adoptedAllowed ?? prevCachedState.allowedCommands,
+				deniedCommands: adoptedDenied ?? prevCachedState.deniedCommands,
+				// An absent gate field is not evidence that the gate changed.
+				...(adoptedGate === undefined ? {} : { workspaceCommandListsEnabled: adoptedGate }),
+			}))
+			setChangeDetected(false)
+		}
+
+		// A list the dialog changed can only be judged against a state post that has
+		// replaced the pre-save lists. Without one, the settle would read the lists from
+		// before the save and report a landed write as failed. A failed answer needs no
+		// such judgement, so it settles at once.
+		const awaitingRefreshedLists = () => {
+			const save = submittedListSave.current
+			if (!save) {
+				return false
+			}
+
+			const changed =
+				!commandListsEquivalent(save.baselined[0], save.sent[0]) ||
+				!commandListsEquivalent(save.baselined[1], save.sent[1])
+
+			return changed && commandListSnapshot(latestExtensionState.current) === dispatchedCommandSnapshot.current
 		}
 
 		const onResult = (event: MessageEvent) => {
 			const message = event.data
 			if (message?.type !== "settingsSaveResult" || message.requestId !== pendingSaveId) return
-			settle(message.success === true)
+
+			const success = message.success === true
+			if (!success || !awaitingRefreshedLists()) {
+				settle(success)
+				return
+			}
+
+			// Hold the answer for the post carrying this save's lists. The layout effect
+			// that writes `latestExtensionState` applies it against the lists that post
+			// carries, and leaves it held while the lists are still the pre-save ones.
+			heldSaveResult.current = { success }
 		}
 
+		settleSave.current = settle
 		window.addEventListener("message", onResult)
-		const timer = setTimeout(() => settle(false), SAVE_ANSWER_TIMEOUT_MS)
+		// Bounds the wait: a held answer is applied here against the lists the ref holds,
+		// so no result is left unapplied, and a save with no answer is treated as failed.
+		const timer = setTimeout(() => settle(heldSaveResult.current?.success ?? false), SAVE_ANSWER_TIMEOUT_MS)
 		return () => {
 			clearTimeout(timer)
 			window.removeEventListener("message", onResult)
+			settleSave.current = undefined
 		}
 	}, [pendingSaveId])
 
@@ -766,6 +875,9 @@ const SettingsView = forwardRef<SettingsViewRef, SettingsViewProps>(({ onDone, t
 				setCachedState(extensionState) // Revert to original state
 				lastDisplayedCommandSnapshot.current = commandListSnapshot(extensionState)
 				commandListsTouched.current = false // Buffered edits are gone, so live lists are not held off
+				// A save still in flight owns the buffer this discard replaced, so its
+				// answer must not write a baseline taken before the discard.
+				baselineGeneration.current += 1
 				setChangeDetected(false) // Reset change flag
 				confirmDialogHandler.current?.() // Execute the pending action (e.g., tab switch)
 			}

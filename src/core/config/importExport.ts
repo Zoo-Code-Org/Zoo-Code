@@ -365,6 +365,89 @@ export const exportSettings = async ({ providerSettingsManager, contextProxy }: 
 	}
 }
 
+/** The open span. `openers` counts the imports still inside the window, so it settles at zero. */
+type CommandListSpan = {
+	promise: Promise<void>
+	settle: () => void
+	openers: number
+}
+
+/**
+ * The command-list span of the imports that have not settled yet.
+ *
+ * An import writes the lists to extension state and then mirrors them into the
+ * user settings file. A save that runs between those two points reads the
+ * imported state against the old file, so the save path awaits `promise` before
+ * it takes its snapshot. `openers` counts the imports still inside that window:
+ * the span covers all of them and settles when the last one releases.
+ */
+let inFlightCommandListImport: CommandListSpan | undefined
+
+/** Opens a span with one owner and makes it the span a save awaits. */
+function openCommandListSpan(): CommandListSpan {
+	let settle!: () => void
+	const promise = new Promise<void>((resolve) => {
+		settle = resolve
+	})
+	const span: CommandListSpan = { promise, settle, openers: 1 }
+	inFlightCommandListImport = span
+	return span
+}
+
+/** Builds the release handle one opener holds, so no release can count for another. */
+function releaseOnce(span: CommandListSpan): () => void {
+	let released = false
+
+	return () => {
+		if (released) {
+			return
+		}
+
+		released = true
+		span.openers -= 1
+
+		if (span.openers > 0) {
+			return
+		}
+
+		// Cleared before settling, so a save that starts after the last release sees
+		// no span in flight rather than waiting for one that already ended.
+		inFlightCommandListImport = undefined
+		span.settle()
+	}
+}
+
+/**
+ * Opens the command-list span of an import.
+ *
+ * @returns A release function that settles the span once every opener has called
+ * it. Calling it more than once is safe. An import that opens while another is
+ * in flight joins the same span and counts as an owner, so the span settles when
+ * the last owner releases and a save never waits on a span whose release was
+ * discarded.
+ */
+export function beginCommandListImport(): () => void {
+	const joined = inFlightCommandListImport
+
+	if (joined === undefined) {
+		return releaseOnce(openCommandListSpan())
+	}
+
+	joined.openers += 1
+	return releaseOnce(joined)
+}
+
+/**
+ * Waits for an import's command-list span to settle.
+ *
+ * Resolves immediately when no import is in flight. The wait is bounded by the
+ * import itself: the mirror retries once and then reports, and every caller
+ * releases in a `finally`, so a throwing import cannot leave a save waiting.
+ */
+export async function awaitCommandListImportSettled(): Promise<void> {
+	await inFlightCommandListImport?.promise
+}
+
 /**
  * Writes one imported command list into the user settings file, retrying a
  * failed write once.
@@ -405,24 +488,36 @@ async function mirrorCommandList(key: "allowedCommands" | "deniedCommands", impo
  * @param globalSettings - The global settings an import produced, or `undefined`.
  */
 export async function mirrorImportedCommandLists(globalSettings: GlobalSettings | undefined): Promise<void> {
-	const failedKeys: string[] = []
+	// The span covers the writes below, so a save cannot read the imported state
+	// against a settings file this function has not finished writing. An enclosing
+	// import that already opened a span joins it as a second owner, so neither
+	// release can settle the span while the other is still writing.
+	const releaseCommandListImport = beginCommandListImport()
 
-	for (const key of ["allowedCommands", "deniedCommands"] as const) {
-		const imported = globalSettings?.[key]
-		if (!Array.isArray(imported)) {
-			continue
+	try {
+		const failedKeys: string[] = []
+
+		for (const key of ["allowedCommands", "deniedCommands"] as const) {
+			const imported = globalSettings?.[key]
+			if (!Array.isArray(imported)) {
+				continue
+			}
+
+			if (!(await mirrorCommandList(key, imported))) {
+				failedKeys.push(key)
+			}
 		}
 
-		if (!(await mirrorCommandList(key, imported))) {
-			failedKeys.push(key)
+		if (failedKeys.length > 0) {
+			// Fire-and-forget: this promise settles only when the user dismisses the
+			// warning, and the caller's state post must not wait for a human answer.
+			void vscode.window.showWarningMessage(
+				`Settings import: the command list(s) ${failedKeys.join(", ")} could not be written to VS Code user settings. ` +
+					`Set them in user settings, or import the file again. Until they are stored there, a later save can remove the imported entries.`,
+			)
 		}
-	}
-
-	if (failedKeys.length > 0) {
-		await vscode.window.showWarningMessage(
-			`Settings import: the command list(s) ${failedKeys.join(", ")} could not be written to VS Code user settings. ` +
-				`Set them in user settings, or import the file again. Until they are stored there, a later save can remove the imported entries.`,
-		)
+	} finally {
+		releaseCommandListImport()
 	}
 }
 
@@ -438,29 +533,40 @@ export const importSettingsWithFeedback = async (
 ) => {
 	let result
 
-	if (filePath) {
-		// Validate file path and check if file exists
-		try {
-			// Check if file exists and is readable
-			await fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK)
-			result = await importSettingsFromPath(filePath, {
-				providerSettingsManager,
-				contextProxy,
-				customModesManager,
-			})
-		} catch (error) {
-			result = {
-				success: false,
-				error: `Cannot access file at path "${filePath}": ${error instanceof Error ? error.message : "Unknown error"}`,
+	// The span starts before the import, because the command-list state write
+	// happens inside it, and the mirror joins the same span. The notifications
+	// below stay outside it: their promises settle only on dismissal.
+	const releaseCommandListImport = beginCommandListImport()
+
+	try {
+		if (filePath) {
+			// Validate file path and check if file exists
+			try {
+				// Check if file exists and is readable
+				await fs.access(filePath, fs.constants.F_OK | fs.constants.R_OK)
+				result = await importSettingsFromPath(filePath, {
+					providerSettingsManager,
+					contextProxy,
+					customModesManager,
+				})
+			} catch (error) {
+				result = {
+					success: false,
+					error: `Cannot access file at path "${filePath}": ${error instanceof Error ? error.message : "Unknown error"}`,
+				}
 			}
+		} else {
+			result = await importSettings({ providerSettingsManager, contextProxy, customModesManager })
 		}
-	} else {
-		result = await importSettings({ providerSettingsManager, contextProxy, customModesManager })
+
+		if (result.success) {
+			await mirrorImportedCommandLists(result.globalSettings)
+		}
+	} finally {
+		releaseCommandListImport()
 	}
 
 	if (result.success) {
-		await mirrorImportedCommandLists(result.globalSettings)
-
 		provider.settingsImportedAt = Date.now()
 		await provider.postStateToWebview()
 		provider.settingsImportedAt = undefined

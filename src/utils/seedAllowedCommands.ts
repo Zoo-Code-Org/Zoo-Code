@@ -1,7 +1,20 @@
 import * as vscode from "vscode"
 
-import { commandListConfiguration, workspaceCommandListsEnabled } from "../core/auto-approval/commandScope"
-import type { CommandListConfigKey } from "../core/auto-approval/commandScope"
+import {
+	commandListConfiguration,
+	selectWorkspaceCommandListLayer,
+	workspaceCommandListsEnabled,
+} from "../core/auto-approval/commandScope"
+import type { CommandListConfigKey, CommandListInspection } from "../core/auto-approval/commandScope"
+
+/**
+ * The layers one `inspect()` reports for a command-list key: the selector's
+ * workspace layers plus the global and default values the seed chooses between.
+ */
+interface CommandListSeedInspection extends CommandListInspection {
+	globalValue?: string[]
+	defaultValue?: string[]
+}
 
 /**
  * Seeds one command-list key from its settings value into extension global
@@ -19,7 +32,8 @@ import type { CommandListConfigKey } from "../core/auto-approval/commandScope"
  * workspace override suppresses the default: array settings replace across
  * scopes, so seeding past the override would re-grant the approvals it
  * removed. With the gate off the override is inert, so the default is still
- * seeded.
+ * seeded. A folder value stored as `null` selects no layer, so it suppresses
+ * nothing.
  *
  * @param globalState - The extension global-state memento to seed.
  * @param configKey - The command-list configuration key to seed.
@@ -31,23 +45,18 @@ export async function seedCommandList(globalState: vscode.Memento, configKey: Co
 
 	// Guard only the lookup. It can fail before the workspace is ready, and a skip
 	// then defers the seed to a later activation.
-	let inspected:
-		| {
-				globalValue?: string[]
-				defaultValue?: string[]
-				workspaceValue?: string[]
-				workspaceFolderValue?: string[]
-		  }
-		| undefined
+	let inspected: CommandListSeedInspection | undefined
 	try {
 		inspected = commandListConfiguration().inspect<string[]>(configKey)
 	} catch {
 		return
 	}
 
-	// The `undefined` checks, not truthiness: an explicitly empty array still
-	// counts as an override.
-	const workspaceOverride = inspected?.workspaceValue !== undefined || inspected?.workspaceFolderValue !== undefined
+	// Which layer holds a workspace list is the selector's decision, so the seed
+	// cannot disagree with the read and write paths about which layer exists. A
+	// stored `null` folder value selects no layer, an explicit `[]` does, and
+	// either layer is an override even when it holds nothing.
+	const workspaceOverride = selectWorkspaceCommandListLayer(inspected).layer !== undefined
 
 	const seedValue =
 		inspected?.globalValue ??

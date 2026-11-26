@@ -8,6 +8,7 @@ import * as vscode from "vscode"
 import { Package } from "../../../shared/package"
 import { makeUri, makeWorkspaceConfiguration } from "../../../test-utils/vscode"
 import {
+	type CommandListInspection,
 	classifyCommandListBaseline,
 	commandListFolderForResource,
 	getEffectiveCommandDecision,
@@ -17,6 +18,7 @@ import {
 	rollbackFailedCommandListWrite,
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
+	workspaceLayerValue,
 } from "../commandScope"
 import { getSingleCommandDecision } from "../commands"
 import { checkAutoApproval } from "../index"
@@ -398,6 +400,55 @@ describe("resolveWorkspaceWriteTarget", () => {
 			// No resource means no folder value, so the folder target stays unreachable.
 			expect(resolveWorkspaceWriteTarget("deniedCommands")).toBe(vscode.ConfigurationTarget.Workspace)
 			expect(vscode.workspace.getConfiguration).toHaveBeenCalledWith(Package.name, undefined)
+		},
+	)
+})
+
+describe("workspace layer selection parity", () => {
+	beforeEach(() => {
+		vi.clearAllMocks()
+	})
+
+	it("reads the workspace layer when the folder value is null, matching the target it writes", () => {
+		// VS Code reports `null` for a key that settings.json sets to null. That is
+		// no folder override, so the read takes the workspace value and the target
+		// is the workspace layer. Reading the fallback while writing the folder
+		// override would save to a layer no read ever saw.
+		const inspection: CommandListInspection = { workspaceFolderValue: null, workspaceValue: ["docker"] }
+
+		expect(readCommandListScopes("deniedCommands", [], inspection).workspace).toEqual(["docker"])
+		expect(resolveWorkspaceWriteTarget("deniedCommands", inspection)).toBe(vscode.ConfigurationTarget.Workspace)
+	})
+
+	it("keeps the folder override for an explicitly empty folder value, matching the target it writes", () => {
+		// An explicit `[]` is a decision to override the workspace list with
+		// nothing, so both the read and the target stay on the folder layer. A
+		// predicate that treated emptiness as absence would write the workspace
+		// layer and leave the user's clear in place.
+		const inspection: CommandListInspection = { workspaceFolderValue: [], workspaceValue: ["docker"] }
+
+		expect(readCommandListScopes("deniedCommands", [], inspection).workspace).toEqual([])
+		expect(resolveWorkspaceWriteTarget("deniedCommands", inspection)).toBe(
+			vscode.ConfigurationTarget.WorkspaceFolder,
+		)
+	})
+
+	// The save path's mid-save re-read asks whether the layer it writes still
+	// holds a value, not which layer wins. These four states pin that per-layer
+	// read: a folder override arriving is the folder layer's value, never the
+	// workspace layer's disappearance.
+	const layerValueCases: [CommandListInspection, string[] | undefined, string[] | undefined][] = [
+		[{ workspaceFolderValue: null, workspaceValue: ["docker"] }, undefined, ["docker"]],
+		[{ workspaceFolderValue: [], workspaceValue: ["docker"] }, [], ["docker"]],
+		[{ workspaceValue: ["docker"] }, undefined, ["docker"]],
+		[{}, undefined, undefined],
+	]
+
+	it.each(layerValueCases)(
+		"reads each layer's own value, so a folder override is not a workspace removal (%#)",
+		(inspection, expectedFolder, expectedWorkspace) => {
+			expect(workspaceLayerValue(inspection, "workspaceFolder")).toEqual(expectedFolder)
+			expect(workspaceLayerValue(inspection, "workspace")).toEqual(expectedWorkspace)
 		},
 	)
 })
@@ -1731,41 +1782,6 @@ describe("classifyCommandListBaseline", () => {
 		expect(result.promotionHiddenEntries).toEqual(["docker"])
 	})
 
-	it("keeps a displayed workspace entry out of the global write when an unchanged gate hides it", () => {
-		// The workspace layer holds "echo", a global entry shadows it, and the
-		// dialog displayed it before the gate stayed on. The configuration's global
-		// layer holds no "echo", so a promotion is the only way it could reach the
-		// user's global list. Reading the promotion set as the whole hidden set
-		// would drop "echo" from the workspace origin set, the split would read it
-		// as brand-new, and the global write would gain it. The baseline keeps it a
-		// workspace decision instead.
-		const { promotionHiddenEntries } = classifyCommandListBaseline({
-			baseline: ["echo"],
-			incoming: ["echo"],
-			currentScopes: { global: [], workspace: ["echo"], merged: [] },
-			configGlobalAtSaveStart: [],
-			globalLayerAtSaveStart: undefined,
-			hiddenWorkspaceEntries: ["echo"],
-			gateAtDisplay: true,
-		})
-
-		// The save path splits, then re-adds the hidden entries the baseline never
-		// showed. The baseline showed "echo", so the split alone decides here.
-		const baseline = ["echo"]
-		const hiddenWorkspaceEntries = ["echo"]
-		const { globalWrite, workspaceWrite } = splitCommandListScopes(
-			["echo"],
-			hiddenWorkspaceEntries.filter((entry) => !promotionHiddenEntries.includes(entry)),
-			[],
-		)
-		const workspaceWriteWithHidden = [
-			...new Set([...workspaceWrite, ...hiddenWorkspaceEntries.filter((entry) => !baseline.includes(entry))]),
-		]
-
-		expect(globalWrite).toEqual([])
-		expect(workspaceWriteWithHidden).toEqual(["echo"])
-	})
-
 	it("treats a baseline of the wrong runtime type as no baseline", () => {
 		// A sender can put anything in the baseline slot. A non-array cannot answer
 		// the display-time question, so the guard keeps the current hidden set
@@ -2002,6 +2018,31 @@ describe("rollbackFailedCommandListWrite", () => {
 		})
 
 		expect(writeGlobalLayer).toHaveBeenCalledWith([])
+	})
+
+	it("leaves another writer's clear in place instead of restoring the entries this save removed", async () => {
+		// The layer held "git", this save replaced it with "new", and the workspace
+		// write then failed. A later writer cleared the layer to `[]`. Restoring
+		// "git" would re-add an entry the user just deleted, so the undo keeps the
+		// clear. The restore still runs, because the failed write leaves the layer
+		// half-applied otherwise.
+		const writeGlobalLayer = vi.fn(async () => undefined)
+
+		const result = await rollbackFailedCommandListWrite({
+			key: "allowedCommands",
+			failure: "workspace write failed",
+			globalWrite: ["new"],
+			configGlobalAtSaveStart: ["git"],
+			globalLayerAtSaveStart: ["git"],
+			globalWriteApplied: true,
+			readGlobalLayer: () => [],
+			writeGlobalLayer,
+		})
+
+		expect(result).toEqual({ status: "rolled-back" })
+		expect(writeGlobalLayer).toHaveBeenCalledTimes(1)
+		expect(writeGlobalLayer).toHaveBeenCalledWith([])
+		expect(writeGlobalLayer).not.toHaveBeenCalledWith(["git"])
 	})
 
 	it("reports a failed re-read and writes nothing", async () => {

@@ -87,16 +87,60 @@ const mockTelemetryServiceInstance = {
 	updateTelemetryState: vi.fn(),
 }
 
-vi.mock("@roo-code/telemetry", () => ({
-	TelemetryService: {
-		createInstance: vi.fn().mockReturnValue(mockTelemetryServiceInstance),
-		hasInstance: vi.fn().mockReturnValue(true),
-		get instance() {
-			return mockTelemetryServiceInstance
+// Named so a test that installs its own double can restore this one afterwards
+// without cancelling the file-level mock for the tests that follow it.
+function permissiveTelemetryModule() {
+	return {
+		TelemetryService: {
+			createInstance: vi.fn().mockReturnValue(mockTelemetryServiceInstance),
+			hasInstance: vi.fn().mockReturnValue(true),
+			get instance() {
+				return mockTelemetryServiceInstance
+			},
 		},
-	},
-	PostHogTelemetryClient: vi.fn(),
-}))
+		PostHogTelemetryClient: vi.fn(),
+	}
+}
+
+// The real `createInstance()` accepts one instance per process and throws after
+// that; `shutdown()` does not reset it
+// (packages/telemetry/src/TelemetryService.ts:428-435). A test that activates
+// twice needs a factory that keeps that rule, so the second activation fails
+// unless the test has discarded the module registry in between.
+function singletonTelemetryModule() {
+	let instance: {
+		register: ReturnType<typeof vi.fn>
+		setProvider: ReturnType<typeof vi.fn>
+		shutdown: ReturnType<typeof vi.fn>
+		updateTelemetryState: ReturnType<typeof vi.fn>
+	} | null = null
+	return {
+		TelemetryService: {
+			createInstance: vi.fn(() => {
+				if (instance) {
+					throw new Error("TelemetryService instance already created")
+				}
+				instance = {
+					register: vi.fn(),
+					setProvider: vi.fn(),
+					shutdown: vi.fn(),
+					updateTelemetryState: vi.fn(),
+				}
+				return instance
+			}),
+			hasInstance: vi.fn(() => instance !== null),
+			get instance() {
+				if (!instance) {
+					throw new Error("TelemetryService not initialized")
+				}
+				return instance
+			},
+		},
+		PostHogTelemetryClient: vi.fn(),
+	}
+}
+
+vi.mock("@roo-code/telemetry", () => permissiveTelemetryModule())
 
 vi.mock("../utils/outputChannelLogger", () => ({
 	createOutputChannelLogger: vi.fn().mockReturnValue(vi.fn()),
@@ -736,47 +780,62 @@ describe("extension.ts", () => {
 		})
 
 		test("clears the persistence trace sink before disposing the output channel when seeding rejects", async () => {
-			// The trace sink logs through the output channel, so the failure path
-			// must clear it before disposing the channel.
+			// The trace sink logs through the output channel, so the failure path must
+			// clear it before disposing the channel. The clear is proved by module state,
+			// not by the call alone: a trace emitted while the sink is installed reaches
+			// it, and one emitted afterwards falls through to the module's own console
+			// sink. A double that recorded the call without changing the sink would leave
+			// the installed sink in place, so the second trace would still reach it.
 			const vscode = await import("vscode")
 			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
 			rejectingCommandListKeys.add("deniedCommands")
-			const teardownOrder: string[] = []
-			// Clearing passes undefined, which restores the default sink. That call marks the order assertion.
-			const setPersistenceTraceSink = vi.fn((sink?: unknown) => {
-				if (sink === undefined) {
-					teardownOrder.push("trace-sink-cleared")
-				}
-			})
-			vi.doMock("../core/task-persistence/persistenceTrace", () => ({
-				setPersistenceTraceSink,
-				tracePersistenceEvent: vi.fn(),
-			}))
+			const persistenceTrace = await import("../core/task-persistence/persistenceTrace")
+			// Pass-through spy: the real setter still performs the transition.
+			const setPersistenceTraceSink = vi.spyOn(persistenceTrace, "setPersistenceTraceSink")
+			const consoleLog = vi.spyOn(console, "log").mockImplementation(() => {})
 			const { TelemetryService } = await import("@roo-code/telemetry")
 			const shutdown = vi.mocked(TelemetryService.instance.shutdown)
+			// Shutdown runs after the sink is installed and before it is cleared, so a
+			// trace emitted here lands inside the window the install opened.
 			shutdown.mockImplementation(() => {
-				teardownOrder.push("telemetry-shutdown")
+				persistenceTrace.tracePersistenceEvent("shutdown")
 				return Promise.resolve()
 			})
 			try {
 				// The same channel `activate` creates, from the same factory double.
-				// Arming dispose observes the disposal order.
 				const channel = vi.mocked(vscode.window.createOutputChannel)("Test Output")
-				channel.dispose = vi.fn(() => void teardownOrder.push("channel-disposed"))
+				channel.dispose = vi.fn()
 
 				const { activate } = await import("../extension")
 				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
 				// Reverse acquisition order: the sink goes in after the channel, so it clears
 				// after telemetry shutdown and before the channel.
-				expect(teardownOrder).toEqual(["telemetry-shutdown", "trace-sink-cleared", "channel-disposed"])
+				const [installOrder, clearOrder] = setPersistenceTraceSink.mock.invocationCallOrder
+				expect(installOrder).toBeLessThan(shutdown.mock.invocationCallOrder[0])
+				expect(shutdown.mock.invocationCallOrder[0]).toBeLessThan(clearOrder)
+				expect(clearOrder).toBeLessThan(vi.mocked(channel.dispose).mock.invocationCallOrder[0])
+
 				// The failure path clears the sink exactly once: install + clear.
 				expect(setPersistenceTraceSink).toHaveBeenCalledTimes(2)
 				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(1, expect.any(Function))
 				expect(setPersistenceTraceSink).toHaveBeenNthCalledWith(2, undefined)
+
+				// The sink `activate` installed, read back from the real setter's own
+				// argument. The teardown-time trace reached it, so the install took effect.
+				const installedSink = vi.mocked(setPersistenceTraceSink.mock.calls[0][0])
+				expect(installedSink).toHaveBeenCalledTimes(1)
+				expect(consoleLog).not.toHaveBeenCalled()
+
+				// A trace after teardown bypasses the sink and falls through to the
+				// module's default console sink, so the clear took effect too.
+				persistenceTrace.tracePersistenceEvent("shutdown")
+				expect(installedSink).toHaveBeenCalledTimes(1)
+				expect(consoleLog).toHaveBeenCalledTimes(1)
 			} finally {
 				shutdown.mockReset()
-				vi.doUnmock("../core/task-persistence/persistenceTrace")
+				consoleLog.mockRestore()
+				setPersistenceTraceSink.mockRestore()
 			}
 		})
 
@@ -796,22 +855,45 @@ describe("extension.ts", () => {
 
 		test("preserves the stored allow list and retries only the failed deny seed", async () => {
 			// The per-key guard makes the retry cheap: the allow key is set, so only the
-			// denied key is attempted again.
-			const vscode = await import("vscode")
-			setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
-			rejectingCommandListKeys.add("deniedCommands")
+			// denied key is attempted again. The retry models a restarted host, because
+			// `TelemetryService.shutdown()` does not clear the singleton and
+			// `createInstance()` throws once one exists
+			// (packages/telemetry/src/TelemetryService.ts:428-435). The double below
+			// throws exactly as the real singleton does, so the restart between the two
+			// activations is what lets the seed run again: without it this test fails at
+			// `createInstance()` instead of silently passing.
+			vi.doMock("@roo-code/telemetry", () => singletonTelemetryModule())
+			try {
+				const vscode = await import("vscode")
+				setConfigScope(vscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+				rejectingCommandListKeys.add("deniedCommands")
 
-			const { activate } = await import("../extension")
-			await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
+				const { activate } = await import("../extension")
+				await expect(activate(mockContext)).rejects.toThrow("seed state write failed")
 
-			rejectingCommandListKeys.clear()
-			vi.mocked(mockContext.globalState.update).mockClear()
+				rejectingCommandListKeys.clear()
+				vi.mocked(mockContext.globalState.update).mockClear()
 
-			await activate(mockContext)
+				// The restarted host. A process restart discards every module, so both the
+				// registry and the mock's own factory must be replaced: the registry alone
+				// would hand back the singleton the previous activation created. The Memento
+				// double and its stored values live on the test object, so they survive.
+				vi.resetModules()
+				vi.doMock("@roo-code/telemetry", () => singletonTelemetryModule())
+				const restartedVscode = await import("vscode")
+				setConfigScope(restartedVscode, { globalValue: ["git"], deniedGlobalValue: ["docker"] })
+				const { activate: activateAfterRestart } = await import("../extension")
 
-			expect(vi.mocked(mockContext.globalState.update).mock.calls).toEqual([["deniedCommands", ["docker"]]])
-			expect(globalStateValues.get("allowedCommands")).toEqual(["git"])
-			expect(globalStateValues.get("deniedCommands")).toEqual(["docker"])
+				await activateAfterRestart(mockContext)
+
+				expect(vi.mocked(mockContext.globalState.update).mock.calls).toEqual([["deniedCommands", ["docker"]]])
+				expect(globalStateValues.get("allowedCommands")).toEqual(["git"])
+				expect(globalStateValues.get("deniedCommands")).toEqual(["docker"])
+			} finally {
+				// Restore, not unmock: cancelling the file-level mock would leave the
+				// tests after this one running against the real singleton module.
+				vi.doMock("@roo-code/telemetry", () => permissiveTelemetryModule())
+			}
 		})
 
 		test("does not shut down telemetry when activation completes", async () => {

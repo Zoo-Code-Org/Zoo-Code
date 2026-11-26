@@ -4353,8 +4353,8 @@ export class ClineProvider
 		if (configuration) {
 			await this.setValues(configuration)
 
-			// Global target on purpose: these writes mean "start this task with
-			// exactly this auto-approval policy". The settings dialog splits by scope.
+			// Global target on purpose: these writes set the global layer only. A workspace layer still
+			// affects the task while the workspace-command-lists gate is on; the settings dialog splits the scopes.
 			if (configuration.allowedCommands) {
 				await vscode.workspace
 					.getConfiguration(Package.name)

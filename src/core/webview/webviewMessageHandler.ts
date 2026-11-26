@@ -66,14 +66,17 @@ import { changeLanguage, t } from "../../i18n"
 import { Package } from "../../shared/package"
 import {
 	type CommandListInspection,
+	type WorkspaceCommandListLayer,
 	classifyCommandListBaseline,
 	commandListConfiguration,
 	readCommandListScopes,
 	resolveEffectiveCommandLists,
 	resolveWorkspaceWriteTarget,
 	rollbackFailedCommandListWrite,
+	sanitizeCommandList,
 	splitCommandListScopes,
 	workspaceCommandListsEnabled,
+	workspaceLayerValue,
 } from "../auto-approval/commandScope"
 import { type RouterName, toRouterName } from "../../shared/api"
 import { MessageEnhancer } from "./messageEnhancer"
@@ -92,7 +95,7 @@ import { searchWorkspaceFiles } from "../../services/search/file-search"
 import { fileExistsAtPath } from "../../utils/fs"
 import { playTts, setTtsEnabled, setTtsSpeed, stopTts } from "../../utils/tts"
 import { searchCommits } from "../../utils/git"
-import { exportSettings, importSettingsWithFeedback } from "../config/importExport"
+import { awaitCommandListImportSettled, exportSettings, importSettingsWithFeedback } from "../config/importExport"
 import { getOpenAiModels } from "../../api/providers/openai"
 import { getVsCodeLmModels } from "../../api/providers/vscode-lm"
 import { getGitHubCopilotViewState } from "../../services/language-models/copilotViewState"
@@ -840,6 +843,11 @@ export const webviewMessageHandler = async (
 							? commands.filter((cmd) => typeof cmd === "string" && cmd.trim().length > 0)
 							: []
 
+						// An import writes the lists to state and then mirrors them into the
+						// settings file. Waiting for its span keeps this snapshot from reading
+						// the imported state against the file the import has not written yet.
+						await awaitCommandListImportSettled()
+
 						// The webview sends the full merged list. The split needs one inspect()
 						// snapshot before any write, so the workspace layer, the write target, and
 						// the rollback value describe the same state. A guessed-empty workspace
@@ -886,10 +894,13 @@ export const webviewMessageHandler = async (
 						// only the hidden-entry mechanism, never this key's target or rollback.
 						const otherKey = key === "allowedCommands" ? "deniedCommands" : "allowedCommands"
 						const otherScopes = readCommandListScopes(otherKey, commandListGlobalsAtSaveStart[otherKey])
+						// One read decides both the hidden set and whether the workspace layer can
+						// carry an entry through this save.
+						const workspaceListsEnabled = workspaceCommandListsEnabled()
 						const { hiddenWorkspaceAllow, hiddenWorkspaceDeny } = resolveEffectiveCommandLists(
 							key === "allowedCommands" ? currentScopes : otherScopes,
 							key === "deniedCommands" ? currentScopes : otherScopes,
-							workspaceCommandListsEnabled(),
+							workspaceListsEnabled,
 						)
 						// Hidden entries were never displayed. The gate is off, or a global entry
 						// shadows them. A list cannot delete what it never showed, so a save re-adds
@@ -911,6 +922,20 @@ export const webviewMessageHandler = async (
 								hiddenWorkspaceEntries,
 								gateAtDisplay: message.commandListBaseline?.workspaceCommandListsEnabled,
 							})
+						// The split treats an entry outside its origin set as new, so the origin set
+						// decides what the global write may hold. `classifyCommandListBaseline` keeps
+						// a state-only global entry in `splitSourceEntries` when
+						// `globalLayerAtSaveStart` is `undefined`, because the activation seed wrote
+						// that copy and not the user. With the gate off the workspace layer enforces
+						// nothing, so that entry's only home is the global layer and the origin set
+						// must hold it. With the gate on the workspace layer carries it, and
+						// re-writing the seeded copy into the user's settings file would duplicate a
+						// default the user never added.
+						const seededGlobalEntries =
+							!workspaceListsEnabled && globalLayerAtSaveStart === undefined
+								? currentScopes.global.filter((entry) => !configGlobalAtSaveStart.includes(entry))
+								: []
+						const globalOriginEntries = [...new Set([...configGlobalAtSaveStart, ...seededGlobalEntries])]
 						const { globalWrite, workspaceWrite: keptWorkspaceWrite } = splitCommandListScopes(
 							splitSourceEntries,
 							// Hidden entries are not known state. The dialog never displayed them, so a
@@ -918,10 +943,7 @@ export const webviewMessageHandler = async (
 							// layer holds it hidden. Entries the baseline shows displayed are the
 							// exception, because the re-add below restores dropped hidden entries.
 							currentScopes.workspace.filter((entry) => !promotionHiddenEntries.includes(entry)),
-							// The global origin set must match the retained-entry filter. Only the
-							// configuration's own global layer proves known global state, because
-							// the state copy lags direct file edits.
-							configGlobalAtSaveStart,
+							globalOriginEntries,
 						)
 
 						// The hidden set holds entries the dialog could not display, so re-adding
@@ -952,32 +974,61 @@ export const webviewMessageHandler = async (
 							// the save skips the write, so saving never materializes one. Deletions clear
 							// it with `[]`.
 							if (workspaceTarget !== undefined) {
-								// The layer can gain entries while the global write runs, and the
-								// configuration API has no compare-and-set. A re-read here narrows that
-								// window: entries added since save start are merged in, so this save
-								// does not overwrite another writer's entry. An entry added inside the
-								// window that remains between this read and the write is still lost.
+								// The layer can change while the global write runs, and the configuration
+								// API has no compare-and-set. A re-read here narrows that window: entries
+								// added since save start are merged in, so this save does not overwrite
+								// another writer's entry. An entry added inside the window that remains
+								// between this read and the write is still lost.
 								let workspaceAtWrite = workspaceWrite
+								let workspaceLayerVanished = false
 								try {
 									const freshInspection = config.inspect<string[]>(key)
+									// No inspection object is no evidence about the layer, so the
+									// precomputed list stands rather than counting as a removal.
 									if (freshInspection !== undefined) {
-										const workspaceNow = readCommandListScopes(
-											key,
-											globalLayerAtSaveStart,
-											freshInspection,
-										).workspace
-										// `currentScopes.workspace` is this save's start state, sanitized
-										// the same way, so an entry it never held is a mid-save addition.
-										// `globalLayerAtSaveStart` is passed only because the signature
-										// requires it; `.workspace` does not read it.
-										const addedDuringSave = workspaceNow.filter(
-											(entry) => !currentScopes.workspace.includes(entry),
-										)
-										workspaceAtWrite = [...new Set([...workspaceWrite, ...addedDuringSave])]
+										// Read the target layer's own value, not the layer that wins.
+										// `selectWorkspaceCommandListLayer` answers which layer wins, so a
+										// folder override appearing mid-save makes it report the folder
+										// layer while the workspace layer this save writes still exists.
+										// Comparing the winner to the target would read that appearance as
+										// a disappearance, refuse a valid save, and undo its global half.
+										// The question here is narrower: does the target layer still hold
+										// a value? Only "no" is a conflict.
+										const targetLayer: WorkspaceCommandListLayer =
+											workspaceTarget === vscode.ConfigurationTarget.WorkspaceFolder
+												? "workspaceFolder"
+												: "workspace"
+										const targetValue = workspaceLayerValue(freshInspection, targetLayer)
+										if (targetValue === undefined) {
+											workspaceLayerVanished = true
+										} else {
+											// The dialog's submission is the intent. An entry it kept and the
+											// layer still holds stays; an entry the layer lost was removed by
+											// another writer, so the save honors that removal instead of
+											// writing it back. Entries another writer added are preserved.
+											// The start side is sanitised on read, so the fresh side is too.
+											// Otherwise an entry the layer holds blank or non-string, which
+											// the read drops, would count as added here and be written back.
+											const freshWorkspace = sanitizeCommandList(targetValue)
+											const keptByBoth = workspaceWrite.filter((entry) =>
+												freshWorkspace.includes(entry),
+											)
+											const addedDuringSave = freshWorkspace.filter(
+												(entry) => !currentScopes.workspace.includes(entry),
+											)
+											workspaceAtWrite = [...new Set([...keptByBoth, ...addedDuringSave])]
+										}
 									}
 								} catch {
 									// The global write already landed. Keep the precomputed list rather
 									// than abort a half-applied save over a re-read that cannot complete.
+								}
+								if (workspaceLayerVanished) {
+									// Writing would recreate an override another writer removed. The
+									// global half has landed, so it is undone and the key reported.
+									throw new Error(
+										`the ${workspaceTarget === vscode.ConfigurationTarget.WorkspaceFolder ? "workspace-folder" : "workspace"} layer was removed during the save`,
+									)
 								}
 								await config.update(key, workspaceAtWrite, workspaceTarget)
 							}
@@ -993,7 +1044,18 @@ export const webviewMessageHandler = async (
 								configGlobalAtSaveStart,
 								globalLayerAtSaveStart,
 								globalWriteApplied,
-								readGlobalLayer: () => config.inspect<string[]>(key)?.globalValue,
+								readGlobalLayer: () => {
+									// The rollback treats a missing value as a layer another writer
+									// deleted, and it then clears the key. That reading is only safe
+									// when the inspection exists and reports no global value. No
+									// inspection object at all says nothing about the layer, so it
+									// throws, which the helper already answers with `re-read-failed`.
+									const reInspection = config.inspect<string[]>(key)
+									if (reInspection === undefined) {
+										throw new Error("the configuration value could not be read")
+									}
+									return reInspection.globalValue
+								},
 								writeGlobalLayer: (value) =>
 									config.update(key, value, vscode.ConfigurationTarget.Global),
 							})
