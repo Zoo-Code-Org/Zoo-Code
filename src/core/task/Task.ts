@@ -486,6 +486,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponseTargetSeq = next
 		return next
 	}
+
+	/**
+	 * Mint this ask's target token and arm the response slot. Every ask
+	 * arms at the publication boundary of its ask row (see the beforeEmit
+	 * hook in addToClineMessages), so a `created` Message listener that
+	 * answers the ask finds its token armed and its response resolves it
+	 * (issue 998 review). A response that lands before the arm still tags
+	 * the previous arm's value (or none) and stays an orphan.
+	 */
+	private armAskTarget(): number {
+		const askTarget = this.nextAskTarget()
+		this.awaitingAskTarget = askTarget
+		return askTarget
+	}
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -1717,7 +1731,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		return readTaskMessages({ taskId: this.taskId, globalStoragePath: this.globalStoragePath })
 	}
 
-	private async addToClineMessages(message: ClineMessage) {
+	private async addToClineMessages(message: ClineMessage, beforeEmit?: () => void) {
 		message.messageId ??= crypto.randomUUID()
 		this.clineMessages.push(message)
 		const provider = this.providerRef.deref()
@@ -1747,6 +1761,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				console.error("[Task#addToClineMessages] flushPostStateToWebviewThrottled failed:", error)
 			}
 		}
+		// The publication boundary: the ask row is flushed to the webview
+		// above, so a listener may answer as soon as this event runs. The ask
+		// arms its target here (see armAskTarget), not earlier: a response that
+		// lands before this point still finds the previous arm's value (or
+		// none) and stays an orphan no ask may consume.
+		beforeEmit?.()
 		this.emit(RooCodeEventName.Message, { action: "created", message })
 		await this.saveClineMessages()
 
@@ -2048,6 +2068,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			throw new Error(`[RooCode#ask] task ${this.taskId}.${this.instanceId} aborted`)
 		}
 
+		// Each publication branch below arms this ask's target token at its
+		// row's publication boundary (see armAskTarget); the wait predicates
+		// read the armed token through this local. Zero is never a minted
+		// token.
+		let askTarget = 0
+
 		if (partial !== undefined) {
 			const lastMessage = this.clineMessages.at(-1)
 
@@ -2085,6 +2111,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
 					this.askResponseTarget = undefined
+					askTarget = this.armAskTarget()
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -2121,15 +2148,20 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseTarget = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
-					await this.addToClineMessages({
-						ts: askTs,
-						type: "ask",
-						ask: type,
-						text,
-						isProtected,
-						isAnswered: isAutoAnswered || undefined,
-						autoApprovalDecision,
-					})
+					await this.addToClineMessages(
+						{
+							ts: askTs,
+							type: "ask",
+							ask: type,
+							text,
+							isProtected,
+							isAnswered: isAutoAnswered || undefined,
+							autoApprovalDecision,
+						},
+						() => {
+							askTarget = this.armAskTarget()
+						},
+					)
 				}
 			}
 		} else {
@@ -2140,23 +2172,21 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseTarget = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
-			await this.addToClineMessages({
-				ts: askTs,
-				type: "ask",
-				ask: type,
-				text,
-				isProtected,
-				isAnswered: isAutoAnswered || undefined,
-				autoApprovalDecision,
-			})
+			await this.addToClineMessages(
+				{
+					ts: askTs,
+					type: "ask",
+					ask: type,
+					text,
+					isProtected,
+					isAnswered: isAutoAnswered || undefined,
+					autoApprovalDecision,
+				},
+				() => {
+					askTarget = this.armAskTarget()
+				},
+			)
 		}
-
-		// Mint this ask's target token and arm the wait only now, after the ask
-		// row is posted. The gap between the slot reset above and this arm is the
-		// ask's entry window: a response landing there tags with the previous
-		// arm's value (or none) and is discarded at the first wait poll below.
-		const askTarget = this.nextAskTarget()
-		this.awaitingAskTarget = askTarget
 
 		const timeouts: NodeJS.Timeout[] = []
 
@@ -2227,7 +2257,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// can outrun that teardown, and a status transition published after
 		// abort would describe a task that no longer runs.
 		const armAskStatusTimers = (): void => {
-			const askStillPending = this.askResponse === undefined && this.lastMessageTs === askTs
+			// Ownership-aware, like the isBlocking check: a response that does
+			// not carry this ask's token is an orphan the wait will discard, so
+			// the ask is still pending and the status timers must arm (issue
+			// 998 review).
+			const askStillPending =
+				(this.askResponse === undefined || this.askResponseTarget !== askTarget) && this.lastMessageTs === askTs
 			if (!askStillPending || this.abort || partial || approval.decision !== "ask" || timeouts.length > 0) {
 				return
 			}
@@ -2506,7 +2541,12 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (queuedMessageId) {
 					this.messageQueueService.releaseMessage(queuedMessageId)
 				}
-				this.awaitingAskTarget = undefined
+				// Clear the arm only while it still belongs to this ask: a newer
+				// ask may have armed during the wind-down, and wiping its token
+				// would orphan every response to it (issue 998 review).
+				if (this.awaitingAskTarget === askTarget) {
+					this.awaitingAskTarget = undefined
+				}
 				throw new AskIgnoredError("superseded")
 			}
 
@@ -2615,9 +2655,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// A partial ask is still streaming in (thread 4680322903): stamping it
 		// would leave the completed ask waiting forever with no Run/Deny.
 		if (
-			askResponse === "messageResponse" ||
-			askResponse === "yesButtonClicked" ||
-			askResponse === "noButtonClicked"
+			// Only an arrival carrying the armed ask's token may settle the
+			// row: an orphan that the wait will discard must leave the Run/Deny
+			// controls in place (issue 998 review).
+			this.askResponseTarget !== undefined &&
+			(askResponse === "messageResponse" ||
+				askResponse === "yesButtonClicked" ||
+				askResponse === "noButtonClicked")
 		) {
 			const lastCommandAskIndex = findLastIndex(
 				this.clineMessages,

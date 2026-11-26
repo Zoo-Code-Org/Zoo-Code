@@ -4,7 +4,7 @@ import { setAbortLatch } from "../../../test-utils/run-state"
 type QueueTaskTestAccess = {
 	say: Task["say"]
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: () => Promise<void>
+	addToClineMessages: (message: unknown, beforeEmit?: () => void) => Promise<void>
 	lastMessageTs?: number
 }
 
@@ -29,7 +29,9 @@ describe("Task.ask queued message drain", () => {
 		;(task as any).lastMessageTs = undefined
 		return import("../../message-queue/MessageQueueService").then(({ MessageQueueService }) => {
 			;(task as any).messageQueueService = new MessageQueueService()
-			;(task as any).addToClineMessages = vi.fn(async () => {})
+			;(task as any).addToClineMessages = vi.fn(async (_message: unknown, beforeEmit?: () => void) => {
+				beforeEmit?.()
+			})
 			;(task as any).saveClineMessages = vi.fn(async () => {})
 			;(task as any).updateClineMessage = vi.fn(async () => {})
 			;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})
@@ -339,7 +341,9 @@ describe("Task.ask queued message drain", () => {
 			finishAddingAsk = resolve
 		})
 		const access = getQueueTaskTestAccess(task)
-		access.addToClineMessages = vi.fn(() => addingAsk)
+		access.addToClineMessages = vi.fn((_message: unknown, beforeEmit?: () => void) =>
+			addingAsk.then(() => beforeEmit?.()),
+		)
 		task.messageQueueService.addMessage("Still durable")
 		const ask = task.ask("tool", JSON.stringify({ tool: "finishTask" }), false)
 		await Promise.resolve()
@@ -358,7 +362,9 @@ describe("Task.ask queued message drain", () => {
 			finishAddingAsk = resolve
 		})
 		const access = getQueueTaskTestAccess(task)
-		access.addToClineMessages = vi.fn(() => addingAsk)
+		access.addToClineMessages = vi.fn((_message: unknown, beforeEmit?: () => void) =>
+			addingAsk.then(() => beforeEmit?.()),
+		)
 		task.messageQueueService.addMessage("Persist me later")
 		const ask = task.ask("completion_result", "Done", false)
 		await Promise.resolve()

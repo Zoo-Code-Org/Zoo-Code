@@ -20,7 +20,12 @@ function buildTask(provider: ProviderStub | undefined) {
 	;(task as any).askResponseText = undefined
 	;(task as any).askResponseImages = undefined
 	;(task as any).lastMessageTs = undefined
-	;(task as any).addToClineMessages = vi.fn(async () => {})
+	// The marking tests answer the ask directly, so seed an armed target: a
+	// real arrival would carry this ask's token (only orphans skip the stamp).
+	;(task as unknown as { awaitingAskTarget: number }).awaitingAskTarget = 1
+	;(task as any).addToClineMessages = vi.fn(async (_message: unknown, beforeEmit?: () => void) => {
+		beforeEmit?.()
+	})
 	;(task as any).saveClineMessages = vi.fn(async () => {})
 	;(task as any).updateClineMessage = vi.fn(async () => {})
 	;(task as any).cancelAutoApprovalTimeout = vi.fn(() => {})

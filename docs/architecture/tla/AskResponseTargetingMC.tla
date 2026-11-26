@@ -3,7 +3,9 @@
 EXTENDS AskResponseTargeting
 
 \* Sabotage 1: the ownership gate at the consume step is removed. This is the
-\* unfixed consume: any pending response satisfies the ask that reads it.
+\* unfixed consume: any pending response satisfies the ask that reads it. The
+\* lifecycle (awaiting, cur) mirrors the fixed Consume, so the gate is the only
+\* delta.
 ConsumeNoGate(k) ==
     /\ cur = k
     /\ ~ended[k]
@@ -14,7 +16,9 @@ ConsumeNoGate(k) ==
     /\ pending' = FALSE
     /\ rtag' = Orphan
     /\ ghostArrival' = Orphan
-    /\ UNCHANGED <<awaiting, begun, cur, arrivals>>
+    /\ awaiting' = 0
+    /\ cur' = 0
+    /\ UNCHANGED <<begun, arrivals>>
 
 \* Sabotage 2: the tag is written from the ask that is minted, not from the ask
 \* that awaits. A response arriving during the entry window then carries the new

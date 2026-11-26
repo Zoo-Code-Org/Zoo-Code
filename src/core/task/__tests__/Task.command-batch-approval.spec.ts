@@ -199,7 +199,7 @@ type BatchTaskAccess = {
 	requestPolicySnapshot: Record<string, unknown> | undefined
 	safeEnsureModelFetched: () => Promise<unknown>
 	saveClineMessages: () => Promise<boolean>
-	addToClineMessages: (msg: unknown) => Promise<unknown>
+	addToClineMessages: (msg: unknown, beforeEmit?: () => void) => Promise<unknown>
 	attemptApiRequest: () => AsyncIterable<ApiStreamChunk>
 	userMessageContent: Array<{ type: string; tool_use_id?: string }>
 }
@@ -210,6 +210,10 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 	let mockOutputChannel: vscode.OutputChannel
 	let scope: object
 	let mockExtensionContext: vscode.ExtensionContext
+	// Tasks created by the current test and their request-loop promises: the
+	// tests end while a command ask still waits, so teardown must abort each
+	// task and drain its loop before the parser state is cleared.
+	const active: Array<{ task: Task; settled?: Promise<unknown> }> = []
 
 	beforeEach(async () => {
 		scope = NativeToolCallParser.createScope()
@@ -292,7 +296,19 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 		})
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
+		// Stop the ask pollers and request loops this test leaves behind: the
+		// tests end mid-approval on purpose, so abort each task and drain its
+		// loop before clearing the parser scope.
+		for (const { task, settled } of active.splice(0)) {
+			await Promise.race([
+				task.abortTask().catch(() => undefined),
+				new Promise((resolve) => setTimeout(resolve, 2000)),
+			])
+			if (settled) {
+				await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, 2000))])
+			}
+		}
 		NativeToolCallParser.clearAllStreamingToolCalls(scope)
 		NativeToolCallParser.clearRawChunkState(scope)
 	})
@@ -304,6 +320,8 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			task: "batch task",
 			startTask: false,
 		})
+		const entry: { task: Task; settled?: Promise<unknown> } = { task }
+		active.push(entry)
 		const access = task as unknown as BatchTaskAccess
 		vi.spyOn(task.diffViewProvider, "reset").mockResolvedValue(undefined)
 		// The real attemptApiRequest captures the frozen tool policy before
@@ -331,8 +349,13 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			}
 			throw new Error("BATCH-END-OF-REQUESTS")
 		})
+		const settled = task.recursivelyMakeClineRequests([{ type: "text", text: "test" }]).catch((e) => e)
+		const entry = active.find((candidate) => candidate.task === task)
+		if (entry) {
+			entry.settled = settled
+		}
 		return {
-			settled: task.recursivelyMakeClineRequests([{ type: "text", text: "test" }]).catch((e) => e),
+			settled,
 			apiCalls: () => calls,
 		}
 	}
@@ -373,9 +396,12 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 	it("does not run the next command when an orphan click lands in its entry window", async () => {
 		const task = createTask()
 		const access = task as unknown as BatchTaskAccess
-		const realAdd = access.addToClineMessages.bind(task)
+		const realAdd = access.addToClineMessages.bind(task) as (
+			msg: unknown,
+			beforeEmit?: () => void,
+		) => Promise<unknown>
 		let commandAskCount = 0
-		access.addToClineMessages = async (msg: unknown) => {
+		access.addToClineMessages = async (msg: unknown, beforeEmit?: () => void) => {
 			if (
 				typeof msg === "object" &&
 				msg !== null &&
@@ -384,12 +410,14 @@ describe("Task - multi-command approval in one request (issue 998)", () => {
 			) {
 				commandAskCount++
 				if (commandAskCount === 2) {
-					// The duplicate click of the first approval delivers now: the
-					// second ask has reset its slot and is not waiting yet.
+					// The duplicate click of the first approval delivers while the
+					// second ask is inside its publication await, before the row
+					// is flushed or emitted: the arm has not run yet, so the click
+					// must stay an orphan.
 					task.handleWebviewAskResponse("yesButtonClicked")
 				}
 			}
-			return realAdd(msg)
+			return realAdd(msg, beforeEmit)
 		}
 		const { settled } = runThreeCommandRequest(task)
 

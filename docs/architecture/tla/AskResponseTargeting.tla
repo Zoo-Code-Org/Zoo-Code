@@ -17,9 +17,19 @@
 \* Not modeled: the queued-message drain (QueueDrainRetry.tla owns the queue; its answers
 \* go through this same slot), the auto-approval timeout token, the text and image payload.
 \* Expected before the fix: the NoGate config reproduces failure 1 on the unfixed code.
-\* Result: AskResponseTargeting.cfg holds (60 states). Each sabotage config fails:
-\* .NoGate on OnlyOwnResponse and NoOrphanApproval (the unfixed consume), .TagByCur on
-\* OnlyOwnResponse (a tag written from the minted ask instead of the awaiting ask).
+\* Result: AskResponseTargeting.cfg holds (32 states). Each sabotage config fails:
+\* .NoGate on OnlyOwnResponse (the unfixed consume takes a real orphan arrival in
+\* the entry window, before the arm folds it), .TagByCur on OnlyOwnResponse (a tag
+\* written from the minted ask instead of the awaiting ask).
+\* Review ratchet (round on the fresh head): the arming transition no longer
+\* makes a pending response out of an empty slot, and both terminal actions
+\* reset cur to 0 while Consume also clears awaiting, so the second ask is
+\* reachable and the between-ask orphan windows get checked. Not modeled
+\* (bounded gaps, each pinned by a test in
+\* src/core/task/__tests__/ask-response-targeting.spec.ts): the arm fires at the
+\* row's publication boundary (the spec keeps the entry phase as a conservative
+\* envelope), the status-timer arming rule, concurrent asks (the presenter runs
+\* one ask at a time), and the isAnswered persistence stamp.
 \* Code check: the sabotage matches the entry-window leak that
 \* src/core/task/__tests__/ask-response-targeting.spec.ts and
 \* src/core/task/__tests__/Task.command-batch-approval.spec.ts replay on the real ask
@@ -72,12 +82,14 @@ MintAsk(k) ==
     /\ ghostArrival' = Orphan
     /\ UNCHANGED <<awaiting, consumed, consumedWhile, ended, arrivals>>
 
-\* ask() arms its wait after the ask row is posted. An orphan present at the first
-\* wait poll is discarded there; the spec folds that discard into this action.
+\* ask() arms its wait at the ask row's publication boundary. An orphan present
+\* at the first wait poll is discarded there; the spec folds that discard into
+\* this action. Arming never manufactures a response: an empty slot stays
+\* empty, an orphan-tagged slot clears, an own-tagged slot stays available.
 ArmAsk(k) ==
     /\ cur = k
     /\ awaiting' = k
-    /\ pending' = ~(pending /\ rtag = Orphan)
+    /\ pending' = pending /\ rtag # Orphan
     /\ rtag' = rtag
     /\ ghostArrival' = ghostArrival
     /\ UNCHANGED <<consumed, consumedWhile, ended, begun, cur, arrivals>>
@@ -94,6 +106,8 @@ Arrive ==
 
 \* The consume step. The ownership gate: only a response tagged with this ask's
 \* token may satisfy it. The ghost stores the arrival truth for the invariant.
+\* Consuming ends the ask: the arm clears with the active ask, and the next
+\* ask may enter.
 Consume(k) ==
     /\ cur = k
     /\ ~ended[k]
@@ -105,14 +119,18 @@ Consume(k) ==
     /\ pending' = FALSE
     /\ rtag' = Orphan
     /\ ghostArrival' = Orphan
-    /\ UNCHANGED <<awaiting, begun, cur, arrivals>>
+    /\ awaiting' = 0
+    /\ cur' = 0
+    /\ UNCHANGED <<begun, arrivals>>
 
 \* The ask ends without consuming (superseded, abort, or the user rejected).
+\* The active ask clears too, so the next ask can enter.
 EndNoConsume(k) ==
     /\ cur = k
     /\ ended' = [ended EXCEPT ![k] = TRUE]
     /\ awaiting' = 0
-    /\ UNCHANGED <<pending, rtag, ghostArrival, consumed, consumedWhile, begun, cur, arrivals>>
+    /\ cur' = 0
+    /\ UNCHANGED <<pending, rtag, ghostArrival, consumed, consumedWhile, begun, arrivals>>
 
 Next ==
     \/ \E k \in 1..MaxAsks : MintAsk(k)
