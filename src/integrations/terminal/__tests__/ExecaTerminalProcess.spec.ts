@@ -1,6 +1,7 @@
 // npx vitest run integrations/terminal/__tests__/ExecaTerminalProcess.spec.ts
 
 const mockPid = 12345
+const streamControl = vi.hoisted(() => ({ wait: undefined as Promise<void> | undefined }))
 
 vitest.mock("execa", () => {
 	const mockKill = vitest.fn()
@@ -10,6 +11,7 @@ vitest.mock("execa", () => {
 			iterable: (_opts: Record<string, unknown>) =>
 				(async function* () {
 					yield "test output\n"
+					await streamControl.wait
 				})(),
 			kill: mockKill,
 		})
@@ -17,10 +19,8 @@ vitest.mock("execa", () => {
 	return { execa, ExecaError: class extends Error {} }
 })
 
-vitest.mock("ps-tree", () => ({
-	default: vitest.fn(function (_: number, cb: (error: Error | null, children: readonly { PID: string }[]) => void) {
-		return cb(null, [])
-	}),
+vitest.mock("../../../utils/processTree", () => ({
+	getChildProcesses: vitest.fn().mockResolvedValue([]),
 }))
 
 import { execa } from "execa"
@@ -30,6 +30,7 @@ import { BaseTerminal } from "../BaseTerminal"
 import type { RooTerminal } from "../types"
 
 import { clearAllMocks } from "../../../test-utils/reset"
+import { getChildProcesses } from "../../../utils/processTree"
 
 describe("ExecaTerminalProcess", () => {
 	let mockTerminal: RooTerminal
@@ -37,6 +38,7 @@ describe("ExecaTerminalProcess", () => {
 	let originalEnv: NodeJS.ProcessEnv
 
 	beforeEach(() => {
+		streamControl.wait = undefined
 		originalEnv = { ...process.env }
 		BaseTerminal.setExecaShellPath(undefined)
 		mockTerminal = {
@@ -176,6 +178,75 @@ describe("ExecaTerminalProcess", () => {
 			await terminalProcess.run("echo test")
 			expect(mockTerminal.setActiveStream).toHaveBeenCalledWith(expect.any(Object), mockPid)
 			expect(mockTerminal.setActiveStream).toHaveBeenLastCalledWith(undefined)
+		})
+
+		it("skips process enumeration for commands that already finished", async () => {
+			vi.useFakeTimers()
+			try {
+				await terminalProcess.run("echo test")
+				await vi.advanceTimersByTimeAsync(100)
+				expect(getChildProcesses).not.toHaveBeenCalled()
+				await expect(terminalProcess["pidUpdatePromise"]).resolves.toBeUndefined()
+			} finally {
+				vi.useRealTimers()
+			}
+		})
+
+		it("handles an enumeration failure on abort without losing the owned-process kill", async () => {
+			const kill = vi.spyOn(process, "kill").mockReturnValue(true)
+			const log = vi.spyOn(console, "error").mockImplementation(() => {})
+			vi.mocked(getChildProcesses).mockRejectedValueOnce(new Error("lookup failed"))
+			try {
+				terminalProcess["pid"] = mockPid
+				terminalProcess.abort()
+				await Promise.resolve()
+				await Promise.resolve()
+				expect(kill).toHaveBeenCalledWith(mockPid, "SIGKILL")
+				expect(log).toHaveBeenCalledWith(expect.stringContaining("lookup failed"))
+			} finally {
+				kill.mockRestore()
+				log.mockRestore()
+			}
+		})
+
+		it("releases the PID lookup wait after failure so cancellation can finish", async () => {
+			vi.useFakeTimers()
+			const kill = vi.spyOn(process, "kill").mockReturnValue(true)
+			const log = vi.spyOn(console, "warn").mockImplementation(() => {})
+			let finish = () => {}
+			streamControl.wait = new Promise<void>((resolve) => {
+				finish = resolve
+			})
+			vi.mocked(getChildProcesses).mockRejectedValueOnce(new Error("lookup unavailable"))
+			const running = terminalProcess.run("long command")
+			try {
+				await vi.advanceTimersByTimeAsync(100)
+				await expect(terminalProcess["pidUpdatePromise"]).resolves.toBeUndefined()
+				expect(log).toHaveBeenCalledWith(expect.stringContaining("lookup unavailable"))
+				terminalProcess.abort()
+				finish()
+				await running
+				expect(kill).toHaveBeenCalledWith(mockPid, "SIGKILL")
+			} finally {
+				finish()
+				await running
+				kill.mockRestore()
+				log.mockRestore()
+				vi.useRealTimers()
+			}
+		})
+
+		it("never sends a kill to the extension host PID", async () => {
+			const kill = vi.spyOn(process, "kill").mockReturnValue(true)
+			try {
+				terminalProcess["pid"] = process.pid
+				terminalProcess.abort()
+				await Promise.resolve()
+				expect(kill).not.toHaveBeenCalled()
+				expect(getChildProcesses).not.toHaveBeenCalled()
+			} finally {
+				kill.mockRestore()
+			}
 		})
 	})
 
