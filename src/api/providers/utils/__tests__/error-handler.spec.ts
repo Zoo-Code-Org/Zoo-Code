@@ -259,6 +259,25 @@ describe("handleProviderError", () => {
 			expect(result).toBeInstanceOf(Error)
 			expect(result.message).toBe("TestProvider completion error: Connection timeout")
 		})
+
+		it("shows the underlying socket reason for a terminated stream", () => {
+			const cause = Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" })
+			const original = new TypeError("terminated", { cause })
+
+			const result = handleProviderError(original, providerName)
+
+			expect(result.message).toBe(
+				"TestProvider completion error: terminated (response stream ended unexpectedly; cause: other side closed; code: UND_ERR_SOCKET)",
+			)
+			expect(result.cause).toBe(original)
+		})
+
+		it("explains a terminated stream even when no cause is attached", () => {
+			const result = handleProviderError(new TypeError("terminated"), providerName)
+			expect(result.message).toBe(
+				"TestProvider completion error: terminated (response stream ended unexpectedly; check provider/server logs)",
+			)
+		})
 	})
 
 	describe("real-world error scenarios", () => {
