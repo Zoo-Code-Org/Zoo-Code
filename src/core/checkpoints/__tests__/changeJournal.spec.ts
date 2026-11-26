@@ -123,6 +123,10 @@ describe("changeJournal", () => {
 			const renamePending = new Promise<void>((resolve) => {
 				releaseRename = resolve
 			})
+			// Declared outside the try block so that `finally` can still release the gate
+			// and settle the append when an assertion fails: a pending append would
+			// leave the task lock queue entry in place for every later test.
+			let firstAppend: ReturnType<typeof appendChange> | undefined
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
 			const realOpen = fs.open
@@ -154,7 +158,7 @@ describe("changeJournal", () => {
 				await realRename(from as string | URL, to as string | URL)
 			})
 			try {
-				const firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 				await waitForEvent(events, "rename")
 				// While the rename is pending, no directory sync may have begun: the entry
 				// it would persist does not exist yet.
@@ -171,6 +175,10 @@ describe("changeJournal", () => {
 				expect(synced).toHaveLength(2)
 				expect(events).toEqual(["rename", "sync", "rename", "sync"])
 			} finally {
+				releaseRename()
+				if (firstAppend !== undefined) {
+					await firstAppend.catch(() => {})
+				}
 				renameSpy.mockRestore()
 				openSpy.mockRestore()
 				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
@@ -195,6 +203,10 @@ describe("changeJournal", () => {
 			const renamePending = new Promise<void>((resolve) => {
 				releaseRename = resolve
 			})
+			// Declared outside the try block so that `finally` can still release the gate
+			// and settle the append when an assertion fails: a pending append would
+			// leave the task lock queue entry in place for every later test.
+			let firstAppend: ReturnType<typeof appendChange> | undefined
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
 			const parentPath = path.dirname(dirPath)
@@ -236,7 +248,7 @@ describe("changeJournal", () => {
 				await realRename(from as string | URL, to as string | URL)
 			})
 			try {
-				const firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
 				await waitForEvent(events, "rename")
 				// While the rename is pending, no directory sync may have begun: the entry
 				// it would persist does not exist yet.
@@ -275,6 +287,10 @@ describe("changeJournal", () => {
 					"close:dir",
 				])
 			} finally {
+				releaseRename()
+				if (firstAppend !== undefined) {
+					await firstAppend.catch(() => {})
+				}
 				renameSpy.mockRestore()
 				openSpy.mockRestore()
 				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
