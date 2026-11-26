@@ -44,6 +44,13 @@ describe("task command output references", () => {
 		expect(await registerCommandOutput(directory, { content: "next" })).toBe("output-2")
 	})
 
+	it("lists legacy references until the task has short IDs and tolerates a missing output directory", async () => {
+		await fs.writeFile(path.join(directory, "cmd-456.txt"), "second")
+		await fs.writeFile(path.join(directory, "cmd-123.txt"), "first")
+		expect(await listCommandOutputs(directory)).toEqual(["cmd-123.txt", "cmd-456.txt"])
+		expect(await listCommandOutputs(path.join(directory, "missing"))).toEqual([])
+	})
+
 	it("reports a failed registration and permits a later retry", async () => {
 		const registration = registerCommandOutput(directory, { file: path.join(directory, "absent.txt") })
 		const failure = expect(registration).rejects.toMatchObject({ code: "ENOENT" })

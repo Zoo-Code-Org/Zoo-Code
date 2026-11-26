@@ -117,6 +117,29 @@ describe("ReadCommandOutputTool", () => {
 		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
 	})
 
+	it("reports an empty output list when there is no latest artifact", async () => {
+		vi.mocked(listCommandOutputs).mockResolvedValue([])
+
+		await tool.execute({ artifact_id: "latest" }, mockTask, mockCallbacks)
+
+		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(
+			expect.stringContaining('Artifact not found: "latest"'),
+		)
+		expect(fs.access).not.toHaveBeenCalled()
+		expect(fs.open).not.toHaveBeenCalled()
+	})
+
+	it.each([{ offset: 1.5 }, { limit: 0 }, { limit: -1 }, { limit: Number.MAX_SAFE_INTEGER + 1 }])(
+		"rejects invalid byte arguments %j before I/O",
+		async (args) => {
+			await tool.execute({ artifact_id: "output-1", ...args }, mockTask, mockCallbacks)
+
+			expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("positive integer"))
+			expect(mockTask.recordToolError).toHaveBeenCalledWith("read_command_output")
+			expect(fs.access).not.toHaveBeenCalled()
+		},
+	)
+
 	describe("Basic read functionality", () => {
 		it("should read artifact file correctly", async () => {
 			const artifactId = "cmd-1706119234567.txt"
