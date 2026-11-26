@@ -28,6 +28,28 @@ const TIGHT_DEADLINE_MS = 300
 const GENEROUS_DEADLINE_MS = 8000
 
 const servers: http.Server[] = []
+const pendingTimers = new Set<AbortController>()
+
+// Schedules `write` to run after `ms`. The timer aborts when the response
+// closes or when teardown runs, so no delayed callback fires after the
+// server is gone. Expected cancellation does not fail the test.
+function scheduleDelayedResponse(res: http.ServerResponse, ms: number, write: () => void): void {
+	const controller = new AbortController()
+	pendingTimers.add(controller)
+	res.once("close", () => {
+		controller.abort()
+	})
+	void delay(ms, undefined, { signal: controller.signal })
+		.then(write)
+		.catch((error: unknown) => {
+			if (!controller.signal.aborted) {
+				throw error
+			}
+		})
+		.finally(() => {
+			pendingTimers.delete(controller)
+		})
+}
 
 beforeAll(() => {
 	// Local servers only: the net-connect guard documents the
@@ -36,6 +58,11 @@ beforeAll(() => {
 })
 
 afterAll(async () => {
+	// Cancel pending delayed responses before the servers close.
+	for (const controller of pendingTimers) {
+		controller.abort()
+	}
+	pendingTimers.clear()
 	for (const server of servers) {
 		server.closeAllConnections()
 		await new Promise<void>((resolve) => server.close(() => resolve()))
@@ -83,7 +110,7 @@ describe("OpenAI transport honors the configured request deadline", () => {
 	it("drops a non-streaming request whose response headers exceed the deadline", async () => {
 		vitest.mocked(getApiRequestTimeout).mockReturnValue(TIGHT_DEADLINE_MS)
 		const port = await startServer((_req, res) => {
-			void delay(SERVER_DELAY_MS).then(() => {
+			scheduleDelayedResponse(res, SERVER_DELAY_MS, () => {
 				res.writeHead(200, { "content-type": "application/json" })
 				res.end(JSON.stringify({ choices: [{ message: { content: "late" }, finish_reason: "stop" }] }))
 			})
@@ -99,7 +126,7 @@ describe("OpenAI transport honors the configured request deadline", () => {
 	it("lets a slow response complete when the deadline exceeds the wait", async () => {
 		vitest.mocked(getApiRequestTimeout).mockReturnValue(GENEROUS_DEADLINE_MS)
 		const port = await startServer((_req, res) => {
-			void delay(SERVER_DELAY_MS).then(() => {
+			scheduleDelayedResponse(res, SERVER_DELAY_MS, () => {
 				res.writeHead(200, { "content-type": "application/json" })
 				res.end(JSON.stringify({ choices: [{ message: { content: "late" }, finish_reason: "stop" }] }))
 			})
@@ -116,7 +143,7 @@ describe("OpenAI transport honors the configured request deadline", () => {
 		const port = await startServer((_req, res) => {
 			res.writeHead(200, { "content-type": "text/event-stream" })
 			res.write(sseChunk("alpha"))
-			void delay(BODY_GAP_MS).then(() => {
+			scheduleDelayedResponse(res, BODY_GAP_MS, () => {
 				res.write(sseChunk("omega"))
 				res.write("data: [DONE]\n\n")
 				res.end()
@@ -140,7 +167,7 @@ describe("OpenAI transport honors the configured request deadline", () => {
 			res.writeHead(200, { "content-type": "text/event-stream" })
 			res.write(sseChunk("alpha"))
 			// Silence: the body goes idle past the configured deadline.
-			void delay(BODY_GAP_MS).then(() => {
+			scheduleDelayedResponse(res, BODY_GAP_MS, () => {
 				res.write(sseChunk("omega"))
 				res.end()
 			})

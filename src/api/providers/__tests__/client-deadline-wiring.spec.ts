@@ -20,7 +20,10 @@ vitest.mock("../../../utils/networkProxy", () => ({
 
 vitest.mock("undici", () => ({
 	Agent: vitest.fn().mockImplementation(function () {
-		return { __mockDispatcher: true }
+		const instance = { __mockDispatcher: true }
+		const sink = globalThis as { __wiredDeadlineDispatchers?: unknown[] }
+		sink.__wiredDeadlineDispatchers?.push(instance)
+		return instance
 	}),
 }))
 
@@ -84,11 +87,20 @@ function lastConstructorConfig(mock: ReturnType<typeof vitest.fn>): Record<strin
 	return mock.mock.calls.at(-1)?.[0] as Record<string, unknown> | undefined
 }
 
+function wiredDispatchers(): unknown[] {
+	const sink = globalThis as { __wiredDeadlineDispatchers?: unknown[] }
+	if (!sink.__wiredDeadlineDispatchers) {
+		sink.__wiredDeadlineDispatchers = []
+	}
+	return sink.__wiredDeadlineDispatchers
+}
+
 describe("client construction receives the request deadline dispatcher", () => {
 	beforeEach(() => {
 		clearAllMocks()
 		vitest.mocked(getApiRequestTimeout).mockReturnValue(600000)
 		vitest.mocked(isProxyEnabled).mockReturnValue(false)
+		wiredDispatchers().splice(0)
 	})
 
 	it("wires the dispatcher into the plain OpenAI client", () => {
@@ -120,6 +132,63 @@ describe("client construction receives the request deadline dispatcher", () => {
 		const config = lastConstructorConfig(mockAzureOpenAIConstructor)
 		expect(config?.timeout).toBe(600000)
 		expect(config?.fetchOptions).toBeDefined()
+	})
+
+	it("wires the dispatcher into the Azure /openai/v1 client", () => {
+		const options: ApiHandlerOptions = {
+			apiModelId: "gpt-4",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://myresource.openai.azure.com/openai/v1",
+
+			openAiApiKey: "test-key",
+		}
+
+		new OpenAiHandler(options)
+
+		const config = lastConstructorConfig(mockOpenAIConstructor)
+		expect(config?.timeout).toBe(600000)
+		const fetchOptions = config?.fetchOptions as { dispatcher?: unknown } | undefined
+		expect(fetchOptions).toBeDefined()
+		expect(wiredDispatchers()).toHaveLength(1)
+		expect(fetchOptions?.dispatcher).toBe(wiredDispatchers()[0])
+	})
+
+	it("wires the dispatcher into the Azure AI Inference client", () => {
+		const options: ApiHandlerOptions = {
+			apiModelId: "gpt-4",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://myendpoint.services.ai.azure.com",
+
+			openAiApiKey: "test-key",
+		}
+
+		new OpenAiHandler(options)
+
+		const config = lastConstructorConfig(mockOpenAIConstructor)
+		expect(config?.timeout).toBe(600000)
+		const fetchOptions = config?.fetchOptions as { dispatcher?: unknown } | undefined
+		expect(fetchOptions).toBeDefined()
+		expect(wiredDispatchers()).toHaveLength(1)
+		expect(fetchOptions?.dispatcher).toBe(wiredDispatchers()[0])
+	})
+
+	it("wires no dispatcher for Azure AI Inference while the debug proxy is active", () => {
+		vitest.mocked(isProxyEnabled).mockReturnValue(true)
+
+		const options: ApiHandlerOptions = {
+			apiModelId: "gpt-4",
+			openAiModelId: "gpt-4",
+			openAiBaseUrl: "https://myendpoint.services.ai.azure.com",
+
+			openAiApiKey: "test-key",
+		}
+
+		new OpenAiHandler(options)
+
+		const config = lastConstructorConfig(mockOpenAIConstructor)
+		expect(config?.timeout).toBe(600000)
+		expect(config?.fetchOptions).toBeUndefined()
+		expect(wiredDispatchers()).toHaveLength(0)
 	})
 
 	it("wires the dispatcher into OpenAI-compatible base providers", () => {
