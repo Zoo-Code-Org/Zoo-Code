@@ -5225,11 +5225,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 						(block) => block.type === "tool_use" || block.type === "mcp_tool_use",
 					)
 
-					if (
-						!didToolUse &&
-						assistantMessage.trim() &&
-						!this.parentTaskId
-					) {
+					if (!didToolUse && assistantMessage.trim() && !this.parentTaskId) {
 						await this.completePlainTextResponse(assistantMessage.trim())
 						if (this.userMessageContent.length === 0) return true
 						stack.push({ userContent: [...this.userMessageContent], includeFileDetails: false })
