@@ -16,6 +16,7 @@ import {
 } from "./utils/abort-signal"
 import { getLoggableOrigin } from "./utils/endpoint-origin"
 import { TagMatcher } from "../../utils/tag-matcher"
+import { InvokeRecoveryScanner, offeredToolNames, type RecoveryEvent } from "./utils/invoke-recovery"
 import { isProxyEnabled } from "../../utils/networkProxy"
 import type {
 	SingleCompletionHandler,
@@ -537,6 +538,43 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 			// Track tool call IDs for emitting end events
 			const toolCallIds: string[] = []
 
+			// Pseudo tool-call recovery (issue #1429): some models write
+			// <invoke> markup as plain content text. The scanner consumes
+			// the matched text chunks, holds only marker bytes, emits a
+			// recovered call at its block close, and keeps quoted or
+			// unterminated blocks as text. It runs only when function tools
+			// are offered, so plain chat behavior stays byte-identical.
+			// Native tool calls are not held: they emit on arrival, so the
+			// sink order is resolution order.
+			const recoveryToolNames = offeredToolNames(metadata?.tools)
+			const recoveryScanner =
+				recoveryToolNames.size > 0 ? new InvokeRecoveryScanner(recoveryToolNames) : undefined
+
+			// Builds one tool_call_partial chunk with a fresh id and index.
+			// Native calls and recovered calls share this emitter, so their
+			// sink indices stay unique and ordered.
+			const emitToolCallPartial = (call: { name: string; arguments: string }) => {
+				const toolCallId = `ollama-tool-${toolCallIndex}`
+				toolCallIds.push(toolCallId)
+				const partial = {
+					type: "tool_call_partial",
+					index: toolCallIndex,
+					id: toolCallId,
+					name: call.name,
+					arguments: call.arguments,
+				} as const
+				toolCallIndex++
+				return partial
+			}
+
+			// Maps one scanner event to its ApiStream chunk.
+			const emitRecoveryEvent = (event: RecoveryEvent) => {
+				if (event.kind === "text") {
+					return { type: "text", text: event.text } as const
+				}
+				return emitToolCallPartial(event)
+			}
+
 			try {
 				for await (const chunk of stream) {
 					// Process Ollama's native thinking field. When the think
@@ -554,24 +592,28 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 					if (typeof chunk.message.content === "string" && chunk.message.content.length > 0) {
 						// Process content through matcher for reasoning detection
 						for (const matcherChunk of matcher.update(chunk.message.content)) {
-							yield matcherChunk
+							if (recoveryScanner && matcherChunk.type === "text") {
+								// Recover pseudo calls from the text; chunks
+								// outside a marker candidate pass through.
+								for (const event of recoveryScanner.onText(matcherChunk.text)) {
+									yield emitRecoveryEvent(event)
+								}
+							} else {
+								yield matcherChunk
+							}
 						}
 					}
 
 					// Handle tool calls - emit partial chunks for NativeToolCallParser compatibility
 					if (chunk.message.tool_calls && chunk.message.tool_calls.length > 0) {
 						for (const toolCall of chunk.message.tool_calls) {
-							// Generate a unique ID for this tool call
-							const toolCallId = `ollama-tool-${toolCallIndex}`
-							toolCallIds.push(toolCallId)
-							yield {
-								type: "tool_call_partial",
-								index: toolCallIndex,
-								id: toolCallId,
+							// Native calls emit on arrival through the shared
+							// emitter, so their ids and indices stay ordered
+							// against recovered calls.
+							yield emitToolCallPartial({
 								name: toolCall.function.name,
 								arguments: JSON.stringify(toolCall.function.arguments),
-							}
-							toolCallIndex++
+							})
 						}
 					}
 
@@ -588,7 +630,20 @@ export class NativeOllamaHandler extends BaseProvider implements SingleCompletio
 
 				// Yield any remaining content from the matcher
 				for (const chunk of matcher.final()) {
-					yield chunk
+					if (recoveryScanner && chunk.type === "text") {
+						for (const event of recoveryScanner.onText(chunk.text)) {
+							yield emitRecoveryEvent(event)
+						}
+					} else {
+						yield chunk
+					}
+				}
+
+				if (recoveryScanner) {
+					// Flush the final hold: an unterminated block stays text.
+					for (const event of recoveryScanner.finish()) {
+						yield emitRecoveryEvent(event)
+					}
 				}
 
 				for (const toolCallId of toolCallIds) {

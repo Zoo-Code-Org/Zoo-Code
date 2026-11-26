@@ -1,0 +1,291 @@
+---- MODULE OllamaInvokeRecovery ----
+\* Models the incremental invoke recovery scanner InvokeRecoveryScanner
+\* (src/api/providers/utils/invoke-recovery.ts) inside the content stream of
+\* NativeOllamaHandler.createMessage. Source: the text chunks the TagMatcher
+\* yields, one token per step, plus native tool_call arrivals. Sink: the
+\* ApiStream text chunks and tool_call events, in sink order.
+\* Failure 1 (issue 1429): a model writes <invoke> tool calls as plain text.
+\* Nothing recovers them, so no tool runs and the turn fails.
+\* Failure 2 (old PR review round 1): recovery that swallows a quoted or an
+\* unterminated block, or that leaks the markup of a recovered block, shows
+\* text the user must not lose or must not see.
+\* Failure 3 (old PR review round 2): recovery that buffers the whole
+\* response stops the live streaming of ordinary prose.
+\* Failure 4 (old PR review round 4): the sink order of recovered calls and
+\* native calls must follow resolution order: a recovered call emits at its
+\* block close, a native at its arrival, so a native that arrives inside an
+\* open block runs before that block's call.
+\* Failure 5 (old PR review round 5): a finish pass that swallows held text
+\* loses data; an unterminated block stays text.
+\* The machine holds text only from a marker start to the verdict, so a hold
+\* can never cover a token before the marker. This is the LiveStream rule.
+\* Invariant NoLostCall: a run with a complete known-name block outside a
+\* quote context yields exactly one call event.
+\* Invariant NoPhantomCall: a run without such a block yields no call event.
+\* Invariant NoBlockTextLeak: tokens of a recovered block never reach the
+\* text sink.
+\* Invariant NoLostText: every live token reaches the text sink once.
+\* Invariant NativeOrder: the call and native events equal the truth table
+\* Events for the run.
+\* Invariant LiveStream: every live token is in the sink or in the hold, and
+\* the hold never covers a token before the marker start.
+\* Modes: Fixed is the scanner. HoldAll delays every token to the finish.
+\* Unfixed recovers nothing. NoGuard ignores the quote verdict. NoSuppress
+\* leaks recovered tokens to the text sink. NoFinishFlush drops the hold at
+\* the finish. EarlyEmit emits the call at the hold start, not at the close.
+\* The draft of the interrupted run had a NoLedger mode (natives wait in a
+\* ledger). The new machine never waits with natives, so that mode had no
+\* observable fault here; EarlyEmit replaces it as the NativeOrder saboteur.
+\* Oracles: Tokens, HasCall, Quoted and Events are truth-table data per run.
+\* The machine never re-derives a verdict; it reads the truth tables.
+\* Not modeled: marker bytes split across chunk pushes (the chunk-split
+\* property test covers it), the parameter schema typing, TagMatcher
+\* reasoning tags, abort paths, and token costs.
+\* Cost: each cfg checks in a few seconds on one TLC worker.
+\* Result: OllamaInvokeRecovery.cfg (Fixed) pass in 66 states. HoldAll fails
+\* LiveStream. Unfixed fails NoLostCall (and NoBlockTextLeak). NoGuard fails
+\* NoPhantomCall (and LiveStream). NoSuppress fails NoBlockTextLeak.
+\* NoFinishFlush fails NoLostText. EarlyEmit fails NativeOrder.
+\* Review: 0 covered, 0 added, 0 gap (fresh spec; no review round yet).
+EXTENDS Naturals, Sequences
+
+CONSTANT Mode
+
+\* ---- Input alphabet (one token = one stream step) ----
+T_PROSE == "p"          \* plain text outside markup
+T_OPNK == "o"           \* <invoke name="known-tool">
+T_OPNU == "x"           \* <invoke name="unknown-tool">
+T_PARAM == "r"          \* well-formed <parameter>...</parameter>
+T_INVC == "c"           \* </invoke>
+T_WRPO == "W"           \* <function_calls>
+T_WRPC == "w"           \* </function_calls>
+T_FENCE == "F"          \* a fenced code block marker line
+T_TICK == "t"           \* a backtick run that opens or closes a code span
+T_NATIVE == "n"         \* a native tool_call arrival
+
+Runs == {"wrap", "split", "fence", "carry", "natAfter", "natMid",
+         "natFirst", "quotedNat", "unfin", "unknown", "prose"}
+
+\* ---- Per-run inputs (truth-table data, not rules) ----
+Tokens(r) ==
+    CASE r = "wrap"     -> <<T_WRPO, T_OPNK, T_PARAM, T_INVC, T_WRPC>>
+    []  r = "split"     -> <<T_OPNK, T_PARAM, T_INVC>>
+    []  r = "fence"     -> <<T_FENCE, T_OPNK, T_PARAM, T_INVC, T_FENCE>>
+    []  r = "carry"     -> <<T_TICK, T_OPNK, T_PARAM, T_INVC, T_TICK>>
+    []  r = "natAfter"  -> <<T_OPNK, T_PARAM, T_INVC, T_NATIVE>>
+    []  r = "natMid"    -> <<T_OPNK, T_NATIVE, T_PARAM, T_INVC>>
+    []  r = "natFirst"  -> <<T_NATIVE, T_OPNK, T_PARAM, T_INVC>>
+    []  r = "quotedNat" -> <<T_FENCE, T_OPNK, T_NATIVE, T_PARAM, T_INVC, T_FENCE>>
+    []  r = "unfin"     -> <<T_PROSE, T_OPNK, T_PARAM>>
+    []  r = "unknown"   -> <<T_OPNU, T_PARAM, T_PARAM>>
+    []  r = "prose"     -> <<T_PROSE, T_PROSE>>
+    []  OTHER -> <<>>
+
+RunLen(r) == Len(Tokens(r))
+
+\* Oracle: a complete, known-name invoke block exists in this run. TRUE for
+\* the quoted runs too; the quote verdict is what keeps them as text.
+HasCall(r) ==
+    r \in {"wrap", "split", "fence", "carry",
+           "natAfter", "natMid", "natFirst", "quotedNat"}
+
+\* Oracle: the block sits inside a fence or an inline code span, so the
+\* guard keeps it as text.
+Quoted(r) == r \in {"fence", "carry", "quotedNat"}
+
+TruthRecovered(r) == HasCall(r) /\ ~Quoted(r)
+
+\* The verdict the machine applies. NoGuard drops the quote guard.
+EffRecov(r) == IF Mode = "NoGuard" THEN HasCall(r) ELSE TruthRecovered(r)
+
+\* First position the machine may hold: the marker start. The wrapper
+\* opener, or the invoke opener without a wrapper.
+HoldStart(r) ==
+    CASE r = "wrap"     -> 1
+    []  r = "split"     -> 1
+    []  r = "fence"     -> 2
+    []  r = "carry"     -> 2
+    []  r = "natAfter"  -> 1
+    []  r = "natMid"    -> 1
+    []  r = "natFirst"  -> 2
+    []  r = "quotedNat" -> 2
+    []  r = "unfin"     -> 2
+    []  r = "unknown"   -> 1
+    []  OTHER -> RunLen(r) + 1
+
+\* Position where the hold resolves: the invoke close, or the wrapper close
+\* behind it. Runs without a close resolve at the finish.
+ResolvePos(r) ==
+    CASE r = "wrap"     -> 5
+    []  r = "split"     -> 3
+    []  r = "fence"     -> 4
+    []  r = "carry"     -> 4
+    []  r = "natAfter"  -> 3
+    []  r = "natMid"    -> 4
+    []  r = "natFirst"  -> 4
+    []  r = "quotedNat" -> 5
+    []  OTHER -> RunLen(r) + 1
+
+\* Positions the machine swallows when a run recovers. Native tokens never
+\* join the hold; they emit on arrival.
+Swallowed(r) ==
+    IF TruthRecovered(r)
+    THEN {i \in 1..RunLen(r) : Tokens(r)[i] # T_NATIVE}
+    ELSE {}
+
+SwallowToken(r, i) == i \in Swallowed(r)
+IsTextToken(r, i) == Tokens(r)[i] # T_NATIVE /\ ~SwallowToken(r, i)
+
+\* Expected sink events, in sink order. The call sits at the resolve
+\* position, the native at its arrival position. Pure data: this spec has
+\* no sort operator.
+Events(r) ==
+    CASE r = "wrap"     -> << <<"call", 5>> >>
+    []  r = "split"     -> << <<"call", 3>> >>
+    []  r = "natAfter"  -> << <<"call", 3>>, <<"nat", 4>> >>
+    []  r = "natMid"    -> << <<"nat", 2>>, <<"call", 4>> >>
+    []  r = "natFirst"  -> << <<"nat", 1>>, <<"call", 4>> >>
+    []  r = "quotedNat" -> << <<"nat", 3>> >>
+    []  OTHER -> <<>>
+
+EventsSet(r) == {Events(r)[i] : i \in 1..Len(Events(r))}
+
+\* ---- Machine state ----
+VARIABLES run, pos, held, sink, phase
+
+TypeOK ==
+    /\ run \in Runs
+    /\ pos \in 1..RunLen(run) + 1
+    /\ phase \in {"prose", "hold", "done"}
+    /\ \A i \in 1..Len(held) : held[i] \in 1..RunLen(run)
+    /\ \A i \in 1..Len(sink) :
+        sink[i][1] \in {"txt", "call", "nat"} /\ sink[i][2] \in 1..RunLen(run)
+
+\* The hold start the mode applies. HoldAll holds from the first token.
+\* Unfixed never holds.
+MHoldStart(r) ==
+    CASE Mode = "HoldAll"  -> 1
+    []  Mode = "Unfixed"   -> RunLen(r) + 1
+    []  OTHER -> HoldStart(r)
+
+InSeq(sq, x) == \E i \in 1..Len(sq) : sq[i] = x
+TxtEvent(i) == <<"txt", i>>
+HasCallEv == \E i \in 1..Len(sink) : sink[i][1] = "call"
+
+Init ==
+    /\ run \in Runs
+    /\ pos = 1
+    /\ held = <<>>
+    /\ sink = <<>>
+    /\ phase = "prose"
+
+Finish ==
+    /\ pos > RunLen(run)
+    /\ phase # "done"
+    /\ held' = <<>>
+    /\ UNCHANGED <<pos, run>>
+    /\ IF Mode = "NoFinishFlush"
+       THEN /\ phase' = "done"
+            /\ UNCHANGED sink
+       ELSE /\ phase' = "done"
+            /\ sink' = IF held = <<>>
+                        THEN sink
+                        ELSE sink \o [i \in 1..Len(held) |-> TxtEvent(held[i])]
+
+Native ==
+    /\ pos <= RunLen(run)
+    /\ Tokens(run)[pos] = T_NATIVE
+    /\ sink' = Append(sink, <<"nat", pos>>)
+    /\ pos' = pos + 1
+    /\ UNCHANGED <<held, phase, run>>
+
+Hold ==
+    /\ pos <= RunLen(run)
+    /\ phase = "prose"
+    /\ pos = MHoldStart(run)
+    /\ Tokens(run)[pos] # T_NATIVE
+    /\ IF Mode = "EarlyEmit" /\ EffRecov(run)
+       THEN sink' = Append(sink, <<"call", pos>>)
+       ELSE UNCHANGED sink
+    /\ held' = Append(held, pos)
+    /\ pos' = pos + 1
+    /\ phase' = "hold"
+    /\ UNCHANGED run
+
+Stream ==
+    /\ pos <= RunLen(run)
+    /\ phase = "prose"
+    /\ pos # MHoldStart(run)
+    /\ Tokens(run)[pos] # T_NATIVE
+    /\ sink' = Append(sink, TxtEvent(pos))
+    /\ pos' = pos + 1
+    /\ UNCHANGED <<held, phase, run>>
+
+HoldAdv ==
+    /\ pos <= RunLen(run)
+    /\ phase = "hold"
+    /\ pos # ResolvePos(run)
+    /\ Tokens(run)[pos] # T_NATIVE
+    /\ sink' = sink
+    /\ held' = Append(held, pos)
+    /\ pos' = pos + 1
+    /\ UNCHANGED <<phase, run>>
+
+Resolve ==
+    LET callSink == Append(sink, <<"call", pos>>)
+        leakSink == callSink \o [i \in 1..Len(held) |-> TxtEvent(held[i])]
+        flushSink == sink \o
+            [i \in 1..Len(held) + 1 |->
+                IF i <= Len(held) THEN TxtEvent(held[i]) ELSE TxtEvent(pos)]
+    IN /\ pos <= RunLen(run)
+       /\ phase = "hold"
+       /\ pos = ResolvePos(run)
+       /\ held' = <<>>
+       /\ pos' = pos + 1
+       /\ phase' = "prose"
+       /\ UNCHANGED run
+       /\ sink' = IF EffRecov(run)
+                  THEN (IF Mode = "NoSuppress" THEN leakSink ELSE callSink)
+                  ELSE flushSink
+
+Next ==
+    \/ Finish
+    \/ Native
+    \/ Hold
+    \/ Stream
+    \/ HoldAdv
+    \/ Resolve
+
+Spec == Init /\ [][Next]_<<run, pos, held, sink, phase>>
+
+\* ---- Invariants ----
+
+NoLostCall ==
+    phase = "done" => (TruthRecovered(run) => HasCallEv)
+
+NoPhantomCall ==
+    phase = "done" => (~TruthRecovered(run) => ~HasCallEv)
+
+NoBlockTextLeak ==
+    \A i \in 1..Len(sink) :
+        sink[i][1] = "txt" => ~SwallowToken(run, sink[i][2])
+
+NoLostText ==
+    phase = "done" =>
+        \A i \in 1..RunLen(run) :
+            IsTextToken(run, i) => InSeq(sink, TxtEvent(i))
+
+NativeOrder ==
+    phase = "done" =>
+        (\A e \in EventsSet(run) : InSeq(sink, e))
+        /\ (\A i \in 1..Len(sink) :
+            sink[i][1] # "txt" => InSeq(Events(run), sink[i]))
+
+LiveStream ==
+    /\ \A i \in 1..pos - 1 :
+        IsTextToken(run, i) =>
+            (InSeq(sink, TxtEvent(i)) \/ InSeq(held, i))
+    /\ \A j \in 1..Len(held) : held[j] >= HoldStart(run)
+    /\ phase = "done" => held = <<>>
+
+====
