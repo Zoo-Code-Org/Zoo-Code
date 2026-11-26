@@ -1008,16 +1008,31 @@ describe("changeJournal", () => {
 			expect(JSON.stringify(result)).toContain('"additions":"5"')
 		})
 
-		it("appendChanges tolerates a blank line after a valid final record", async () => {
-			await fs.mkdir(path.dirname(journalPath(tmpRoot, taskId)), { recursive: true })
+		it("treats a blank line as corrupt at the tail and skippable in the middle", async () => {
+			// Measured before any production change, to pin exactly what review thread
+			// 4702171904 describes. loadChanges drops one trailing empty element, so a
+			// blank line that reaches the final position is the record it validates
+			// (corrupt), while the same blank line followed by another record is skipped.
+			// appendChanges reads the tail, gets an empty tailText, skips validation and
+			// accepts the append: a journal that loadChanges rejects becomes one it
+			// accepts, with the blank line still in the file. Validating the last
+			// non-empty record before appending is a production change and is
+			// deliberately not made in this commit.
+			const filePath = journalPath(tmpRoot, taskId)
+			await fs.mkdir(path.dirname(filePath), { recursive: true })
 			const good = JSON.stringify(entry({ checkpointId: "good" }))
-			await fs.writeFile(journalPath(tmpRoot, taskId), good + "\n\n")
+			const after = JSON.stringify(entry({ checkpointId: "after" }))
+			await fs.writeFile(filePath, good + "\n")
+			await expect(loadChanges(tmpRoot, taskId)).resolves.toHaveLength(1)
+			await fs.writeFile(filePath, good + "\n\n")
+			await expect(loadChanges(tmpRoot, taskId)).rejects.toThrow(/Corrupt change journal entry at line 2/)
+			expect(await fs.readFile(filePath, "utf8")).toBe(good + "\n\n")
 			await appendChange(tmpRoot, taskId, entry({ checkpointId: "after" }))
-			const result = await loadChanges(tmpRoot, taskId)
-			// Predicted by the finding: append skips tail validation on an
-			// empty tailText, and the blank line then reads as a skippable
-			// middle record, so both ids come back.
-			expect(result.map((e) => e.checkpointId)).toEqual(["good", "after"])
+			const merged = await loadChanges(tmpRoot, taskId)
+			expect(merged.map((e) => e.checkpointId)).toEqual(["good", "after"])
+			expect(await fs.readFile(filePath, "utf8")).toBe(good + "\n\n" + after + "\n")
+			await fs.writeFile(filePath, "\n")
+			await expect(loadChanges(tmpRoot, taskId)).resolves.toHaveLength(0)
 		})
 
 		it("appendChanges reads the caller array after the queue turn", async () => {
