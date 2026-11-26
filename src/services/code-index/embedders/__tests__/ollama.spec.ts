@@ -326,4 +326,21 @@ describe("CodeIndexOllamaEmbedder", () => {
 			expect(result.error).toBe("Network timeout")
 		})
 	})
+
+	describe("CI-EM-01: single attempt with classified errors", () => {
+		it.each([
+			[503, undefined, "server", undefined],
+			[429, "7", "rate-limit", 7000],
+		])("sends one request on HTTP %s and classifies it", async (status, retryAfter, classification, delay) => {
+			mockFetch.mockResolvedValueOnce(
+				new Response("busy", {
+					status,
+					headers: retryAfter === undefined ? {} : { "retry-after": retryAfter },
+				}),
+			)
+			const error = await embedder.createEmbeddings(["text"]).catch((caught: unknown) => caught)
+			expect(mockFetch).toHaveBeenCalledTimes(1)
+			expect(error).toMatchObject({ classification, statusCode: status, retryAfterMs: delay })
+		})
+	})
 })

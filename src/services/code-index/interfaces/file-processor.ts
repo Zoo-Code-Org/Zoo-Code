@@ -1,5 +1,6 @@
 import * as vscode from "vscode"
-import { PointStruct } from "./vector-store"
+import type { FileFailureActivity } from "../file-failure-registry"
+import type { ParserFatalError } from "../parser-errors"
 
 /**
  * Interface for code file parser
@@ -18,6 +19,7 @@ export interface ICodeParser {
 			maxBlockLines?: number
 			content?: string
 			fileHash?: string
+			signal?: AbortSignal
 		},
 	): Promise<CodeBlock[]>
 }
@@ -54,7 +56,7 @@ export interface IFileWatcher extends vscode.Disposable {
 	/**
 	 * Initializes the file watcher
 	 */
-	initialize(): Promise<void>
+	initialize(signal?: AbortSignal): Promise<void>
 
 	/**
 	 * Event emitted when a batch of files begins processing.
@@ -77,6 +79,9 @@ export interface IFileWatcher extends vscode.Disposable {
 	 */
 	readonly onDidFinishBatchProcessing: vscode.Event<BatchProcessingSummary>
 
+	/** Fired when a parse fails fatally (timeout, crash or worker exit); the orchestrator ends the attempt. */
+	readonly onParserFatal: vscode.Event<ParserFatalError>
+
 	/**
 	 * Processes a file
 	 * @param filePath Path to the file to process
@@ -94,11 +99,12 @@ export interface BatchProcessingSummary {
 
 export interface FileProcessingResult {
 	path: string
-	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error"
+	status: "success" | "skipped" | "error" | "processed_for_batching" | "local_error" | "missing"
 	error?: Error
 	reason?: string
 	newHash?: string
-	pointsToUpsert?: PointStruct[]
+	blocks?: CodeBlock[]
+	activity?: FileFailureActivity
 }
 
 /**

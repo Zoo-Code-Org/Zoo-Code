@@ -6,8 +6,8 @@ export default mergeConfig(
 	baseConfig,
 	defineConfig({
 		test: {
-			// This smoke test validates emitted artifacts; source coverage remains in the unit lane.
-			include: ["__tests__/dist_assets.spec.ts"],
+			// These smoke tests validate emitted artifacts; source coverage remains in the unit lane.
+			include: ["__tests__/dist_assets.spec.ts", "services/code-index/__tests__/parse-worker-dist.spec.ts"],
 		},
 	}),
 )

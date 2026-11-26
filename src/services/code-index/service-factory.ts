@@ -8,12 +8,14 @@ import { RooIgnoreController } from "../../core/ignore/RooIgnoreController"
 import { EmbedderFactory } from "./embedders/embedder-factory"
 import { EmbedderValidationManager } from "./embedders/embedder-validation-manager"
 import { VectorStoreFactory } from "./vector-store/vector-store-factory"
-import { codeParser, DirectoryScanner } from "./processors"
+import { DirectoryScanner } from "./processors"
 import { DirectoryScannerFactory } from "./processors/directory-scanner-factory"
 import { FileWatcherFactory } from "./processors/file-watcher-factory"
 import { ICodeParser, IEmbedder, IFileWatcher, IVectorStore } from "./interfaces"
 import { CodeIndexConfigManager } from "./config-manager"
 import { CacheManager } from "./cache-manager"
+import type { FileFailureRegistry } from "./file-failure-registry"
+import type { ProviderPacerRegistry } from "./provider-pacer"
 
 /**
  * Factory class responsible for creating and configuring code indexing service dependencies.
@@ -32,6 +34,9 @@ export class CodeIndexServiceFactory {
 		private readonly configManager: CodeIndexConfigManager,
 		private readonly workspacePath: string,
 		private readonly cacheManager: CacheManager,
+		private readonly failureRegistry: FileFailureRegistry,
+		private readonly pacers: ProviderPacerRegistry,
+		private readonly parser: ICodeParser,
 	) {}
 
 	/**
@@ -66,15 +71,17 @@ export class CodeIndexServiceFactory {
 		}
 
 		const config = this.configManager.getConfig()
-		const embedder = this.embedderFactory.create(config)
-		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath)
-		const parser = codeParser
+		const embedder = this.embedderFactory.create(config, this.pacers)
+		const vectorStore = this.vectorStoreFactory.create(config, this.workspacePath, this.pacers)
+		const parser = this.parser
 		const scanner = this.directoryScannerFactory.create({
 			embedder,
 			vectorStore,
 			parser,
 			cacheManager: this.cacheManager,
 			ignoreInstance,
+			failureRegistry: this.failureRegistry,
+			pacers: this.pacers,
 		})
 		const fileWatcher = this.fileWatcherFactory.create({
 			workspacePath: this.workspacePath,
@@ -84,6 +91,9 @@ export class CodeIndexServiceFactory {
 			cacheManager,
 			ignoreInstance,
 			rooIgnoreController,
+			failureRegistry: this.failureRegistry,
+			pacers: this.pacers,
+			parser,
 		})
 
 		return {

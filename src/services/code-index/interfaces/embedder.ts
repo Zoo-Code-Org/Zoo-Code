@@ -18,6 +18,9 @@ export interface IEmbedder {
 	validateConfiguration(): Promise<{ valid: boolean; error?: string }>
 
 	get embedderInfo(): EmbedderInfo
+
+	/** Requests with the same scope share one provider allowance and its rate-limit wait. */
+	readonly rateLimitScope: string
 }
 
 export interface EmbeddingResponse {

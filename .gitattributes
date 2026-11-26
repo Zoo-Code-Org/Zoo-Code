@@ -8,6 +8,9 @@
 *.test.tsx linguist-generated=true
 docs/architecture/tla/*.cfg linguist-generated=true
 
+# pnpm hashes patch bytes; keep LF on every checkout.
+patches/*.patch text eol=lf
+
 # Test snapshot files - mark as linguist-generated to exclude from GitHub language statistics
 *.snap linguist-generated=true
 

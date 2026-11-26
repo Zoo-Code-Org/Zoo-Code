@@ -2,7 +2,7 @@ import type { Mock } from "vitest"
 import * as vscode from "vscode"
 import { createHash } from "crypto"
 import debounce from "lodash.debounce"
-import { CacheManager } from "../cache-manager"
+import { CacheManager, CacheReadError } from "../cache-manager"
 
 import { clearAllMocks } from "../../../test-utils/reset"
 
@@ -10,6 +10,8 @@ import { clearAllMocks } from "../../../test-utils/reset"
 vitest.mock("../../../utils/safeWriteJson", () => ({
 	safeWriteJson: vitest.fn().mockResolvedValue(undefined),
 }))
+
+vitest.mock("../../../i18n", () => ({ t: (key: string) => key }))
 
 // Import the mocked version
 import { safeWriteJson } from "../../../utils/safeWriteJson"
@@ -95,12 +97,30 @@ describe("CacheManager", () => {
 			expect(cacheManager.getAllHashes()).toEqual(mockCache)
 		})
 
-		it("should handle missing cache file by creating empty cache", async () => {
-			;(vscode.workspace.fs.readFile as Mock).mockRejectedValue(new Error("File not found"))
-
+		it.each([
+			["missing (ENOENT)", () => Promise.reject(Object.assign(new Error("gone"), { code: "ENOENT" }))],
+			[
+				"missing (FileNotFound)",
+				() => Promise.reject(Object.assign(new Error("gone"), { code: "FileNotFound" })),
+			],
+			["invalid JSON", () => Promise.resolve(Buffer.from("{not json"))],
+			["a non-object", () => Promise.resolve(Buffer.from("[1, 2]"))],
+			["non-string hashes", () => Promise.resolve(Buffer.from('{"a.ts": 3}'))],
+		])("CI-CM-01: treats a %s cache as empty", async (_label, read) => {
+			;(vscode.workspace.fs.readFile as Mock).mockImplementation(read)
 			await cacheManager.initialize()
-
 			expect(cacheManager.getAllHashes()).toEqual({})
+		})
+
+		it("CI-CM-01: an unreadable cache throws CacheReadError and keeps nothing in memory changed", async () => {
+			cacheManager.updateHash("kept.ts", "hash")
+			const denied = Object.assign(new Error("denied"), { code: "EACCES" })
+			;(vscode.workspace.fs.readFile as Mock).mockRejectedValue(denied)
+			const error = await cacheManager.initialize().catch((caught: unknown) => caught)
+			expect(error).toBeInstanceOf(CacheReadError)
+			expect((error as CacheReadError).cause).toBe(denied)
+			expect(cacheManager.getAllHashes()).toEqual({ "kept.ts": "hash" })
+			expect(safeWriteJson).not.toHaveBeenCalledWith(expect.anything(), {})
 		})
 	})
 

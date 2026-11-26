@@ -1,6 +1,6 @@
 // npx vitest services/code-index/processors/__tests__/parser.spec.ts
 
-import { CodeParser, codeParser } from "../parser"
+import { CodeParser, ParserLoadError } from "../parser"
 import { loadRequiredLanguageParsers } from "../../../tree-sitter/languageParser"
 import { parseMarkdown } from "../../../tree-sitter/markdownParser"
 import { readFile } from "fs/promises"
@@ -37,6 +37,7 @@ vi.mock("fs/promises", () => ({
 vi.mock("../../../tree-sitter/languageParser")
 vi.mock("../../../tree-sitter/markdownParser")
 
+const treeDelete = vi.fn()
 const mockLanguageParser = {
 	js: {
 		parser: {
@@ -48,6 +49,7 @@ const mockLanguageParser = {
 					children: [],
 					type: "program",
 				},
+				delete: treeDelete,
 			})),
 		},
 		query: {
@@ -165,16 +167,57 @@ describe("CodeParser", () => {
 			expect(result).toBeDefined()
 		})
 
-		it("should handle parser load errors", async () => {
-			;(loadRequiredLanguageParsers as any).mockRejectedValue(new Error("Load failed"))
+		it.each([
+			[
+				"a rejected load",
+				() => vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(new Error("Load failed")),
+			],
+			["no parser for the extension", () => vi.mocked(loadRequiredLanguageParsers).mockResolvedValueOnce({})],
+		])("CI-PA-01: %s throws ParserLoadError and the next call reloads", async (_label, failLoad) => {
+			failLoad()
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBeInstanceOf(
+				ParserLoadError,
+			)
 			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
+			expect(Array.isArray(result)).toBe(true)
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledTimes(2)
 		})
 
-		it("should return empty array when no parser is available", async () => {
-			;(loadRequiredLanguageParsers as any).mockResolvedValue({} as any)
-			const result = await parser["parseContent"]("test.js", "const test = 123", "hash")
-			expect(result).toEqual([])
+		it("passes the constructor source directory to the grammar loader", async () => {
+			await new CodeParser("/wasm/dir").parseFile("test.js", { content: "const test = 123" })
+			expect(loadRequiredLanguageParsers).toHaveBeenCalledWith(["test.js"], "/wasm/dir")
+		})
+
+		it.each([
+			["directly", new Error("Aborted(OOM)")],
+			["through cause", new Error("load failed", { cause: new Error("memory access out of bounds") })],
+		])("CI-PA-03: a load error matching isParserAbort %s is rethrown unchanged", async (_label, abort) => {
+			vi.mocked(loadRequiredLanguageParsers).mockRejectedValueOnce(abort)
+			const failure = await parser["parseContent"]("test.js", "const test = 123", "hash").catch(
+				(error: unknown) => error,
+			)
+			expect(failure).toBe(abort)
+			expect(failure).not.toBeInstanceOf(ParserLoadError)
+		})
+
+		it("CI-PA-03: a pending load that aborts is rethrown unchanged to the waiting call", async () => {
+			const abort = new Error("Aborted()")
+			parser["pendingLoads"].set("js", Promise.reject(abort))
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBe(abort)
+		})
+
+		it("CI-PA-02: deletes the tree after a successful parse", async () => {
+			await parser["parseContent"]("test.js", "const test = 123", "hash")
+			expect(treeDelete).toHaveBeenCalledOnce()
+		})
+
+		it("CI-PA-02: deletes the tree when capturing fails", async () => {
+			const captureError = new Error("capture failed")
+			mockLanguageParser.js.query.captures.mockImplementationOnce(() => {
+				throw captureError
+			})
+			await expect(parser["parseContent"]("test.js", "const test = 123", "hash")).rejects.toBe(captureError)
+			expect(treeDelete).toHaveBeenCalledOnce()
 		})
 	})
 
@@ -316,12 +359,30 @@ describe("CodeParser", () => {
 		})
 	})
 
-	describe("singleton instance", () => {
+	describe("repeated parses", () => {
 		it("should maintain parser state across calls", async () => {
-			const result1 = await codeParser.parseFile("test.js", { content: "const a = 1" })
-			const result2 = await codeParser.parseFile("test.js", { content: "const b = 2" })
-			expect(result1).toBeDefined()
-			expect(result2).toBeDefined()
+			const reused = new CodeParser()
+			// Capture each parsed root, so the result reflects the input rather than an earlier fixed capture.
+			const echoRoot = (node: { text: string }) => [
+				{
+					node: {
+						text: node.text,
+						startPosition: { row: 0 },
+						endPosition: { row: 0 },
+						type: "function_declaration",
+						childForFieldName: vi.fn().mockReturnValue(null),
+						children: [],
+					},
+					name: "definition.function",
+				},
+			]
+			mockLanguageParser.js.query.captures.mockImplementationOnce(echoRoot).mockImplementationOnce(echoRoot)
+			const first = "const firstValue = 'singleton parser first input with enough text'"
+			const second = "const secondValue = 'singleton parser second input with enough text'"
+			const result1 = await reused.parseFile("test.js", { content: first })
+			const result2 = await reused.parseFile("test.js", { content: second })
+			expect(result1.map((block) => block.content)).toEqual([first])
+			expect(result2.map((block) => block.content)).toEqual([second])
 		})
 	})
 
