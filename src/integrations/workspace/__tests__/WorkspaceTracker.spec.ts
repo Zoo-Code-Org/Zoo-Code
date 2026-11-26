@@ -405,4 +405,50 @@ describe("WorkspaceTracker", () => {
 			tabGroupsMock.all = previousTabs
 		}
 	})
+
+	// Review round 2: a session that starts without a workspace keeps
+	// prevWorkSpacePath equal to cwd, so tab changes take workspaceDidUpdate,
+	// not workspaceDidReset. Directory scanning stays off, but every tab
+	// update must still publish the opened tabs (cut against the task
+	// anchor) with an empty file list, or the webview never sees any tabs.
+	it("publishes opened tabs on repeated tab updates without a workspace", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		// Rootless from construction: prevWorkSpacePath and cwd are both empty.
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/anchor/dir")
+		workspaceTracker = new WorkspaceTracker(mockProvider)
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/a.ts", true)] }]
+
+		try {
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "a.ts" }],
+			})
+
+			// A second tab change publishes again.
+			tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/b.ts", true)] }]
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			expect(mockProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "b.ts", isActive: true, path: "b.ts" }],
+			})
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
+	})
 })

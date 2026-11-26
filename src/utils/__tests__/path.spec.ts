@@ -375,6 +375,15 @@ describe("Path Utilities", () => {
 			expect(getReadablePath(desktop, filePath)).toBe(filePath.toPosix())
 		})
 
+		it("should return the full path for a relative file when home is cwd", () => {
+			expect(getReadablePath(homeDir, "notes.txt")).toBe(path.join(homeDir, "notes.txt").toPosix())
+		})
+
+		it("should return the full path for an absolute file when home is cwd", () => {
+			const filePath = path.join(homeDir, "file.txt")
+			expect(getReadablePath(homeDir, filePath)).toBe(filePath.toPosix())
+		})
+
 		it("should return empty string when relative path is undefined", () => {
 			expect(getReadablePath(cwd)).toBe("")
 		})
@@ -439,6 +448,20 @@ describe("getTaskCwdPath (issue #1271: no workspace open)", () => {
 		}
 	})
 
+	it("returns the home directory when the active editor has a non-file scheme", () => {
+		const cleanup = withWorkspaceMock({
+			folders: undefined,
+			activeEditor: {
+				document: { uri: { fsPath: "/untitled-buffer/draft.md", scheme: "untitled" } },
+			},
+		})
+		try {
+			expect(getTaskCwdPath()).toBe(os.homedir())
+		} finally {
+			cleanup()
+		}
+	})
+
 	it("never anchors to a constructed Desktop path, even with a lowercase home", () => {
 		const homeSpy = vi.spyOn(os, "homedir").mockReturnValue("/home/test/desktop")
 		const cleanup = withWorkspaceMock({ folders: undefined, activeEditor: null })
@@ -458,17 +481,22 @@ describe("getTaskCwdPath (issue #1271: no workspace open)", () => {
 		["a file outside the anchor tree", "/elsewhere/projects/site/index.html"],
 		["a file whose name has spaces", "/home/test/desktop-projects/notes/my notes/plan v2.md"],
 	])("mention value round-trips for %s", (_label, tabPath) => {
+		// Fully resolve fixtures before the assertion: on Windows path.resolve
+		// adds the current drive to a drive-less absolute path while
+		// path.normalize does not, so both sides must resolve the same way.
+		const resolvedTabPath = path.resolve(tabPath)
+		const editorPath = path.resolve("/home/test/desktop-projects/notes/ideas.md")
 		const cleanup = withWorkspaceMock({
 			folders: undefined,
 			activeEditor: {
-				document: { uri: { fsPath: "/home/test/desktop-projects/notes/ideas.md", scheme: "file" } },
+				document: { uri: { fsPath: editorPath, scheme: "file" } },
 			},
 		})
 		try {
 			const anchor = getTaskCwdPath()
-			const mentionValue = "/" + toRelativePath(tabPath, anchor)
+			const mentionValue = "/" + toRelativePath(resolvedTabPath, anchor)
 			// parseMentions strips the leading slash before path.resolve
-			expect(path.resolve(anchor, mentionValue.slice(1))).toBe(path.normalize(tabPath))
+			expect(path.resolve(anchor, mentionValue.slice(1))).toBe(resolvedTabPath)
 		} finally {
 			cleanup()
 		}

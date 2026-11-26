@@ -25,7 +25,8 @@
 \* Not modeled: real path algebra (resolve and relative are oracles), the
 \* webview suggestion UI, multi-root workspaces.
 \* Cost: TLC runs in under 5 seconds per config. Agent time is not measured.
-\* Review: 0 covered, 0 added, 0 gap (first version, pre-review).
+\* Review: 1 covered, 0 added, 0 gap (round 2: widened the TypeOK valueBase domain to\*
+\* admit the NoAnchorGuard sabotage value, isolating the AnchorExists failure).
 \* Property test: src/utils/__tests__/path.spec.ts (mention value round-trip,
 \* it.each). Caller tests: WorkspaceTracker.spec.ts, getEnvironmentDetails.spec.ts,
 \* sections.spec.ts.
@@ -77,7 +78,7 @@ TypeOK ==
   /\ editor \in {"file", "none"}
   /\ desktopExists \in BOOLEAN
   /\ anchor \in {"root", "editorDir", "home", "desktop", "nowhere"}
-  /\ valueBase \in {"root", "editorDir", "home", "emptyRoot"}
+  /\ valueBase \in {"root", "editorDir", "home", "emptyRoot", "nowhere"}
   /\ steer \in {"generic", "desktop-worded"}
 
 \* The task never runs from a directory the system does not have.

@@ -127,6 +127,15 @@ class WorkspaceTracker {
 		}
 		this.updateTimer = setTimeout(() => {
 			if (!this.cwd) {
+				// Rootless session (issue #1271): there is no workspace root to
+				// scan, so the directory listing stays empty. Opened tabs still
+				// feed the webview's mention values, cut against the task anchor.
+				void this.providerRef.deref()?.postMessageToWebview({
+					type: "workspaceUpdated",
+					filePaths: [],
+					openedTabs: this.getOpenedTabsInfo(),
+				})
+				this.updateTimer = null
 				return
 			}
 
