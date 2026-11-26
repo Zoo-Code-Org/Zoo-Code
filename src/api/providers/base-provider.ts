@@ -36,10 +36,17 @@ export abstract class BaseProvider implements ApiHandler {
 	 * Pass strict=false to serve endpoints that reject strict: true (e.g.
 	 * strict-unaware OpenAI-compatible proxies): non-MCP tools are then sent
 	 * with strict: false and their declared schemas are preserved as-is.
+	 *
+	 * Pass strict=null for strict-unaware routes whose backends have no strict
+	 * field in their tool schema at all (e.g. LiteLLM forwarding to Bedrock,
+	 * which rejects the key outright with "tools.0.custom.strict: Extra inputs
+	 * are not permitted", #1137): the strict key is then omitted entirely —
+	 * emitted, MCP-disabled, or inherited from the caller — and declared
+	 * schemas are preserved as-is.
 	 */
 	protected convertToolsForOpenAI(
 		tools: any[] | undefined,
-		strict: boolean = DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
+		strict: boolean | null = DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS,
 	): any[] | undefined {
 		if (!tools) {
 			return undefined
@@ -55,19 +62,26 @@ export abstract class BaseProvider implements ApiHandler {
 			const isMcp = isMcpTool(tool.function.name)
 
 			// Strict mode also rewrites the schema (all properties become
-			// required). When disabled, the declared schema is preserved as-is,
-			// retaining every original required constraint (e.g. nanogpt).
-			const useStrict = !isMcp && strict
+			// required). When disabled or unaware, the declared schema is
+			// preserved as-is, retaining every original required constraint
+			// (e.g. nanogpt).
+			const strictAware = strict !== null
+			const useStrict = strictAware && !isMcp && strict === true
+
+			// The helper owns the strict field: one inherited from the caller is
+			// dropped and re-emitted only on strict-aware routes, so a
+			// strict-unaware payload can never carry the key a backend rejects.
+			const { strict: _inheritedStrict, ...declaredFunction } = tool.function
 
 			return {
 				...tool,
 				function: {
-					...tool.function,
+					...declaredFunction,
 					// Sanitize lone UTF-16 surrogates: providers validating the JSON body
 					// (e.g. DeepSeek) reject the whole request otherwise. See #461.
 					name: sanitizeSurrogates(tool.function.name),
 					description: sanitizeSurrogates(tool.function.description),
-					strict: useStrict,
+					...(strictAware ? { strict: useStrict } : {}),
 					parameters: sanitizeSurrogatesDeep(
 						useStrict
 							? stripUnsupportedStrictKeywords(this.convertToolSchemaForOpenAI(tool.function.parameters))

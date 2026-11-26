@@ -256,7 +256,12 @@ export class LiteLLMHandler extends RouterProvider implements SingleCompletionHa
 			stream_options: {
 				include_usage: true,
 			},
-			tools: this.convertToolsForOpenAI(metadata?.tools),
+			// LiteLLM forwards tools to backends whose tool schema has no strict
+			// field; Bedrock rejects the OpenAI-specific key outright before
+			// inference starts ("tools.0.custom.strict: Extra inputs are not
+			// permitted", #1137). The strict-unaware mode omits the key entirely
+			// and passes the declared schemas through as-is.
+			tools: this.convertToolsForOpenAI(metadata?.tools, null),
 			tool_choice: metadata?.tool_choice,
 		}
 		if (reasoningEffort) {
