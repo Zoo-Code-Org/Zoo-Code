@@ -14,6 +14,30 @@ describe("prepareApiConversationMessage", () => {
 		vi.useRealTimers()
 	})
 
+	it.each([{ messageId: "saved-turn", ts: 123 }, { ts: 123 }, { messageId: "saved-turn" }, undefined])(
+		"uses each supplied user identity field: %j",
+		(identity) => {
+			const api = {
+				createMessage: vi.fn<ApiHandler["createMessage"]>(),
+				getModel: vi.fn<ApiHandler["getModel"]>(),
+				countTokens: vi.fn<ApiHandler["countTokens"]>(),
+				getModelCacheScope: vi.fn<ApiHandler["getModelCacheScope"]>(),
+			}
+			const options = { api, apiConfiguration: {}, apiConversationHistory: [], identity }
+			const user = prepareApiConversationMessage({ ...options, message: { role: "user", content: "turn" } })
+			expect(user.ts).toBe(identity?.ts ?? Date.now())
+			if (identity?.messageId) expect(user.messageId).toBe(identity.messageId)
+			else expect(user.messageId).toMatch(/^[0-9a-f-]{36}$/)
+			const assistant = prepareApiConversationMessage({
+				...options,
+				message: { role: "assistant", content: "answer" },
+			})
+			expect(assistant.ts).toBe(Date.now())
+			expect(assistant.messageId).toMatch(/^[0-9a-f-]{36}$/)
+			expect(assistant.messageId).not.toBe(identity?.messageId)
+		},
+	)
+
 	it("prepends Anthropic thinking blocks with thought signatures", () => {
 		const result = prepareApiConversationMessage({
 			message: { role: "assistant", content: "answer" },

@@ -28,6 +28,7 @@ import { getEffectiveApiHistory } from "../../condense"
 import { mergeConsecutiveApiMessages } from "../mergeConsecutiveApiMessages"
 import { convertToOpenAiMessages } from "../../../api/transform/openai-format"
 import { setAbortLatch } from "../../../test-utils/run-state"
+import { asyncStreamFrom } from "../../../test-utils/stream"
 import type { ApiStreamChunk } from "../../../api/transform/stream"
 import * as safeWriteJsonModule from "../../../utils/safeWriteJson"
 
@@ -149,12 +150,6 @@ const stubModelInfo: ModelInfo = {
 }
 
 const TOOL_USE_ID = "toolu_retry_01"
-
-function stream(chunks: ApiStreamChunk[]): AsyncGenerator<ApiStreamChunk> {
-	return (async function* () {
-		yield* chunks
-	})()
-}
 
 /** The tool_use assistant turn and its saved user result turn in the disk history. */
 function findResultMessage(messages: ApiMessage[], toolUseId: string): ApiMessage | undefined {
@@ -329,7 +324,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 	} {
 		let captured: { messageId?: string; ts?: number } | undefined
 		const body = (async function* () {
-			const saved = findResultMessage(await readDiskHistory(task), TOOL_USE_ID)
+			const saved = findResultMessage(task.apiConversationHistory, TOOL_USE_ID)
 			captured = { messageId: saved?.messageId, ts: saved?.ts }
 			yield* chunks
 		})()
@@ -349,7 +344,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 		const attemptApiRequestSpy = vi
 			.spyOn(task, "attemptApiRequest")
 			.mockImplementationOnce(() => firstAttempt.body)
-			.mockImplementationOnce(() => stream([{ type: "text", text: "retry succeeded" }]))
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry succeeded" }]))
 			.mockImplementation(() => {
 				throw new Error("stop after retry response")
 			})
@@ -388,9 +383,9 @@ describe("empty-response history persistence (issue 2691)", () => {
 		const attemptApiRequestSpy = vi
 			.spyOn(task, "attemptApiRequest")
 			.mockImplementationOnce(() => firstAttempt.body)
-			.mockImplementationOnce(() => stream([]))
-			.mockImplementationOnce(() => stream([]))
-			.mockImplementationOnce(() => stream([{ type: "text", text: "finally answered" }]))
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([]))
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([]))
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "finally answered" }]))
 			.mockImplementation(() => {
 				throw new Error("stop after retry response")
 			})
@@ -414,12 +409,10 @@ describe("empty-response history persistence (issue 2691)", () => {
 		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: false })
 
 		vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
-		vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
-
 		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
 		const attemptSpy = vi.spyOn(task, "attemptApiRequest")
 		attemptSpy.mockImplementationOnce(() => firstAttempt.body)
-		attemptSpy.mockImplementation(() => stream([]))
+		attemptSpy.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([]))
 
 		const result = await task.recursivelyMakeClineRequests(toolResultUserContent())
 
@@ -448,7 +441,9 @@ describe("empty-response history persistence (issue 2691)", () => {
 		const attemptApiRequestSpy = vi
 			.spyOn(task, "attemptApiRequest")
 			.mockImplementationOnce(() => firstAttempt.body)
-			.mockImplementationOnce(() => stream([{ type: "text", text: "explicit retry worked" }]))
+			.mockImplementationOnce(() =>
+				asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "explicit retry worked" }]),
+			)
 			.mockImplementation(() => {
 				throw new Error("stop after retry response")
 			})
@@ -460,6 +455,8 @@ describe("empty-response history persistence (issue 2691)", () => {
 
 		const disk = await readDiskHistory(task)
 		expect(countSavedResults(disk, TOOL_USE_ID)).toBe(1)
+		expect(findResultMessage(disk, TOOL_USE_ID)).toMatchObject(firstAttempt.identity())
+		expect(findResultMessage(disk, TOOL_USE_ID)?.content).toEqual(expect.arrayContaining(toolResultUserContent()))
 		expect(outgoingToolResultCount(disk, TOOL_USE_ID)).toBe(1)
 	})
 
@@ -494,14 +491,16 @@ describe("empty-response history persistence (issue 2691)", () => {
 	 * now). The API history writes go through safeWriteJson, so a rejection there
 	 * reaches saveApiConversationHistory without touching unrelated files.
 	 */
-	function injectApiHistorySaveFailure(failingWrite: number): { restore: () => void } {
+	function injectApiHistorySaveFailure(failingWrite: number): { restore: () => void; failures: () => number } {
 		const originalSafeWriteJson = safeWriteJsonModule.safeWriteJson
 		let apiHistoryWrites = 0
+		let failures = 0
 		const writeSpy = vi.spyOn(safeWriteJsonModule, "safeWriteJson")
 		writeSpy.mockImplementation(async (filePath, data, options) => {
 			if (String(filePath).includes("api_conversation_history.json")) {
 				apiHistoryWrites += 1
 				if (apiHistoryWrites === failingWrite) {
+					failures++
 					throw Object.assign(new Error("injected save failure"), { code: "EACCES" })
 				}
 			}
@@ -509,20 +508,21 @@ describe("empty-response history persistence (issue 2691)", () => {
 		})
 		return {
 			restore: () => writeSpy.mockRestore(),
+			failures: () => failures,
 		}
 	}
 
-	it("keeps a single saved result when the retry restore save fails (fault injection)", async () => {
+	it.each([1, 2])("keeps a single saved result when save %i fails", async (failingWrite) => {
 		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: true })
 
 		// API-history saves from here: the first iteration's user turn, then the
-		// restore save after the empty-response pop. Fail the restore save.
-		const injection = injectApiHistorySaveFailure(2)
+		// restore save after the empty-response pop. Fail each save in turn.
+		const injection = injectApiHistorySaveFailure(failingWrite)
 
 		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
 		vi.spyOn(task, "attemptApiRequest")
 			.mockImplementationOnce(() => firstAttempt.body)
-			.mockImplementationOnce(() => stream([{ type: "text", text: "retry succeeded" }]))
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "retry succeeded" }]))
 			.mockImplementation(() => {
 				throw new Error("stop after retry response")
 			})
@@ -530,11 +530,11 @@ describe("empty-response history persistence (issue 2691)", () => {
 		await task.recursivelyMakeClineRequests(toolResultUserContent())
 
 		const beforeRetry = firstAttempt.identity()
+		expect(injection.failures()).toBe(1)
 		injection.restore()
 
 		const disk = await readDiskHistory(task)
-		// The failed restore still re-added the turn in memory, and the next merge
-		// save matched the original disk record by identity: one copy, result kept.
+		// A later save must keep one copy with the original identity.
 		expect(countSavedResults(disk, TOOL_USE_ID)).toBe(1)
 		const afterRetry = findResultMessage(disk, TOOL_USE_ID)
 		expect(afterRetry?.messageId).toBe(beforeRetry.messageId)
@@ -553,12 +553,13 @@ describe("empty-response history persistence (issue 2691)", () => {
 		const firstAttempt = firstAttemptCapturingSavedIdentity(task, [])
 		const attemptSpy = vi.spyOn(task, "attemptApiRequest")
 		attemptSpy.mockImplementationOnce(() => firstAttempt.body)
-		attemptSpy.mockImplementation(() => stream([]))
+		attemptSpy.mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([]))
 
 		const result = await task.recursivelyMakeClineRequests(toolResultUserContent())
 
 		const beforeDecline = firstAttempt.identity()
 		expect(result).toBe(false)
+		expect(injection.failures()).toBe(1)
 		injection.restore()
 
 		const disk = await readDiskHistory(task)
@@ -573,6 +574,45 @@ describe("empty-response history persistence (issue 2691)", () => {
 		expect(outgoingToolResultCount(disk, TOOL_USE_ID)).toBe(1)
 	})
 
+	it.each(["before pop", "during backoff"])("keeps a summary saved %s", async (phase) => {
+		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: true })
+		const summary: ApiMessage = {
+			role: "user",
+			content: "Saved summary",
+			messageId: "summary-1",
+			ts: Date.now() + 100,
+			isSummary: true,
+			condenseId: "condense-1",
+		}
+		const condense = async () => {
+			await task.overwriteApiConversationHistory([
+				...task.apiConversationHistory.map((message) => ({ ...message, condenseParent: "condense-1" })),
+				summary,
+			])
+		}
+		if (phase === "during backoff") {
+			vi.spyOn(probe(task), "backoffAndAnnounce").mockImplementation(condense)
+		}
+		vi.spyOn(task, "attemptApiRequest")
+			.mockImplementationOnce(() =>
+				(async function* () {
+					if (phase === "before pop") await condense()
+					yield* asyncStreamFrom<ApiStreamChunk>([])
+				})(),
+			)
+			.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: "done" }]))
+			.mockImplementation(() => {
+				throw new Error("stop after retry")
+			})
+
+		await task.recursivelyMakeClineRequests(toolResultUserContent())
+
+		const disk = await readDiskHistory(task)
+		expect(disk.find((message) => message.messageId === summary.messageId)).toEqual(summary)
+		expect(getEffectiveApiHistory(disk)).toContainEqual(summary)
+		expect(getEffectiveApiHistory(disk).some((message) => message.condenseParent === "condense-1")).toBe(false)
+	})
+
 	it("keeps the saved history valid when the task is cancelled during the retry backoff", async () => {
 		const task = await createTaskWithSavedToolUse({ autoApprovalEnabled: true })
 
@@ -580,7 +620,7 @@ describe("empty-response history persistence (issue 2691)", () => {
 		vi.spyOn(probe(task), "backoffAndAnnounce").mockImplementation(async () => {
 			setAbortLatch(task, true)
 		})
-		vi.spyOn(task, "attemptApiRequest").mockImplementation(() => stream([]))
+		vi.spyOn(task, "attemptApiRequest").mockImplementation(() => asyncStreamFrom<ApiStreamChunk>([]))
 
 		const result = await task.recursivelyMakeClineRequests(toolResultUserContent())
 
