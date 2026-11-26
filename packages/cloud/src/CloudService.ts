@@ -2,7 +2,6 @@ import type { Disposable, ExtensionContext } from "vscode"
 import EventEmitter from "events"
 
 import type {
-	TelemetryEvent,
 	ClineMessage,
 	CloudServiceEvents,
 	AuthService,
@@ -301,13 +300,6 @@ export class CloudService extends EventEmitter<CloudServiceEvents> implements Di
 	public isTaskSyncEnabled(): boolean {
 		this.ensureInitialized()
 		return this.settingsService!.isTaskSyncEnabled()
-	}
-
-	// TelemetryClient
-
-	public captureEvent(_event: TelemetryEvent): void {
-		this.ensureInitialized()
-		this.log("[CloudService] Skipping cloud telemetry capture in compatibility mode")
 	}
 
 	// ShareService
