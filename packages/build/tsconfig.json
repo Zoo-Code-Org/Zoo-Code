@@ -1,9 +1,7 @@
 {
 	"extends": "@roo-code/config-typescript/base.json",
 	"compilerOptions": {
-		"outDir": "dist",
-		"incremental": true,
-		"tsBuildInfoFile": "node_modules/.cache/tsc/build.tsbuildinfo"
+		"outDir": "dist"
 	},
 	"include": ["src"],
 	"exclude": ["node_modules"]
