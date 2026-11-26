@@ -45,6 +45,40 @@ describe("ensureMessageIdentifiers", () => {
 })
 
 describe("mergeClineMessageSnapshots", () => {
+	it("matches many same-timestamp siblings by ID with bounded property reads", () => {
+		let reads = 0
+		const existing = Array.from({ length: 3_000 }, (_, i) => ({
+			ts: 1,
+			type: "say",
+			say: "text",
+			text: "old",
+			get messageId() {
+				reads++
+				return `id-${i}`
+			},
+		}))
+		const incoming = Array.from({ length: 3_000 }, (_, i) => ({
+			ts: 1,
+			messageId: `id-${2_999 - i}`,
+			type: "say",
+			say: "text",
+			text: "new",
+		}))
+		const merged = mergeClineMessageSnapshots(existing, incoming)
+		expect(merged).toEqual(incoming)
+		expect(reads).toBeLessThan(30_000)
+	})
+
+	it.each([true, false])(
+		"preserves a large disk-only tail without a spread-argument overflow (timestamped=%s)",
+		(timestamped) => {
+			const existing = Array.from({ length: 200_000 }, (_, i) =>
+				timestamped ? { ts: 1, role: "user", content: String(i) } : { role: "user", content: String(i) },
+			)
+			const merged = mergeApiMessageSnapshots(existing, [])
+			expect(merged).toEqual(existing)
+		},
+	)
 	it("preserves disk-only messages and applies incoming updates in timestamp order", () => {
 		const result = mergeClineMessageSnapshots(
 			[

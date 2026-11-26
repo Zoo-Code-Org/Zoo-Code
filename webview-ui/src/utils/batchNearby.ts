@@ -78,7 +78,7 @@ export function batchNearby<T>(items: T[], options: BatchNearbyOptions<T>): T[] 
 				result.push(batch[0])
 			}
 			if (pendingIgnorable.length > 0) {
-				result.push(...pendingIgnorable)
+				for (const item of pendingIgnorable) result.push(item)
 			}
 
 			i = j // items[j] was not consumed — re-examine it on next iteration

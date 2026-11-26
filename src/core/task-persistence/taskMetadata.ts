@@ -4,7 +4,6 @@ import getFolderSize from "get-folder-size"
 import type { ClineMessage, HistoryItem } from "@roo-code/types"
 
 import { combineApiRequests } from "../../shared/combineApiRequests"
-import { combineCommandSequences } from "../../shared/combineCommandSequences"
 import { getApiMetrics } from "../../shared/getApiMetrics"
 import { findLastIndex } from "../../shared/array"
 import { getTaskDirectoryPath } from "../../utils/storage"
@@ -72,7 +71,17 @@ export async function taskMetadata({
 
 		timestamp = lastRelevantMessage.ts
 
-		tokenUsage = getApiMetrics(combineApiRequests(combineCommandSequences(messages.slice(1))))
+		// Metrics never consume command/file bodies. Do not rebuild potentially
+		// hundreds of MB of consolidated output on every history save.
+		const metricMessages = messages.filter(
+			(message, index) =>
+				index > 0 &&
+				message.type === "say" &&
+				(message.say === "api_req_started" ||
+					message.say === "api_req_finished" ||
+					message.say === "condense_context"),
+		)
+		tokenUsage = getApiMetrics(combineApiRequests(metricMessages))
 
 		// Get task directory size
 		const cachedSize = taskSizeCache.get<number>(taskDir)

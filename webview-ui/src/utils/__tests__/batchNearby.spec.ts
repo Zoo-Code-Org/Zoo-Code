@@ -8,6 +8,17 @@ interface TestItem {
 	say?: string
 }
 
+it("preserves very large trailing ignorable runs without argument overflow", () => {
+	const items = ["target", ...Array.from({ length: 200_000 }, () => "ignorable")]
+	const result = batchNearby(items, {
+		isTarget: (item) => item === "target",
+		isBoundary: () => false,
+		isIgnorableBetweenTargets: (item) => item === "ignorable",
+		synthesize: () => "merged",
+	})
+	expect(result).toEqual(items)
+})
+
 /** Helper: create a minimal test item with an identifiable text field. */
 function msg(text: string, type = "say", say?: string): TestItem {
 	return { ts: Date.now(), type, text, say }
