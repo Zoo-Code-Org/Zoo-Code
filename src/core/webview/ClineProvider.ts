@@ -25,6 +25,8 @@ import {
 	beginExplicitRecovery,
 } from "./webviewRecoveryPolicy"
 
+import { resolveRestoreProfileActivation } from "./restore-provider-profile"
+
 import {
 	type TaskProviderLike,
 	type TaskProviderEvents,
@@ -1608,19 +1610,29 @@ export class ClineProvider
 			// Keep global state/UI in sync with latest profiles for parity with mode restoration above.
 			await this.updateGlobalState("listApiConfigMeta", listApiConfig)
 			const profile = listApiConfig.find(({ name }) => name === historyItem.apiConfigName)
+			// The profile active at restore time is the user's latest choice; a pin naming a
+			// different profile is stale (the task saved it before the switch). Resolving the
+			// active name against the profile list keeps a dangling pointer out of the decision.
+			const currentApiConfigName = this.getGlobalState("currentApiConfigName")
+			const activeProfileName = listApiConfig.some(({ name }) => name === currentApiConfigName)
+				? currentApiConfigName
+				: undefined
+			const decision = resolveRestoreProfileActivation({
+				pinnedApiConfigName: historyItem.apiConfigName,
+				activeProfileName,
+				pinnedProfileExists: !!profile,
+			})
 
-			if (profile?.name) {
+			if (decision.reactivateProfileName && profile?.name && profile.apiProvider) {
 				try {
-					if (profile.apiProvider) {
-						await this.activateProviderProfile(
-							{ name: profile.name },
-							{
-								persistModeConfig: false,
-								persistTaskHistory: false,
-								expectedCurrentTaskId: historyItem.id,
-							},
-						)
-					}
+					await this.activateProviderProfile(
+						{ name: profile.name },
+						{
+							persistModeConfig: false,
+							persistTaskHistory: false,
+							expectedCurrentTaskId: historyItem.id,
+						},
+					)
 				} catch (error) {
 					// Log the error but continue with task restoration.
 					this.log(
@@ -1629,7 +1641,16 @@ export class ClineProvider
 						}. Continuing with current configuration.`,
 					)
 				}
-			} else {
+			} else if (decision.refreshedApiConfigName) {
+				// The pin names a profile that is not in effect at restore time. Keep the user's
+				// active profile (and its context window) and re-pin the task to it, so later
+				// restores do not flip the configuration back to the stale profile.
+				this.log(
+					`Restoring task ${historyItem.id} with active profile '${decision.refreshedApiConfigName}' instead of stale pinned profile '${historyItem.apiConfigName}'.`,
+				)
+				historyItem.apiConfigName = decision.refreshedApiConfigName
+				await this.updateTaskHistory({ ...historyItem, apiConfigName: decision.refreshedApiConfigName })
+			} else if (!decision.reactivateProfileName) {
 				// Profile no longer exists, log warning but continue
 				this.log(
 					`Provider profile '${historyItem.apiConfigName}' from history no longer exists. Using current configuration.`,
