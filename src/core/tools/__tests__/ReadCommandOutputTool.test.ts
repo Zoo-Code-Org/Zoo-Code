@@ -87,6 +87,36 @@ describe("ReadCommandOutputTool", () => {
 		vi.restoreAllMocks()
 	})
 
+	it("lists saved outputs without opening a file", async () => {
+		vi.mocked(listCommandOutputs).mockResolvedValueOnce(["output-1", "output-2"])
+
+		await tool.execute({ artifact_id: "list" }, mockTask, mockCallbacks)
+
+		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("output-2"))
+		expect(fs.open).not.toHaveBeenCalled()
+	})
+
+	it("opens the latest output by its resolved short ID", async () => {
+		vi.mocked(listCommandOutputs).mockResolvedValueOnce(["output-1", "output-2"])
+		mockFileHandle.read.mockResolvedValue({ bytesRead: 0 })
+
+		await tool.execute({ artifact_id: "latest" }, mockTask, mockCallbacks)
+
+		expect(fs.access).toHaveBeenCalledWith(
+			path.join(globalStoragePath, "tasks", taskId, "command-output", "output-2.txt"),
+		)
+	})
+
+	it("suggests available IDs when a reference cannot be opened", async () => {
+		vi.mocked(fs.access).mockRejectedValueOnce(new Error("Missing file"))
+		vi.mocked(listCommandOutputs).mockResolvedValueOnce(["output-4"])
+
+		await tool.execute({ artifact_id: "output-2" }, mockTask, mockCallbacks)
+
+		expect(mockCallbacks.pushToolResult).toHaveBeenCalledWith(expect.stringContaining("output-4"))
+		expect(mockTask.didToolFailInCurrentTurn).toBe(true)
+	})
+
 	describe("Basic read functionality", () => {
 		it("should read artifact file correctly", async () => {
 			const artifactId = "cmd-1706119234567.txt"
