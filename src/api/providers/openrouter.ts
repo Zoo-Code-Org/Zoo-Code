@@ -194,6 +194,13 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 	/**
 	 * Handle OpenRouter streaming error response and report to telemetry.
 	 * OpenRouter may include metadata.raw with the actual upstream provider error.
+	 * This method is the single capture point for mid-stream OpenRouter errors:
+	 * it throws the same ApiProviderError instance it captured, and
+	 * TelemetryService#captureException marks that instance, so an enclosing
+	 * catch that captures the re-thrown error is a no-op instead of a second
+	 * $exception event (issue #513, Bug 4).
+	 * The error now exposes status and the ApiProviderError name.
+	 * Retry messages can use status to show the localized error body.
 	 * @param error The error object (not wrapped - receives the error directly)
 	 */
 	private handleStreamingError(error: OpenRouterError, modelId: string, operation: string): never {
@@ -202,13 +209,21 @@ export class OpenRouterHandler extends BaseProvider implements SingleCompletionH
 		const rawErrorMessage = parsedError || error?.message || "Unknown error"
 
 		const apiError = Object.assign(
-			new ApiProviderError(rawErrorMessage, providerIdentifiers.openrouter, modelId, operation, error?.code),
+			new ApiProviderError(
+				error?.code === undefined
+					? rawErrorMessage
+					: `${providerIdentifiers.openrouter} API Error ${error.code}: ${rawErrorMessage}`,
+				providerIdentifiers.openrouter,
+				modelId,
+				operation,
+				error?.code,
+			),
 			{ status: error?.code, error },
 		)
 
 		TelemetryService.instance.captureException(apiError)
 
-		throw new Error(`${providerIdentifiers.openrouter} API Error ${error?.code}: ${rawErrorMessage}`)
+		throw apiError
 	}
 
 	override async *createMessage(

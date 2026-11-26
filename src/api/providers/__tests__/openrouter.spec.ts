@@ -594,6 +594,30 @@ describe("OpenRouterHandler", () => {
 			})
 		})
 
+		it.each([
+			{ code: 500, message: "failure", expected: "openrouter API Error 500: failure" },
+			{ code: 429, message: "quota exceeded", expected: "openrouter API Error 429: quota exceeded" },
+			{ code: undefined, message: "429 quota exceeded", expected: "429 quota exceeded" },
+			{ code: undefined, message: "failure", expected: "failure" },
+		])("throws the captured instance for $code and $message", async ({ code, message, expected }) => {
+			const handler = new OpenRouterHandler(mockOptions)
+			const mockCreate = vitest.fn().mockResolvedValue(asyncStreamFrom([{ error: { code, message } }]))
+			// The SDK double supplies only chat.completions.create.
+			const prototype = OpenAI.prototype as unknown as { chat: { completions: { create: typeof mockCreate } } }
+			prototype.chat = { completions: { create: mockCreate } }
+
+			let thrown: unknown
+			try {
+				await handler.createMessage("test", []).next()
+			} catch (error) {
+				thrown = error
+			}
+			expect(thrown).toBeInstanceOf(ApiProviderError)
+			expect(thrown).toMatchObject({ name: "ApiProviderError", message: expected, status: code })
+			expect(mockCaptureException).toHaveBeenCalledTimes(1)
+			expect(thrown).toBe(mockCaptureException.mock.calls[0]?.[0])
+		})
+
 		it("handles API errors and captures telemetry", async () => {
 			const handler = new OpenRouterHandler(mockOptions)
 			const mockStream = asyncStreamFrom([{ error: { message: "API Error", code: 500 } }])
@@ -608,7 +632,9 @@ describe("OpenRouterHandler", () => {
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "API Error",
+					// handleStreamingError throws the instance it captured, so the
+					// payload carries the same caller-facing message.
+					message: "openrouter API Error 500: API Error",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "createMessage",
@@ -629,7 +655,7 @@ describe("OpenRouterHandler", () => {
 			proto.chat = { completions: { create: mockCreate } }
 
 			const generator = handler.createMessage("test", [])
-			await expect(generator.next()).rejects.toThrow("openrouter API Error undefined: Unknown error")
+			await expect(generator.next()).rejects.toThrow("Unknown error")
 
 			expect(mockCaptureException.mock.calls.length).toBe(1)
 			const captured = mockCaptureException.mock.calls[0]?.[0]
@@ -736,7 +762,7 @@ describe("OpenRouterHandler", () => {
 
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "Rate limit exceeded",
+					message: "openrouter API Error 429: Rate limit exceeded",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "createMessage",
@@ -1107,7 +1133,7 @@ describe("OpenRouterHandler", () => {
 			// Verify telemetry was captured
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "API Error",
+					message: "openrouter API Error 500: API Error",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "completePrompt",
@@ -1223,7 +1249,7 @@ describe("OpenRouterHandler", () => {
 			// captureException is called, but PostHogTelemetryClient filters out 429 errors internally
 			expect(mockCaptureException).toHaveBeenCalledWith(
 				expect.objectContaining({
-					message: "Rate limit exceeded",
+					message: "openrouter API Error 429: Rate limit exceeded",
 					provider: providerIdentifiers.openrouter,
 					modelId: mockOptions.openRouterModelId,
 					operation: "completePrompt",
