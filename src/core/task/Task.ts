@@ -1,3 +1,4 @@
+import { awaitWithAbort } from "../../utils/awaitWithAbort"
 import * as path from "path"
 import * as vscode from "vscode"
 import os from "os"
@@ -4284,31 +4285,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					const iterator = stream[Symbol.asyncIterator]()
 
 					// Helper to race iterator.next() with abort signal
-					const nextChunkWithAbort = async () => {
-						const nextPromise = iterator.next()
-
-						// If we have an abort controller, race it with the next chunk
-						if (this.currentRequestAbortController) {
-							const abortPromise = new Promise<never>((_, reject) => {
-								const signal = this.currentRequestAbortController!.signal
-								if (signal.aborted) {
-									reject(new Error("Request cancelled by user"))
-								} else {
-									signal.addEventListener(
-										"abort",
-										() => {
-											reject(new Error("Request cancelled by user"))
-										},
-										{ once: true },
-									)
-								}
-							})
-							return await Promise.race([nextPromise, abortPromise])
-						}
-
-						// No abort controller, just return the next chunk normally
-						return await nextPromise
-					}
+					const nextChunkWithAbort = () =>
+						awaitWithAbort(iterator.next(), this.currentRequestAbortController?.signal)
 
 					let item = await nextChunkWithAbort()
 					while (!item.done) {
@@ -6124,23 +6102,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			// Awaiting first chunk to see if it will throw an error.
 			this.isWaitingForFirstChunk = true
 
-			// Race between the first chunk and the abort signal
-			const firstChunkPromise = iterator.next()
-			const abortPromise = new Promise<never>((_, reject) => {
-				if (abortSignal.aborted) {
-					reject(new Error("Request cancelled by user"))
-				} else {
-					abortSignal.addEventListener(
-						"abort",
-						() => {
-							reject(new Error("Request cancelled by user"))
-						},
-						{ once: true },
-					)
-				}
-			})
-
-			const firstChunk = await Promise.race([firstChunkPromise, abortPromise])
+			const firstChunk = await awaitWithAbort(iterator.next(), abortSignal)
 			// Retries after a first-chunk failure or an empty stream keep tolerance; it ends only on a real chunk.
 			if (!firstChunk.done && servedRefreshGeneration === this.instructionRefreshGeneration) {
 				this.pendingInstructionRefresh = false
