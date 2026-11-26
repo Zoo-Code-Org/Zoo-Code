@@ -14,6 +14,7 @@ import { BaseProvider } from "./base-provider"
 import { handleOpenAIError } from "./utils/error-handler"
 import { calculateApiCostOpenAI } from "../../shared/cost"
 import { extractReasoningFromDelta } from "./utils/extract-reasoning"
+import { hasUsableTimeout, toSdkTimeoutMs } from "./utils/abort-signal"
 
 type BaseOpenAiCompatibleProviderOptions<ModelName extends string> = ApiHandlerOptions & {
 	providerName: string
@@ -104,7 +105,17 @@ export abstract class BaseOpenAiCompatibleProvider<ModelName extends string>
 		}
 
 		try {
-			return this.client.chat.completions.create(params, requestOptions)
+			const effectiveOptions =
+				hasUsableTimeout(metadata?.timeoutMs) || metadata?.abortSignal
+					? {
+							...requestOptions,
+							...(hasUsableTimeout(metadata?.timeoutMs)
+								? { timeout: toSdkTimeoutMs(metadata.timeoutMs) }
+								: {}),
+							...(metadata?.abortSignal ? { signal: metadata.abortSignal } : {}),
+						}
+					: requestOptions
+			return this.client.chat.completions.create(params, effectiveOptions)
 		} catch (error) {
 			throw handleOpenAIError(error, this.providerName)
 		}

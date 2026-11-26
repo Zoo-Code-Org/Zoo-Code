@@ -213,6 +213,12 @@ describe("OpenAiHandler", () => {
 	})
 
 	describe("createMessage", () => {
+		it("honors a caller-owned condensation deadline without the SDK's shorter timeout", async () => {
+			const handler = new OpenAiHandler(mockOptions)
+			await collectStream(handler.createMessage("system", [], { taskId: "task", timeoutMs: 86_400_000 }))
+			expect(mockCreate).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ timeout: 86_400_000 }))
+		})
+
 		const systemPrompt = "You are a helpful assistant."
 		const messages: Anthropic.Messages.MessageParam[] = [
 			{
@@ -663,7 +669,7 @@ describe("OpenAiHandler", () => {
 		})
 
 		it("should still send temperature when the user sets a custom value of 0", async () => {
-			// A deliberate 0 must be distinguished from "unset" — it is sent, not omitted.
+			// A deliberate 0 must be distinguished from "unset" â€” it is sent, not omitted.
 			const zeroTempHandler = new OpenAiHandler({ ...mockOptions, modelTemperature: 0 })
 			const stream = zeroTempHandler.createMessage(systemPrompt, messages)
 			await collectStream(stream)
@@ -1254,7 +1260,7 @@ describe("OpenAiHandler", () => {
 					],
 					stream: true,
 					stream_options: { include_usage: true },
-					// No custom temperature set → `temperature` is omitted.
+					// No custom temperature set â†’ `temperature` is omitted.
 					tools: undefined,
 					tool_choice: undefined,
 					parallel_tool_calls: true,

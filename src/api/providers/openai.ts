@@ -255,6 +255,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(requestOptions, {
 					signal: metadata?.abortSignal,
+					...(hasUsableTimeout(metadata?.timeoutMs) ? { timeout: toSdkTimeoutMs(metadata.timeoutMs) } : {}),
 					...(isAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
@@ -323,6 +324,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(requestOptions, {
 					signal: metadata?.abortSignal,
+					...(hasUsableTimeout(metadata?.timeoutMs) ? { timeout: toSdkTimeoutMs(metadata.timeoutMs) } : {}),
 					...(this._isAzureAiInference(modelUrl) ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
@@ -619,6 +621,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				stream = await this.client.chat.completions.create(requestOptions, {
 					signal: metadata?.abortSignal,
+					...(hasUsableTimeout(metadata?.timeoutMs) ? { timeout: toSdkTimeoutMs(metadata.timeoutMs) } : {}),
 					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {
@@ -654,6 +657,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 			try {
 				response = await this.client.chat.completions.create(requestOptions, {
 					signal: metadata?.abortSignal,
+					...(hasUsableTimeout(metadata?.timeoutMs) ? { timeout: toSdkTimeoutMs(metadata.timeoutMs) } : {}),
 					...(methodIsAzureAiInference ? { path: OPENAI_AZURE_AI_INFERENCE_PATH } : {}),
 				})
 			} catch (error) {

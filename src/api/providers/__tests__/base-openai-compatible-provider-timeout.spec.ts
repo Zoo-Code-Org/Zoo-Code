@@ -15,6 +15,7 @@ import { clearAllMocks } from "../../../test-utils/reset"
 
 // Mock OpenAI and capture constructor calls
 const mockOpenAIConstructor = vitest.fn()
+const mockCreate = vitest.fn()
 
 vitest.mock("openai", () => {
 	return {
@@ -24,7 +25,7 @@ vitest.mock("openai", () => {
 			return {
 				chat: {
 					completions: {
-						create: vitest.fn(),
+						create: mockCreate,
 					},
 				},
 			}
@@ -57,6 +58,20 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 }
 
 describe("BaseOpenAiCompatibleProvider Timeout Configuration", () => {
+	it("passes the caller-owned deadline and cancellation signal through to the SDK", async () => {
+		const provider = new TestOpenAiCompatibleProvider("test-key")
+		const controller = new AbortController()
+		await provider["createStream"]("system", [], {
+			taskId: "task",
+			timeoutMs: 86_400_000,
+			abortSignal: controller.signal,
+		})
+		expect(mockCreate).toHaveBeenCalledWith(
+			expect.anything(),
+			expect.objectContaining({ timeout: 86_400_000, signal: controller.signal }),
+		)
+	})
+
 	beforeEach(() => {
 		clearAllMocks()
 	})
