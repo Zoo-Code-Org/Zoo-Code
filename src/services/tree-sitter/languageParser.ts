@@ -41,17 +41,25 @@ export interface LanguageParser {
 async function loadLanguage(langName: string, sourceDirectory?: string) {
 	const baseDir = sourceDirectory || __dirname
 	const wasmPath = path.join(baseDir, `tree-sitter-${langName}.wasm`)
-
-	try {
+	let load = languageLoads.get(wasmPath)
+	if (!load) {
 		const { Language } = require("web-tree-sitter")
-		return await Language.load(wasmPath)
-	} catch (error) {
-		console.error(`Error loading language: ${wasmPath}: ${error instanceof Error ? error.message : error}`)
-		throw error
+		load = (Language.load(wasmPath) as Promise<LanguageT>).catch((error: unknown) => {
+			// A failed WASM load is not recoverable without replacing the installed
+			// grammar or restarting the host. Retain the rejection so a workspace
+			// with hundreds of files does not load and log the same failure per file.
+			console.error(`Error loading language: ${wasmPath}: ${error instanceof Error ? error.message : error}`)
+			throw error
+		})
+		languageLoads.set(wasmPath, load)
 	}
+	return load
 }
 
-let isParserInitialized = false
+// WASM grammars remain allocated for the process lifetime. Share each load so
+// repeated definition requests do not continually grow the Tree-sitter heap.
+const languageLoads = new Map<string, Promise<LanguageT>>()
+let parserInitialization: Promise<void> | undefined
 
 /*
 Using node bindings for tree-sitter is problematic in vscode extensions 
@@ -79,15 +87,14 @@ Sources:
 export async function loadRequiredLanguageParsers(filesToParse: string[], sourceDirectory?: string) {
 	const { Parser, Query } = require("web-tree-sitter")
 
-	if (!isParserInitialized) {
-		try {
-			await Parser.init()
-			isParserInitialized = true
-		} catch (error) {
+	if (!parserInitialization) {
+		parserInitialization = (Parser.init() as Promise<void>).catch((error: unknown) => {
+			parserInitialization = undefined
 			console.error(`Error initializing parser: ${error instanceof Error ? error.message : error}`)
 			throw error
-		}
+		})
 	}
+	await parserInitialization
 
 	const extensionsToLoad = new Set(filesToParse.map((file) => path.extname(file).toLowerCase().slice(1)))
 	const parsers: LanguageParser = {}
