@@ -1,6 +1,7 @@
 // pnpm --filter @roo-code/core test src/custom-tools/__tests__/custom-tool-registry.integration.spec.ts
 
 import fs from "fs"
+import { execFileSync } from "child_process"
 import os from "os"
 import { createHash } from "crypto"
 import path from "path"
@@ -41,7 +42,7 @@ describe.sequential("CustomToolRegistry integration", () => {
 		let entryDir: string
 
 		beforeEach(() => {
-			sandbox = fs.mkdtempSync(path.join(os.tmpdir(), "tool-cache-security-"))
+			sandbox = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "tool-cache-security-")))
 			toolDir = path.join(sandbox, "tools")
 			cacheDir = path.join(sandbox, "cache")
 			fs.mkdirSync(toolDir)
@@ -57,6 +58,70 @@ describe.sequential("CustomToolRegistry integration", () => {
 		})
 
 		afterEach(() => fs.rmSync(sandbox, { recursive: true, force: true }))
+
+		it.each(["#", "%23", " "].flatMap((character) => ["js", "ts"].map((ext) => ({ character, ext }))))(
+			"loads $ext tools with $character in their paths",
+			async ({ character, ext }) => {
+				const directory = path.join(sandbox, `tools${character}source`)
+				fs.mkdirSync(directory)
+				fs.writeFileSync(
+					path.join(directory, `tool.${ext}`),
+					'export default { name: "encoded", description: "path test", execute: async () => "ok" }',
+				)
+				const options = { cacheDir: path.join(sandbox, `cache${character}root`) }
+				// Use Node directly. The Vitest loader cannot resolve encoded hash characters.
+				const runtime = path.join(sandbox, "registry.mjs")
+				await esbuildRunner.runEsbuild({
+					entryPoint: path.join(__dirname, "../custom-tool-registry.ts"),
+					outfile: runtime,
+					bundle: true,
+					platform: "node",
+					format: "esm",
+					banner: esbuildRunner.COMMONJS_REQUIRE_BANNER,
+					external: esbuildRunner.NODE_BUILTIN_MODULES,
+				})
+				execFileSync(process.execPath, [
+					"--input-type=module",
+					"--eval",
+					`
+					import { pathToFileURL } from "node:url";
+					import { deepStrictEqual } from "node:assert";
+					const [runtime, directory, cacheDir] = process.argv.slice(1);
+					const { CustomToolRegistry } = await import(pathToFileURL(runtime).href);
+					for (let attempt = 0; attempt < 2; attempt++) {
+						const registry = new CustomToolRegistry({ cacheDir });
+						deepStrictEqual(await registry.loadFromDirectory(directory), { loaded: ["encoded"], failed: [] });
+					}
+					`,
+					runtime,
+					directory,
+					options.cacheDir,
+				])
+			},
+		)
+
+		it.each(["EACCES", "EIO"])("does not rebuild after a bundle lookup fails with %s", async (code) => {
+			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			const original = fs.lstatSync
+			const error = Object.assign(new Error(`lookup failed: ${code}`), { code })
+			vi.spyOn(fs, "lstatSync").mockImplementation((...args) => {
+				if (args[0] === path.join(entryDir, "bundle.mjs")) throw error
+				return original(...args)
+			})
+			const build = vi.spyOn(esbuildRunner, "runEsbuild")
+			const result = await registry.loadFromDirectory(toolDir)
+			expect(result.loaded).toEqual([])
+			expect(result.failed[0]?.error).toBe(error.message)
+			expect(build).not.toHaveBeenCalled()
+		})
+
+		it("checks a cached bundle with one lstat call", async () => {
+			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			const lstat = vi.spyOn(fs, "lstatSync")
+			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])
+			const bundle = path.join(entryDir, "bundle.mjs")
+			expect(lstat.mock.calls.filter(([location]) => location === bundle)).toHaveLength(1)
+		})
 
 		it("creates a private cache, reuses bundles across instances, and clears it", async () => {
 			expect((await registry.loadFromDirectory(toolDir)).loaded).toEqual(["safe"])

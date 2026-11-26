@@ -12,6 +12,7 @@ import fs from "fs"
 import path from "path"
 import { createHash, randomUUID } from "crypto"
 import os from "os"
+import { pathToFileURL } from "url"
 
 import type { CustomToolDefinition, SerializedCustomToolDefinition, CustomToolParametersSchema } from "@roo-code/types"
 
@@ -251,9 +252,12 @@ export class CustomToolRegistry {
 		return this.extensionPath
 	}
 
-	/** Reject cache paths that another account could supply or replace. */
-	private validateCachePath(cachePath: string, directory: boolean): void {
-		const stat = fs.lstatSync(cachePath)
+	/** Reject cache paths that another account could supply or replace.
+	 * Return false only for an absent path when allowMissing is set.
+	 */
+	private validateCachePath(cachePath: string, directory: boolean, allowMissing = false): boolean {
+		const stat = fs.lstatSync(cachePath, { throwIfNoEntry: !allowMissing })
+		if (!stat) return false
 		const uid = process.getuid?.()
 		if (
 			(directory ? !stat.isDirectory() : !stat.isFile()) ||
@@ -262,6 +266,7 @@ export class CustomToolRegistry {
 		) {
 			throw new Error(`Unsafe custom tool cache path: ${cachePath}`)
 		}
+		return true
 	}
 
 	private prepareCacheDirectory(): void {
@@ -342,7 +347,7 @@ export class CustomToolRegistry {
 		const ext = path.extname(absolutePath)
 
 		if (ext === ".js" || ext === ".mjs") {
-			return import(`file://${absolutePath}`)
+			return import(pathToFileURL(absolutePath).href)
 		}
 
 		const stat = fs.statSync(absolutePath)
@@ -361,9 +366,8 @@ export class CustomToolRegistry {
 		const tempFile = path.join(toolCacheDir, "bundle.mjs")
 
 		// Check if we have a cached version on disk (from a previous run/instance).
-		if (fs.lstatSync(tempFile, { throwIfNoEntry: false })) {
-			this.validateCachePath(tempFile, false)
-			return import(`file://${tempFile}`)
+		if (this.validateCachePath(tempFile, false, true)) {
+			return import(pathToFileURL(tempFile).href)
 		}
 
 		// Remember a source diagnostic, not a missing or unsafe cache path.
@@ -417,7 +421,7 @@ export class CustomToolRegistry {
 			fs.rmSync(pendingFile, { force: true })
 		}
 
-		return import(`file://${tempFile}`)
+		return import(pathToFileURL(tempFile).href)
 	}
 
 	/**

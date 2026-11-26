@@ -20,7 +20,7 @@ Latest runs took under 1s each. Round 3 runs took 27 to 42s. *)
 Old cleanup fails 4 of 7 cases. Guard sabotage deletes all 3 unsafe sentinels. *)
 (* Round 6 validation: Fixed code passes 41 integration and 25 unit tests.
 Both type checks and focused lint pass. Suppression counts do not increase. *)
-(* Review ratchet, PR #2485: Added 13, covered 1, gap 12 across eight rounds.
+(* Review ratchet, PR #2485: Added 14, covered 2, gap 12 across nine rounds.
 Gaps cover test routing, defaults, module placement, and PR metadata. *)
 (* Round 1: Threads PRRT_kwDOSK-bwM64vzgN, PRRT_kwDOSK-bwM64vzgR, PRRT_kwDOSK-bwM64vzgV. Added 1, gap 2.
 Publication became an invariant. Test routing and defaults use direct tests. *)
@@ -56,6 +56,8 @@ Use one validated disk lookup. Prepare env files before the bundle commit marker
 The directory check already covers a loose directory after concurrent cleanup. Covered 1. *)
 (* Round 8 gaps: Spec prose, PR behavior text, and unverified Windows rename behavior need direct evidence. Gap 3.
 Headers now name behaviors. The PR body states that unreadable environment files fail a build. *)
+(* Round 9: Thread PRRT_kwDOSK-bwM67Mmrq adds a completed changed-source request check in CustomToolCacheRecovery. Added 1.
+Thread PRRT_kwDOSK-bwM67Mmru uses canonical sandbox paths. OwnershipMockReachesRoot covers that rule. Covered 1. *)
 (* Gate: Run check.sh CustomToolCache and the property tables. The runner selects CustomToolCacheMC.
 Use -metadir outside the repo. TLC needs a local socket. Run file tests on the host. *)
 EXTENDS Naturals, TLC
