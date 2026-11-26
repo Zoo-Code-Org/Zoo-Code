@@ -1,4 +1,5 @@
-import React, { forwardRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useEventCallback } from "@src/hooks/useEventCallback"
+import React, { forwardRef, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useEvent } from "react-use"
 import DynamicTextArea from "react-textarea-autosize"
 import { VolumeX, Image, WandSparkles, SendHorizontal, X, ListEnd, Square } from "lucide-react"
@@ -296,7 +297,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		}, [selectedType, searchQuery])
 
-		const handleEnhancePrompt = useCallback(() => {
+		const handleEnhancePrompt = useEventCallback(() => {
 			const trimmedInput = normalizedInputValue.trim()
 
 			if (trimmedInput) {
@@ -305,7 +306,7 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			} else {
 				setInputValueProgrammatic(t("chat:enhancePromptDescription"))
 			}
-		}, [normalizedInputValue, setInputValueProgrammatic, t])
+		})
 
 		const allModes = useMemo(() => getAllModes(customModes), [customModes])
 
@@ -365,156 +366,112 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		}, [showContextMenu, setShowContextMenu])
 
-		const handleMentionSelect = useCallback(
-			(type: ContextMenuOptionType, value?: string) => {
-				if (type === ContextMenuOptionType.NoResults) {
-					return
-				}
+		const handleMentionSelect = useEventCallback((type: ContextMenuOptionType, value?: string) => {
+			if (type === ContextMenuOptionType.NoResults) {
+				return
+			}
 
-				if (type === ContextMenuOptionType.Mode && value) {
-					// Handle mode selection.
-					setMode(value)
-					setInputValue("")
-					setShowContextMenu(false)
-					vscode.postMessage({ type: "mode", text: value })
-					return
-				}
-
-				if (type === ContextMenuOptionType.Command && value) {
-					// Handle command selection.
-					setSelectedMenuIndex(-1)
-					setInputValue("")
-					setShowContextMenu(false)
-
-					// Insert the command mention into the textarea
-					const commandMention = `/${value}`
-					setInputValue(commandMention + " ")
-					setCursorPosition(commandMention.length + 1)
-					setIntendedCursorPosition(commandMention.length + 1)
-
-					// Focus the textarea
-					setTimeout(() => {
-						if (textAreaRef.current) {
-							textAreaRef.current.focus()
-						}
-					}, 0)
-					return
-				}
-
-				if (
-					type === ContextMenuOptionType.File ||
-					type === ContextMenuOptionType.Folder ||
-					type === ContextMenuOptionType.Git
-				) {
-					if (!value) {
-						setSelectedType(type)
-						setSearchQuery("")
-						setSelectedMenuIndex(0)
-						return
-					}
-				}
-
+			if (type === ContextMenuOptionType.Mode && value) {
+				// Handle mode selection.
+				setMode(value)
+				setInputValue("")
 				setShowContextMenu(false)
-				setSelectedType(null)
+				vscode.postMessage({ type: "mode", text: value })
+				return
+			}
 
-				if (textAreaRef.current) {
-					let insertValue = value || ""
+			if (type === ContextMenuOptionType.Command && value) {
+				// Handle command selection.
+				setSelectedMenuIndex(-1)
+				setInputValue("")
+				setShowContextMenu(false)
 
-					if (type === ContextMenuOptionType.URL) {
-						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder) {
-						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.Problems) {
-						insertValue = "problems"
-					} else if (type === ContextMenuOptionType.Terminal) {
-						insertValue = "terminal"
-					} else if (type === ContextMenuOptionType.Git) {
-						insertValue = value || ""
-					} else if (type === ContextMenuOptionType.Command) {
-						insertValue = value ? `/${value}` : ""
+				// Insert the command mention into the textarea
+				const commandMention = `/${value}`
+				setInputValue(commandMention + " ")
+				setCursorPosition(commandMention.length + 1)
+				setIntendedCursorPosition(commandMention.length + 1)
+
+				// Focus the textarea
+				setTimeout(() => {
+					if (textAreaRef.current) {
+						textAreaRef.current.focus()
 					}
+				}, 0)
+				return
+			}
 
-					// Determine if this is a slash command selection
-					const isSlashCommand = type === ContextMenuOptionType.Mode || type === ContextMenuOptionType.Command
-
-					const { newValue, mentionIndex } = insertMention(
-						textAreaRef.current.value,
-						cursorPosition,
-						insertValue,
-						isSlashCommand,
-					)
-
-					setInputValue(newValue)
-					const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
-					setCursorPosition(newCursorPosition)
-					setIntendedCursorPosition(newCursorPosition)
-
-					// Scroll to cursor.
-					setTimeout(() => {
-						if (textAreaRef.current) {
-							textAreaRef.current.blur()
-							textAreaRef.current.focus()
-						}
-					}, 0)
+			if (
+				type === ContextMenuOptionType.File ||
+				type === ContextMenuOptionType.Folder ||
+				type === ContextMenuOptionType.Git
+			) {
+				if (!value) {
+					setSelectedType(type)
+					setSearchQuery("")
+					setSelectedMenuIndex(0)
+					return
 				}
-			},
-			// eslint-disable-next-line react-hooks/exhaustive-deps
-			[setInputValue, cursorPosition],
-		)
+			}
 
-		const handleKeyDown = useCallback(
-			(event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-				if (showContextMenu) {
-					if (event.key === "Escape") {
-						setSelectedType(null)
-						setSelectedMenuIndex(3) // File by default
-						return
+			setShowContextMenu(false)
+			setSelectedType(null)
+
+			if (textAreaRef.current) {
+				let insertValue = value || ""
+
+				if (type === ContextMenuOptionType.URL) {
+					insertValue = value || ""
+				} else if (type === ContextMenuOptionType.File || type === ContextMenuOptionType.Folder) {
+					insertValue = value || ""
+				} else if (type === ContextMenuOptionType.Problems) {
+					insertValue = "problems"
+				} else if (type === ContextMenuOptionType.Terminal) {
+					insertValue = "terminal"
+				} else if (type === ContextMenuOptionType.Git) {
+					insertValue = value || ""
+				} else if (type === ContextMenuOptionType.Command) {
+					insertValue = value ? `/${value}` : ""
+				}
+
+				// Determine if this is a slash command selection
+				const isSlashCommand = type === ContextMenuOptionType.Mode || type === ContextMenuOptionType.Command
+
+				const { newValue, mentionIndex } = insertMention(
+					textAreaRef.current.value,
+					cursorPosition,
+					insertValue,
+					isSlashCommand,
+				)
+
+				setInputValue(newValue)
+				const newCursorPosition = newValue.indexOf(" ", mentionIndex + insertValue.length) + 1
+				setCursorPosition(newCursorPosition)
+				setIntendedCursorPosition(newCursorPosition)
+
+				// Scroll to cursor.
+				setTimeout(() => {
+					if (textAreaRef.current) {
+						textAreaRef.current.blur()
+						textAreaRef.current.focus()
 					}
+				}, 0)
+			}
+		})
 
-					if (event.key === "ArrowUp" || event.key === "ArrowDown") {
-						event.preventDefault()
-						setSelectedMenuIndex((prevIndex) => {
-							const direction = event.key === "ArrowUp" ? -1 : 1
-							const options = getContextMenuOptions(
-								t,
-								searchQuery,
-								selectedType,
-								queryItems,
-								fileSearchResults,
-								allModes,
-								commands,
-							)
-							const optionsLength = options.length
+		const handleKeyDown = useEventCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+			if (showContextMenu) {
+				if (event.key === "Escape") {
+					setSelectedType(null)
+					setSelectedMenuIndex(3) // File by default
+					return
+				}
 
-							if (optionsLength === 0) return prevIndex
-
-							// Find selectable options (non-URL types)
-							const selectableOptions = options.filter(
-								(option) =>
-									option.type !== ContextMenuOptionType.URL &&
-									option.type !== ContextMenuOptionType.NoResults &&
-									option.type !== ContextMenuOptionType.SectionHeader,
-							)
-
-							if (selectableOptions.length === 0) return -1 // No selectable options
-
-							// Find the index of the next selectable option
-							const currentSelectableIndex = selectableOptions.findIndex(
-								(option) => option === options[prevIndex],
-							)
-
-							const newSelectableIndex =
-								(currentSelectableIndex + direction + selectableOptions.length) %
-								selectableOptions.length
-
-							// Find the index of the selected option in the original options array
-							return options.findIndex((option) => option === selectableOptions[newSelectableIndex])
-						})
-						return
-					}
-					if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
-						event.preventDefault()
-						const selectedOption = getContextMenuOptions(
+				if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+					event.preventDefault()
+					setSelectedMenuIndex((prevIndex) => {
+						const direction = event.key === "ArrowUp" ? -1 : 1
+						const options = getContextMenuOptions(
 							t,
 							searchQuery,
 							selectedType,
@@ -522,111 +479,128 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 							fileSearchResults,
 							allModes,
 							commands,
-						)[selectedMenuIndex]
-						if (
-							selectedOption &&
-							selectedOption.type !== ContextMenuOptionType.URL &&
-							selectedOption.type !== ContextMenuOptionType.NoResults &&
-							selectedOption.type !== ContextMenuOptionType.SectionHeader
-						) {
-							handleMentionSelect(selectedOption.type, selectedOption.value)
-						}
-						return
-					}
-				}
+						)
+						const optionsLength = options.length
 
-				const isComposing = event.nativeEvent?.isComposing ?? false
+						if (optionsLength === 0) return prevIndex
 
-				// Handle prompt history navigation using custom hook
-				if (handleHistoryNavigation(event, showContextMenu, isComposing)) {
+						// Find selectable options (non-URL types)
+						const selectableOptions = options.filter(
+							(option) =>
+								option.type !== ContextMenuOptionType.URL &&
+								option.type !== ContextMenuOptionType.NoResults &&
+								option.type !== ContextMenuOptionType.SectionHeader,
+						)
+
+						if (selectableOptions.length === 0) return -1 // No selectable options
+
+						// Find the index of the next selectable option
+						const currentSelectableIndex = selectableOptions.findIndex(
+							(option) => option === options[prevIndex],
+						)
+
+						const newSelectableIndex =
+							(currentSelectableIndex + direction + selectableOptions.length) % selectableOptions.length
+
+						// Find the index of the selected option in the original options array
+						return options.findIndex((option) => option === selectableOptions[newSelectableIndex])
+					})
 					return
 				}
-
-				// Handle Enter key based on enterBehavior setting
-				if (event.key === "Enter" && !isComposing) {
-					if (enterBehavior === "newline") {
-						// New behavior: Enter = newline, Ctrl/Cmd+Enter = send
-						if (event.ctrlKey || event.metaKey) {
-							event.preventDefault()
-							resetHistoryNavigation()
-							onSend()
-						}
-						// Otherwise, let Enter create newline (don't preventDefault)
-					} else {
-						// Default behavior: Enter = send, Shift+Enter = newline
-						if (!event.shiftKey) {
-							event.preventDefault()
-							resetHistoryNavigation()
-							onSend()
-						}
-					}
-				}
-
-				if (event.key === "Backspace" && !isComposing) {
-					const charBeforeCursor = normalizedInputValue[cursorPosition - 1]
-					const charAfterCursor = normalizedInputValue[cursorPosition + 1]
-
-					const charBeforeIsWhitespace =
-						charBeforeCursor === " " || charBeforeCursor === "\n" || charBeforeCursor === "\r\n"
-
-					const charAfterIsWhitespace =
-						charAfterCursor === " " || charAfterCursor === "\n" || charAfterCursor === "\r\n"
-
-					// Checks if char before cursor is whitespace after a mention.
+				if ((event.key === "Enter" || event.key === "Tab") && selectedMenuIndex !== -1) {
+					event.preventDefault()
+					const selectedOption = getContextMenuOptions(
+						t,
+						searchQuery,
+						selectedType,
+						queryItems,
+						fileSearchResults,
+						allModes,
+						commands,
+					)[selectedMenuIndex]
 					if (
-						charBeforeIsWhitespace &&
-						// "$" is added to ensure the match occurs at the end of the string.
-						normalizedInputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
+						selectedOption &&
+						selectedOption.type !== ContextMenuOptionType.URL &&
+						selectedOption.type !== ContextMenuOptionType.NoResults &&
+						selectedOption.type !== ContextMenuOptionType.SectionHeader
 					) {
-						const newCursorPosition = cursorPosition - 1
-						// If mention is followed by another word, then instead
-						// of deleting the space separating them we just move
-						// the cursor to the end of the mention.
-						if (!charAfterIsWhitespace) {
-							event.preventDefault()
-							textAreaRef.current?.setSelectionRange(newCursorPosition, newCursorPosition)
-							setCursorPosition(newCursorPosition)
-						}
+						handleMentionSelect(selectedOption.type, selectedOption.value)
+					}
+					return
+				}
+			}
 
-						setCursorPosition(newCursorPosition)
-						setJustDeletedSpaceAfterMention(true)
-					} else if (justDeletedSpaceAfterMention) {
-						const { newText, newPosition } = removeMention(normalizedInputValue, cursorPosition)
+			const isComposing = event.nativeEvent?.isComposing ?? false
 
-						if (newText !== normalizedInputValue) {
-							event.preventDefault()
-							setInputValue(newText)
-							setIntendedCursorPosition(newPosition) // Store the new cursor position in state
-						}
+			// Handle prompt history navigation using custom hook
+			if (handleHistoryNavigation(event, showContextMenu, isComposing)) {
+				return
+			}
 
-						setJustDeletedSpaceAfterMention(false)
-						setShowContextMenu(false)
-					} else {
-						setJustDeletedSpaceAfterMention(false)
+			// Handle Enter key based on enterBehavior setting
+			if (event.key === "Enter" && !isComposing) {
+				if (enterBehavior === "newline") {
+					// New behavior: Enter = newline, Ctrl/Cmd+Enter = send
+					if (event.ctrlKey || event.metaKey) {
+						event.preventDefault()
+						resetHistoryNavigation()
+						onSend()
+					}
+					// Otherwise, let Enter create newline (don't preventDefault)
+				} else {
+					// Default behavior: Enter = send, Shift+Enter = newline
+					if (!event.shiftKey) {
+						event.preventDefault()
+						resetHistoryNavigation()
+						onSend()
 					}
 				}
-			},
-			[
-				onSend,
-				showContextMenu,
-				searchQuery,
-				selectedMenuIndex,
-				handleMentionSelect,
-				selectedType,
-				normalizedInputValue,
-				cursorPosition,
-				setInputValue,
-				justDeletedSpaceAfterMention,
-				queryItems,
-				allModes,
-				fileSearchResults,
-				handleHistoryNavigation,
-				resetHistoryNavigation,
-				commands,
-				enterBehavior,
-				t,
-			],
-		)
+			}
+
+			if (event.key === "Backspace" && !isComposing) {
+				const charBeforeCursor = normalizedInputValue[cursorPosition - 1]
+				const charAfterCursor = normalizedInputValue[cursorPosition + 1]
+
+				const charBeforeIsWhitespace =
+					charBeforeCursor === " " || charBeforeCursor === "\n" || charBeforeCursor === "\r\n"
+
+				const charAfterIsWhitespace =
+					charAfterCursor === " " || charAfterCursor === "\n" || charAfterCursor === "\r\n"
+
+				// Checks if char before cursor is whitespace after a mention.
+				if (
+					charBeforeIsWhitespace &&
+					// "$" is added to ensure the match occurs at the end of the string.
+					normalizedInputValue.slice(0, cursorPosition - 1).match(new RegExp(mentionRegex.source + "$"))
+				) {
+					const newCursorPosition = cursorPosition - 1
+					// If mention is followed by another word, then instead
+					// of deleting the space separating them we just move
+					// the cursor to the end of the mention.
+					if (!charAfterIsWhitespace) {
+						event.preventDefault()
+						textAreaRef.current?.setSelectionRange(newCursorPosition, newCursorPosition)
+						setCursorPosition(newCursorPosition)
+					}
+
+					setCursorPosition(newCursorPosition)
+					setJustDeletedSpaceAfterMention(true)
+				} else if (justDeletedSpaceAfterMention) {
+					const { newText, newPosition } = removeMention(normalizedInputValue, cursorPosition)
+
+					if (newText !== normalizedInputValue) {
+						event.preventDefault()
+						setInputValue(newText)
+						setIntendedCursorPosition(newPosition) // Store the new cursor position in state
+					}
+
+					setJustDeletedSpaceAfterMention(false)
+					setShowContextMenu(false)
+				} else {
+					setJustDeletedSpaceAfterMention(false)
+				}
+			}
+		})
 
 		useLayoutEffect(() => {
 			if (intendedCursorPosition !== null && textAreaRef.current) {
@@ -638,90 +612,79 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		// Ref to store the search timeout.
 		const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-		const handleInputChange = useCallback(
-			(e: React.ChangeEvent<HTMLTextAreaElement>) => {
-				const newValue = e.target.value
-				const inputType = e.nativeEvent instanceof InputEvent ? e.nativeEvent.inputType : ""
-				if (setInputValueWithSegments && inputType.startsWith("history")) {
-					// Undo and redo bring back older text with unknown origin. The whole draft is generated.
-					setInputValueWithSegments(newValue, generatedSegments(newValue))
-				} else if (programmaticInsertRef.current) {
-					programmaticInsertRef.current = false
-					setInputValueProgrammatic(newValue)
+		const handleInputChange = useEventCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+			const newValue = e.target.value
+			const inputType = e.nativeEvent instanceof InputEvent ? e.nativeEvent.inputType : ""
+			if (setInputValueWithSegments && inputType.startsWith("history")) {
+				// Undo and redo bring back older text with unknown origin. The whole draft is generated.
+				setInputValueWithSegments(newValue, generatedSegments(newValue))
+			} else if (programmaticInsertRef.current) {
+				programmaticInsertRef.current = false
+				setInputValueProgrammatic(newValue)
+			} else {
+				setInputValue(newValue)
+			}
+
+			// Reset history navigation when user types
+			resetOnInputChange()
+
+			const newCursorPosition = e.target.selectionStart
+			setCursorPosition(newCursorPosition)
+
+			const showMenu = shouldShowContextMenu(newValue, newCursorPosition)
+			setShowContextMenu(showMenu)
+
+			if (showMenu) {
+				if (newValue.startsWith("/") && !newValue.includes(" ")) {
+					// Handle slash command - request fresh commands
+					const query = newValue
+					setSearchQuery(query)
+					// Set to first selectable item (skip section headers)
+					setSelectedMenuIndex(1) // Section header is at 0, first command is at 1
+					// Request commands fresh each time slash menu is shown
+					vscode.postMessage({ type: "requestCommands" })
 				} else {
-					setInputValue(newValue)
-				}
+					// Existing @ mention handling.
+					const lastAtIndex = newValue.lastIndexOf("@", newCursorPosition - 1)
+					const query = newValue.slice(lastAtIndex + 1, newCursorPosition)
+					setSearchQuery(query)
 
-				// Reset history navigation when user types
-				resetOnInputChange()
+					// Send file search request if query is not empty.
+					if (query.length > 0) {
+						setSelectedMenuIndex(0)
 
-				const newCursorPosition = e.target.selectionStart
-				setCursorPosition(newCursorPosition)
+						// Don't clear results until we have new ones. This
+						// prevents flickering.
 
-				const showMenu = shouldShowContextMenu(newValue, newCursorPosition)
-				setShowContextMenu(showMenu)
-
-				if (showMenu) {
-					if (newValue.startsWith("/") && !newValue.includes(" ")) {
-						// Handle slash command - request fresh commands
-						const query = newValue
-						setSearchQuery(query)
-						// Set to first selectable item (skip section headers)
-						setSelectedMenuIndex(1) // Section header is at 0, first command is at 1
-						// Request commands fresh each time slash menu is shown
-						vscode.postMessage({ type: "requestCommands" })
-					} else {
-						// Existing @ mention handling.
-						const lastAtIndex = newValue.lastIndexOf("@", newCursorPosition - 1)
-						const query = newValue.slice(lastAtIndex + 1, newCursorPosition)
-						setSearchQuery(query)
-
-						// Send file search request if query is not empty.
-						if (query.length > 0) {
-							setSelectedMenuIndex(0)
-
-							// Don't clear results until we have new ones. This
-							// prevents flickering.
-
-							// Clear any existing timeout.
-							if (searchTimeoutRef.current) {
-								clearTimeout(searchTimeoutRef.current)
-							}
-
-							// Set a timeout to debounce the search requests.
-							searchTimeoutRef.current = setTimeout(() => {
-								// Generate a request ID for this search.
-								const reqId = Math.random().toString(36).substring(2, 9)
-								setSearchRequestId(reqId)
-								setSearchLoading(true)
-
-								// Send message to extension to search files.
-								vscode.postMessage({
-									type: "searchFiles",
-									query: unescapeSpaces(query),
-									requestId: reqId,
-								})
-							}, 200) // 200ms debounce.
-						} else {
-							setSelectedMenuIndex(3) // Set to "File" option by default.
+						// Clear any existing timeout.
+						if (searchTimeoutRef.current) {
+							clearTimeout(searchTimeoutRef.current)
 						}
+
+						// Set a timeout to debounce the search requests.
+						searchTimeoutRef.current = setTimeout(() => {
+							// Generate a request ID for this search.
+							const reqId = Math.random().toString(36).substring(2, 9)
+							setSearchRequestId(reqId)
+							setSearchLoading(true)
+
+							// Send message to extension to search files.
+							vscode.postMessage({
+								type: "searchFiles",
+								query: unescapeSpaces(query),
+								requestId: reqId,
+							})
+						}, 200) // 200ms debounce.
+					} else {
+						setSelectedMenuIndex(3) // Set to "File" option by default.
 					}
-				} else {
-					setSearchQuery("")
-					setSelectedMenuIndex(-1)
-					setFileSearchResults([]) // Clear file search results.
 				}
-			},
-			[
-				setInputValue,
-				setInputValueProgrammatic,
-				setInputValueWithSegments,
-				setSearchRequestId,
-				setFileSearchResults,
-				setSearchLoading,
-				resetOnInputChange,
-			],
-		)
+			} else {
+				setSearchQuery("")
+				setSelectedMenuIndex(-1)
+				setFileSearchResults([]) // Clear file search results.
+			}
+		})
 
 		useEffect(() => {
 			if (!showContextMenu) {
@@ -729,101 +692,98 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 			}
 		}, [showContextMenu])
 
-		const handleBlur = useCallback(() => {
+		const handleBlur = useEventCallback(() => {
 			// Only hide the context menu if the user didn't click on it.
 			if (!isMouseDownOnMenu) {
 				setShowContextMenu(false)
 			}
 
 			setIsFocused(false)
-		}, [isMouseDownOnMenu])
+		})
 
-		const handlePaste = useCallback(
-			async (e: React.ClipboardEvent) => {
-				const items = e.clipboardData.items
+		const handlePaste = useEventCallback(async (e: React.ClipboardEvent) => {
+			const items = e.clipboardData.items
 
-				const pastedText = e.clipboardData.getData("text")
-				// Check if the pasted content is a URL, add space after so user
-				// can easily delete if they don't want it.
-				const urlRegex = /^\S+:\/\/\S+$/
-				if (urlRegex.test(pastedText.trim())) {
-					e.preventDefault()
-					const trimmedUrl = pastedText.trim()
-					const newValue =
-						normalizedInputValue.slice(0, cursorPosition) +
-						trimmedUrl +
-						" " +
-						normalizedInputValue.slice(cursorPosition)
-					setInputValue(newValue)
-					const newCursorPosition = cursorPosition + trimmedUrl.length + 1
-					setCursorPosition(newCursorPosition)
-					setIntendedCursorPosition(newCursorPosition)
-					setShowContextMenu(false)
+			const pastedText = e.clipboardData.getData("text")
+			// Check if the pasted content is a URL, add space after so user
+			// can easily delete if they don't want it.
+			const urlRegex = /^\S+:\/\/\S+$/
+			if (urlRegex.test(pastedText.trim())) {
+				e.preventDefault()
+				const trimmedUrl = pastedText.trim()
+				const newValue =
+					normalizedInputValue.slice(0, cursorPosition) +
+					trimmedUrl +
+					" " +
+					normalizedInputValue.slice(cursorPosition)
+				setInputValue(newValue)
+				const newCursorPosition = cursorPosition + trimmedUrl.length + 1
+				setCursorPosition(newCursorPosition)
+				setIntendedCursorPosition(newCursorPosition)
+				setShowContextMenu(false)
 
-					// Scroll to new cursor position.
-					setTimeout(() => {
-						if (textAreaRef.current) {
-							textAreaRef.current.blur()
-							textAreaRef.current.focus()
+				// Scroll to new cursor position.
+				setTimeout(() => {
+					if (textAreaRef.current) {
+						textAreaRef.current.blur()
+						textAreaRef.current.focus()
+					}
+				}, 0)
+
+				return
+			}
+
+			const acceptedTypes = ["png", "jpeg", "webp"]
+
+			const imageItems = Array.from(items).filter((item) => {
+				const [type, subtype] = item.type.split("/")
+				return type === "image" && acceptedTypes.includes(subtype)
+			})
+
+			if (!shouldDisableImages && imageItems.length > 0) {
+				e.preventDefault()
+
+				const imagePromises = imageItems.map((item) => {
+					return new Promise<string | null>((resolve) => {
+						const blob = item.getAsFile()
+
+						if (!blob) {
+							resolve(null)
+							return
 						}
-					}, 0)
 
-					return
-				}
+						const reader = new FileReader()
 
-				const acceptedTypes = ["png", "jpeg", "webp"]
+						reader.onloadend = () => {
+							if (reader.error) {
+								console.error(t("chat:errorReadingFile"), reader.error)
+								resolve(null)
+							} else {
+								const result = reader.result
+								resolve(typeof result === "string" ? result : null)
+							}
+						}
 
-				const imageItems = Array.from(items).filter((item) => {
-					const [type, subtype] = item.type.split("/")
-					return type === "image" && acceptedTypes.includes(subtype)
+						reader.readAsDataURL(blob)
+					})
 				})
 
-				if (!shouldDisableImages && imageItems.length > 0) {
-					e.preventDefault()
+				const imageDataArray = await Promise.all(imagePromises)
+				const dataUrls = imageDataArray.filter((dataUrl): dataUrl is string => dataUrl !== null)
 
-					const imagePromises = imageItems.map((item) => {
-						return new Promise<string | null>((resolve) => {
-							const blob = item.getAsFile()
-
-							if (!blob) {
-								resolve(null)
-								return
-							}
-
-							const reader = new FileReader()
-
-							reader.onloadend = () => {
-								if (reader.error) {
-									console.error(t("chat:errorReadingFile"), reader.error)
-									resolve(null)
-								} else {
-									const result = reader.result
-									resolve(typeof result === "string" ? result : null)
-								}
-							}
-
-							reader.readAsDataURL(blob)
-						})
-					})
-
-					const imageDataArray = await Promise.all(imagePromises)
-					const dataUrls = imageDataArray.filter((dataUrl): dataUrl is string => dataUrl !== null)
-
-					if (dataUrls.length > 0) {
-						setSelectedImages((prevImages) => [...prevImages, ...dataUrls].slice(0, MAX_IMAGES_PER_MESSAGE))
-					} else {
-						console.warn(t("chat:noValidImages"))
-					}
+				if (dataUrls.length > 0) {
+					setSelectedImages((prevImages) => [...prevImages, ...dataUrls].slice(0, MAX_IMAGES_PER_MESSAGE))
+				} else {
+					console.warn(t("chat:noValidImages"))
 				}
-			},
-			[shouldDisableImages, setSelectedImages, cursorPosition, setInputValue, normalizedInputValue, t],
-		)
+			}
+		})
 
-		const handleMenuMouseDown = useCallback(() => {
+		const handleMenuMouseDown = useEventCallback(() => {
 			setIsMouseDownOnMenu(true)
-		}, [])
+		})
 
-		const updateHighlights = useCallback(() => {
+		const updateHighlights = useEventCallback(() => {
 			if (!textAreaRef.current || !highlightLayerRef.current) return
 
 			const text = textAreaRef.current.value
@@ -862,131 +822,113 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 
 			highlightLayerRef.current.scrollTop = textAreaRef.current.scrollTop
 			highlightLayerRef.current.scrollLeft = textAreaRef.current.scrollLeft
-		}, [commands])
+		})
 
 		useLayoutEffect(() => {
 			updateHighlights()
 		}, [normalizedInputValue, updateHighlights])
 
-		const updateCursorPosition = useCallback(() => {
+		const updateCursorPosition = useEventCallback(() => {
 			if (textAreaRef.current) {
 				setCursorPosition(textAreaRef.current.selectionStart)
 			}
-		}, [])
+		})
 
-		const handleKeyUp = useCallback(
-			(e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-				if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
-					updateCursorPosition()
-				}
-			},
-			[updateCursorPosition],
-		)
+		const handleKeyUp = useEventCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+			if (["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(e.key)) {
+				updateCursorPosition()
+			}
+		})
 
-		const handleDrop = useCallback(
-			async (e: React.DragEvent<HTMLDivElement>) => {
-				e.preventDefault()
-				setIsDraggingOver(false)
+		const handleDrop = useEventCallback(async (e: React.DragEvent<HTMLDivElement>) => {
+			e.preventDefault()
+			setIsDraggingOver(false)
 
-				const textFieldList = e.dataTransfer.getData("text")
-				const textUriList = e.dataTransfer.getData("application/vnd.code.uri-list")
-				// When textFieldList is empty, it may attempt to use textUriList obtained from drag-and-drop tabs; if not empty, it will use textFieldList.
-				const text = textFieldList || textUriList
-				if (text) {
-					// Split text on newlines to handle multiple files
-					const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "")
+			const textFieldList = e.dataTransfer.getData("text")
+			const textUriList = e.dataTransfer.getData("application/vnd.code.uri-list")
+			// When textFieldList is empty, it may attempt to use textUriList obtained from drag-and-drop tabs; if not empty, it will use textFieldList.
+			const text = textFieldList || textUriList
+			if (text) {
+				// Split text on newlines to handle multiple files
+				const lines = text.split(/\r?\n/).filter((line) => line.trim() !== "")
 
-					if (lines.length > 0) {
-						// Process each line as a separate file path
-						let newValue = normalizedInputValue.slice(0, cursorPosition)
-						let totalLength = 0
+				if (lines.length > 0) {
+					// Process each line as a separate file path
+					let newValue = normalizedInputValue.slice(0, cursorPosition)
+					let totalLength = 0
 
-						// Using a standard for loop instead of forEach for potential performance gains.
-						for (let i = 0; i < lines.length; i++) {
-							const line = lines[i]
-							// Convert each path to a mention-friendly format
-							const mentionText = convertToMentionPath(line, cwd)
-							newValue += mentionText
-							totalLength += mentionText.length
+					// Using a standard for loop instead of forEach for potential performance gains.
+					for (let i = 0; i < lines.length; i++) {
+						const line = lines[i]
+						// Convert each path to a mention-friendly format
+						const mentionText = convertToMentionPath(line, cwd)
+						newValue += mentionText
+						totalLength += mentionText.length
 
-							// Add space after each mention except the last one
-							if (i < lines.length - 1) {
-								newValue += " "
-								totalLength += 1
-							}
+						// Add space after each mention except the last one
+						if (i < lines.length - 1) {
+							newValue += " "
+							totalLength += 1
 						}
-
-						// Add space after the last mention and append the rest of the input
-						newValue += " " + normalizedInputValue.slice(cursorPosition)
-						totalLength += 1
-
-						setInputValue(newValue)
-						const newCursorPosition = cursorPosition + totalLength
-						setCursorPosition(newCursorPosition)
-						setIntendedCursorPosition(newCursorPosition)
 					}
 
-					return
+					// Add space after the last mention and append the rest of the input
+					newValue += " " + normalizedInputValue.slice(cursorPosition)
+					totalLength += 1
+
+					setInputValue(newValue)
+					const newCursorPosition = cursorPosition + totalLength
+					setCursorPosition(newCursorPosition)
+					setIntendedCursorPosition(newCursorPosition)
 				}
 
-				const files = Array.from(e.dataTransfer.files)
+				return
+			}
 
-				if (files.length > 0) {
-					const acceptedTypes = ["png", "jpeg", "webp"]
+			const files = Array.from(e.dataTransfer.files)
 
-					const imageFiles = files.filter((file) => {
-						const [type, subtype] = file.type.split("/")
-						return type === "image" && acceptedTypes.includes(subtype)
+			if (files.length > 0) {
+				const acceptedTypes = ["png", "jpeg", "webp"]
+
+				const imageFiles = files.filter((file) => {
+					const [type, subtype] = file.type.split("/")
+					return type === "image" && acceptedTypes.includes(subtype)
+				})
+
+				if (!shouldDisableImages && imageFiles.length > 0) {
+					const imagePromises = imageFiles.map((file) => {
+						return new Promise<string | null>((resolve) => {
+							const reader = new FileReader()
+
+							reader.onloadend = () => {
+								if (reader.error) {
+									console.error(t("chat:errorReadingFile"), reader.error)
+									resolve(null)
+								} else {
+									const result = reader.result
+									resolve(typeof result === "string" ? result : null)
+								}
+							}
+
+							reader.readAsDataURL(file)
+						})
 					})
 
-					if (!shouldDisableImages && imageFiles.length > 0) {
-						const imagePromises = imageFiles.map((file) => {
-							return new Promise<string | null>((resolve) => {
-								const reader = new FileReader()
+					const imageDataArray = await Promise.all(imagePromises)
+					const dataUrls = imageDataArray.filter((dataUrl): dataUrl is string => dataUrl !== null)
 
-								reader.onloadend = () => {
-									if (reader.error) {
-										console.error(t("chat:errorReadingFile"), reader.error)
-										resolve(null)
-									} else {
-										const result = reader.result
-										resolve(typeof result === "string" ? result : null)
-									}
-								}
+					if (dataUrls.length > 0) {
+						setSelectedImages((prevImages) => [...prevImages, ...dataUrls].slice(0, MAX_IMAGES_PER_MESSAGE))
 
-								reader.readAsDataURL(file)
-							})
-						})
-
-						const imageDataArray = await Promise.all(imagePromises)
-						const dataUrls = imageDataArray.filter((dataUrl): dataUrl is string => dataUrl !== null)
-
-						if (dataUrls.length > 0) {
-							setSelectedImages((prevImages) =>
-								[...prevImages, ...dataUrls].slice(0, MAX_IMAGES_PER_MESSAGE),
-							)
-
-							if (typeof vscode !== "undefined") {
-								vscode.postMessage({ type: "draggedImages", dataUrls: dataUrls })
-							}
-						} else {
-							console.warn(t("chat:noValidImages"))
+						if (typeof vscode !== "undefined") {
+							vscode.postMessage({ type: "draggedImages", dataUrls: dataUrls })
 						}
+					} else {
+						console.warn(t("chat:noValidImages"))
 					}
 				}
-			},
-			[
-				cursorPosition,
-				cwd,
-				normalizedInputValue,
-				setInputValue,
-				setCursorPosition,
-				setIntendedCursorPosition,
-				shouldDisableImages,
-				setSelectedImages,
-				t,
-			],
-		)
+			}
+		})
 
 		const [isTtsPlaying, setIsTtsPlaying] = useState(false)
 
@@ -1003,23 +945,20 @@ export const ChatTextArea = forwardRef<HTMLTextAreaElement, ChatTextAreaProps>(
 		const placeholderBottomText = `\n(${t("chat:addContext")}${shouldDisableImages ? `, ${t("chat:dragFiles")}` : `, ${t("chat:dragFilesImages")}`})`
 
 		// Common mode selector handler
-		const handleModeChange = useCallback(
-			(value: Mode) => {
-				setMode(value)
-				vscode.postMessage({ type: "mode", text: value })
-			},
-			[setMode],
-		)
+		const handleModeChange = useEventCallback((value: Mode) => {
+			setMode(value)
+			vscode.postMessage({ type: "mode", text: value })
+		})
 
 		// Helper function to handle API config change
-		const handleApiConfigChange = useCallback((value: string) => {
+		const handleApiConfigChange = useEventCallback((value: string) => {
 			vscode.postMessage({ type: "loadApiConfigurationById", text: value })
-		}, [])
+		})
 
-		const handleToggleLockApiConfig = useCallback(() => {
+		const handleToggleLockApiConfig = useEventCallback(() => {
 			const newValue = !lockApiConfigAcrossModes
 			vscode.postMessage({ type: "lockApiConfigAcrossModes", bool: newValue })
-		}, [lockApiConfigAcrossModes])
+		})
 
 		return (
 			<div

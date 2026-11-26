@@ -1,3 +1,4 @@
+import { useEventCallback } from "@src/hooks/useEventCallback"
 import React, {
 	forwardRef,
 	useCallback,
@@ -292,35 +293,32 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const lastPlayedRef = useRef<Record<string, number>>({})
 
-	const playSound = useCallback(
-		(audioType: AudioType) => {
-			if (!soundEnabled) {
-				return
-			}
+	const playSound = useEventCallback((audioType: AudioType) => {
+		if (!soundEnabled) {
+			return
+		}
 
-			const now = Date.now()
-			const lastPlayed = lastPlayedRef.current[audioType] ?? 0
-			if (now - lastPlayed < 100) {
-				return
-			} // debounce: skip if played within 100ms
-			lastPlayedRef.current[audioType] = now
+		const now = Date.now()
+		const lastPlayed = lastPlayedRef.current[audioType] ?? 0
+		if (now - lastPlayed < 100) {
+			return
+		} // debounce: skip if played within 100ms
+		lastPlayedRef.current[audioType] = now
 
-			switch (audioType) {
-				case "notification":
-					playNotification()
-					break
-				case "celebration":
-					playCelebration()
-					break
-				case "progress_loop":
-					playProgressLoop()
-					break
-				default:
-					console.warn(`Unknown audio type: ${audioType}`)
-			}
-		},
-		[soundEnabled, playNotification, playCelebration, playProgressLoop],
-	)
+		switch (audioType) {
+			case "notification":
+				playNotification()
+				break
+			case "celebration":
+				playCelebration()
+				break
+			case "progress_loop":
+				playProgressLoop()
+				break
+			default:
+				console.warn(`Unknown audio type: ${audioType}`)
+		}
+	})
 
 	function playTts(text: string) {
 		vscode.postMessage({ type: "playTts", text })
@@ -642,14 +640,14 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		return false
 	}, [modifiedMessages, clineAsk, enableButtons, primaryButtonText])
 
-	const markFollowUpAsAnswered = useCallback(() => {
+	const markFollowUpAsAnswered = useEventCallback(() => {
 		const lastFollowUpMessage = messagesRef.current.findLast((msg: ClineMessage) => msg.ask === "followup")
 		if (lastFollowUpMessage) {
 			setCurrentFollowUpTs(lastFollowUpMessage.ts)
 		}
-	}, [])
+	})
 
-	const handleChatReset = useCallback(() => {
+	const handleChatReset = useEventCallback(() => {
 		// Clear any pending auto-approval timeout
 		if (autoApproveTimeoutRef.current) {
 			clearTimeout(autoApproveTimeoutRef.current)
@@ -668,7 +666,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		// Do not reset mode here as it should persist.
 		// setPrimaryButtonKey(undefined)
 		// setSecondaryButtonKey(undefined)
-	}, [])
+	})
 
 	/**
 	 * Sends the chat box as one message and clears it. The only place that reads the segments for a send,
@@ -694,7 +692,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	 * @param text - The message text to send
 	 * @param images - Array of image data URLs to send with the message
 	 */
-	const handleSendMessage = useCallback(
+	const handleSendMessage = useEventCallback(
 		(text: string, images: string[], segmentsOverride?: MentionSegment[]) => {
 			text = text.trim()
 			const segments = segmentsOverride ? trimSegments(segmentsOverride) : segmentsFor(text)
@@ -782,42 +780,29 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				handleChatReset()
 			}
 		},
-		[
-			handleChatReset,
-			markFollowUpAsAnswered,
-			sendingDisabled,
-			isStreaming,
-			messageQueue.length,
-			apiConfiguration.apiProvider,
-			segmentsFor,
-			postDraft,
-		], // messagesRef and clineAskRef are stable
 	)
 
-	const handleSetChatBoxMessage = useCallback(
-		(text: string, images: string[], inserted?: MentionSegment[]) => {
-			// Segments that are missing or do not match the text are all generated.
-			const insertedSegments = normalizeSegments(text, inserted)
-			if (inputValue === "") {
-				segmentsRef.current = insertedSegments
-				setInputValue(text)
-			} else {
-				segmentsRef.current = [
-					...(segmentsRef.current ?? userSegments(inputValue)),
-					...generatedSegments(" "),
-					...insertedSegments,
-				]
-				setInputValue(inputValue + " " + text)
-			}
-			setSelectedImages([...selectedImages, ...images])
-		},
-		[inputValue, selectedImages],
-	)
+	const handleSetChatBoxMessage = useEventCallback((text: string, images: string[], inserted?: MentionSegment[]) => {
+		// Segments that are missing or do not match the text are all generated.
+		const insertedSegments = normalizeSegments(text, inserted)
+		if (inputValue === "") {
+			segmentsRef.current = insertedSegments
+			setInputValue(text)
+		} else {
+			segmentsRef.current = [
+				...(segmentsRef.current ?? userSegments(inputValue)),
+				...generatedSegments(" "),
+				...insertedSegments,
+			]
+			setInputValue(inputValue + " " + text)
+		}
+		setSelectedImages([...selectedImages, ...images])
+	})
 
-	const startNewTask = useCallback(() => {
+	const startNewTask = useEventCallback(() => {
 		setShowRetiredProviderWarning(false)
 		vscode.postMessage({ type: "clearTask" })
-	}, [])
+	})
 
 	// A manual edit marks only the changed text as user text.
 	const setInputValueFromUser = useCallback(
@@ -849,230 +834,205 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	}, [])
 
 	// Handle stop button click from textarea
-	const handleStopTask = useCallback(() => {
+	const handleStopTask = useEventCallback(() => {
 		vscode.postMessage({ type: "cancelTask" })
 		setDidClickCancel(true)
-	}, [setDidClickCancel])
+	})
 
 	// Handle enqueue button click from textarea
-	const handleEnqueueCurrentMessage = useCallback(() => {
+	const handleEnqueueCurrentMessage = useEventCallback(() => {
 		const text = inputValue.trim()
 		if (text || selectedImages.length > 0) {
 			postDraft({ type: "queueMessage" }, text, selectedImages)
 		}
-	}, [inputValue, selectedImages, postDraft])
+	})
 
 	// Resets the approval button UI to its hidden/disabled state. Shared by the
 	// manual click handlers and by the backend-driven clearApprovalButtons
 	// message so auto-approved/denied asks hide the buttons through the same
 	// pathway a manual click uses.
-	const clearApprovalButtons = useCallback(() => {
+	const clearApprovalButtons = useEventCallback(() => {
 		setSendingDisabled(true)
 		setClineAsk(undefined)
 		setEnableButtons(false)
 		setPrimaryButtonKey(undefined)
 		setSecondaryButtonKey(undefined)
-	}, [])
+	})
 
 	// This logic depends on the useEffect[messages] above to set clineAsk,
 	// after which buttons are shown and we then send an askResponse to the
 	// extension.
-	const handlePrimaryButtonClick = useCallback(
-		(text?: string, images?: string[]) => {
-			// Mark that user has responded
-			userRespondedRef.current = true
+	const handlePrimaryButtonClick = useEventCallback((text?: string, images?: string[]) => {
+		// Mark that user has responded
+		userRespondedRef.current = true
 
-			const trimmedInput = text?.trim()
+		const trimmedInput = text?.trim()
 
-			switch (clineAsk) {
-				case "api_req_failed":
-				case "command":
-				case "tool":
-				case "use_mcp_server":
-				case "mistake_limit_reached":
+		switch (clineAsk) {
+			case "api_req_failed":
+			case "command":
+			case "tool":
+			case "use_mcp_server":
+			case "mistake_limit_reached":
+				// Only send text/images if they exist
+				if (trimmedInput || (images && images.length > 0)) {
+					postDraft({ type: "askResponse", askResponse: "yesButtonClicked" }, trimmedInput ?? "", images)
+				} else {
+					vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
+				}
+				break
+			case "resume_task":
+				// For completed subtasks (tasks with a parentTaskId and a completion_result),
+				// start a new task instead of resuming since the subtask is done
+				const isCompletedSubtaskForClick =
+					currentTaskItem?.parentTaskId &&
+					messagesRef.current.some(
+						(msg) => msg.ask === "completion_result" || msg.say === "completion_result",
+					)
+				if (isCompletedSubtaskForClick) {
+					startNewTask()
+				} else {
 					// Only send text/images if they exist
 					if (trimmedInput || (images && images.length > 0)) {
 						postDraft({ type: "askResponse", askResponse: "yesButtonClicked" }, trimmedInput ?? "", images)
 					} else {
 						vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
 					}
-					break
-				case "resume_task":
-					// For completed subtasks (tasks with a parentTaskId and a completion_result),
-					// start a new task instead of resuming since the subtask is done
-					const isCompletedSubtaskForClick =
-						currentTaskItem?.parentTaskId &&
-						messagesRef.current.some(
-							(msg) => msg.ask === "completion_result" || msg.say === "completion_result",
-						)
-					if (isCompletedSubtaskForClick) {
-						startNewTask()
-					} else {
-						// Only send text/images if they exist
-						if (trimmedInput || (images && images.length > 0)) {
-							postDraft(
-								{ type: "askResponse", askResponse: "yesButtonClicked" },
-								trimmedInput ?? "",
-								images,
-							)
-						} else {
-							vscode.postMessage({ type: "askResponse", askResponse: "yesButtonClicked" })
-						}
-					}
-					break
-				case "completion_result":
-					startNewTask()
-					break
-				case "resume_completed_task":
-					// Waiting for feedback, but we can just present a new task button
-					startNewTask()
-					break
-				case "command_output":
-					vscode.postMessage({ type: "terminalOperation", terminalOperation: "continue" })
-					break
-			}
+				}
+				break
+			case "completion_result":
+				startNewTask()
+				break
+			case "resume_completed_task":
+				// Waiting for feedback, but we can just present a new task button
+				startNewTask()
+				break
+			case "command_output":
+				vscode.postMessage({ type: "terminalOperation", terminalOperation: "continue" })
+				break
+		}
 
-			clearApprovalButtons()
-		},
-		[clineAsk, startNewTask, currentTaskItem?.parentTaskId, clearApprovalButtons, postDraft],
-	)
+		clearApprovalButtons()
+	})
 
-	const handleSecondaryButtonClick = useCallback(
-		(text?: string, images?: string[]) => {
-			// Mark that user has responded
-			userRespondedRef.current = true
+	const handleSecondaryButtonClick = useEventCallback((text?: string, images?: string[]) => {
+		// Mark that user has responded
+		userRespondedRef.current = true
 
-			const trimmedInput = text?.trim()
+		const trimmedInput = text?.trim()
 
-			if (isStreaming) {
-				vscode.postMessage({ type: "cancelTask" })
-				setDidClickCancel(true)
-				return
-			}
+		if (isStreaming) {
+			vscode.postMessage({ type: "cancelTask" })
+			setDidClickCancel(true)
+			return
+		}
 
-			switch (clineAsk) {
-				case "api_req_failed":
-				case "mistake_limit_reached":
-				case "resume_task":
-					startNewTask()
-					break
-				case "command":
-				case "tool":
-				case "use_mcp_server":
-					// Only send text/images if they exist
-					if (trimmedInput || (images && images.length > 0)) {
-						postDraft({ type: "askResponse", askResponse: "noButtonClicked" }, trimmedInput ?? "", images)
-					} else {
-						// Responds to the API with a "This operation failed" and lets it try again
-						vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })
-					}
-					break
-				case "command_output":
-					vscode.postMessage({ type: "terminalOperation", terminalOperation: "abort" })
-					break
-			}
-			clearApprovalButtons()
-		},
-		[clineAsk, startNewTask, isStreaming, setDidClickCancel, clearApprovalButtons, postDraft],
-	)
+		switch (clineAsk) {
+			case "api_req_failed":
+			case "mistake_limit_reached":
+			case "resume_task":
+				startNewTask()
+				break
+			case "command":
+			case "tool":
+			case "use_mcp_server":
+				// Only send text/images if they exist
+				if (trimmedInput || (images && images.length > 0)) {
+					postDraft({ type: "askResponse", askResponse: "noButtonClicked" }, trimmedInput ?? "", images)
+				} else {
+					// Responds to the API with a "This operation failed" and lets it try again
+					vscode.postMessage({ type: "askResponse", askResponse: "noButtonClicked" })
+				}
+				break
+			case "command_output":
+				vscode.postMessage({ type: "terminalOperation", terminalOperation: "abort" })
+				break
+		}
+		clearApprovalButtons()
+	})
 
 	const { info: model } = useSelectedModel(apiConfiguration)
 
-	const selectImages = useCallback(() => vscode.postMessage({ type: "selectImages" }), [])
+	const selectImages = useEventCallback(() => vscode.postMessage({ type: "selectImages" }))
 
 	const shouldDisableImages = !model?.supportsImages || selectedImages.length >= MAX_IMAGES_PER_MESSAGE
 
-	const handleMessage = useCallback(
-		(e: MessageEvent) => {
-			const message: ExtensionMessage = e.data
+	const handleMessage = useEventCallback((e: MessageEvent) => {
+		const message: ExtensionMessage = e.data
 
-			switch (message.type) {
-				case "action":
-					switch (message.action!) {
-						case "didBecomeVisible":
-							if (document.hasFocus() && !isHidden && !sendingDisabled && !enableButtons) {
-								textAreaRef.current?.focus()
-							}
-							break
-						case "focusInput":
+		switch (message.type) {
+			case "action":
+				switch (message.action!) {
+					case "didBecomeVisible":
+						if (document.hasFocus() && !isHidden && !sendingDisabled && !enableButtons) {
 							textAreaRef.current?.focus()
-							break
-					}
-					break
-				case "selectedImages":
-					// Only handle selectedImages if it's not for editing context
-					// When context is "edit", ChatRow will handle the images
-					if (message.context !== "edit") {
-						setSelectedImages((prevImages: string[]) =>
-							appendImages(prevImages, message.images, MAX_IMAGES_PER_MESSAGE),
+						}
+						break
+					case "focusInput":
+						textAreaRef.current?.focus()
+						break
+				}
+				break
+			case "selectedImages":
+				// Only handle selectedImages if it's not for editing context
+				// When context is "edit", ChatRow will handle the images
+				if (message.context !== "edit") {
+					setSelectedImages((prevImages: string[]) =>
+						appendImages(prevImages, message.images, MAX_IMAGES_PER_MESSAGE),
+					)
+				}
+				break
+			case "invoke":
+				switch (message.invoke!) {
+					case "newChat":
+						handleChatReset()
+						break
+					case "sendMessage":
+						handleSendMessage(
+							message.text ?? "",
+							message.images ?? [],
+							normalizeSegments(message.text ?? "", message.segments),
 						)
-					}
-					break
-				case "invoke":
-					switch (message.invoke!) {
-						case "newChat":
-							handleChatReset()
-							break
-						case "sendMessage":
-							handleSendMessage(
-								message.text ?? "",
-								message.images ?? [],
-								normalizeSegments(message.text ?? "", message.segments),
-							)
-							break
-						case "setChatBoxMessage":
-							handleSetChatBoxMessage(message.text ?? "", message.images ?? [], message.segments)
-							break
-						case "primaryButtonClick":
-							handlePrimaryButtonClick(message.text ?? "", message.images ?? [])
-							break
-						case "secondaryButtonClick":
-							handleSecondaryButtonClick(message.text ?? "", message.images ?? [])
-							break
-					}
-					break
-				case "condenseTaskContextStarted":
-					// Automatic condensation shows progress but never sets the manual wait.
-					if (isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
-						setIsCondensing(true)
-					}
-					break
-				case "condenseTaskContextResponse":
-					if (message.text && isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
-						finishManualCondenseWait(message.text)
-						setIsCondensing(false)
-					}
-					break
-				case "checkpointInitWarning":
-					setCheckpointWarning(message.checkpointWarning)
-					break
-				case "interactionRequired":
-					playSound("notification")
-					break
-				case "taskWithAggregatedCosts":
-					if (message.text && message.text === currentTaskIdRef.current && message.aggregatedCosts) {
-						setAggregatedCostsMap(new Map([[message.text, message.aggregatedCosts]]))
-					}
-					break
-			}
-			// textAreaRef.current is not explicitly required here since React
-			// guarantees that ref will be stable across re-renders, and we're
-			// not using its value but its reference.
-		},
-		[
-			finishManualCondenseWait,
-			isHidden,
-			sendingDisabled,
-			enableButtons,
-			handleChatReset,
-			handleSendMessage,
-			handleSetChatBoxMessage,
-			handlePrimaryButtonClick,
-			handleSecondaryButtonClick,
-			setCheckpointWarning,
-			playSound,
-		],
-	)
+						break
+					case "setChatBoxMessage":
+						handleSetChatBoxMessage(message.text ?? "", message.images ?? [], message.segments)
+						break
+					case "primaryButtonClick":
+						handlePrimaryButtonClick(message.text ?? "", message.images ?? [])
+						break
+					case "secondaryButtonClick":
+						handleSecondaryButtonClick(message.text ?? "", message.images ?? [])
+						break
+				}
+				break
+			case "condenseTaskContextStarted":
+				// Automatic condensation shows progress but never sets the manual wait.
+				if (isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
+					setIsCondensing(true)
+				}
+				break
+			case "condenseTaskContextResponse":
+				if (message.text && isMessageForCurrentTask(message.text, currentTaskIdRef.current)) {
+					finishManualCondenseWait(message.text)
+					setIsCondensing(false)
+				}
+				break
+			case "checkpointInitWarning":
+				setCheckpointWarning(message.checkpointWarning)
+				break
+			case "interactionRequired":
+				playSound("notification")
+				break
+			case "taskWithAggregatedCosts":
+				if (message.text && message.text === currentTaskIdRef.current && message.aggregatedCosts) {
+					setAggregatedCostsMap(new Map([[message.text, message.aggregatedCosts]]))
+				}
+				break
+		}
+		// textAreaRef.current is not explicitly required here since React
+		// guarantees that ref will be stable across re-renders, and we're
+		// not using its value but its reference.
+	})
 
 	useEvent("message", handleMessage)
 
@@ -1457,25 +1417,19 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		prevExpandedRowsRef.current = expandedRows
 	}, [enterUserBrowsingHistory, expandedRows])
 
-	const handleSetExpandedRow = useCallback(
-		(ts: number, expand?: boolean) => {
-			setExpandedRows((prev: Record<number, boolean>) => ({
-				...prev,
-				[ts]: expand === undefined ? !prev[ts] : expand,
-			}))
-		},
-		[setExpandedRows], // setExpandedRows is stable
-	)
+	const handleSetExpandedRow = useEventCallback((ts: number, expand?: boolean) => {
+		setExpandedRows((prev: Record<number, boolean>) => ({
+			...prev,
+			[ts]: expand === undefined ? !prev[ts] : expand,
+		}))
+	})
 
 	// Scroll when user toggles certain rows.
-	const toggleRowExpansion = useCallback(
-		(ts: number) => {
-			handleSetExpandedRow(ts)
-			// The logic to set disableAutoScrollRef.current = true on expansion
-			// is now handled by the useEffect hook that observes expandedRows.
-		},
-		[handleSetExpandedRow],
-	)
+	const toggleRowExpansion = useEventCallback((ts: number) => {
+		handleSetExpandedRow(ts)
+		// The logic to set disableAutoScrollRef.current = true on expansion
+		// is now handled by the useEffect hook that observes expandedRows.
+	})
 
 	// Effect to clear checkpoint warning when messages appear or task changes
 	useEffect(() => {
@@ -1486,95 +1440,89 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 
 	const placeholderText = task ? t("chat:typeMessage") : t("chat:typeTask")
 
-	const switchToMode = useCallback(
-		(modeSlug: string): void => {
-			if (!getAllModes(customModes).some((modeConfig) => modeConfig.slug === modeSlug)) {
-				return
+	const switchToMode = useEventCallback((modeSlug: string): void => {
+		if (!getAllModes(customModes).some((modeConfig) => modeConfig.slug === modeSlug)) {
+			return
+		}
+
+		// Update local state and notify extension to sync mode change.
+		setMode(modeSlug)
+
+		// Send the mode switch message.
+		vscode.postMessage({ type: "mode", text: modeSlug })
+	})
+
+	const handleSuggestionClickInRow = useEventCallback((suggestion: SuggestionItem, event?: React.MouseEvent) => {
+		// The model may emit suggestions with missing or blank answers (issue #1226).
+		// Ignore them instead of pushing an undefined value into the input, which
+		// would crash the text area (inputValue.trim on undefined).
+		const answer = hasUsableAnswer(suggestion) ? suggestion.answer.trim() : ""
+		if (!answer) {
+			return
+		}
+
+		// Mark that user has responded if this is a manual click (not auto-approval)
+		if (event) {
+			userRespondedRef.current = true
+		}
+
+		// Mark the current follow-up question as answered when a suggestion is clicked
+		if (clineAsk === "followup" && !event?.shiftKey) {
+			markFollowUpAsAnswered()
+		}
+
+		// Check if we need to switch modes
+		const suggestionMode = getSuggestionMode(suggestion.mode)
+		if (suggestionMode) {
+			// Only switch modes if it's a manual click (event exists) or auto-approval is allowed
+			const isManualClick = !!event
+			if (isManualClick || alwaysAllowModeSwitch) {
+				// Switch mode without waiting
+				switchToMode(suggestionMode)
 			}
+		}
 
-			// Update local state and notify extension to sync mode change.
-			setMode(modeSlug)
+		if (event?.shiftKey) {
+			// Always append to existing text, don't overwrite.
+			// The suggestion is model text, so it stays generated.
+			const currentValue = inputValueRef.current
+			const separator = currentValue !== "" ? " \n" : ""
+			segmentsRef.current = [
+				...(segmentsRef.current ?? userSegments(currentValue)),
+				...generatedSegments(separator + answer),
+			]
+			inputValueRef.current = currentValue + separator + answer
+			setInputValue(inputValueRef.current)
+		} else {
+			// Don't clear the input value when sending a follow-up choice
+			// The message should be sent but the text area should preserve what the user typed
+			const preservedInput = inputValueRef.current
+			const preservedSegments = segmentsRef.current
+			// A suggestion is model text, so it is generated.
+			handleSendMessage(answer, [], generatedSegments(answer))
+			// Restore the input value and its segments after sending
+			setInputValue(preservedInput)
+			segmentsRef.current = preservedSegments
+		}
+	})
 
-			// Send the mode switch message.
-			vscode.postMessage({ type: "mode", text: modeSlug })
-		},
-		[customModes, setMode],
-	)
-
-	const handleSuggestionClickInRow = useCallback(
-		(suggestion: SuggestionItem, event?: React.MouseEvent) => {
-			// The model may emit suggestions with missing or blank answers (issue #1226).
-			// Ignore them instead of pushing an undefined value into the input, which
-			// would crash the text area (inputValue.trim on undefined).
-			const answer = hasUsableAnswer(suggestion) ? suggestion.answer.trim() : ""
-			if (!answer) {
-				return
-			}
-
-			// Mark that user has responded if this is a manual click (not auto-approval)
-			if (event) {
-				userRespondedRef.current = true
-			}
-
-			// Mark the current follow-up question as answered when a suggestion is clicked
-			if (clineAsk === "followup" && !event?.shiftKey) {
-				markFollowUpAsAnswered()
-			}
-
-			// Check if we need to switch modes
-			const suggestionMode = getSuggestionMode(suggestion.mode)
-			if (suggestionMode) {
-				// Only switch modes if it's a manual click (event exists) or auto-approval is allowed
-				const isManualClick = !!event
-				if (isManualClick || alwaysAllowModeSwitch) {
-					// Switch mode without waiting
-					switchToMode(suggestionMode)
-				}
-			}
-
-			if (event?.shiftKey) {
-				// Always append to existing text, don't overwrite.
-				// The suggestion is model text, so it stays generated.
-				const currentValue = inputValueRef.current
-				const separator = currentValue !== "" ? " \n" : ""
-				segmentsRef.current = [
-					...(segmentsRef.current ?? userSegments(currentValue)),
-					...generatedSegments(separator + answer),
-				]
-				inputValueRef.current = currentValue + separator + answer
-				setInputValue(inputValueRef.current)
-			} else {
-				// Don't clear the input value when sending a follow-up choice
-				// The message should be sent but the text area should preserve what the user typed
-				const preservedInput = inputValueRef.current
-				const preservedSegments = segmentsRef.current
-				// A suggestion is model text, so it is generated.
-				handleSendMessage(answer, [], generatedSegments(answer))
-				// Restore the input value and its segments after sending
-				setInputValue(preservedInput)
-				segmentsRef.current = preservedSegments
-			}
-		},
-		[handleSendMessage, setInputValue, switchToMode, alwaysAllowModeSwitch, clineAsk, markFollowUpAsAnswered],
-	)
-
-	const handleBatchFileResponse = useCallback((response: { [key: string]: boolean }) => {
+	const handleBatchFileResponse = useEventCallback((response: { [key: string]: boolean }) => {
 		// Handle batch file response, e.g., for file uploads
 		vscode.postMessage({ type: "askResponse", askResponse: "objectResponse", text: JSON.stringify(response) })
-	}, [])
+	})
 
 	// Cancel backend auto-approval timeout when FollowUpSuggest's countdown effect cleans up.
 	// This is called when auto-approve is toggled off, a suggestion is clicked, or the component unmounts.
-	const handleFollowUpUnmount = useCallback(() => {
+	const handleFollowUpUnmount = useEventCallback(() => {
 		vscode.postMessage({ type: "cancelAutoApproval" })
-	}, [])
+	})
 
-	const handleScrollToBottomAndResetCheckpointCursor = useCallback(() => {
+	const handleScrollToBottomAndResetCheckpointCursor = useEventCallback(() => {
 		checkpointJumpCursorRef.current = null
 		handleScrollToBottomClick()
-	}, [handleScrollToBottomClick])
+	})
 
-	const handleScrollToLatestCheckpoint = useCallback(() => {
+	const handleScrollToLatestCheckpoint = useEventCallback(() => {
 		if (checkpointIndices.length === 0) {
 			return
 		}
@@ -1590,7 +1538,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			align: "center",
 			behavior: "smooth",
 		})
-	}, [checkpointIndices, enterUserBrowsingHistory])
+	})
 
 	const itemContent = useCallback(
 		(index: number, messageOrGroup: ClineMessage) => {
@@ -1659,38 +1607,35 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 	)
 
 	// Function to handle mode switching
-	const switchToNextMode = useCallback(() => {
+	const switchToNextMode = useEventCallback(() => {
 		const allModes = getAllModes(customModes)
 		const currentModeIndex = allModes.findIndex((m) => m.slug === mode)
 		const nextModeIndex = (currentModeIndex + 1) % allModes.length
 		// Update local state and notify extension to sync mode change
 		switchToMode(allModes[nextModeIndex].slug)
-	}, [mode, customModes, switchToMode])
+	})
 
 	// Function to handle switching to previous mode
-	const switchToPreviousMode = useCallback(() => {
+	const switchToPreviousMode = useEventCallback(() => {
 		const allModes = getAllModes(customModes)
 		const currentModeIndex = allModes.findIndex((m) => m.slug === mode)
 		const previousModeIndex = (currentModeIndex - 1 + allModes.length) % allModes.length
 		// Update local state and notify extension to sync mode change
 		switchToMode(allModes[previousModeIndex].slug)
-	}, [mode, customModes, switchToMode])
+	})
 
 	// Mode switching keyboard handler. Scroll-intent keyboard detection
 	// (PageUp, Home, ArrowUp) is handled by useScrollLifecycle.
-	const handleKeyDown = useCallback(
-		(event: KeyboardEvent) => {
-			if ((event.metaKey || event.ctrlKey) && event.key === ".") {
-				event.preventDefault()
-				if (event.shiftKey) {
-					switchToPreviousMode()
-				} else {
-					switchToNextMode()
-				}
+	const handleKeyDown = useEventCallback((event: KeyboardEvent) => {
+		if ((event.metaKey || event.ctrlKey) && event.key === ".") {
+			event.preventDefault()
+			if (event.shiftKey) {
+				switchToPreviousMode()
+			} else {
+				switchToNextMode()
 			}
-		},
-		[switchToNextMode, switchToPreviousMode],
-	)
+		}
+	})
 
 	useEffect(() => {
 		window.addEventListener("keydown", handleKeyDown)
@@ -1720,6 +1665,12 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 		},
 	}))
 
+	const handleSendCurrentMessage = useEventCallback(() => handleSendMessage(inputValue, selectedImages))
+	const handleInputHeightChange = useEventCallback(() => {
+		if (isAtBottomRef.current && scrollPhaseRef.current !== "USER_BROWSING_HISTORY") {
+			scrollToBottomAuto()
+		}
+	})
 	const handleCondenseContext = (taskId: string) => {
 		if (isCondensing || sendingDisabled) {
 			return
@@ -1967,14 +1918,10 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				placeholderText={placeholderText}
 				selectedImages={selectedImages}
 				setSelectedImages={setSelectedImages}
-				onSend={() => handleSendMessage(inputValue, selectedImages)}
+				onSend={handleSendCurrentMessage}
 				onSelectImages={selectImages}
 				shouldDisableImages={shouldDisableImages}
-				onHeightChange={() => {
-					if (isAtBottomRef.current && scrollPhaseRef.current !== "USER_BROWSING_HISTORY") {
-						scrollToBottomAuto()
-					}
-				}}
+				onHeightChange={handleInputHeightChange}
 				mode={mode}
 				setMode={setMode}
 				modeShortcutText={modeShortcutText}
