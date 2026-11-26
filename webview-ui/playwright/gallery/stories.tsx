@@ -1,4 +1,5 @@
 import React, { useState } from "react"
+import type { ClineMessage } from "@roo-code/types"
 
 type StoryProps = Record<string, unknown>
 type Story = (props: StoryProps) => React.ReactNode | Promise<React.ReactNode>
@@ -12,6 +13,26 @@ const mermaidGantt = `gantt
     Ship release :active, release, after scope, 3d`
 
 export const stories: Record<string, Story> = {
+	"file-changes-long-list": async () => {
+		const [{ AppProviders }, { default: FileChangesPanel }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/FileChangesPanel"),
+		])
+		const messages: ClineMessage[] = Array.from({ length: 40 }, (_, index) => ({
+			type: "ask",
+			ask: "tool",
+			ts: index + 1,
+			isAnswered: true,
+			text: JSON.stringify({ tool: "appliedDiff", path: `src/file-${index}.ts`, diff: "+line" }),
+		}))
+		return (
+			<AppProviders>
+				<div className="h-[360px] w-[320px] max-w-full overflow-hidden bg-vscode-editor-background">
+					<FileChangesPanel clineMessages={messages} />
+				</div>
+			</AppProviders>
+		)
+	},
 	"litellm-reasoning-settings": async () => {
 		const [{ AppProviders }, { default: ApiOptions }, { providerIdentifiers }] = await Promise.all([
 			import("../AppProviders"),

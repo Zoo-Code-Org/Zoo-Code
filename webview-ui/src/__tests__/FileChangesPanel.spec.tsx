@@ -91,6 +91,28 @@ describe("FileChangesPanel", () => {
 		expect(container.firstChild).toBeNull()
 	})
 
+	it("keeps an expanded file row open when streaming replaces the message array", () => {
+		const edit = createFileEditMessage("src/example.ts", "+first")
+		const { rerender } = renderPanel([edit], "task-1")
+		fireEvent.click(screen.getByRole("button", { name: /1 file/ }))
+		fireEvent.click(screen.getByTestId("accordian-toggle"))
+		expect(screen.getByTestId("accordian-toggle")).toHaveTextContent("expanded")
+
+		rerender(
+			<TranslationProvider>
+				<FileChangesPanel
+					clineMessages={[
+						edit,
+						{ type: "say", say: "text", ts: edit.ts + 1, text: "streaming", partial: true },
+					]}
+					taskId="task-1"
+				/>
+			</TranslationProvider>,
+		)
+
+		expect(screen.getByTestId("accordian-toggle")).toHaveTextContent("expanded")
+	})
+
 	it("renders nothing when there are no file-edit messages", () => {
 		const messages: ClineMessage[] = [
 			{
@@ -150,6 +172,20 @@ describe("FileChangesPanel", () => {
 		const paths = screen.getAllByTestId("accordian-path")
 		expect(paths).toHaveLength(2)
 		expect(paths.map((el) => el.textContent)).toEqual(expect.arrayContaining(["src/a.ts", "src/b.ts"]))
+	})
+
+	it("keeps a long expanded file list in a keyboard-scrollable region", () => {
+		const messages = Array.from({ length: 40 }, (_, index) =>
+			createFileEditMessage(`src/file-${index}.ts`, `diff ${index}`),
+		)
+		renderPanel(messages)
+		fireEvent.click(screen.getByText("40 file(s) changed in this conversation").closest("button")!)
+
+		const list = screen.getByTestId("file-changes-list")
+		expect(list).toHaveClass("max-h-[40vh]", "overflow-y-auto")
+		expect(list).toHaveAttribute("tabindex", "0")
+		expect(screen.getAllByTestId("accordian-path")).toHaveLength(40)
+		expect(screen.getByText("40 file(s) changed in this conversation")).toBeVisible()
 	})
 
 	it("collapsed by default: panel trigger shows chevron and expanding reveals file rows", () => {
