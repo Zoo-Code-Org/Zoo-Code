@@ -522,6 +522,35 @@ describe("NativeToolCallParser", () => {
 	})
 
 	describe("finalizeStreamingToolCall", () => {
+		it("keeps a large streamed file write complete while limiting repeated partial parsing", () => {
+			const id = "large-write"
+			const scope = NativeToolCallParser.createScope()
+			NativeToolCallParser.startStreamingToolCall(id, "write_to_file", scope)
+			const key = NativeToolCallParser.makeStreamingKey(id, "write_to_file")
+			const prefix = '{"path":"large.txt","content":"'
+			const first = NativeToolCallParser.processStreamingChunk(
+				key,
+				prefix + "x".repeat(32 * 1024 - prefix.length),
+				scope,
+			)
+			expect(first).not.toBeNull()
+			expect(NativeToolCallParser.processStreamingChunk(key, "x".repeat(10 * 1024), scope)).toBeNull()
+			const checkpoint = NativeToolCallParser.processStreamingChunk(key, "x".repeat(24 * 1024), scope)
+			expect(checkpoint).not.toBeNull()
+			expect(NativeToolCallParser.processStreamingChunk(key, "x".repeat(10 * 1024), scope)).toBeNull()
+			let partialUpdates = 0
+			for (let index = 0; index < 180; index++) {
+				if (NativeToolCallParser.processStreamingChunk(key, "x".repeat(1024), scope)) partialUpdates++
+			}
+			NativeToolCallParser.processStreamingChunk(key, '"}', scope)
+
+			const result = NativeToolCallParser.finalizeStreamingToolCall(key, scope)
+			expect(result?.type).toBe("tool_use")
+			if (result?.type !== "tool_use") throw new Error("Expected tool use")
+			expect(result.nativeArgs).toEqual({ path: "large.txt", content: "x".repeat(256 * 1024 - prefix.length) })
+			expect(partialUpdates).toBeLessThan(5)
+		})
+
 		describe("read_file tool", () => {
 			it("should parse read_file args on finalize", () => {
 				const id = "toolu_finalize_123"

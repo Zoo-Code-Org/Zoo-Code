@@ -56,7 +56,7 @@ export class NativeToolCallParser {
 	// Note: name is string to accommodate dynamic MCP tools (mcp--serverName--toolName)
 	private static streamingToolCallsByScope = new WeakMap<
 		object,
-		Map<string, { id: string; name: string; argumentsAccumulator: string }>
+		Map<string, { id: string; name: string; argumentsAccumulator: string; nextPartialParseLength: number }>
 	>()
 
 	/**
@@ -259,6 +259,7 @@ export class NativeToolCallParser {
 			id,
 			name,
 			argumentsAccumulator: "",
+			nextPartialParseLength: 64 * 1024,
 		})
 	}
 
@@ -326,6 +327,17 @@ export class NativeToolCallParser {
 		const mcpPrefix = MCP_TOOL_PREFIX + MCP_TOOL_SEPARATOR
 		if (toolCall.name.startsWith(mcpPrefix)) {
 			return null
+		}
+
+		// Re-parsing the entire JSON value for every streamed fragment becomes
+		// quadratic for large write_to_file arguments. Keep small tool calls fully
+		// responsive, then update the preview at exponentially spaced sizes.
+		const length = toolCall.argumentsAccumulator.length
+		if (length > 32 * 1024 && length < toolCall.nextPartialParseLength) {
+			return null
+		}
+		if (length >= toolCall.nextPartialParseLength) {
+			toolCall.nextPartialParseLength = length * 2
 		}
 
 		// Parse whatever we can from the incomplete JSON!
