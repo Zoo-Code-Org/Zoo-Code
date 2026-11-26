@@ -1318,11 +1318,13 @@ export class DiffViewProvider {
 			// A newer save of this path owns the report. Reading the workspace snapshot here
 			// would read it after that newer write and re-report its problems against the
 			// save this tail describes, so the superseded tail stops before any diagnostics
-			// work; the survivor holds this run's earliest baseline.
-			if (this.pendingSaveReports.get(savedFilePath)?.generation !== saveGeneration) {
+			// work; the survivor holds this run's earliest baseline. The entry is released only
+			// after the last ownership recheck, below: releasing it here would leave nothing to
+			// compare against after the awaits, and this run could then delete a newer save's
+			// entry on its way out.
+			if (this.reportOwnershipLost(savedFilePath, saveGeneration)) {
 				return
 			}
-			this.pendingSaveReports.delete(savedFilePath)
 			// arePathsEqual: case-insensitive on Windows, where a relPath whose
 			// casing differs from the diagnostic URI is still the same file.
 			const postDiagnostics = vscode.languages
@@ -1341,10 +1343,11 @@ export class DiffViewProvider {
 			const includeDiagnosticMessages = state?.includeDiagnosticMessages ?? true
 			const maxDiagnosticMessages = state?.maxDiagnosticMessages ?? 50
 
-			// The settings read is an await too, so disposal can land inside it and the
-			// await still returns normally. Stopping here keeps a gone task from paying for
-			// the formatting pass before the emit guard below.
-			if (controller.signal.aborted) {
+			// The settings read is an await too, so disposal can land inside it and the await
+			// still returns normally. A newer save of the same path can register inside it as
+			// well, so ownership is re-checked alongside the signal: a run that this save no
+			// longer describes must not pay for the formatting pass below.
+			if (controller.signal.aborted || this.reportOwnershipLost(savedFilePath, saveGeneration)) {
 				return
 			}
 
@@ -1356,12 +1359,16 @@ export class DiffViewProvider {
 				maxDiagnosticMessages,
 			)
 
-			// Formatting is awaited too, so a cancellation can land inside it. The emit below
-			// persists an error row into the task, so it must not start once the caller is gone:
-			// say() would otherwise be dropped or land in a task the user already left.
-			if (controller.signal.aborted) {
+			// Formatting is awaited too, so a cancellation or a newer save can land inside it.
+			// Ownership is re-checked one last time before anything is persisted, and only then
+			// is the entry released: a tail that lost the race stops without deleting the newer
+			// save's claim. The emit below persists an error row into the task, so it must not
+			// start once the caller is gone: say() would otherwise be dropped or land in a task
+			// the user already left.
+			if (controller.signal.aborted || this.reportOwnershipLost(savedFilePath, saveGeneration)) {
 				return
 			}
+			this.pendingSaveReports.delete(savedFilePath)
 
 			if (newProblems.length > 0) {
 				// This tail runs writeDelayMs after saveDirectly resolved, so the task has usually
@@ -1388,6 +1395,16 @@ export class DiffViewProvider {
 		} finally {
 			this.postSaveTails.delete(controller)
 		}
+	}
+
+	/**
+	 * Whether the post-save report for this path no longer belongs to the run that
+	 * carries the given generation: either a newer save took the entry over, or the
+	 * entry is already gone because that newer run reported and released it. Both mean
+	 * this tail must stop before it formats or emits anything.
+	 */
+	private reportOwnershipLost(savedFilePath: string, saveGeneration: number): boolean {
+		return this.pendingSaveReports.get(savedFilePath)?.generation !== saveGeneration
 	}
 
 	/**

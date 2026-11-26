@@ -1128,6 +1128,9 @@ describe("DiffViewProvider", () => {
 
 			expect(mockTask.say).toHaveBeenCalledTimes(1)
 			expect(mockTask.say.mock.calls[0]?.[1]).toContain("own-problem")
+			// The negative half of the scenario: without it, dropping the saved-file filter would
+			// leave both assertions satisfied because the emitted row still mentions own-problem.
+			expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("other-file-problem")
 		})
 
 		it("narrows the tail payload to Error-severity diagnostics", async () => {
@@ -1544,6 +1547,91 @@ describe("DiffViewProvider", () => {
 			// Mock vscode functions
 			vi.mocked(vscode.window.showTextDocument).mockResolvedValue(makeTextEditor())
 			vi.mocked(vscode.languages.getDiagnostics).mockReturnValue([])
+		})
+
+		it("stops a tail whose ownership was taken while the settings read was parked", async () => {
+			// The interleaving the generation checks are for: a tail passes the ownership check, releases
+			// the map entry, then parks in the settings await. A newer save of the same path registers
+			// meanwhile, so the parked tail no longer owns the report; only the cancellation re-checks
+			// exist here, so it resumes and emits a report for a save it no longer describes. Each save
+			// carries its own problem message so an assertion can tell which tail emitted the row.
+			const mockDelay = vi.mocked(delay)
+			const delayGates: Array<() => void> = []
+			mockDelay.mockImplementation(
+				() =>
+					new Promise<void>((resolve) => {
+						delayGates.push(resolve)
+					}),
+			)
+			const provider = mockTask.providerRef.deref()
+			const originalGetState = provider.getState
+			// Each settings read registers its own resolver, so the test can release the parked tail
+			// while the newer save's read is still held.
+			const stateResult = { includeDiagnosticMessages: true, maxDiagnosticMessages: 50 }
+			const stateGates: Array<(state: typeof stateResult) => void> = []
+			provider.getState = vi.fn(
+				() =>
+					new Promise<typeof stateResult>((resolve) => {
+						stateGates.push(resolve)
+					}),
+			)
+			let tailProblem: vscode.Diagnostic | undefined
+			const makeProblem = (message: string): vscode.Diagnostic => ({
+				severity: vscode.DiagnosticSeverity.Error,
+				range: new vscode.Range(0, 0, 0, 1),
+				message,
+			})
+			const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
+			mockTask.say.mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockClear()
+			vi.mocked(vscode.languages.getDiagnostics).mockImplementation(() =>
+				tailProblem ? [[makeUri(`${mockCwd}/test.ts`), [tailProblem]]] : [],
+			)
+			try {
+				// Save one: its tail takes the report and parks in the settings read.
+				tailProblem = makeProblem("stale-ownership-problem")
+				await diffViewProvider.saveDirectly("test.ts", "content one", true, true, 100)
+				await tick()
+				expect(delayGates.length).toBeGreaterThanOrEqual(1)
+				delayGates.shift()?.()
+				await tick()
+				// The tail has taken its post-save diagnostics by now, so flipping the fixture below
+				// attributes the next row to the newer save only.
+				expect(stateGates.length).toBe(1)
+				expect(mockTask.say).not.toHaveBeenCalled()
+
+				// Save two: a newer save of the same path registers while the first tail is parked.
+				tailProblem = makeProblem("newest-save-problem")
+				await diffViewProvider.saveDirectly("test.ts", "content two", true, true, 100)
+				await tick()
+				delayGates.forEach((release) => release())
+				delayGates.length = 0
+				await tick()
+				expect(stateGates.length).toBe(2)
+
+				// Release the parked settings read: the first tail resumes without being cancelled, and
+				// the newer save is still waiting for its own settings read.
+				stateGates.shift()?.(stateResult)
+				await tick()
+				await new Promise((resolve) => setTimeout(resolve, 20))
+				expect(stateGates.length).toBe(1)
+				const emittedBeforeNewerSave = mockTask.say.mock.calls.map((call) => String(call[1]))
+				expect(emittedBeforeNewerSave.some((text) => text.includes("stale-ownership-problem"))).toBe(false)
+
+				// The newer save finishes and owns the report; its row is the only emitted row.
+				stateGates.shift()?.(stateResult)
+				await new Promise((resolve) => setTimeout(resolve, 20))
+				expect(mockTask.say).toHaveBeenCalledTimes(1)
+				expect(mockTask.say.mock.calls[0]?.[1]).toContain("newest-save-problem")
+				expect(mockTask.say.mock.calls[0]?.[1]).not.toContain("stale-ownership-problem")
+				// No entry is left behind: the owning tail releases the map entry when it reports.
+				expect(diffViewProvider["pendingSaveReports"].size).toBe(0)
+			} finally {
+				provider.getState = originalGetState
+				delayGates.forEach((release) => release())
+				stateGates.forEach((release) => release(stateResult))
+				mockDelay.mockImplementation(() => Promise.resolve())
+			}
 		})
 
 		it("should apply diagnostic delay when diagnosticsEnabled is true", async () => {
