@@ -345,8 +345,9 @@ export class TaskHistoryStore {
 			let dirEntries: string[]
 			try {
 				dirEntries = await fs.readdir(tasksDir)
-			} catch {
-				return // tasks dir doesn't exist yet
+			} catch (error) {
+				if ((error as NodeJS.ErrnoException).code === "ENOENT") return
+				throw error
 			}
 
 			// Filter out hidden and reserved names
@@ -1315,7 +1316,7 @@ export class TaskHistoryStore {
 	 * Get the tasks base directory path, resolving custom storage paths.
 	 */
 	private async getTasksDir(): Promise<string> {
-		const basePath = await getStorageBasePath(this.globalStoragePath)
+		const basePath = await getStorageBasePath(this.globalStoragePath, true)
 		return path.join(basePath, "tasks")
 	}
 

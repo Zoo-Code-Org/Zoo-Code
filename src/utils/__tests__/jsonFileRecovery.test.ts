@@ -154,6 +154,7 @@ describe("reader recovery", () => {
 
 	it("does not create a missing task directory", async () => {
 		await fs.rm(dir, { recursive: true })
+		await expect(deleteJsonFile(target)).resolves.toBeUndefined()
 		await expect(recoverMissingJsonFile(target)).resolves.toBe(false)
 		await expect(fs.stat(dir)).rejects.toMatchObject({ code: "ENOENT" })
 	})

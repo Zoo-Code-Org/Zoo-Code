@@ -656,6 +656,9 @@ export class ClineProvider
 				elapsedMs: Date.now() - startedAt,
 			})
 			this.log(`[initializeTaskHistoryStore] Error: ${error instanceof Error ? error.message : String(error)}`)
+			void vscode.window.showWarningMessage(
+				`Zoo could not load conversation history: ${error instanceof Error ? error.message : String(error)}. Check the configured storage path and restart VS Code after it is available.`,
+			)
 		}
 	}
 

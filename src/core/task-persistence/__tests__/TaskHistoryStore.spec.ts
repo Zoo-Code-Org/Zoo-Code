@@ -53,6 +53,10 @@ describe("TaskHistoryStore", () => {
 	})
 
 	describe("initialize()", () => {
+		it("reports a non-directory storage path instead of treating it as empty history", async () => {
+			await fs.writeFile(path.join(tmpDir, "tasks"), "blocked")
+			await expect(store.reconcile({ forceRefresh: true })).rejects.toMatchObject({ code: "ENOTDIR" })
+		})
 		it("initializes from empty state (no index, no task dirs)", async () => {
 			await store.initialize()
 			expect(store.getAll()).toEqual([])

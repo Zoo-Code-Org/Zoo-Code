@@ -77,6 +77,14 @@ export async function recoverMissingJsonFile(
  * of a stale backup after a successful deletion. Missing files are harmless.
  */
 export async function deleteJsonFile(filePath: string): Promise<void> {
+	// An absent task directory cannot contain a canonical file or backups, and
+	// proper-lockfile cannot create its sibling lock directory there.
+	try {
+		await fs.access(path.dirname(path.resolve(filePath)))
+	} catch (error: unknown) {
+		if (getErrorCode(error) === "ENOENT") return
+		throw error
+	}
 	await withFileLock(filePath, async (absoluteFilePath) => {
 		let entries: string[]
 		try {
