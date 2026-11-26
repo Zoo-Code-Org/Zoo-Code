@@ -22,8 +22,10 @@ bin/
 /local-prompts
 AGENTS.local.md
 # Personal Roo configuration; shared templates live in contrib/roo/
-.roo/
-.roomodes
+/.roo/
+/.roomodes
+# Personal MCP configuration can contain secrets at any directory depth.
+**/.roo/mcp.json
 
 # Test environment
 .test_env

@@ -15,6 +15,7 @@ The repository does not track `.roo/` or `.roomodes`. The shared modes, commands
 - Write JSON files with `safeWriteJson` from `src/utils/safeWriteJson.ts` instead of `JSON.stringify` plus a manual file write. It writes atomically with locking, streams the write, and creates parent directories. Do not call `mkdir` before it. Test files are exempt.
 - Build new webview markup with Tailwind CSS classes instead of inline style objects. Add VS Code CSS variables to `webview-ui/src/index.css` before you use them in Tailwind classes.
 - Vitest globals (`describe`, `it`, `test`, `expect`, `vi`) are defined by the `tsconfig.json` in each package and do not need an import from `vitest`.
+- Run Vitest from the package directory that declares it, for example `cd src && pnpm exec vitest run <path>`. Do not run Vitest from the repository root.
 
 ## Published Text Style (STE100)
 

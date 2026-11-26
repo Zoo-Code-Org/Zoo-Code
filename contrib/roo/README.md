@@ -16,7 +16,7 @@ This repository ships its shared Roo Code configuration as templates instead of 
 | `roo/`     | Template for `.roo/`: commands, global and mode rules, skills, translator guidance, and `roomotes.yml`.                                                 |
 | `setup.sh` | No-clobber installer for both templates.                                                                                                                |
 
-`.rooignore` stays tracked at the repository root. It protects every contributor and agent the same way, like `.gitignore` and `.editorconfig`, so it does not need a personal copy. `.roo/mcp.json` stays personal; git ignores it through the `.roo/` rule.
+`.rooignore` stays tracked at the repository root. It protects every contributor and agent the same way, like `.gitignore` and `.editorconfig`, so it does not need a personal copy. `.roo/mcp.json` stays personal; git ignores it through the `/.roo/` rule.
 
 ## Setup
 
@@ -41,29 +41,31 @@ Read the template change before you copy it, so you know what you adopt.
 
 ## Migration: back up before you pull
 
-This change removes the tracked `.roo/` and `.roomodes` files from the repository. Git deletes your checkout copies when it applies that removal, even if you changed them locally.
+This change removes the tracked `.roo/` and `.roomodes` files from the repository. Git removes unchanged tracked copies when you pull. Local changes can stop the pull.
 
 Before you pull this change, back up your local configuration:
 
 ```
-cp -R .roo /tmp/roo-backup
-cp .roomodes /tmp/roomodes-backup
+backup_dir=$(mktemp -d)
+cp -R .roo "$backup_dir/roo"
+cp .roomodes "$backup_dir/roomodes"
+printf 'Backup directory: %s\n' "$backup_dir"
 ```
 
-After you pull, restore your files:
+Keep the backup path. After you pull, restore your files in the same shell. In a new shell, set `backup_dir` to that path first.
 
 ```
-mv /tmp/roo-backup .roo
-mv /tmp/roomodes-backup .roomodes
+mkdir -p .roo
+cp -R "$backup_dir/roo/." .roo/
+cp "$backup_dir/roomodes" .roomodes
 ```
 
 Then run `./contrib/roo/setup.sh`. It adds the template files you do not have and keeps the files you restored.
 
-If you pulled without a backup, recover the last tracked version from Git history, where `HEAD~1` is the last commit that still tracked the files:
+If you pulled without a backup, recover the last tracked version from the commit before removal. Back up any current local configuration first. This command replaces the checkout copies and leaves the index unchanged:
 
 ```
-git show HEAD~1:.roomodes > .roomodes
-git checkout HEAD~1 -- .roo
+git restore --source=ca43e69f700173e7a238f4c19d21f18d485d0006 --worktree -- .roo .roomodes
 ```
 
 ## Uninstall
