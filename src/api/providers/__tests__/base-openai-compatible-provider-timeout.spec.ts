@@ -58,6 +58,17 @@ class TestOpenAiCompatibleProvider extends BaseOpenAiCompatibleProvider<"test-mo
 }
 
 describe("BaseOpenAiCompatibleProvider Timeout Configuration", () => {
+	it.each([undefined, Number.NaN])("keeps the SDK timeout untouched for %s", async (timeoutMs) => {
+		const provider = new TestOpenAiCompatibleProvider("test-key")
+		const signal = new AbortController().signal
+		await provider["createStream"]("system", [], { taskId: "task", timeoutMs, abortSignal: signal })
+
+		expect(mockCreate.mock.calls.at(-1)?.[1]).toEqual(expect.objectContaining({ signal }))
+		expect(mockCreate.mock.calls.at(-1)?.[1]).not.toHaveProperty("timeout")
+		await provider["createStream"]("system", [], { taskId: "task", timeoutMs })
+		expect(mockCreate.mock.calls.at(-1)?.[1]).toBeUndefined()
+	})
+
 	it("passes the caller-owned deadline and cancellation signal through to the SDK", async () => {
 		const provider = new TestOpenAiCompatibleProvider("test-key")
 		const controller = new AbortController()
