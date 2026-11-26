@@ -465,6 +465,27 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	private askResponseText?: string
 	private askResponseImages?: string[]
 	private askResponseSegments?: MentionSegment[]
+	// Response targeting (issue 998): every ask mints a token, and the response
+	// slot tags each response with the ask that was awaiting at its arrival. The
+	// consume step only accepts a response tagged with the ask's own token, so an
+	// orphan event (a duplicate click between asks, or one landing in the entry
+	// window before the wait is armed) can never satisfy a later ask.
+	private askResponseTargetSeq?: number
+	private awaitingAskTarget?: number
+	private askResponseTarget?: number
+
+	/**
+	 * Mint the next ask target token. Tolerates an unset sequence field: test
+	 * doubles built with Object.create skip class-field initializers, and a
+	 * `++undefined` would poison every later comparison with NaN.
+	 */
+	private nextAskTarget(): number {
+		const raw = this.askResponseTargetSeq
+		const seq = typeof raw === "number" && Number.isFinite(raw) ? raw : 0
+		const next = seq + 1
+		this.askResponseTargetSeq = next
+		return next
+	}
 	/**
 	 * Structured detail of the automatic denial that resolved the current ask,
 	 * set when `checkAutoApproval` denies via policy (denylist, blanket
@@ -2063,6 +2084,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseTarget = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -2096,6 +2118,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
+					this.askResponseTarget = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages({
@@ -2114,6 +2137,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponse = undefined
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
+			this.askResponseTarget = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages({
@@ -2126,6 +2150,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				autoApprovalDecision,
 			})
 		}
+
+		// Mint this ask's target token and arm the wait only now, after the ask
+		// row is posted. The gap between the slot reset above and this arm is the
+		// ask's entry window: a response landing there tags with the previous
+		// arm's value (or none) and is discarded at the first wait poll below.
+		const askTarget = this.nextAskTarget()
+		this.awaitingAskTarget = askTarget
 
 		const timeouts: NodeJS.Timeout[] = []
 
@@ -2167,7 +2198,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 		// The state is mutable if the message is complete and the task will
 		// block (via the `pWaitFor`).
-		const isBlocking = !(this.askResponse !== undefined || this.lastMessageTs !== askTs)
+		// Only a response tagged with this ask's own token may unblock it
+		// (issue 998): an orphan that landed in the entry window carries the
+		// previous arm's tag (or none) and must not skip the wait below.
+		const hasOwnResponse = this.askResponse !== undefined && this.askResponseTarget === askTarget
+		const isBlocking = !(hasOwnResponse || this.lastMessageTs !== askTs)
 		const isMessageQueued = !this.messageQueueService.isEmpty()
 		// Keep queued user messages intact during command_output asks. Those asks
 		// are terminal flow-control, not conversational turns.
@@ -2383,7 +2418,23 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		try {
 			await pWaitFor(
 				() => {
-					if (this.abort || this.askResponse !== undefined || this.lastMessageTs !== askTs) {
+					if (this.abort || this.lastMessageTs !== askTs) {
+						return true
+					}
+
+					// A response whose tag is not this ask's token arrived while no
+					// ask was awaiting (an orphan). It answers nobody: drop it here so
+					// the ask keeps waiting for its own response (issue 998).
+					if (this.askResponse !== undefined && this.askResponseTarget !== askTarget) {
+						this.askResponse = undefined
+						this.askResponseText = undefined
+						this.askResponseImages = undefined
+						this.askResponseSegments = undefined
+						this.askResponseTarget = undefined
+						return false
+					}
+
+					if (this.askResponse !== undefined) {
 						return true
 					}
 
@@ -2455,6 +2506,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				if (queuedMessageId) {
 					this.messageQueueService.releaseMessage(queuedMessageId)
 				}
+				this.awaitingAskTarget = undefined
 				throw new AskIgnoredError("superseded")
 			}
 
@@ -2470,6 +2522,8 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
 			this.askResponseSegments = undefined
+			this.askResponseTarget = undefined
+			this.awaitingAskTarget = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2505,6 +2559,10 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponseText = text
 		this.askResponseImages = images
 		this.askResponseSegments = segments
+		// Tag the arrival with the ask that is awaiting now. When no ask is
+		// awaiting the tag stays unset, which marks the response as an orphan no
+		// ask may consume.
+		this.askResponseTarget = this.awaitingAskTarget
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2598,6 +2656,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	public supersedePendingAsk(): void {
 		this.lastMessageTs = Date.now()
+		// The pending ask is invalid; a response arriving after this must not
+		// carry its token, so the orphan discard keeps applying.
+		this.awaitingAskTarget = undefined
 	}
 
 	/**
