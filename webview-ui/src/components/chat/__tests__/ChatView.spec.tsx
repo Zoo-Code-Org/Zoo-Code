@@ -23,6 +23,8 @@ const mockVirtuosoState = vi.hoisted(() => ({
 		increaseViewportBy?: number | { top?: number; bottom?: number }
 	} | null,
 	lastData: [] as ClineMessage[],
+	scrollToIndex: vi.fn(),
+	checkpointCallbacks: new Map<number, () => void>(),
 }))
 
 // Define minimal types needed for testing
@@ -58,11 +60,14 @@ vi.mock("../ChatRow", () => ({
 		message,
 		onSuggestionClick,
 		isFollowUpAnswered,
+		onJumpToPreviousCheckpoint,
 	}: {
 		message: ClineMessage
 		onSuggestionClick?: (suggestion: SuggestionItem, event?: React.MouseEvent) => void
 		isFollowUpAnswered?: boolean
+		onJumpToPreviousCheckpoint: () => void
 	}) {
+		mockVirtuosoState.checkpointCallbacks.set(message.ts, onJumpToPreviousCheckpoint)
 		const [instance] = React.useState(() => ++nextRowInstance)
 		if (message.type === "ask" && message.ask === "followup" && message.text) {
 			try {
@@ -128,19 +133,26 @@ vi.mock("../AutoApproveMenu", () => ({
 // Mock react-virtuoso to render items directly without virtualization
 // This allows tests to verify items rendered in the chat list
 vi.mock("react-virtuoso", () => ({
-	Virtuoso: function MockVirtuoso({
-		data,
-		itemContent,
-		computeItemKey,
-		defaultItemHeight,
-		increaseViewportBy,
-	}: {
-		data: ClineMessage[]
-		itemContent: (index: number, item: ClineMessage) => React.ReactNode
-		computeItemKey?: (index: number, item: ClineMessage) => React.Key
-		defaultItemHeight?: number
-		increaseViewportBy?: number | { top?: number; bottom?: number }
-	}) {
+	Virtuoso: React.forwardRef(function MockVirtuoso(
+		{
+			data,
+			itemContent,
+			computeItemKey,
+			defaultItemHeight,
+			increaseViewportBy,
+		}: {
+			data: ClineMessage[]
+			itemContent: (index: number, item: ClineMessage) => React.ReactNode
+			computeItemKey?: (index: number, item: ClineMessage) => React.Key
+			defaultItemHeight?: number
+			increaseViewportBy?: number | { top?: number; bottom?: number }
+		},
+		ref,
+	) {
+		React.useImperativeHandle(ref, () => ({
+			scrollToIndex: mockVirtuosoState.scrollToIndex,
+			scrollTo: vi.fn(),
+		}))
 		mockVirtuosoState.lastConfig = {
 			computeItemKey,
 			defaultItemHeight,
@@ -157,7 +169,7 @@ vi.mock("react-virtuoso", () => ({
 				))}
 			</div>
 		)
-	},
+	}),
 }))
 
 // Mock VersionIndicator - returns null by default to prevent rendering in tests
@@ -735,6 +747,32 @@ describe("ChatView - Virtualization Configuration", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()
 		mockVirtuosoState.lastConfig = null
+	})
+
+	it("keeps the checkpoint callback stable and uses the current transcript", async () => {
+		mockVirtuosoState.checkpointCallbacks.clear()
+		renderChatView()
+		const task: ClineMessage = { type: "say", say: "task", ts: 1, text: "Task" }
+		const text: ClineMessage = { type: "say", say: "text", ts: 2, text: "Starting" }
+		mockPostMessage({ clineMessages: [task, text] })
+		await screen.findByTestId("chat-row")
+		const original = mockVirtuosoState.checkpointCallbacks.get(text.ts)
+		expect(typeof original).toBe("function")
+
+		mockVirtuosoState.scrollToIndex.mockClear()
+		act(() => original?.())
+		expect(mockVirtuosoState.scrollToIndex).not.toHaveBeenCalled()
+
+		const checkpoint: ClineMessage = { type: "say", say: "checkpoint_saved", ts: 3, text: "new-checkpoint" }
+		mockPostMessage({ clineMessages: [task, text, checkpoint] })
+		await waitFor(() => expect(mockVirtuosoState.lastData.some((row) => row.ts === checkpoint.ts)).toBe(true))
+		expect(mockVirtuosoState.checkpointCallbacks.get(text.ts)).toBe(original)
+		act(() => original?.())
+		expect(mockVirtuosoState.scrollToIndex).toHaveBeenLastCalledWith({
+			index: mockVirtuosoState.lastData.findIndex((row) => row.ts === checkpoint.ts),
+			align: "center",
+			behavior: "smooth",
+		})
 	})
 
 	it("preserves the row instance when a partial message completes", async () => {
