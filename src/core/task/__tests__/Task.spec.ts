@@ -1,3 +1,4 @@
+import { getEventListeners } from "node:events"
 import { WebviewFocusTracker } from "../../webview/WebviewFocusTracker"
 // npx vitest core/task/__tests__/Task.spec.ts
 
@@ -490,6 +491,19 @@ describe("Cline", () => {
 	}
 
 	describe("empty-response retries", () => {
+		it("releases abort listeners as streamed chunks complete", async () => {
+			const task = await createTaskWithManualRetries()
+			const controller = new AbortController()
+			task["currentRequestAbortController"] = controller
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "noButtonClicked" } satisfies TaskAskResult)
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() =>
+					stream(Array.from({ length: 200 }, () => ({ type: "text", text: "chunk" }))),
+				)
+				.mockImplementation(() => stream([]))
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "stream listener regression" }])
+			expect(getEventListeners(controller.signal, "abort")).toHaveLength(0)
+		})
 		it("restores the user message before a confirmed empty-response retry", async () => {
 			const task = await createTaskWithManualRetries()
 			let retryHistory: ApiMessage[] | undefined
