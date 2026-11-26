@@ -597,36 +597,20 @@ describe("Cline", () => {
 	})
 
 	describe("request continuation", () => {
-		it("sends the no-tool-use reminder in a second request when the first response has no tool use", async () => {
+		it("completes a top-level response without requiring a tool call", async () => {
 			const task = await createTaskWithManualRetries()
-			let secondRequestHistory: ApiMessage[] | undefined
+			vi.spyOn(task, "ask").mockResolvedValue({ response: "yesButtonClicked" } satisfies TaskAskResult)
 
 			const attemptApiRequestSpy = vi
 				.spyOn(task, "attemptApiRequest")
-				.mockImplementationOnce(() => stream([{ type: "text", text: "no tool here" }]))
-				.mockImplementationOnce(() => {
-					secondRequestHistory = structuredClone(task.apiConversationHistory)
-					throw new Error("stop after continuation request")
-				})
+				.mockImplementationOnce(() => stream([{ type: "text", text: "Task complete." }]))
 
 			await task.recursivelyMakeClineRequests([{ type: "text", text: "original user request" }])
 
-			expect(attemptApiRequestSpy).toHaveBeenCalledTimes(2)
-			expect(secondRequestHistory).toMatchObject([
-				{
-					role: "user",
-					content: expect.arrayContaining([expect.objectContaining({ text: "original user request" })]),
-				},
-				{ role: "assistant", content: [{ type: "text", text: "no tool here" }] },
-				{
-					role: "user",
-					content: expect.arrayContaining([
-						expect.objectContaining({
-							text: expect.stringContaining("You did not use a tool in your previous response"),
-						}),
-					]),
-				},
-			])
+			expect(attemptApiRequestSpy).toHaveBeenCalledOnce()
+			expect(task.apiConversationHistory).toContainEqual(
+				expect.objectContaining({ role: "assistant", content: [{ type: "text", text: "Task complete." }] }),
+			)
 		})
 	})
 

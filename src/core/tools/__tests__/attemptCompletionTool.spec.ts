@@ -83,6 +83,22 @@ describe("attemptCompletionTool", () => {
 		}
 	})
 
+	it("accepts an already presented plain answer without displaying it twice", async () => {
+		await attemptCompletionTool.execute({ result: "Done", alreadyPresented: true }, mockTask as Task, {
+			toolCallId: "",
+			askApproval: mockAskApproval,
+			handleError: mockHandleError,
+			pushToolResult: mockPushToolResult,
+			askFinishSubTaskApproval: mockAskFinishSubTaskApproval,
+			toolDescription: mockToolDescription,
+		})
+
+		expect(mockTask.say).not.toHaveBeenCalledWith("completion_result", expect.anything(), undefined, false)
+		expect(mockTask.ask).toHaveBeenCalledWith("completion_result", "", false)
+		expect(mockTask.flushTelemetryInstallment).toHaveBeenCalledWith("plain_text")
+		expect(mockTask.emit).toHaveBeenCalled()
+	})
+
 	describe("todo list validation", () => {
 		it("should allow completion when there is no todo list", async () => {
 			const block: ToolUse<"attempt_completion"> = {

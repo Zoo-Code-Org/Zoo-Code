@@ -27,10 +27,11 @@ describe("getToolUseGuidelinesSection", () => {
 		expect(guidelines).not.toContain("use one tool at a time per message")
 	})
 
-	it("should use simplified footer without step-by-step language", () => {
+	it("identifies tool results as Zoo observations rather than user replies", () => {
 		const guidelines = getToolUseGuidelinesSection(policyFor(["list_files"]))
 
-		expect(guidelines).toContain("carefully considering the user's response after tool executions")
+		expect(guidelines).toContain("Zoo returns the tool result")
+		expect(guidelines).not.toContain("user's response after tool executions")
 		expect(guidelines).not.toContain("It is crucial to proceed step-by-step")
 		expect(guidelines).not.toContain("ALWAYS wait for user confirmation after each tool use")
 	})

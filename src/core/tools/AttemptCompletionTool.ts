@@ -14,6 +14,7 @@ import { sanitizeToolUseId } from "../../utils/tool-id"
 interface AttemptCompletionParams {
 	result: string
 	command?: string
+	alreadyPresented?: boolean
 }
 
 export interface AttemptCompletionCallbacks extends ToolCallbacks {
@@ -46,7 +47,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 	readonly name = "attempt_completion" as const
 
 	async execute(params: AttemptCompletionParams, task: Task, callbacks: AttemptCompletionCallbacks): Promise<void> {
-		const { result } = params
+		const { result, alreadyPresented } = params
 		const { handleError, pushToolResult, askFinishSubTaskApproval, toolCallId } = callbacks
 
 		// Prevent attempt_completion if any tool failed in the current turn
@@ -87,7 +88,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 
 			task.consecutiveMistakeCount = 0
 
-			await task.say("completion_result", result, undefined, false)
+			if (!alreadyPresented) await task.say("completion_result", result, undefined, false)
 
 			// Whether this attempt_completion call is a stale replay of an already-completed
 			// subtask (user revisiting it from history) rather than a live model-initiated
@@ -144,7 +145,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 								// may return early below. hasFlushedTelemetry prevents the shared
 								// fallthrough flush further down from double-reporting if delegation
 								// falls through to "continue" instead of returning.
-								task.flushTelemetryInstallment("attempt_completion")
+								task.flushTelemetryInstallment(alreadyPresented ? "plain_text" : "attempt_completion")
 								hasFlushedTelemetry = true
 
 								try {
@@ -215,7 +216,7 @@ export class AttemptCompletionTool extends BaseTool<"attempt_completion"> {
 			// already flushed.
 			if (!isStaleHistoryReplay && !hasFlushedTelemetry) {
 				task.emitFinalTokenUsageUpdate()
-				task.flushTelemetryInstallment("attempt_completion")
+				task.flushTelemetryInstallment(alreadyPresented ? "plain_text" : "attempt_completion")
 			}
 
 			const { response, text, images, queuedMessageId, segments } = await task.ask("completion_result", "", false)

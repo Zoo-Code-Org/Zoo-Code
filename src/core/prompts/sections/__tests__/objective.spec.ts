@@ -82,6 +82,8 @@ describe("getObjectiveSection", () => {
 	})
 
 	it("names attempt_completion when it is advertised", () => {
-		expect(getObjectiveSection(policyFor(["attempt_completion"]))).toContain("attempt_completion tool")
+		const objective = getObjectiveSection(policyFor(["attempt_completion"]))
+		expect(objective).toContain("present the result directly or use the attempt_completion tool")
+		expect(objective).toContain("For a delegated subtask, use attempt_completion")
 	})
 })

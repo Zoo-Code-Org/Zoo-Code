@@ -102,7 +102,7 @@ async function generatePrompt(
 
 ${markdownFormattingSection()}
 
-${getSharedToolUseSection()}${toolsCatalog}
+${getSharedToolUseSection(policy)}${toolsCatalog}
 
 ${getToolUseGuidelinesSection(policy)}
 
