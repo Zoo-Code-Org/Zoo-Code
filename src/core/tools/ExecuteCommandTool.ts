@@ -7,6 +7,7 @@ import * as vscode from "vscode"
 import delay from "delay"
 
 import { CommandExecutionStatus, DEFAULT_TERMINAL_OUTPUT_PREVIEW_SIZE, PersistedCommandOutput } from "@roo-code/types"
+import { registerCommandOutput } from "../task-persistence/commandOutputArtifacts"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { buildAutoDenyReason, checkAutoApproval } from "../auto-approval"
@@ -497,13 +498,19 @@ export async function executeCommandInTerminal(
 	}
 
 	const schedulePartialCommandOutputUpdate = () => {
-		if (!latestCompressedOutput || completed) {
+		if (!accumulatedOutput || completed) {
 			return
 		}
 
 		const emitUpdate = () => {
 			pendingCommandOutputEmitTimer = undefined
 			lastCommandOutputEmitAt = Date.now()
+			latestCompressedOutput = Terminal.compressTerminalOutput(accumulatedOutput)
+			postCommandExecutionStatus(provider, {
+				executionId,
+				status: "output",
+				output: latestCompressedOutput,
+			})
 			void queueCommandOutputMessage(latestCompressedOutput, true)
 		}
 
@@ -538,11 +545,9 @@ export async function executeCommandInTerminal(
 			// Write to interceptor for persisted output
 			interceptor?.write(lines)
 
-			// Continue sending compressed output to webview for UI display (unchanged behavior)
-			const compressedOutput = Terminal.compressTerminalOutput(accumulatedOutput)
-			latestCompressedOutput = compressedOutput
-			const status: CommandExecutionStatus = { executionId, status: "output", output: compressedOutput }
-			postCommandExecutionStatus(provider, status)
+			// Batch compression, status delivery and chat updates together. A script
+			// can emit thousands of lines per second; per-line webview messages can
+			// overwhelm the renderer even though each output snapshot is bounded.
 			schedulePartialCommandOutputUpdate()
 		},
 		onCompleted: async (output: string | undefined) => {
@@ -555,15 +560,24 @@ export async function executeCommandInTerminal(
 				// before we advertise the artifact_id to the LLM.
 				if (interceptor) {
 					persistedResult = await interceptor.finalize()
+					if (persistedResult.artifactPath) {
+						persistedResult.artifactId = await registerCommandOutput(
+							path.dirname(persistedResult.artifactPath),
+							{
+								file: persistedResult.artifactPath,
+							},
+						)
+					}
 				}
 			} catch (error) {
-				console.error("[ExecuteCommandTool] interceptor.finalize() failed:", error)
+				console.error("[ExecuteCommandTool] Finalizing command output reference failed:", error)
 			}
 
 			// Continue using compressed output for UI display
-			result = Terminal.compressTerminalOutput(output ?? "")
+			result = Terminal.compressTerminalOutput((output ?? "").slice(-maxAccumulatedOutputSize))
 			latestCompressedOutput = result
 			completed = true
+			postCommandExecutionStatus(provider, { executionId, status: "output", output: result })
 
 			// Unblock the main code path: persistedResult, result, and completed are
 			// all set now. Resolve before draining the UI say chain so that a stalled
@@ -761,7 +775,7 @@ function formatPersistedOutput(
 ): string {
 	const exitStatus = formatExitStatus(exitDetails)
 	const sizeStr = formatBytes(result.totalBytes)
-	const artifactId = result.artifactPath ? path.basename(result.artifactPath) : ""
+	const artifactId = result.artifactId ?? (result.artifactPath ? path.basename(result.artifactPath) : "")
 
 	return [
 		`Command executed in '${workingDir}'. ${exitStatus}`,

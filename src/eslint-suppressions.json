@@ -594,11 +594,6 @@
 			"count": 21
 		}
 	},
-	"core/message-manager/index.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/prompts/__tests__/add-custom-instructions.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 2

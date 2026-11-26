@@ -87,7 +87,7 @@ import { RepoPerTaskCheckpointService } from "../../services/checkpoints"
 import { DiffViewProvider } from "../../integrations/editor/DiffViewProvider"
 import { RooTerminalProcess } from "../../integrations/terminal/types"
 import { TerminalRegistry } from "../../integrations/terminal/TerminalRegistry"
-import { OutputInterceptor } from "../../integrations/terminal/OutputInterceptor"
+import { flushArtifactRegistrations } from "../task-persistence/commandOutputArtifacts"
 
 // utils
 import { calculateApiCostAnthropic, calculateApiCostOpenAI } from "../../shared/cost"
@@ -3691,7 +3691,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
 			})
 			// Reversion affects the user's workspace and must finish before the
-			// final task state is saved. Artifact deletion is drained separately.
+			// final task state is saved. Artifact registration is drained separately.
 			await this.diffReversionPromise
 		} catch (error) {
 			console.error(`Error during task ${this.taskId}.${this.instanceId} disposal:`, error)
@@ -3797,14 +3797,15 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			console.error("Error releasing terminals:", error)
 		}
 
-		// Cleanup command output artifacts
+		// Keep saved outputs across task switches/restarts. Only deleting the task directory
+		// deletes its artifacts; disposal merely drains registrations already in flight.
 		const pendingCleanup = getTaskDirectoryPath(this.globalStoragePath, this.taskId)
 			.then((taskDir) => {
 				const outputDir = path.join(taskDir, "command-output")
-				return OutputInterceptor.cleanup(outputDir)
+				return flushArtifactRegistrations(outputDir)
 			})
 			.catch((error) => {
-				console.error("Error cleaning up command output artifacts:", error)
+				console.error("Error flushing command output references:", error)
 			})
 
 		try {

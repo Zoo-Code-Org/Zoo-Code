@@ -1,5 +1,8 @@
 import { MessageManager } from "./index"
 import * as condenseModule from "../condense"
+import { getTaskDirectoryPath } from "../../utils/storage"
+
+vi.mock("../../utils/storage", () => ({ getTaskDirectoryPath: vi.fn() }))
 
 describe("MessageManager", () => {
 	let mockTask: any
@@ -27,6 +30,22 @@ describe("MessageManager", () => {
 	})
 
 	describe("Basic rewind operations", () => {
+		it("does not garbage-collect artifacts by message timestamps when rewinding", async () => {
+			mockTask.globalStoragePath = "/storage"
+			mockTask.taskId = "task"
+			mockTask.clineMessages = [
+				{
+					ts: 100,
+					type: "say",
+					say: "text",
+					text: "Summary refers to output-1 and cmd-1794879311931321565.txt",
+				},
+				{ ts: 200, type: "say", say: "text", text: "Remove this turn" },
+			]
+			await manager.rewindToTimestamp(200)
+			expect(getTaskDirectoryPath).not.toHaveBeenCalled()
+			expect(mockTask.overwriteClineMessages).toHaveBeenCalledWith([mockTask.clineMessages[0]])
+		})
 		it("should remove messages at and after the target timestamp", async () => {
 			mockTask.clineMessages = [
 				{ ts: 100, say: "user", text: "First" },

@@ -3,6 +3,12 @@ import * as path from "path"
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest"
 
 import { ReadCommandOutputTool } from "../ReadCommandOutputTool"
+import { listCommandOutputs } from "../../task-persistence/commandOutputArtifacts"
+
+vi.mock("../../task-persistence/commandOutputArtifacts", async (importOriginal) => ({
+	...(await importOriginal<typeof import("../../task-persistence/commandOutputArtifacts")>()),
+	listCommandOutputs: vi.fn().mockResolvedValue([]),
+}))
 
 // Mock filesystem operations
 vi.mock("fs/promises", () => ({
@@ -11,6 +17,7 @@ vi.mock("fs/promises", () => ({
 		stat: vi.fn(),
 		open: vi.fn(),
 		readFile: vi.fn(),
+		readdir: vi.fn().mockResolvedValue([]),
 	},
 	access: vi.fn(),
 	stat: vi.fn(),

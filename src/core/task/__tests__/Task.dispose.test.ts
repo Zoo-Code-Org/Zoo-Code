@@ -5,6 +5,7 @@ import { type ProviderSettings, RooCodeEventName } from "@roo-code/types"
 import { Task } from "../Task"
 import { ObservationRegistry } from "../observationRegistry"
 import { ClineProvider } from "../../webview/ClineProvider"
+import { flushArtifactRegistrations } from "../../task-persistence/commandOutputArtifacts"
 import { OutputInterceptor } from "../../../integrations/terminal/OutputInterceptor"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 import { getTaskDirectoryPath } from "../../../utils/storage"
@@ -20,10 +21,8 @@ vi.mock("../../../integrations/terminal/TerminalRegistry", () => ({
 vi.mock("../../../utils/storage", () => ({
 	getTaskDirectoryPath: vi.fn().mockResolvedValue("/test/path/tasks/test-task"),
 }))
-vi.mock("../../../integrations/terminal/OutputInterceptor", () => ({
-	OutputInterceptor: {
-		cleanup: vi.fn().mockResolvedValue(undefined),
-	},
+vi.mock("../../task-persistence/commandOutputArtifacts", () => ({
+	flushArtifactRegistrations: vi.fn().mockResolvedValue(undefined),
 }))
 vi.mock("../../ignore/RooIgnoreController")
 vi.mock("../../protect/RooProtectedController")
@@ -56,6 +55,14 @@ describe("Task dispose method", () => {
 	let mockApiConfiguration: ProviderSettings
 	let task: Task
 	let skipCleanup: boolean
+
+	test("retains saved artifacts when a task is disposed", async () => {
+		const deletion = vi.spyOn(OutputInterceptor, "cleanup").mockResolvedValue(undefined)
+		await task.dispose()
+		expect(flushArtifactRegistrations).toHaveBeenCalled()
+		expect(deletion).not.toHaveBeenCalled()
+		deletion.mockRestore()
+	})
 
 	beforeEach(() => {
 		// Reset all mocks
@@ -92,7 +99,7 @@ describe("Task dispose method", () => {
 		}
 	})
 
-	test("should expose completion of deferred command output cleanup", async () => {
+	test("should expose completion of deferred command output registration drain", async () => {
 		let resolveTaskDirectory: (taskDirectory: string) => void
 		vi.mocked(getTaskDirectoryPath).mockReturnValueOnce(
 			new Promise((resolve) => {
@@ -108,12 +115,12 @@ describe("Task dispose method", () => {
 		await Promise.resolve()
 
 		expect(disposalComplete).toBe(false)
-		expect(OutputInterceptor.cleanup).not.toHaveBeenCalled()
+		expect(flushArtifactRegistrations).not.toHaveBeenCalled()
 
 		resolveTaskDirectory!("/test/path/tasks/test-task")
 		await disposal
 
-		expect(OutputInterceptor.cleanup).toHaveBeenCalledWith(
+		expect(flushArtifactRegistrations).toHaveBeenCalledWith(
 			path.join("/test/path/tasks/test-task", "command-output"),
 		)
 		expect(disposalComplete).toBe(true)
@@ -186,7 +193,7 @@ describe("Task dispose method", () => {
 		expect(task.dispose()).toBe(disposal)
 	})
 
-	test("should report command output cleanup failures before disposal completes", async () => {
+	test("should report command output registration drain failures before disposal completes", async () => {
 		const cleanupError = new Error("cleanup failed")
 		let disposalComplete = false
 		const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {
@@ -206,7 +213,7 @@ describe("Task dispose method", () => {
 		rejectTaskDirectory(cleanupError)
 		await vi.waitFor(() => expect(consoleErrorSpy).toHaveBeenCalled())
 
-		expect(consoleErrorSpy).toHaveBeenCalledWith("Error cleaning up command output artifacts:", cleanupError)
+		expect(consoleErrorSpy).toHaveBeenCalledWith("Error flushing command output references:", cleanupError)
 		await disposal
 		expect(disposalComplete).toBe(true)
 		consoleErrorSpy.mockRestore()
@@ -214,7 +221,7 @@ describe("Task dispose method", () => {
 
 	test("should wait for deferred output cleanup and memoize repeated disposal", async () => {
 		let resolveCleanup!: () => void
-		vi.mocked(OutputInterceptor.cleanup).mockReturnValueOnce(
+		vi.mocked(flushArtifactRegistrations).mockReturnValueOnce(
 			new Promise((resolve) => {
 				resolveCleanup = resolve
 			}),
@@ -227,7 +234,7 @@ describe("Task dispose method", () => {
 		void firstDisposal.then(() => {
 			disposalComplete = true
 		})
-		await vi.waitFor(() => expect(OutputInterceptor.cleanup).toHaveBeenCalledOnce())
+		await vi.waitFor(() => expect(flushArtifactRegistrations).toHaveBeenCalledOnce())
 
 		expect(secondDisposal).toBe(firstDisposal)
 		expect(disposalComplete).toBe(false)
@@ -241,7 +248,7 @@ describe("Task dispose method", () => {
 	test("should await diff reversion during abort without waiting for output cleanup", async () => {
 		let resolveCleanup!: () => void
 		let resolveReversion!: () => void
-		vi.mocked(OutputInterceptor.cleanup).mockReturnValueOnce(
+		vi.mocked(flushArtifactRegistrations).mockReturnValueOnce(
 			new Promise((resolve) => {
 				resolveCleanup = resolve
 			}),
@@ -286,7 +293,7 @@ describe("Task dispose method", () => {
 		const revertChangesSpy = vi.spyOn(task.diffViewProvider, "revertChanges").mockReturnValue(reversion)
 
 		const disposal = task.dispose()
-		await vi.waitFor(() => expect(OutputInterceptor.cleanup).toHaveBeenCalled())
+		await vi.waitFor(() => expect(flushArtifactRegistrations).toHaveBeenCalled())
 		let disposalComplete = false
 		void disposal.then(() => {
 			disposalComplete = true

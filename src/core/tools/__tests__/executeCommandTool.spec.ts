@@ -1122,6 +1122,38 @@ describe("executeCommandTool", () => {
 			})
 		}
 
+		it("batches high-volume output updates and bounds the completed display snapshot", async () => {
+			vitest.useFakeTimers()
+			const provider = await mockCline.providerRef.deref()
+			const terminal = await setupControllableTerminal()
+			const handlePromise = handleCommand("emit many lines")
+			await vitest.waitFor(() => expect(terminal.callbacks).toBeDefined())
+			const callbacks = terminal.callbacks!
+			const proc = terminal.proc as unknown as RooTerminalProcess
+
+			for (let index = 0; index < 120; index++) {
+				await callbacks.onLine(`${index}: ${"x".repeat(1_000)}\n`, proc)
+			}
+			const outputUpdates = () =>
+				provider.postMessageToWebview.mock.calls
+					.map(([message]: [{ type: string; text?: string }]) => message)
+					.filter((message: { type: string }) => message.type === "commandExecutionStatus")
+					.map((message: { text?: string }) => JSON.parse(message.text ?? "{}"))
+					.filter((status: { status?: string }) => status.status === "output")
+			expect(outputUpdates()).toHaveLength(1)
+			await vitest.advanceTimersByTimeAsync(150)
+			expect(outputUpdates()).toHaveLength(2)
+
+			await callbacks.onCompleted!("z".repeat(1_000_000), proc)
+			callbacks.onShellExecutionComplete!({ exitCode: 0 }, proc)
+			terminal.resolveProcess()
+			await vitest.advanceTimersByTimeAsync(100)
+			await handlePromise
+			const finalOutput = outputUpdates().at(-1)?.output as string
+			expect(finalOutput.length).toBeLessThan(60_000)
+			expect(finalOutput).toContain("z")
+		})
+
 		it("waits for Inline Terminal completion after output instead of returning it to the agent", async () => {
 			vitest.useFakeTimers()
 			const terminal = await setupControllableTerminal()
