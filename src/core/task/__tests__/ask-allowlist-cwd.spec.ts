@@ -1,5 +1,9 @@
 // npx vitest run core/task/__tests__/ask-allowlist-cwd.spec.ts
 
+import fs from "fs"
+import os from "os"
+import path from "path"
+
 import type { ExtensionState } from "@roo-code/types"
 
 import { Task } from "../Task"
@@ -156,9 +160,24 @@ describe("Task.ask resolves allowlists against the task's workspace", () => {
 // folder, so folder A's allow entry cannot approve a command in folder B. The
 // raw global layers are empty, so each decision comes from the command's
 // folder. The baked pair holds values that no folder composes.
+//
+// A root the filesystem cannot resolve drops the folder layer: the resolver
+// compares each root by its real path, so a fictional root would leave the
+// global layers deciding alone. `beforeEach` creates the two roots on disk and
+// `openTwoFolders()` registers them by that real path, so the registered and
+// resolved spellings agree on case-insensitive filesystems. The test below for
+// a folder that no longer resolves registers one folder by a spelling the
+// filesystem cannot resolve, so the two disagree on purpose.
 
-const FOLDER_A = "/mock/folder-a"
-const FOLDER_B = "/mock/folder-b"
+let fixtureRoot = ""
+let FOLDER_A = ""
+let FOLDER_B = ""
+
+function createFolder(parent: string, name: string): string {
+	const directory = path.join(parent, name)
+	fs.mkdirSync(directory)
+	return fs.realpathSync.native(directory)
+}
 
 function openTwoFolders() {
 	const folderA = { fsPath: FOLDER_A, uri: { fsPath: FOLDER_A } }
@@ -211,6 +230,13 @@ describe("Task.ask judges command asks by the command's working directory", () =
 		workspaceState.workspaceFolders = []
 		workspaceState.foldersByPath.clear()
 		workspaceState.configScripts = {}
+		fixtureRoot = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "ask-allowlist-cwd-")))
+		FOLDER_A = createFolder(fixtureRoot, "folder-a")
+		FOLDER_B = createFolder(fixtureRoot, "folder-b")
+	})
+
+	afterEach(() => {
+		fs.rmSync(fixtureRoot, { recursive: true, force: true })
 	})
 
 	it("approves a command whose custom cwd resolves to the folder that allows it", async () => {
@@ -235,6 +261,24 @@ describe("Task.ask judges command asks by the command's working directory", () =
 		// The baked pair would approve. Re-composition drops the workspace layer
 		// for an unmatched cwd, so nothing matches and the user decides.
 		expect(await askToRunCommand("/mock/removed-folder", commandState())).toBe("ask")
+	})
+
+	it("does not approve a command from a registered folder that no longer resolves on disk", async () => {
+		// A folder that was moved or deleted keeps its registry entry. Its real
+		// path is then unknown, so nothing confirms it holds the command's
+		// directory. Matching the command against the registered spelling would
+		// let a root that bounds nothing approve it, so the folder layer is
+		// dropped and only the global layers decide.
+		const removedFolder = path.join(fixtureRoot, "removed-folder")
+		fs.mkdirSync(removedFolder)
+		fs.rmSync(removedFolder, { recursive: true, force: true })
+		const removedUri = { fsPath: removedFolder }
+		workspaceState.workspaceFolders = [{ fsPath: removedFolder, uri: removedUri }]
+		workspaceState.foldersByPath.set(removedFolder, removedUri)
+		// The entry would approve the command if the registered spelling decided.
+		workspaceState.configScripts = { [removedFolder]: { gate: true, allow: ["echo"] } }
+
+		expect(await askToRunCommand(path.join(removedFolder, "sub"), commandState())).toBe("ask")
 	})
 
 	it("keeps judging a command without a custom cwd by the task folder's policy", async () => {
