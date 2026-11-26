@@ -23,6 +23,7 @@ import { convertToOpenAiMessages } from "../transform/openai-format"
 import { sanitizeSurrogates } from "../transform/sanitize-surrogates"
 import { convertToR1Format } from "../transform/r1-format"
 import { isOSeriesModelId } from "./utils/is-o-series-model"
+import { isDatabricksEndpoint } from "./utils/databricks-endpoint"
 import { buildResponsesRequest } from "./utils/openai-compatible-responses"
 import { resolveOpenAiCompatibleMaxTokens } from "./utils/openai-compatible-max-tokens"
 import { processResponsesApiStream, createUsageNormalizer } from "../transform/responses-api-stream"
@@ -163,6 +164,9 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
 		const isAzureAiInference = this._isAzureAiInference(modelUrl)
 		const deepseekReasoner = this.usesR1Format(modelId)
+		// Databricks serving endpoints reject unsupported body fields with 400 (issue #2168):
+		// never send parallel_tool_calls to one.
+		const isDatabricks = isDatabricksEndpoint(this.options.openAiBaseUrl)
 
 		if (isOSeriesModelId(modelId)) {
 			yield* this.handleO3FamilyMessage(modelId, systemPrompt, messages, metadata)
@@ -244,7 +248,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				...(reasoning && reasoning),
 				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				...(isDatabricks ? {} : { parallel_tool_calls: metadata?.parallelToolCalls ?? true }),
 			}
 
 			// Add max_tokens if needed
@@ -312,7 +316,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				...(isDatabricks ? {} : { parallel_tool_calls: metadata?.parallelToolCalls ?? true }),
 			}
 
 			// Add max_tokens if needed
@@ -586,6 +590,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 		// yield undefined, which the parameter default in convertToolsForOpenAI turns back into
 		// the same strict value as `??`.
 		const strictToolSchemas = this.options.openAiStrictToolSchemas ?? DEFAULT_OPEN_AI_STRICT_TOOL_SCHEMAS
+		const isDatabricks = isDatabricksEndpoint(this.options.openAiBaseUrl)
 
 		if (this.options.openAiStreamingEnabled ?? true) {
 			const isGrokXAI = this._isGrokXAI(this.options.openAiBaseUrl)
@@ -606,7 +611,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				...(isDatabricks ? {} : { parallel_tool_calls: metadata?.parallelToolCalls ?? true }),
 			}
 
 			// O3 family models do not support the deprecated max_tokens parameter
@@ -641,7 +646,7 @@ export class OpenAiHandler extends BaseProvider implements SingleCompletionHandl
 				// Tools are always present (minimum ALWAYS_AVAILABLE_TOOLS)
 				tools: this.convertToolsForOpenAI(metadata?.tools, strictToolSchemas),
 				tool_choice: metadata?.tool_choice,
-				parallel_tool_calls: metadata?.parallelToolCalls ?? true,
+				...(isDatabricks ? {} : { parallel_tool_calls: metadata?.parallelToolCalls ?? true }),
 			}
 
 			// O3 family models do not support the deprecated max_tokens parameter
