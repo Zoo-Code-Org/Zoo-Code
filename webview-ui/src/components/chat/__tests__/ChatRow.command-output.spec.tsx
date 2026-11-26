@@ -28,6 +28,19 @@ describe("command output read display", () => {
 		expect(screen.getByText("(0 B - 5.2 KB of 11.7 KB)")).toBeInTheDocument()
 	})
 
+	it("shows the total size for an older read with no range", () => {
+		renderRead(JSON.stringify({ tool: "readCommandOutput", totalBytes: 1024 }))
+
+		expect(screen.getByText("(1.0 KB)")).toBeInTheDocument()
+	})
+
+	it("can render a read with no byte metadata", () => {
+		renderRead(JSON.stringify({ tool: "readCommandOutput" }))
+
+		expect(screen.getByText("chat:readCommandOutput.title")).toBeInTheDocument()
+		expect(screen.queryByText(/\(/)).not.toBeInTheDocument()
+	})
+
 	it("collapses grouped reads and reveals each range on demand", () => {
 		const onToggleExpand = vi.fn()
 		const message = JSON.stringify({

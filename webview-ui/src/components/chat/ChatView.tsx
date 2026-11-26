@@ -1410,7 +1410,6 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			},
 		})
 
-
 		if (isCondensing) {
 			outputReadsBatched.push({
 				type: "say",

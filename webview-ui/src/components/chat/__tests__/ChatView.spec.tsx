@@ -435,6 +435,24 @@ const renderChatView = (props: Partial<ChatViewProps> = {}) => {
 describe("ChatView - Tool Batching Tests", () => {
 	beforeEach(() => vi.clearAllMocks())
 
+	it("keeps a malformed tool row between two output reads", async () => {
+		renderChatView()
+		const output = JSON.stringify({ tool: "readCommandOutput", readStart: 0, readEnd: 4, totalBytes: 12 })
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Initial task" },
+				{ type: "say", say: "tool", ts: 2, text: output },
+				{ type: "say", say: "tool", ts: 3, text: "{" },
+				{ type: "say", say: "tool", ts: 4, text: output },
+			],
+		})
+		await waitFor(() => {
+			expect(mockVirtuosoState.lastData.filter((row) => row.say === "tool").map((row) => row.ts)).toEqual([
+				2, 3, 4,
+			])
+		})
+	})
+
 	it("groups output reads across non-content rows but keeps assistant text as a boundary", async () => {
 		renderChatView()
 		const read = (ts: number, readEnd: number) => ({
