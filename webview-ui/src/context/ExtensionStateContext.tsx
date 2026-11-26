@@ -1,5 +1,6 @@
 import { providerIdentifiers } from "@roo-code/types"
 import React, { createContext, useCallback, useEffect, useRef, useState } from "react"
+import { applyClineMessagesDelta } from "./clineMessagesDelta"
 
 import {
 	type ProviderSettings,
@@ -217,6 +218,9 @@ export const mergeExtensionState = (prevState: ExtensionState, newState: Partial
 	if (messagesAreStale(newState, prevState.clineMessagesSeq)) {
 		rest.clineMessages = prevState.clineMessages
 		rest.clineMessagesSeq = prevState.clineMessagesSeq
+		rest.currentTaskId = prevState.currentTaskId
+		rest.currentTaskTodos = prevState.currentTaskTodos
+		rest.messageQueue = prevState.messageQueue
 	}
 	if (keepTaskIdentity) {
 		// Pushes without fresh messages cannot establish task identity. Keep the task item with
@@ -336,7 +340,7 @@ export const ExtensionStateContextProvider: React.FC<{
 	const currentTaskIdRef = useRef(initialState?.currentTaskId)
 	const clineMessagesSeqRef = useRef(initialState?.clineMessagesSeq)
 
-	const [state, setState] = useState<ExtensionState>(() => {
+	const [state, setState] = useState<ExtensionState & { clineMessagesSyncNeeded?: boolean }>(() => {
 		const mergedState = mergeExtensionState(createInitialExtensionState(), initialState ?? {})
 		for (const clineMessage of mergedState.clineMessages) {
 			messageCache.intern(clineMessage)
@@ -410,7 +414,27 @@ export const ExtensionStateContextProvider: React.FC<{
 			const message: ExtensionMessage = event.data
 			switch (message.type) {
 				case "state": {
-					const newState = message.state ?? {}
+					let newState = message.state ?? {}
+					const delta = message.clineMessagesDelta
+					if (delta && !messagesAreStale(newState, clineMessagesSeqRef.current)) {
+						const messages = applyClineMessagesDelta(
+							{
+								currentTaskId: currentTaskIdRef.current,
+								clineMessagesSeq: clineMessagesSeqRef.current,
+								clineMessages: messagesRef.current,
+							},
+							delta,
+						)
+						if (
+							!messages ||
+							newState.currentTaskId !== delta.taskId ||
+							newState.clineMessagesSeq === undefined
+						) {
+							setState((previous) => ({ ...previous, clineMessagesSyncNeeded: true }))
+							break
+						}
+						newState = { ...newState, clineMessages: messages }
+					}
 
 					const staleMessages = messagesAreStale(newState, clineMessagesSeqRef.current)
 					recordDiagnosticsStateSequence(
@@ -445,7 +469,10 @@ export const ExtensionStateContextProvider: React.FC<{
 					if (newState.currentTaskItem) {
 						historyCache.intern(newState.currentTaskItem)
 					}
-					setState((prevState) => mergeExtensionState(prevState, newState))
+					setState((prevState) => ({
+						...mergeExtensionState(prevState, newState),
+						clineMessagesSyncNeeded: newState.clineMessages ? false : prevState.clineMessagesSyncNeeded,
+					}))
 					setShowWelcome(!checkExistKey(newState.apiConfiguration, newState.zooCodeIsAuthenticated))
 					setDidHydrateState(true)
 					recordDiagnosticsHydration(true)
@@ -522,6 +549,8 @@ export const ExtensionStateContextProvider: React.FC<{
 					}
 					setState((prevState) => {
 						// worth noting it will never be possible for a more up-to-date message to be sent here or in normal messages post since the presentAssistantContent function uses lock
+						if (message.clineMessageTaskId && message.clineMessageTaskId !== prevState.currentTaskId)
+							return prevState
 						const lastIndex = findLastIndex(prevState.clineMessages, (msg) => msg.ts === clineMessage.ts)
 						if (lastIndex !== -1) {
 							const newClineMessages = [...prevState.clineMessages]
@@ -635,8 +664,15 @@ export const ExtensionStateContextProvider: React.FC<{
 	}, [handleMessage])
 
 	useEffect(() => {
-		vscode.postMessage({ type: "webviewDidLaunch" })
+		vscode.postMessage({ type: "webviewDidLaunch", supportsClineMessagesDelta: true })
 	}, [])
+
+	useEffect(() => {
+		if (!state.clineMessagesSyncNeeded) return
+		vscode.postMessage({ type: "requestClineMessagesSync" })
+		const timer = setInterval(() => vscode.postMessage({ type: "requestClineMessagesSync" }), 2000)
+		return () => clearInterval(timer)
+	}, [state.clineMessagesSyncNeeded])
 
 	// Apply the configurable chat font size as a CSS variable. When unset, the
 	// override is removed so the UI falls back to VS Code's `--vscode-font-size`.

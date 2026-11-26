@@ -248,6 +248,27 @@ describe("findOriginalContent", () => {
 })
 
 describe("omitOriginalContentFromExtensionMessage", () => {
+	it("strips pre-edit file bodies from incremental transcript updates", () => {
+		const original = toolAsk({ tool: "appliedDiff", path: "a.ts", originalContent: bigOriginal })
+		const message: ExtensionMessage = {
+			type: "state",
+			state: { currentTaskId: "task", clineMessagesSeq: 2 },
+			clineMessagesDelta: {
+				taskId: "task",
+				baseSeq: 1,
+				baseLength: 0,
+				length: 1,
+				updates: [{ index: 0, message: original }],
+			},
+		}
+
+		const result = omitOriginalContentFromExtensionMessage(message)
+		const delivered = result.clineMessagesDelta?.updates[0].message
+		expect(JSON.parse(delivered?.text ?? "{}")).toMatchObject({ originalContentLength: bigOriginal.length })
+		expect(JSON.stringify(result)).not.toContain(bigOriginal)
+		expect(JSON.parse(original.text ?? "{}").originalContent).toBe(bigOriginal)
+	})
+
 	it("applies to the chat messages inside a state message without touching other state", () => {
 		const message = {
 			type: "state",

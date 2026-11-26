@@ -70,11 +70,27 @@ export function findOriginalContent(
 
 /** The webview gets `originalContent` on demand (`readOriginalContent`) instead of inside every chat message. */
 export function omitOriginalContentFromExtensionMessage(message: ExtensionMessage): ExtensionMessage {
-	if (message.type === "state" && message.state?.clineMessages?.length) {
-		return {
-			...message,
-			state: { ...message.state, clineMessages: message.state.clineMessages.map(omitOriginalContent) },
+	if (message.type === "state") {
+		let outbound = message
+		if (message.state?.clineMessages?.length) {
+			outbound = {
+				...outbound,
+				state: { ...message.state, clineMessages: message.state.clineMessages.map(omitOriginalContent) },
+			}
 		}
+		if (message.clineMessagesDelta?.updates.length) {
+			outbound = {
+				...outbound,
+				clineMessagesDelta: {
+					...message.clineMessagesDelta,
+					updates: message.clineMessagesDelta.updates.map(({ index, message: update }) => ({
+						index,
+						message: omitOriginalContent(update),
+					})),
+				},
+			}
+		}
+		return outbound
 	}
 
 	if (message.type === "messageUpdated" && message.clineMessage) {

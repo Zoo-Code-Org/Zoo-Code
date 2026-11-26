@@ -1826,7 +1826,13 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 
 	private async updateClineMessage(message: ClineMessage) {
 		const provider = this.providerRef.deref()
-		await provider?.postMessageToWebview({ type: "messageUpdated", clineMessage: message })
+		if (provider?.getCurrentTask()?.taskId === this.taskId) {
+			await provider.postMessageToWebview({
+				type: "messageUpdated",
+				clineMessage: message,
+				clineMessageTaskId: this.taskId,
+			})
+		}
 		this.emit(RooCodeEventName.Message, { action: "updated", message })
 	}
 

@@ -5034,6 +5034,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			const taskAccess = getTaskTestAccess(task)
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
 			vi.spyOn(taskAccess, "saveClineMessages").mockResolvedValue(true)
 			const updatePostSpy = vi.mocked(mockProvider.postMessageToWebview)
 			const partialMessage = {
@@ -5054,6 +5055,7 @@ describe("Cline", () => {
 			expect(mockProvider.flushPostStateToWebviewThrottled).not.toHaveBeenCalled()
 			expect(updatePostSpy).toHaveBeenCalledWith({
 				type: "messageUpdated",
+				clineMessageTaskId: task.taskId,
 				clineMessage: {
 					...partialMessage,
 					text: "updated partial",
@@ -5081,6 +5083,7 @@ describe("Cline", () => {
 				startTask: false,
 			})
 			vi.spyOn(getTaskTestAccess(task), "saveClineMessages").mockResolvedValue(true)
+			vi.spyOn(mockProvider, "getCurrentTask").mockReturnValue(task)
 			return { task, messageUpdates }
 		}
 

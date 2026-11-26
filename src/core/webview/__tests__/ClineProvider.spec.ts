@@ -3655,11 +3655,11 @@ describe("ClineProvider", () => {
 		releaseOlderSnapshot(emptyState)
 		await olderPost
 
+		// Stale snapshots must not become the baseline for later deltas.
 		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessages)).toEqual([
 			readyState.clineMessages,
-			emptyState.clineMessages,
 		])
-		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessagesSeq)).toEqual([2, 1])
+		expect(postMessageSpy.mock.calls.map(([message]) => message.state?.clineMessagesSeq)).toEqual([2])
 	})
 
 	test.each([
