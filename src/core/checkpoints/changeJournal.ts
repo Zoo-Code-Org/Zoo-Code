@@ -113,6 +113,66 @@ function isEntryShaped(value: unknown): value is ChangeJournalEntry {
  * Failures propagate: callers must not report a fully durable checkpoint
  * when the journal update did not complete.
  */
+/**
+ * fsync one directory so an entry created inside it survives a crash.
+ * Windows cannot open directories, so every caller guards on the platform.
+ * A failure here means reduced crash durability, not a lost update: errnos
+ * that mean "fsync is unsupported on this mount" are tolerated and logged,
+ * any other failure still propagates.
+ */
+async function syncDirectory(dirPath: string, reason: string): Promise<void> {
+	try {
+		const handle = await fs.open(dirPath, "r")
+		try {
+			await handle.sync()
+		} finally {
+			await handle.close()
+		}
+	} catch (error) {
+		const syncCode = (error as NodeJS.ErrnoException).code
+		if (!["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(syncCode ?? "")) {
+			throw error
+		}
+		console.warn(`[changeJournal] directory sync unsupported ${reason} (${syncCode}); crash durability reduced`)
+	}
+}
+
+/**
+ * True when `candidate` is `root` itself or lives under it. Both sides are
+ * resolved first, so this compares one platform's normal form against the
+ * same platform's normal form rather than mixing separators.
+ */
+function isInsideOrEqual(candidate: string, root: string): boolean {
+	const resolvedCandidate = path.resolve(candidate)
+	const resolvedRoot = path.resolve(root)
+	if (resolvedCandidate === resolvedRoot) {
+		return true
+	}
+	return resolvedCandidate.startsWith(resolvedRoot.endsWith(path.sep) ? resolvedRoot : resolvedRoot + path.sep)
+}
+
+/**
+ * The directory levels to sync after the journal directory was created:
+ * every level from the storage root down to the journal directory's parent,
+ * outermost first, because the entry that names a directory lives inside it.
+ * The storage root bounds the walk: the path `mkdir` reports can carry a
+ * `\\?\` prefix on Windows, so it is used only as the trigger for this walk
+ * and never compared against a path computed here.
+ */
+function createdAncestors(dir: string, storageRoot: string): string[] {
+	const levels: string[] = []
+	let level = path.dirname(dir)
+	while (isInsideOrEqual(level, storageRoot)) {
+		levels.push(level)
+		const next = path.dirname(level)
+		if (next === level) {
+			break
+		}
+		level = next
+	}
+	return levels.reverse()
+}
+
 export async function appendChanges(
 	globalStorageDir: string,
 	taskId: string,
@@ -124,7 +184,9 @@ export async function appendChanges(
 	const filePath = journalPath(globalStorageDir, taskId)
 	return withTaskLock(filePath, async () => {
 		const dir = path.dirname(filePath)
-		await fs.mkdir(dir, { recursive: true })
+		// Node reports the first directory it created, which is what tells this
+		// append that a new entry needs syncing into the level above.
+		const createdDir = await fs.mkdir(dir, { recursive: true })
 		let content = ""
 		try {
 			content = await fs.readFile(filePath, "utf8")
@@ -219,24 +281,18 @@ export async function appendChanges(
 				// survive a crash (Windows cannot open directories). The
 				// journal content is already in place at this point, so a
 				// sync failure means reduced crash durability, not a lost
-				// update: errnos that mean "fsync is unsupported on this
-				// mount" are tolerated and logged; any other failure still
-				// propagates.
-				try {
-					const dirHandle = await fs.open(dir, "r")
-					try {
-						await dirHandle.sync()
-					} finally {
-						await dirHandle.close()
+				// update (see syncDirectory).
+				await syncDirectory(dir, "after journal rename")
+				if (createdDir) {
+					// The recursive mkdir may have created more than the
+					// journal directory, and every new entry lives in the
+					// directory above it: syncing only the journal
+					// directory can still lose the whole chain, journal
+					// included. Outermost first, so no entry ever points
+					// at a directory whose own entry was never persisted.
+					for (const ancestor of createdAncestors(dir, globalStorageDir)) {
+						await syncDirectory(ancestor, "after creating the journal directory")
 					}
-				} catch (error) {
-					const syncCode = (error as NodeJS.ErrnoException).code
-					if (!["EINVAL", "EISDIR", "EBADF", "ENOTSUP", "EOPNOTSUPP", "EPERM"].includes(syncCode ?? "")) {
-						throw error
-					}
-					console.warn(
-						`[changeJournal] directory sync unsupported after journal rename (${syncCode}); crash durability reduced`,
-					)
 				}
 			}
 		} catch (error) {

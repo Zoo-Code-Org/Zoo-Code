@@ -33,6 +33,16 @@ describe("changeJournal", () => {
 		}
 	}
 
+	async function waitForEvent(events: string[], name: string): Promise<void> {
+		for (let attempt = 0; attempt < 200; attempt++) {
+			if (events.includes(name)) {
+				return
+			}
+			await new Promise((resolve) => setTimeout(resolve, 5))
+		}
+		throw new Error(`event ${name} never recorded; saw ${JSON.stringify(events)}`)
+	}
+
 	describe("appendChange", () => {
 		it("writes one JSON line per entry with the documented field shape", async () => {
 			await appendChange(tmpRoot, taskId, entry({ operation: "create", checkpointId: "aaa" }))
@@ -106,6 +116,13 @@ describe("changeJournal", () => {
 
 		it("syncs the parent directory after every journal replacement (POSIX)", async () => {
 			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			// A rename that started but has not completed is the window that matters:
+			// the sync must not begin inside it, or it would persist nothing about the
+			// replacement that is still in flight.
+			let releaseRename: () => void = () => {}
+			const renamePending = new Promise<void>((resolve) => {
+				releaseRename = resolve
+			})
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
 			const realOpen = fs.open
@@ -133,10 +150,17 @@ describe("changeJournal", () => {
 			const realRename = fs.rename
 			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
 				events.push("rename")
+				await renamePending
 				await realRename(from as string | URL, to as string | URL)
 			})
 			try {
-				await appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				const firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				await waitForEvent(events, "rename")
+				// While the rename is pending, no directory sync may have begun: the entry
+				// it would persist does not exist yet.
+				expect(events.filter((name) => name.startsWith("sync"))).toEqual([])
+				releaseRename()
+				await firstAppend
 				expect(synced).toEqual([dirPath])
 				expect(closed).toEqual([dirPath])
 				// Every replacement renames a new file into place, so the directory
@@ -146,6 +170,110 @@ describe("changeJournal", () => {
 				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
 				expect(synced).toHaveLength(2)
 				expect(events).toEqual(["rename", "sync", "rename", "sync"])
+			} finally {
+				renameSpy.mockRestore()
+				openSpy.mockRestore()
+				if (platformDesc) Object.defineProperty(process, "platform", platformDesc)
+			}
+			const result = await loadChanges(tmpRoot, taskId)
+			expect(result.map((e) => e.checkpointId)).toEqual(["first", "second"])
+		})
+
+		it("syncs the parent entry of a newly created journal directory (POSIX)", async () => {
+			// changeJournal.ts:127 can add an entry to the task directory while the
+			// rename sync only persists the entry inside the journal directory. The
+			// entry that points at the journal directory lives one level up, so a
+			// crash after appendChanges resolves can lose the whole directory with its
+			// journal. Platform-independent like the sibling test: the POSIX branch is
+			// forced on and both directories are watched, so nothing here depends on
+			// how a particular operating system treats directory handles.
+			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
+			// A rename that started but has not completed is the window that matters:
+			// the sync must not begin inside it, or it would persist nothing about the
+			// replacement that is still in flight.
+			let releaseRename: () => void = () => {}
+			const renamePending = new Promise<void>((resolve) => {
+				releaseRename = resolve
+			})
+			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
+			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const parentPath = path.dirname(dirPath)
+			const tasksPath = path.dirname(parentPath)
+			const realOpen = fs.open
+			const events: string[] = []
+			const labelFor = (opened: string): string | null =>
+				opened === dirPath
+					? "dir"
+					: opened === parentPath
+						? "parent"
+						: opened === tasksPath
+							? "tasks"
+							: opened === tmpRoot
+								? "root"
+								: null
+			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
+				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
+				const p = typeof pathish === "string" ? pathish : String(pathish)
+				const label = flags === "r" ? labelFor(p) : null
+				if (label) {
+					return {
+						sync: async () => {
+							events.push(`sync:${label}`)
+						},
+						close: async () => {
+							events.push(`close:${label}`)
+						},
+					} as unknown as fs.FileHandle
+				}
+				return openAs(p, flags as string | undefined)
+			})
+			// The rename event orders the syncs against the replacement: a sync that
+			// ran before the rename would not have persisted the new journal name.
+			const realRename = fs.rename
+			const renameSpy = vi.spyOn(fs, "rename").mockImplementation(async (from, to) => {
+				events.push("rename")
+				await renamePending
+				await realRename(from as string | URL, to as string | URL)
+			})
+			try {
+				const firstAppend = appendChange(tmpRoot, taskId, entry({ checkpointId: "first" }))
+				await waitForEvent(events, "rename")
+				// While the rename is pending, no directory sync may have begun: the entry
+				// it would persist does not exist yet.
+				expect(events.filter((name) => name.startsWith("sync"))).toEqual([])
+				releaseRename()
+				await firstAppend
+				// This call created the journal directory, so its parent is synced
+				// after it: no entry may point at a directory whose own entry is not
+				// durable yet.
+				expect(events).toEqual([
+					"rename",
+					"sync:dir",
+					"close:dir",
+					"sync:root",
+					"close:root",
+					"sync:tasks",
+					"close:tasks",
+					"sync:parent",
+					"close:parent",
+				])
+				await appendChange(tmpRoot, taskId, entry({ checkpointId: "second" }))
+				// The second update creates no directory, so it must not pay for a
+				// parent sync: the guard is the path mkdir reported as created.
+				expect(events).toEqual([
+					"rename",
+					"sync:dir",
+					"close:dir",
+					"sync:root",
+					"close:root",
+					"sync:tasks",
+					"close:tasks",
+					"sync:parent",
+					"close:parent",
+					"rename",
+					"sync:dir",
+					"close:dir",
+				])
 			} finally {
 				renameSpy.mockRestore()
 				openSpy.mockRestore()
@@ -641,12 +769,24 @@ describe("changeJournal", () => {
 			const platformDesc = Object.getOwnPropertyDescriptor(process, "platform")
 			Object.defineProperty(process, "platform", { value: "linux", configurable: true })
 			const dirPath = path.dirname(journalPath(tmpRoot, taskId))
+			const parentPath = path.dirname(dirPath)
+			// Both sync sites are simulated, not only the journal directory:
+			// otherwise the warning counts depend on how the host operating
+			// system answers a real fsync of a directory. The parent is opened on
+			const tasksPath = path.dirname(parentPath)
+			const dirLevels = new Set([dirPath, parentPath, tasksPath, tmpRoot])
+			// The storage root bounds the created-directory walk, so all four
+			// levels are simulated here and none reaches a real directory fsync.
+			// the one append that creates the journal directory, the first one.
 			const realOpen = fs.open
 			let currentCode = "EINVAL"
 			const openSpy = vi.spyOn(fs, "open").mockImplementation(async (pathish, flags) => {
 				const openAs = realOpen as (p: string | URL, f?: string) => Promise<fs.FileHandle>
 				const p = typeof pathish === "string" ? pathish : String(pathish)
-				if (p === dirPath && flags === "r") {
+				if (flags === "r" && dirLevels.has(p)) {
+					if (p !== dirPath) {
+						throw Object.assign(new Error(currentCode + ": unsupported"), { code: currentCode })
+					}
 					return {
 						sync: async () => {
 							throw Object.assign(new Error(currentCode + ": unsupported"), { code: currentCode })
@@ -665,7 +805,21 @@ describe("changeJournal", () => {
 					await appendChange(tmpRoot, taskId, entry({ checkpointId: "tol-" + code }))
 					expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("directory sync unsupported"))
 				}
-				expect(warnSpy).toHaveBeenCalledTimes(tolerated.length)
+				const renameWarns = warnSpy.mock.calls.filter((call) =>
+					String(call[0]).includes("after journal rename"),
+				)
+				const createdWarns = warnSpy.mock.calls.filter((call) =>
+					String(call[0]).includes("after creating the journal directory"),
+				)
+				// One tolerated warning per errno at the rename site, and exactly one at
+				// the parent site: only the append that created the journal directory
+				// has a parent entry to persist. Counting per reason keeps the assertion
+				// independent of how the host answers a real fsync of a directory.
+				expect(renameWarns).toHaveLength(tolerated.length)
+				// The created-directory walk covers every level from the storage root
+				// down to the journal directorys parent: the mocked set holds the journal
+				// directory plus those three levels, so one warning is owed per ancestor.
+				expect(createdWarns).toHaveLength(dirLevels.size - 1)
 			} finally {
 				openSpy.mockRestore()
 				warnSpy.mockRestore()
@@ -1005,7 +1159,13 @@ describe("changeJournal", () => {
 			const result = await loadChanges(tmpRoot, taskId)
 			// Predicted by the finding: isEntryShaped ignores diffStats, so an
 			// untyped stats object survives the load unchanged.
-			expect(JSON.stringify(result)).toContain('"additions":"5"')
+			expect(result).toHaveLength(1)
+			expect(result[0]).toEqual(JSON.parse(withStats))
+			// Pinned as measured, not as intended: isEntryShaped never looks at diffStats,
+			// so an entry whose additions is a string loads back as a string. The type gap
+			// itself is finding 93; if its fix rejects or normalizes that value, this
+			// expectation has to move with it, which is why it compares the whole entry.
+			expect(typeof result[0].diffStats?.additions).toBe("string")
 		})
 
 		it("treats a blank line as corrupt at the tail and skippable in the middle", async () => {
