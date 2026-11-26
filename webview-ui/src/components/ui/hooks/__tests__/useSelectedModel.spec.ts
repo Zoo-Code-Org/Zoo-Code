@@ -1522,6 +1522,21 @@ describe("useSelectedModel", () => {
 			expect(selected.info?.contextWindow).toBeLessThan(entry!.contextWindow)
 		})
 
+		it("shows the approved Fable 5.2 catalog budget before Copilot reports a live model", () => {
+			const selected = selectCopilot({ vendor: "copilot", family: "claude-fable-5.2" })
+			expect(selected.info?.contextWindow).toBe(871793)
+		})
+
+		it.each([167790, 871793])("keeps Copilot's reported Fable 5.2 window of %s", (contextWindow) => {
+			reportedModels({
+				id: "fable",
+				family: "claude-fable-5.2",
+				modelInfo: { contextWindow, supportsPromptCache: false },
+			})
+			const selected = selectCopilot({ vendor: "copilot", id: "fable", family: "claude-fable-5.2" })
+			expect(selected.info?.contextWindow).toBe(contextWindow)
+		})
+
 		it("does not let a reported model that says nothing about vision inherit the catalog's flag", () => {
 			const [family] = Object.entries(vscodeLlmModels).find(([, e]) => e.supportsImages) ?? []
 			// An unreported capability arrives with its key absent, as it does after crossing the message boundary.
@@ -1740,6 +1755,156 @@ describe("useSelectedModel", () => {
 			)
 			expect(result.current.info?.contextWindow).toBe(266789)
 			expect(result.current.id).toBe(`${vendor}/gpt-6-astra`)
+		})
+
+		it.each([
+			["copilot", 871793],
+			["copilotcli", 167790],
+			[undefined, 167790],
+		] as const)("feeds the Fable 5.2 gauge for selector vendor %s", (vendor, expected) => {
+			const selector = { vendor, family: "claude-fable-5.2", id: "claude-fable-5.2" }
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm, vsCodeLmModelSelector: selector }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info?.contextWindow).toBe(expected)
+			expect(result.current.id).toBe(`${vendor}/claude-fable-5.2`)
+			expect(selector).toEqual({ vendor, family: "claude-fable-5.2", id: "claude-fable-5.2" })
+		})
+
+		it.each([
+			["copilot", 871793],
+			["copilotcli", 167790],
+			[undefined, 167790],
+		] as const)(
+			"feeds the Fable 5.2 gauge with live vendor %s when the selector omits family and vendor",
+			(liveVendor, expected) => {
+				vi.mocked(useVsCodeLmModels).mockReturnValue({
+					data: [{ id: "claude-fable-5.2", family: "claude-fable-5.2", vendor: liveVendor }],
+				} as ReturnType<typeof useVsCodeLmModels>)
+				const { result } = renderHook(
+					() =>
+						useSelectedModel({
+							apiProvider: providerIdentifiers.vscodeLm,
+							vsCodeLmModelSelector: { id: "claude-fable-5.2" },
+						}),
+					{ wrapper: createWrapper() },
+				)
+
+				expect(result.current.info?.contextWindow).toBe(expected)
+			},
+		)
+
+		it.each([
+			{
+				label: "live family and vendor conflict with the selector",
+				live: { family: "claude-fable-5.2", vendor: "copilot" },
+				selector: { family: "gpt-6-astra", vendor: "copilotcli" },
+			},
+			{
+				label: "live family is present and selector supplies the missing live vendor",
+				live: { family: "claude-fable-5.2", vendor: undefined },
+				selector: { family: undefined, vendor: "copilot" },
+			},
+			{
+				label: "live vendor is present and selector supplies the missing live family",
+				live: { family: undefined, vendor: "copilot" },
+				selector: { family: "claude-fable-5.2", vendor: undefined },
+			},
+		])("uses live identity with field-by-field selector fallback when $label", ({ live, selector }) => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: [{ id: "fable", ...live }],
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { id: "fable", ...selector },
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info?.contextWindow).toBe(871793)
+		})
+
+		it.each([
+			{
+				label: "several host models share the selector id",
+				selector: { id: "fable", family: "claude-fable-5.2", vendor: "copilotcli" },
+				models: [
+					{ id: "fable", family: "claude-fable-5.2", vendor: "copilot" },
+					{ id: "fable", family: "gpt-6-astra", vendor: "copilot" },
+				],
+				expected: 167790,
+				supportsImages: undefined,
+			},
+			{
+				label: "the selector id is absent from a non-empty host list",
+				selector: { id: "missing", family: "claude-fable-5.2", vendor: "copilotcli" },
+				models: [{ id: "listed", family: "claude-fable-5.2", vendor: "copilot" }],
+				expected: 167790,
+				supportsImages: undefined,
+			},
+			{
+				label: "an empty selector id matches all defined identity fields",
+				selector: { id: "", family: "claude-fable-5.2", vendor: "copilot", version: "v1" },
+				models: [
+					{ id: "other-version", family: "claude-fable-5.2", vendor: "copilot", version: "v2" },
+					{
+						id: "listed",
+						family: "claude-fable-5.2",
+						vendor: "copilot",
+						version: "v1",
+						modelInfo: { contextWindow: 871793, supportsPromptCache: false, supportsImages: true },
+					},
+				],
+				expected: 871793,
+				supportsImages: true,
+			},
+		])("resolves the D4 gauge budget when $label", ({ selector, models, expected, supportsImages }) => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: models,
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(
+				() => useSelectedModel({ apiProvider: providerIdentifiers.vscodeLm, vsCodeLmModelSelector: selector }),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info?.contextWindow).toBe(expected)
+			expect(result.current.info?.supportsImages).toBe(supportsImages)
+		})
+
+		it("uses both live family and vendor when the selector names only an id", () => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: [{ id: "fable", family: "claude-fable-5.2", vendor: "copilot" }],
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { id: "fable" },
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info?.contextWindow).toBe(871793)
+		})
+
+		it("resolves a non-Fable family from the live model when the selector names only an id", () => {
+			vi.mocked(useVsCodeLmModels).mockReturnValue({
+				data: [{ id: "gemini-3.8-flash", family: "gemini-3.8-flash", vendor: "copilotcli" }],
+			} as ReturnType<typeof useVsCodeLmModels>)
+			const { result } = renderHook(
+				() =>
+					useSelectedModel({
+						apiProvider: providerIdentifiers.vscodeLm,
+						vsCodeLmModelSelector: { id: "gemini-3.8-flash" },
+					}),
+				{ wrapper: createWrapper() },
+			)
+
+			expect(result.current.info?.contextWindow).toBe(955113)
 		})
 
 		it("falls back to the default model's window for an unlisted family (NOT 128000)", () => {

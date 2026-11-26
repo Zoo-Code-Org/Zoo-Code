@@ -17,6 +17,7 @@ import {
 	vertexModels,
 	xaiModels,
 	vscodeLlmModels,
+	getVscodeLlmModelInfo,
 	vscodeLlmDefaultModelId,
 	openAiCodexModels,
 	sambaNovaModels,
@@ -482,21 +483,25 @@ function getSelectedModel({
 		}
 		case providerIdentifiers.vscodeLm: {
 			const selector = apiConfiguration.vsCodeLmModelSelector
-			const matches = vsCodeLmModels?.filter((model) =>
-				(["id", "vendor", "family", "version"] as const).every(
-					(key) => selector?.[key] === undefined || model[key] === selector[key],
-				),
-			)
+			// An id match is live; its family and vendor must override the selector's.
+			const matches = selector?.id
+				? vsCodeLmModels?.filter((model) => model.id === selector.id)
+				: vsCodeLmModels?.filter((model) =>
+						(["vendor", "family", "version"] as const).every(
+							(key) => selector?.[key] === undefined || model[key] === selector[key],
+						),
+					)
 			// The host selects its first match; a separate listing cannot establish that order.
 			const reported = matches?.length === 1 ? matches[0] : undefined
 			const id = apiConfiguration.vsCodeLmModelSelector
 				? `${apiConfiguration.vsCodeLmModelSelector.vendor}/${apiConfiguration.vsCodeLmModelSelector.family}`
 				: vscodeLlmDefaultModelId
-			const modelFamily = apiConfiguration.vsCodeLmModelSelector?.family ?? vscodeLlmDefaultModelId
-			// On a family miss, fall back to the default model entry, not openAiModelInfoSaneDefaults
+			// Use the default row on a family miss, not openAiModelInfoSaneDefaults
 			// (whose 128K contextWindow would diverge from the gate and skew the bar).
-			const listedModel =
-				vscodeLlmModels[modelFamily as keyof typeof vscodeLlmModels] ?? vscodeLlmModels[vscodeLlmDefaultModelId]
+			const listedModel = getVscodeLlmModelInfo(
+				reported?.family ?? selector?.family,
+				reported?.vendor ?? selector?.vendor,
+			)
 			// Set contextWindow = maxInputTokens so the UI bar shares one source of truth with the gate,
 			// whose primary window is getCondenseContextWindow() (static-table maxInputTokens); this
 			// info.contextWindow is only the gate's fallback.

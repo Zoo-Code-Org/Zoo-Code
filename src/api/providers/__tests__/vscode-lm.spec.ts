@@ -4110,6 +4110,46 @@ describe("VsCodeLmHandler", () => {
 			expect(handler.getCondenseContextWindow()).toBe(expected)
 		})
 
+		it.each([
+			["copilot", 871793],
+			["copilotcli", 167790],
+			[undefined, 167790],
+		] as const)("resolves Fable 5.2 from selector vendor %s", (vendor, expected) => {
+			const fableHandler = new VsCodeLmHandler({
+				vsCodeLmModelSelector: { vendor, family: "claude-fable-5.2", id: "claude-fable-5.2" },
+			})
+			try {
+				expect(fableHandler.getCondenseContextWindow()).toBe(expected)
+			} finally {
+				fableHandler.dispose()
+			}
+		})
+
+		it.each([
+			["copilot", "copilotcli", 871793],
+			["copilotcli", "copilot", 167790],
+			[undefined, "copilot", 871793],
+			[undefined, "copilotcli", 167790],
+			[undefined, undefined, 167790],
+		] as const)(
+			"resolves Fable 5.2 with live vendor %s ahead of selector vendor %s",
+			(liveVendor, selectorVendor, expected) => {
+				const fableHandler = new VsCodeLmHandler({
+					vsCodeLmModelSelector: { vendor: selectorVendor, family: "claude-fable-5.2" },
+				})
+				fableHandler["client"] = {
+					...mockLanguageModelChat,
+					family: "claude-fable-5.2",
+					vendor: liveVendor,
+				} as unknown as vscode.LanguageModelChat
+				try {
+					expect(fableHandler.getCondenseContextWindow()).toBe(expected)
+				} finally {
+					fableHandler.dispose()
+				}
+			},
+		)
+
 		it.each(["copilot", "some-other-vendor"])("resolves Astra's selector budget for vendor %s", (vendor) => {
 			const selectedHandler = new VsCodeLmHandler({
 				vsCodeLmModelSelector: { vendor, family: "gpt-6-astra" },

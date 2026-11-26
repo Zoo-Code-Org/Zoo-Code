@@ -543,6 +543,20 @@ describe("Copilot model capabilities", () => {
 			expect(getVsCodeLmModelInfo(liveModel({ maxInputTokens: 921793 })).contextWindow).toBe(921793)
 		})
 
+		it.each([167790, 871793])("preserves Fable 5.2's live input limit of %s", async (maxInputTokens) => {
+			const model = liveModel({ family: "claude-fable-5.2", maxInputTokens })
+			expect(getVsCodeLmModelInfo(model).contextWindow).toBe(maxInputTokens)
+			vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([model])
+			const handler = new GitHubCopilotHandler({})
+			try {
+				await handler.initializeClient()
+				expect(handler.getCondenseContextWindow()).toBe(maxInputTokens)
+				expect(handler.getModel().info.contextWindow).toBe(maxInputTokens)
+			} finally {
+				handler.dispose()
+			}
+		})
+
 		it("honors a live limit smaller than the curated limit", () => {
 			const model = liveModel({ family: curatedFamily, maxInputTokens: curatedEntry.maxInputTokens - 1 })
 			expect(getVsCodeLmModelInfo(model).contextWindow).toBe(curatedEntry.maxInputTokens - 1)

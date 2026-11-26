@@ -266,6 +266,17 @@ export const vscodeLlmModels = {
 		supportsToolCalling: true,
 		maxInputTokens: 658785,
 	},
+	// User-authorized advertised budget, not measured; getVscodeLlmModelInfo restricts it to Copilot.
+	"claude-fable-5.2": {
+		contextWindow: 871793,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "claude-fable-5.2",
+		version: "claude-fable-5.2",
+		name: "Claude Fable 5.2",
+		supportsToolCalling: true,
+		maxInputTokens: 871793,
+	},
 	// Values copied from claude-fable-5.1 at the user's request; not measured for claude-fable-5.5.
 	"claude-fable-5.5": {
 		contextWindow: 935793,
@@ -566,3 +577,10 @@ export const vscodeLlmModels = {
 		maxInputTokens: number
 	}
 >
+
+// Shared by the gauge and condensation; unknown families use the default budget, not a live window.
+export function getVscodeLlmModelInfo(family: string | undefined, vendor: string | undefined) {
+	return family && (family !== "claude-fable-5.2" || vendor === githubCopilotLanguageModel.vendor)
+		? (vscodeLlmModels[family as VscodeLlmModelId] ?? vscodeLlmModels[vscodeLlmDefaultModelId])
+		: vscodeLlmModels[vscodeLlmDefaultModelId]
+}
