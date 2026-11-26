@@ -1,9 +1,19 @@
-demo.gif filter=lfs diff=lfs merge=lfs -text
-assets/docs/demo.gif filter=lfs diff=lfs merge=lfs -text
-src/assets/docs/demo.gif filter=lfs diff=lfs merge=lfs -text
+# Shell scripts need LF line endings on all platforms.
+*.sh text eol=lf
+
+# Spec files and TLA+ model configs: collapse in PR diffs and exclude from language statistics
+*.spec.ts linguist-generated=true
+*.spec.tsx linguist-generated=true
+*.test.ts linguist-generated=true
+*.test.tsx linguist-generated=true
+docs/architecture/tla/*.cfg linguist-generated=true
 
 # Test snapshot files - mark as linguist-generated to exclude from GitHub language statistics
 *.snap linguist-generated=true
+
+# Collapse visual test fixtures and specs in GitHub diffs.
+**/stories.tsx linguist-generated=true
+*.visual.tsx linguist-generated=true
 
 # Non-English translation files - mark as linguist-generated to exclude from GitHub language statistics
 # Package NLS files - mark non-English ones as generated

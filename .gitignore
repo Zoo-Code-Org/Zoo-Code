@@ -21,6 +21,11 @@ bin/
 # Local prompts and rules
 /local-prompts
 AGENTS.local.md
+# Personal Roo configuration; shared templates live in contrib/roo/
+/.roo/
+/.roomodes
+# Personal MCP configuration can contain secrets at any directory depth.
+**/.roo/mcp.json
 
 # Test environment
 .test_env
@@ -52,7 +57,6 @@ logs
 .idea/
 .qodo/
 .vercel
-.roo/mcp.json
 
 # Qdrant
 qdrant_storage/
