@@ -435,6 +435,55 @@ const renderChatView = (props: Partial<ChatViewProps> = {}) => {
 describe("ChatView - Tool Batching Tests", () => {
 	beforeEach(() => vi.clearAllMocks())
 
+	it("groups output reads across non-content rows but keeps assistant text as a boundary", async () => {
+		renderChatView()
+		const read = (ts: number, readEnd: number) => ({
+			type: "say",
+			say: "tool",
+			ts,
+			text: JSON.stringify({ tool: "readCommandOutput", readStart: 0, readEnd, totalBytes: 12000 }),
+		})
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Initial task" },
+				read(2, 5300),
+				{ type: "say", say: "api_req_started", ts: 3, text: "{}" },
+				{ type: "say", say: "text", ts: 4, text: " \n " },
+				read(5, 5400),
+				{ type: "say", say: "text", ts: 6, text: "Inspecting the output." },
+				read(7, 5500),
+			],
+		})
+
+		await waitFor(() => {
+			const reads = mockVirtuosoState.lastData.filter((message) => message.say === "tool")
+			expect(reads).toHaveLength(2)
+			expect(JSON.parse(reads[0].text ?? "{}").batchCommandOutputReads).toHaveLength(2)
+			expect(mockVirtuosoState.lastData.some((message) => message.text === "Inspecting the output.")).toBe(true)
+			expect(reads[1].ts).toBe(7)
+		})
+	})
+
+	it("hides a standalone whitespace-only assistant row", async () => {
+		renderChatView()
+		mockPostMessage({
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "Initial task" },
+				{ type: "say", say: "text", ts: 2, text: " \n " },
+				{
+					type: "say",
+					say: "tool",
+					ts: 3,
+					text: JSON.stringify({ tool: "readCommandOutput", totalBytes: 100 }),
+				},
+			],
+		})
+
+		await waitFor(() => {
+			expect(mockVirtuosoState.lastData.map((message) => message.ts)).toEqual([3])
+		})
+	})
+
 	it("batches readFile asks separated by an API request row", async () => {
 		renderChatView()
 

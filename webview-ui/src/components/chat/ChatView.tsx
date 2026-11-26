@@ -1124,7 +1124,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 				]
 				if (message.ask && alwaysHiddenOnceProcessedAsk.includes(message.ask)) return false
 				if (message.say && alwaysHiddenOnceProcessedSay.includes(message.say)) return false
-				if (message.say === "text" && (message.text ?? "") === "" && (message.images?.length ?? 0) === 0) {
+				if (message.say === "text" && !message.text?.trim() && (message.images?.length ?? 0) === 0) {
 					return false
 				}
 				return true
@@ -1155,7 +1155,7 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 					}
 					break
 				case "text":
-					if ((message.text ?? "") === "" && (message.images?.length ?? 0) === 0) return false
+					if (!message.text?.trim() && (message.images?.length ?? 0) === 0) return false
 					break
 				case "mcp_server_request_started":
 					return false
@@ -1385,16 +1385,41 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 			isBoundary,
 			synthesize: synthesizeEditFileBatch,
 		})
+		const outputReadsBatched = batchNearby(result, {
+			isTarget: (msg) => {
+				if (msg.type !== "say" || msg.say !== "tool") return false
+				try {
+					return (JSON.parse(msg.text || "{}") as ClineSayTool).tool === "readCommandOutput"
+				} catch {
+					return false
+				}
+			},
+			isIgnorableBetweenTargets: (msg) =>
+				msg.type === "say" &&
+				(msg.say === "api_req_started" || (msg.say === "text" && !msg.text?.trim() && !msg.images?.length)),
+			isBoundary,
+			synthesize: (batch) => {
+				const first = JSON.parse(batch[0].text || "{}") as ClineSayTool
+				const batchCommandOutputReads = batch.map((msg) => {
+					const { readStart, readEnd, totalBytes, searchPattern, matchCount } = JSON.parse(
+						msg.text || "{}",
+					) as ClineSayTool
+					return { readStart, readEnd, totalBytes, searchPattern, matchCount }
+				})
+				return { ...batch[0], text: JSON.stringify({ ...first, batchCommandOutputReads }) }
+			},
+		})
+
 
 		if (isCondensing) {
-			result.push({
+			outputReadsBatched.push({
 				type: "say",
 				say: "condense_context",
 				ts: Date.now(),
 				partial: true,
 			} as ClineMessage)
 		}
-		return result
+		return outputReadsBatched
 	}, [isCondensing, visibleMessages])
 
 	const checkpointIndices = useMemo(() => {
