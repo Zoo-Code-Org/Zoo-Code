@@ -774,11 +774,6 @@
 			"count": 1
 		}
 	},
-	"core/tools/UpdateTodoListTool.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 1
-		}
-	},
 	"core/tools/UseMcpToolTool.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
@@ -857,11 +852,6 @@
 	"core/tools/__tests__/skillTool.spec.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 3
-		}
-	},
-	"core/tools/__tests__/updateTodoListTool.spec.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 2
 		}
 	},
 	"core/tools/__tests__/useMcpToolTool.spec.ts": {
@@ -986,7 +976,7 @@
 	},
 	"core/webview/webviewMessageHandler.ts": {
 		"@typescript-eslint/no-explicit-any": {
-			"count": 5
+			"count": 4
 		}
 	},
 	"services/__tests__/zoo-code-auth.test.ts": {

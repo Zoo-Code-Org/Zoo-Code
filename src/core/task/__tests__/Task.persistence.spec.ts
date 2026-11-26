@@ -976,6 +976,24 @@ describe("Task persistence", () => {
 	// ── saveClineMessages ────────────────────────────────────────────────
 
 	describe("saveClineMessages", () => {
+		it("restores initial child-task todos from its first saved message before any model update", async () => {
+			const initialTodos = [{ id: "initial", content: "Delegated task", status: "in_progress" as const }]
+			const task = new Task({
+				provider: mockProvider,
+				apiConfiguration: mockApiConfig,
+				task: "child",
+				initialTodos,
+				startTask: false,
+			})
+			await task.say("text", "child task request")
+			const saved = JSON.parse(JSON.stringify(task.clineMessages)) as ClineMessage[]
+			const restored = new Task({ provider: mockProvider, apiConfiguration: mockApiConfig, startTask: false })
+			await restored.overwriteClineMessages(saved, false)
+			expect(restored.todoList).toEqual(initialTodos)
+			initialTodos[0].content = "Changed elsewhere"
+			expect(task.clineMessages[0]?.initialTodos?.[0]?.content).toBe("Delegated task")
+			expect(saved[0]?.initialTodos?.[0]?.content).toBe("Delegated task")
+		})
 		it("returns true on success", async () => {
 			mockSaveTaskMessages.mockResolvedValueOnce([])
 

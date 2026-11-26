@@ -8,7 +8,7 @@ const MODE_PARAMETER_DESCRIPTION = `Slug of the mode to begin the new task in (e
 
 const MESSAGE_PARAMETER_DESCRIPTION = `Initial user instructions or context for the new task`
 
-const TODOS_PARAMETER_DESCRIPTION = `Optional initial todo list written as a markdown checklist; required when the workspace mandates todos`
+const TODOS_PARAMETER_DESCRIPTION = `Optional string containing the full Markdown checklist, e.g. "[ ] First task\\n[-] Current task". Use [ ], [-], or [x] for status. Required when the workspace mandates todos; otherwise use null to omit.`
 
 export default {
 	type: "function",

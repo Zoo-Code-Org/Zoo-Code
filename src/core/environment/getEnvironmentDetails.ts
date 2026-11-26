@@ -254,10 +254,9 @@ export async function getEnvironmentDetails(cline: Task, includeFileDetails: boo
 		}
 	}
 
-	const todoListEnabled =
-		state && typeof state.apiConfiguration?.todoListEnabled === "boolean"
-			? state.apiConfiguration.todoListEnabled
-			: true
-	const reminderSection = todoListEnabled ? formatReminderSection(cline.todoList) : ""
+	const todoListEnabled = cline.apiConfiguration?.todoListEnabled ?? state?.apiConfiguration?.todoListEnabled ?? true
+	// A mode's profile can disable the update tool without clearing the task's list.
+	// Keep an existing list in the next request so superseded environment blocks can be removed safely.
+	const reminderSection = formatReminderSection(cline.todoList, todoListEnabled)
 	return `<environment_details>\n${details.trim()}\n${reminderSection}\n</environment_details>`
 }

@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { todoItemSchema } from "./todo.js"
 
 /**
  * ClineAsk
@@ -259,6 +260,8 @@ export const clineMessageSchema = z.object({
 	text: z.string().optional(),
 	images: z.array(z.string()).optional(),
 	partial: z.boolean().optional(),
+	/** Initial delegated-task checklist, stored with its first message before model updates. */
+	initialTodos: z.array(todoItemSchema).optional(),
 	reasoning: z.string().optional(),
 	conversationHistoryIndex: z.number().optional(),
 	checkpoint: z.record(z.string(), z.unknown()).optional(),
