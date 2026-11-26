@@ -9,7 +9,14 @@ import * as path from "path"
 // against a `resolve.alias` mapping.
 import * as vscodeMock from "vscode"
 
-import { arePathsEqual, getReadablePath, getWorkspacePath, getWorkspacePathForContext } from "../path"
+import {
+	arePathsEqual,
+	getReadablePath,
+	getTaskCwdPath,
+	getWorkspacePath,
+	getWorkspacePathForContext,
+	toRelativePath,
+} from "../path"
 
 // Loose typing for the mock object — the file is plain JS and exposes a
 // hand-rolled subset of the VS Code API.
@@ -53,7 +60,7 @@ function setRootResolution(value: "activeEditor" | "firstFolder" | undefined) {
 function withWorkspaceMock(opts: {
 	folders?: Array<{ uri: { fsPath: string }; name: string; index: number }> | undefined
 	getWorkspaceFolder?: (...args: unknown[]) => { uri: { fsPath: string } } | null | undefined
-	activeEditor?: { document: { uri: { fsPath: string } } } | null
+	activeEditor?: { document: { uri: { fsPath: string; scheme?: string } } } | null
 	getConfiguration?: (section?: string) => { get: (key: string, defaultValue?: unknown) => unknown }
 }): () => void {
 	const previousFolders = mockWorkspace.workspaceFolders
@@ -357,7 +364,6 @@ describe("Path Utilities", () => {
 					: "/Users/test/project/src/file.txt"
 			expect(getReadablePath(cwd, filePath)).toBe("src/file.txt")
 		})
-
 		it("should return absolute path when outside cwd", () => {
 			const filePath =
 				process.platform === "win32" ? "C:\\Users\\test\\other\\file.txt" : "/Users/test/other/file.txt"
@@ -391,5 +397,80 @@ describe("Path Utilities", () => {
 					: "/Users/test/project/./src/../src/file.txt"
 			expect(getReadablePath(cwd, filePath)).toBe("src/file.txt")
 		})
+	})
+})
+
+// Issue #1271: with no workspace folder open the task still needs a working
+// directory. The anchor must be a directory that exists on the user's system
+// and tab mention values cut against it must resolve back to the open files.
+describe("getTaskCwdPath (issue #1271: no workspace open)", () => {
+	it("returns the workspace folder when one is open", () => {
+		const cleanup = withWorkspaceMock({
+			folders: [{ uri: { fsPath: "/test/workspace" }, name: "test", index: 0 }],
+			activeEditor: { document: { uri: { fsPath: "/elsewhere/file.ts", scheme: "file" } } },
+		})
+		try {
+			expect(getTaskCwdPath()).toBe("/test/workspace")
+		} finally {
+			cleanup()
+		}
+	})
+
+	it("returns the active editor's directory without a workspace", () => {
+		const cleanup = withWorkspaceMock({
+			folders: undefined,
+			activeEditor: {
+				document: { uri: { fsPath: "/home/test/desktop-projects/notes/ideas.md", scheme: "file" } },
+			},
+		})
+		try {
+			expect(getTaskCwdPath()).toBe("/home/test/desktop-projects/notes")
+		} finally {
+			cleanup()
+		}
+	})
+
+	it("returns the home directory without a workspace and without an editor", () => {
+		const cleanup = withWorkspaceMock({ folders: undefined, activeEditor: null })
+		try {
+			expect(getTaskCwdPath()).toBe(os.homedir())
+		} finally {
+			cleanup()
+		}
+	})
+
+	it("never anchors to a constructed Desktop path, even with a lowercase home", () => {
+		const homeSpy = vi.spyOn(os, "homedir").mockReturnValue("/home/test/desktop")
+		const cleanup = withWorkspaceMock({ folders: undefined, activeEditor: null })
+		try {
+			const anchor = getTaskCwdPath()
+			expect(anchor).toBe("/home/test/desktop")
+			expect(anchor).not.toBe(path.join("/home/test/desktop", "Desktop"))
+		} finally {
+			homeSpy.mockRestore()
+			cleanup()
+		}
+	})
+
+	it.each([
+		["a file next to the anchor", "/home/test/desktop-projects/notes/plan.md"],
+		["a file in a subdirectory", "/home/test/desktop-projects/notes/src/deep/module.ts"],
+		["a file outside the anchor tree", "/elsewhere/projects/site/index.html"],
+		["a file whose name has spaces", "/home/test/desktop-projects/notes/my notes/plan v2.md"],
+	])("mention value round-trips for %s", (_label, tabPath) => {
+		const cleanup = withWorkspaceMock({
+			folders: undefined,
+			activeEditor: {
+				document: { uri: { fsPath: "/home/test/desktop-projects/notes/ideas.md", scheme: "file" } },
+			},
+		})
+		try {
+			const anchor = getTaskCwdPath()
+			const mentionValue = "/" + toRelativePath(tabPath, anchor)
+			// parseMentions strips the leading slash before path.resolve
+			expect(path.resolve(anchor, mentionValue.slice(1))).toBe(path.normalize(tabPath))
+		} finally {
+			cleanup()
+		}
 	})
 })

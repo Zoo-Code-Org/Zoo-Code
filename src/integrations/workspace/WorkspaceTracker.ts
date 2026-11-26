@@ -3,7 +3,7 @@ import * as path from "path"
 
 import { listFiles } from "../../services/glob/list-files"
 import { ClineProvider } from "../../core/webview/ClineProvider"
-import { toRelativePath, getWorkspacePath } from "../../utils/path"
+import { toRelativePath, getTaskCwdPath, getWorkspacePath } from "../../utils/path"
 
 const MAX_INITIAL_FILES = 1_000
 
@@ -74,6 +74,12 @@ class WorkspaceTracker {
 	}
 
 	private getOpenedTabsInfo() {
+		// Tab paths feed the @-mention values the webview offers; parseMentions
+		// resolves them against the task anchor. Without a workspace root there
+		// is no root to cut against, so anchor to the task cwd instead of an
+		// empty string, which path.relative would join to the extension host's
+		// own process directory (issue #1271).
+		const baseCwd = this.cwd || getTaskCwdPath()
 		return vscode.window.tabGroups.all.reduce(
 			(acc, group) => {
 				const groupTabs = group.tabs
@@ -81,7 +87,7 @@ class WorkspaceTracker {
 					.map((tab) => ({
 						label: tab.label,
 						isActive: tab.isActive,
-						path: toRelativePath((tab.input as vscode.TabInputText).uri.fsPath, this.cwd || ""),
+						path: toRelativePath((tab.input as vscode.TabInputText).uri.fsPath, baseCwd),
 					}))
 
 				groupTabs.forEach((tab) => (tab.isActive ? acc.unshift(tab) : acc.push(tab)))

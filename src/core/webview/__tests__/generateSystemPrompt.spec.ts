@@ -757,7 +757,7 @@ describe("getCapabilitiesSection / getRulesSection fragment gating", () => {
 			expect(result).toContain(
 				"You are only allowed to ask the user questions using the ask_followup_question tool",
 			)
-			expect(result).toContain("you should use the list_files tool to list the files in the Desktop")
+			expect(result).toContain("you should use the list_files tool to list the files in that directory")
 			expect(result).not.toContain("Provide your best-effort result")
 			expect(result).toContain("When executing commands, if you don't see the expected output")
 			expect(result).toContain(

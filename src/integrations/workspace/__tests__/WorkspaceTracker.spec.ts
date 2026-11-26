@@ -3,7 +3,7 @@ import * as vscode from "vscode"
 import WorkspaceTracker from "../WorkspaceTracker"
 import { ClineProvider } from "../../../core/webview/ClineProvider"
 import { listFiles } from "../../../services/glob/list-files"
-import { getWorkspacePath } from "../../../utils/path"
+import { getTaskCwdPath, getWorkspacePath } from "../../../utils/path"
 
 // Mock functions - must be defined before vitest.mock calls
 const mockOnDidCreate = vitest.fn()
@@ -16,6 +16,7 @@ let registeredTabChangeCallback: (() => Promise<void>) | null = null
 // Mock workspace path
 vitest.mock("../../../utils/path", () => ({
 	getWorkspacePath: vitest.fn().mockReturnValue("/test/workspace"),
+	getTaskCwdPath: vitest.fn().mockReturnValue("/anchor/dir"),
 	toRelativePath: vitest.fn(function (path, cwd) {
 		// Handle both Windows and POSIX paths by using path.relative
 		const relativePath = require("path").relative(cwd, path)
@@ -63,6 +64,7 @@ vitest.mock("vscode", () => ({
 		},
 	},
 	FileType: { File: 1, Directory: 2 },
+	TabInputText: class MockTabInputText {},
 }))
 
 vitest.mock("../../../services/glob/list-files", () => ({
@@ -372,5 +374,35 @@ describe("WorkspaceTracker", () => {
 
 		// No postMessage should be called after dispose
 		expect(mockProvider.postMessageToWebview).not.toHaveBeenCalled()
+	})
+
+	// Issue #1271: without a workspace root there is no root to cut tab paths
+	// against. Mention values must be relative to the task anchor so
+	// parseMentions resolves them back to the open files.
+	it("cuts opened-tab mention values against the task anchor without a workspace", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/anchor/dir")
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/anchor/dir/a.ts", true), makeTab("/elsewhere/b.ts", false)] }]
+
+		try {
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+
+			const calls = (mockProvider.postMessageToWebview as Mock).mock.calls
+			const posted = calls.map((call) => call[0]).find((message) => message.openedTabs?.length === 2)
+			expect(posted).toBeDefined()
+			expect(posted.openedTabs.map((tab: { path: string }) => tab.path)).toEqual(["a.ts", "../../elsewhere/b.ts"])
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
 	})
 })

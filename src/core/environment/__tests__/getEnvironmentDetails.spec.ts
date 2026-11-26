@@ -1,5 +1,8 @@
 // npx vitest core/environment/__tests__/getEnvironmentDetails.spec.ts
 
+import os from "os"
+import * as path from "path"
+
 import pWaitFor from "p-wait-for"
 import delay from "delay"
 import type { Mock } from "vitest"
@@ -191,7 +194,11 @@ describe("getEnvironmentDetails", () => {
 	})
 
 	it("should handle desktop directory specially", async () => {
-		;(arePathsEqual as Mock).mockReturnValue(true)
+		// Issue #1271: the guard wording follows the directory the task runs
+		// from, so pin cwd to the Desktop and compare paths for real.
+		const actual = await vi.importActual<typeof import("../../../utils/path")>("../../../utils/path")
+		;(arePathsEqual as Mock).mockImplementation(actual.arePathsEqual)
+		;(mockCline as unknown as { cwd: string }).cwd = path.join(os.homedir(), "Desktop")
 		const result = await getEnvironmentDetails(mockCline as Task, true)
 		expect(result).toContain("Desktop files not shown automatically")
 		expect(listFiles).not.toHaveBeenCalled()
@@ -491,5 +498,31 @@ describe("getEnvironmentDetails", () => {
 			undefined,
 			expect.objectContaining({ cwd: mockCwd }),
 		)
+	})
+
+	// Issue #1271: with no workspace open the task anchors to a broad personal
+	// directory. It must not be auto-listed, and the guard text must name the
+	// directory the task actually sits in, not always "Desktop".
+	it("does not auto-list the home anchor and names it as the home directory", async () => {
+		const actual = await vi.importActual<typeof import("../../../utils/path")>("../../../utils/path")
+		;(arePathsEqual as Mock).mockImplementation(actual.arePathsEqual)
+
+		;(mockCline as unknown as { cwd: string }).cwd = os.homedir()
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+
+		expect(result).toContain("Home-directory files not shown automatically")
+		expect(result).not.toContain("Desktop files not shown automatically")
+		expect(listFiles).not.toHaveBeenCalled()
+	})
+
+	it("keeps the Desktop guard wording when the task really runs on the Desktop", async () => {
+		const actual = await vi.importActual<typeof import("../../../utils/path")>("../../../utils/path")
+		;(arePathsEqual as Mock).mockImplementation(actual.arePathsEqual)
+
+		;(mockCline as unknown as { cwd: string }).cwd = path.join(os.homedir(), "Desktop")
+		const result = await getEnvironmentDetails(mockCline as Task, true)
+
+		expect(result).toContain("Desktop files not shown automatically")
+		expect(listFiles).not.toHaveBeenCalled()
 	})
 })

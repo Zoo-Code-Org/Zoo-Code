@@ -62,7 +62,7 @@ export function getCapabilitiesSection(policy: EffectiveToolPolicy): string {
 	// `list_files` guidance only — the file-tree *fact* is stated once in
 	// SYSTEM INFORMATION (and carries the cwd there).
 	if (tools.has("list_files")) {
-		body += `- If you need to further explore directories such as outside the current workspace directory, you can use the list_files tool. If you pass 'true' for the recursive parameter, it will list files recursively. Otherwise, it will list files at the top level, which is better suited for generic directories where you don't necessarily need the nested structure, like the Desktop.\n`
+		body += `- If you need to further explore directories such as outside the current workspace directory, you can use the list_files tool. If you pass 'true' for the recursive parameter, it will list files recursively. Otherwise, it will list files at the top level, which is better suited for generic directories where you don't necessarily need the nested structure.\n`
 	}
 
 	if (tools.has("execute_command")) {
