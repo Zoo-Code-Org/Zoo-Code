@@ -34,6 +34,11 @@ describe("salvageXmlToolCalls", () => {
 		expect(salvaged?.[0]?.args.content).toBe("&lt; tag")
 	})
 
+	it("keeps an unknown entity such as &nbsp; as the literal text (review 6081008463)", () => {
+		const salvaged = salvageXmlToolCalls("<write_to_file><content>a&nbsp;b</content></write_to_file>")
+		expect(salvaged?.[0]?.args.content).toBe("a&nbsp;b")
+	})
+
 	it("allows markup-like text inside a parameter value", () => {
 		const salvaged = salvageXmlToolCalls("<write_to_file><content><div>x</div></content></write_to_file>")
 		expect(salvaged?.[0]?.args.content).toBe("<div>x</div>")

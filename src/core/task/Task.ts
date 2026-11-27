@@ -293,6 +293,26 @@ export class PendingActionSettlementError extends Error {
 	}
 }
 
+function isSalvagePlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+/**
+ * Describes a parsed JSON value's shape for the invalid-argument error.
+ */
+function describeSalvageShape(parsed: unknown): string {
+	if (Array.isArray(parsed)) {
+		return "an array"
+	}
+	if (isSalvagePlainObject(parsed)) {
+		return "an object"
+	}
+	if (parsed === null) {
+		return "null"
+	}
+	return `of type ${typeof parsed}`
+}
+
 /**
  * Converts salvaged XML argument values to their declared structured types
  * (issue #547 review 4712438429). The salvage scanner captures every
@@ -300,9 +320,12 @@ export class PendingActionSettlementError extends Error {
  * unchanged, so a stringified array (ask_followup_question's follow_up)
  * reached the tool's shape validation as a string and the call was rejected.
  * Values whose declared type is array or object are parsed back to
- * structures before promotion. Ordinary string parameters, unparseable
- * values and unknown tools stay untouched, so the parser keeps rejecting
- * genuinely invalid calls and the response stays plain text.
+ * structures before promotion. A conversion failure or a parsed shape that
+ * conflicts with the declared type throws: the promotion loop treats the
+ * whole salvage as invalid and keeps the response as plain text, because the
+ * native parser deliberately accepts present-but-wrong-shaped values to
+ * give the streaming path a precise execution-time error (issue #547 review
+ * 4713747404). Ordinary string parameters stay untouched.
  */
 function structureDeclaredParamsForSalvage(
 	args: Record<string, string>,
@@ -315,7 +338,7 @@ function structureDeclaredParamsForSalvage(
 		(tool): tool is Extract<NativeToolDef, { function: { name: string } }> =>
 			tool.type === "function" && tool.function?.name === resolvedName,
 	)
-	const declaredStructured = new Set<string>()
+	const declaredStructured = new Map<string, { declared: string[] }>()
 	if (schema?.function && typeof schema.function.parameters === "object" && schema.function.parameters !== null) {
 		const properties = (schema.function.parameters as unknown as Record<string, unknown>).properties
 		if (typeof properties === "object" && properties !== null) {
@@ -323,7 +346,9 @@ function structureDeclaredParamsForSalvage(
 				const type = (paramSchema as unknown as Record<string, unknown>)?.type
 				const types = Array.isArray(type) ? type : [type]
 				if (types.includes("array") || types.includes("object")) {
-					declaredStructured.add(param)
+					declaredStructured.set(param, {
+						declared: types.filter((entry): entry is string => typeof entry === "string"),
+					})
 				}
 			}
 		}
@@ -331,17 +356,44 @@ function structureDeclaredParamsForSalvage(
 
 	const structured: Record<string, unknown> = {}
 	for (const [key, value] of Object.entries(args)) {
-		if (declaredStructured.has(key)) {
+		const declared = declaredStructured.get(key)
+		if (declared) {
+			let parsed: unknown
 			try {
-				const parsed: unknown = JSON.parse(value)
-				if (typeof parsed === "object" && parsed !== null) {
-					structured[key] = parsed
-					continue
-				}
+				parsed = JSON.parse(value)
 			} catch {
-				// Not JSON: keep the string; the native parser rejects the call
-				// and the response stays plain text.
+				// Declared structured but not JSON: forwarding the string
+				// would ride the parser's presence-only checks and promote
+				// an invalid call. Reject the salvage; the response stays
+				// plain text.
+				throw new Error(
+					`Invalid salvaged argument '${key}' for tool '${resolvedName}': declared ${declared.declared.join(" or ")} but the value is not JSON`,
+				)
 			}
+			let shape: string
+			if (Array.isArray(parsed)) {
+				shape = "array"
+			} else if (isSalvagePlainObject(parsed)) {
+				shape = "object"
+			} else if (parsed === null) {
+				shape = "null"
+			} else {
+				shape = typeof parsed
+			}
+			if (shape === "number" && Number.isInteger(parsed) && declared.declared.includes("integer")) {
+				shape = "integer"
+			}
+			if (!declared.declared.includes(shape)) {
+				// The parsed shape conflicts with the declared type: the
+				// tool would reject the call during execution, after the
+				// response text was already cleared. Reject the salvage
+				// instead and keep the response as plain text.
+				throw new Error(
+					`Invalid salvaged argument '${key}' for tool '${resolvedName}': declared ${declared.declared.join(" or ")} but the parsed value is ${describeSalvageShape(parsed)}`,
+				)
+			}
+			structured[key] = parsed
+			continue
 		}
 		structured[key] = value
 	}

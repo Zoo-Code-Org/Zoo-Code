@@ -310,19 +310,6 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			nativeArgs?: Record<string, unknown>
 		}
 
-		// Captures assistantMessageContent at each save point so a test can
-		// observe the response as finalized BEFORE a later retry replaces the
-		// observed content (review 4712438423).
-		function recordSaveSnapshots(task: Task): { snapshots: FinalizedEntry[][] } {
-			const snapshots: FinalizedEntry[][] = []
-			vi.spyOn(getTaskStreamingAccess(task), "saveClineMessages").mockImplementation(async () => {
-				const access = getSalvageAccess(task)
-				snapshots.push((access.assistantMessageContent as FinalizedEntry[]).map((block) => ({ ...block })))
-				return true
-			})
-			return { snapshots }
-		}
-
 		// Replaces the plain counter field with a recording accessor so a test can
 		// observe its peak across the request loop even after a later iteration
 		// resets it.
@@ -338,6 +325,34 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 				},
 			})
 			return { peak: () => peak }
+		}
+
+		type ApiHistoryMessage = { role: string; content: unknown }
+		type ApiHistoryAccess = {
+			addToApiConversationHistory: (message: ApiHistoryMessage, reasoning?: string) => Promise<void>
+		}
+
+		// Captures the assistant entries as they reach the API history sink while
+		// still running the real write. The history entry is built AFTER the
+		// salvage decision, so a rejected response's entry shows the text the
+		// salvage kept — a pre-salvage save snapshot cannot see a later clear
+		// (review round 3, additional comment on 4712438423).
+		function recordApiHistoryEntries(task: Task): { assistantEntries: ApiHistoryMessage[] } {
+			const assistantEntries: ApiHistoryMessage[] = []
+			const access = task as unknown as ApiHistoryAccess
+			const original = access.addToApiConversationHistory.bind(task)
+			vi.spyOn(access, "addToApiConversationHistory").mockImplementation(async (message, reasoning) => {
+				if (message.role === "assistant") {
+					assistantEntries.push({
+						role: message.role,
+						content: Array.isArray(message.content)
+							? message.content.map((block) => ({ ...(block as Record<string, unknown>) }))
+							: message.content,
+					})
+				}
+				return original(message, reasoning)
+			})
+			return { assistantEntries }
 		}
 
 		async function createStreamingTask() {
@@ -387,7 +402,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		it("leaves prose-wrapped XML alone (no false promotion)", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
-			const { snapshots } = recordSaveSnapshots(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
 
 			vi.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -416,13 +431,14 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			expect(toolUses).toHaveLength(1)
 			expect(toolUses[0].name).toBe("write_to_file")
 			expect(counter.peak()).toBe(1)
-			// The rejected response stays plain text before the retry replaces it
-			// (review 4712438423).
-			// Early saves run before the stream produces content; observe the
-			// first capture that holds the finalized response.
-			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
-			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
-			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+			// The rejected response stays plain text: the first assistant
+			// API-history entry is built after the salvage decision, so it
+			// shows the retained full text and no promoted tool_use (review
+			// 4712438423, round-3 additional comment).
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const rejectedBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(rejectedBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejectedBlocks.find((block) => block.type === "text")?.text).toBe(
 				"I will check the file now: <read_file><path>a.ts</path></read_file>",
 			)
 		})
@@ -449,7 +465,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		it("keeps malformed tool XML as text instead of promoting a broken call", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
-			const { snapshots } = recordSaveSnapshots(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
 
 			vi.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -478,13 +494,13 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			expect(toolUses).toHaveLength(1)
 			expect(toolUses[0].nativeArgs).toMatchObject({ path: "b.ts" })
 			expect(counter.peak()).toBe(1)
-			// The rejected nested-XML response stays plain text before the retry
-			// replaces it (review 4712438423).
-			// Early saves run before the stream produces content; observe the
-			// first capture that holds the finalized response.
-			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
-			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
-			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+			// The rejected nested-XML response stays plain text: the first
+			// assistant API-history entry is built after the salvage
+			// decision (review 4712438423, round-3 additional comment).
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const rejectedBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(rejectedBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejectedBlocks.find((block) => block.type === "text")?.text).toBe(
 				"<read_file><read_file><path>a.ts</path></read_file></read_file>",
 			)
 		})
@@ -492,7 +508,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		it("promotes neither call when a valid call is followed by a parser-rejected one (review 4712438440)", async () => {
 			const task = await createStreamingTask()
 			const counter = recordNoToolUsePeak(task)
-			const { snapshots } = recordSaveSnapshots(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
 
 			vi.spyOn(task, "attemptApiRequest")
 				.mockImplementationOnce(() =>
@@ -518,12 +534,14 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 
 			// The parser rejects the pathless call, so the valid call staged
 			// before it is discarded too: failure promotes nothing and the
-			// complete response text is preserved.
-			// Early saves run before the stream produces content; observe the
-			// first capture that holds the finalized response.
-			const rejected = snapshots.find((snapshot) => snapshot.length > 0) ?? []
-			expect(rejected.some((block) => block.type === "tool_use")).toBe(false)
-			expect(rejected.find((block) => block.type === "text")?.content).toBe(
+			// complete response text is preserved. The first assistant
+			// API-history entry is built after the salvage decision, so it
+			// shows the retained full text and no promoted tool_use (review
+			// 4712438423, round-3 additional comment).
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const rejectedBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(rejectedBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejectedBlocks.find((block) => block.type === "text")?.text).toBe(
 				"<read_file><path>a.ts</path></read_file><read_file></read_file>",
 			)
 			expect(counter.peak()).toBe(1)
@@ -564,6 +582,105 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			})
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Salvaged 1 XML tool call"))
 			warnSpy.mockRestore()
+		})
+
+		it("keeps a JSON-looking value on a string-declared parameter a string (review 6081008463)", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "text",
+						text: "<write_to_file><path>b.ts</path><content>[1, 2]</content></write_to_file>",
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const salvagedBlocks = content.filter((block) => block.type === "tool_use")
+			expect(salvagedBlocks).toHaveLength(1)
+			// content is declared string, so the JSON-looking value must stay
+			// a string end to end (round-3 pre-merge check, case 1).
+			expect(salvagedBlocks[0].nativeArgs).toMatchObject({ path: "b.ts", content: "[1, 2]" })
+			warnSpy.mockRestore()
+		})
+
+		it("promotes neither call when a structured parameter is not valid JSON (review 4713747404)", async () => {
+			const task = await createStreamingTask()
+			const counter = recordNoToolUsePeak(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
+			const invalidCall =
+				"<read_file><path>a.ts</path></read_file><ask_followup_question><question>Continue?</question><follow_up>not json</follow_up></ask_followup_question>"
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: invalidCall }]))
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call",
+							id: "toolu_native4",
+							name: "write_to_file",
+							arguments: '{"path":"b.ts","content":"hi"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// follow_up is declared array but is not JSON: the whole salvage
+			// is rejected, so the staged read_file call never executes and
+			// the full response text reaches the API history (round-3
+			// pre-merge check, case 2).
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const rejectedBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(rejectedBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejectedBlocks.find((block) => block.type === "text")?.text).toBe(invalidCall)
+			// The retry's native call is the only tool_use in the content.
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].name).toBe("write_to_file")
+			expect(counter.peak()).toBe(1)
+		})
+
+		it("promotes neither call when a declared array parameter parses as an object (review 4713747404)", async () => {
+			const task = await createStreamingTask()
+			const counter = recordNoToolUsePeak(task)
+			const { assistantEntries } = recordApiHistoryEntries(task)
+			const invalidCall =
+				"<read_file><path>a.ts</path></read_file><ask_followup_question><question>Continue?</question><follow_up>{}</follow_up></ask_followup_question>"
+
+			vi.spyOn(task, "attemptApiRequest")
+				.mockImplementationOnce(() => asyncStreamFrom<ApiStreamChunk>([{ type: "text", text: invalidCall }]))
+				.mockImplementationOnce(() =>
+					asyncStreamFrom<ApiStreamChunk>([
+						{
+							type: "tool_call",
+							id: "toolu_native5",
+							name: "write_to_file",
+							arguments: '{"path":"b.ts","content":"hi"}',
+						},
+					]),
+				)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// follow_up={} parses to an object although the schema declares
+			// an array: the parser's presence-only check would promote the
+			// call and clear the text, so the shape conflict must reject the
+			// whole salvage (review 4713747404).
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const rejectedBlocks = assistantEntries[0].content as Array<{ type: string; text?: string }>
+			expect(rejectedBlocks.some((block) => block.type === "tool_use")).toBe(false)
+			expect(rejectedBlocks.find((block) => block.type === "text")?.text).toBe(invalidCall)
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].name).toBe("write_to_file")
+			expect(counter.peak()).toBe(1)
 		})
 	})
 })

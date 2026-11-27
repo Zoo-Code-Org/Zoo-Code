@@ -16,8 +16,11 @@
  *   description hints, so the model still sees the constraint they carried;
  * - compilation never turns a satisfiable schema into an unsatisfiable one:
  *   removing patternProperties relaxes a retained additionalProperties: false,
- *   a oneOf whose branches changed moves under anyOf, and a not whose
- *   predicate changed is dropped (its original rule stays in the hint);
+ *   a oneOf whose branches changed moves under anyOf as its own allOf
+ *   conjunct (an unchanged sibling anyOf keeps applying on its own), a not
+ *   whose predicate changed is dropped, and a conditional whose if predicate
+ *   changed loses its then/else branches (each original rule stays in the
+ *   hint);
  * - compilation is pure: the caller-owned schema object is never mutated.
  *
  * Unlike stripUnsupportedStrictKeywords (the strict-mode sanitizer applied for
@@ -106,6 +109,13 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 	const removed: Record<string, unknown> = {}
 	let relaxedOneOf: unknown[] | undefined
 
+	// A conditional whose `if` predicate compilation changes cannot keep its
+	// branches: the compiled predicate selects then/else for values the
+	// original rejected, and a retained then would reject them all. Detect
+	// the change before the key loop so the decision cannot depend on key
+	// order (issue #547 review 4713747391).
+	const conditionalRelaxed = isRecord(schema.if) && !deepEqualJson(compileSchemaNode(schema.if, depth + 1), schema.if)
+
 	for (const [key, value] of Object.entries(schema)) {
 		if (DEEPSEEK_REJECTED_SCHEMA_KEYWORDS.has(key)) {
 			defineOwnKey(removed, key, value)
@@ -161,13 +171,30 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 				}
 				continue
 			}
-		} else if (
-			key === "additionalProperties" ||
-			key === "if" ||
-			key === "then" ||
-			key === "else" ||
-			key === "propertyNames"
-		) {
+		} else if (key === "if") {
+			if (isRecord(value)) {
+				if (conditionalRelaxed) {
+					// The compiled predicate changed: the whole original
+					// conditional moves into the hint, so then/else cannot
+					// fire on values the original schema accepted.
+					defineOwnKey(removed, key, value)
+				} else {
+					defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
+				}
+				continue
+			}
+		} else if (key === "then" || key === "else") {
+			if (conditionalRelaxed) {
+				// The branches belong to a relaxed conditional; they travel
+				// into the hint with their if predicate.
+				defineOwnKey(removed, key, value)
+				continue
+			}
+			if (isRecord(value)) {
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
+				continue
+			}
+		} else if (key === "additionalProperties" || key === "propertyNames") {
 			if (isRecord(value)) {
 				defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
 				continue
@@ -178,10 +205,18 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 	}
 
 	if (relaxedOneOf) {
-		// Merge instead of overwrite: the input may declare anyOf alongside
-		// the relaxed oneOf.
-		const existing = Array.isArray(result.anyOf) ? (result.anyOf as unknown[]) : []
-		defineOwnKey(result, "anyOf", [...existing, ...relaxedOneOf])
+		// Sibling constraints apply together, never as alternatives: the
+		// original anyOf stays untouched and the relaxed oneOf branches
+		// become one separate allOf conjunct (issue #547 review
+		// 4713747398). With no sibling combinator the branches keep the
+		// anyOf position unchanged.
+		const alternatives = { anyOf: relaxedOneOf }
+		if (Array.isArray(result.anyOf) || Array.isArray(result.allOf)) {
+			const existing = Array.isArray(result.allOf) ? (result.allOf as unknown[]) : []
+			defineOwnKey(result, "allOf", [...existing, alternatives])
+		} else {
+			defineOwnKey(result, "anyOf", relaxedOneOf)
+		}
 	}
 
 	// Removing patternProperties can strand keys that were legal only through

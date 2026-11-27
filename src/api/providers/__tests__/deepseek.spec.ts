@@ -1169,6 +1169,116 @@ describe("DeepSeekHandler", () => {
 			expect((props["__proto__"] as Record<string, unknown>).type).toBe("string")
 			expect(params.required).toStrictEqual(["__proto__"])
 		})
+
+		it("keeps a sibling anyOf as its own constraint next to a relaxed oneOf (review 4713747398)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							label: {
+								anyOf: [{ const: "apple" }],
+								oneOf: [
+									{ type: "string", pattern: "^a" },
+									{ type: "string", pattern: "^b" },
+								],
+							},
+						},
+						required: ["label"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const label = (params.properties ?? {}).label as unknown as {
+				anyOf?: Array<Record<string, unknown>>
+				oneOf?: unknown
+				allOf?: Array<{ anyOf?: Array<Record<string, unknown>> }>
+			}
+			// The sibling anyOf must stay exactly as declared: the relaxed
+			// branches are alternatives only among themselves, so "banana"
+			// keeps failing the unchanged const constraint.
+			expect(label.anyOf).toStrictEqual([{ const: "apple" }])
+			expect(label).not.toHaveProperty("oneOf")
+			const conjuncts = label.allOf ?? []
+			expect(conjuncts).toHaveLength(1)
+			const relaxed = conjuncts[0].anyOf ?? []
+			expect(relaxed).toHaveLength(2)
+			// Each relaxed branch keeps its type and the removed pattern only
+			// as the description hint the model still reads.
+			expect(relaxed[0].type).toBe("string")
+			expect(relaxed[1].type).toBe("string")
+			expect(relaxed[0]).not.toHaveProperty("pattern")
+			expect(relaxed[1]).not.toHaveProperty("pattern")
+			expect(String(relaxed[0].description)).toContain("^a")
+			expect(String(relaxed[1].description)).toContain("^b")
+		})
+
+		it("drops a conditional whose if predicate changed and records it (review 4713747391)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							name: {
+								type: "string",
+								if: { pattern: "^tmp" },
+								then: false,
+							},
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The compiled if accepts every string, so a retained then: false
+			// would reject values ("report") the original schema accepted.
+			expect(name).not.toHaveProperty("if")
+			expect(name).not.toHaveProperty("then")
+			expect(name).not.toHaveProperty("else")
+			// The original conditional stays visible as a hint.
+			expect(String(name.description)).toContain("^tmp")
+			expect(String(name.description)).toContain("then")
+		})
+
+		it("keeps an unchanged conditional in place (review 4713747391)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: {
+							name: {
+								type: "string",
+								if: { format: "uuid" },
+								then: { description: "an id" },
+							},
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The predicate compiles unchanged, so the conditional is preserved.
+			expect(name.if).toStrictEqual({ format: "uuid" })
+			expect(name.then).toStrictEqual({ description: "an id" })
+			expect(name).not.toHaveProperty("description")
+		})
 	})
 })
 

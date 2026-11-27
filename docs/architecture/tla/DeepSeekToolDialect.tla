@@ -14,11 +14,17 @@
 \*            accepts nothing under exactly-one semantics (review 4712438393).
 \* Failure 6: a not whose predicate lost its constraint rejects every value
 \*            (review 4712438405).
+\* Failure 7: a conditional whose if predicate compilation changes keeps
+\*            then: false and rejects values the original schema accepted
+\*            (review 4713747391).
+\* Failure 8: a relaxed oneOf absorbs a sibling anyOf, so the sibling stops
+\*            applying as its own constraint (review 4713747398).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
-\*             SatPreserved.
+\*             SatPreserved, SiblingConjunctKept.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
-\* KeepOneOf and KeepClosed fail SatPreserved.
+\* KeepOneOf, KeepClosed and KeepConditional fail SatPreserved. AbsorbAnyOf
+\* Expect: fails SiblingConjunctKept.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -28,18 +34,21 @@
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 512 states. ForceRequired fails RequiredPreserved.
+\* Result: Fixed holds in 4096 states. ForceRequired fails RequiredPreserved.
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
-\* NotTighten, KeepOneOf and KeepClosed each fail SatPreserved. TLC found no
-\* state outside the sabotages.
+\* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
+\* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
+\* outside the sabotages.
 \* Cost: TLC runs in seconds. Agent time is not measured.
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
-\* JSON.parse regression test). (Round 2.)
+\* JSON.parse regression test). (Round 2.) Round 3: 2 added (4713747391
+\* changed conditional, 4713747398 sibling anyOf).
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
-                                  \* "DropSilently", "NotTighten", "KeepOneOf"
-                                  \* or "KeepClosed"
+                                  \* "DropSilently", "NotTighten", "KeepOneOf",
+                                  \* "KeepClosed", "KeepConditional"
+                                  \* or "AbsorbAnyOf"
 
 VARIABLE in
 
@@ -49,29 +58,36 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* may carry rejected keywords (kw2) and may be composed: a not whose child
 \* carries a rejected keyword (not2, childKw), a oneOf of two
 \* pattern-distinguished branches whose branch carries a rejected keyword
-\* (oneOf2, branchKw), or a closed object whose extra key is legal only
-\* through patternProperties (closed2).
+\* (oneOf2, branchKw), a closed object whose extra key is legal only
+\* through patternProperties (closed2), a conditional whose if predicate
+\* carries a rejected keyword (cond2, ifKw), or an unchanged anyOf sibling
+\* next to the oneOf (anyOf2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
-           closed2 : BOOLEAN]
+           closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
+           anyOf2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
 \* The compiled output for this input: the required set, the rejected keywords
 \* still present, the removed keywords re-encoded in the description, and the
-\* three satisfiability decisions. Fixed drops a negation only when its child
-\* lost a constraint, moves a oneOf only when a branch changed, and relaxes
-\* additionalProperties only under removed patternProperties.
+\* satisfiability decisions. Fixed drops a negation only when its child lost
+\* a constraint, moves a oneOf only when a branch changed, relaxes
+\* additionalProperties only under removed patternProperties, drops a
+\* conditional only when its if predicate changed, and always keeps an anyOf
+\* sibling as its own constraint.
 \* ForceRequired is the all-required rewrite the strict path used before.
 \* KeepPattern leaves every keyword in place. DropSilently removes without a
-\* note. NotTighten, KeepOneOf and KeepClosed each retain exactly one
-\* tightened construct.
+\* note. NotTighten, KeepOneOf, KeepClosed, KeepConditional and AbsorbAnyOf
+\* each retain exactly one tightened construct.
 Decisions(i) ==
     LET fixed ==
         [required |-> Required(i), kept |-> {}, noted |-> i.kw2,
          notDropped |-> i.not2 /\ i.childKw,
          overlapSafe |-> i.oneOf2 /\ i.branchKw,
-         apRelaxed |-> i.closed2]
+         apRelaxed |-> i.closed2,
+         condRelaxed |-> i.cond2 /\ i.ifKw,
+         siblingKept |-> TRUE]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
@@ -85,6 +101,10 @@ Decisions(i) ==
         [fixed EXCEPT !["overlapSafe"] = FALSE]
     [] Variant = "KeepClosed" ->
         [fixed EXCEPT !["apRelaxed"] = FALSE]
+    [] Variant = "KeepConditional" ->
+        [fixed EXCEPT !["condRelaxed"] = FALSE]
+    [] Variant = "AbsorbAnyOf" ->
+        [fixed EXCEPT !["siblingKept"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -94,6 +114,8 @@ TypeOK ==
     /\ Decisions(in).notDropped \in BOOLEAN
     /\ Decisions(in).overlapSafe \in BOOLEAN
     /\ Decisions(in).apRelaxed \in BOOLEAN
+    /\ Decisions(in).condRelaxed \in BOOLEAN
+    /\ Decisions(in).siblingKept \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -130,6 +152,22 @@ ClosedPart(i) ==
     ELSE IF Variant = "KeepPattern" THEN TRUE
     ELSE Decisions(i).apRelaxed
 
-SatPreserved == NotPart(in) /\ OneOfPart(in) /\ ClosedPart(in)
+\* v2 does not match the original if predicate when ifKw holds: the
+\* conditional keeps accepting it only when compilation relaxed the
+\* conditional or the predicate never lost a keyword.
+CondPart(i) ==
+    IF ~i.cond2 THEN TRUE
+    ELSE IF Decisions(i).condRelaxed THEN TRUE
+    ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE i.ifKw = FALSE
+
+SatPreserved == NotPart(in) /\ OneOfPart(in) /\ ClosedPart(in) /\ CondPart(in)
+
+\* Safety: relaxed oneOf alternatives stay one separate conjunct, so an
+\* unchanged anyOf sibling keeps applying on its own (a value it rejects
+\* stays rejected).
+SiblingConjunctKept ==
+    IF Decisions(in).overlapSafe /\ in.anyOf2 THEN Decisions(in).siblingKept
+    ELSE TRUE
 
 ====
