@@ -111,7 +111,7 @@ jobs:
             - name: Check formatting
               run: pnpm format:check
             - name: Lint
-              run: pnpm lint
+              run: pnpm lint:ci
             - name: Check types
               run: pnpm check-types
             - name: Test mock authentication

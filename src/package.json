@@ -450,6 +450,7 @@
 	},
 	"scripts": {
 		"lint": "eslint . --ext=ts --max-warnings=0 --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache",
+		"lint:ci": "eslint . --ext=ts --max-warnings=0 --no-cache",
 		"check-types": "tsc --noEmit",
 		"test": "vitest run",
 		"verify:coverage-contract": "node scripts/verify-coverage-contract.mjs",

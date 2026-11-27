@@ -68,3 +68,18 @@ matches its issue, or that a test detects a behavioral regression. Use focused
 contract tests and the existing changed-code mutation checks for those questions.
 Keep new architectural ESLint rules and clone detection scoped to demonstrated
 failure patterns and validate their false positives before making them required.
+
+## Local lint cache and CI
+
+The commit hook lints staged extension files with a content cache.
+It stores the cache in `src/node_modules/.cache/eslint/.eslintcache-staged`.
+This cache is separate from the full local lint cache used by `pnpm --dir src lint`.
+Repeat commit attempts can reuse results when the staged files have not changed.
+A changed file with type-aware rules can still require TypeScript project analysis.
+
+The local cache does not track changes to imported types.
+Code QA runs `pnpm lint:ci`. It runs the other workspace lint tasks through Turbo with `--force`.
+It then runs `pnpm --dir src lint:ci` directly, which checks the full extension with `--no-cache`.
+The extension runs once. Other workspace lint commands keep their existing ESLint cache settings.
+Use `pnpm --dir src lint:ci` locally when you need a fresh extension check.
+Keep `--prune-suppressions` checks separate and scoped to the edited files, as required by `AGENTS.md`.

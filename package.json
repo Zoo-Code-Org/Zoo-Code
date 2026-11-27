@@ -10,6 +10,7 @@
 		"install": "node scripts/bootstrap.mjs",
 		"install:all": "node scripts/bootstrap.mjs",
 		"lint": "turbo lint --log-order grouped --output-logs new-only",
+		"lint:ci": "pnpm lint --force --filter=!zoo-code && pnpm --dir src lint:ci",
 		"check-types": "tsc -p tsconfig.json --noEmit && turbo check-types --log-order grouped --output-logs new-only",
 		"test": "turbo test --log-order grouped --output-logs new-only",
 		"test:local": "node scripts/test-local.mjs",
@@ -70,7 +71,7 @@
 	},
 	"lint-staged": {
 		"src/**/*.ts": [
-			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored"
+			"pnpm --dir src exec eslint --max-warnings=0 --no-warn-ignored --cache --cache-strategy content --cache-location node_modules/.cache/eslint/.eslintcache-staged"
 		],
 		"webview-ui/src/**/*.{ts,tsx}": [
 			"pnpm --dir webview-ui exec eslint --max-warnings=0 --no-warn-ignored"

@@ -148,3 +148,38 @@ describe("Code QA dependency install", () => {
 		assert.equal(frozen.length, setups.length)
 	})
 })
+
+// CiChecksCurrent: neither cache layer can reuse a result after imported types change.
+describe("lint cache policy", () => {
+	const manifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "package.json"), "utf8"))
+
+	it("uses a separate content cache for staged extension files", () => {
+		const commands = manifest["lint-staged"]["src/**/*.ts"]
+		assert.equal(commands.length, 1)
+		const command = commands[0]
+		assert.match(command, /^pnpm --dir src exec eslint /)
+		for (const option of ["--max-warnings=0", "--no-warn-ignored", "--cache", "--cache-strategy content"]) {
+			assert.ok(command.split(" ").includes(option) || command.includes(`${option} `), `missing ${option}`)
+		}
+		assert.match(command, /--cache-location node_modules\/\.cache\/eslint\/\.eslintcache-staged$/)
+	})
+
+	it("bypasses Turbo and ESLint caches in the unconditional CI lint step", () => {
+		const command = manifest.scripts["lint:ci"]
+		assert.equal(typeof command, "string")
+		const [otherPackages, extension] = command.split(" && ")
+		assert.match(otherPackages, /^pnpm lint /)
+		assert.ok(otherPackages.split(" ").includes("--force"))
+		assert.ok(otherPackages.split(" ").includes("--filter=!zoo-code"))
+		assert.equal(extension, "pnpm --dir src lint:ci")
+		const extensionManifest = JSON.parse(fs.readFileSync(path.join(repositoryRoot, "src/package.json"), "utf8"))
+		const freshCommand = extensionManifest.scripts["lint:ci"].split(" ")
+		assert.equal(freshCommand[0], "eslint")
+		assert.ok(freshCommand.includes("."))
+		assert.ok(freshCommand.includes("--max-warnings=0"))
+		assert.ok(freshCommand.includes("--no-cache"))
+		assert.ok(!freshCommand.some((option) => option === "--cache" || option.startsWith("--cache-")))
+		assert.match(workflowStep("Lint"), /run: pnpm lint:ci\s*$/)
+		assert.doesNotMatch(workflowStep("Lint"), /continue-on-error|if:/)
+	})
+})
