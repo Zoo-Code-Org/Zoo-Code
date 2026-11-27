@@ -305,6 +305,7 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 		type FinalizedEntry = {
 			type: string
 			name: string
+			id?: string
 			partial: boolean
 			content?: string
 			nativeArgs?: Record<string, unknown>
@@ -397,6 +398,77 @@ describe("Task - XML tool salvage (issue #547 defect 4)", () => {
 			// The turn must not count as a no-tool-use failure.
 			expect(access.consecutiveNoToolUseCount).toBe(0)
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Salvaged 1 XML tool call"))
+			warnSpy.mockRestore()
+		})
+
+		it("does not salvage XML text beside a native tool call in the same response (review 4716476974)", async () => {
+			const task = await createStreamingTask()
+			const { assistantEntries } = recordApiHistoryEntries(task)
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "tool_call",
+						id: "toolu_native_precedence",
+						name: "write_to_file",
+						arguments: '{"path":"b.ts","content":"hi"}',
+					},
+					{ type: "text", text: "<read_file><path>a.ts</path></read_file>" },
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			// A native tool call wins: the salvage guard must not add a
+			// second channel, so the full tool array contains only the
+			// native call.
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const toolUses = content.filter((block) => block.type === "tool_use")
+			expect(toolUses).toHaveLength(1)
+			expect(toolUses[0].name).toBe("write_to_file")
+			expect(toolUses[0].id).toBe("toolu_native_precedence")
+			// The XML text is not consumed by a salvage: the API history
+			// retains it alongside the native tool_use.
+			expect(assistantEntries.length).toBeGreaterThan(0)
+			const entryBlocks = assistantEntries[0].content as Array<{ type: string; text?: string; name?: string }>
+			expect(entryBlocks.find((block) => block.type === "text")?.text).toBe(
+				"<read_file><path>a.ts</path></read_file>",
+			)
+			expect(entryBlocks.filter((block) => block.type === "tool_use").map((block) => block.name)).toStrictEqual([
+				"write_to_file",
+			])
+		})
+
+		it("converts a number-declared timeout before native parsing (review 4716476981)", async () => {
+			const task = await createStreamingTask()
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
+
+			vi.spyOn(task, "attemptApiRequest").mockImplementation(() =>
+				asyncStreamFrom<ApiStreamChunk>([
+					{
+						type: "text",
+						text: "<execute_command><command>npm run dev</command><cwd>/test/workspace</cwd><timeout>5</timeout></execute_command>",
+					},
+				]),
+			)
+
+			await task.recursivelyMakeClineRequests([{ type: "text", text: "test" }])
+
+			const content = getSalvageAccess(task).assistantMessageContent as FinalizedEntry[]
+			const salvagedBlocks = content.filter((block) => block.type === "tool_use")
+			expect(salvagedBlocks).toHaveLength(1)
+			expect(salvagedBlocks[0].name).toBe("execute_command")
+			// The schema declares timeout ["number","null"]; the XML text
+			// must be promoted as the number 5. The pre-fix promotion kept
+			// the string "5", which resolveAgentTimeoutMs converts to zero —
+			// the command then never enters the background after 5 seconds
+			// and the turn waits until the process exits or the user
+			// intervenes.
+			expect(salvagedBlocks[0].nativeArgs).toStrictEqual({
+				command: "npm run dev",
+				cwd: "/test/workspace",
+				timeout: 5,
+			})
 			warnSpy.mockRestore()
 		})
 

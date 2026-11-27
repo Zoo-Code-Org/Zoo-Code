@@ -12,6 +12,76 @@ function constraintNote(removed: Schema): string {
 	return `Constraints: ${JSON.stringify(removed)}`
 }
 
+/**
+ * Minimal Draft 2020-12 acceptance oracle for the keyword subset these
+ * fixtures use (type, pattern, required/properties, oneOf/anyOf/allOf). It
+ * encodes JSON Schema semantics - not the stripper's rules - so a test can
+ * assert that values the declared schema accepted still validate after
+ * stripping.
+ */
+function matchesType(type: string, value: unknown): boolean {
+	switch (type) {
+		case "string":
+			return typeof value === "string"
+		case "object":
+			return typeof value === "object" && value !== null && !Array.isArray(value)
+		case "array":
+			return Array.isArray(value)
+		case "null":
+			return value === null
+		case "number":
+			return typeof value === "number"
+		case "integer":
+			return typeof value === "number" && Number.isInteger(value)
+		case "boolean":
+			return typeof value === "boolean"
+		default:
+			return true
+	}
+}
+
+function accepts(schema: unknown, value: unknown): boolean {
+	if (typeof schema !== "object" || schema === null || Array.isArray(schema)) {
+		return true
+	}
+	const s = schema as Schema
+	if (Array.isArray(s.oneOf)) {
+		return s.oneOf.filter((branch) => accepts(branch, value)).length === 1
+	}
+	if (Array.isArray(s.anyOf)) {
+		return s.anyOf.some((branch) => accepts(branch, value))
+	}
+	if (Array.isArray(s.allOf)) {
+		return s.allOf.every((branch) => accepts(branch, value))
+	}
+	if (typeof s.type === "string" && !matchesType(s.type, value)) {
+		return false
+	}
+	if (typeof s.pattern === "string") {
+		if (typeof value !== "string" || !new RegExp(s.pattern).test(value)) {
+			return false
+		}
+	}
+	if (s.properties === undefined) {
+		return true
+	}
+	if (typeof value !== "object" || value === null || Array.isArray(value)) {
+		return false
+	}
+	const object = value as Record<string, unknown>
+	for (const required of Array.isArray(s.required) ? s.required : []) {
+		if (typeof required === "string" && !(required in object)) {
+			return false
+		}
+	}
+	for (const [key, sub] of Object.entries(s.properties as Schema)) {
+		if (key in object && !accepts(sub, object[key])) {
+			return false
+		}
+	}
+	return true
+}
+
 describe("stripUnsupportedStrictKeywords", () => {
 	it.each([
 		["minimum", 1],
@@ -112,9 +182,18 @@ describe("stripUnsupportedStrictKeywords", () => {
 		},
 	)
 
-	it.each(["anyOf", "oneOf", "allOf", "prefixItems"])("strips each subschema in the %s list", (keyword) => {
+	it.each(["anyOf", "allOf", "prefixItems"])("strips each subschema in the %s list", (keyword) => {
 		expect(strip({ [keyword]: [{ type: "integer", minimum: 0 }, { type: "null" }] })).toEqual({
 			[keyword]: [{ type: "integer", description: constraintNote({ minimum: 0 }) }, { type: "null" }],
+		})
+	})
+
+	it("moves a stripped oneOf list under anyOf (review 4716476955)", () => {
+		// The stripped branches lose their distinguishing constraints, so
+		// exactly-one semantics would accept nothing; the stripped branches
+		// arrive in the anyOf position instead.
+		expect(strip({ oneOf: [{ type: "integer", minimum: 0 }, { type: "null" }] })).toEqual({
+			anyOf: [{ type: "integer", description: constraintNote({ minimum: 0 }) }, { type: "null" }],
 		})
 	})
 
@@ -204,5 +283,84 @@ describe("stripUnsupportedStrictKeywords", () => {
 		strip(schema)
 
 		expect(schema).toEqual(snapshot)
+	})
+
+	it("moves a stripped oneOf under anyOf so single-alternative values stay accepted (review 4716476955)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { str: { oneOf: [{ pattern: "^a$" }, { pattern: "^b$" }] } },
+			required: ["str"],
+		}
+		// Ground truth on the declared schema: "a" and "b" each match exactly
+		// one alternative, "ab" matches none.
+		expect(accepts(schema, { str: "a" })).toBe(true)
+		expect(accepts(schema, { str: "b" })).toBe(true)
+		expect(accepts(schema, { str: "ab" })).toBe(false)
+
+		const compiled = strip(schema)
+		const str = (compiled.properties as Schema).str as Schema & {
+			anyOf?: Array<Record<string, unknown>>
+			oneOf?: unknown
+			allOf?: Array<Record<string, unknown> & { anyOf?: unknown[] }>
+		}
+
+		// The stripped alternatives are no longer exactly-one alternatives:
+		// kept under oneOf every string would match both branches and the
+		// property would reject every value, so the branches relax under
+		// anyOf instead.
+		expect(str).not.toHaveProperty("oneOf")
+		expect(str.anyOf).toHaveLength(2)
+		expect(str.anyOf?.[0]).not.toHaveProperty("pattern")
+		expect(str.anyOf?.[1]).not.toHaveProperty("pattern")
+		expect(String(str.anyOf?.[0]?.description)).toContain("^a$")
+		expect(String(str.anyOf?.[1]?.description)).toContain("^b$")
+
+		// The acceptance oracle proves the emitted schema still VALIDATES the
+		// values the original accepted, not just that it changed shape.
+		expect(accepts(compiled, { str: "a" })).toBe(true)
+		expect(accepts(compiled, { str: "b" })).toBe(true)
+	})
+
+	it("keeps an unchanged oneOf exactly where it was (review 4716476955)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: { str: { oneOf: [{ type: "string" }, { type: "integer" }] } },
+			required: ["str"],
+		}
+
+		const compiled = strip(schema)
+		const str = (compiled.properties as Schema).str as Schema
+
+		// Nothing was stripped from the branches, so exactly-one semantics
+		// still hold and the combinator must not move.
+		expect(str.oneOf).toStrictEqual([{ type: "string" }, { type: "integer" }])
+		expect(str).not.toHaveProperty("anyOf")
+	})
+
+	it("moves a stripped oneOf beside an unchanged allOf sibling without absorbing it (review 4716476955)", () => {
+		const schema: Schema = {
+			type: "object",
+			properties: {
+				str: {
+					allOf: [{ type: "string" }],
+					oneOf: [{ pattern: "^a$" }, { pattern: "^b$" }],
+				},
+			},
+			required: ["str"],
+		}
+
+		const compiled = strip(schema)
+		const str = (compiled.properties as Schema).str as Schema & {
+			anyOf?: Array<Record<string, unknown>>
+			oneOf?: unknown
+			allOf?: Array<Record<string, unknown> & { anyOf?: unknown[] }>
+		}
+
+		// The unchanged allOf stays its own conjunct; the relaxed branches
+		// arrive as one additional allOf member.
+		expect(str).not.toHaveProperty("oneOf")
+		expect(str.allOf).toHaveLength(2)
+		expect(str.allOf?.[0]).toStrictEqual({ type: "string" })
+		expect(str.allOf?.[1]?.anyOf).toHaveLength(2)
 	})
 })

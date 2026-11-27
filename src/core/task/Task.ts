@@ -320,7 +320,12 @@ function describeSalvageShape(parsed: unknown): string {
  * unchanged, so a stringified array (ask_followup_question's follow_up)
  * reached the tool's shape validation as a string and the call was rejected.
  * Values whose declared type is array or object are parsed back to
- * structures before promotion. A conversion failure or a parsed shape that
+ * structures before promotion, and values declared number or integer are
+ * converted from their XML text the same way (issue #547 review
+ * 4716476981): a stringified <timeout>5</timeout> otherwise reaches
+ * resolveAgentTimeoutMs as a string, converts to zero, and the command
+ * never enters the background at the requested timeout. A conversion
+ * failure or a parsed shape that
  * conflicts with the declared type throws: the promotion loop treats the
  * whole salvage as invalid and keeps the response as plain text, because the
  * native parser deliberately accepts present-but-wrong-shaped values to
@@ -345,7 +350,12 @@ function structureDeclaredParamsForSalvage(
 			for (const [param, paramSchema] of Object.entries(properties as Record<string, unknown>)) {
 				const type = (paramSchema as unknown as Record<string, unknown>)?.type
 				const types = Array.isArray(type) ? type : [type]
-				if (types.includes("array") || types.includes("object")) {
+				if (
+					types.includes("array") ||
+					types.includes("object") ||
+					types.includes("number") ||
+					types.includes("integer")
+				) {
 					declaredStructured.set(param, {
 						declared: types.filter((entry): entry is string => typeof entry === "string"),
 					})

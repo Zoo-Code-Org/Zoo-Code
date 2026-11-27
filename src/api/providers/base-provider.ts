@@ -229,13 +229,16 @@ export abstract class BaseProvider implements ApiHandler {
 								// object recursion below cannot reach the
 								// original — normalize its own object shape
 								// here (review 4675158952): an object-typed
-								// original gets the strict constraints and
-								// nullable inner properties before the wrap.
+								// original gets the strict constraints before
+								// the wrap, with or without declared properties
+								// (review 6084531532), because strict mode
+								// requires additionalProperties: false on every
+								// object schema.
 								const originalTypes: unknown[] = Array.isArray(original.type)
 									? original.type
 									: // Stryker disable next-line ArrayDeclaration: equivalence - the wrap branch is reachable only for optional properties, whose string type was already widened to a type array above, so the fallback never holds "object"/"array" and only feeds those includes checks
 										[original.type]
-								if (originalTypes.includes("object") && original.properties) {
+								if (originalTypes.includes("object")) {
 									const converted = this.convertToolSchemaForOpenAI({ ...original, type: "object" })
 									// Keep the original's declared (possibly
 									// nullable) type.

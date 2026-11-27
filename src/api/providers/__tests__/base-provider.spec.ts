@@ -593,10 +593,11 @@ describe("BaseProvider", () => {
 			expect(result.properties.value).toStrictEqual(prop)
 		})
 
-		it("wraps an object-typed original without properties unchanged (#2653 mutation round)", () => {
-			// No properties: the wrapper's object branch must not fire, so
-			// the original is wrapped exactly as (already nullable) it
-			// was normalized.
+		it("normalizes an object-typed original without properties before wrapping (review 6084531532)", () => {
+			// No properties: the wrapper's object branch must still fire. Strict
+			// mode requires additionalProperties: false on every object schema,
+			// so the wrapped original carries it even with no declared properties
+			// (the round-6 correction applied to the property-less shape).
 			const prop = {
 				type: "object",
 				oneOf: [{ type: ["object", "null"] }, { type: ["string", "null"] }],
@@ -606,7 +607,11 @@ describe("BaseProvider", () => {
 			const result = provider.testConvertToolSchemaForOpenAI(schema)
 
 			expect(result.properties.value.anyOf).toStrictEqual([
-				{ type: ["object", "null"], oneOf: prop.oneOf },
+				{
+					type: ["object", "null"],
+					oneOf: prop.oneOf,
+					additionalProperties: false,
+				},
 				{ type: "null" },
 			])
 		})

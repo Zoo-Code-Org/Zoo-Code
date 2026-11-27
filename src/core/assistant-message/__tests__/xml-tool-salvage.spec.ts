@@ -34,6 +34,34 @@ describe("salvageXmlToolCalls", () => {
 		expect(salvaged?.[0]?.args.content).toBe("&lt; tag")
 	})
 
+	it("decodes a supported entity after raw ampersands (review 4716476962)", () => {
+		const salvaged = salvageXmlToolCalls("<write_to_file><content>x && y &lt; z</content></write_to_file>")
+		// The raw ampersands stay verbatim and the supported entity still
+		// decodes. The pre-fix scanner searched the suffix for a semicolon at
+		// the first ampersand, consumed "& y &lt;" as one unknown entity, and
+		// the promoted write_to_file received "&lt;" as literal text.
+		expect(salvaged?.[0]?.args.content).toBe("x && y < z")
+	})
+
+	it("decodes an entity after an unsupported entity span (review 4716476962)", () => {
+		const salvaged = salvageXmlToolCalls("<write_to_file><content>a&nbsp;b &amp; c</content></write_to_file>")
+		expect(salvaged?.[0]?.args.content).toBe("a&nbsp;b & c")
+	})
+
+	it("preserves hundreds of thousands of bare ampersands in one linear pass (review 4716476967)", () => {
+		// The pre-fix scanner searched the whole suffix for a semicolon at
+		// every ampersand — quadratic synchronous work on model output, with
+		// no length bound on a parameter value. The positional scan stays
+		// linear; this completes far inside the timeout post-fix and times
+		// out under the quadratic search.
+		const ampersands = "&".repeat(500_000)
+		const content = `${ampersands}tail &lt; end`
+		const startedAt = Date.now()
+		const salvaged = salvageXmlToolCalls(`<write_to_file><content>${content}</content></write_to_file>`)
+		expect(salvaged?.[0]?.args.content).toBe(`${ampersands}tail < end`)
+		expect(Date.now() - startedAt).toBeLessThan(1000)
+	}, 5000)
+
 	it("keeps an unknown entity such as &nbsp; as the literal text (review 6081008463)", () => {
 		const salvaged = salvageXmlToolCalls("<write_to_file><content>a&nbsp;b</content></write_to_file>")
 		expect(salvaged?.[0]?.args.content).toBe("a&nbsp;b")

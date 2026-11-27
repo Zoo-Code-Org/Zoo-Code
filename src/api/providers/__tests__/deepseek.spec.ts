@@ -1345,6 +1345,257 @@ describe("DeepSeekHandler", () => {
 			// was recorded anywhere in the compiled tree.
 			expect(JSON.stringify(compiled)).not.toContain("DeepSeek compatibility")
 		})
+
+		it("compiles constraints inside dependentSchemas (review 4716476931)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: { query: { type: "string" } },
+						dependentSchemas: {
+							query: {
+								properties: { query: { pattern: "^a" } },
+								required: ["query"],
+							},
+						},
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema & {
+				dependentSchemas?: Record<string, unknown>
+			}
+			const dependent = params.dependentSchemas ?? {}
+			const query = dependent.query as { properties?: Record<string, unknown>; required?: string[] }
+			// The dependent schema's constraints are compiled like any other
+			// container: the gateway-rejected pattern is removed and stays
+			// visible only as the description hint.
+			const inner = (query.properties ?? {}).query as Record<string, unknown>
+			expect(inner).not.toHaveProperty("pattern")
+			expect(String(inner.description)).toContain("^a")
+			// Property-name keys and nested required arrays survive traversal.
+			expect(Object.keys(dependent)).toStrictEqual(["query"])
+			expect(query.required).toStrictEqual(["query"])
+		})
+
+		it("leaves an unchanged dependentSchemas entry structurally identical (review 4716476931)", () => {
+			const dependentSchemas = { query: { properties: { query: { type: "string" } } } }
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: { query: { type: "string" } },
+						dependentSchemas,
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as { dependentSchemas?: unknown }
+			// Nothing to compile away: no rejected keyword, no hint added.
+			expect(params.dependentSchemas).toStrictEqual(dependentSchemas)
+			expect(tools[0].function.parameters).not.toHaveProperty("description")
+		})
+
+		it("drops a not whose $ref target changed and records it (review 4716476940)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { tmp: { pattern: "^tmp" } },
+						properties: {
+							name: { type: "string", not: { $ref: "#/$defs/tmp" } },
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema & {
+				$defs?: Record<string, unknown>
+			}
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The reference object is unchanged, but its target lost the
+			// pattern: the compiled target accepts every string, so a
+			// retained not would reject {"name":"report"} — a value the
+			// original schema accepted.
+			expect(name).not.toHaveProperty("not")
+			expect(String(name.description)).toContain("not")
+			// The target itself compiled: its pattern is removed with a hint.
+			expect(params.$defs?.tmp).not.toHaveProperty("pattern")
+		})
+
+		it("keeps a not whose $ref target compiles unchanged (review 4716476940)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { tmp: { type: "string" } },
+						properties: {
+							name: { type: "string", not: { $ref: "#/$defs/tmp" } },
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The target compiles unchanged, so the reference-stable negation
+			// is preserved exactly as declared.
+			expect(name.not).toStrictEqual({ $ref: "#/$defs/tmp" })
+			expect(name).not.toHaveProperty("description")
+		})
+
+		it("moves a oneOf whose $ref targets changed under anyOf (review 4716476940)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { a: { pattern: "^a" }, b: { type: "string" } },
+						properties: {
+							label: { oneOf: [{ $ref: "#/$defs/a" }, { $ref: "#/$defs/b" }] },
+						},
+						required: ["label"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const label = (params.properties ?? {}).label as unknown as Record<string, unknown>
+			// Target #/$defs/a lost its pattern, so every value would match
+			// both branches and a retained oneOf would accept nothing.
+			expect(label).not.toHaveProperty("oneOf")
+			expect(label.anyOf).toStrictEqual([{ $ref: "#/$defs/a" }, { $ref: "#/$defs/b" }])
+		})
+
+		it("drops a conditional whose if only references a changed target (review 4716476940)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { tmp: { pattern: "^tmp" } },
+						properties: {
+							name: {
+								type: "string",
+								if: { $ref: "#/$defs/tmp" },
+								then: { type: "string" },
+							},
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The compiled predicate accepts every string, so a retained
+			// then branch would fire on values the original rejected.
+			expect(name).not.toHaveProperty("if")
+			expect(name).not.toHaveProperty("then")
+			expect(name).not.toHaveProperty("else")
+			expect(String(name.description)).toContain("then")
+		})
+
+		it("keeps a conditional whose if references an unchanged target (review 4716476940)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { tmp: { type: "string" } },
+						properties: {
+							name: {
+								type: "string",
+								if: { $ref: "#/$defs/tmp" },
+								then: { description: "a tmp string" },
+							},
+						},
+						required: ["name"],
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as ObjectSchema
+			const name = (params.properties ?? {}).name as unknown as Record<string, unknown>
+			// The target compiles unchanged, so the conditional is preserved.
+			expect(name.if).toStrictEqual({ $ref: "#/$defs/tmp" })
+			expect(name.then).toStrictEqual({ description: "a tmp string" })
+		})
+
+		it("relaxes unevaluatedProperties when patternProperties is removed (review 4716476950)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^x": { type: "string" } },
+						required: ["x"],
+						unevaluatedProperties: false,
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// patternProperties was what evaluated the key x; with the rules
+			// removed, unevaluatedProperties: false would forbid the required
+			// property and no argument object could satisfy the schema.
+			expect(params.unevaluatedProperties).toBe(true)
+			expect(params.required).toStrictEqual(["x"])
+			expect(String(params.description)).toContain("patternProperties")
+		})
+
+		it("keeps unevaluatedProperties when no patternProperties is removed (review 4716476950)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						properties: { x: { type: "string" } },
+						required: ["x"],
+						unevaluatedProperties: false,
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// properties evaluates its own keys, so the closed-object rule is
+			// an ordinary restriction and stays untouched.
+			expect(params.unevaluatedProperties).toBe(false)
+			expect(params).not.toHaveProperty("description")
+		})
 	})
 })
 

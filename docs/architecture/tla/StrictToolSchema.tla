@@ -74,13 +74,20 @@
 \* focused tests, documented 5 equivalent ones as narrow Stryker disables,
 \* and removed 3 dead-code lines (a duplicated type check, a dead break
 \* guard) with no behavior change, so no invariant changed.
+\* Review round 8 (PR #2653, threads 4716476955 and 6084531532): a stripped
+\* oneOf keeps exactly-one semantics and accepts nothing - the spec adds the
+\* patOneOf input, the RelaxesChangedOneOf hook, and OneOfValuesKept
+\* (1 added, 0 covered, 0 gap; replays as a red-verified acceptance-oracle
+\* test in strict-tool-schema.spec.ts). The property-less object wrap guard
+\* (6084531532) is already demanded by WrappedInnerStrict ("object" shape
+\* without declared properties): covered, closed by the code fix.
 
 EXTENDS Naturals, TLC
 
 \* The name of the one modelled property.
 q == "q"
 
-VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner
+VARIABLES declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf
 
 Props == {q}
 Types == {"str", "null"}
@@ -116,10 +123,18 @@ NeverWrapped(multi) == FALSE
 \* the original's own inner schema is normalized BEFORE the wrap — an
 \* object-typed original carries required/all-keys and additionalProperties:
 \* false (round 4675158952), and an array-typed original's items object
-\* carries them (round 4675584064).
+\* carries them (round 4675584064). The wrap fires with or without declared
+\* properties (review 6084531532).
 NormalizesWrappedInner(shape) == shape # "none"
 \* Sabotage: the wrap keeps the original's inner schema untouched.
 SkipsWrappedInner(shape) == FALSE
+\* Fixed code: a oneOf whose pattern-distinguished alternatives were stripped
+\* (every value now matches both) relaxes under anyOf, so a value matching
+\* exactly one original alternative stays accepted (review 4716476955).
+RelaxesChangedOneOf(oneOf) == oneOf
+\* Sabotage: the stripped oneOf keeps exactly-one semantics and accepts
+\* nothing.
+NeverRelaxesOneOf(oneOf) == FALSE
 
 DeclaredType == {"str"} \cup (IF qNullable THEN {"null"} ELSE {})
 
@@ -186,6 +201,7 @@ TypeOK ==
     /\ oneOfMultiNull \in BOOLEAN
     /\ NestedIsOneOf \in {0, 1}
     /\ wrappedInner \in {"none", "object", "array"}
+    /\ patOneOf \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
@@ -199,12 +215,13 @@ Init ==
     /\ oneOfMultiNull \in BOOLEAN
     /\ NestedIsOneOf \in {0, 1}
     /\ wrappedInner \in {"none", "object", "array"}
+    /\ patOneOf \in BOOLEAN
     /\ ~(nestedWrapper /\ oneOfMultiNull)
     /\ (wrappedInner # "none" => oneOfMultiNull)
 
-Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner>>
+Next == UNCHANGED <<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf>>
 
-Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner>>
+Spec == Init /\ [][Next]_<<declaredReq, qNullable, declaredPat, qEnum, nestedWrapper, nestedMatches, oneOfMultiNull, NestedIsOneOf, wrappedInner, patOneOf>>
 
 \* An optional property stays optional: the emitted schema accepts null.
 \* The oracle checks the whole schema, not only the type list.
@@ -227,5 +244,12 @@ NestedOrMultiStillNullable == ((q \notin declaredReq) /\ (nestedWrapper \/ oneOf
 \* shape, 4675584064). The merge-base converter normalized these; the
 \* stripping pass must not lose them.
 WrappedInnerStrict == (oneOfMultiNull /\ wrappedInner # "none") => EmittedInnerStrict
+
+\* Review round 8 (4716476955): a oneOf whose distinguishing alternatives
+\* were stripped must relax under anyOf - a value the declared oneOf
+\* accepted ("a", matching exactly one ^a$/^b$ alternative) stays accepted
+\* after stripping. Under the sabotage the stripped exactly-one rule accepts
+\* nothing.
+OneOfValuesKept == patOneOf => RelaxesChangedOneOf(patOneOf)
 
 ====

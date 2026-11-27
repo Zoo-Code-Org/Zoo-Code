@@ -13,16 +13,24 @@ EXTENDS Naturals
 \* Failure 5: a promoted call whose arguments cannot match the declared
 \*            types runs and fails during execution, after the response text
 \*            was already cleared (review 4713747404).
+\* Failure 6: a parameter value with a raw ampersand before a supported
+\*            entity decodes wrongly - the first ampersand's suffix search
+\*            consumes the later entity as one unknown span (review
+\*            4716476962).
 \* Invariants: WholeTextOnly, AllOrNothing, NativeFirst, NestedNotPromoted,
-\*             InvalidNotPromoted.
+\*             InvalidNotPromoted, DecodedFaithful.
 \* Expect: Fixed holds. PromoteProse fails WholeTextOnly. PartialPromote fails
 \* Expect: AllOrNothing. IgnoreNative fails NativeFirst. NestedPromote fails
 \* Expect: NestedNotPromoted. PromoteInvalid fails InvalidNotPromoted.
+\* Expect: ConsumeAhead fails DecodedFaithful.
 \* Before this change no salvage existed: a text-only XML response promoted
 \* nothing and the turn ended in MODEL_NO_TOOLS_USED.
 \* Replay: a text-only response of one read_file block deadlocked the request
 \* loop in the pre-fix tree (the wiring test timed out with no tool_use block).
-\* Not modeled: entity decoding, tag-name syntax, the production parser's
+\* Not modeled: the WORK COUNT of entity decoding (a per-ampersand suffix
+\* search is quadratic; review 4716476967 is a gap in this abstraction,
+\* pinned by the linear-pass stress test in xml-tool-salvage.spec.ts),
+\* tag-name syntax, the production parser's
 \* tool-name and argument validation, the salvage cap as a number (modeled as
 \* the fixed set of blocks the domain admits), the same-name VALUE argument
 \* (skill = name is an ordinary parameter and stays salvageable; nested = FALSE
@@ -42,21 +50,26 @@ EXTENDS Naturals
 \* Cost: TLC runs in under 1 second. Agent time is not measured.
 \* Review: 1 added (round 2026-11-26 minor + review 4712438440 same-name nested
 \* regression), 3 gaps recorded above. (Round 2.) Round 3: 1 added (4713747404),
-\* 1 gap (the API-history retention sink, recorded above).
+\* 1 gap (the API-history retention sink, recorded above). Round 4 (reviews
+\* 4716476962, 4716476967): 1 added (positional entity matching, amps input,
+\* DecodedFaithful), 0 covered, 1 gap (the decoding work count, recorded
+\* above).
 
 CONSTANT Variant                  \* "Fixed", "PromoteProse", "PartialPromote",
-                                  \* "IgnoreNative", "NestedPromote"
-                                  \* or "PromoteInvalid"
+                                  \* "IgnoreNative", "NestedPromote",
+                                  \* "PromoteInvalid" or "ConsumeAhead"
 
 VARIABLE in
 
 \* A response is the number of well-formed tool blocks it contains, whether
 \* prose (non-XML text) surrounds them, whether a native tool call exists,
 \* whether a block carries a same-name child that is itself a tool block,
-\* and whether a block's salvaged arguments cannot match the declared types
-\* (a conversion failure or a shape conflict).
+\* whether a block's salvaged arguments cannot match the declared types
+\* (a conversion failure or a shape conflict), and whether a block's
+\* parameter value holds a raw ampersand before a later supported entity
+\* (amps).
 Inputs == [blocks : {0, 1, 2}, prose : BOOLEAN, native : BOOLEAN,
-           nested : BOOLEAN, badArgs : BOOLEAN]
+           nested : BOOLEAN, badArgs : BOOLEAN, amps : BOOLEAN]
 
 \* How many blocks the wiring promotes for this response.
 PromotedCount(i) ==
@@ -72,9 +85,20 @@ PromotedCount(i) ==
         IF ~i.prose /\ ~i.native /\ i.blocks > 0 THEN i.blocks ELSE 0
     [] Variant = "PromoteInvalid" ->
         IF ~i.prose /\ ~i.native /\ ~i.nested /\ i.blocks > 0 THEN i.blocks ELSE 0
+    [] Variant = "ConsumeAhead" ->
+        IF ~i.prose /\ ~i.native /\ ~i.nested /\ ~i.badArgs
+        /\ i.blocks > 0 THEN i.blocks ELSE 0
     [] OTHER ->
         IF ~i.prose /\ ~i.native /\ ~i.nested /\ ~i.badArgs
         /\ i.blocks > 0 THEN i.blocks ELSE 0
+
+\* Whether the promoted value is decoded faithfully: an entity is recognized
+\* only when it starts at the current ampersand, so a raw ampersand never
+\* consumes a later supported entity (review 4716476962). ConsumeAhead is
+\* the suffix-search decoder that reads to the next semicolon.
+DecodedFaithfully(i) ==
+    CASE Variant = "ConsumeAhead" -> ~i.amps
+    [] OTHER -> TRUE
 
 TypeOK == PromotedCount(in) \in {0, 1, 2} /\ PromotedCount(in) <= in.blocks
 
@@ -98,5 +122,9 @@ NestedNotPromoted == in.nested => PromotedCount(in) = 0
 \* Safety: arguments that cannot match their declared types fail only during
 \* execution, after the response text is gone. Such a response stays text.
 InvalidNotPromoted == in.badArgs => PromotedCount(in) = 0
+
+\* Safety: a promoted value preserves every entity the original text
+\* carried - a raw ampersand does not swallow a later supported entity.
+DecodedFaithful == in.amps => DecodedFaithfully(in)
 
 ====

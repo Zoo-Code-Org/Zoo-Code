@@ -19,12 +19,22 @@
 \*            (review 4713747391).
 \* Failure 8: a relaxed oneOf absorbs a sibling anyOf, so the sibling stops
 \*            applying as its own constraint (review 4713747398).
+\* Failure 9: a constraint inside a dependentSchemas entry survives uncompiled
+\*            and the gateway answers HTTP 422 (review 4716476931).
+\* Failure 10: a predicate whose object is only a $ref is retained although a
+\*             referenced target lost its constraint; the applied target then
+\*             rejects every value the original accepted (review 4716476940).
+\* Failure 11: removing patternProperties strands a retained
+\*             unevaluatedProperties: false - the removed rules were what
+\*             evaluated those keys, so a required property becomes forbidden
+\*             (review 4716476950).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
 \*             SatPreserved, SiblingConjunctKept.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
-\* KeepOneOf, KeepClosed and KeepConditional fail SatPreserved. AbsorbAnyOf
-\* Expect: fails SiblingConjunctKept.
+\* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate and KeepUnevaluated
+\* Expect: fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. KeepDependent
+\* Expect: fails ForbiddenAbsent.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -48,12 +58,16 @@
 \* Review: 3 added (4712438380, 4712438393, 4712438405), 1 gap (4712438384
 \* __proto__ own-property semantics are a JS artifact, pinned by the
 \* JSON.parse regression test). (Round 2.) Round 3: 2 added (4713747391
-\* changed conditional, 4713747398 sibling anyOf).
+\* changed conditional, 4713747398 sibling anyOf). Round 5 (reviews
+\* 4716476931, 4716476940, 4716476950): 3 added (dependentSchemas traversal,
+\* reference-target tracking, unevaluatedProperties relaxation), 0 covered,
+\* 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
-                                  \* "KeepClosed", "KeepConditional"
-                                  \* or "AbsorbAnyOf"
+                                  \* "KeepClosed", "KeepConditional", "AbsorbAnyOf",
+                                  \* "KeepDependent", "KeepRefPredicate"
+                                  \* or "KeepUnevaluated"
 
 VARIABLE in
 
@@ -65,39 +79,52 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* pattern-distinguished branches whose branch carries a rejected keyword
 \* (oneOf2, branchKw), a closed object whose extra key is legal only
 \* through patternProperties (closed2), a conditional whose if predicate
-\* carries a rejected keyword (cond2, ifKw), or an unchanged anyOf sibling
-\* next to the oneOf (anyOf2).
+\* carries a rejected keyword (cond2, ifKw), an unchanged anyOf sibling
+\* next to the oneOf (anyOf2), the keyword carried inside a
+\* dependentSchemas entry instead of directly on the property (dep2), a
+\* predicate whose child is only a $ref to a kw2-carrying target (ref2),
+\* and the closed-object rule shaped as unevaluatedProperties: false
+\* instead of additionalProperties: false (uneval2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
-           anyOf2 : BOOLEAN]
+           anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
+           uneval2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
 \* The compiled output for this input: the required set, the rejected keywords
 \* still present, the removed keywords re-encoded in the description, and the
 \* satisfiability decisions. Fixed drops a negation only when its child lost
-\* a constraint, moves a oneOf only when a branch changed, relaxes
-\* additionalProperties only under removed patternProperties, drops a
-\* conditional only when its if predicate changed, and always keeps an anyOf
-\* sibling as its own constraint.
+\* a constraint or a referenced target changed, moves a oneOf only when a
+\* branch (or a referenced branch target) changed, relaxes
+\* additionalProperties and unevaluatedProperties only under removed
+\* patternProperties, drops a conditional only when its if predicate (or a
+\* referenced predicate target) changed, and always keeps an anyOf sibling
+\* as its own constraint.
 \* ForceRequired is the all-required rewrite the strict path used before.
 \* KeepPattern leaves every keyword in place. DropSilently removes without a
 \* note. NotTighten, KeepOneOf, KeepClosed, KeepConditional and AbsorbAnyOf
-\* each retain exactly one tightened construct.
+\* each retain exactly one tightened construct. KeepDependent skips the
+\* dependentSchemas traversal. KeepRefPredicate keeps the reference-blind
+\* retention decisions. KeepUnevaluated keeps the stranded
+\* unevaluatedProperties: false rule.
 Decisions(i) ==
-    LET fixed ==
+    LET refChanged == i.ref2 /\ i.kw2 # {}
+    IN LET fixed ==
         [required |-> Required(i), kept |-> {}, noted |-> i.kw2,
-         notDropped |-> i.not2 /\ i.childKw,
-         overlapSafe |-> i.oneOf2 /\ i.branchKw,
-         apRelaxed |-> i.closed2,
-         condRelaxed |-> i.cond2 /\ i.ifKw,
+         notDropped |-> i.not2 /\ (i.childKw \/ refChanged),
+         overlapSafe |-> i.oneOf2 /\ (i.branchKw \/ refChanged),
+         apRelaxed |-> i.closed2 /\ ~i.uneval2,
+         uepRelaxed |-> i.closed2 /\ i.uneval2,
+         condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
          siblingKept |-> TRUE]
     IN CASE Variant = "ForceRequired" ->
         [fixed EXCEPT !["required"] = {1, 2}]
     [] Variant = "KeepPattern" ->
         [fixed EXCEPT !["kept"] = i.kw2, !["notDropped"] = FALSE,
-         !["overlapSafe"] = FALSE, !["apRelaxed"] = FALSE]
+         !["overlapSafe"] = FALSE, !["apRelaxed"] = FALSE,
+         !["uepRelaxed"] = FALSE]
     [] Variant = "DropSilently" ->
         [fixed EXCEPT !["noted"] = {}]
     [] Variant = "NotTighten" ->
@@ -105,11 +132,19 @@ Decisions(i) ==
     [] Variant = "KeepOneOf" ->
         [fixed EXCEPT !["overlapSafe"] = FALSE]
     [] Variant = "KeepClosed" ->
-        [fixed EXCEPT !["apRelaxed"] = FALSE]
+        [fixed EXCEPT !["apRelaxed"] = FALSE, !["uepRelaxed"] = FALSE]
     [] Variant = "KeepConditional" ->
         [fixed EXCEPT !["condRelaxed"] = FALSE]
     [] Variant = "AbsorbAnyOf" ->
         [fixed EXCEPT !["siblingKept"] = FALSE]
+    [] Variant = "KeepDependent" ->
+        [fixed EXCEPT !["kept"] = IF i.dep2 THEN i.kw2 ELSE {}]
+    [] Variant = "KeepRefPredicate" ->
+        [fixed EXCEPT !["notDropped"] = i.not2 /\ i.childKw,
+                      !["overlapSafe"] = i.oneOf2 /\ i.branchKw,
+                      !["condRelaxed"] = i.cond2 /\ i.ifKw]
+    [] Variant = "KeepUnevaluated" ->
+        [fixed EXCEPT !["uepRelaxed"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -119,6 +154,7 @@ TypeOK ==
     /\ Decisions(in).notDropped \in BOOLEAN
     /\ Decisions(in).overlapSafe \in BOOLEAN
     /\ Decisions(in).apRelaxed \in BOOLEAN
+    /\ Decisions(in).uepRelaxed \in BOOLEAN
     /\ Decisions(in).condRelaxed \in BOOLEAN
     /\ Decisions(in).siblingKept \in BOOLEAN
 
@@ -144,17 +180,20 @@ NotPart(i) ==
     IF ~i.not2 THEN TRUE
     ELSE IF Decisions(i).notDropped THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
     ELSE i.childKw = FALSE
 
 OneOfPart(i) ==
     IF ~i.oneOf2 THEN TRUE
     ELSE IF Decisions(i).overlapSafe THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
     ELSE i.branchKw = FALSE
 
 ClosedPart(i) ==
     IF ~i.closed2 THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.uneval2 THEN Decisions(i).uepRelaxed
     ELSE Decisions(i).apRelaxed
 
 \* v2 does not match the original if predicate when ifKw holds: the
@@ -164,6 +203,7 @@ CondPart(i) ==
     IF ~i.cond2 THEN TRUE
     ELSE IF Decisions(i).condRelaxed THEN TRUE
     ELSE IF Variant = "KeepPattern" THEN TRUE
+    ELSE IF i.ref2 /\ i.kw2 # {} THEN FALSE
     ELSE i.ifKw = FALSE
 
 SatPreserved == NotPart(in) /\ OneOfPart(in) /\ ClosedPart(in) /\ CondPart(in)

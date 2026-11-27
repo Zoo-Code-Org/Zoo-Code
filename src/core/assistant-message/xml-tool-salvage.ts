@@ -44,42 +44,44 @@ function isMcpToolName(name: string): boolean {
 	return name.startsWith("mcp--") || name.startsWith("mcp__")
 }
 
-/** Decodes the five predefined XML entities in one pass; unknown entities stay as-is. */
+/** The five predefined XML entities, matched as prefixes at the current position. */
+const XML_ENTITY_DECODES: ReadonlyArray<readonly [string, string]> = [
+	["&lt;", "<"],
+	["&gt;", ">"],
+	["&quot;", '"'],
+	["&apos;", "'"],
+	["&amp;", "&"],
+]
+
+/**
+ * Decodes the five predefined XML entities in one pass; unknown text stays
+ * as-is. An entity is recognized only when it starts AT the current
+ * ampersand: any other ampersand is preserved and the scan moves one
+ * character forward, so a supported entity after a raw ampersand still
+ * decodes ("x && y &lt; z" -> "x && y < z", issue #547 review 4716476962)
+ * and no suffix search runs per ampersand — a value of many bare ampersands
+ * stays linear instead of quadratic (issue #547 review 4716476967).
+ * Decoding is single-pass: "&amp;lt;" yields "&lt;", never "<".
+ */
 function decodeXmlEntities(value: string): string {
 	let out = ""
-	for (let i = 0; i < value.length; i++) {
+	for (let i = 0; i < value.length;) {
 		const char = value[i]
 		if (char !== "&") {
 			out += char
+			i++
 			continue
 		}
-		const semi = value.indexOf(";", i)
-		if (semi === -1) {
+		const decoded = XML_ENTITY_DECODES.find(([entity]) => value.startsWith(entity, i))
+		if (decoded) {
+			out += decoded[1]
+			i += decoded[0].length
+		} else {
+			// Not a supported entity: keep the ampersand and move on, so a
+			// later supported entity is still matched at its own position.
 			out += char
-			continue
+			i++
 		}
-		const entity = value.slice(i + 1, semi)
-		switch (entity) {
-			case "lt":
-				out += "<"
-				break
-			case "gt":
-				out += ">"
-				break
-			case "quot":
-				out += '"'
-				break
-			case "apos":
-				out += "'"
-				break
-			case "amp":
-				out += "&"
-				break
-			default:
-				// Not a supported entity: keep the raw text.
-				out += value.slice(i, semi + 1)
-		}
-		i = semi
 	}
 	return out
 }

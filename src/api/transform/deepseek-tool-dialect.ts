@@ -14,13 +14,19 @@
  *   nesting level);
  * - keywords DeepSeek gateways reject are removed and re-encoded as readable
  *   description hints, so the model still sees the constraint they carried;
+ * - schema maps are compiled depth-first: properties, $defs, definitions and
+ *   dependentSchemas (a constraint inside a dependent schema reaches the
+ *   gateway exactly like one on a property);
  * - compilation never turns a satisfiable schema into an unsatisfiable one:
- *   removing patternProperties relaxes a retained additionalProperties: false,
- *   a oneOf whose branches changed moves under anyOf as its own allOf
- *   conjunct (an unchanged sibling anyOf keeps applying on its own), a not
- *   whose predicate changed is dropped, and a conditional whose if predicate
- *   changed loses its then/else branches (each original rule stays in the
- *   hint);
+ *   removing patternProperties relaxes a retained additionalProperties: false
+ *   and a retained unevaluatedProperties: false (the removed rules were what
+ *   evaluated those keys), a oneOf whose branches - or whose branches'
+ *   reference targets - changed moves under anyOf as its own allOf conjunct
+ *   (an unchanged sibling anyOf keeps applying on its own), a not whose
+ *   predicate changed is dropped, and a conditional whose if predicate changed
+ *   loses its then/else branches. A predicate that only references schemas
+ *   ($ref) counts as changed when a referenced target itself compiles
+ *   differently (each original rule stays in the hint);
  * - compilation is pure: the caller-owned schema object is never mutated.
  *
  * Unlike stripUnsupportedStrictKeywords (the strict-mode sanitizer applied for
@@ -71,6 +77,72 @@ function deepEqualJson(a: unknown, b: unknown): boolean {
 }
 
 /**
+ * Collects every local "$ref" JSON pointer mentioned anywhere inside a
+ * predicate subtree. A reference applies its target schema at validation
+ * time, so a predicate whose own object is unchanged can still behave
+ * differently when one of its targets compiles differently.
+ */
+function collectRefPointers(value: unknown, seen: Set<unknown>, out: string[]): void {
+	if (Array.isArray(value)) {
+		for (const entry of value) {
+			collectRefPointers(entry, seen, out)
+		}
+		return
+	}
+	if (!isRecord(value) || seen.has(value)) {
+		return
+	}
+	seen.add(value)
+	if (typeof value.$ref === "string") {
+		out.push(value.$ref)
+	}
+	for (const entry of Object.values(value)) {
+		collectRefPointers(entry, seen, out)
+	}
+}
+
+/**
+ * Resolves a "#/..." JSON pointer against the original root schema. Anything
+ * else (external URIs, the whole-document "#" form, dangling pointers) is
+ * reported unresolved.
+ */
+function resolveLocalRef(root: unknown, ref: string): { resolved: boolean; target: unknown } {
+	if (!ref.startsWith("#/")) {
+		return { resolved: false, target: undefined }
+	}
+	let node: unknown = root
+	for (const rawSegment of ref.slice(2).split("/")) {
+		const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+		if (!isRecord(node) || !Object.prototype.hasOwnProperty.call(node, segment)) {
+			return { resolved: false, target: undefined }
+		}
+		node = node[segment]
+	}
+	return { resolved: true, target: node }
+}
+
+/**
+ * A predicate is reference-stable when every schema its "$ref"s resolve in
+ * the original root and compiles unchanged: the compiled document keeps the
+ * pointer path, so the retained predicate then behaves exactly as declared.
+ * An unresolvable or relaxed target means a retained predicate would apply
+ * constraints the original did not have - a tightening (issue #547 review
+ * 4716476940).
+ */
+function referencesUnchangedTargets(refs: string[], root: unknown, depth: number): boolean {
+	for (const ref of refs) {
+		const resolved = resolveLocalRef(root, ref)
+		if (!resolved.resolved) {
+			return false
+		}
+		if (!deepEqualJson(compileSchemaNode(resolved.target, depth + 1, root), resolved.target)) {
+			return false
+		}
+	}
+	return true
+}
+
+/**
  * Explicit own-property creation: a schema key like "__proto__" (legal in
  * JSON and produced by JSON.parse as an own property) must become an own data
  * property of the compiled copy, never a prototype change (issue #547 review
@@ -100,7 +172,7 @@ function describeRemovedConstraints(removed: Record<string, unknown>): string {
  * never mutated. Container positions (properties, items, combinators and the
  * keyword-driven schema values) are compiled depth-first.
  */
-function compileSchemaNode(schema: unknown, depth: number): unknown {
+function compileSchemaNode(schema: unknown, depth: number, root: unknown): unknown {
 	if (!isRecord(schema) || depth > MAX_SCHEMA_DEPTH) {
 		return schema
 	}
@@ -117,8 +189,19 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 	// once per level and the key loop reuses this copy, so a chain of
 	// unchanged conditionals costs linear work, not exponential
 	// (issue #547 review 4714821172).
-	const compiledIf = isRecord(schema.if) ? compileSchemaNode(schema.if, depth + 1) : undefined
-	const conditionalRelaxed = compiledIf !== undefined && !deepEqualJson(compiledIf, schema.if)
+	const compiledIf = isRecord(schema.if) ? compileSchemaNode(schema.if, depth + 1, root) : undefined
+	let conditionalRelaxed = compiledIf !== undefined && !deepEqualJson(compiledIf, schema.if)
+	if (!conditionalRelaxed && compiledIf !== undefined) {
+		// The predicate object compiled unchanged, but predicates that only
+		// reference schemas ($ref) apply their targets at validation time: a
+		// relaxed target turns the retained predicate into a different rule
+		// (issue #547 review 4716476940).
+		const refs: string[] = []
+		collectRefPointers(schema.if, new Set(), refs)
+		if (refs.length > 0 && !referencesUnchangedTargets(refs, root, depth)) {
+			conditionalRelaxed = true
+		}
+	}
 
 	for (const [key, value] of Object.entries(schema)) {
 		if (DEEPSEEK_REJECTED_SCHEMA_KEYWORDS.has(key)) {
@@ -126,11 +209,11 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 			continue
 		}
 
-		if (key === "properties" || key === "$defs" || key === "definitions") {
+		if (key === "properties" || key === "$defs" || key === "definitions" || key === "dependentSchemas") {
 			if (isRecord(value)) {
 				const compiled: Record<string, unknown> = {}
 				for (const [name, subSchema] of Object.entries(value)) {
-					defineOwnKey(compiled, name, compileSchemaNode(subSchema, depth + 1))
+					defineOwnKey(compiled, name, compileSchemaNode(subSchema, depth + 1, root))
 				}
 				defineOwnKey(result, key, compiled)
 				continue
@@ -140,15 +223,24 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 				result,
 				key,
 				Array.isArray(value)
-					? value.map((entry) => compileSchemaNode(entry, depth + 1))
-					: compileSchemaNode(value, depth + 1),
+					? value.map((entry) => compileSchemaNode(entry, depth + 1, root))
+					: compileSchemaNode(value, depth + 1, root),
 			)
 			continue
 		} else if (key === "anyOf" || key === "oneOf" || key === "allOf" || key === "prefixItems") {
 			if (Array.isArray(value)) {
-				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1))
-				const relaxed =
-					key === "oneOf" && compiledBranches.some((branch, index) => !deepEqualJson(branch, value[index]))
+				const compiledBranches = value.map((entry) => compileSchemaNode(entry, depth + 1, root))
+				const branchesChanged = compiledBranches.some((branch, index) => !deepEqualJson(branch, value[index]))
+				let relaxed = key === "oneOf" && branchesChanged
+				if (!relaxed && key === "oneOf") {
+					// Branch objects unchanged, but branches that only
+					// reference schemas ($ref) apply their targets at
+					// validation time: a relaxed target makes every value
+					// match several branches (issue #547 review 4716476940).
+					const refs: string[] = []
+					collectRefPointers(value, new Set(), refs)
+					relaxed = refs.length > 0 && !referencesUnchangedTargets(refs, root, depth)
+				}
 				if (relaxed) {
 					// oneOf accepts exactly one alternative: compilation that
 					// relaxed branch constraints (removed distinguishing
@@ -163,8 +255,22 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 			}
 		} else if (key === "not") {
 			if (isRecord(value)) {
-				const compiledChild = compileSchemaNode(value, depth + 1)
-				if (deepEqualJson(compiledChild, value)) {
+				const compiledChild = compileSchemaNode(value, depth + 1, root)
+				const childUnchanged = deepEqualJson(compiledChild, value)
+				let targetsUnchanged = true
+				if (childUnchanged) {
+					// The child object compiled unchanged, but a child that
+					// only references schemas ($ref) applies its targets at
+					// validation time: the reference object being identical
+					// does not make the negation behave identically (issue
+					// #547 review 4716476940).
+					const refs: string[] = []
+					collectRefPointers(value, new Set(), refs)
+					if (refs.length > 0) {
+						targetsUnchanged = referencesUnchangedTargets(refs, root, depth)
+					}
+				}
+				if (childUnchanged && targetsUnchanged) {
 					defineOwnKey(result, key, compiledChild)
 				} else {
 					// The negated predicate carried a rejected keyword: the
@@ -197,12 +303,12 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 				continue
 			}
 			if (isRecord(value)) {
-				defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root))
 				continue
 			}
 		} else if (key === "additionalProperties" || key === "propertyNames") {
 			if (isRecord(value)) {
-				defineOwnKey(result, key, compileSchemaNode(value, depth + 1))
+				defineOwnKey(result, key, compileSchemaNode(value, depth + 1, root))
 				continue
 			}
 		}
@@ -232,6 +338,14 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
 	if ("patternProperties" in removed && result.additionalProperties === false) {
 		defineOwnKey(result, "additionalProperties", true)
 	}
+	if ("patternProperties" in removed && result.unevaluatedProperties === false) {
+		// patternProperties evaluated the keys it matched; with the rules gone
+		// those keys are unevaluated, so a retained unevaluatedProperties: false
+		// would forbid a required property the original accepted (issue #547
+		// review 4716476950). An object-schema value is an ordinary restriction
+		// and stays untouched.
+		defineOwnKey(result, "unevaluatedProperties", true)
+	}
 
 	if (Object.keys(removed).length > 0) {
 		const hint = describeRemovedConstraints(removed)
@@ -254,5 +368,5 @@ function compileSchemaNode(schema: unknown, depth: number): unknown {
  * Pure: the input schema is left untouched.
  */
 export function compileToolParametersForDeepSeek(schema: unknown): unknown {
-	return compileSchemaNode(schema, 0)
+	return compileSchemaNode(schema, 0, schema)
 }

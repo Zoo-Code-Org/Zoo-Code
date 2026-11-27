@@ -48,6 +48,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+/**
+ * Structural equality for stripped-vs-original schema nodes: stripping
+ * rebuilds nodes in input key order and appends a description only when it
+ * removed keywords, so an unchanged node serializes identically.
+ */
+function deepEqualJson(a: unknown, b: unknown): boolean {
+	return JSON.stringify(a) === JSON.stringify(b)
+}
+
 function isUnsupportedKeyword(key: string, value: unknown): boolean {
 	if (UNSUPPORTED_STRICT_SCHEMA_KEYWORDS.has(key)) {
 		return true
@@ -68,7 +77,9 @@ function isUnsupportedKeyword(key: string, value: unknown): boolean {
  * Removes constraints that Anthropic and Bedrock reject for strict tool use.
  * Removed constraints are retained in descriptions so models can still follow them.
  * An unsupported additionalProperties value becomes false, because strict mode
- * requires additionalProperties: false on every object schema.
+ * requires additionalProperties: false on every object schema. A oneOf whose
+ * alternatives lost their distinguishing constraints moves under anyOf, so
+ * values that matched exactly one original alternative stay accepted.
  */
 export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 	if (!isRecord(schema)) {
@@ -77,6 +88,7 @@ export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 
 	const result: Record<string, unknown> = {}
 	const removed: Record<string, unknown> = {}
+	let relaxedOneOf: unknown[] | undefined
 
 	for (const [key, originalValue] of Object.entries(schema)) {
 		if (isUnsupportedKeyword(key, originalValue)) {
@@ -93,13 +105,39 @@ export function stripUnsupportedStrictKeywords(schema: unknown): unknown {
 				Object.entries(value).map(([name, subSchema]) => [name, stripUnsupportedStrictKeywords(subSchema)]),
 			)
 		} else if (SCHEMA_LIST_KEYWORDS.has(key) && Array.isArray(value)) {
-			value = value.map(stripUnsupportedStrictKeywords)
+			const branches: unknown[] = value
+			const stripped = branches.map(stripUnsupportedStrictKeywords)
+			if (key === "oneOf" && stripped.some((branch, index) => !deepEqualJson(branch, branches[index]))) {
+				// oneOf accepts exactly one alternative: stripping the
+				// distinguishing constraints makes every value match several
+				// branches and oneOf would accept nothing. The branches relax
+				// under the overlap-safe anyOf position instead; each branch
+				// keeps its removed constraints as the description hint
+				// (issue #547 review 4716476955).
+				relaxedOneOf = stripped
+				continue
+			}
+			value = stripped
 		} else if (SCHEMA_VALUE_KEYWORDS.has(key)) {
 			value = Array.isArray(value)
 				? value.map(stripUnsupportedStrictKeywords)
 				: stripUnsupportedStrictKeywords(value)
 		}
 		result[key] = value
+	}
+
+	if (relaxedOneOf) {
+		// Sibling constraints apply together, never as alternatives: an
+		// unchanged anyOf or allOf sibling stays where it is and the relaxed
+		// branches become one separate allOf conjunct; with no sibling the
+		// branches keep the anyOf position unchanged.
+		const alternatives = { anyOf: relaxedOneOf }
+		if (Array.isArray(result.anyOf) || Array.isArray(result.allOf)) {
+			const existing = Array.isArray(result.allOf) ? (result.allOf as unknown[]) : []
+			result.allOf = [...existing, alternatives]
+		} else {
+			result.anyOf = relaxedOneOf
+		}
 	}
 
 	if (Object.keys(removed).length > 0) {
