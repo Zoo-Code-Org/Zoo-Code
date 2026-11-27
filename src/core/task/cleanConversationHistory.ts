@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk"
 
 import type { ModelInfo } from "@roo-code/types"
+import type { ResponseReasoningItem } from "openai/resources/responses/responses"
 
 import type { ApiMessage } from "../task-persistence"
 
@@ -8,10 +9,40 @@ export type ReasoningItemForRequest = {
 	type: "reasoning"
 	encrypted_content: string
 	id?: string
-	summary?: any[]
+	summary?: ResponseReasoningItem.Summary[]
 }
 
-export type CleanConversationHistoryItem = Anthropic.Messages.MessageParam | ReasoningItemForRequest
+/** An embedded reasoning block as stored inside assistant message content. */
+type ReasoningContentBlock = {
+	type: "reasoning"
+	text?: string
+	encrypted_content?: string
+	summary?: ResponseReasoningItem.Summary[]
+	id?: string
+}
+
+/**
+ * The stored block union carries no "reasoning" member; reasoning blocks are
+ * an OpenAI Native stored shape that reaches this projection from history.
+ * Returns the block as a ReasoningContentBlock when its stored shape matches,
+ * undefined otherwise.
+ */
+function asStoredReasoningBlock(
+	block: Anthropic.Messages.ContentBlockParam | undefined,
+): ReasoningContentBlock | undefined {
+	if (block === undefined || (block as { type?: string }).type !== "reasoning") {
+		return undefined
+	}
+	return block as unknown as ReasoningContentBlock
+}
+
+/** An assistant message carrying OpenRouter reasoning_details (Gemini 3 etc.). */
+export type AssistantMessageWithReasoningDetails = Anthropic.Messages.MessageParam & {
+	reasoning_details: NonNullable<ApiMessage["reasoning_details"]>
+}
+
+export type CleanConversationHistoryItem =
+	Anthropic.Messages.MessageParam | ReasoningItemForRequest | AssistantMessageWithReasoningDetails
 
 /**
  * Projects stored API history into the exact item sequence a normal task
@@ -73,29 +104,29 @@ export function buildCleanConversationHistory(
 				}
 
 				// Create message with reasoning_details property
-				cleanConversationHistory.push({
+				const messageWithDetails: AssistantMessageWithReasoningDetails = {
 					role: "assistant",
 					content: assistantContent,
 					reasoning_details: msgWithDetails.reasoning_details,
-				} as any)
+				}
+				cleanConversationHistory.push(messageWithDetails)
 
 				continue
 			}
 
 			// Embedded reasoning: encrypted (send) or plain text (skip)
-			const hasEncryptedReasoning =
-				first && (first as any).type === "reasoning" && typeof (first as any).encrypted_content === "string"
-			const hasPlainTextReasoning =
-				first && (first as any).type === "reasoning" && typeof (first as any).text === "string"
+			const reasoningFirst = asStoredReasoningBlock(first)
+			const encryptedContent = reasoningFirst !== undefined ? reasoningFirst.encrypted_content : undefined
+			const hasPlainTextReasoning = reasoningFirst !== undefined && typeof reasoningFirst.text === "string"
 
-			if (hasEncryptedReasoning) {
-				const reasoningBlock = first as any
+			if (typeof encryptedContent === "string" && reasoningFirst !== undefined) {
+				const reasoningBlock = reasoningFirst
 
 				// Send as separate reasoning item (OpenAI Native)
 				cleanConversationHistory.push({
 					type: "reasoning",
 					summary: reasoningBlock.summary ?? [],
-					encrypted_content: reasoningBlock.encrypted_content,
+					encrypted_content: encryptedContent,
 					...(reasoningBlock.id ? { id: reasoningBlock.id } : {}),
 				})
 

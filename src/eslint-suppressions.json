@@ -744,11 +744,6 @@
 			"count": 8
 		}
 	},
-	"core/task/cleanConversationHistory.ts": {
-		"@typescript-eslint/no-explicit-any": {
-			"count": 7
-		}
-	},
 	"core/tools/BaseTool.ts": {
 		"@typescript-eslint/no-explicit-any": {
 			"count": 1

@@ -7298,6 +7298,13 @@ describe("Cline", () => {
 			// Condensing ran because sizing resolved from the 32k threaded
 			// window; a 128k re-read would have cleared the threshold instead.
 			expect(summarizeConversation).toHaveBeenCalledTimes(summarizeCallsBefore + 1)
+			// The condense side threads the same snapshot into its history
+			// cleaner: the automatic path passes the request's captured model
+			// info through context management, so the condense request
+			// resolves model-dependent flags from the caller's snapshot, not
+			// from a mid-request re-read.
+			const [condenseOptions] = requireDefined(vi.mocked(summarizeConversation).mock.calls.at(-1))
+			expect(condenseOptions.requestModelInfo).toBe(threadedInfo)
 		})
 	})
 

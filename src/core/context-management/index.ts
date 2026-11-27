@@ -7,6 +7,7 @@ import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
 import { MAX_CONDENSE_THRESHOLD, MIN_CONDENSE_THRESHOLD, summarizeConversation, SummarizeResponse } from "../condense"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { ANTHROPIC_DEFAULT_MAX_TOKENS } from "@roo-code/types"
+import type { ModelInfo } from "@roo-code/types"
 import { RooIgnoreController } from "../ignore/RooIgnoreController"
 
 /**
@@ -192,6 +193,12 @@ export type WillManageContextOptions = {
 	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
 	 */
 	useAvailableInputForContextPercent?: boolean
+	/**
+	 * Optional model-info snapshot threaded from the caller's request so the
+	 * condense history cleaner resolves model-dependent flags from the same
+	 * snapshot the previous task request used (issue 2453).
+	 */
+	requestModelInfo?: ModelInfo
 }
 
 /**
@@ -287,6 +294,12 @@ export type ContextManagementOptions = {
 	 * (contextWindow - reserved output) instead of the full window. Others leave it undefined.
 	 */
 	useAvailableInputForContextPercent?: boolean
+	/**
+	 * Optional model-info snapshot threaded from the caller's request so the
+	 * condense history cleaner resolves model-dependent flags from the same
+	 * snapshot the previous task request used (issue 2453).
+	 */
+	requestModelInfo?: ModelInfo
 }
 
 export type ContextManagementResult = SummarizeResponse & {
@@ -321,6 +334,7 @@ export async function manageContext({
 	cwd,
 	rooIgnoreController,
 	useAvailableInputForContextPercent,
+	requestModelInfo,
 }: ContextManagementOptions): Promise<ContextManagementResult> {
 	let error: string | undefined
 	let errorDetails: string | undefined
@@ -384,6 +398,7 @@ export async function manageContext({
 				filesReadByRoo,
 				cwd,
 				rooIgnoreController,
+				requestModelInfo,
 			})
 			if (result.error) {
 				error = result.error

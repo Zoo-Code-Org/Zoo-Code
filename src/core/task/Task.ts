@@ -2817,6 +2817,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			filesReadByRoo,
 			cwd: this.cwd,
 			rooIgnoreController: this.rooIgnoreController,
+			requestModelInfo,
 		})
 		// A cancellation landing during the summarization request must stop
 		// manual condensation before it replaces and persists the history.
@@ -5708,6 +5709,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				cwd: this.cwd,
 				rooIgnoreController: this.rooIgnoreController,
 				useAvailableInputForContextPercent,
+				requestModelInfo,
 			})
 
 			if (truncateResult.messages !== this.apiConversationHistory) {
@@ -5966,6 +5968,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					cwd: this.cwd,
 					rooIgnoreController: this.rooIgnoreController,
 					useAvailableInputForContextPercent,
+					requestModelInfo,
 				})
 				if (truncateResult.messages !== this.apiConversationHistory) {
 					await this.overwriteApiConversationHistory(truncateResult.messages)

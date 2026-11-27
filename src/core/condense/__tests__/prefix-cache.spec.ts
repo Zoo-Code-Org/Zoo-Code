@@ -90,6 +90,40 @@ function textBlock(text: string): Anthropic.Messages.TextBlockParam {
 	return { type: "text", text }
 }
 
+// The metadata-change sequence from Task.spec.ts: the request threads a
+// model-info snapshot, then a metadata fetch lands mid-request so a fresh
+// getModel() re-read returns divergent policy.
+const threadedInfo: ModelInfo = {
+	contextWindow: 32_000,
+	maxTokens: 16_000,
+	supportsPromptCache: true,
+	supportsImages: false,
+	preserveReasoning: true,
+}
+const lateInfo: ModelInfo = {
+	contextWindow: 128_000,
+	maxTokens: 64_000,
+	supportsPromptCache: true,
+	supportsImages: false,
+	preserveReasoning: false,
+}
+
+// OpenAI Native stores plain-text reasoning inside assistant content; that
+// stored shape is not part of Anthropic's block union.
+const plainReasoningBlock = {
+	type: "reasoning",
+	text: "hidden chain of thought",
+	summary: [],
+} as unknown as Anthropic.Messages.ContentBlockParam
+
+class DivergentModelHandler extends CapturingApiHandler {
+	modelInfo: ModelInfo = threadedInfo
+
+	override getModel(): { id: string; info: ModelInfo } {
+		return { id: "divergent-model", info: this.modelInfo }
+	}
+}
+
 function buildHistory(): ApiMessage[] {
 	return [
 		{
@@ -184,6 +218,62 @@ describe("Condense request prefix cache", () => {
 		const sent = handler.requests[0].messages
 		expect(sent).toHaveLength(expectedPrefix.length + 1)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+	})
+
+	it("keeps the prefix byte-identical when model metadata changes between the task request and condensation", async () => {
+		const handler = new DivergentModelHandler()
+		handler.modelInfo = threadedInfo
+		const messages: ApiMessage[] = [
+			{ role: "user", content: [textBlock("Task: fix the parser")] },
+			{ role: "assistant", content: [plainReasoningBlock, textBlock("Refactoring done")] },
+		]
+		// The previous task request resolved its cleaner from the threaded
+		// snapshot: preserveReasoning was true, so the embedded plain-text
+		// reasoning block rode inside the assistant content.
+		const previousTaskRequest: CleanConversationHistoryItem[] = [
+			{ role: "user", content: [textBlock("Task: fix the parser")] },
+			{ role: "assistant", content: [plainReasoningBlock, textBlock("Refactoring done")] },
+		]
+
+		// The metadata fetch lands before condensation: a fresh getModel()
+		// re-read now returns the late snapshot, whose preserveReasoning flag
+		// is false. The condense request must still resolve its cleaner from
+		// the threaded snapshot, so the prefix stays byte-identical.
+		handler.modelInfo = lateInfo
+
+		await summarizeConversation({
+			messages,
+			apiHandler: handler,
+			systemPrompt: taskSystemPrompt,
+			taskId,
+			requestModelInfo: threadedInfo,
+		})
+
+		const sent = handler.requests[0].messages
+		expect(sent.length).toBe(previousTaskRequest.length + 1)
+		expect(sent.slice(0, previousTaskRequest.length)).toStrictEqual(previousTaskRequest)
+		// The reasoning block survived: the late snapshot's strip flag never
+		// reached this request's cleaner.
+		expect(JSON.stringify(sent)).toContain("hidden chain of thought")
+
+		// Control: a caller without a snapshot falls back to the live read,
+		// which strips the plain-text reasoning - proving the divergence above
+		// was prevented by the snapshot, not by the fixture.
+		const fallbackHandler = new DivergentModelHandler()
+		fallbackHandler.modelInfo = lateInfo
+		await summarizeConversation({
+			messages: structuredClone(messages),
+			apiHandler: fallbackHandler,
+			systemPrompt: taskSystemPrompt,
+			taskId,
+		})
+		const fallbackSent = fallbackHandler.requests[0].messages
+		expect(fallbackSent.length).toBe(previousTaskRequest.length + 1)
+		expect(asApiMessage(fallbackSent[1])).toStrictEqual({
+			role: "assistant",
+			content: "Refactoring done",
+		})
+		expect(JSON.stringify(fallbackSent)).not.toContain("hidden chain of thought")
 	})
 
 	it("sends native tool blocks instead of text conversions", async () => {
@@ -326,6 +416,15 @@ describe("Condense request prefix cache", () => {
 				},
 				{ role: "assistant", content: [textBlock("Reviewed")] },
 			],
+			// Literal expected prefix, independent of the production shaping
+			// helpers: the image block rides as the placeholder text.
+			literal: (): CleanConversationHistoryItem[] => [
+				{
+					role: "user",
+					content: [textBlock("Task: review the mockup"), textBlock("[Referenced image in conversation]")],
+				},
+				{ role: "assistant", content: [textBlock("Reviewed")] },
+			],
 		},
 		{
 			name: "with consecutive user messages that merge in the task request",
@@ -334,17 +433,50 @@ describe("Condense request prefix cache", () => {
 				{ role: "user", content: [textBlock("Also run the tests")] },
 				{ role: "assistant", content: [textBlock("On it")] },
 			],
+			// Literal expected prefix: both text blocks survive inside one
+			// merged user message.
+			literal: (): CleanConversationHistoryItem[] => [
+				{
+					role: "user",
+					content: [textBlock("Task: fix the parser"), textBlock("Also run the tests")],
+				},
+				{ role: "assistant", content: [textBlock("On it")] },
+			],
 		},
 		{
 			name: "with tool blocks the previous request sent natively",
 			messages: (): ApiMessage[] => buildHistory(),
+			// Literal expected prefix: native tool blocks stay native and the
+			// trailing user pair merges around the tool result.
+			literal: (): CleanConversationHistoryItem[] => [
+				{
+					role: "user",
+					content: [textBlock("Task: fix the parser"), textBlock("Focus on the tokenizer first")],
+				},
+				{
+					role: "assistant",
+					content: [
+						textBlock("Reading the tokenizer"),
+						{ type: "tool_use", id: "toolu_1", name: "read_file", input: { path: "src/tokenizer.ts" } },
+					],
+				},
+				{
+					role: "user",
+					content: [
+						{ type: "tool_result", tool_use_id: "toolu_1", content: "const x = 1" },
+						textBlock("Remember the release checklist"),
+					],
+				},
+			],
 		},
-	])("keeps the task-shaped prefix intact $name", async ({ messages }) => {
+	])("keeps the task-shaped prefix intact $name", async ({ messages, literal }) => {
 		const handler = new CapturingApiHandler()
 		const history = messages()
-		// Freeze the expectation before the call: an in-place mutation of the
-		// history must not leak into the observed prefix.
-		const expectedPrefix = structuredClone(expectedTaskShaped(history, handler))
+		// The expectation is a literal full-array shape, not a run of the
+		// production shaping helpers: a shaping step that becomes a no-op
+		// (image removal, merging) must fail this test instead of matching
+		// itself.
+		const expectedPrefix = structuredClone(literal())
 
 		await summarizeConversation({
 			messages: history,
@@ -354,8 +486,12 @@ describe("Condense request prefix cache", () => {
 		})
 
 		const sent = handler.requests[0].messages
-		expect(sent.length).toBeGreaterThanOrEqual(expectedPrefix.length + 1)
+		// Exactly the prefix and one instruction suffix: none of these
+		// histories carries an orphan tool call, so no synthetic tool-result
+		// message may appear.
+		expect(sent.length).toBe(expectedPrefix.length + 1)
 		expect(sent.slice(0, expectedPrefix.length)).toStrictEqual(expectedPrefix)
+		expect(asApiMessage(sent[sent.length - 1]).content).toContain("DO NOT call any tools")
 	})
 
 	describe("reasoning items and reasoning_details the task request sends", () => {

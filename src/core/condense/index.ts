@@ -4,6 +4,7 @@ import crypto from "crypto"
 import { TelemetryService } from "@roo-code/telemetry"
 
 import { t } from "../../i18n"
+import type { ModelInfo } from "@roo-code/types"
 import { ApiHandler, ApiHandlerCreateMessageMetadata } from "../../api"
 import { ApiMessage } from "../task-persistence/apiMessages"
 import { maybeRemoveImageBlocks } from "../../api/transform/image-cleaning"
@@ -245,6 +246,14 @@ export type SummarizeConversationOptions = {
 	filesReadByRoo?: string[]
 	cwd?: string
 	rooIgnoreController?: RooIgnoreController
+	/**
+	 * Optional model-info snapshot threaded from the caller's request. The
+	 * history cleaner resolves model-dependent flags (preserveReasoning) from
+	 * this snapshot, so a metadata refresh landing mid-request cannot make the
+	 * condense request diverge from the previous task request's prefix
+	 * (issue 2453). Callers without a snapshot fall back to a live read.
+	 */
+	requestModelInfo?: ModelInfo
 }
 
 /**
@@ -278,6 +287,7 @@ export async function summarizeConversation(options: SummarizeConversationOption
 		filesReadByRoo,
 		cwd,
 		rooIgnoreController,
+		requestModelInfo,
 	} = options
 	TelemetryService.instance.captureContextCondensed(
 		taskId,
@@ -328,7 +338,10 @@ export async function summarizeConversation(options: SummarizeConversationOption
 	// embedded reasoning blocks ride as separate reasoning items (OpenAI Native
 	// stores them inside assistant content), so the wire items match the
 	// previous task request up to the appended suffixes (issue 2453).
-	const cleanedHistory = buildCleanConversationHistory(shapedForApi, apiHandler.getModel().info)
+	// Same model-info source as the previous task request: the threaded
+	// snapshot when the caller captured one, a live read otherwise (issue 2453).
+	const historyModelInfo = requestModelInfo ?? apiHandler.getModel().info
+	const cleanedHistory = buildCleanConversationHistory(shapedForApi, historyModelInfo)
 
 	// Inject synthetic tool_results for orphan tool_calls to prevent API rejections
 	// (e.g., when user triggers condense after receiving attempt_completion but before responding).

@@ -46,8 +46,12 @@
 \* Findings (PR 2698 round 3): the task history cleaner was missing from the
 \* modeled and real pipeline, so embedded reasoning reached the request
 \* embedded (added: ReasoningClean, NoEmbeddedReasoning, ReasoningSkip).
+\* Findings (PR 2698 round 4): the TextConvert and NoMerge sabotage modes
+\* omitted ReasoningClean too, so a reasoning-only history failed
+\* PrefixUnchanged for the wrong reason; both modes now apply it and fail
+\* only through their named change (covered: no new invariant).
 \* Cost: TLC runs each config in a few seconds (base 106,079 distinct
-\* states, round 3).
+\* states, round 3; re-confirmed on round 4).
 
 EXTENDS Naturals, Sequences
 
@@ -121,8 +125,8 @@ TextConvert(h) ==
 
 Build(h) ==
     CASE Mode = "Fixed" -> <<SysTask, TaskPipeline(h) \o <<Instr>>>>
-    []   Mode = "TextConvert" -> <<SysTask, ImageClean(Merge(TextConvert(h))) \o <<Instr>>>>
-    []   Mode = "NoMerge" -> <<SysTask, ImageClean(h) \o <<Instr>>>>
+    []   Mode = "TextConvert" -> <<SysTask, ReasoningClean(ImageClean(Merge(TextConvert(h)))) \o <<Instr>>>>
+    []   Mode = "NoMerge" -> <<SysTask, ReasoningClean(ImageClean(h)) \o <<Instr>>>>
     []   Mode = "SystemSwap" -> <<SysCondense, TaskPipeline(h) \o <<Instr>>>>
     []   Mode = "InstructionFirst" -> <<SysTask, <<Instr>> \o TaskPipeline(h)>>
     []   Mode = "ReasoningSkip" -> <<SysTask, ImageClean(Merge(h)) \o <<Instr>>>>
