@@ -266,6 +266,17 @@ export const vscodeLlmModels = {
 		supportsToolCalling: true,
 		maxInputTokens: 658785,
 	},
+	// User-authorized advertised budget, not measured; getVscodeLlmModelInfo restricts it to Copilot.
+	"claude-fable-5.2": {
+		contextWindow: 871793,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "claude-fable-5.2",
+		version: "claude-fable-5.2",
+		name: "Claude Fable 5.2",
+		supportsToolCalling: true,
+		maxInputTokens: 871793,
+	},
 	// Values copied from claude-fable-5.1 at the user's request; not measured for claude-fable-5.5.
 	"claude-fable-5.5": {
 		contextWindow: 935793,
@@ -276,6 +287,63 @@ export const vscodeLlmModels = {
 		name: "Claude Fable 5.5",
 		supportsToolCalling: true,
 		maxInputTokens: 660686,
+	},
+	// Through gpt-6.2-sol: measured 2026-11-26, VS Code 1.147.0/copilot; maxInputTokens = largest
+	// accepted size, no margin. Prices and caching are unmeasured.
+	"gemini-4-neon": {
+		contextWindow: 982833,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "gemini-4-neon",
+		version: "gemini-4-neon",
+		name: "Gemini 4 Neon",
+		supportsToolCalling: true,
+		// Lower bound; 901675 got a generic 400, cause unconfirmed.
+		maxInputTokens: 897718,
+	},
+	"gemini-4-hydrogen": {
+		contextWindow: 982830,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "gemini-4-hydrogen",
+		version: "gemini-4-hydrogen",
+		name: "Gemini 4 Hydrogen",
+		supportsToolCalling: true,
+		// Lower bound; 901674 got a generic 400, cause unconfirmed.
+		maxInputTokens: 897719,
+	},
+	"gemini-4-carbon": {
+		contextWindow: 935793,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "gemini-4-carbon",
+		version: "gemini-4-carbon",
+		name: "Gemini 4 Carbon",
+		supportsToolCalling: true,
+		// Lower bound; 903669 got a generic 400, cause unconfirmed.
+		maxInputTokens: 899900,
+	},
+	"gpt-6.2-astra": {
+		contextWindow: 921793,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "gpt-6.2-astra",
+		version: "gpt-6.2-astra",
+		name: "GPT-6.2 Astra",
+		supportsToolCalling: true,
+		// Accepted 271119, rejected 274827 (exceeds); gpt-6-astra's 5K margin does not apply.
+		maxInputTokens: 271119,
+	},
+	"gpt-6.2-sol": {
+		contextWindow: 921793,
+		supportsImages: true,
+		supportsPromptCache: false,
+		family: "gpt-6.2-sol",
+		version: "gpt-6.2-sol",
+		name: "GPT-6.2 Sol",
+		supportsToolCalling: true,
+		// Accepted 271119, rejected 274826 (exceeds).
+		maxInputTokens: 271119,
 	},
 	"claude-sonnet-5": {
 		contextWindow: 925449,
@@ -566,3 +634,12 @@ export const vscodeLlmModels = {
 		maxInputTokens: number
 	}
 >
+
+// Shared by the gauge and condensation; unknown families use the default budget, not a live window.
+export function getVscodeLlmModelInfo(family: string | undefined, vendor: string | undefined) {
+	return family &&
+		Object.prototype.hasOwnProperty.call(vscodeLlmModels, family) &&
+		(family !== "claude-fable-5.2" || vendor === githubCopilotLanguageModel.vendor)
+		? vscodeLlmModels[family as VscodeLlmModelId]
+		: vscodeLlmModels[vscodeLlmDefaultModelId]
+}

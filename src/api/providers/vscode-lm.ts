@@ -6,8 +6,7 @@ import {
 	type ModelInfo,
 	openAiModelInfoSaneDefaults,
 	providerIdentifiers,
-	vscodeLlmDefaultModelId,
-	vscodeLlmModels,
+	getVscodeLlmModelInfo,
 } from "@roo-code/types"
 
 import type { ApiHandlerOptions } from "../../shared/api"
@@ -1666,9 +1665,8 @@ export class VsCodeLmHandler extends BaseProvider implements SingleCompletionHan
 	 */
 	getCondenseContextWindow(): number {
 		const family = this.client?.family ?? this.options.vsCodeLmModelSelector?.family
-		const staticModel = family
-			? (vscodeLlmModels[family as keyof typeof vscodeLlmModels] ?? vscodeLlmModels[vscodeLlmDefaultModelId])
-			: vscodeLlmModels[vscodeLlmDefaultModelId]
+		const vendor = this.client?.vendor ?? this.options.vsCodeLmModelSelector?.vendor
+		const staticModel = getVscodeLlmModelInfo(family, vendor)
 
 		if (staticModel && typeof staticModel.maxInputTokens === "number" && staticModel.maxInputTokens > 0) {
 			return staticModel.maxInputTokens

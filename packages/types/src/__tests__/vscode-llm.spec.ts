@@ -1,7 +1,55 @@
 import { describe, it, expect } from "vitest"
-import { vscodeLlmModels, vscodeLlmDefaultModelId } from "../providers/vscode-llm.js"
+import { getVscodeLlmModelInfo, vscodeLlmModels, vscodeLlmDefaultModelId } from "../providers/vscode-llm.js"
+
+describe("getVscodeLlmModelInfo", () => {
+	it.each(["copilot", "copilotcli", "unknown-vendor", undefined])(
+		"resolves other known families independently of vendor %s",
+		(vendor) => {
+			for (const [family, model] of Object.entries(vscodeLlmModels)) {
+				if (family !== "claude-fable-5.2") {
+					expect(getVscodeLlmModelInfo(family, vendor)).toBe(model)
+				}
+			}
+		},
+	)
+
+	it.each([undefined, "", "unknown-family", "toString", "constructor", "__proto__"])(
+		"keeps the default row for family %s",
+		(family) => {
+			expect(getVscodeLlmModelInfo(family, "copilot")).toBe(vscodeLlmModels[vscodeLlmDefaultModelId])
+		},
+	)
+
+	it("resolves Fable 5.2's advertised budget for Copilot", () => {
+		const model = getVscodeLlmModelInfo("claude-fable-5.2", "copilot")
+		expect(model).toBe(vscodeLlmModels["claude-fable-5.2"])
+		expect(model.maxInputTokens).toBe(871793)
+	})
+
+	it.each(["copilotcli", "unknown-vendor", undefined])(
+		"keeps the default row for Fable 5.2 with vendor %s",
+		(vendor) => {
+			const model = getVscodeLlmModelInfo("claude-fable-5.2", vendor)
+			expect(model).toBe(vscodeLlmModels[vscodeLlmDefaultModelId])
+			expect(model.maxInputTokens).toBe(167790)
+		},
+	)
+})
 
 describe("vscodeLlmModels", () => {
+	it("pins Fable 5.2 to the user-authorized advertised budget, not a measurement", () => {
+		expect(vscodeLlmModels["claude-fable-5.2"]).toEqual({
+			contextWindow: 871793,
+			supportsImages: true,
+			supportsPromptCache: false,
+			family: "claude-fable-5.2",
+			version: "claude-fable-5.2",
+			name: "Claude Fable 5.2",
+			supportsToolCalling: true,
+			maxInputTokens: 871793,
+		})
+	})
+
 	it("exposes the opus-4.8 row with its measured maxInputTokens and contextWindow", () => {
 		// The two values differ for this row, so pin the exact stored values rather than forcing equality.
 		expect(vscodeLlmModels).toHaveProperty("claude-opus-4.8")
@@ -114,6 +162,33 @@ describe("vscodeLlmModels", () => {
 		expect(vscodeLlmModels["claude-fable-5.5"].contextWindow).toBe(935793)
 		expect(vscodeLlmModels["claude-fable-5.5"].maxInputTokens).toBe(660686)
 	})
+
+	it.each([
+		["gemini-4-neon", "Gemini 4 Neon", 982833, 897718],
+		["gemini-4-hydrogen", "Gemini 4 Hydrogen", 982830, 897719],
+		["gemini-4-carbon", "Gemini 4 Carbon", 935793, 899900],
+		["gpt-6.2-astra", "GPT-6.2 Astra", 921793, 271119],
+		["gpt-6.2-sol", "GPT-6.2 Sol", 921793, 271119],
+	] as const)(
+		"records %s's measured limits without a safety margin or unmeasured prices",
+		(family, name, contextWindow, maxInputTokens) => {
+			// Exact-row comparison rejects extra fields, including margins and prices.
+			expect(vscodeLlmModels[family]).toEqual({
+				contextWindow,
+				supportsImages: true,
+				supportsPromptCache: false,
+				family,
+				version: family,
+				name,
+				supportsToolCalling: true,
+				maxInputTokens,
+			})
+			expect(vscodeLlmModels[family]).not.toHaveProperty("inputPrice")
+			expect(vscodeLlmModels[family]).not.toHaveProperty("outputPrice")
+			expect(getVscodeLlmModelInfo(family, "copilot")).toBe(vscodeLlmModels[family])
+			expect(getVscodeLlmModelInfo(family, undefined)).toBe(vscodeLlmModels[family])
+		},
+	)
 
 	it.each([
 		["claude-opus-5.5", "claude-opus-5", "claude-opus-4.8"],

@@ -4097,6 +4097,11 @@ describe("VsCodeLmHandler", () => {
 			["gemini-3.8-flash", 955113],
 			["claude-opus-5", 680456],
 			["gemini-3.6-flash", 935785],
+			["gemini-4-neon", 897718],
+			["gemini-4-hydrogen", 897719],
+			["gemini-4-carbon", 899900],
+			["gpt-6.2-astra", 271119],
+			["gpt-6.2-sol", 271119],
 		] as const)("uses %s's assigned budget rather than its advertised window", async (family, expected) => {
 			await handler.initializeClient()
 			handler["client"] = { ...mockLanguageModelChat, family, maxInputTokens: 2_000_000 }
@@ -4108,6 +4113,70 @@ describe("VsCodeLmHandler", () => {
 			handler["client"] = { ...mockLanguageModelChat, family, maxInputTokens: 123456 }
 			expect(handler.getModel().info.contextWindow).toBe(123456)
 			expect(handler.getCondenseContextWindow()).toBe(expected)
+		})
+
+		it.each([
+			["copilot", 871793],
+			["copilotcli", 167790],
+			[undefined, 167790],
+		] as const)("resolves Fable 5.2 from selector vendor %s", (vendor, expected) => {
+			const fableHandler = new VsCodeLmHandler({
+				vsCodeLmModelSelector: { vendor, family: "claude-fable-5.2", id: "claude-fable-5.2" },
+			})
+			try {
+				expect(fableHandler.getCondenseContextWindow()).toBe(expected)
+			} finally {
+				fableHandler.dispose()
+			}
+		})
+
+		it.each([
+			["copilot", "copilotcli", 871793],
+			["copilotcli", "copilot", 167790],
+			[undefined, "copilot", 871793],
+			[undefined, "copilotcli", 167790],
+			[undefined, undefined, 167790],
+		] as const)(
+			"resolves Fable 5.2 with live vendor %s ahead of selector vendor %s",
+			(liveVendor, selectorVendor, expected) => {
+				const fableHandler = new VsCodeLmHandler({
+					vsCodeLmModelSelector: { vendor: selectorVendor, family: "claude-fable-5.2" },
+				})
+				fableHandler["client"] = {
+					...mockLanguageModelChat,
+					family: "claude-fable-5.2",
+					vendor: liveVendor,
+				} as unknown as vscode.LanguageModelChat
+				try {
+					expect(fableHandler.getCondenseContextWindow()).toBe(expected)
+				} finally {
+					fableHandler.dispose()
+				}
+			},
+		)
+
+		describe.each([
+			["gemini-4-neon", 897718],
+			["gemini-4-hydrogen", 897719],
+			["gemini-4-carbon", 899900],
+			["gpt-6.2-astra", 271119],
+			["gpt-6.2-sol", 271119],
+		] as const)("resolves %s's measured condensation budget for any or missing vendor", (family, inputLimit) => {
+			it.each(["copilot", "some-other-vendor", undefined])("with vendor %s", (vendor) => {
+				const selectedHandler = new VsCodeLmHandler({
+					vsCodeLmModelSelector: { family, vendor },
+				})
+				try {
+					selectedHandler["client"] = null
+					expect(selectedHandler.getCondenseContextWindow()).toBe(inputLimit)
+					const liveClient = { ...mockLanguageModelChat, family, maxInputTokens: 2_000_000 }
+					Object.defineProperty(liveClient, "vendor", { value: vendor })
+					selectedHandler["client"] = liveClient
+					expect(selectedHandler.getCondenseContextWindow()).toBe(inputLimit)
+				} finally {
+					selectedHandler.dispose()
+				}
+			})
 		})
 
 		it.each(["copilot", "some-other-vendor"])("resolves Astra's selector budget for vendor %s", (vendor) => {
@@ -4145,6 +4214,16 @@ describe("VsCodeLmHandler", () => {
 				vscodeLlmModels[vscodeLlmDefaultModelId].maxInputTokens,
 			)
 			noFamilyHandler.dispose()
+		})
+
+		it("uses the default-row maxInputTokens for an unset selector before client initialization", () => {
+			const unsetHandler = new VsCodeLmHandler({})
+			try {
+				unsetHandler["client"] = null
+				expect(unsetHandler.getCondenseContextWindow()).toBe(167790)
+			} finally {
+				unsetHandler.dispose()
+			}
 		})
 
 		it("falls back to the derived window when the static row exists but maxInputTokens is non-positive", () => {

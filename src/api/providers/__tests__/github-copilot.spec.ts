@@ -543,6 +543,50 @@ describe("Copilot model capabilities", () => {
 			expect(getVsCodeLmModelInfo(liveModel({ maxInputTokens: 921793 })).contextWindow).toBe(921793)
 		})
 
+		it.each([167790, 871793])("preserves Fable 5.2's live input limit of %s", async (maxInputTokens) => {
+			const model = liveModel({ family: "claude-fable-5.2", maxInputTokens })
+			expect(getVsCodeLmModelInfo(model).contextWindow).toBe(maxInputTokens)
+			vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([model])
+			const handler = new GitHubCopilotHandler({})
+			try {
+				await handler.initializeClient()
+				expect(handler.getCondenseContextWindow()).toBe(maxInputTokens)
+				expect(handler.getModel().info.contextWindow).toBe(maxInputTokens)
+			} finally {
+				handler.dispose()
+			}
+		})
+
+		describe.each([
+			["gemini-4-neon", 982833, 897718],
+			["gemini-4-hydrogen", 982830, 897719],
+			["gemini-4-carbon", 935793, 899900],
+			["gpt-6.2-astra", 921793, 271119],
+			["gpt-6.2-sol", 921793, 271119],
+		] as const)(
+			"enforces %s's accepted measured cap without overriding a smaller live limit",
+			(family, capacity, inputLimit) => {
+				it.each([capacity, inputLimit, inputLimit - 1])("with live input limit %s", async (liveLimit) => {
+					const expected = Math.min(liveLimit, inputLimit)
+					const model = liveModel({ family, maxInputTokens: liveLimit })
+					const info = getVsCodeLmModelInfo(model)
+					expect(info.contextWindow).toBe(expected)
+					expect(info.supportsImages).toBeUndefined()
+					expect(info.supportsToolCalling).toBeUndefined()
+					expect(info).toMatchObject({ supportsPromptCache: false, inputPrice: 0, outputPrice: 0 })
+					vi.mocked(vscode.lm.selectChatModels).mockResolvedValue([model])
+					const handler = new GitHubCopilotHandler({ vsCodeLmModelSelector: { family } })
+					try {
+						await handler.initializeClient()
+						expect(handler.getCondenseContextWindow()).toBe(expected)
+						expect(handler.getModel().info).toEqual(info)
+					} finally {
+						handler.dispose()
+					}
+				})
+			},
+		)
+
 		it("honors a live limit smaller than the curated limit", () => {
 			const model = liveModel({ family: curatedFamily, maxInputTokens: curatedEntry.maxInputTokens - 1 })
 			expect(getVsCodeLmModelInfo(model).contextWindow).toBe(curatedEntry.maxInputTokens - 1)
