@@ -299,6 +299,7 @@ describe("manual command-ask marking (#998)", () => {
 
 	it("marks the latest unanswered command ask when the user approves", () => {
 		const { task, older, latest } = buildMarkingTask()
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = latest.ts
 
 		task.handleWebviewAskResponse("yesButtonClicked")
 
@@ -311,6 +312,7 @@ describe("manual command-ask marking (#998)", () => {
 
 	it("marks the latest unanswered command ask when the user denies", () => {
 		const { task, older, latest } = buildMarkingTask()
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = latest.ts
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
@@ -373,6 +375,8 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const answeredCommand = commandAsk(5, true)
 		const tailSay = say(6, "command output")
 		task.clineMessages.push(taskSay, tool, olderCommand, interleavedSay, answeredCommand, tailSay)
+		// The armed ask owns the unanswered command row.
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = olderCommand.ts
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
@@ -399,6 +403,8 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const tool = toolAsk(2)
 		const tailSay = say(3, "command output")
 		task.clineMessages.push(taskSay, tool, tailSay)
+		// The armed ask's owning row is not in this history.
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = 999
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
@@ -415,6 +421,7 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const older = commandAsk(Date.now() - 2)
 		const latest = commandAsk(Date.now() - 1)
 		task.clineMessages.push(older, latest)
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = latest.ts
 
 		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
 
@@ -443,6 +450,7 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const task = buildTask(undefined)
 		const command = commandAsk(Date.now() - 1)
 		task.clineMessages.push(command)
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = command.ts
 		const failure = new Error("update failed")
 		;(task as unknown as { updateClineMessage: ReturnType<typeof vi.fn> }).updateClineMessage = vi.fn(async () => {
 			throw failure
@@ -462,6 +470,7 @@ describe("command-ask marking across a mixed history (#998 review)", () => {
 		const task = buildTask(undefined)
 		const command = commandAsk(Date.now() - 1)
 		task.clineMessages.push(command)
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = command.ts
 		const failure = new Error("save failed")
 		;(task as unknown as { saveClineMessages: ReturnType<typeof vi.fn> }).saveClineMessages = vi.fn(async () => {
 			throw failure
@@ -506,6 +515,7 @@ describe("command-ask marking guards (#998 review)", () => {
 		const newerToolAsk = toolAsk(4)
 		const tailSay = say(5, "thinking")
 		task.clineMessages.push(say(1, "Initial task"), olderCommand, newerToolAsk, tailSay)
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = olderCommand.ts
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
@@ -523,6 +533,8 @@ describe("command-ask marking guards (#998 review)", () => {
 		// allows it; the marking predicate must not treat it as an ask.
 		const legacySay: ClineMessage = { ts: 3, type: "say", say: "text", text: "legacy record", ask: "command" }
 		task.clineMessages.push(say(1, "Initial task"), legacySay)
+		// The owning ts matches the legacy record; the type guard must reject it.
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = legacySay.ts
 
 		task.handleWebviewAskResponse("noButtonClicked")
 
@@ -542,6 +554,7 @@ describe("command-ask marking guards (#998 review)", () => {
 			partial: true,
 		}
 		task.clineMessages.push(say(1, "Initial task"), partial)
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = partial.ts
 
 		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
 
@@ -567,6 +580,7 @@ describe("command-ask marking guards (#998 review)", () => {
 		// The stream completes the same message, then a text reply settles
 		// the completed ask. It must be stamped like every complete ask.
 		partial.partial = false
+		;(task as unknown as { awaitingAskTargetRowTs?: number }).awaitingAskTargetRowTs = partial.ts
 		task.handleWebviewAskResponse("messageResponse", "use flags, not rm")
 
 		expect(partial.isAnswered).toBe(true)

@@ -472,7 +472,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	// window before the wait is armed) can never satisfy a later ask.
 	private askResponseTargetSeq?: number
 	private awaitingAskTarget?: number
+	/** The ask row ts that owns the armed target; a stamped row is matched by it. */
+	private awaitingAskTargetRowTs?: number
 	private askResponseTarget?: number
+	/** The owning row ts snapshotted when the response was tagged with its target. */
+	private askResponseTargetRowTs?: number
 
 	/**
 	 * Mint the next ask target token. Tolerates an unset sequence field: test
@@ -493,11 +497,16 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 	 * hook in addToClineMessages), so a `created` Message listener that
 	 * answers the ask finds its token armed and its response resolves it
 	 * (issue 998 review). A response that lands before the arm still tags
-	 * the previous arm's value (or none) and stays an orphan.
+	 * the previous arm's value (or none) and stays an orphan. The caller
+	 * guards the call with the ask's currency (`lastMessageTs === askTs`) so
+	 * an out-of-date publication can never take the arm slot, and passes its
+	 * row ts so a stamped row is matched by ownership, not recency (issue
+	 * 998 review r3).
 	 */
-	private armAskTarget(): number {
+	private armAskTarget(ownerTs: number): number {
 		const askTarget = this.nextAskTarget()
 		this.awaitingAskTarget = askTarget
+		this.awaitingAskTargetRowTs = ownerTs
 		return askTarget
 	}
 	/**
@@ -2111,7 +2120,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
 					this.askResponseTarget = undefined
-					askTarget = this.armAskTarget()
+					this.askResponseTargetRowTs = undefined
 
 					// Bug for the history books:
 					// In the webview we use the ts as the chatrow key for the
@@ -2140,12 +2149,26 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					this.updateClineMessage(lastMessage).catch((error) => {
 						console.error("[Task#ask] updateClineMessage failed:", error)
 					})
+					// Publication boundary of the completed partial row (issue
+					// 998 review r3): the save persisted the completed prompt
+					// and the update post is issued, so a response processed
+					// before this line still carries the previous arm (or
+					// none) and stays an orphan — the previous command's
+					// approval can never run this ask. No click can be
+					// processed before the update reaches the webview, which
+					// is necessarily after this synchronous stretch, so the
+					// arm leaves no gap. Currency-guarded like the other
+					// branches.
+					if (this.lastMessageTs === askTs) {
+						askTarget = this.armAskTarget(askTs)
+					}
 				} else {
 					// This is a new and complete message, so add it like normal.
 					this.askResponse = undefined
 					this.askResponseText = undefined
 					this.askResponseImages = undefined
 					this.askResponseTarget = undefined
+					this.askResponseTargetRowTs = undefined
 					askTs = Date.now()
 					this.lastMessageTs = askTs
 					await this.addToClineMessages(
@@ -2159,7 +2182,14 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 							autoApprovalDecision,
 						},
 						() => {
-							askTarget = this.armAskTarget()
+							// Currency guard (issue 998 review r3): a newer ask
+							// may have published while this row awaited its
+							// flush. Arming over this stale publication would
+							// steal the newer ask's arm, which this ask's
+							// superseded cleanup would then wipe.
+							if (this.lastMessageTs === askTs) {
+								askTarget = this.armAskTarget(askTs)
+							}
 						},
 					)
 				}
@@ -2170,6 +2200,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseText = undefined
 			this.askResponseImages = undefined
 			this.askResponseTarget = undefined
+			this.askResponseTargetRowTs = undefined
 			askTs = Date.now()
 			this.lastMessageTs = askTs
 			await this.addToClineMessages(
@@ -2183,7 +2214,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 					autoApprovalDecision,
 				},
 				() => {
-					askTarget = this.armAskTarget()
+					// Currency guard (issue 998 review r3): see the sibling
+					// publication branch above.
+					if (this.lastMessageTs === askTs) {
+						askTarget = this.armAskTarget(askTs)
+					}
 				},
 			)
 		}
@@ -2546,6 +2581,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 				// would orphan every response to it (issue 998 review).
 				if (this.awaitingAskTarget === askTarget) {
 					this.awaitingAskTarget = undefined
+					this.awaitingAskTargetRowTs = undefined
 				}
 				throw new AskIgnoredError("superseded")
 			}
@@ -2563,7 +2599,9 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			this.askResponseImages = undefined
 			this.askResponseSegments = undefined
 			this.askResponseTarget = undefined
+			this.askResponseTargetRowTs = undefined
 			this.awaitingAskTarget = undefined
+			this.awaitingAskTargetRowTs = undefined
 			this.pendingAutoDenyDetail = undefined
 
 			// Switch back to an active state.
@@ -2601,8 +2639,11 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		this.askResponseSegments = segments
 		// Tag the arrival with the ask that is awaiting now. When no ask is
 		// awaiting the tag stays unset, which marks the response as an orphan no
-		// ask may consume.
+		// ask may consume. The owning row ts travels with the tag, so the
+		// answered-stamp can settle exactly the row that owns the token
+		// (issue 998 review r3).
 		this.askResponseTarget = this.awaitingAskTarget
+		this.askResponseTargetRowTs = this.awaitingAskTargetRowTs
 
 		// Create a checkpoint whenever the user sends a message.
 		// Use allowEmpty=true to ensure a checkpoint is recorded even if there are no file changes.
@@ -2646,30 +2687,41 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 			}
 		}
 
-		// Mark the last command-approval ask as answered when the user answers (#998).
+		// Mark the command-approval ask that owns the arrival's target as
+		// answered when the user answers (#998, ownership per review r3).
 		// A text reply (messageResponse) settles it too, mirroring the follow-up
 		// branch above: without the stamp a denied command's user_feedback say makes
 		// the webview restore block match the unstamped ask and re-show Run/Deny.
 		// The webview keeps the ask's Run/Deny buttons only while the ask is
 		// unanswered, so the stamp stops a later snapshot from re-showing them.
+		// Only the row owning the tagged token is settled: a nonempty target
+		// alone would stamp a newer command row that is merely unanswered while
+		// the tagged ask waits, hiding its controls with no resolution coming.
 		// A partial ask is still streaming in (thread 4680322903): stamping it
 		// would leave the completed ask waiting forever with no Run/Deny.
 		if (
-			// Only an arrival carrying the armed ask's token may settle the
-			// row: an orphan that the wait will discard must leave the Run/Deny
-			// controls in place (issue 998 review).
+			// Only an arrival carrying the armed ask's token may settle a row,
+			// and only that ask's own row: an orphan that the wait will
+			// discard must leave the Run/Deny controls in place (issue 998
+			// review).
 			this.askResponseTarget !== undefined &&
+			this.askResponseTargetRowTs !== undefined &&
 			(askResponse === "messageResponse" ||
 				askResponse === "yesButtonClicked" ||
 				askResponse === "noButtonClicked")
 		) {
-			const lastCommandAskIndex = findLastIndex(
-				this.clineMessages,
-				(msg) => msg.type === "ask" && msg.ask === "command" && !msg.isAnswered && msg.partial !== true,
+			const ownedRowTs = this.askResponseTargetRowTs
+			const ownedCommandAskIndex = this.clineMessages.findIndex(
+				(msg) =>
+					msg.type === "ask" &&
+					msg.ask === "command" &&
+					!msg.isAnswered &&
+					msg.partial !== true &&
+					msg.ts === ownedRowTs,
 			)
-			if (lastCommandAskIndex !== -1) {
-				this.clineMessages[lastCommandAskIndex].isAnswered = true
-				void this.updateClineMessage(this.clineMessages[lastCommandAskIndex]).catch((error) => {
+			if (ownedCommandAskIndex !== -1) {
+				this.clineMessages[ownedCommandAskIndex].isAnswered = true
+				void this.updateClineMessage(this.clineMessages[ownedCommandAskIndex]).catch((error) => {
 					console.error("[Task#handleWebviewAskResponse] updateClineMessage failed:", error)
 				})
 				this.saveClineMessages().catch((error) => {
@@ -2703,6 +2755,7 @@ export class Task extends EventEmitter<TaskEvents> implements TaskLike {
 		// The pending ask is invalid; a response arriving after this must not
 		// carry its token, so the orphan discard keeps applying.
 		this.awaitingAskTarget = undefined
+		this.awaitingAskTargetRowTs = undefined
 	}
 
 	/**

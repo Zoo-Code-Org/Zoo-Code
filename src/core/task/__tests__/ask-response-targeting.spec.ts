@@ -32,7 +32,9 @@ type AskTargetingTaskAccess = {
 	clineMessages: AskRow[]
 	askResponse: string | undefined
 	askResponseTarget: number | undefined
+	askResponseTargetRowTs: number | undefined
 	awaitingAskTarget: number | undefined
+	awaitingAskTargetRowTs: number | undefined
 	askResponseTargetSeq: number
 	lastMessageTs: number | undefined
 	addToClineMessages: (message: unknown, beforeEmit?: () => void) => Promise<unknown>
@@ -54,7 +56,9 @@ function buildTask(provider: ProviderStub | undefined) {
 	// must be seeded here.
 	access.askResponseTargetSeq = 0
 	access.awaitingAskTarget = undefined
+	access.awaitingAskTargetRowTs = undefined
 	access.askResponseTarget = undefined
+	access.askResponseTargetRowTs = undefined
 	access.clineMessages = []
 	access.askResponse = undefined
 	access.lastMessageTs = undefined
@@ -239,10 +243,147 @@ describe("ask response targeting", () => {
 
 		access.clineMessages = [{ type: "ask", ask: "command", ts: 1, isAnswered: undefined, partial: undefined }]
 		access.awaitingAskTarget = 7
+		// The arm records the owning row; the stamp settles that row.
+		access.awaitingAskTargetRowTs = 1
 
 		task.handleWebviewAskResponse("yesButtonClicked")
 
 		expect(access.clineMessages[0]!.isAnswered).toBe(true)
+	})
+
+	it("stamps only the command row that owns the arrival's target", async () => {
+		const provider = stubProvider()
+		const task = buildTask(provider)
+		await attachQueue(task)
+		const access = task as unknown as AskTargetingTaskAccess
+
+		// Ask A is armed; a newer command ask B's row already sits unanswered
+		// in the history while B is inside its publication. A recency
+		// predicate would settle B and hide its Run/Deny with no resolution
+		// coming; ownership settles A.
+		const olderRow = { type: "ask", ask: "command", ts: 1, isAnswered: undefined, partial: undefined }
+		const newerRow = { type: "ask", ask: "command", ts: 2, isAnswered: undefined, partial: undefined }
+		access.clineMessages = [olderRow, newerRow]
+		access.awaitingAskTarget = 7
+		access.awaitingAskTargetRowTs = 1
+
+		task.handleWebviewAskResponse("yesButtonClicked")
+
+		expect(olderRow.isAnswered).toBe(true)
+		expect(newerRow.isAnswered).toBeUndefined()
+		expect(access.updateClineMessage).toHaveBeenCalledTimes(1)
+		expect(access.updateClineMessage).toHaveBeenCalledWith(olderRow)
+	})
+
+	it("does not resolve the completed partial ask from a response that lands during its save", async () => {
+		const provider = stubProvider()
+		const task = buildTask(provider)
+		await attachQueue(task)
+		const access = task as unknown as AskTargetingTaskAccess
+
+		// The streaming partial row the completion path updates in place.
+		access.clineMessages = [{ type: "ask", ask: "command", ts: 11, partial: true, text: "ec" }]
+		// Park the completion path inside its save await: the window where a
+		// delayed previous-command approval would be processed.
+		let releaseSave: (() => void) | undefined
+		access.saveClineMessages = vi.fn(
+			() =>
+				new Promise<void>((resolve) => {
+					releaseSave = resolve
+				}),
+		)
+
+		const askPromise = task.ask("command", "echo hi", false)
+		const settled = askPromise.then(
+			() => "answered" as const,
+			() => "thrown" as const,
+		)
+		await vi.waitFor(() => {
+			if (!releaseSave) {
+				throw new Error("save not parked yet")
+			}
+		})
+
+		// The previous command's approval is processed inside the save window.
+		task.handleWebviewAskResponse("yesButtonClicked")
+		releaseSave!()
+
+		// The completed ask must not consume it: the ask arms only after its
+		// publication, so the save-window arrival is an orphan.
+		const raced = await Promise.race([
+			settled,
+			tick()
+				.then(() => tick())
+				.then(() => tick())
+				.then(() => "waiting" as const),
+		])
+		expect(raced).toBe("waiting")
+
+		// A separate approval after the publication resolves the ask and
+		// stamps the row it owns.
+		setTimeout(() => {
+			task.approveAsk()
+		}, 0)
+		expect(await askPromise).toMatchObject({ response: "yesButtonClicked" })
+		expect(access.clineMessages[0]!.isAnswered).toBe(true)
+	})
+
+	it("keeps the newer ask's armed token when an older publication completes late", async () => {
+		const provider = stubProvider()
+		const task = buildTask(provider)
+		await attachQueue(task)
+		const access = task as unknown as AskTargetingTaskAccess
+
+		// Park the first ask inside its publication: its beforeEmit arm hook
+		// has not run yet.
+		let releaseFirstPublication: (() => void) | undefined
+		let firstPublicationParked = false
+		access.addToClineMessages = async (_message: unknown, beforeEmit?: () => void) => {
+			if (!firstPublicationParked) {
+				firstPublicationParked = true
+				await new Promise<void>((resolve) => {
+					releaseFirstPublication = resolve
+				})
+			}
+			beforeEmit?.()
+		}
+
+		const firstAsk = task.ask("command", "echo one", false).then(
+			() => "answered" as const,
+			() => "thrown" as const,
+		)
+		await vi.waitFor(() => {
+			if (!releaseFirstPublication) {
+				throw new Error("first publication not parked yet")
+			}
+		})
+
+		// A newer ask races in and completes its publication: its token is
+		// armed and lastMessageTs has moved to the newer ask.
+		const secondAsk = task.ask("command", "echo two", false)
+		await vi.waitFor(() => {
+			if (access.awaitingAskTarget === undefined) {
+				throw new Error("second ask not armed yet")
+			}
+		})
+		const secondToken = access.awaitingAskTarget
+
+		// The older publication resumes. Its arm must be skipped (the ask is
+		// superseded), or it would steal the newer arm and the superseded
+		// cleanup would wipe it, leaving the newer ask with no armed target.
+		releaseFirstPublication!()
+		const firstOutcome = await Promise.race([
+			firstAsk,
+			new Promise((resolve) => setTimeout(resolve, 400)).then(() => "pending" as const),
+		])
+		expect(firstOutcome).toBe("thrown")
+		expect(access.awaitingAskTarget).toBe(secondToken)
+
+		// The newer ask still answers with its own approval.
+		setTimeout(() => {
+			task.approveAsk()
+		}, 0)
+		expect(await secondAsk).toMatchObject({ response: "yesButtonClicked" })
 	})
 
 	it("emits TaskInteractive when the ask stays pending past the two-second delay", async () => {
