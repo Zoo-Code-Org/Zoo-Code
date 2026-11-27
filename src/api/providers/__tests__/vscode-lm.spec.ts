@@ -4216,6 +4216,16 @@ describe("VsCodeLmHandler", () => {
 			noFamilyHandler.dispose()
 		})
 
+		it("uses the default-row maxInputTokens for an unset selector before client initialization", () => {
+			const unsetHandler = new VsCodeLmHandler({})
+			try {
+				unsetHandler["client"] = null
+				expect(unsetHandler.getCondenseContextWindow()).toBe(167790)
+			} finally {
+				unsetHandler.dispose()
+			}
+		})
+
 		it("falls back to the derived window when the static row exists but maxInputTokens is non-positive", () => {
 			// A curated row exists but its maxInputTokens is <= 0, so the `> 0` guard fails and the gate
 			// falls back to getModel().info.contextWindow.

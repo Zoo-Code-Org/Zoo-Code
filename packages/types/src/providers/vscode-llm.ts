@@ -637,7 +637,9 @@ export const vscodeLlmModels = {
 
 // Shared by the gauge and condensation; unknown families use the default budget, not a live window.
 export function getVscodeLlmModelInfo(family: string | undefined, vendor: string | undefined) {
-	return family && (family !== "claude-fable-5.2" || vendor === githubCopilotLanguageModel.vendor)
-		? (vscodeLlmModels[family as VscodeLlmModelId] ?? vscodeLlmModels[vscodeLlmDefaultModelId])
+	return family &&
+		Object.prototype.hasOwnProperty.call(vscodeLlmModels, family) &&
+		(family !== "claude-fable-5.2" || vendor === githubCopilotLanguageModel.vendor)
+		? vscodeLlmModels[family as VscodeLlmModelId]
 		: vscodeLlmModels[vscodeLlmDefaultModelId]
 }

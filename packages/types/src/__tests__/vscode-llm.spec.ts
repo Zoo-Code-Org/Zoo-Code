@@ -13,9 +13,12 @@ describe("getVscodeLlmModelInfo", () => {
 		},
 	)
 
-	it.each([undefined, "", "unknown-family"])("keeps the default row for family %s", (family) => {
-		expect(getVscodeLlmModelInfo(family, "copilot")).toBe(vscodeLlmModels[vscodeLlmDefaultModelId])
-	})
+	it.each([undefined, "", "unknown-family", "toString", "constructor", "__proto__"])(
+		"keeps the default row for family %s",
+		(family) => {
+			expect(getVscodeLlmModelInfo(family, "copilot")).toBe(vscodeLlmModels[vscodeLlmDefaultModelId])
+		},
+	)
 
 	it("resolves Fable 5.2's advertised budget for Copilot", () => {
 		const model = getVscodeLlmModelInfo("claude-fable-5.2", "copilot")
