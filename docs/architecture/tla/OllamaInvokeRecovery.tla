@@ -102,6 +102,18 @@
 \* tests (a second marker four columns in through a tab residual
 \* plus two spaces ends the quoted fence and the call below
 \* recovers; three columns in stays quoted).
+\* Review round 8 (on the head after 50fcc34e9): the tail rule behind a
+\* recovered call drops only the closer next to the block - a second
+\* wrapper close is prose. Added: the wrapTwice run; IsTailDrop already
+\* excluded the second close (a wrapper close between natives breaks
+\* the all-natives condition), NoLostText now pins the second close at
+\* exactly one sink occurrence. The tab-padded quoted fence opener and
+\* the fence an exit line re-opens sit below the token abstraction
+\* like the other container rules - Quoted stays the run oracle.
+\* Covered: the fence run's Quoted oracle already keeps a quoted
+\* example text. Gap: the two line-level rules, pinned by scanner
+\* unit tests (>\t~~~ opens the quoted fence; the ~~~ line that ends
+\* a quoted fence re-opens a top-level fence over the call below).
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -118,13 +130,14 @@ T_FENCE == "F"          \* a fenced code block marker line
 T_TICK == "t"           \* a backtick run that opens or closes a code span
 T_NATIVE == "n"         \* a native tool_call arrival
 
-Runs == {"wrap", "split", "fence", "carry", "natAfter", "natMid",
-         "natFirst", "natTail", "quotedNat", "unfin", "unknown",
-         "unknownWrap", "prose"}
+Runs == {"wrap", "wrapTwice", "split", "fence", "carry", "natAfter",
+         "natMid", "natFirst", "natTail", "quotedNat", "unfin",
+         "unknown", "unknownWrap", "prose"}
 
 \* ---- Per-run inputs (truth-table data, not rules) ----
 Tokens(r) ==
     CASE r = "wrap"     -> <<T_WRPO, T_OPNK, T_PARAM, T_INVC, T_WRPC>>
+    []  r = "wrapTwice" -> <<T_WRPO, T_OPNK, T_PARAM, T_INVC, T_WRPC, T_WRPC>>
     []  r = "split"     -> <<T_OPNK, T_PARAM, T_INVC>>
     []  r = "fence"     -> <<T_FENCE, T_OPNK, T_PARAM, T_INVC, T_FENCE>>
     []  r = "carry"     -> <<T_TICK, T_OPNK, T_PARAM, T_INVC, T_TICK>>
@@ -144,7 +157,7 @@ RunLen(r) == Len(Tokens(r))
 \* Oracle: a complete, known-name invoke block exists in this run. TRUE for
 \* the quoted runs too; the quote verdict is what keeps them as text.
 HasCall(r) ==
-    r \in {"wrap", "split", "fence", "carry",
+    r \in {"wrap", "wrapTwice", "split", "fence", "carry",
            "natAfter", "natMid", "natFirst", "natTail", "quotedNat"}
 
 \* Oracle: the block sits inside a fence or an inline code span, so the
@@ -160,6 +173,7 @@ EffRecov(r) == IF Mode = "NoGuard" THEN HasCall(r) ELSE TruthRecovered(r)
 \* opener, or the invoke opener without a wrapper.
 HoldStart(r) ==
     CASE r = "wrap"     -> 1
+    []  r = "wrapTwice" -> 1
     []  r = "split"     -> 1
     []  r = "fence"     -> 2
     []  r = "carry"     -> 2
@@ -177,6 +191,7 @@ HoldStart(r) ==
 \* behind it emits nothing. Runs without a close resolve at the finish.
 ResolvePos(r) ==
     CASE r = "wrap"     -> 4
+    []  r = "wrapTwice" -> 4
     []  r = "split"     -> 3
     []  r = "fence"     -> 4
     []  r = "carry"     -> 4
@@ -189,8 +204,12 @@ ResolvePos(r) ==
 
 \* Positions the machine swallows when a run recovers. Native tokens never
 \* join the hold; they emit on arrival.
+\* The tail drops only the closer next to the block: in wrapTwice the
+\* second T_WRPC stays text, so the swallow set ends at the first one.
 Swallowed(r) ==
-    IF TruthRecovered(r)
+    IF r = "wrapTwice"
+    THEN 1..5
+    ELSE IF TruthRecovered(r)
     THEN {i \in 1..RunLen(r) : Tokens(r)[i] # T_NATIVE}
     ELSE {}
 
@@ -202,6 +221,7 @@ IsTextToken(r, i) == Tokens(r)[i] # T_NATIVE /\ ~SwallowToken(r, i)
 \* no sort operator.
 Events(r) ==
     CASE r = "wrap"     -> << <<"call", 4>> >>
+    []  r = "wrapTwice" -> << <<"call", 4>> >>
     []  r = "split"     -> << <<"call", 3>> >>
     []  r = "natAfter"  -> << <<"call", 3>>, <<"nat", 4>> >>
     []  r = "natMid"    -> << <<"nat", 2>>, <<"call", 4>> >>

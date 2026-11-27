@@ -117,13 +117,29 @@ const LIST_MARKER = /^ {0,3}(?:[-+*]|\d{1,9}[.)])( +)/
 /**
  * The container prefix of a complete line: how many bytes to strip
  * before reading the line's own block content, and which container
- * those bytes belong to.
+ * those bytes belong to. `column` is the document column the strip
+ * point reaches and `base` the column the content region starts at,
+ * so the fenced-opener check can measure indentation in columns. A
+ * tab partly consumed by the strip keeps its residual columns in
+ * the content region.
  */
-function lineContainer(line: string): { strip: number; container: FenceContainer } {
+function lineContainer(line: string): { strip: number; container: FenceContainer; column: number; base: number } {
 	const quote = QUOTE_PREFIX.exec(line)
 	if (quote !== null) {
 		const depth = (quote[0].match(/>/g) ?? []).length
-		return { strip: quote[0].length, container: { kind: "quote", depth } }
+		let strip = quote[0].length
+		let column = strip
+		let base = column
+		if (quote[0].endsWith(">") && line.startsWith(quote[0] + "\t")) {
+			// CommonMark: the optional space behind the marker may be
+			// one column of a tab; the tab's remaining columns stay in
+			// the content region, the same accounting the fenced-closer
+			// path applies.
+			strip += 1
+			base = column + 1
+			column += 4 - (column % 4)
+		}
+		return { strip, container: { kind: "quote", depth }, column, base }
 	}
 	const list = LIST_MARKER.exec(line)
 	if (list !== null) {
@@ -131,9 +147,9 @@ function lineContainer(line: string): { strip: number; container: FenceContainer
 		// indent; a wider run indents the content by marker width + 1.
 		const markerWidth = list[0].length - list[1].length
 		const indent = list[1].length <= 4 ? list[0].length : markerWidth + 1
-		return { strip: indent, container: { kind: "list", indent } }
+		return { strip: indent, container: { kind: "list", indent }, column: indent, base: indent }
 	}
-	return { strip: 0, container: { kind: "none" } }
+	return { strip: 0, container: { kind: "none" }, column: 0, base: 0 }
 }
 
 /**
@@ -404,6 +420,9 @@ export class InvokeRecoveryScanner {
 		const marker = matchMarker(rest)
 		if (marker === WRAPPER_CLOSE) {
 			this.drop(wsEnd + WRAPPER_CLOSE.length)
+			// Only the closer next to the block is skeleton residue;
+			// a further closer is prose and must reach the text sink.
+			this.phase = "safe"
 			return [true]
 		}
 		if (marker === undefined && isMarkerPrefix(rest) && rest.length > 0) {
@@ -514,6 +533,9 @@ export class InvokeRecoveryScanner {
 		const stripped = containerStrip(fence.container, line)
 		if (stripped === null) {
 			this.fence = null
+			// The line is read outside the ended container, so it may
+			// open a new fence; ordinary prose leaves fence null.
+			this.detectFence(line)
 			return
 		}
 		// Fence lines are read behind the opening fence's own
@@ -545,19 +567,28 @@ export class InvokeRecoveryScanner {
 	/**
 	 * Opens a fence on a complete line outside any fence. The line's
 	 * own container prefix is skipped, so a quoted or list-held fence
-	 * is still a fence and the block it wraps stays quoted.
+	 * is still a fence and the block it wraps stays quoted. The fence
+	 * may sit at most three columns inside the container, measured at
+	 * tab stops like the closing-fence check: a tab partly consumed
+	 * by the strip leaves residual columns the allowance must count.
 	 */
 	private detectFence(line: string): void {
-		const { strip, container } = lineContainer(line)
+		const { strip, container, column, base } = lineContainer(line)
 		const content = line.slice(strip)
-		const tilde = /^ {0,3}(~{3,})/.exec(content)
+		const run = whitespaceRun(content, 0, column)
+		if (run.column - base > 3) {
+			// Past the fence allowance: an indented block, not a fence.
+			return
+		}
+		const body = content.slice(run.at)
+		const tilde = /^(~{3,})/.exec(body)
 		if (tilde) {
 			// A tilde fence accepts any info string.
 			this.fence = { char: "~", width: tilde[1].length, container }
 			return
 		}
-		const backtick = /^ {0,3}(`{3,})/.exec(content)
-		if (backtick && !content.slice(backtick[0].length).includes("`")) {
+		const backtick = /^(`{3,})/.exec(body)
+		if (backtick && !body.slice(backtick[0].length).includes("`")) {
 			// A backtick fence's info string must contain no backtick.
 			this.fence = { char: "`", width: backtick[1].length, container }
 		}

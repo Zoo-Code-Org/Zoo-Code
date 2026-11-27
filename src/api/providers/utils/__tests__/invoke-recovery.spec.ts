@@ -42,6 +42,16 @@ describe("InvokeRecoveryScanner", () => {
 		expect(text(events)).toBe("Running now \ndone")
 	})
 
+	it("drops only the first wrapper close behind a recovered call", () => {
+		// Only the closer next to the block is skeleton residue. A second
+		// closer falls outside the wrapper-only drop rule and flows
+		// through prose scanning as text.
+		const fixture = `${bareWeatherCall("Rome")}</function_calls></function_calls>X`
+		const events = scanChunked(fixture, [30, 20, 10])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("</function_calls>X")
+	})
+
 	it("recovers a bare invoke block without a wrapper", () => {
 		const events = scanChunked(`Hmm. ${bareWeatherCall("Rome")} Ok.`, [5, 30, 10])
 		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
@@ -412,6 +422,28 @@ ${bareWeatherCall("Rome")}`,
 		// ends the block early, and recovers the quoted call below.
 		const fixture = `> ~~~\n>\t ~~~\n> ~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`
 		const events = scanChunked(fixture, [6, 30, 30])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("opens a quoted fence whose opener pads the marker with a tab", () => {
+		// CommonMark consumes one column of a tab as the quote marker's
+		// optional padding: the fence after `>\t` sits three residual
+		// columns inside the quote, so it opens and the example below
+		// stays quoted text.
+		const fixture = `>\t~~~\n> ${bareWeatherCall("Rome")}\n> ~~~`
+		const events = scanChunked(fixture, [3, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("re-opens a top-level fence on the line that ends the quoted fence", () => {
+		// CommonMark ends an unclosed fenced block when its container
+		// ends, and the same line can open a new fence at the top
+		// level: the example after the transition stays inside the new
+		// fence as literal content.
+		const fixture = `> ~~~\n~~~\n${bareWeatherCall("Rome")}\n~~~`
+		const events = scanChunked(fixture, [6, 30, 10])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
 	})
