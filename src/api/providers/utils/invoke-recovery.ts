@@ -162,9 +162,24 @@ function containerStrip(container: FenceContainer, line: string): number {
 				// A blank line neither leaves the item nor closes the fence.
 				return 0
 			}
-			const leading = /^ */.exec(line)
-			const spaces = leading === null ? 0 : leading[0].length
-			return spaces >= container.indent ? container.indent : -1
+			// CommonMark expands a tab to the next four-column tab stop, so
+			// a tab-indented line can satisfy the item's content indent:
+			// measure columns, and strip the bytes that reach the indent.
+			// Space-indented lines keep the plain space count.
+			let column = 0
+			let at = 0
+			while (at < line.length && column < container.indent) {
+				const char = line[at]
+				if (char === " ") {
+					column += 1
+				} else if (char === "\t") {
+					column += 4 - (column % 4)
+				} else {
+					break
+				}
+				at += 1
+			}
+			return column >= container.indent ? at : -1
 		}
 	}
 }

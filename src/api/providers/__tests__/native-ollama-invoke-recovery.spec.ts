@@ -116,6 +116,12 @@ const textOf = (parts: Array<{ type: string }>) =>
 		.map((part) => part.text)
 		.join("")
 
+const reasoningOf = (parts: Array<{ type: string }>) =>
+	parts
+		.filter((part): part is { type: "reasoning"; text: string } => part.type === "reasoning")
+		.map((part) => part.text)
+		.join("")
+
 describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 	beforeEach(() => {
 		clearAllMocks()
@@ -312,6 +318,24 @@ describe("NativeOllamaHandler pseudo tool-call recovery", () => {
 
 		expect(callsOf(parts)).toStrictEqual([])
 		expect(textOf(parts)).toBe(fixture)
+	})
+
+	it("keeps a think-tag-wrapped invoke block as reasoning without recovering it", async () => {
+		// The think tags are reasoning regions in content: the TagMatcher
+		// classifies their bytes as reasoning before the scanner sees
+		// them, so a fully formed call inside the block never recovers.
+		const quoted = wrappedWeatherCall("Berlin")
+		const parts = await run(
+			{ message: { content: "<think>Let me check. " } },
+			{ message: { content: quoted } },
+			{ message: { content: "\n</think>Done" } },
+		)
+
+		expect(callsOf(parts)).toStrictEqual([])
+		// The matcher strips the think tags: reasoning carries the inner
+		// content only.
+		expect(reasoningOf(parts)).toBe(`Let me check. ${quoted}\n`)
+		expect(textOf(parts)).toBe("Done")
 	})
 
 	it("keeps streaming prose live while tools are offered", async () => {

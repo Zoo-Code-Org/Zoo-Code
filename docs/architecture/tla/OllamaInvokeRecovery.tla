@@ -62,6 +62,15 @@
 \* added). Gap: the fence container rules (same-depth quote levels,
 \* list-item indent, container exit closes the fence) sit below the token
 \* abstraction, pinned by scanner unit tests.
+\* Review round 4 (on 19d088c80): the round-3 claim that the wrapped
+\* unknown-name negative was spec-covered was wrong - the unknown run
+\* holds an incomplete unwrapped block. Added the complete wrapped
+\* unknownWrap run (wrapper, unknown opener, parameter, invoke close,
+\* wrapper close): NoPhantomCall now covers the wrapped unknown-name
+\* negative on the spec level, with no oracle change (HasCall stays
+\* false: the unknown-name verdict, not the quote guard, keeps it text).
+\* Covered: the tab-stop list-indent rule sits below the token
+\* abstraction, pinned by a scanner unit test. Gap: none new.
 EXTENDS Naturals, Sequences, FiniteSets
 
 CONSTANT Mode
@@ -79,7 +88,8 @@ T_TICK == "t"           \* a backtick run that opens or closes a code span
 T_NATIVE == "n"         \* a native tool_call arrival
 
 Runs == {"wrap", "split", "fence", "carry", "natAfter", "natMid",
-         "natFirst", "natTail", "quotedNat", "unfin", "unknown", "prose"}
+         "natFirst", "natTail", "quotedNat", "unfin", "unknown",
+         "unknownWrap", "prose"}
 
 \* ---- Per-run inputs (truth-table data, not rules) ----
 Tokens(r) ==
@@ -94,6 +104,7 @@ Tokens(r) ==
     []  r = "quotedNat" -> <<T_FENCE, T_OPNK, T_NATIVE, T_PARAM, T_INVC, T_FENCE>>
     []  r = "unfin"     -> <<T_PROSE, T_OPNK, T_PARAM>>
     []  r = "unknown"   -> <<T_OPNU, T_PARAM, T_PARAM>>
+    []  r = "unknownWrap" -> <<T_WRPO, T_OPNU, T_PARAM, T_INVC, T_WRPC>>
     []  r = "prose"     -> <<T_PROSE, T_PROSE>>
     []  OTHER -> <<>>
 
@@ -128,6 +139,7 @@ HoldStart(r) ==
     []  r = "quotedNat" -> 2
     []  r = "unfin"     -> 2
     []  r = "unknown"   -> 1
+    []  r = "unknownWrap" -> 1
     []  OTHER -> RunLen(r) + 1
 
 \* Position where the hold resolves: the invoke close. The wrapper close

@@ -201,6 +201,19 @@ describe("InvokeRecoveryScanner", () => {
 		expect(text(events)).toBe("")
 	})
 
+	it("keeps the last value of a repeated parameter", () => {
+		// Pin the duplicate-key rule: a later <parameter> with the same
+		// name overwrites the earlier one, so arguments carry the last
+		// value. A change in duplicate handling fails this exact-string
+		// assertion.
+		const fixture =
+			`<invoke name="get_weather"><parameter name="location">Berlin</parameter>` +
+			`<parameter name="location">Rome</parameter></invoke>`
+		const events = scanChunked(fixture, [12, 40, 30])
+		expect(calls(events)).toStrictEqual([{ kind: "call", name: "get_weather", arguments: '{"location":"Rome"}' }])
+		expect(text(events)).toBe("")
+	})
+
 	it("recovers across fence-adjacent whitespace inside the wrapper skeleton", () => {
 		const fixture = `<function_calls>\n<invoke name="get_weather"><parameter name="location">Berlin</parameter></invoke>\n</function_calls>`
 		const events = scanChunked(fixture, [17, 40, 30])
@@ -288,6 +301,17 @@ describe("InvokeRecoveryScanner", () => {
 		// CommonMark opens and closes fenced code blocks inside list
 		// items: the example stays text, never recovers.
 		const fixture = `- ~~~\n  ${bareWeatherCall("Rome")}\n  ~~~\nafter`
+		const events = scanChunked(fixture, [5, 30, 10])
+		expect(calls(events)).toStrictEqual([])
+		expect(text(events)).toBe(fixture)
+	})
+
+	it("keeps a tab-indented fence inside a list item as text", () => {
+		// CommonMark expands a tab to the next four-column tab stop, so a
+		// tab-indented line still satisfies the list item's content
+		// indent: the fence stays open and the example stays text, never
+		// recovers.
+		const fixture = `- ~~~\n\tcode\n  <invoke name="get_weather"></invoke>\n  ~~~\nafter`
 		const events = scanChunked(fixture, [5, 30, 10])
 		expect(calls(events)).toStrictEqual([])
 		expect(text(events)).toBe(fixture)
