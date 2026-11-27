@@ -1831,6 +1831,181 @@ describe("DeepSeekHandler", () => {
 			})
 			expect(params.required).toStrictEqual(["x"])
 		})
+
+		// Walks a compiled schema and fails on any local "#/..." reference the
+		// compiled document cannot resolve - the gateway would answer with a
+		// compilation error instead of applying the rule.
+		const assertNoDanglingLocalRefs = (node: unknown, root: unknown = node): void => {
+			if (Array.isArray(node)) {
+				node.forEach((entry) => assertNoDanglingLocalRefs(entry, root))
+				return
+			}
+			if (typeof node !== "object" || node === null) {
+				return
+			}
+			const record = node as Record<string, unknown>
+			if (typeof record.$ref === "string" && record.$ref.startsWith("#/")) {
+				let cursor: unknown = root
+				for (const rawSegment of record.$ref.slice(2).split("/")) {
+					const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+					if (
+						typeof cursor !== "object" ||
+						cursor === null ||
+						!Object.prototype.hasOwnProperty.call(cursor, segment)
+					) {
+						throw new Error(`dangling local reference ${record.$ref}`)
+					}
+					cursor = (cursor as Record<string, unknown>)[segment]
+				}
+			}
+			for (const value of Object.values(record)) {
+				assertNoDanglingLocalRefs(value, root)
+			}
+		}
+
+		it("inlines a moved pattern-rule reference that would dangle under additionalProperties (review 6089521528)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: {
+							"^x": {
+								$defs: { value: { type: "string" } },
+								$ref: "#/patternProperties/^x/$defs/value",
+							},
+						},
+						required: ["x"],
+						additionalProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The moved alternative carries the rule the pointer denoted, not
+			// the pointer: the compiled document has no patternProperties
+			// location left, so a retained reference could not resolve its
+			// string alternative and the value the original accepted for the
+			// key x would break. The inert $defs sibling keeps applying
+			// beside the inlined target under one allOf conjunct.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { value: { type: "string" } } }] }],
+			})
+			assertNoDanglingLocalRefs(params)
+			expect(String(params.description)).toContain("patternProperties")
+		})
+
+		it("inlines a moved pattern-rule reference that would dangle under unevaluatedProperties (review 6089521528)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: {
+							"^x": {
+								$defs: { value: { type: "string" } },
+								$ref: "#/patternProperties/^x/$defs/value",
+							},
+						},
+						required: ["x"],
+						unevaluatedProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The same relocation for the second schema-valued closed rule.
+			expect(params.unevaluatedProperties).toStrictEqual({
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { value: { type: "string" } } }] }],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("keeps a moved pattern-rule reference whose target survives compilation", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						$defs: { shared: { type: "string" } },
+						patternProperties: { "^x": { $ref: "#/$defs/shared" } },
+						required: ["x"],
+						additionalProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// A pointer that still resolves in the compiled document stays a
+			// pointer: the relocation must not inline references whose
+			// target compilation keeps at its original location.
+			expect(params.additionalProperties).toStrictEqual({
+				anyOf: [{ type: "number" }, { $ref: "#/$defs/shared" }],
+			})
+			assertNoDanglingLocalRefs(params)
+		})
+
+		it("relaxes a schema-valued closed rule when a moved reference resolves only through itself", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "object",
+						patternProperties: { "^x": { $ref: "#/patternProperties/^x" } },
+						required: ["x"],
+						additionalProperties: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The pattern rule references itself through the removed
+			// location: no moved copy can resolve it, so the keys it
+			// evaluated are unknown and the retained rule relaxes instead of
+			// forbidding a value the original accepted.
+			expect(params.additionalProperties).toBe(true)
+			assertNoDanglingLocalRefs(params)
+			expect(String(params.description)).toContain("patternProperties")
+		})
+
+		it("inlines a moved contains reference that would dangle under unevaluatedItems (review 6089521528)", () => {
+			const tool = {
+				type: "function",
+				function: {
+					name: "search_files",
+					description: "Search",
+					strict: true,
+					parameters: {
+						type: "array",
+						contains: { $defs: { v: { type: "string" } }, $ref: "#/contains/$defs/v" },
+						minContains: 1,
+						unevaluatedItems: { type: "number" },
+					},
+				},
+			} satisfies Record<string, unknown>
+			const tools = convert([tool])
+			const params = tools[0].function.parameters as unknown as Record<string, unknown>
+			// The contains rule re-enters beside the retained restriction
+			// (review 4719419428); the same relocation applies to it, since
+			// the compiled document loses the contains location too.
+			expect(params.unevaluatedItems).toStrictEqual({
+				anyOf: [{ type: "number" }, { allOf: [{ type: "string" }, { $defs: { v: { type: "string" } } }] }],
+			})
+			assertNoDanglingLocalRefs(params)
+			expect(String(params.description)).toContain("contains")
+		})
 	})
 })
 

@@ -21,7 +21,11 @@
  *   removing patternProperties relaxes a retained additionalProperties rule
  *   and a retained unevaluatedProperties rule (a false rule becomes true; a
  *   schema-valued rule re-admits the removed pattern rules as alternatives,
- *   so the keys they evaluated stay accepted), removing contains relaxes a
+ *   so the keys they evaluated stay accepted), a moved rule carries no
+ *   reference that only resolves through a removed location: such a pointer
+ *   is inlined with its compiled target, and a rule that references itself
+ *   through the removed location relaxes the retained rule instead (issue
+ *   #547 review 6089521528), removing contains relaxes a
  *   retained unevaluatedItems restriction the same way, and a retained
  *   prefixItems is no complete evaluator: only a retained items keeps the
  *   array restriction (issue #547 review 4719935091), a oneOf whose branches - or
@@ -159,6 +163,126 @@ function referencesUnchangedTargets(refs: string[], root: unknown, depth: number
 		}
 	}
 	return true
+}
+
+/**
+ * Keys a moved rule's pointer must not traverse: compilation removes these
+ * keywords outright (the rejected set) or rewrites them into another
+ * structure (the retained rules the relaxations replace), so a pointer
+ * through them targets a location the compiled document does not have and
+ * the reference could not resolve at validation time (issue #547 review
+ * 6089521528).
+ */
+const POINTER_KEYS_LOST_IN_COMPILATION = new Set([
+	...DEEPSEEK_REJECTED_SCHEMA_KEYWORDS,
+	"oneOf",
+	"not",
+	"if",
+	"then",
+	"else",
+	"additionalProperties",
+	"unevaluatedProperties",
+	"unevaluatedItems",
+])
+
+function pointerTraversesLostKey(ref: string): boolean {
+	if (!ref.startsWith("#/")) {
+		// External URIs and the whole-document "#" form never depended on a
+		// local document location.
+		return false
+	}
+	return ref
+		.slice(2)
+		.split("/")
+		.some((rawSegment) => {
+			const segment = rawSegment.replace(/~1/g, "/").replace(/~0/g, "~")
+			return POINTER_KEYS_LOST_IN_COMPILATION.has(segment)
+		})
+}
+
+/**
+ * Rewrites the local references inside a rule that compilation moves to
+ * another document location. A pointer whose path traverses a lost key is
+ * replaced with its resolved, compiled target - the same schema a retained
+ * pointer would have resolved to - so the moved rule keeps the constraints
+ * it declared instead of an unresolvable reference. Siblings of a rewritten
+ * "$ref" keep applying beside the inlined target under one allOf conjunct
+ * (Draft 2020-12 applies a reference in addition to its siblings). The rule
+ * is passed through unchanged when its pointer is external, never resolved
+ * locally even in the original, or still resolves in the compiled document.
+ * Sets cyclic.hit when the rule references itself through the lost location:
+ * no finite inlining represents such a rule, and the caller relaxes instead
+ * of moving it. Pure: the input node is never mutated.
+ */
+function relocateMovedRefs(
+	node: unknown,
+	root: unknown,
+	depth: number,
+	memo: SchemaCompileMemo,
+	chain: Set<unknown>,
+	cyclic: { hit: boolean },
+): unknown {
+	if (cyclic.hit) {
+		return node
+	}
+	if (Array.isArray(node)) {
+		const out: unknown[] = []
+		for (const entry of node) {
+			out.push(relocateMovedRefs(entry, root, depth, memo, chain, cyclic))
+		}
+		return out
+	}
+	if (!isRecord(node)) {
+		return node
+	}
+	if (typeof node.$ref === "string") {
+		const ref: string = node.$ref
+		if (!pointerTraversesLostKey(ref)) {
+			return node
+		}
+		const resolved = resolveLocalRef(root, ref)
+		if (!resolved.resolved) {
+			// The pointer never resolved in the original document either:
+			// keep it exactly as the untouched pass-through would.
+			return node
+		}
+		if (chain.has(resolved.target)) {
+			cyclic.hit = true
+			return node
+		}
+		chain.add(resolved.target)
+		const inlined = relocateMovedRefs(
+			compileSchemaNode(resolved.target, depth + 1, root, memo),
+			root,
+			depth,
+			memo,
+			chain,
+			cyclic,
+		)
+		chain.delete(resolved.target)
+		if (cyclic.hit) {
+			return node
+		}
+		const rest: Record<string, unknown> = {}
+		for (const [key, value] of Object.entries(node)) {
+			if (key === "$ref") {
+				continue
+			}
+			defineOwnKey(rest, key, relocateMovedRefs(value, root, depth, memo, chain, cyclic))
+		}
+		if (cyclic.hit) {
+			return node
+		}
+		if (Object.keys(rest).length === 0) {
+			return inlined
+		}
+		return { allOf: [inlined, rest] }
+	}
+	const out: Record<string, unknown> = {}
+	for (const [key, value] of Object.entries(node)) {
+		defineOwnKey(out, key, relocateMovedRefs(value, root, depth, memo, chain, cyclic))
+	}
+	return out
 }
 
 /**
@@ -369,22 +493,50 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 	// alternatives, so a value the original accepted stays accepted (issue #547
 	// review 4719336022). Ordinary closed objects keep their rule.
 	if ("patternProperties" in removed && isRecord(removed.patternProperties)) {
-		const patternRules = Object.values(removed.patternProperties).map((rule) =>
-			compileSchemaNode(rule, depth + 1, root, memo),
-		)
+		const patternRules: unknown[] = []
+		let relocatable = true
+		for (const rule of Object.values(removed.patternProperties)) {
+			const cyclic = { hit: false }
+			const relocated = relocateMovedRefs(
+				compileSchemaNode(rule, depth + 1, root, memo),
+				root,
+				depth,
+				memo,
+				new Set(),
+				cyclic,
+			)
+			if (cyclic.hit) {
+				relocatable = false
+				break
+			}
+			patternRules.push(relocated)
+		}
 		if (result.additionalProperties === false) {
 			defineOwnKey(result, "additionalProperties", true)
 		} else if (isRecord(result.additionalProperties)) {
-			defineOwnKey(result, "additionalProperties", {
-				anyOf: [result.additionalProperties, ...patternRules],
-			})
+			if (relocatable) {
+				defineOwnKey(result, "additionalProperties", {
+					anyOf: [result.additionalProperties, ...patternRules],
+				})
+			} else {
+				// A pattern rule references itself through the removed
+				// location, so the keys it evaluated are unknown: a retained
+				// schema-valued rule could forbid a value the original
+				// accepted, and the rule relaxes instead (issue #547 review
+				// 6089521528).
+				defineOwnKey(result, "additionalProperties", true)
+			}
 		}
 		if (result.unevaluatedProperties === false) {
 			defineOwnKey(result, "unevaluatedProperties", true)
 		} else if (isRecord(result.unevaluatedProperties)) {
-			defineOwnKey(result, "unevaluatedProperties", {
-				anyOf: [result.unevaluatedProperties, ...patternRules],
-			})
+			if (relocatable) {
+				defineOwnKey(result, "unevaluatedProperties", {
+					anyOf: [result.unevaluatedProperties, ...patternRules],
+				})
+			} else {
+				defineOwnKey(result, "unevaluatedProperties", true)
+			}
 		}
 	}
 	// The same annotation dependency on arrays: contains evaluated the items it
@@ -402,9 +554,25 @@ function compileSchemaNode(schema: unknown, depth: number, root: unknown, memo: 
 			// The contains rule re-enters as an alternative: the items it
 			// evaluated stay accepted beside the retained restriction. A
 			// boolean contains evaluates positions only, so the alternative
-			// accepts any item.
-			const relaxed = isRecord(removed.contains) ? compileSchemaNode(removed.contains, depth + 1, root, memo) : {}
-			defineOwnKey(result, "unevaluatedItems", { anyOf: [result.unevaluatedItems, relaxed] })
+			// accepts any item. The same relocation applies to the moved
+			// rule: the compiled document loses the contains location too
+			// (issue #547 review 6089521528).
+			const cyclic = { hit: false }
+			const relaxed = isRecord(removed.contains)
+				? relocateMovedRefs(
+						compileSchemaNode(removed.contains, depth + 1, root, memo),
+						root,
+						depth,
+						memo,
+						new Set(),
+						cyclic,
+					)
+				: {}
+			if (cyclic.hit) {
+				defineOwnKey(result, "unevaluatedItems", true)
+			} else {
+				defineOwnKey(result, "unevaluatedItems", { anyOf: [result.unevaluatedItems, relaxed] })
+			}
 		}
 	}
 

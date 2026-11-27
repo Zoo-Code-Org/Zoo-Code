@@ -40,14 +40,21 @@
 \*             the pattern rules evaluated were exempt from it, and the
 \*             retained rule then rejects values the original accepted
 \*             (review 4719336022).
+\* Failure 15: a moved pattern rule keeps a $ref whose pointer only resolves
+\*             through the removed patternProperties location - the compiled
+\*             document has no such location left, the reference cannot
+\*             resolve, and the value the original accepted for the key
+\*             breaks (review 6089521528).
 \* Invariants: RequiredPreserved, ForbiddenAbsent, ConstraintsRecorded,
-\*             SatPreserved, SiblingConjunctKept, ArraySatKept.
+\*             SatPreserved, SiblingConjunctKept, ArraySatKept,
+\*             MovedRefResolvable.
 \* Expect: Fixed holds. ForceRequired fails RequiredPreserved. KeepPattern fails
 \* Expect: ForbiddenAbsent. DropSilently fails ConstraintsRecorded. NotTighten,
 \* KeepOneOf, KeepClosed, KeepConditional, KeepRefPredicate, KeepUnevaluated and
 \* Expect: KeepUepSchema fail SatPreserved. AbsorbAnyOf fails SiblingConjunctKept.
 \* Expect: KeepDependent fails ForbiddenAbsent. KeepContainsUneval and
-\* Expect: KeepPrefixEvaluator fail ArraySatKept.
+\* Expect: KeepPrefixEvaluator fail ArraySatKept. KeepMovedRef fails
+\* Expect: MovedRefResolvable.
 \* Before this change the DeepSeek handler ran the strict-mode sanitizer plus the
 \* all-required rewrite, so RequiredPreserved failed on every optional parameter.
 \* Replay: DeepSeek answered 400 missing required parameter on read_file without
@@ -64,7 +71,7 @@
 \* prototype-key fidelity (a JS runtime artifact, pinned by the JSON.parse
 \* regression test for review 4712438384).
 \* Property tests: src/api/providers/__tests__/deepseek.spec.ts (tool dialect block).
-\* Result: Fixed holds in 4096 states. ForceRequired fails RequiredPreserved.
+\* Result: Fixed holds in 1048576 states. ForceRequired fails RequiredPreserved.
 \* KeepPattern fails ForbiddenAbsent. DropSilently fails ConstraintsRecorded.
 \* NotTighten, KeepOneOf, KeepClosed and KeepConditional each fail
 \* SatPreserved. AbsorbAnyOf fails SiblingConjunctKept. TLC found no state
@@ -83,13 +90,18 @@
 \* 2 added (a partial prefixItems no longer counts as a complete array
 \* evaluator, ArraySatKept; a schema-valued closed rule re-admits the removed
 \* pattern rules as alternatives, SatPreserved), 0 covered, 0 gap.
+\* Round 8 (review 6089521528): 1 added (a moved pattern rule carries no
+\* reference that only resolves through a removed location, the pointer is
+\* inlined with its compiled target and a self-referencing rule relaxes the
+\* retained rule instead, MovedRefResolvable), 0 covered, 0 gap.
 
 CONSTANT Variant                  \* "Fixed", "ForceRequired", "KeepPattern",
                                   \* "DropSilently", "NotTighten", "KeepOneOf",
                                   \* "KeepClosed", "KeepConditional", "AbsorbAnyOf",
                                   \* "KeepDependent", "KeepRefPredicate",
                                   \* "KeepUnevaluated", "KeepContainsUneval",
-                                  \* "KeepPrefixEvaluator" or "KeepUepSchema"
+                                  \* "KeepPrefixEvaluator", "KeepUepSchema"
+                                  \* or "KeepMovedRef"
 
 VARIABLE in
 
@@ -112,14 +124,16 @@ REJECTED == {"pattern", "minLength", "minItems"}
 \* (arrEvaluator2), with a partial prefixItems as the second evaluator
 \* instead (partialPrefix2 - it evaluates only its listed positions), and
 \* the closed-object rule shaped as a schema-valued unevaluatedProperties
-\* restriction that must re-admit the removed pattern rules (uepSchema2).
+\* restriction that must re-admit the removed pattern rules (uepSchema2),
+\* and the pattern rule itself being only a $ref whose pointer resolves
+\* through the removed patternProperties location (movedRef2).
 Inputs == [req2 : BOOLEAN, kw2 : SUBSET REJECTED, not2 : BOOLEAN,
            childKw : BOOLEAN, oneOf2 : BOOLEAN, branchKw : BOOLEAN,
            closed2 : BOOLEAN, cond2 : BOOLEAN, ifKw : BOOLEAN,
            anyOf2 : BOOLEAN, dep2 : BOOLEAN, ref2 : BOOLEAN,
            uneval2 : BOOLEAN, containsClosed2 : BOOLEAN,
            arrEvaluator2 : BOOLEAN, partialPrefix2 : BOOLEAN,
-           uepSchema2 : BOOLEAN]
+           uepSchema2 : BOOLEAN, movedRef2 : BOOLEAN]
 
 Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 
@@ -146,6 +160,8 @@ Required(i) == {1} \union (IF i.req2 THEN {2} ELSE {})
 \* array restriction. KeepPrefixEvaluator keeps treating a partial prefixItems
 \* as a complete evaluator. KeepUepSchema keeps a schema-valued closed rule
 \* unmerged, so it rejects the keys the pattern rules evaluated.
+\* KeepMovedRef keeps the moved rule's reference as a pointer, although the
+\* compiled document has no patternProperties location for it to resolve.
 Decisions(i) ==
     LET refChanged == i.ref2 /\ i.kw2 # {}
     IN LET fixed ==
@@ -156,6 +172,7 @@ Decisions(i) ==
          uepRelaxed |-> i.closed2 /\ i.uneval2 /\ ~i.uepSchema2,
          uepSchemaKept |-> i.closed2 /\ i.uepSchema2,
          condRelaxed |-> i.cond2 /\ (i.ifKw \/ refChanged),
+         movedRefInlined |-> i.closed2 /\ i.uepSchema2 /\ i.movedRef2,
          siblingKept |-> TRUE,
          uiRelaxed |-> i.containsClosed2 /\ (~i.arrEvaluator2 \/ i.partialPrefix2)]
     IN CASE Variant = "ForceRequired" ->
@@ -191,6 +208,8 @@ Decisions(i) ==
         [fixed EXCEPT !["uiRelaxed"] = i.containsClosed2 /\ ~i.arrEvaluator2]
     [] Variant = "KeepUepSchema" ->
         [fixed EXCEPT !["uepSchemaKept"] = FALSE]
+    [] Variant = "KeepMovedRef" ->
+        [fixed EXCEPT !["movedRefInlined"] = FALSE]
     [] OTHER -> fixed
 
 TypeOK ==
@@ -205,6 +224,7 @@ TypeOK ==
     /\ Decisions(in).condRelaxed \in BOOLEAN
     /\ Decisions(in).siblingKept \in BOOLEAN
     /\ Decisions(in).uiRelaxed \in BOOLEAN
+    /\ Decisions(in).movedRefInlined \in BOOLEAN
 
 Init == in \in Inputs
 Next == UNCHANGED in
@@ -273,5 +293,15 @@ SiblingConjunctKept ==
 \* (review 4719935091).
 ArraySatKept ==
     (in.containsClosed2 /\ ((~in.arrEvaluator2) \/ in.partialPrefix2)) => Decisions(in).uiRelaxed
+
+\* Safety (review 6089521528): a pattern rule that is only a $ref through the
+\* removed patternProperties location is re-admitted as an inlined compiled
+\* target, never as the pointer itself - the compiled document has no such
+\* location left, so a retained pointer could not resolve and the key it
+\* admitted would break. The re-admission happens under a schema-valued
+\* closed rule (closed2 with the uepSchema2 shape); without one the rule has
+\* no moved position at all.
+MovedRefResolvable ==
+    (in.movedRef2 /\ in.closed2 /\ in.uepSchema2) => Decisions(in).movedRefInlined
 
 ====
