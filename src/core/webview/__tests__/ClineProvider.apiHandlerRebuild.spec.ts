@@ -11,6 +11,7 @@ import { ContextProxy } from "../../config/ContextProxy"
 import type { Mode } from "../../../shared/modes"
 import { Task, TaskOptions } from "../../task/Task"
 import { ClineProvider } from "../ClineProvider"
+import WorkspaceTracker from "../../../integrations/workspace/WorkspaceTracker"
 import { providerIdentifiers } from "@roo-code/types/provider-identifiers"
 
 // Mock setup
@@ -97,6 +98,7 @@ vi.mock("../../../integrations/workspace/WorkspaceTracker", () => {
 		default: vi.fn().mockImplementation(function () {
 			return {
 				initializeFilePaths: vi.fn(),
+				publishOpenedTabs: vi.fn(),
 				dispose: vi.fn(),
 			}
 		}),
@@ -1203,6 +1205,30 @@ describe("ClineProvider - API Handler Rebuild Guard", () => {
 		test("returns undefined when no model ID is present", () => {
 			expect(getModelId({ apiProvider: providerIdentifiers.anthropic })).toBeUndefined()
 			expect(getModelId({})).toBeUndefined()
+		})
+	})
+
+	describe("task activation tab republish (issue #1271)", () => {
+		test("addClineToStack republishes the offered tab values for the incoming task", async () => {
+			const mockTask = new Task({
+				...defaultTaskOptions,
+				apiConfiguration: {
+					apiProvider: providerIdentifiers.openrouter,
+					openRouterModelId: "openai/gpt-4",
+				},
+			})
+
+			// The tracker constructed with the provider in beforeEach.
+			const trackerMock = vi.mocked(WorkspaceTracker)
+			const trackerInstance = trackerMock.mock.results.at(-1)?.value as
+				{ publishOpenedTabs: ReturnType<typeof vi.fn> } | undefined
+			expect(trackerInstance?.publishOpenedTabs).toBeTypeOf("function")
+
+			// A task just became current: the provider must republish the
+			// offered tab values so they are cut against this task's stored
+			// anchor, not a pre-task live anchor left in the webview.
+			await provider.addClineToStack(mockTask)
+			expect(trackerInstance?.publishOpenedTabs).toHaveBeenCalledTimes(1)
 		})
 	})
 })

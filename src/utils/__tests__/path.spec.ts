@@ -475,6 +475,10 @@ describe("getTaskCwdPath (issue #1271: no workspace open)", () => {
 		}
 	})
 
+	// The algebra below pins the anchor/value composition of the utils. The
+	// mention-resolution proof for these values lives at the resolver layer:
+	// src/core/mentions/__tests__/index.spec.ts calls parseMentions itself
+	// instead of rebuilding the resolver steps.
 	it.each([
 		["a file next to the anchor", "/home/test/desktop-projects/notes/plan.md"],
 		["a file in a subdirectory", "/home/test/desktop-projects/notes/src/deep/module.ts"],

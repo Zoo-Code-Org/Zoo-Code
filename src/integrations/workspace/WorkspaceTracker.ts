@@ -182,6 +182,16 @@ class WorkspaceTracker {
 		return this.filePaths.delete(normalizedPath) || this.filePaths.delete(normalizedPath + "/")
 	}
 
+	// A task activation (start or history resume) changes the anchor that
+	// offered tab values are cut against (issue #1271): values published
+	// before a task existed were cut against the live anchor, and a resumed
+	// task stores the workspacePath from its history item, which can differ.
+	// Republish through the same debounced path the tab and file events use;
+	// their behavior is unchanged.
+	public publishOpenedTabs(): void {
+		this.workspaceDidUpdate()
+	}
+
 	public dispose() {
 		if (this.updateTimer) {
 			clearTimeout(this.updateTimer)

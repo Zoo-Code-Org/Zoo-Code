@@ -503,4 +503,64 @@ describe("WorkspaceTracker", () => {
 			tabGroupsMock.all = previousTabs
 		}
 	})
+
+	// Review round 4: a task activation (start or history resume) must
+	// republish the offered tab values. Values published before a task
+	// existed were cut against the live anchor; a resumed task stores the
+	// workspacePath from its history item, which can differ. The webview
+	// keeps the last values until the next workspaceUpdated message, so
+	// the provider calls publishOpenedTabs() when a task becomes current.
+	it("republishes tab values against the resumed task's stored anchor after activation", async () => {
+		const TabInputText = (vscode as unknown as { TabInputText: new () => object }).TabInputText
+		const makeTab = (fsPath: string, isActive: boolean) => ({
+			label: fsPath.split("/").pop() ?? "",
+			isActive,
+			input: Object.assign(new TabInputText(), { uri: { fsPath } }),
+		})
+
+		// Rootless session, no task yet: a tab event publishes values cut
+		// against the live anchor (/live/dir).
+		;(getWorkspacePath as Mock).mockReturnValue("")
+		;(getTaskCwdPath as Mock).mockReturnValue("/live/dir")
+		let currentTask: { cwd: string } | undefined = undefined
+		const resumingProvider = {
+			postMessageToWebview: vitest.fn().mockResolvedValue(undefined),
+			getCurrentTask: vitest.fn(() => currentTask),
+		} as unknown as ClineProvider & { postMessageToWebview: Mock; getCurrentTask: Mock }
+		workspaceTracker = new WorkspaceTracker(resumingProvider)
+
+		const tabGroupsMock = vscode.window.tabGroups as unknown as { all: unknown }
+		const previousTabs = tabGroupsMock.all
+		tabGroupsMock.all = [{ tabs: [makeTab("/live/dir/a.ts", true)] }]
+
+		try {
+			// Pre-task publish: cut against the live anchor.
+			await registeredTabChangeCallback!()
+			vitest.runAllTimers()
+			expect(resumingProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "a.ts" }],
+			})
+
+			// The task resumes from history with a stored anchor /anchor/dir.
+			// No tab or file event fires; the provider reports the activation.
+			currentTask = { cwd: "/anchor/dir" }
+			workspaceTracker.publishOpenedTabs()
+			vitest.runAllTimers()
+
+			// The republish cuts against the STORED anchor, not the live one:
+			// path.relative("/anchor/dir", "/live/dir/a.ts"). Offered as
+			// @/../../live/dir/a.ts the mention resolves back to the open file
+			// under the anchor the resolver joins it to.
+			expect(resumingProvider.postMessageToWebview).toHaveBeenLastCalledWith({
+				type: "workspaceUpdated",
+				filePaths: [],
+				openedTabs: [{ label: "a.ts", isActive: true, path: "../../live/dir/a.ts" }],
+			})
+			expect(resumingProvider.getCurrentTask).toHaveBeenCalled()
+		} finally {
+			tabGroupsMock.all = previousTabs
+		}
+	})
 })
