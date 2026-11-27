@@ -470,12 +470,8 @@
 			"confirm": "削除"
 		}
 	},
-	"tooManyTools": {
-		"title": "有効になっているツールが多すぎます",
-		"toolsPart_other": "{{count}} ツール",
-		"serversPart_other": "{{count}} MCP サーバー",
-		"messageTemplate": "{{servers}}経由で{{tools}}が有効になっています。このような高い数は、モデルを混乱させてエラーを引き起こす可能性があります。{{threshold}}以下に保つようにしてください。",
-		"openMcpSettings": "MCP 設定を開く"
+	"dynamicToolsStatus": {
+		"summary": "このターンで添付された MCP ツール: {{total}} 件中 {{attached}} 件"
 	},
 	"ignoredDisabledTools": {
 		"title": "無効化されたツールは無視されました",

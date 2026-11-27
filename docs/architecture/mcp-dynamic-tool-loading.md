@@ -42,11 +42,17 @@ The gate limits advertised definitions; it does not add an execution permission
 boundary. Existing tool authorization still applies to calls by name.
 
 The settings schema and extension-state round trip are implemented for
-`threshold`, `initialK`, and `searchTurns`. SettingsView
-controls and replacement of the legacy catalog-wide warning are deferred to
-#581. The legacy warning uses its own catalog advisory threshold; it does not
-report the scoped tool count for a running task. The `mcp_load` escape hatch is
-deferred to #579.
+`threshold`, `initialK`, and `searchTurns`. SettingsView controls are deferred
+to #583. The `mcp_load` escape hatch is deferred to #579.
+
+## Tool status in the chat
+
+Each gated build reports the MCP declarations that it sends and the number of
+allowed MCP tools. `McpToolStatusTracker` keeps the result of the newest build.
+The extension state sends it as `mcpToolStatus`. A `null` value hides the
+indicator below the task header. The status is not saved, so it appears after the
+first request of a resumed task. The chat hides old `too_many_tools_warning`
+messages. `docs/architecture/tla/McpToolStatus.tla` models the update order.
 
 ## Selection and catalog boundaries
 

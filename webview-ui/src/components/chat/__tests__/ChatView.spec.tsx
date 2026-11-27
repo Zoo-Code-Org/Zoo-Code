@@ -520,6 +520,25 @@ describe("ChatView - Tool Batching Tests", () => {
 	})
 })
 
+describe("ChatView - Dynamic MCP Tools", () => {
+	it("shows the tool status of a task and hides old warning messages", async () => {
+		const { findByText, getAllByTestId } = renderChatView()
+		mockPostMessage({
+			currentTaskId: "task-a",
+			mcpToolStatus: { attachedToolNames: ["mcp--s--a"], totalScoped: 60 },
+			clineMessages: [
+				{ type: "say", say: "task", ts: 1, text: "task" },
+				{ type: "say", say: "too_many_tools_warning", ts: 2, text: "{}" },
+				{ type: "say", say: "text", ts: 3, text: "answer" },
+			],
+		})
+
+		expect(await findByText("chat:dynamicToolsStatus.summary")).toBeInTheDocument()
+		// Only the answer has a row.
+		expect(getAllByTestId("chat-row")).toHaveLength(1)
+	})
+})
+
 describe("ChatView - Aggregated Costs Lifecycle", () => {
 	beforeEach(() => {
 		vi.clearAllMocks()

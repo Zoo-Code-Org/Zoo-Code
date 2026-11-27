@@ -259,6 +259,27 @@ export const stories: Record<string, Story> = {
 			</AppProviders>
 		)
 	},
+	"dynamic-tools-status": async () => {
+		const [{ AppProviders }, { DynamicToolsStatus }] = await Promise.all([
+			import("../AppProviders"),
+			import("@/components/chat/DynamicToolsStatus"),
+		])
+		const mcpToolStatus: import("@roo-code/types").McpToolStatus = {
+			attachedToolNames: [
+				"mcp--github--create_pull_request",
+				"mcp--github--list_issues",
+				"mcp--analytics_warehouse--query_monthly_active_users_by_region_and_plan",
+			],
+			totalScoped: 305,
+		}
+		return (
+			<AppProviders initialState={{ mcpToolStatus }}>
+				<div className="w-[360px] py-1 bg-vscode-editor-background">
+					<DynamicToolsStatus />
+				</div>
+			</AppProviders>
+		)
+	},
 	"ignored-disabled-tools-warning": async () => {
 		const [{ AppProviders }, { ChatRowContent }] = await Promise.all([
 			import("../AppProviders"),

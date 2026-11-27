@@ -16,10 +16,6 @@ vi.mock("@src/i18n/TranslationContext", () => ({
 	useAppTranslation: () => ({ t: (key: string) => key }),
 }))
 
-vi.mock("@src/hooks/useTooManyTools", () => ({
-	useTooManyTools: () => ({ isOverThreshold: false, title: "", message: "" }),
-}))
-
 vi.mock("@src/components/settings/Section", () => ({
 	Section: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }))

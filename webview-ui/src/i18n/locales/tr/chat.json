@@ -476,14 +476,8 @@
 			"confirm": "Sil"
 		}
 	},
-	"tooManyTools": {
-		"title": "Çok fazla araç etkinleştirildi",
-		"toolsPart_one": "{{count}} araç",
-		"toolsPart_other": "{{count}} araç",
-		"serversPart_one": "{{count}} MCP sunucusu",
-		"serversPart_other": "{{count}} MCP sunucusu",
-		"messageTemplate": "{{servers}} üzerinden {{tools}} etkinleştirilmiş durumda. Bu kadar fazlası modeli kafası karışabilir ve hatalara neden olabilir. {{threshold}} altında tutmaya çalış.",
-		"openMcpSettings": "MCP Ayarlarını Aç"
+	"dynamicToolsStatus": {
+		"summary": "Bu turda eklenen MCP araçları: {{attached}} / {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "Devre dışı bırakılan araç yok sayıldı",

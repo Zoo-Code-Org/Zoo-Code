@@ -485,18 +485,8 @@
 			"confirm": "Usuń"
 		}
 	},
-	"tooManyTools": {
-		"title": "Włączono zbyt wiele narzędzi",
-		"toolsPart_one": "{{count}} narzędzie",
-		"toolsPart_few": "{{count}} narzędzia",
-		"toolsPart_many": "{{count}} narzędzi",
-		"toolsPart_other": "{{count}} narzędzia",
-		"serversPart_one": "{{count}} serwer MCP",
-		"serversPart_few": "{{count}} serwery MCP",
-		"serversPart_many": "{{count}} serwerów MCP",
-		"serversPart_other": "{{count}} serwera MCP",
-		"messageTemplate": "Masz {{tools}} włączonych przez {{servers}}. Taka duża liczba może zamieszać model i prowadzić do błędów. Staraj się, aby była poniżej {{threshold}}.",
-		"openMcpSettings": "Otwórz ustawienia MCP"
+	"dynamicToolsStatus": {
+		"summary": "Narzędzia MCP dołączone w tej turze: {{attached}} z {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "Zignorowano wyłączane narzędzie",

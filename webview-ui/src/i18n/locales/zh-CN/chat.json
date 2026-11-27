@@ -471,12 +471,8 @@
 			"confirm": "删除"
 		}
 	},
-	"tooManyTools": {
-		"title": "启用的工具过多",
-		"toolsPart_other": "{{count}} 个工具",
-		"serversPart_other": "{{count}} 个 MCP 服务",
-		"messageTemplate": "你通过 {{servers}} 启用了 {{tools}}。这么多数量会混淆模型并导致错误。建议将其保持在 {{threshold}} 以下。",
-		"openMcpSettings": "打开 MCP 设置"
+	"dynamicToolsStatus": {
+		"summary": "本轮附加的 MCP 工具：{{attached}} / {{total}}"
 	},
 	"ignoredDisabledTools": {
 		"title": "已忽略被禁用的工具",

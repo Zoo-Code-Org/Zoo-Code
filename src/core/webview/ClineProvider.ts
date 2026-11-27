@@ -3565,6 +3565,8 @@ export class ClineProvider
 			platform: process.platform,
 			arch: process.arch,
 			debug: vscode.workspace.getConfiguration(Package.name).get<boolean>("debug", false),
+			// Keep this last. A build can finish during an earlier await (McpToolStatus.tla).
+			mcpToolStatus: currentTask?.mcpToolStatus?.value ?? null,
 		}
 	}
 

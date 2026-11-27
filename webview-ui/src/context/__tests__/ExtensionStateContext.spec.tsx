@@ -370,6 +370,19 @@ describe("ExtensionStateContext", () => {
 		)
 	})
 
+	// Webview rules of docs/architecture/tla/McpToolStatus.tla.
+	it("applies the MCP tool status only for the task that it shows, and clears it on null", () => {
+		const status = { attachedToolNames: ["mcp--s--a"], totalScoped: 60 }
+		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a", mcpToolStatus: status }
+
+		const late = mergeExtensionState(initial, { currentTaskId: "task-b", mcpToolStatus: null })
+		expect(late.mcpToolStatus).toBe(status)
+		expect(mergeExtensionState(initial, { currentTaskId: "task-a" }).mcpToolStatus).toBe(status)
+		for (const push of [{ currentTaskId: "task-a" }, { currentTaskId: "task-b", clineMessages: [] }]) {
+			expect(mergeExtensionState(initial, { ...push, mcpToolStatus: null }).mcpToolStatus).toBeNull()
+		}
+	})
+
 	it("ignores task identity in pushes without messages", () => {
 		// Settings, telemetry and mode refreshes do not switch tasks; their snapshots can arrive late.
 		const initial = { ...createInitialExtensionState(), currentTaskId: "task-a" }
