@@ -23,7 +23,7 @@ ConsumeNoGate(k) ==
     /\ ghostPhase' = "none"
     /\ awaiting' = 0
     /\ cur' = 0
-    /\ UNCHANGED <<begun, published, tsBumped, armedAfterBump, arrivals>>
+    /\ UNCHANGED <<begun, published, tsBumped, armedAfterBump, curArmed, arrivals>>
 
 \* Sabotage 2: the tag is written from the ask that is minted, not from the ask
 \* that awaits. A response arriving during the entry window then carries the new
@@ -39,7 +39,7 @@ ArriveTagByCur ==
         THEN (IF published[awaiting] THEN "pub" ELSE "entry")
         ELSE "none"
     /\ UNCHANGED <<awaiting, consumed, consumedPhase, consumedWhile, ended, begun,
-        published, tsBumped, armedAfterBump, cur>>
+        published, tsBumped, armedAfterBump, curArmed, cur>>
 
 \* Sabotage 3 (review r3): the arm fires at the entry phase, before the row
 \* published — the completion path's pre-save arm. A response landing in the
@@ -56,7 +56,7 @@ ArmEarly(k) ==
     /\ ghostArrival' = ghostArrival
     /\ ghostPhase' = ghostPhase
     /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, ended, begun, published,
-        tsBumped, cur, arrivals>>
+        tsBumped, curArmed, cur, arrivals>>
 
 \* Sabotage 4 (review r3): the currency guard is dropped — an out-of-date
 \* publication arms its ask even though the ask's ts already moved on and its
@@ -72,8 +72,26 @@ ArmNoCurrentGuard(k) ==
     /\ ghostArrival' = ghostArrival
     /\ ghostPhase' = ghostPhase
     /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, ended, begun, published,
-        tsBumped, cur, arrivals>>
+        tsBumped, curArmed, cur, arrivals>>
+
+\* Sabotage 5 (review 6084536709): the superseded ask's cleanup clears the arm
+\* slot unconditionally, so ask k's late unwind wipes a newer ask's armed
+\* token -- the exact wipe the keeps-a-newer-ask's-token test forbids on the
+\* real path. ArmSlotCurrent must fail.
+StaleCleanupStaleWipe(k) ==
+    /\ cur # k
+    /\ tsBumped[k]
+    /\ ~ended[k]
+    /\ ended' = [ended EXCEPT ![k] = TRUE]
+    /\ awaiting' = 0
+    /\ pending' = FALSE
+    /\ rtag' = Orphan
+    /\ ghostArrival' = Orphan
+    /\ ghostPhase' = "none"
+    /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, begun, published,
+        tsBumped, armedAfterBump, curArmed, cur, arrivals>>
 
 ====
 \* Run each config on this module. AskResponseTargeting.cfg passes. Each variant
-\* config fails the invariant of its failure.
+\* config fails the invariant of its failure. StaleCleanupStaleWipe fails
+\* ArmSlotCurrent.

@@ -15,7 +15,7 @@
 \* OnlyOwnPublishedResponse (a consumed response arrived after its ask's row published),
 \* NoStaleConsumption (a superseded ask consumes nothing), ArmOnlyWhileCurrent (the arm
 \* never fires for an ask whose ts already moved on).
-\* The model has serial asks 1..MaxAsks, because the presenter runs tools one at a time.
+\* The model runs asks 1..MaxAsks in order, because the presenter runs tools one at a time;\n\* a superseded ask may still unwind while its successor arms (the unwind race below).
 \* Each ask has phases: Entry (slot reset, row not yet published), Published (the row
 \* reached the webview; the arm may fire), and the terminal end. Publish models the
 \* row publication; BumpTs models lastMessageTs moving past the ask (supersedePendingAsk
@@ -47,11 +47,13 @@
 \* stamp facts stay test-pinned in src/core/task/__tests__/ask-response-targeting.spec.ts
 \* (the stamp follows the arrival's owning row, and the stamp is skipped for
 \* unset targets and partial rows) because row identity needs the overlap
-\* envelope this serial model does not carry. Also still not modeled (bounded
+\* fields, so the gate and the truth cannot drift. Also still not modeled (bounded
 \* gaps, each pinned by a test in ask-response-targeting.spec.ts): the status-timer
-\* arming rule, and concurrent asks (the presenter runs one ask at a time; the
-\* arm-clobber window an overlapping publication opens is pinned by the
-\* keeps-a-newer-ask's-token test).
+\* arming rule, and the late publication of a parked older ask (Publish still
+\* requires cur = k; the arm skip is pinned by the older-publication test).
+\* The unwind race itself is modeled since review 6084536709: ask k mints over
+\* a superseded, unended k-1, and StaleCleanup(k-1) then clears only k-1's own
+\* arm; ArmSlotCurrent pins it and .StaleWipe is the unconditional sabotage.
 \* Code check: the sabotages match the entry-window leak that
 \* src/core/task/__tests__/ask-response-targeting.spec.ts and
 \* src/core/task/__tests__/Task.command-batch-approval.spec.ts replay on the real ask
@@ -64,18 +66,24 @@
 \* verification-artifact repairs, so both count as covered — the model already
 \* expressed each rule. ConsumeNoGate now carries the ~tsBumped[k] guard the
 \* fixed Consume has (without it a bump-trace NoStaleConsumption violation could
-\* mask a broken ownership-gate check in the must-fail cfg), and the objectResponse
+\* objectResponse
 \* negative test seeds the owning row ts so the response-kind exclusion, not the
 \* unset stamp, is what leaves the row unmarked.
+\* Review ratchet (review 6084536709): covered 1, added 2, gap 0.
+\* Covered: the keeps-a-newer-ask's-token behavior the reviewer cites was already
+\* test-pinned on this head. Added: the unwind race -- MintAsk enters ask k over
+\* a superseded, unended k-1 and StaleCleanup(k) ends k late while clearing only
+\* k's own arm, with ArmSlotCurrent as the invariant. Added: the .StaleWipe
+\* sabotage, whose unconditional clearing must fail ArmSlotCurrent.
 
 EXTENDS Naturals
 
 CONSTANTS MaxAsks, Orphan, MaxArrivals
 
 VARIABLES awaiting, pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
-    consumedWhile, ended, begun, published, tsBumped, armedAfterBump, cur, arrivals
+    consumedWhile, ended, begun, published, tsBumped, armedAfterBump, cur, curArmed, arrivals
 vars == <<awaiting, pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
-    consumedWhile, ended, begun, published, tsBumped, armedAfterBump, cur, arrivals>>
+    consumedWhile, ended, begun, published, tsBumped, armedAfterBump, cur, curArmed, arrivals>>
 
 TypeOK ==
     /\ awaiting \in {0} \union (1..MaxAsks)
@@ -92,6 +100,7 @@ TypeOK ==
     /\ tsBumped \in [1..MaxAsks -> BOOLEAN]
     /\ armedAfterBump \in BOOLEAN
     /\ cur \in {0} \union (1..MaxAsks)
+    /\ curArmed \in BOOLEAN
     /\ arrivals \in 0..MaxArrivals
 
 Init ==
@@ -109,16 +118,19 @@ Init ==
     /\ tsBumped = [k \in 1..MaxAsks |-> FALSE]
     /\ armedAfterBump = FALSE
     /\ cur = 0
+    /\ curArmed = FALSE
     /\ arrivals = 0
 
-\* ask() begins for ask k. The entry reset clears the slot. Nothing awaits yet and
-\* the row is not published.
+\* ask() begins for ask k. The entry reset clears the slot. Nothing awaits yet
+\* and the row is not published. Ask k may also enter while ask k-1 is
+\* superseded (its ts moved on) and still winding down: ask 1's cleanup lands
+\* after ask 2 can arm (the keeps-a-newer-ask's-token test).
 MintAsk(k) ==
-    /\ cur = 0
     /\ ~begun[k]
-    /\ k = 1 \/ (k > 1 /\ ended[k - 1])
+    /\ k = 1 \/ (k > 1 /\ (ended[k - 1] \/ (tsBumped[k - 1] /\ cur = k - 1)))
     /\ begun' = [begun EXCEPT ![k] = TRUE]
     /\ cur' = k
+    /\ curArmed' = FALSE
     /\ pending' = FALSE
     /\ rtag' = Orphan
     /\ ghostArrival' = Orphan
@@ -135,7 +147,7 @@ Publish(k) ==
     /\ ~published[k]
     /\ published' = [published EXCEPT ![k] = TRUE]
     /\ UNCHANGED <<awaiting, pending, rtag, ghostArrival, ghostPhase, consumed,
-        consumedPhase, consumedWhile, ended, begun, tsBumped, armedAfterBump, cur, arrivals>>
+        consumedPhase, consumedWhile, ended, begun, tsBumped, armedAfterBump, curArmed, cur, arrivals>>
 
 \* lastMessageTs moves past ask k while it still runs: supersedePendingAsk, or
 \* another flow publishing a row. The ask's wait will exit as superseded.
@@ -144,7 +156,7 @@ BumpTs(k) ==
     /\ ~ended[k]
     /\ tsBumped' = [tsBumped EXCEPT ![k] = TRUE]
     /\ UNCHANGED <<awaiting, pending, rtag, ghostArrival, ghostPhase, consumed,
-        consumedPhase, consumedWhile, ended, begun, published, armedAfterBump, cur, arrivals>>
+        consumedPhase, consumedWhile, ended, begun, published, armedAfterBump, curArmed, cur, arrivals>>
 
 \* ask() arms its wait at the ask row's publication boundary, and only while the
 \* ask is still current. An orphan present at the first wait poll is discarded
@@ -157,6 +169,7 @@ ArmAsk(k) ==
     /\ ~tsBumped[k]
     /\ armedAfterBump' = FALSE
     /\ awaiting' = k
+    /\ curArmed' = TRUE
     /\ pending' = (pending /\ rtag # Orphan)
     /\ rtag' = rtag
     /\ ghostArrival' = ghostArrival
@@ -177,7 +190,7 @@ Arrive ==
         THEN (IF published[awaiting] THEN "pub" ELSE "entry")
         ELSE "none"
     /\ UNCHANGED <<awaiting, consumed, consumedPhase, consumedWhile, ended, begun,
-        published, tsBumped, armedAfterBump, cur>>
+        published, tsBumped, armedAfterBump, curArmed, cur>>
 
 \* The consume step. The ownership gate: only a response tagged with this ask's
 \* token may satisfy it, and only while the ask is still current (a superseded
@@ -200,7 +213,7 @@ Consume(k) ==
     /\ ghostPhase' = "none"
     /\ awaiting' = 0
     /\ cur' = 0
-    /\ UNCHANGED <<begun, published, tsBumped, armedAfterBump, arrivals>>
+    /\ UNCHANGED <<begun, published, tsBumped, armedAfterBump, curArmed, arrivals>>
 
 \* The ask ends without consuming (superseded, abort, or the user rejected).
 \* The active ask clears too, so the next ask can enter.
@@ -210,7 +223,24 @@ EndNoConsume(k) ==
     /\ awaiting' = 0
     /\ cur' = 0
     /\ UNCHANGED <<pending, rtag, ghostArrival, ghostPhase, consumed, consumedPhase,
-        consumedWhile, begun, published, tsBumped, armedAfterBump, arrivals>>
+        consumedWhile, begun, published, tsBumped, armedAfterBump, curArmed, arrivals>>
+
+\* A superseded ask's cleanup lands after its wait exited: cur has moved to
+\* the successor that raced in over the bump. The cleanup clears only this
+\* ask's own arm and own-tagged response; a newer ask's armed token survives
+\* it (the keeps-a-newer-ask's-token test).
+StaleCleanup(k) ==
+    /\ cur # k
+    /\ tsBumped[k]
+    /\ ~ended[k]
+    /\ ended' = [ended EXCEPT ![k] = TRUE]
+    /\ awaiting' = IF awaiting = k THEN 0 ELSE awaiting
+    /\ pending' = IF pending /\ rtag = k THEN FALSE ELSE pending
+    /\ rtag' = IF pending /\ rtag = k THEN Orphan ELSE rtag
+    /\ ghostArrival' = IF pending /\ rtag = k THEN Orphan ELSE ghostArrival
+    /\ ghostPhase' = IF pending /\ rtag = k THEN "none" ELSE ghostPhase
+    /\ UNCHANGED <<consumed, consumedPhase, consumedWhile, begun, published,
+        tsBumped, armedAfterBump, curArmed, cur, arrivals>>
 
 Next ==
     \/ \E k \in 1..MaxAsks : MintAsk(k)
@@ -220,6 +250,7 @@ Next ==
     \/ Arrive
     \/ \E k \in 1..MaxAsks : Consume(k)
     \/ \E k \in 1..MaxAsks : EndNoConsume(k)
+    \/ \E k \in 1..MaxAsks : StaleCleanup(k)
 
 Spec == Init /\ [][Next]_vars
 
@@ -245,4 +276,9 @@ NoStaleConsumption ==
 \* The arm is monotonic: it never fires for an ask whose ts already moved on,
 \* so an out-of-date publication cannot take the arm slot (issue 998 review r3).
 ArmOnlyWhileCurrent == armedAfterBump = FALSE
+
+\* Once the current ask armed, the arm slot holds it: a superseded ask's late
+\* cleanup must not wipe a newer ask's armed token (issue 998 review
+\* 6084536709).
+ArmSlotCurrent == (cur > 0 /\ curArmed) => awaiting = cur
 ====

@@ -48,8 +48,12 @@ type AskTargetingTaskAccess = {
 	nextAskTarget: () => number
 }
 
+const trackedTasks: Task[] = []
+const trackedAsks: Promise<unknown>[] = []
+
 function buildTask(provider: ProviderStub | undefined) {
 	const task = Object.create(Task.prototype) as Task
+	trackedTasks.push(task)
 	setAbortLatch(task, false)
 	const access = task as unknown as AskTargetingTaskAccess
 	// Object.create skips class-field initializers, so the response-slot fields
@@ -73,6 +77,19 @@ function buildTask(provider: ProviderStub | undefined) {
 	access.checkpointSave = vi.fn(async () => {})
 	access.emit = vi.fn()
 	access.providerRef = { deref: () => provider }
+
+	// Track every ask promise so the afterEach can settle a poll that a
+	// failed assertion leaves waiting.
+	const realAsk = task.ask.bind(task)
+	;(
+		task as unknown as {
+			ask: (...args: Parameters<Task["ask"]>) => ReturnType<Task["ask"]>
+		}
+	).ask = (...args) => {
+		const promise = realAsk(...args)
+		trackedAsks.push(promise.catch(() => undefined))
+		return promise
+	}
 
 	return task
 }
@@ -99,6 +116,17 @@ function stubProvider(): ProviderStub {
 const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0))
 
 describe("ask response targeting", () => {
+	// A failed assertion leaves the ask's poll running: the wait returns only
+	// on abort, a moved ts, or a matching response. Abort every tracked task
+	// and settle every ask promise so a pending ask does not outlive its
+	// test, even on a failing run (review 6084536709).
+	afterEach(async () => {
+		for (const task of trackedTasks.splice(0)) {
+			setAbortLatch(task, true)
+		}
+		await Promise.allSettled(trackedAsks.splice(0))
+	})
+
 	it("resolves an ask answered by a created Message listener during publication", async () => {
 		const provider = stubProvider()
 		const task = buildTask(provider)

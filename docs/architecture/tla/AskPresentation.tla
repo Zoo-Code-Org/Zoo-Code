@@ -11,6 +11,7 @@
 \* Failure F6: the host stamps a partial ask on a text reply. The completed ask then waits with no Run/Deny (thread 4680322903).
 \* Invariants: NoMaskedPendingAsk (F1), NoStaleRunButton (F2), ReqSupersedes (F3), NoSettledKeptOrRestored (F4, F5), NoStampOnPartial (F6).
 \* Expected: Old fails on ask then command_output. Each guard variant fails on its own shape. NoReconcile fails F4. NoPartialGuard fails F6.
+\* CountsLocal fails NoStaleRunButton on [ca, cu] after a local answer.
 \* Kinds: ca ask command, cp partial ask command, ou ask command_output, cu say command_output, tx say text, os other say, rq say api_req_started.
 \* A message is [kind, answered]. Only ca carries answered true. The host stamps it when the ask is settled.
 \* Variables: in the snapshot, shown the Run button state, loc the ask index that the user answered locally.
@@ -21,13 +22,16 @@
 EXTENDS Naturals, Sequences
 
 CONSTANTS Inputs, Variant
-\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile.
+\* Inputs: snapshot sequences. Variant: Fixed, Old, NoAnsweredGuard, NoReqGuard, TailOnly, NoReconcile, CountsLocal.
 
 VARIABLES in, shown, loc
 
 Kinds == {"ca", "ou", "cu", "tx", "os", "rq", "cp"}
 IsAsk(m) == m.kind \in {"ca", "cp", "ou"}
 IsCa(m) == m.kind = "ca"
+
+\* The appendable messages: only ca carries answered true.
+MsgSet == {m \in [kind: Kinds, answered: BOOLEAN] : m.kind = "ca" \/ m.answered = FALSE}
 
 \* The scan depth of the say branch. TailOnly reads only the last two messages.
 Depth == IF Variant = "TailOnly" THEN 2 ELSE 99
@@ -77,7 +81,7 @@ ScanPresents(s, l) ==
 	IN /\ ix > 0
 	   /\ s[ix].kind = "ca"
 	   /\ (\/ s[ix].answered = FALSE \/ Variant = "NoAnsweredGuard")
-	   /\ ix # l
+	   /\ (\/ ix # l \/ Variant = "CountsLocal")
 	   /\ (\/ ~SupersededByReq(s, ix) \/ Variant = "NoReqGuard")
 
 \* The Run state that the code derives from the snapshot.
@@ -148,10 +152,22 @@ Complete ==
 	/\ loc' = loc
 	/\ shown' = Derives(in', loc)
 
+\* A new message arrives: the host appends it to the snapshot and the
+\* webview reconciles. The locally answered index survives the append
+\* (answeredCommandAskTs), so the reconcile must not re-show the Run button
+\* for that ask (thread 4716481098: LocalRespond then a late say, or a
+\* visible ask then api_req_started).
+ArriveMsg(m) ==
+	/\ in' = Append(in, m)
+	/\ in' \in Inputs
+	/\ loc' = loc
+	/\ shown' = Derives(in', loc)
+
 Next == \/ Present
 	\/ LocalRespond
 	\/ HostStamp
 	\/ Complete
+	\/ \E m \in MsgSet : ArriveMsg(m)
 
 Spec == Init /\ [][Next]_<<in, shown, loc>>
 
@@ -172,7 +188,7 @@ NoSettledKeptOrRestored == Settled(in, loc) => ~shown
 \* waits forever with no Run/Deny. Vitest replays the text-reply trace.
 NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = FALSE
 
-\* Result, MaxLen 3: base passes, 694 states. Old fails NoMaskedPendingAsk on [ca, cu].
+\* Result, MaxLen 3: base passes, 794 states. Old fails NoMaskedPendingAsk on [ca, cu].
 \* Result: NoAnsweredGuard fails NoStaleRunButton on [ca answered, cu].
 \* Result: NoReqGuard fails NoStaleRunButton on [ca, rq, cu]. TailOnly fails NoMaskedPendingAsk on [ca, cu, cu].
 \* Result: NoReconcile fails NoSettledKeptOrRestored on [ca, cu] Present then HostStamp (thread 4658203877).
@@ -190,5 +206,9 @@ NoStampOnPartial == \A i \in 1..Len(in) : in[i].kind = "cp" => in[i].answered = 
 \* Review round 8 (review 6039613196): covered 1, added 1, gap 0.
 \* Added: thread 4680322903 -- the host must not stamp a partial ask. New kind cp, the Complete event, the NoStampOnPartial invariant, and the NoPartialGuard variant.
 \* Covered: thread 4680322926 -- LocalRespond already records the local answer before Present and HostStamp. NoSettledKeptOrRestored pins the say-after-local-answer shape. The handler that answers is routing, the gap of thread 4658203883. Vitest pins it.
+\* Review round (review 6084536709): covered 1, added 2, gap 0.
+\* Covered: the say-after-local-answer shape -- NoSettledKeptOrRestored already pins the derivation state on [ca, cu] with a recorded local answer.
+\* Added: thread 4716481098 -- the snapshot-arrival transition. ArriveMsg appends a bounded message so LocalRespond then a late say and a visible ask then api_req_started are checked as transitions, not only as Init snapshots.
+\* Added: the CountsLocal sabotage -- a scan that counts the locally answered index fails NoStaleRunButton; it pins the local-answer exclusion.
 
 ====

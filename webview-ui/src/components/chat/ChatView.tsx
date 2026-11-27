@@ -535,37 +535,40 @@ const ChatViewComponent: React.ForwardRefRenderFunction<ChatViewRef, ChatViewPro
 						case "completion_result":
 							break
 					}
-					// A full-state snapshot can end in a say while a command ask
-					// still waits for an answer (#998). The say must not mask
-					// the ask's Run/Deny buttons. Scan back to the newest ask.
-					// An api_req_started say supersedes it; so does any newer ask.
-					const maskedAsk = findLast(
-						messages,
-						(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
-					)
-					// The newest ask is a live command ask when it is pending.
-					const maskedCommandAskPending =
-						maskedAsk !== undefined && isPendingCommandAsk(maskedAsk, answeredCommandAskTsRef.current)
-					if (maskedCommandAskPending) {
-						// Mirror the ask branch's command presentation. This also
-						// re-enables the controls when a partial command ask
-						// completes (#998 review): the partial ask disabled
-						// Run/Deny, and the completed ask must restore them even
-						// though clineAskRef.current is already "command".
-						setSendingDisabled(false)
-						setClineAsk("command")
-						setEnableButtons(true)
-						setPrimaryButtonKey("chat:runCommand.title")
-						setSecondaryButtonKey("chat:reject.title")
-					} else if (clineAskRef.current === "command") {
-						// Reconcile a recovered command ask with the host state:
-						// the controls stay up only while that ask stays live.
-						// A newer ask must clear them, not leave them lingering (#998).
-						setSendingDisabled(true)
-						setClineAsk(undefined)
-						setEnableButtons(false)
-						setPrimaryButtonKey(undefined)
-						setSecondaryButtonKey(undefined)
+					{
+						// A full-state snapshot can end in a say while a command ask
+						// still waits for an answer (#998). The say must not mask
+						// the ask's Run/Deny buttons. Scan back to the newest ask.
+						// An api_req_started say supersedes it; so does any newer ask.
+						const maskedAsk = findLast(
+							messages,
+							(message: ClineMessage) => message.type === "ask" || message.say === "api_req_started",
+						)
+						// The newest ask is a live command ask when it is pending.
+						const maskedCommandAskPending =
+							maskedAsk !== undefined && isPendingCommandAsk(maskedAsk, answeredCommandAskTsRef.current)
+						if (maskedCommandAskPending) {
+							// Mirror the ask branch's command presentation. This also
+							// re-enables the controls when a partial command ask
+							// completes (#998 review): the partial ask disabled
+							// Run/Deny, and the completed ask must restore them even
+							// though clineAskRef.current is already "command".
+							setSendingDisabled(false)
+							setClineAsk("command")
+							setEnableButtons(true)
+							setPrimaryButtonKey("chat:runCommand.title")
+							setSecondaryButtonKey("chat:reject.title")
+						} else if (clineAskRef.current === "command") {
+							// Reconcile a recovered command ask with the host state:
+							// the controls stay up only while that ask stays live.
+							// A newer ask must clear them, not leave them lingering (#998).
+							setSendingDisabled(true)
+							setClineAsk(undefined)
+							setEnableButtons(false)
+							setPrimaryButtonKey(undefined)
+							setSecondaryButtonKey(undefined)
+						}
+						break
 					}
 					break
 			}

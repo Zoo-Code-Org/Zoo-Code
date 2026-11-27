@@ -6,7 +6,7 @@ EXTENDS AskPresentation
 MaxLen == 3
 
 \* Only ca carries answered true. The host stamps it when the ask is settled.
-Msgs == {m \in [kind: Kinds, answered: BOOLEAN] : m.kind = "ca" \/ m.answered = FALSE}
+Msgs == MsgSet
 
 MCInputs == UNION {[1..n -> Msgs] : n \in 0..MaxLen}
 
